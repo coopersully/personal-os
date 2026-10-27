@@ -26,7 +26,7 @@ test("unavailable weather retains the recovery gate until a successful retry", a
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   const recovery = page.getByRole("dialog", { name: "Let’s reconnect" });
   await expect(recovery).toBeVisible();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "up next" })).toHaveCount(0);
   const initialRequests = requests;
   const failedRetry = page.waitForResponse(
     (response) => weatherSnapshotRoute.test(response.url()) && response.status() === 503,
@@ -44,7 +44,7 @@ test("unavailable weather retains the recovery gate until a successful retry", a
   await recovery.getByRole("button", { name: "Try again", exact: true }).click();
   await recovered;
   await expect(recovery).not.toBeVisible();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Clear, 72°F", exact: true })).toBeVisible();
   await page.goto("/calendar");
   await expect(page.getByRole("button", { name: /^Calendar view:/ })).toBeVisible();

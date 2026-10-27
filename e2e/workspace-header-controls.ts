@@ -1,12 +1,11 @@
 import { expect, type Page } from "@playwright/test";
 
-/** Wait for closing dialogs to release the mobile utility row before opening its menu. */
+/** Page options are direct header controls in every layout, without an extra overflow menu. */
 export async function revealWorkspaceOptions(page: Page) {
-  if ((page.viewportSize()?.width ?? 1280) >= 768) return;
-  const trigger = page.getByRole("button", { name: "View options", exact: true });
-  await expect(trigger).toBeVisible();
-  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
-    await trigger.click();
-  }
-  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  const header = page.getByRole("navigation", { name: "Top navigation", exact: true });
+  await expect(header).toBeVisible();
+  await expect(header.getByRole("button", { name: "View options", exact: true })).toHaveCount(0);
+  await expect(
+    header.locator(".workspace-header-options").getByRole("button").first(),
+  ).toBeVisible();
 }

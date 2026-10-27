@@ -32,6 +32,17 @@ function setup() {
 }
 
 describe("Settings search", () => {
+  it("moves from the search field into results with the keyboard and opens the destination", async () => {
+    const user = setup();
+    const input = screen.getByRole("searchbox", { name: "Search settings" });
+    await user.type(input, "working hours");
+    const results = screen.getByRole("navigation", { name: "Settings search results" });
+    await user.keyboard("{ArrowDown}");
+    expect(within(results).getAllByRole("link")[0]).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByLabelText("Location")).toHaveTextContent("field=profile%3Aday-end");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
   it("finds preferences across sections by topic and navigates without retaining the search", async () => {
     const user = setup();
     await user.click(screen.getByRole("searchbox", { name: "Search settings" }));

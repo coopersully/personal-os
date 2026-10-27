@@ -51,7 +51,7 @@ test.describe("ritual cleanup isolation", () => {
     expect(
       state.definitions.some((definition: { kind: string }) => definition.kind === "night"),
     ).toBe(false);
-    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
     await page.goto("/settings?page=calendar");
     await expect(page.getByRole("heading", { name: "Calendar", exact: true })).toBeVisible();
   });

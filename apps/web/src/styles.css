@@ -8638,11 +8638,11 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
   .account-profile-identity { align-items: center; text-align: center; }
 }
 @container settings (max-width: 22rem) {
-  .settings-panel [data-settings-row]:not(:has(> :is(textarea, [data-slot="field-group"], [data-slot="field-set"], [data-slot="field-description"]))) {
+  .settings-panel [data-settings-row]:not(.wallpaper-choice-row):not(:has(> :is(textarea, [data-slot="field-group"], [data-slot="field-set"], [data-slot="field-description"]))) {
     grid-template-columns: minmax(0, 1fr) minmax(0, 60%);
     align-items: center;
   }
-  .settings-panel [data-settings-row]:not(:has(> :is(textarea, [data-slot="field-group"], [data-slot="field-set"], [data-slot="field-description"]))) > * { grid-column: 2; grid-row: 1; }
+  .settings-panel [data-settings-row]:not(.wallpaper-choice-row):not(:has(> :is(textarea, [data-slot="field-group"], [data-slot="field-set"], [data-slot="field-description"]))) > * { grid-column: 2; grid-row: 1; }
   .settings-panel [data-settings-row] > :is([data-slot="field-label"], [data-slot="field-content"]) { grid-column: 1; }
 }
 
@@ -8840,8 +8840,15 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
   flex-wrap: nowrap;
   gap: .25rem;
   font-size: .6875rem;
-  line-height: 1rem;
+  line-height: .75rem;
   white-space: nowrap;
+}
+/* The 44px title track contains a 12px breadcrumb and a 32px text selector.
+   Page-action icon buttons retain their separate 44px mobile targets. */
+.workspace-app-bar[data-header-layout="sentence"] .workspace-app-bar__page-title [data-slot="workspace-title-sentence"] button {
+  height: 2rem;
+  min-height: 2rem;
+  line-height: 1.5rem;
 }
 .workspace-page-breadcrumbs [data-slot="breadcrumb-separator"] > svg { width: .625rem; height: .625rem; }
 .workspace-app-bar__page-title:has(.settings-page-heading) > .workspace-page-breadcrumbs { display: none; }

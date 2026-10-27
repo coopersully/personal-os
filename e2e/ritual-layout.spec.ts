@@ -35,20 +35,19 @@ async function cloudsPainted(layer: Locator) {
     .toBe(true);
 }
 
-test("morning and evening skies fill the viewport independently of the ritual card", async ({
+test("morning and evening previews keep their sky within responsive overlays independently of the ritual card", async ({
   page,
 }, info) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/settings?page=rituals");
   for (const kind of ["Morning", "Evening"]) {
     await page.getByRole("button", { name: `Preview ${kind} Ritual`, exact: true }).click();
     const preview = page.getByRole("dialog", { name: "Ritual preview" });
-    await fillsViewport(page, preview);
-    await fillsViewport(page, preview.locator(".ritual-clouds"));
+    await expect(preview).toBeVisible();
     const sizes = info.project.use.isMobile
       ? [{ width: 390, height: 844 }]
       : [
@@ -57,8 +56,36 @@ test("morning and evening skies fill the viewport independently of the ritual ca
         ];
     for (const size of sizes) {
       await page.setViewportSize(size);
-      await fillsViewport(page, preview);
-      await fillsViewport(page, preview.locator(".ritual-clouds"));
+      // Browser previews follow the shared modal/drawer contract; native windows stay fullscreen.
+      await expect(preview).toHaveAttribute(
+        "data-presentation",
+        size.width < 768 ? "drawer" : "dialog",
+      );
+      await expect
+        .poll(async () => {
+          const box = await preview.boundingBox();
+          const sky = await preview.locator(".ritual-clouds").boundingBox();
+          if (!box || !sky) return false;
+          const contained =
+            box.x >= -1 &&
+            box.y >= -1 &&
+            box.x + box.width <= size.width + 1 &&
+            box.y + box.height <= size.height + 1;
+          const aligned =
+            size.width < 768
+              ? Math.abs(box.y + box.height - size.height) <= 1
+              : Math.abs(box.x + box.width / 2 - size.width / 2) <= 1 &&
+                Math.abs(box.y + box.height / 2 - size.height / 2) <= 1;
+          return (
+            contained &&
+            aligned &&
+            Math.abs(sky.x - box.x) <= 1 &&
+            Math.abs(sky.y - box.y) <= 1 &&
+            Math.abs(sky.width - box.width) <= 1 &&
+            Math.abs(sky.height - box.height) <= 1
+          );
+        })
+        .toBe(true);
       await cloudsPainted(preview.locator(".ritual-clouds"));
       const close = preview.getByRole("button", { name: "Close Preview" });
       await expect(close).toBeVisible();

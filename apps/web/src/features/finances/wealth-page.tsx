@@ -10,6 +10,11 @@ import { useEffect, useRef, useState } from "react";
 import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
 import {
+  FloatingActionButton,
+  FloatingActionRegion,
+  FloatingActions,
+} from "@/components/floating-actions";
+import {
   BankIcon,
   DollarIcon,
   EditIcon,
@@ -51,7 +56,6 @@ import {
 } from "@/components/ui/item";
 import { NativeSelectOption } from "@/components/ui/native-select";
 import { Progress } from "@/components/ui/progress";
-import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
@@ -185,16 +189,13 @@ export function FinanceWealthPage() {
         </FinanceSection>
       ) : null}
       <FinanceSection title="Financial goals">
-        <WorkspaceHeaderControls label="Wealth controls">
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Create goal"
-            onClick={() => setEditor("new")}
-          >
-            <PlusIcon />
-          </Button>
-        </WorkspaceHeaderControls>
+        <FloatingActionRegion align="end">
+          <FloatingActions aria-label="Wealth actions">
+            <FloatingActionButton label="Create goal" onClick={() => setEditor("new")}>
+              <PlusIcon />
+            </FloatingActionButton>
+          </FloatingActions>
+        </FloatingActionRegion>
         <div className="flex min-w-0 flex-col gap-3">
           <FinanceSourceState label="Financial goals" query={goals} />
           <FinanceSourceState label="Goal confirmation context" query={me} />

@@ -32,66 +32,44 @@ test("the repository QA fixture login exposes representative workspace data", as
 
   await page.goto(`/calendar?follow=0&view=${test.info().project.use.isMobile ? "day" : "week"}`);
   await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
-  const overlapPin = page.getByRole("button", { name: "Spread 5 overlapping events" });
-  await expect(overlapPin).toHaveCSS("opacity", test.info().project.use.isMobile ? "1" : "0");
-  const overlappingCards = page
-    .getByRole("group", { name: "5 overlapping events", exact: true })
-    .locator(".calendar-timeline-event");
-  if (!test.info().project.use.isMobile) {
-    await page.locator(".week-calendar").evaluate((calendar) => {
-      calendar.scrollTop = 300;
-    });
-    const stack = page.getByRole("group", { name: "5 overlapping events", exact: true });
-    await stack.hover();
-    await expect(overlapPin).toHaveCSS("opacity", "1");
-    await expect(page.getByRole("tooltip")).toHaveCount(0);
-    await expect(stack).toHaveClass(/is-hovered/);
-    await expect
-      .poll(() => stack.evaluate((element) => getComputedStyle(element, "::after").backgroundImage))
-      .toBe("none");
-    const stackBounds = await stack.boundingBox();
-    if (!stackBounds) throw new Error("Missing stack bounds");
-    // Move through the original card area after the cards have fanned out.
-    await page.mouse.move(
-      stackBounds.x + stackBounds.width / 2,
-      stackBounds.y + stackBounds.height / 2,
-    );
-    await page.waitForTimeout(220);
-    await expect(stack).toHaveClass(/is-hovered/);
-    await overlappingCards.first().hover({ position: { x: 10, y: 10 } });
-    await expect(overlappingCards.first()).toHaveCSS("z-index", "8");
+  // Overlaps retain separate, directly accessible lanes in both Calendar layouts.
+  const overlappingCards = page.locator(".calendar-timeline-event").filter({
+    hasText:
+      /^(Design critique|Customer research debrief|Roadmap check-in|Partner launch sync|Hiring calibration)/,
+  });
+  await expect(overlappingCards).toHaveCount(5);
+  const lanes = await overlappingCards.evaluateAll((cards) =>
+    cards
+      .map((card) => {
+        const bounds = card.getBoundingClientRect();
+        return { left: bounds.left, right: bounds.right, width: bounds.width };
+      })
+      .sort((left, right) => left.left - right.left),
+  );
+  for (let index = 0; index < lanes.length; index += 1) {
+    const lane = lanes[index];
+    const firstLane = lanes[0];
+    if (!lane || !firstLane) throw new Error("Missing Calendar overlap lane geometry.");
+    expect(lane.width).toBeGreaterThan(0);
+    expect(Math.abs(lane.width - firstLane.width)).toBeLessThan(1);
+    if (index > 0) {
+      const previousLane = lanes[index - 1];
+      if (!previousLane) throw new Error("Missing previous Calendar overlap lane geometry.");
+      expect(lane.left).toBeGreaterThanOrEqual(previousLane.right);
+    }
+    await expect(overlappingCards.nth(index)).toBeEnabled();
   }
-
-  if (!test.info().project.use.isMobile) {
-    await overlapPin.click();
-    await expect(page.getByRole("button", { name: "Collapse 5 overlapping events" })).toBeVisible();
-    await overlappingCards.first().hover({ position: { x: 10, y: 10 } });
-    await expect(overlappingCards.first()).toHaveCSS("z-index", "8");
-    const pinBounds = await page
-      .getByRole("button", { name: "Collapse 5 overlapping events" })
-      .boundingBox();
-    const groupBounds = await overlappingCards.first().locator("..").boundingBox();
-    if (!pinBounds || !groupBounds) throw new Error("Missing stack geometry");
-    expect(
-      Math.abs(pinBounds.x + pinBounds.width / 2 - groupBounds.x - groupBounds.width / 2),
-    ).toBeLessThan(1);
-    expect(
-      Math.abs(pinBounds.y + pinBounds.height / 2 - groupBounds.y - groupBounds.height / 2),
-    ).toBeLessThan(1);
-  }
-  if (!test.info().project.use.isMobile) {
-    await page.getByRole("button", { name: "Collapse 5 overlapping events" }).press("Escape");
-    await expect(overlapPin).toBeFocused();
-    await expect(overlapPin).toHaveAttribute("aria-expanded", "false");
-    await expect(overlappingCards.first()).toHaveCSS("transform", "none");
-  }
-  if (test.info().project.use.isMobile) {
-    await overlapPin.tap();
-    const collapse = page.getByRole("button", { name: "Collapse 5 overlapping events" });
-    await expect(collapse).toBeVisible();
-    await collapse.tap();
-    await expect(overlapPin).toBeVisible();
-  }
+  await expect(
+    page.getByRole("button", { name: /^(Spread|Collapse) 5 overlapping events$/ }),
+  ).toHaveCount(0);
+  const eventAction = overlappingCards.filter({ hasText: "Design critique" });
+  await eventAction.scrollIntoViewIfNeeded();
+  await eventAction.focus();
+  await expect(eventAction).toBeFocused();
+  await eventAction.press("Enter");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   await page.goto("/tasks");
   await page.getByRole("button", { name: /^Tasks view:/ }).click();
@@ -152,11 +130,14 @@ test("desktop navigation fills the viewport while long content scrolls independe
       const sidebar = page.getByRole("complementary", { name: `${workspace} Sidebar` });
       await expect(sidebar).toHaveAttribute("data-slot", "sidebar");
       await expect(sidebar.locator('[data-slot="sidebar-header"]')).toHaveText(workspace);
-      await expect(
-        page
-          .getByRole("navigation", { name: "Top navigation" })
-          .getByText(workspace, { exact: true }),
-      ).toHaveCount(0);
+      const header = page.getByRole("navigation", { name: "Top navigation", exact: true });
+      const breadcrumbs = header.getByRole("navigation", { name: "Page breadcrumbs" });
+      const owner = breadcrumbs.getByRole("link", { name: workspace, exact: true });
+      await expect(owner).toBeVisible();
+      await expect(owner).toHaveAttribute("href", `/${workspace.toLowerCase()}`);
+      const title = header.locator(".workspace-app-bar__page-title .workspace-app-bar__title");
+      await expect(title).toBeVisible();
+      await expect(title).toContainText(/\S/);
       await expect(page.locator(".workspace-rail .workspace-icon")).toHaveCount(0);
       const handle = page.getByRole("separator", { name: "Collapse or show sidebar" });
       const edge = await handle.boundingBox();
@@ -214,7 +195,12 @@ test("desktop navigation fills the viewport while long content scrolls independe
     await expect(switcher).toBeVisible();
     await switcher.click();
     await page.getByRole("menuitem", { name: "Calendar", exact: true }).click();
-    await expect(page.locator(".workspace-app-bar")).toHaveCSS("padding-left", "48px");
+    const headerPadding = await page.locator(".workspace-app-bar").evaluate((header) => {
+      const style = getComputedStyle(header);
+      return { left: style.paddingLeft, right: style.paddingRight };
+    });
+    expect(headerPadding.left).toBe(headerPadding.right);
+    expect(Number.parseFloat(headerPadding.left)).toBeGreaterThan(0);
     const storedSidebar = await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"));
     await page.keyboard.press("Control+b");
     expect(await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"))).toBe(
@@ -510,29 +496,32 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await returnToApp();
   await expect(page.getByText(eventTitle)).toBeVisible();
   if (mobile) await page.getByRole("button", { name: "Expand schedule" }).click();
-  const todayEvent = page.locator('[data-slot="event-card"]').filter({ hasText: eventTitle });
-  const todayEventLayout = await todayEvent.evaluate((card) => {
-    const action = card.querySelector<HTMLElement>("button");
-    const body = card.querySelector<HTMLElement>('[data-slot="event-card-body"]');
-    if (!action || !body) throw new Error("Today event preview is incomplete.");
+  const todayEvent = page
+    .locator(".today-schedule .calendar-timeline-event")
+    .filter({ hasText: eventTitle });
+  await expect(todayEvent).toBeVisible();
+  await expect(todayEvent).toContainText("Desktop overlay");
+  const todayEventLayout = await todayEvent.evaluate((action) => {
     const actionStyle = getComputedStyle(action);
-    const bodyStyle = getComputedStyle(body);
+    const bounds = action.getBoundingClientRect();
+    const timeline = action.closest(".calendar-timeline")?.getBoundingClientRect();
+    if (!timeline) throw new Error("Today event is missing its shared Calendar timeline.");
     return {
-      alignItems: actionStyle.alignItems,
-      bodyJustifyContent: bodyStyle.justifyContent,
+      flexDirection: actionStyle.flexDirection,
       paddingBottom: actionStyle.paddingBottom,
       paddingLeft: actionStyle.paddingLeft,
       paddingRight: actionStyle.paddingRight,
       paddingTop: actionStyle.paddingTop,
       textAlign: actionStyle.textAlign,
+      withinTimeline: bounds.left >= timeline.left && bounds.right <= timeline.right,
     };
   });
   expect(todayEventLayout.paddingLeft).toBe(todayEventLayout.paddingRight);
   expect(todayEventLayout.paddingTop).toBe(todayEventLayout.paddingBottom);
   expect(Number.parseFloat(todayEventLayout.paddingTop)).toBeGreaterThan(0);
-  expect(todayEventLayout.alignItems).toBe("flex-start");
-  expect(todayEventLayout.bodyJustifyContent).toBe("flex-start");
+  expect(todayEventLayout.flexDirection).toBe("column");
   expect(todayEventLayout.textAlign).toBe("left");
+  expect(todayEventLayout.withinTimeline).toBe(true);
   await openWorkspace("Calendar");
   await page.getByRole("combobox", { name: "Search Calendar" }).fill("new event");
   await page.getByRole("option", { name: /New event/ }).click();
@@ -559,7 +548,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(todayLayout.viewportWidth).toBeLessThanOrEqual(viewportWidth + 1);
 
   if (mobile) {
-    const eventAction = todayEvent.getByRole("button");
+    const eventAction = todayEvent;
     await eventAction.tap();
     await expect(page.getByRole("menuitem", { name: "View Event in Calendar" })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -734,7 +723,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     weekGridLayout.otherTimelineBackgrounds[0],
   );
   expect(weekGridLayout.todayHeaderBackground).toBe(weekGridLayout.todayTimelineBackground);
-  const calendarHeading = page.locator('[data-slot="workspace-app-bar-identity"] h2');
+  const calendarHeading = page.locator('[data-slot="workspace-app-bar-title"] h2');
   const initialCalendarHeading = await calendarHeading.innerText();
   await navigateCalendarPeriod("Next week");
   await expect.poll(() => calendarHeading.innerText()).not.toBe(initialCalendarHeading);

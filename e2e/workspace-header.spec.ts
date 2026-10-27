@@ -38,7 +38,7 @@ for (const width of [320, 390, 1100]) {
         const context = element.querySelector(".workspace-app-bar__context") as HTMLElement;
         const controls = [
           ...element.querySelectorAll<HTMLElement>(
-            '.workspace-app-bar__context button[data-size^="icon"], .workspace-app-bar__actions button[data-size^="icon"]',
+            '.workspace-app-bar__context button[data-size^="icon"], .workspace-app-bar__page-actions button[data-size^="icon"], .workspace-app-bar__actions button[data-size^="icon"]',
           ),
         ].filter(
           (button) =>
@@ -46,6 +46,7 @@ for (const width of [320, 390, 1100]) {
             !button.closest(".workspace-primary-actions"),
         );
         return {
+          height: element.getBoundingClientRect().height,
           titleY: titleElement.getBoundingClientRect().y,
           contextBottom: context.getBoundingClientRect().bottom,
           fontSize: getComputedStyle(titleElement).fontSize,
@@ -58,6 +59,8 @@ for (const width of [320, 390, 1100]) {
         };
       });
       expect(geometry.overflow, route).toBe(false);
+      expect(geometry.height, route).toBe(104);
+      expect(geometry.titleY, route).toBeGreaterThanOrEqual(geometry.contextBottom);
       if (width < 768) {
         expect(geometry.titleY, route).toBeGreaterThanOrEqual(geometry.contextBottom);
         expect(geometry.fontSize, route).toBe("17px");
@@ -85,8 +88,9 @@ for (const width of [320, 390, 1100]) {
         await title.getByRole("button", { name: "Mail view: Inbox" }).click();
         await page.getByRole("menuitemradio", { name: "Unread", exact: true }).click();
         await expect(page).toHaveURL(/unread=1/);
-        if (width < 768)
-          await header.getByRole("button", { name: "View options", exact: true }).click();
+        await expect(header.getByRole("button", { name: "View options", exact: true })).toHaveCount(
+          0,
+        );
         await page.getByRole("button", { name: "Message list layout", exact: true }).click();
         await expect(
           page.getByRole("menuitemradio", { name: "Full-width view", exact: true }),

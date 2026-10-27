@@ -19,6 +19,7 @@ for (const width of [320, 390, 1100]) {
         (response) =>
           response.url().endsWith(settingsPath) && response.request().method() === "PATCH",
       );
+    let testFailed = false;
     try {
       await page.goto("/tasks?sort=default&group=none");
       const bar = page.getByRole("navigation", { name: "Top navigation" });
@@ -56,20 +57,29 @@ for (const width of [320, 390, 1100]) {
         expect((await saved).ok()).toBe(true);
       }
       await expect(unpin).toHaveAttribute("aria-pressed", "true");
-      if (width < 768) await page.getByRole("button", { name: "Workspace actions" }).click();
-      const sidebar =
-        width < 768
-          ? page.getByRole("dialog")
-          : page.getByRole("complementary", { name: "Tasks Sidebar" });
-      const pins = sidebar.getByRole("navigation", { name: "Pinned lists and projects" });
-      await expect(
-        pins.getByRole("link", { name: "Autumn program opening", exact: true }),
-      ).toBeVisible();
+      const mobile = width <= 900;
+      const dock = page.getByRole("navigation", { name: "Workspace sections" });
+      if (mobile) {
+        await dock.getByRole("link", { name: "pinned", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "pinned", exact: true })).toBeVisible();
+      }
+      const navigation = mobile
+        ? page.getByRole("main")
+        : page.getByRole("complementary", { name: "Tasks Sidebar" });
+      const pins = navigation.getByRole("navigation", { name: "Pinned lists and projects" });
+      const pinnedProject = pins.getByRole("link", { name: "Autumn program opening", exact: true });
+      await expect(pinnedProject).toBeVisible();
       await expect(pins.locator('[data-slot="sidebar-menu-sub"]')).toHaveCount(0);
-      await expect(sidebar.getByRole("button", { name: /More views|Expand|Collapse/ })).toHaveCount(
-        0,
-      );
-      await sidebar.getByRole("link", { name: "All", exact: true }).click();
+      await expect(
+        navigation.getByRole("button", { name: /More views|Expand|Collapse/ }),
+      ).toHaveCount(0);
+      if (mobile) {
+        await pinnedProject.click();
+        await expect(view).toHaveAccessibleName("Tasks view: Autumn program opening");
+        await dock.getByRole("link", { name: "views", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "views", exact: true })).toBeVisible();
+      }
+      await navigation.getByRole("link", { name: "All", exact: true }).click();
       await expect(view).toHaveAccessibleName("Tasks view: All tasks");
       await page.goto("/tasks?view=all&sort=default&group=none");
       await expect(page.getByRole("button", { name: "Open Call Mom" })).toBeVisible();
@@ -137,23 +147,34 @@ for (const width of [320, 390, 1100]) {
         page.getByRole("navigation", { name: "Calendar week navigation" }),
       ).toBeVisible();
       await expect(bar.getByRole("button", { name: /^Tasks view:/ })).toHaveCount(0);
+    } catch (error) {
+      testFailed = true;
+      throw error;
     } finally {
-      const latestResponse = await page.request.get(settingsPath);
-      expect(latestResponse.ok()).toBe(true);
-      const latest = (await latestResponse.json()) as WorkspaceSettings<"tasks">;
-      const restored = await page.request.patch(settingsPath, {
-        headers: { origin: new URL(page.url()).origin },
-        data: {
-          expectedRevision: latest.revision,
-          // PATCH cannot remove optional keys; restore their effective defaults if absent.
-          preferences: {
-            taskSort: original.preferences.taskSort ?? "default",
-            taskGroup: original.preferences.taskGroup ?? "none",
-            pinnedProjectIds: original.preferences.pinnedProjectIds ?? [],
+      try {
+        const latestResponse = await page.request.get(settingsPath);
+        expect(latestResponse.ok()).toBe(true);
+        const latest = (await latestResponse.json()) as WorkspaceSettings<"tasks">;
+        const restored = await page.request.patch(settingsPath, {
+          headers: { origin: new URL(page.url()).origin },
+          data: {
+            expectedRevision: latest.revision,
+            // PATCH cannot remove optional keys; restore their effective defaults if absent.
+            preferences: {
+              taskSort: original.preferences.taskSort ?? "default",
+              taskGroup: original.preferences.taskGroup ?? "none",
+              pinnedProjectIds: original.preferences.pinnedProjectIds ?? [],
+            },
           },
-        },
-      });
-      expect(restored.ok()).toBe(true);
+        });
+        expect(restored.ok()).toBe(true);
+      } catch (error) {
+        if (!testFailed) throw error;
+        test.info().annotations.push({
+          type: "preference cleanup failed",
+          description: String(error),
+        });
+      }
     }
   });
 }

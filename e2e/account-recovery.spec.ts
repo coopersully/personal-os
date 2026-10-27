@@ -10,7 +10,11 @@ test("account recovery overlays rather than displaces settings and requires a su
   await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/settings?page=rituals");
   await expect(page.getByRole("heading", { name: "Morning Ritual", exact: true })).toBeVisible();
-  const card = page.locator(".settings-page__heading");
+  const card = page.getByRole("region", {
+    name: "Morning Ritual",
+    exact: true,
+    includeHidden: true,
+  });
   const before = await card.boundingBox();
   let fail = true;
   await page.route("**/v1/me", async (route) => {

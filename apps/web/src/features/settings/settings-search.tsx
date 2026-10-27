@@ -76,6 +76,7 @@ export type SettingsSearchGroup = {
 
 export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const words = query.toLocaleLowerCase().trim().split(/\s+/);
@@ -131,6 +132,16 @@ export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
                 setQuery(event.target.value);
                 setOpen(true);
               }}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                const links = resultsRef.current?.querySelectorAll<HTMLAnchorElement>("a[href]");
+                const destination =
+                  event.key === "ArrowDown" ? links?.[0] : links?.[links.length - 1];
+                if (destination) {
+                  event.preventDefault();
+                  destination.focus();
+                }
+              }}
               type="search"
             />
           </InputGroup>
@@ -150,6 +161,7 @@ export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
         }}
       >
         <nav
+          ref={resultsRef}
           id="settings-search-results"
           aria-label="Settings search results"
           className="settings-search-results"

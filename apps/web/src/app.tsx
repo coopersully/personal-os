@@ -4258,6 +4258,7 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
     updateSelection(null);
   };
   const keyDown = (event: ReactKeyboardEvent<HTMLElement>, day: LocalDate) => {
+    if ((event.target as Element).closest(".calendar-timeline-event")) return;
     const current = selectionRef.current;
     if (event.key === "Escape" && current) {
       event.preventDefault();

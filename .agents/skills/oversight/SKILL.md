@@ -85,10 +85,12 @@ still complete the kickoff gate above before dispatch.
 - A dedicated epic section is named exactly for the current epic name. Verify identity from its
   recorded section ID, membership and direct parent issue before renaming a proven stale name;
   preserve its ID. Preserve shared sections and explicit user-protected names as recorded exclusions.
-- Cooper’s October 26 instruction supersedes subject-only names. Name managed chats
-  `ISSUE-ID - Issue name` from their verified direct Nohmi issue or epic parent, for example
-  `COO-159 - Development tooling`. Use the parent for multi-slice oversight; do not switch it for
-  each child. Prefer one or two words for the issue subject, generally at most five when clear.
+- Name oversight chats exactly `👀 - <epic name>` from their verified Nohmi epic parent,
+  for example `👀 - Development speed`. Cooper’s October 27 exception supersedes the older
+  issue-prefix convention for oversight only; retain its parent mapping across child work and phases.
+  Ordinary children use `ISSUE-ID - Issue name` from their verified direct issue, for example
+  `COO-159 - Development tooling`. Prefer one or two words for the issue subject,
+  generally at most five when clear.
   Keep phases, progress, PR links and blockers in records. Reconcile changed issue mappings/names
   through the current `nohmi-project-manager` checklist; never infer identity from similar wording.
   Normalize an authorized issue title before its chat title and read back both. Preserve later

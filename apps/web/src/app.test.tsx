@@ -10341,7 +10341,7 @@ describe("ilo web app", () => {
     pendingSave.unmount();
   }, 10_000);
 
-  it("keeps Pinterest settings, updates, and wallpaper application failures explicit", async () => {
+  it("keeps Pinterest settings, updates, and pending previews explicit", async () => {
     mocks.isTauri.mockReturnValue(true);
     const settings = {
       backgroundColor: "#ffffff",
@@ -10411,67 +10411,113 @@ describe("ilo web app", () => {
       expect(refreshWallpaper).toBeEnabled();
     });
     tooFewPins.unmount();
-
-    mocks.getPinterestWallpaperSettings.mockResolvedValue({
-      ...settings,
-      boardUrl: "https://www.pinterest.com/",
-    });
-    mocks.listPinterestPins.mockResolvedValue(
-      Array.from({ length: 4 }, (_, index) => ({
-        id: `pin-${index}`,
-        imageUrl: `https://example.com/${index}.jpg`,
-        title: null,
-      })),
-    );
-    mocks.invoke.mockImplementation((command: string) =>
-      command === "preview_pinterest_wallpaper"
-        ? "data:image/png;base64,dGVzdA=="
-        : command === "apply_pinterest_wallpaper"
-          ? Promise.reject("Desktop wallpaper failed")
-          : {
-              hasNotch: false,
-              platform: "macos",
-              safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
-              screen: { height: 900, width: 1440 },
-            },
-    );
-    const stringFailure = setup("/settings?page=wallpaper");
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
-    );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
-    );
-    await browser.click(screen.getByRole("button", { name: "Refresh wallpaper" }));
-    await browser.click(screen.getByRole("button", { name: "Refresh" }));
-    await waitFor(() => expect(mocks.invoke).toHaveBeenCalled());
-    stringFailure.unmount();
-
-    mocks.invoke.mockImplementation((command: string) =>
-      command === "preview_pinterest_wallpaper"
-        ? "data:image/png;base64,dGVzdA=="
-        : command === "apply_pinterest_wallpaper"
-          ? Promise.reject(new Error("Desktop wallpaper failed"))
-          : {
-              hasNotch: false,
-              platform: "macos",
-              safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
-              screen: { height: 900, width: 1440 },
-            },
-    );
-    setup("/settings?page=wallpaper");
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
-    );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
-    );
-    await browser.click(screen.getByRole("button", { name: "Refresh wallpaper" }));
-    await browser.click(screen.getByRole("button", { name: "Refresh" }));
-    expect(
-      await screen.findByText("Couldn’t refresh the wallpaper. Try again."),
-    ).toBeInTheDocument();
   }, 10_000);
+
+  it.each([
+    ["string", "Desktop wallpaper failed"],
+    ["Error", new Error("Desktop wallpaper failed")],
+  ])(
+    "settles the current wallpaper apply %s rejection before teardown",
+    async (_kind, failure) => {
+      mocks.isTauri.mockReturnValue(true);
+      mocks.getPinterestWallpaperSettings.mockResolvedValue({
+        backgroundColor: "#ffffff",
+        backgroundMode: "white",
+        boardUrl: "https://www.pinterest.com/",
+        cornerRadius: 0,
+        enabled: false,
+        frameSpacing: 16,
+        lastAppliedAt: null,
+        layout: "grid",
+        mosaicFit: "preserve",
+        paddingBottom: 16,
+        paddingEnd: 16,
+        paddingLinked: true,
+        paddingStart: 16,
+        paddingTop: 16,
+        rotationDegrees: 0,
+        tileSize: 64,
+      });
+      const pins = [
+        { id: "pin-1", imageUrl: "https://example.com/1.jpg", title: null },
+        { id: "pin-2", imageUrl: "https://example.com/2.jpg", title: null },
+        { id: "pin-3", imageUrl: "https://example.com/3.jpg", title: null },
+        { id: "pin-4", imageUrl: "https://example.com/4.jpg", title: null },
+      ];
+      mocks.listPinterestPins.mockResolvedValue(pins);
+      let finishPreview: ((image: string) => void) | undefined;
+      const preview = new Promise<string>((resolve) => {
+        finishPreview = resolve;
+      });
+      let rejectApply: ((error: unknown) => void) | undefined;
+      const application = new Promise<string>((_resolve, reject) => {
+        rejectApply = reject;
+      });
+      const originalInvoke = mocks.invoke.getMockImplementation();
+      mocks.invoke.mockImplementation((command: string) => {
+        if (command === "preview_pinterest_wallpaper") return preview;
+        if (command === "apply_pinterest_wallpaper") return application;
+        return originalInvoke?.(command);
+      });
+      const browser = userEvent.setup();
+      const view = setup("/settings?page=wallpaper");
+      await waitFor(() =>
+        expect(mocks.invoke).toHaveBeenCalledWith("preview_pinterest_wallpaper", expect.anything()),
+      );
+      const refresh = within(view.container).getByRole("button", { name: "Refresh wallpaper" });
+      expect(refresh).toBeDisabled();
+      expect(
+        mocks.invoke.mock.calls.filter(([command]) => command === "apply_pinterest_wallpaper"),
+      ).toEqual([]);
+      await act(async () => finishPreview?.("data:image/png;base64,dGVzdA=="));
+      await within(view.container).findByAltText("Wallpaper rendered for your display");
+      await waitFor(() => expect(refresh).toBeEnabled());
+      await browser.click(refresh);
+      await browser.click(screen.getByRole("button", { name: "Refresh" }));
+      await waitFor(() =>
+        expect(mocks.invoke).toHaveBeenCalledWith("apply_pinterest_wallpaper", {
+          backgroundColor: "#ffffff",
+          backgroundMode: "white",
+          boardLabel: "Pinterest",
+          cornerRadius: 0,
+          imageUrls: [
+            "https://example.com/1.jpg",
+            "https://example.com/2.jpg",
+            "https://example.com/3.jpg",
+            "https://example.com/4.jpg",
+          ],
+          frameSpacing: 16,
+          layout: "grid",
+          mosaicFit: "preserve",
+          paddingBottom: 16,
+          paddingEnd: 16,
+          paddingStart: 16,
+          paddingTop: 16,
+          rotationDegrees: 0,
+          tileSize: 64,
+        }),
+      );
+      // Desktop/preview invoke history must not stand in for this pending apply's outcome.
+      expect(
+        within(view.container).getByRole("button", { name: "Refreshing wallpaper" }),
+      ).toBeDisabled();
+      expect(
+        screen.queryByText("Couldn’t refresh the wallpaper. Try again."),
+      ).not.toBeInTheDocument();
+      await act(async () => rejectApply?.(failure));
+      const message = await screen.findByText("Couldn’t refresh the wallpaper. Try again.");
+      expect(message.closest("[data-sonner-toast]")).not.toBeNull();
+      expect(screen.getAllByText("Couldn’t refresh the wallpaper. Try again.")).toHaveLength(1);
+      const editor = view.container.querySelector(".wallpaper-editor");
+      expect(editor).toBeInTheDocument();
+      expect(editor).not.toHaveTextContent("Couldn’t refresh the wallpaper. Try again.");
+      expect(
+        mocks.invoke.mock.calls.filter(([command]) => command === "apply_pinterest_wallpaper"),
+      ).toHaveLength(1);
+      view.unmount();
+    },
+    10_000,
+  );
 
   it("blocks wallpaper application when native preview decoding fails and allows retry", async () => {
     const errorToast = vi.spyOn(toast, "error");

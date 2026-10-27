@@ -214,3 +214,8 @@ authenticated standalone API context while the page is available; do not depend 
 `page.request` in a timed-out test body's `finally`. Ritual restoration also removes
 created optional reminders. `cleanup-recovery.spec.ts` intentionally expires one body
 and verifies that the next fresh settings login cannot see its temporary ritual.
+
+The polished demo includes an evening reading/planning block, starting no earlier
+than 9 p.m. or 15 minutes after the fixture run, plus workshop, running and money
+check-in events in the coming week. These remain fictional local records with stable
+IDs and regenerate on reload; late-night runs may put the next block tomorrow.

@@ -796,6 +796,14 @@ function mockApi() {
     })),
     listCalendars: vi.fn(async () => [calendar]),
     listMailboxes: vi.fn(async () => [mailbox]),
+    getMailNavigationCounts: vi.fn(async () => ({
+      all: 1,
+      unread: 1,
+      starred: 0,
+      snoozed: 0,
+      sent: 0,
+      drafts: 0,
+    })),
     getMailSetupContext: vi.fn(async () => ({
       accounts: [],
       automation: {
@@ -1645,6 +1653,7 @@ describe("ilo MCP server", () => {
       [
         "list_mailboxes",
         "get_mail_setup_context",
+        "get_mail_navigation_counts",
         "list_mail",
         "read_mail",
         "update_mail",
@@ -2092,6 +2101,12 @@ describe("ilo MCP server", () => {
     await client.callTool({ name: "list_calendars", arguments: {} });
     await client.callTool({ name: "list_mailboxes", arguments: {} });
     await client.callTool({ name: "get_mail_setup_context", arguments: {} });
+    const counts = await client.callTool({
+      name: "get_mail_navigation_counts",
+      arguments: { accountIds: [accountId] },
+    });
+    expect(counts.structuredContent).toMatchObject({ result: { all: 1, unread: 1, drafts: 0 } });
+    expect(api.getMailNavigationCounts).toHaveBeenCalledWith([accountId]);
     await client.callTool({
       name: "list_mail",
       arguments: { accountIds: [accountId], mailboxId: id, query: "Test", unread: true },

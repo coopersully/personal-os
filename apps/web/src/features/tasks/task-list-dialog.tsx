@@ -6,10 +6,11 @@ import {
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import {
   ResponsiveDialog,
+  ResponsiveDialogBody,
   ResponsiveDialogContent,
   ResponsiveDialogDescription,
   ResponsiveDialogFooter,
@@ -42,6 +43,7 @@ export function TaskListDialog({
   list: TaskList | undefined;
   lists: TaskList[];
 }) {
+  const formId = useId();
   const queryClient = useQueryClient();
   const [conflict, setConflict] = useState<TaskListArchiveConflict | null>(null);
   const [destinationListId, setDestinationListId] = useState("");
@@ -148,71 +150,72 @@ export function TaskListDialog({
           </ResponsiveDialogFooter>
         ) : (
           <>
-            <FeedbackForm feedback={save.feedback} onSubmit={submit}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="task-list-name">Name</FieldLabel>
-                  <Input
-                    autoFocus
-                    defaultValue={list?.name}
-                    id="task-list-name"
-                    name="name"
-                    required
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="task-list-description">Description</FieldLabel>
-                  <Textarea
-                    defaultValue={list?.description ?? ""}
-                    id="task-list-description"
-                    name="description"
-                    rows={3}
-                  />
-                </Field>
-                <FieldSet>
-                  <FieldLegend variant="label">Icon</FieldLegend>
-                  <RadioGroup
-                    aria-label="List icon"
-                    className="grid-cols-[repeat(auto-fit,minmax(2.5rem,1fr))]"
-                    onValueChange={(value) => setIcon(value as TaskListIcon)}
-                    value={icon}
-                  >
-                    {taskListIconOptions.map((option) => {
-                      const OptionIcon = option.icon;
-                      return (
-                        <RadioGroupItem
-                          aria-label={option.label}
-                          title={option.label}
-                          className="h-10 w-full aspect-square items-center justify-center gap-2 rounded-md bg-muted px-3 text-muted-foreground after:hidden hover:bg-accent hover:text-accent-foreground data-[state=checked]:bg-selection data-[state=checked]:text-foreground [&>[data-slot=radio-group-indicator]]:hidden [&>svg]:size-4"
-                          key={option.value}
-                          value={option.value}
-                        >
-                          <OptionIcon aria-hidden="true" />
-                        </RadioGroupItem>
-                      );
-                    })}
-                  </RadioGroup>
-                </FieldSet>
-              </FieldGroup>
-
-              <ResponsiveDialogFooter className="mt-5">
-                <Button onClick={close} type="button" variant="outline">
-                  Cancel
+            <ResponsiveDialogBody>
+              <FeedbackForm id={formId} feedback={save.feedback} onSubmit={submit}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="task-list-name">Name</FieldLabel>
+                    <Input
+                      autoFocus
+                      defaultValue={list?.name}
+                      id="task-list-name"
+                      name="name"
+                      required
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="task-list-description">Description</FieldLabel>
+                    <Textarea
+                      defaultValue={list?.description ?? ""}
+                      id="task-list-description"
+                      name="description"
+                      rows={3}
+                    />
+                  </Field>
+                  <FieldSet>
+                    <FieldLegend variant="label">Icon</FieldLegend>
+                    <RadioGroup
+                      aria-label="List icon"
+                      className="grid-cols-[repeat(auto-fit,minmax(2.5rem,1fr))]"
+                      onValueChange={(value) => setIcon(value as TaskListIcon)}
+                      value={icon}
+                    >
+                      {taskListIconOptions.map((option) => {
+                        const OptionIcon = option.icon;
+                        return (
+                          <RadioGroupItem
+                            aria-label={option.label}
+                            title={option.label}
+                            className="h-10 w-full aspect-square items-center justify-center gap-2 rounded-md bg-muted px-3 text-muted-foreground after:hidden hover:bg-accent hover:text-accent-foreground data-[state=checked]:bg-selection data-[state=checked]:text-foreground [&>[data-slot=radio-group-indicator]]:hidden [&>svg]:size-4"
+                            key={option.value}
+                            value={option.value}
+                          >
+                            <OptionIcon aria-hidden="true" />
+                          </RadioGroupItem>
+                        );
+                      })}
+                    </RadioGroup>
+                  </FieldSet>
+                </FieldGroup>
+              </FeedbackForm>
+              {list ? (
+                <Button
+                  disabled={archive.isPending}
+                  onClick={() => archive.mutate(undefined)}
+                  variant="destructive"
+                >
+                  Archive List
                 </Button>
-                <Button disabled={save.isPending} type="submit">
-                  {save.isPending ? "Saving…" : list ? "Save changes" : "Create List"}
-                </Button>
-              </ResponsiveDialogFooter>
-            </FeedbackForm>
-            {list ? (
-              <Button
-                disabled={archive.isPending}
-                onClick={() => archive.mutate(undefined)}
-                variant="destructive"
-              >
-                Archive List
+              ) : null}
+            </ResponsiveDialogBody>
+            <ResponsiveDialogFooter className="mt-5">
+              <Button onClick={close} type="button" variant="outline">
+                Cancel
               </Button>
-            ) : null}
+              <Button disabled={save.isPending} type="submit" form={formId}>
+                {save.isPending ? "Saving…" : list ? "Save changes" : "Create List"}
+              </Button>
+            </ResponsiveDialogFooter>
           </>
         )}
       </ResponsiveDialogContent>

@@ -45,7 +45,7 @@ export function ReviewNavigation({
     <>
       <ApprovalHandIcon aria-hidden weight={active ? "Filled" : "Outline"} />
       <span className="review-navigation__label">{label}</span>
-      <span aria-hidden="true" className="review-navigation__count">
+      <span aria-hidden="true" className="review-navigation__count action-count-badge">
         {unavailable ? "!" : typeof count === "number" ? formatSidebarCount(count) : "…"}
       </span>
     </>
@@ -71,7 +71,7 @@ export function ReviewNavigation({
     <Button
       tooltip={label}
       aria-label={label}
-      className="review-navigation"
+      className="review-navigation action-count-trigger"
       data-attention={needsAttention || undefined}
       onClick={open}
       variant="ghost"

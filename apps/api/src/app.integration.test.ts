@@ -5259,7 +5259,36 @@ describe.sequential("ilo API", () => {
         .from(reminders)
         .where(and(eq(reminders.userId, demo?.id ?? ""), eq(reminders.kind, "task"))),
     ]);
-    expect(events).toHaveLength(12);
+    // Twelve baseline events plus four stable demo evening/next-week agenda records.
+    expect(events).toHaveLength(16);
+    const agendaIds = [2100, 2102, 2103, 2105].map(
+      (record) => `f1000000-0000-4000-8000-${record.toString(16).padStart(12, "0")}`,
+    );
+    expect(events.filter((event) => agendaIds.includes(event.id))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: agendaIds[0],
+          title: "Read and plan tomorrow",
+          startsAt: new Date("2026-07-29T01:00:00.000Z"),
+          endsAt: new Date("2026-07-29T01:30:00.000Z"),
+        }),
+        expect.objectContaining({
+          id: agendaIds[1],
+          title: "Autumn workshop volunteer briefing",
+          startsAt: new Date("2026-07-30T21:00:00.000Z"),
+        }),
+        expect.objectContaining({
+          id: agendaIds[2],
+          title: "River loop with Priya",
+          startsAt: new Date("2026-07-31T21:00:00.000Z"),
+        }),
+        expect.objectContaining({
+          id: agendaIds[3],
+          title: "Friday money check-in",
+          startsAt: new Date("2026-08-02T21:00:00.000Z"),
+        }),
+      ]),
+    );
     expect(messages).toHaveLength(5);
     // Nine current records plus 159 transactions across the four completed history months.
     expect(transactions).toHaveLength(168);
@@ -5348,6 +5377,18 @@ describe.sequential("ilo API", () => {
     expect(sameListProjects).toHaveLength(2);
 
     await loadQaFixtures(database.db, { now: new Date("2026-07-29T14:00:00.000Z") });
+    const reloadedEvents = await database.db
+      .select()
+      .from(calendarEvents)
+      .where(eq(calendarEvents.userId, demo?.id ?? ""));
+    expect(reloadedEvents).toHaveLength(16);
+    expect(reloadedEvents.map((event) => event.id).sort()).toEqual(
+      events.map((event) => event.id).sort(),
+    );
+    expect(reloadedEvents.find((event) => event.id === agendaIds[0])).toMatchObject({
+      startsAt: new Date("2026-07-30T01:00:00.000Z"),
+      endsAt: new Date("2026-07-30T01:30:00.000Z"),
+    });
     expect(
       await database.db.select().from(users).where(inArray(users.email, fixtureEmails)),
     ).toHaveLength(qaFixtureAccounts.length);

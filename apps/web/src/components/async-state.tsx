@@ -6,8 +6,14 @@ import { Button } from "./ui/button.js";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty.js";
 import { WorkspaceSkeleton, type WorkspaceSkeletonKind } from "./workspace-skeleton.js";
 
-export function PageLoading({ workspace = "generic" }: { workspace?: WorkspaceSkeletonKind }) {
-  return <WorkspaceSkeleton kind={workspace} />;
+export function PageLoading({
+  workspace = "generic",
+  calendarView = "week",
+}: {
+  workspace?: WorkspaceSkeletonKind;
+  calendarView?: "day" | "week" | "month";
+}) {
+  return <WorkspaceSkeleton kind={workspace} calendarView={calendarView} />;
 }
 
 export function InlineError({

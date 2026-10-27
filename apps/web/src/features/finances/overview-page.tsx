@@ -21,6 +21,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -74,7 +75,23 @@ export function FinanceOverviewPage() {
   const outstanding = status.data?.details.reimbursements.outstanding ?? 0;
   return (
     <div className="flex min-w-0 flex-col gap-8">
-      <FinanceSourceState label="Financial position" query={snapshot} />
+      <FinanceSourceState
+        label="Financial position"
+        query={snapshot}
+        loading={
+          <OverviewSection title="At a glance">
+            <KeyMetrics label="Loading finance key metrics" layout="grid">
+              {["cash", "spending", "worth"].map((key) => (
+                <div key={key} className="finance-metric-skeleton">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-7 w-28" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              ))}
+            </KeyMetrics>
+          </OverviewSection>
+        }
+      />
       {snapshot.data ? (
         <Collapsible>
           <OverviewSection
@@ -118,20 +135,7 @@ export function FinanceOverviewPage() {
                 Review accounts
               </Link>
             </CollapsibleContent>
-            <KeyMetrics label="Finance key metrics">
-              <KeyMetric
-                compact
-                to="/finances/accounts"
-                label="Cash"
-                value={
-                  snapshot.data.data.cash === null
-                    ? "Unavailable"
-                    : formatCompactMoney(snapshot.data.data.cash)
-                }
-                exactValue={financeAmount(snapshot.data.data.cash)}
-                icon={BankIcon}
-                description="Recorded planning cash · your share"
-              />
+            <KeyMetrics label="Finance key metrics" layout="grid">
               <KeyMetric
                 compact
                 to="/finances/spending?period=month&pending=0"
@@ -144,6 +148,19 @@ export function FinanceOverviewPage() {
                 exactValue={financeAmount(snapshot.data.data.budget.spent)}
                 icon={ReceiptIcon}
                 description="Posted personal expenses · no pending or transfers"
+              />
+              <KeyMetric
+                compact
+                to="/finances/accounts"
+                label="Cash"
+                value={
+                  snapshot.data.data.cash === null
+                    ? "Unavailable"
+                    : formatCompactMoney(snapshot.data.data.cash)
+                }
+                exactValue={financeAmount(snapshot.data.data.cash)}
+                icon={BankIcon}
+                description="Recorded planning cash · your share"
               />
               <KeyMetric
                 compact
@@ -334,7 +351,24 @@ function OwnerUpcomingMoney({
           : undefined
       }
     >
-      <FinanceSourceState label="Upcoming money" query={upcoming} />
+      <FinanceSourceState
+        label="Upcoming money"
+        query={upcoming}
+        loading={
+          <div className="finance-upcoming-skeleton" aria-hidden="true">
+            <div className="finance-upcoming-skeleton__table">
+              {["header", "first", "second", "third", "fourth", "fifth", "sixth"].map((key) => (
+                <div className="finance-upcoming-skeleton__row" key={key}>
+                  <Skeleton />
+                  <Skeleton />
+                  <Skeleton />
+                </div>
+              ))}
+            </div>
+            <Skeleton className="h-8 w-full" />
+          </div>
+        }
+      />
       {denied ? (
         <p>Upcoming money access unavailable.</p>
       ) : upcoming.data ? (

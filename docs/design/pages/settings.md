@@ -867,3 +867,12 @@ width-constrained question card. Keep decorative layers outside the card's stack
 thumbnail previews remain bounded to their own 16:9 scene. Native ritual surfaces fill the webview
 with fixed insets rather than relying on a dynamic viewport-height measurement. Check both axes
 of the background after entrance animations and after resizing, including short desktop windows.
+
+
+Settings page introductions are omitted globally: breadcrumbs identify the page and
+its first section begins the body. Preserve useful section and field descriptions.
+Security's Log out is a full-width `ProfileRow` in the danger variant with a trailing
+chevron and the existing safe-default confirmation. Keep pending/error feedback in
+Sonner and preserve the existing web/native session reset behavior.
+
+Mobile account navigation uses Account, Personal, Workspaces, and App section landing pages. Each reuses the sidebar permission rules, attention indicators, and destination rows; the active child keeps its owning app-bar section selected. There is no generic More drawer.

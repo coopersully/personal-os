@@ -7,6 +7,8 @@ export const WorkspaceSecondarySlotContext = createContext<HTMLElement | null | 
 
 export const WorkspaceHeaderSlotContext = createContext<
   | {
+      workspaceTarget: HTMLElement | null;
+      setWorkspaceTarget: Dispatch<SetStateAction<HTMLDivElement | null>>;
       titleTarget: HTMLElement | null;
       setTitleTarget: Dispatch<SetStateAction<HTMLDivElement | null>>;
       target: HTMLElement | null;
@@ -34,11 +36,14 @@ export function WorkspaceLayout({
 }) {
   const [secondarySlot, setSecondarySlot] = useState<HTMLDivElement | null>(null);
   const [leadingSlot, setLeadingSlot] = useState<HTMLDivElement | null>(null);
+  const [workspaceSlot, setWorkspaceSlot] = useState<HTMLDivElement | null>(null);
   const [titleSlot, setTitleSlot] = useState<HTMLDivElement | null>(null);
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
   return (
     <WorkspaceHeaderSlotContext.Provider
       value={{
+        workspaceTarget: workspaceSlot,
+        setWorkspaceTarget: setWorkspaceSlot,
         titleTarget: titleSlot,
         setTitleTarget: setTitleSlot,
         target: headerSlot,

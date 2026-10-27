@@ -125,7 +125,14 @@ export function TasksAppBarControls({ search, timeZone }: { search: ReactNode; t
               title={label}
             >
               <SelectedIcon aria-hidden="true" />
-              <span className="truncate">{label}</span>
+              <span
+                data-user-content={
+                  scope === "container" || (archive && Boolean(project || list)) || undefined
+                }
+                className="truncate"
+              >
+                {label}
+              </span>
               <ChevronDownIcon aria-hidden="true" />
             </Button>
           </DropdownMenuTrigger>

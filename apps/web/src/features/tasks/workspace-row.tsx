@@ -69,7 +69,6 @@ export function WorkspaceRow({
   const context =
     item.kind === "task" ? [list?.name, project?.name].filter(Boolean).join(" / ") : "";
   const meta = [
-    context,
     item.kind === "task" && details.includes("estimate") && item.record.estimateMinutes
       ? `${item.record.estimateMinutes} min`
       : null,
@@ -104,12 +103,12 @@ export function WorkspaceRow({
           </TaskItemTitle>
           {record.priority === "high" ? <span className="sr-only">High priority</span> : null}
           {item.kind === "reminder" ? <span className="sr-only">Reminder</span> : null}
-          {record.dueAt || (item.kind === "task" && item.record.scheduledAt) || meta ? (
+          {record.dueAt || (item.kind === "task" && item.record.scheduledAt) || context || meta ? (
             <TaskItemDescription>
               {item.kind === "task" && item.record.scheduledAt ? (
                 <span>
                   Reserved {formatRelativeMaterialDateTime(item.record.scheduledAt, timeZone)}
-                  {record.dueAt || meta ? " · " : ""}
+                  {record.dueAt || context || meta ? " · " : ""}
                 </span>
               ) : null}
               {record.dueAt ? (
@@ -117,9 +116,11 @@ export function WorkspaceRow({
                   <span className={overdue ? "text-destructive" : undefined}>
                     Due {formatRelativeMaterialDateTime(record.dueAt, timeZone)}
                   </span>
-                  {meta ? " · " : ""}
+                  {context || meta ? " · " : ""}
                 </>
               ) : null}
+              {context ? <span data-user-content>{context}</span> : null}
+              {context && meta ? " · " : null}
               {meta}
             </TaskItemDescription>
           ) : null}

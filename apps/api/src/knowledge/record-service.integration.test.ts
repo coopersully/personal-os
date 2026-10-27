@@ -5,6 +5,7 @@ import {
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  goals,
   knowledgeReceipts,
   knowledgeRecords,
   knowledgeRelationships,
@@ -314,6 +315,123 @@ describe.sequential("persistent scoped knowledge", () => {
         }),
       ),
     ).rejects.toMatchObject({ status: 403 });
+  });
+  it("persists owned relationship endpoints and rejects foreign or broader disclosure", async () => {
+    const f = await fixture();
+    const other = await fixture();
+    const subject = await service().create(f.human, input({ scope: { workspace: "finances" } }));
+    const object = await service().create(f.human, input({ scope: { workspace: "finances" } }));
+    const foreign = await service().create(other.human, input());
+    const content: KnowledgeMutationInput["content"] = {
+      kind: "relationship",
+      value: {
+        subjectId: subject.record.id,
+        objectId: object.record.id,
+        relationship: "supports",
+        direction: "directed",
+      },
+    };
+    const request = input({
+      content,
+      scope: { workspace: "finances" },
+      relatedRecordIds: [subject.record.id, object.record.id],
+    });
+    const saved = await service().create(f.human, request);
+    expect(saved.record.content).toEqual(content);
+    expect(saved.record.relatedRecordIds).toEqual(request.relatedRecordIds);
+    expect(await service().get(f.human, { id: saved.record.id, purpose: "planning" })).toEqual(
+      saved.record,
+    );
+    expect(await service().create(f.human, request)).toEqual(saved);
+    const relationships = await database.db
+      .select()
+      .from(knowledgeRelationships)
+      .where(eq(knowledgeRelationships.recordId, saved.record.id));
+    expect(relationships).toHaveLength(2);
+    expect(relationships.map((row) => row.relatedRecordId).sort()).toEqual(
+      [...request.relatedRecordIds].sort(),
+    );
+    const before = await persistedKnowledge();
+    // Omit relatedRecordIds so content endpoints must enforce ownership themselves.
+    for (const endpoint of ["subjectId", "objectId"] as const) {
+      await expect(
+        service().create(
+          f.human,
+          input({
+            content: { ...content, value: { ...content.value, [endpoint]: foreign.record.id } },
+            scope: { workspace: "finances" },
+          }),
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+    }
+    await expect(service().create(f.human, input({ content }))).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(await persistedKnowledge()).toEqual(before);
+  });
+  it("inherits entity-meaning source purpose and scopes without changing canonical goals", async () => {
+    const f = await fixture();
+    const other = await fixture();
+    const [goal] = await database.db
+      .insert(goals)
+      .values({ userId: f.human.userId, title: "Plan weekly meals" })
+      .returning();
+    if (!goal) throw new Error("Goal fixture was not created.");
+    const source = await service().create(
+      f.human,
+      input({ content: { kind: "goal", value: { goalId: goal.id } } }),
+    );
+    const foreign = await service().create(other.human, input());
+    const content: KnowledgeMutationInput["content"] = {
+      kind: "entity_meaning",
+      value: { recordId: source.record.id, meaning: "Weekly planning intent", purpose: "planning" },
+    };
+    const saved = await service().create(f.human, input({ content }));
+    expect(saved.record.content).toEqual(content);
+    expect(saved.record.scope).toEqual({ workspace: null });
+    expect(saved.record.requiredReadScopes).toEqual(["goals:read", "knowledge:read"]);
+    await expect(
+      service().get(f.agent, { id: saved.record.id, purpose: "planning" }),
+    ).rejects.toMatchObject({ status: 403 });
+    const scopes: AccessScope[] = ["knowledge:read", "knowledge:write", "goals:read"];
+    await database.db
+      .update(accessTokens)
+      .set({ scopes })
+      .where(eq(accessTokens.id, f.agent.actorId));
+    const authorized: Principal = { ...f.agent, scopes: new Set(scopes) };
+    expect(await service().get(authorized, { id: saved.record.id, purpose: "planning" })).toEqual(
+      saved.record,
+    );
+    const before = await persistedKnowledge();
+    await database.db
+      .update(accessTokens)
+      .set({ scopes: ["knowledge:read", "knowledge:write"] })
+      .where(eq(accessTokens.id, f.agent.actorId));
+    await expect(
+      service().get(authorized, { id: saved.record.id, purpose: "planning" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      service().get(f.human, { id: saved.record.id, purpose: "review" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      service().create(
+        f.human,
+        input({ content: { ...content, value: { ...content.value, purpose: "review" } } }),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      service().create(f.human, input({ content, purposes: ["planning", "review"] })),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      service().create(
+        f.human,
+        input({
+          content: { ...content, value: { ...content.value, recordId: foreign.record.id } },
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+    expect(await persistedKnowledge()).toEqual(before);
+    expect(await database.db.select().from(goals).where(eq(goals.id, goal.id))).toEqual([goal]);
   });
   it("bounds serialized Unicode values, evidence and relationships and rejects forged fields", async () => {
     const oversized = input({

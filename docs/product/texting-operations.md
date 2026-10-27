@@ -605,29 +605,46 @@ not establish that Claude has read, processed or completed the request. Previous
 captures are not automatically backfilled by this change.
 
 Finance attention reuses one notification intent per canonical owner/scope repair identity across
-maintenance runs. The work revision identifies the exact current run; its immutable run row retains
+maintenance runs. The work revision identifies the exact current run; its canonical run row retains
 schedule/connection correlation. The semantic action revision identifies the required recovery
 (e.g. restore authority, restore a missing target, review scope/rules, restore a source, or review
 budget/position evidence). A new run UUID, wording, confidence, timestamp, host rotation, rulebook
 version or internal evidence refresh does not create a new action. Unknown/internal errors share
-the conservative inspect-failure action rather than inventing a new reason to text.
+the conservative inspect-failure action rather than inventing a new reason to text. Typed canonical
+position scopes (account IDs and date window) and budget proposal/policy/plan IDs and decision
+consequences distinguish material targets under a broad run scope. Whole evidence revisions,
+wording and confidence do not. Errors without canonical subject evidence retain the scope-level
+action; the resolver never extracts a target from prose. Missing or newly available subject evidence
+alone does not start a new episode; known subjects are carried through compatible history.
 
 Only the latest blocked or terminally failed run can produce current generic attention. Healthy
 runs, automatic retries and question/approval waits stay quiet. Generic attention is suppressed only
-when the same locked resolution pass proves a question for that run current; an open marker with
-stale transaction/candidate/run parents does not hide terminal failure. Notification claims partition
-replyable questions (up to three), one exact approval, and repair/generic work into separate delivery
+when the same locked resolution pass proves a question for that run current. Before taking the
+global parent locks, repair resolution discovers all candidate same-run question references from
+owner-scoped database state independently of the dispatcher's 25-row cursor. It then validates
+those references under the ordinary account/transaction/review/question and run/candidate locks.
+Neither page ordering nor an open marker with stale parents can change question ownership.
+Notification claims partition replyable questions (up to three), one exact approval, and repair/generic work into separate delivery
 shapes. Omitted work stays pending for later passes. A repair cannot remove the numbered/choice
 bindings from an unrelated question or approval, and existing live reply namespaces remain intact.
 
-Repeated discovery or later runs of the same unresolved action do not send again after acceptance.
-A materially different recovery action may become eligible after revalidation, while any uncertain
-submission for the stable intent blocks resend even across action revisions. Claimed attempt
-membership retains its original exact run; superseded evidence suppresses unsent attempts rather
+Repeated discovery or later runs of an uninterrupted unresolved action do not send again before
+the configured reminder interval. The default is seven days; `Never` disables reminders. Accepted
+handoffs start the interval; known failed reminder handoffs retain the bounded retry policy.
+
+Episode identity is derived from retained authoritative run history in bounded pages, without a
+lookback cutoff. A completed run for the exact canonical scope closes the previous episode even
+if no notification scan observed the completion. A later same-code failure is eligible again.
+Different-scope completions, retry waits, question waits and manual supersession do not prove
+resolution. A material typed action/target/consequence change starts a new episode, including a
+return to a previously seen target after a different target. The prior terminal boundary is part of
+the action revision; a new run UUID alone is not. No additional episode ledger is published.
+Any uncertain submission for the stable intent blocks resend even across episode/action revisions.
+Claimed attempt membership retains its original exact run; superseded evidence suppresses unsent attempts rather
 than retargeting a queued message. No provider call occurs under domain locks.
 
-Known rejected attention sends have at most three total attempts, with a one-minute wait after the
-first failure and five minutes after the second. Each retry rechecks consent, epoch, preferences,
+Each initial or reminder handoff cycle has at most three known-rejected attempts, with a one-minute
+wait after the first failure and five minutes after the second. Each retry rechecks consent, epoch, preferences,
 quiet hours and current work. Uncertain submissions are never automatically resent. Existing
 notification status exposes the stable action work ID, exact run revision, intent, attempt, outbound
 message and recovery state; this is separate from Finance Activity, which does not project every

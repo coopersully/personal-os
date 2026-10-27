@@ -123,13 +123,30 @@ export function notificationEligibility(input: {
     (latest, a) => (!latest || a.submittedAt > latest ? a.submittedAt : latest),
     null,
   );
-  // Run attention is delivered once; known rejection gets at most two bounded retries.
+  // Current repair episodes obey reminders after acceptance; known rejection gets at most
+  // two bounded retries after the most recent accepted handoff.
   // Uncertain acceptance above always wins, including across action revisions.
   if (work.work.kind === "repair") {
-    if (sameAction.some((a) => a.state === "accepted")) return "attention_delivered";
-    const failures = sameAction.filter((a) => a.state === "failed");
+    const accepted = sameAction
+      .filter((a) => a.state === "accepted")
+      .reduce<Date | null>(
+        (latest, a) => (!latest || a.submittedAt > latest ? a.submittedAt : latest),
+        null,
+      );
+    if (accepted) {
+      if (preferences.reminderDays === null) return "reminder_never";
+      if (now.getTime() - accepted.getTime() < preferences.reminderDays * 86400000)
+        return "reminder_wait";
+    }
+    const failures = sameAction.filter(
+      (a) => a.state === "failed" && (!accepted || a.submittedAt > accepted),
+    );
     if (failures.length >= 3) return "retry_exhausted";
-    if (last && now.getTime() - last.getTime() < (failures.length > 1 ? 300_000 : 60_000))
+    if (
+      failures.length &&
+      last &&
+      now.getTime() - last.getTime() < (failures.length > 1 ? 300_000 : 60_000)
+    )
       return "retry_wait";
   } else if (last) {
     if (preferences.reminderDays === null) return "reminder_never";

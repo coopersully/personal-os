@@ -291,13 +291,24 @@ describe("run attention delivery policy", () => {
     attempts: Parameters<typeof notificationEligibility>[0]["attempts"],
     at = now,
   ) => notificationEligibility({ work: repair, preferences, timeZone: "UTC", now: at, attempts });
-  it("never reminds unchanged accepted attention or blindly retries uncertainty", () => {
+  it("honors repair reminder intervals and never while preserving uncertainty", () => {
     expect(
       evaluate(
         [{ actionRevision: "action-1", state: "accepted", submittedAt: now }],
         new Date(now.getTime() + 30 * 86400000),
       ),
-    ).toBe("attention_delivered");
+    ).toBe("eligible");
+    const accepted = [{ actionRevision: "action-1", state: "accepted" as const, submittedAt: now }];
+    expect(evaluate(accepted)).toBe("reminder_wait");
+    expect(
+      notificationEligibility({
+        work: repair,
+        preferences: { ...preferences, reminderDays: null },
+        timeZone: "UTC",
+        now: new Date(now.getTime() + 365 * 86400000),
+        attempts: accepted,
+      }),
+    ).toBe("reminder_never");
     expect(evaluate([{ actionRevision: "older", state: "uncertain", submittedAt: now }])).toBe(
       "delivery_uncertain",
     );
@@ -309,6 +320,19 @@ describe("run attention delivery policy", () => {
     expect(evaluate([failure, failure], new Date(now.getTime() + 60_000))).toBe("retry_wait");
     expect(evaluate([failure, failure], new Date(now.getTime() + 300_000))).toBe("eligible");
     expect(evaluate([failure, failure, failure], new Date(now.getTime() + 86400000))).toBe(
+      "retry_exhausted",
+    );
+  });
+  it("bounds failed reminder retries after the prior accepted handoff", () => {
+    const accepted = {
+      actionRevision: "action-1",
+      state: "accepted" as const,
+      submittedAt: new Date(now.getTime() - 8 * 86400000),
+    };
+    const failed = { actionRevision: "action-1", state: "failed" as const, submittedAt: now };
+    expect(evaluate([accepted, failed])).toBe("retry_wait");
+    expect(evaluate([accepted, failed], new Date(now.getTime() + 60_000))).toBe("eligible");
+    expect(evaluate([accepted, failed, failed, failed], new Date(now.getTime() + 300_000))).toBe(
       "retry_exhausted",
     );
   });

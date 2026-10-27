@@ -24,6 +24,7 @@ import {
 import {
   defaultNotificationPreferences,
   type FinanceHumanWorkRef,
+  financePositionFactNames,
   type NotificationWork,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -148,7 +149,7 @@ describe.sequential("durable notifications", () => {
     "completed_with_questions",
     "awaiting_approval",
     "queued",
-  ] as const)("discovers only actionable run attention, once across scans and restart: %s", async (status) => {
+  ] as const)("discovers only actionable attention, deduplicates scans and honors default reminders: %s", async (status) => {
     const [run] = await database.db
       .insert(workspaceMaintenanceRuns)
       .values({
@@ -183,14 +184,15 @@ describe.sequential("durable notifications", () => {
       });
       current = new Date(current.getTime() + 8 * 86400000);
       await scan();
-      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledTimes(2);
     }
   });
 
-  async function attentionFixture() {
+  async function attentionFixture(id?: string) {
     const [run] = await database.db
       .insert(workspaceMaintenanceRuns)
       .values({
+        id,
         userId: owner,
         domain: "finances",
         scope: { type: "all_outstanding" },
@@ -374,6 +376,218 @@ describe.sequential("durable notifications", () => {
     }
   });
 
+  it("opens a new same-code episode only after authoritative completion of the same scope", async () => {
+    const { run } = await attentionFixture();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "failed_terminal" })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const scan = createFinanceNotificationDispatcher({
+      db: database.db,
+      notifications: service,
+      enabled: () => true,
+    });
+    await scan();
+    const first = (await service.status(principal)).intents[0]?.work;
+    current = new Date(current.getTime() + 1000);
+    // A completed different target cannot resolve this broad-scope blocker.
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      userId: owner,
+      domain: "finances",
+      scope: { type: "target", entityType: "transaction", id: crypto.randomUUID() },
+      status: "completed",
+      rulebookVersion: "test",
+      createdAt: current,
+    });
+    current = new Date(current.getTime() + 1000);
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      userId: owner,
+      domain: "finances",
+      scope: run.scope,
+      status: "failed_terminal",
+      rulebookVersion: "test",
+      createdAt: current,
+    });
+    await scan();
+    expect(send).toHaveBeenCalledTimes(1);
+    current = new Date(current.getTime() + 1000);
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      userId: owner,
+      domain: "finances",
+      scope: run.scope,
+      status: "completed",
+      rulebookVersion: "test",
+      createdAt: current,
+    });
+    current = new Date(current.getTime() + 1000);
+    const [next] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: owner,
+        domain: "finances",
+        scope: run.scope,
+        status: "failed_terminal",
+        rulebookVersion: "test",
+        createdAt: current,
+      })
+      .returning();
+    await scan();
+    expect(send).toHaveBeenCalledTimes(2);
+    const state = await service.status(principal);
+    expect(state.intents).toHaveLength(1);
+    expect(state.intents[0]?.work.id).toBe(first?.id);
+    expect(state.intents[0]?.work.actionRevision).not.toBe(first?.actionRevision);
+    expect(state.intents[0]?.work.revision).toBe(next?.id);
+    // History pagination cannot truncate the completed episode boundary or reset its identity.
+    await database.db.insert(workspaceMaintenanceRuns).values(
+      Array.from({ length: 51 }, (_, i) => ({
+        userId: owner,
+        domain: "finances" as const,
+        scope: run.scope,
+        status: "failed_terminal" as const,
+        rulebookVersion: "test",
+        createdAt: new Date(current.getTime() + (i + 1) * 1000),
+      })),
+    );
+    current = new Date(current.getTime() + 52_000);
+    await scan();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect((await service.status(principal)).intents[0]?.work.actionRevision).toBe(
+      state.intents[0]?.work.actionRevision,
+    );
+  });
+
+  it("distinguishes material canonical targets within all-outstanding without hashing evidence churn", async () => {
+    const { run } = await attentionFixture();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "failed_terminal" })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const scan = createFinanceNotificationDispatcher({
+      db: database.db,
+      notifications: service,
+      enabled: () => true,
+    });
+    const targetA = crypto.randomUUID();
+    const targetB = crypto.randomUUID();
+    for (const [i, accountId] of [
+      targetA,
+      null,
+      targetA,
+      targetB,
+      targetA,
+      null,
+      targetA,
+    ].entries()) {
+      current = new Date(current.getTime() + 1000);
+      await database.db.insert(workspaceMaintenanceRuns).values({
+        userId: owner,
+        domain: "finances",
+        scope: run.scope,
+        status: "failed_terminal",
+        rulebookVersion: "test",
+        createdAt: current,
+        settledResult: {
+          code: "finance_position_evidence_unavailable",
+          position: accountId
+            ? {
+                revision: `incidental-${i}`,
+                scope: { accountIds: [accountId], from: "2026-03-01", through: "2026-03-31" },
+                facts: Object.fromEntries(
+                  financePositionFactNames.map((name) => [
+                    name,
+                    { quality: "unavailable", reasons: ["source_unavailable"] },
+                  ]),
+                ),
+              }
+            : undefined,
+        },
+      });
+      await scan();
+      expect(send).toHaveBeenCalledTimes(i >= 4 ? 3 : i === 3 ? 2 : 1);
+    }
+  });
+
+  it.each([1, null])("honors configured repair reminders across runs: %s", async (reminderDays) => {
+    const { run } = await attentionFixture();
+    await service.savePreferences(principal, "global", {
+      expectedRevision: null,
+      preferences: { ...defaultNotificationPreferences, reminderDays },
+    });
+    await service.drain(principal);
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "failed_terminal" })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const scan = createFinanceNotificationDispatcher({
+      db: database.db,
+      notifications: service,
+      enabled: () => true,
+    });
+    current = new Date(current.getTime() + 12 * 3600000);
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      userId: owner,
+      domain: "finances",
+      scope: run.scope,
+      status: "failed_terminal",
+      rulebookVersion: "test",
+      createdAt: current,
+    });
+    await scan();
+    expect(send).toHaveBeenCalledTimes(1);
+    current = new Date(current.getTime() + 12 * 3600000);
+    await scan();
+    expect(send).toHaveBeenCalledTimes(reminderDays === null ? 1 : 2);
+  });
+
+  it("suppresses an old claimed episode without retargeting its immutable membership", async () => {
+    const { run, work } = await attentionFixture();
+    const claim = await claimed();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "failed_terminal" })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    current = new Date(current.getTime() + 1000);
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      userId: owner,
+      domain: "finances",
+      scope: run.scope,
+      status: "completed",
+      rulebookVersion: "test",
+      createdAt: current,
+    });
+    current = new Date(current.getTime() + 1000);
+    const [next] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: owner,
+        domain: "finances",
+        scope: run.scope,
+        status: "failed_terminal",
+        rulebookVersion: "test",
+        createdAt: current,
+      })
+      .returning();
+    await service.deliver(principal, claim);
+    expect(send).not.toHaveBeenCalled();
+    expect((await service.status(principal)).attempts[0]?.reason).toBe("resolved");
+    await createFinanceNotificationDispatcher({
+      db: database.db,
+      notifications: service,
+      enabled: () => true,
+    })();
+    expect(send).toHaveBeenCalledTimes(1);
+    const membership = await database.db
+      .select()
+      .from(notificationAttemptItems)
+      .where(eq(notificationAttemptItems.attemptId, claim.id));
+    expect(membership).toMatchObject([{ work }]);
+    const state = await service.status(principal);
+    expect(state.intents).toHaveLength(1);
+    expect(state.intents[0]?.work.revision).toBe(next?.id);
+    expect(state.intents[0]?.work.actionRevision).not.toBe(work.actionRevision);
+  });
+
   it("preserves uncertainty across new runs and material action revisions", async () => {
     const { run } = await attentionFixture();
     send.mockRejectedValueOnce(new Error("unknown handoff"));
@@ -383,6 +597,15 @@ describe.sequential("durable notifications", () => {
       .set({ status: "failed_terminal" })
       .where(eq(workspaceMaintenanceRuns.id, run.id));
     for (const code of ["internal_error", "forbidden"]) {
+      current = new Date(current.getTime() + 1000);
+      await database.db.insert(workspaceMaintenanceRuns).values({
+        userId: owner,
+        domain: "finances",
+        scope: run.scope,
+        status: "completed",
+        rulebookVersion: "test",
+        createdAt: current,
+      });
       current = new Date(current.getTime() + 1000);
       await database.db.insert(workspaceMaintenanceRuns).values({
         userId: owner,
@@ -438,8 +661,16 @@ describe.sequential("durable notifications", () => {
     "current",
     "terminal",
     "orphan",
+    "page_before",
+    "page_after",
   ] as const)("only a current actionable question suppresses repair: %s", async (mode) => {
-    const { run } = await attentionFixture();
+    const { run } = await attentionFixture(
+      mode === "page_before"
+        ? "00000000-0000-4000-8000-000000000001"
+        : mode === "page_after"
+          ? "ffffffff-ffff-4fff-8fff-ffffffffffff"
+          : undefined,
+    );
     const [account] = await database.db
       .insert(financeAccounts)
       .values({ userId: owner, provider: "manual", institution: "Manual", name: "Cash" })
@@ -502,6 +733,21 @@ describe.sequential("durable notifications", () => {
         .update(financeMaintenanceCandidates)
         .set({ state: "superseded" })
         .where(eq(financeMaintenanceCandidates.id, candidate.id));
+    if (mode.startsWith("page_")) {
+      // Force 26 discovered stale rows strictly between the current question and source run.
+      const prefix =
+        Number.parseInt(created.question.reviewCaseId.slice(0, 8), 16) +
+        (mode === "page_before" ? -1 : 1);
+      for (let i = 0; i < 26; i++) {
+        const id = `${prefix.toString(16).padStart(8, "0")}-0000-4000-8000-${i.toString(16).padStart(12, "0")}`;
+        await database.db.insert(notificationIntents).values({
+          userId: owner,
+          domain: "finances",
+          workId: id,
+          work: { id, domain: "finances", kind: "question", revision: "1", actionRevision: "1" },
+        });
+      }
+    }
     const errors: unknown[] = [];
     const scan = createFinanceNotificationDispatcher({
       db: database.db,
@@ -519,11 +765,16 @@ describe.sequential("durable notifications", () => {
       enabled: () => true,
     });
     const scanResult = await scan();
+    if (mode.startsWith("page_")) {
+      expect(scanResult.processed).toBe(25);
+      // Drain through both boundaries and wrap the cursor: ordering cannot own currentness.
+      for (let i = 0; i < 4; i++) expect((await scan()).failed).toBe(0);
+    }
     expect(errors).toEqual([]);
     expect(scanResult.failed).toBe(0);
     expect(send).toHaveBeenCalledTimes(1);
     const bindings = await database.db.select().from(textReplyBindings);
-    if (mode === "current") {
+    if (mode === "current" || mode.startsWith("page_")) {
       expect(send.mock.calls[0]?.[0].body).toContain("Reply with the item number and answer");
       expect(bindings).toMatchObject([
         { workKind: "question", workId: created.question.reviewCaseId },

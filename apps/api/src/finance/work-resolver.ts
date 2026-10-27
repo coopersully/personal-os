@@ -8,12 +8,14 @@ import {
 } from "@personal-os/database";
 import {
   type FinanceHumanWorkRef,
+  financeBudgetEvaluationCheckpointSchema,
   financeHumanWorkRefSchema,
+  financePositionEvidenceCheckpointSchema,
   idSchema,
   maintenanceScopeSchema,
   type NotificationResolution,
 } from "@personal-os/domain";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "../errors.js";
 import type { FinanceTransaction } from "./context.js";
@@ -172,6 +174,58 @@ function attentionAction(code: string): string {
   return "inspect_finance_failure";
 }
 
+type AttentionRun = Pick<
+  typeof workspaceMaintenanceRuns.$inferSelect,
+  "id" | "userId" | "scope" | "lastSafeError" | "settledResult"
+>;
+function attentionBasis(run: AttentionRun) {
+  const settled = run.settledResult as {
+    code?: unknown;
+    position?: unknown;
+    budget?: unknown;
+  } | null;
+  // Only typed canonical subjects/consequences distinguish targets. Never hash prose,
+  // whole evidence revisions, confidence, provider payloads or an invented target ID.
+  const position = financePositionEvidenceCheckpointSchema.safeParse(settled?.position);
+  const budget = financeBudgetEvaluationCheckpointSchema.safeParse(settled?.budget);
+  const targets = {
+    position: position.success
+      ? { ...position.data.scope, accountIds: [...new Set(position.data.scope.accountIds)].sort() }
+      : null,
+    budget:
+      budget.success && budget.data.evaluations.length
+        ? budget.data.evaluations
+            .map((item) => ({
+              proposal: item.proposal.id,
+              policy: item.policy.id,
+              plan: item.plan.id,
+              outcome: item.outcome,
+              reasons: [
+                ...new Set(
+                  item.reasons.filter((reason) =>
+                    [
+                      "direction_not_permitted",
+                      "protected_release",
+                      "protection_floor",
+                      "per_change_cap",
+                      "monthly_cap",
+                      "unbalanced_plan",
+                      "amount_overflow",
+                    ].includes(reason),
+                  ),
+                ),
+              ].sort(),
+            }))
+            .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+        : null,
+  };
+  const code =
+    typeof settled?.code === "string"
+      ? settled.code
+      : (run.lastSafeError?.code ?? "finance_maintenance_attention");
+  return { recovery: attentionAction(code), targets };
+}
+
 /** Stable owner/scope slot, semantic action code, exact run correlation. Run IDs, wording,
  * timestamps, host rotation and internal progress never create a new required action. */
 export function financeRunAttentionWork(
@@ -179,6 +233,7 @@ export function financeRunAttentionWork(
     typeof workspaceMaintenanceRuns.$inferSelect,
     "id" | "userId" | "scope" | "lastSafeError" | "settledResult"
   >,
+  resolutionId: string | null = null,
 ): FinanceHumanWorkRef {
   const scope = maintenanceScopeSchema.parse(run.scope);
   const digest = createHash("sha256")
@@ -186,20 +241,81 @@ export function financeRunAttentionWork(
     .digest("hex");
   const variant = ((Number.parseInt(digest[16] ?? "0", 16) & 3) | 8).toString(16);
   const id = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-8${digest.slice(13, 16)}-${variant}${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
-  const settled = run.settledResult as { code?: unknown } | null;
-  const code =
-    typeof settled?.code === "string"
-      ? settled.code
-      : (run.lastSafeError?.code ?? "finance_maintenance_attention");
+  const basis = attentionBasis(run);
   return {
     domain: "finances",
     kind: "repair",
     id,
     revision: run.id,
     actionRevision: `sha256:${createHash("sha256")
-      .update(JSON.stringify(["finance-attention-action:v1", attentionAction(code)]))
+      .update(
+        JSON.stringify([
+          "finance-attention-action:v2",
+          basis.recovery,
+          resolutionId,
+          basis.targets,
+        ]),
+      )
       .digest("hex")}`,
   };
+}
+
+/** Derive the episode from retained authoritative run history, even if no scan observed the
+ * boundary. Completion of this exact scope resolves it; a different typed action/target starts
+ * a different episode. Queued/retry/question waits and manual supersession are not resolution.
+ * Read history in bounded pages without an arbitrary lookback cutoff. */
+export async function loadFinanceRunAttentionWork(
+  tx: FinanceTransaction,
+  run: typeof workspaceMaintenanceRuns.$inferSelect,
+): Promise<FinanceHumanWorkRef> {
+  const basis = attentionBasis(run);
+  let anchor = run;
+  let before = run;
+  const work = (boundary: string | null) =>
+    financeRunAttentionWork(
+      {
+        ...run,
+        lastSafeError: anchor.lastSafeError,
+        settledResult: anchor.settledResult,
+      },
+      boundary,
+    );
+  for (;;) {
+    const history = await tx
+      .select()
+      .from(workspaceMaintenanceRuns)
+      .where(
+        and(
+          eq(workspaceMaintenanceRuns.userId, run.userId),
+          eq(workspaceMaintenanceRuns.domain, "finances"),
+          inArray(workspaceMaintenanceRuns.status, ["completed", "blocked", "failed_terminal"]),
+          sql`${workspaceMaintenanceRuns.scope} = ${JSON.stringify(maintenanceScopeSchema.parse(run.scope))}::jsonb`,
+          sql`(${workspaceMaintenanceRuns.createdAt},${workspaceMaintenanceRuns.id}) < (${before.createdAt},${before.id}::uuid)`,
+        ),
+      )
+      .orderBy(desc(workspaceMaintenanceRuns.createdAt), desc(workspaceMaintenanceRuns.id))
+      .limit(50)
+      .for("share", { noWait: true });
+    for (const prior of history) {
+      const previous = attentionBasis(prior);
+      const targetChanged = (["position", "budget"] as const).some(
+        (key) =>
+          basis.targets[key] !== null &&
+          previous.targets[key] !== null &&
+          JSON.stringify(basis.targets[key]) !== JSON.stringify(previous.targets[key]),
+      );
+      if (prior.status === "completed" || previous.recovery !== basis.recovery || targetChanged)
+        return work(prior.id);
+      // Missing subject evidence is not proof that a target changed. Preserve the earliest
+      // compatible episode basis and carry known subjects across incomplete snapshots.
+      basis.targets.position ??= previous.targets.position;
+      basis.targets.budget ??= previous.targets.budget;
+      anchor = prior;
+    }
+    const last = history.at(-1);
+    if (history.length < 50 || !last) return work(null);
+    before = last;
+  }
 }
 
 /** Currentness remains run-bound even when delivery history spans later runs. */
@@ -221,7 +337,7 @@ async function resolveRunAttention(
     )
     .for("share", { noWait: true });
   if (!run) return { state: "unavailable" };
-  const expected = financeRunAttentionWork(run);
+  const expected = await loadFinanceRunAttentionWork(tx, run);
   if (work.id !== expected.id || work.actionRevision !== expected.actionRevision)
     return { state: "stale" };
   if (!["blocked", "failed_terminal"].includes(run.status)) return { state: "resolved" };
@@ -249,13 +365,74 @@ export async function resolveFinanceWorks(
   raw: FinanceHumanWorkRef[],
   tx: FinanceTransaction,
 ): Promise<NotificationResolution[]> {
-  const refs = batchSchema.parse(raw);
+  const requested = batchSchema.parse(raw);
+  const refs = [...requested];
   if (new Set(refs.map((r) => r.id.toLowerCase())).size !== refs.length)
     throw new AppError("invalid_request", "Each Finance work item may appear once.");
   try {
     // Serialize the run/question snapshot with the domain's canonical mutation gate.
     if (refs.some((ref) => ref.kind === "repair")) await lockFinanceExecutionOwner(tx, userId);
     await admitContextualOwner(tx, userId);
+    // The discovery cursor is not an authority boundary. Gather same-run question refs before
+    // ANY account/transaction/review/question locks, then use the normal exact resolvers under
+    // the same global parent order. Stale markers remain candidates, never proof of ownership.
+    const repairRuns = refs
+      .filter((ref) => ref.kind === "repair")
+      .map((ref) => ref.revision.toLowerCase())
+      .filter((id) => idSchema.safeParse(id).success);
+    if (repairRuns.length) {
+      const related = await tx
+        .select()
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.userId, userId),
+            eq(financeReviewCases.status, "open"),
+            inArray(sql<string>`${financeReviewCases.evidence}->>'maintenanceRunId'`, repairRuns),
+          ),
+        );
+      const contextual = related.length
+        ? await tx
+            .select()
+            .from(financeContextualQuestions)
+            .where(
+              and(
+                eq(financeContextualQuestions.userId, userId),
+                eq(financeContextualQuestions.state, "open"),
+                inArray(
+                  financeContextualQuestions.reviewCaseId,
+                  related.map((row) => row.id),
+                ),
+              ),
+            )
+        : [];
+      const candidates = [
+        ...related.flatMap((row) =>
+          row.humanAction.state === "open" ? [row.humanAction.request.work] : [],
+        ),
+        ...contextual.map((row) => ({
+          id: row.id,
+          domain: "finances",
+          kind: "question",
+          revision: row.workRevision.toString(),
+          actionRevision: row.actionRevision.toString(),
+        })),
+      ];
+      for (const candidate of candidates) {
+        const parsed = financeHumanWorkRefSchema.safeParse(candidate);
+        if (
+          parsed.success &&
+          parsed.data.kind === "question" &&
+          !refs.some(
+            (ref) =>
+              ref.id === parsed.data.id &&
+              ref.revision === parsed.data.revision &&
+              ref.actionRevision === parsed.data.actionRevision,
+          )
+        )
+          refs.push(parsed.data);
+      }
+    }
     const ids = refs.filter((r) => r.kind === "question").map((r) => r.id.toLowerCase());
     if (!ids.length && !refs.some((ref) => ref.kind === "approval" || ref.kind === "repair"))
       return refs.map(() => ({ state: "unavailable" }));
@@ -307,21 +484,22 @@ export async function resolveFinanceWorks(
         .from(financeReviewCases)
         .where(and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, id)))
         .for("share", { noWait: true });
-    const manualIds = new Set(manual.map((q) => q.id));
-    const manualRefs = refs.filter((r) => manualIds.has(r.id.toLowerCase()));
-    const manualResults = manualRefs.length
-      ? await resolveContextualWorks(userId, manualRefs, tx)
-      : [];
-    const resultMap = new Map(manualRefs.map((ref, i) => [ref.id.toLowerCase(), manualResults[i]]));
+    const manualLocked = await lockContextualQuestions(tx, userId, [
+      ...new Set(manual.map((q) => q.id)),
+    ]);
     const results: NotificationResolution[] = [];
     for (const ref of refs) {
+      const contextual = manualLocked.get(ref.id.toLowerCase());
       const result =
         ref.kind === "repair"
           ? await resolveRunAttention(tx, userId, ref)
           : ref.kind === "approval"
             ? await resolveSmsApproval(userId, ref, tx)
-            : (resultMap.get(ref.id.toLowerCase()) ??
-              (await resolveMaintenanceReviewQuestion(userId, ref, tx)));
+            : contextual
+              ? (await exactContextualAnswer(tx, userId, contextual.question, ref))
+                ? { state: "resolved" as const }
+                : contextualResolution(contextual, ref)
+              : await resolveMaintenanceReviewQuestion(userId, ref, tx);
       // The SMS answer port also returns a private prompt. Notification resolution is strict
       // and must expose only its own contract; keep the answer-port shape unchanged.
       results.push(result.state === "current" ? { state: "current", value: result.value } : result);
@@ -329,17 +507,20 @@ export async function resolveFinanceWorks(
     const currentQuestionRuns = new Set<string>();
     for (const [index, ref] of refs.entries()) {
       if (ref.kind !== "question" || results[index]?.state !== "current") continue;
-      const caseId = manual.find((q) => q.id === ref.id)?.reviewCaseId ?? ref.id;
+      const caseId =
+        manual.find((q) => q.id === ref.id.toLowerCase())?.reviewCaseId ?? ref.id.toLowerCase();
       const lineage = reviews.find((review) => review.id === caseId)?.evidence.maintenanceRunId;
       if (typeof lineage === "string") currentQuestionRuns.add(lineage);
     }
-    return results.map((result, index) =>
-      refs[index]?.kind === "repair" &&
-      result.state === "current" &&
-      currentQuestionRuns.has(refs[index]?.revision ?? "")
-        ? { state: "resolved" }
-        : result,
-    );
+    return results
+      .map((result, index) =>
+        refs[index]?.kind === "repair" &&
+        result.state === "current" &&
+        currentQuestionRuns.has(refs[index]?.revision.toLowerCase() ?? "")
+          ? { state: "resolved" as const }
+          : result,
+      )
+      .slice(0, requested.length);
   } catch (error) {
     let cause: unknown = error;
     const seen = new Set<unknown>();

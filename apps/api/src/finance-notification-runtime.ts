@@ -2,9 +2,12 @@ import { type Database, financeReviewCases, workspaceMaintenanceRuns } from "@pe
 import { type FinanceHumanWorkRef, idSchema } from "@personal-os/domain";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { contextualTransaction } from "./finance/contextual-question-store.js";
-import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
+import {
+  guardFinanceExecutionTransaction,
+  lockFinanceExecutionOwner,
+} from "./finance/execution-owner-guard.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
-import { financeRunAttentionWork, resolveFinanceWorks } from "./finance/work-resolver.js";
+import { loadFinanceRunAttentionWork, resolveFinanceWorks } from "./finance/work-resolver.js";
 import {
   FinanceClaimReconciliationError,
   FinanceReconciliationError,
@@ -140,39 +143,44 @@ export function createFinanceNotificationDispatcher(options: {
                 ),
               )
           : [];
-        const candidates: FinanceHumanWorkRef[] = group.map((row) => {
-          const run = row.kind === "repair" ? runs.find((run) => run.id === row.revision) : null;
-          return run
-            ? financeRunAttentionWork(run)
-            : {
-                id: row.id,
-                domain: "finances",
-                kind: row.kind,
-                revision: row.revision,
-                actionRevision: row.actionRevision,
-              };
+        const current = await contextualTransaction(options.db, undefined, async (tx) => {
+          await lockFinanceExecutionOwner(tx, userId);
+          const candidates: FinanceHumanWorkRef[] = [];
+          for (const row of group) {
+            const run = row.kind === "repair" ? runs.find((run) => run.id === row.revision) : null;
+            candidates.push(
+              run
+                ? await loadFinanceRunAttentionWork(tx, run)
+                : {
+                    id: row.id,
+                    domain: "finances",
+                    kind: row.kind,
+                    revision: row.revision,
+                    actionRevision: row.actionRevision,
+                  },
+            );
+          }
+          // A source run and its existing stable intent can share a discovery page. Prefer the
+          // latest run reference, never publish duplicate work IDs or rewrite attempt membership.
+          const byId = new Map<string, FinanceHumanWorkRef>();
+          for (const candidate of candidates) {
+            const previous = byId.get(candidate.id);
+            const run = runs.find((run) => run.id === candidate.revision);
+            const priorRun = runs.find((run) => run.id === previous?.revision);
+            if (
+              !previous ||
+              (run &&
+                (!priorRun ||
+                  run.createdAt > priorRun.createdAt ||
+                  (run.createdAt.getTime() === priorRun.createdAt.getTime() &&
+                    run.id > priorRun.id)))
+            )
+              byId.set(candidate.id, candidate);
+          }
+          const refs = [...byId.values()];
+          const results = await resolveFinanceWorks(userId, refs, tx);
+          return refs.filter((_ref, i) => results[i]?.state === "current");
         });
-        // A source run and its existing stable intent can share a discovery page. Prefer the
-        // latest run reference, never publish duplicate work IDs or rewrite attempt membership.
-        const byId = new Map<string, FinanceHumanWorkRef>();
-        for (const candidate of candidates) {
-          const previous = byId.get(candidate.id);
-          const run = runs.find((run) => run.id === candidate.revision);
-          const priorRun = runs.find((run) => run.id === previous?.revision);
-          if (
-            !previous ||
-            (run &&
-              (!priorRun ||
-                run.createdAt > priorRun.createdAt ||
-                (run.createdAt.getTime() === priorRun.createdAt.getTime() && run.id > priorRun.id)))
-          )
-            byId.set(candidate.id, candidate);
-        }
-        const refs = [...byId.values()];
-        const results = await contextualTransaction(options.db, undefined, (tx) =>
-          resolveFinanceWorks(userId, refs, tx),
-        );
-        const current = refs.filter((_ref, i) => results[i]?.state === "current");
         if (current.length) await options.notifications.publish(principal, { work: current });
         if (options.enabled() && shouldContinue()) await options.notifications.drain(principal);
       } catch {

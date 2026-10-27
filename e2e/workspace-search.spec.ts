@@ -79,7 +79,7 @@ test("each workspace discovers records and Calendar settings without changing li
   await page.goto("/calendar");
   await page.getByRole("combobox", { name: "Search Calendar", exact: true }).click();
   await page.getByRole("combobox", { name: "Search Calendar", exact: true }).fill("weekends");
-  await page.getByRole("option", { name: "Show weekends Calendar settings Settings" }).click();
+  await page.getByRole("option", { name: /^Show weekends(?:\s|$)/ }).click();
   await expect(page).toHaveURL(/page=calendar.*field=calendar%3Ashow-weekends/);
   await expect(page.getByRole("switch", { name: "Show weekends" })).toBeFocused();
 });
@@ -266,7 +266,12 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
     const actionsBox = await pageActions.boundingBox();
     if (!searchBox || !titleBox || !actionsBox) throw new Error("Missing Tasks header row");
     expect(titleBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height);
-    expect(actionsBox.y).toBeCloseTo(titleBox.y, 0);
+    expect(titleBox.height).toBe(44);
+    const rowCenter = titleBox.y + titleBox.height / 2;
+    expect(actionsBox.y + actionsBox.height / 2).toBeCloseTo(rowCenter, 0);
+    expect(actionsBox.y).toBeGreaterThanOrEqual(titleBox.y);
+    expect(actionsBox.y + actionsBox.height).toBeLessThanOrEqual(titleBox.y + titleBox.height + 1);
+    expect(actionsBox.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width - 1);
     await expect(header.getByRole("button", { name: "View options", exact: true })).toHaveCount(0);
     for (const name of ["Filters", "Sort", "Display"]) {
       const control = pageActions.getByRole("button", {
@@ -276,8 +281,10 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
       await expect(control).toBeVisible();
       const box = await control.boundingBox();
       if (!box) throw new Error(`Missing Tasks ${name} control`);
+      expect(box.y + box.height / 2).toBeCloseTo(rowCenter, 0);
       expect(box.y).toBeGreaterThanOrEqual(titleBox.y);
       expect(box.y + box.height).toBeLessThanOrEqual(titleBox.y + titleBox.height + 1);
+      expect(box.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width - 1);
       expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
     }
     if (isMobile) {
@@ -901,9 +908,21 @@ test("Finance consolidates contextual controls and preserves responsive creation
       header.getByRole("button", { name: "Add in Transactions", exact: true }),
     ).toHaveCount(0);
     if (path === "/finances/transactions") {
-      await expect(
-        header.getByRole("group", { name: "Transaction view", exact: true }),
-      ).toBeVisible();
+      const transactionViewGroup = header.getByRole("group", {
+        name: "Transaction view",
+        exact: true,
+      });
+      if (isMobile) await expect(transactionViewGroup).toHaveCount(0);
+      else await expect(transactionViewGroup).toBeVisible();
+      // Narrow headers place the same view selector inside the shared page controls.
+      const transactionView = header.getByRole("button", { name: /^Transaction view:/ });
+      await expect(transactionView).toBeVisible();
+      await expect(transactionView).toBeInViewport();
+      await transactionView.click();
+      await expect(page.getByRole("menuitemradio", { name: "Table", exact: true })).toBeVisible();
+      await expect(page.getByRole("menuitemradio", { name: "Cards", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(transactionView).toBeFocused();
       // Table exports share the record toolbar's overflow, not the workspace header.
       await expect(header.getByRole("button", { name: "Export", exact: true })).toHaveCount(0);
       const tableActions = page

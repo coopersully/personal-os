@@ -593,21 +593,73 @@ test("a person and an agent share one reminder and calendar surface", async ({
   };
   await expect(page.getByText("12 AM", { exact: true })).toBeVisible();
   const floatingPillColors = await page.locator(".calendar-floating-nav__pill").evaluate((pill) => {
-    const primarySwatch = document.createElement("span");
-    primarySwatch.style.backgroundColor = "var(--primary)";
-    primarySwatch.style.color = "var(--primary-foreground)";
-    document.body.append(primarySwatch);
-    const colors = {
-      background: getComputedStyle(pill).backgroundColor,
-      foreground: getComputedStyle(pill).color,
-      primaryBackground: getComputedStyle(primarySwatch).backgroundColor,
-      primaryForeground: getComputedStyle(primarySwatch).color,
+    const swatch = document.createElement("span");
+    swatch.style.backgroundColor = "var(--navigation-surface)";
+    swatch.style.color = "var(--workspace-calendar-accent)";
+    pill.append(swatch);
+    const style = getComputedStyle(pill);
+    const material = getComputedStyle(swatch);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not inspect navigation contrast");
+    const pixel = (background: string, foreground?: string) => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = background;
+      context.fillRect(0, 0, 1, 1);
+      if (foreground) {
+        context.fillStyle = foreground;
+        context.fillRect(0, 0, 1, 1);
+      }
+      return [...context.getImageData(0, 0, 1, 1).data];
     };
-    primarySwatch.remove();
+    const luminance = (rgb: number[]) =>
+      rgb.slice(0, 3).reduce((sum, channel, index) => {
+        const value = channel / 255;
+        return (
+          sum +
+          (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4) *
+            [0.2126, 0.7152, 0.0722][index]!
+        );
+      }, 0);
+    const background = pixel(
+      getComputedStyle(document.body).backgroundColor,
+      style.backgroundColor,
+    );
+    const foreground = pixel(style.color);
+    const light = Math.max(luminance(background), luminance(foreground));
+    const dark = Math.min(luminance(background), luminance(foreground));
+    const colors = {
+      background: style.backgroundColor,
+      foreground: style.color,
+      navigationBackground: material.backgroundColor,
+      workspaceForeground: material.color,
+      alpha: pixel(style.backgroundColor)[3]! / 255,
+      backdropFilter: style.backdropFilter,
+      borderWidth: style.borderWidth,
+      contrast: (light + 0.05) / (dark + 0.05),
+    };
+    swatch.remove();
     return colors;
   });
-  expect(floatingPillColors.background).toBe(floatingPillColors.primaryBackground);
-  expect(floatingPillColors.foreground).toBe(floatingPillColors.primaryForeground);
+  expect(floatingPillColors.background).toBe(floatingPillColors.navigationBackground);
+  expect(floatingPillColors.foreground).toBe(floatingPillColors.workspaceForeground);
+  expect(floatingPillColors.alpha).toBeCloseTo(0.84, 2);
+  expect(floatingPillColors.backdropFilter).toBe("blur(20px)");
+  expect(floatingPillColors.borderWidth).toBe("0px");
+  expect(floatingPillColors.contrast).toBeGreaterThanOrEqual(3);
+  const calendarActions = page.getByRole("navigation", { name: "Calendar actions" });
+  await expect(calendarActions.getByRole("button")).toHaveCount(2);
+  await expect(
+    calendarActions.getByRole("button", { name: "Choose date", exact: true }),
+  ).toBeVisible();
+  await expect(
+    calendarActions.getByRole("button", { name: "Create event", exact: true }),
+  ).toBeVisible();
+  await expect(
+    calendarActions.getByRole("button", { name: "Search calendar", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Search Calendar", exact: true })).toBeVisible();
   for (const action of await page
     .getByRole("navigation", { name: "Calendar actions" })
     .getByRole("button")

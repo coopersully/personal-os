@@ -2340,7 +2340,6 @@ describe("ilo web app", () => {
     await browser.click(
       within(screen.getByRole("navigation", { name: "Workspace sections" })).getByRole("link", {
         name: "account",
-        exact: true,
       }),
     );
     expect(screen.queryByRole("button", { name: "test account" })).not.toBeInTheDocument();
@@ -3206,7 +3205,7 @@ describe("ilo web app", () => {
     expect(
       within(within(taskHeader).getByRole("navigation", { name: "Page breadcrumbs" })).getByRole(
         "link",
-        { name: "Tasks", exact: true },
+        { name: "Tasks" },
       ),
     ).toHaveAttribute("href", "/tasks");
     expect(within(taskHeader).getByRole("button", { name: "Tasks view: Inbox" })).toBeVisible();
@@ -3473,7 +3472,6 @@ describe("ilo web app", () => {
     await browser.click(
       within(screen.getByRole("navigation", { name: "Workspace sections" })).getByRole("link", {
         name: "account",
-        exact: true,
       }),
     );
     expect(screen.getByRole("link", { name: "Security & Access" })).toBeInTheDocument();
@@ -10774,7 +10772,6 @@ describe("ilo web app", () => {
     await browser.click(
       within(screen.getByRole("navigation", { name: "Workspace sections" })).getByRole("link", {
         name: "account",
-        exact: true,
       }),
     );
     fireEvent.click(screen.getByRole("link", { name: "Security & Access" }));

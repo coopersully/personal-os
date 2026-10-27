@@ -20,6 +20,7 @@ for (const width of [320, 390, 1100]) {
           response.url().endsWith(settingsPath) && response.request().method() === "PATCH",
       );
     let testFailed = false;
+    let testError: unknown;
     try {
       await page.goto("/tasks?sort=default&group=none");
       const bar = page.getByRole("navigation", { name: "Top navigation" });
@@ -149,32 +150,32 @@ for (const width of [320, 390, 1100]) {
       await expect(bar.getByRole("button", { name: /^Tasks view:/ })).toHaveCount(0);
     } catch (error) {
       testFailed = true;
-      throw error;
-    } finally {
-      try {
-        const latestResponse = await page.request.get(settingsPath);
-        expect(latestResponse.ok()).toBe(true);
-        const latest = (await latestResponse.json()) as WorkspaceSettings<"tasks">;
-        const restored = await page.request.patch(settingsPath, {
-          headers: { origin: new URL(page.url()).origin },
-          data: {
-            expectedRevision: latest.revision,
-            // PATCH cannot remove optional keys; restore their effective defaults if absent.
-            preferences: {
-              taskSort: original.preferences.taskSort ?? "default",
-              taskGroup: original.preferences.taskGroup ?? "none",
-              pinnedProjectIds: original.preferences.pinnedProjectIds ?? [],
-            },
-          },
-        });
-        expect(restored.ok()).toBe(true);
-      } catch (error) {
-        if (!testFailed) throw error;
-        test.info().annotations.push({
-          type: "preference cleanup failed",
-          description: String(error),
-        });
-      }
+      testError = error;
     }
+    try {
+      const latestResponse = await page.request.get(settingsPath);
+      expect(latestResponse.ok()).toBe(true);
+      const latest = (await latestResponse.json()) as WorkspaceSettings<"tasks">;
+      const restored = await page.request.patch(settingsPath, {
+        headers: { origin: new URL(page.url()).origin },
+        data: {
+          expectedRevision: latest.revision,
+          // PATCH cannot remove optional keys; restore their effective defaults if absent.
+          preferences: {
+            taskSort: original.preferences.taskSort ?? "default",
+            taskGroup: original.preferences.taskGroup ?? "none",
+            pinnedProjectIds: original.preferences.pinnedProjectIds ?? [],
+          },
+        },
+      });
+      expect(restored.ok()).toBe(true);
+    } catch (error) {
+      if (!testFailed) throw error;
+      test.info().annotations.push({
+        type: "preference cleanup failed",
+        description: String(error),
+      });
+    }
+    if (testFailed) throw testError;
   });
 }

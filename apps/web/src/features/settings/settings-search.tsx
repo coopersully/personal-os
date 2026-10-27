@@ -106,13 +106,9 @@ export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
         .sort((a, b) => b.score - a.score || a.field.label.localeCompare(b.field.label))
     : [];
   return (
-    <Popover
-      open={open}
-      onOpenChange={(value) => {
-        setOpen(value);
-        if (!value) setQuery("");
-      }}
-    >
+    // Popup dismissal can be a temporary focus interruption (for example, a ritual).
+    // Only choosing a destination below clears the person's search draft.
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
         <div className="workspace-finder settings-search">
           <InputGroup className="workspace-finder-input w-full rounded-full">

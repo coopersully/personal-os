@@ -1240,7 +1240,8 @@ Creation controls stay bottom-right at every viewport, including Transactions.
 
 Mobile app tabs and shared floating action pills use the same
 `--navigation-surface`: the theme's card tone at 84% opacity with a 20px backdrop
-blur and the normal semantic foreground. This explicitly approved navigation
+blur, with action icons in the owning workspace accent and supporting text using the
+normal semantic foreground. This explicitly approved navigation
 exception applies to `.floating-actions`,
 `.workspace-dock.workspace-app-tabs`, and the decorative
 `.workspace-app-bar-backdrop` sibling; ordinary cards and expanded editors retain

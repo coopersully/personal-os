@@ -408,6 +408,14 @@ function addBaseAccount(
   });
 }
 
+/** Keep the demo's final agenda item available through the end of its local day. */
+export function qaEveningAgendaStart(now: Date, timezone: string): Date {
+  const today = localDateAt(now, timezone);
+  const evening = localDateTimeToUtc(today, 21 * 60, timezone).getTime();
+  const latest = localDateTimeToUtc(today, 23 * 60 + 30, timezone).getTime();
+  return new Date(Math.min(Math.max(evening, now.getTime() + 15 * 60_000), latest));
+}
+
 function addLoadedWorkspace(
   data: FixtureData,
   account: QaFixtureAccount,
@@ -806,7 +814,7 @@ function addLoadedWorkspace(
   );
   if (account.key === "demo-full") {
     // Keep a useful evening and next-week agenda when fixtures are loaded after work.
-    const eveningStart = Math.max(at(today, 21 * 60).getTime(), now.getTime() + 15 * 60_000);
+    const eveningStart = qaEveningAgendaStart(now, timezone).getTime();
     data.calendarEvents.push({
       id: fixtureId(account, 2100),
       userId: account.id,

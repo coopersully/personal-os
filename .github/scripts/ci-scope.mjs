@@ -1,5 +1,15 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readdirSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+} from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -121,6 +131,80 @@ export function classifyGitChanges(base, head, options = {}) {
     return options.forceFull ? fullScope() : { ...emptyScope(), prose_only: true, repo: true };
   } catch {
     return fullScope();
+  }
+}
+
+export function classifyPushChanges(event, context, options = {}) {
+  const sha = (value) =>
+    typeof value === "string" && /^[a-f0-9]{40}$/u.test(value) && !/^0+$/u.test(value);
+  if (
+    options.forceFull ||
+    !event ||
+    typeof event !== "object" ||
+    Array.isArray(event) ||
+    context?.eventName !== "push" ||
+    !/^[\w.-]+\/[\w.-]+$/u.test(context.repository ?? "") ||
+    event.repository?.full_name !== context.repository ||
+    !Number.isSafeInteger(event.repository?.id) ||
+    event.repository.id <= 0 ||
+    String(event.repository.id) !== context.repositoryId ||
+    typeof context.ref !== "string" ||
+    !/^refs\/heads\/.+$/u.test(context.ref) ||
+    event.ref !== context.ref ||
+    event.created !== false ||
+    event.deleted !== false ||
+    event.forced !== false ||
+    !sha(event.before) ||
+    !sha(event.after) ||
+    event.after !== context.sha ||
+    event.head_commit?.id !== event.after
+  )
+    return fullScope();
+  try {
+    const root = options.root ?? repositoryRoot;
+    if (realpathSync(root) !== realpathSync(context.workspace)) return fullScope();
+    const checkedOut = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 15000,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (checkedOut !== event.after) return fullScope();
+    return classifyGitChanges(event.before, event.after, options);
+  } catch {
+    return fullScope();
+  }
+}
+
+function classifyGitHubPush(options) {
+  let descriptor;
+  try {
+    // The GitHub-generated payload is data, never shell input. Bound even a
+    // special or oversized local file before parsing; uncertain input stays full.
+    descriptor = openSync(process.env.GITHUB_EVENT_PATH, constants.O_RDONLY | constants.O_NONBLOCK);
+    const file = fstatSync(descriptor);
+    const limit = 1024 * 1024;
+    if (!file.isFile() || file.size > limit) return fullScope();
+    const bytes = Buffer.alloc(limit + 1);
+    const length = readSync(descriptor, bytes, 0, bytes.length, 0);
+    if (length > limit || length !== file.size) return fullScope();
+    return classifyPushChanges(
+      JSON.parse(bytes.subarray(0, length).toString("utf8")),
+      {
+        eventName: process.env.GITHUB_EVENT_NAME,
+        repository: process.env.GITHUB_REPOSITORY,
+        repositoryId: process.env.GITHUB_REPOSITORY_ID,
+        ref: process.env.GITHUB_REF,
+        sha: process.env.GITHUB_SHA,
+        workspace: process.env.GITHUB_WORKSPACE,
+      },
+      options,
+    );
+  } catch {
+    // JSON errors can contain commit-message/payload excerpts. Do not log them.
+    return fullScope();
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
   }
 }
 
@@ -300,6 +384,10 @@ function parseArguments(args) {
       options.json = true;
       continue;
     }
+    if (argument === "--github-push") {
+      options.githubPush = true;
+      continue;
+    }
     if (["--files", "--github-output", "--base", "--head"].includes(argument)) {
       const value = args[index + 1];
       if (value === undefined) throw new Error(`${argument} requires a value.`);
@@ -309,7 +397,16 @@ function parseArguments(args) {
     }
     throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!(options.base !== undefined && options.head !== undefined) && !options.files)
+  if (
+    options.githubPush &&
+    [options.base, options.head, options.files].some((value) => value !== undefined)
+  )
+    throw new Error("--github-push cannot be combined with caller-supplied revisions or files.");
+  if (
+    !options.githubPush &&
+    !(options.base !== undefined && options.head !== undefined) &&
+    !options.files
+  )
     throw new Error("--base and --head, or --files, are required.");
   return options;
 }
@@ -319,13 +416,15 @@ function runCli() {
   let scope;
   try {
     options = parseArguments(process.argv.slice(2));
-    scope =
-      options.base !== undefined && options.head !== undefined
+    const forceFull = process.env.CI_FULL === "true";
+    scope = options.githubPush
+      ? classifyGitHubPush({ forceFull })
+      : options.base !== undefined && options.head !== undefined
         ? classifyGitChanges(options.base, options.head, {
-            forceFull: process.env.CI_FULL === "true",
+            forceFull,
           })
         : classifyChanges(readFileSync(options.files, "utf8").split(/\r?\n/u).filter(Boolean), {
-            forceFull: process.env.CI_FULL === "true",
+            forceFull,
           });
   } catch (error) {
     scope = fullScope();

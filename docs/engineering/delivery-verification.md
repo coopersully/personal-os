@@ -29,6 +29,24 @@ changes select full scope. Plain path lists are iteration advice and cannot auth
 CI uses this same classifier; its strict aggregate requires every declared dependency and actual
 success for every selected job. Only unselected jobs may skip. `ci:full` still forces all jobs.
 
+On supported branch pushes, CI uses `--github-push` to read the GitHub-generated event file and
+bind its repository name/ID, branch ref and immutable after SHA to the GitHub runtime context,
+workspace and actual checked-out HEAD. The event's before SHA must be an available ancestor.
+It classifies that entire before-to-after range; it never
+substitutes `HEAD~1`, a merge base or a payload filename list. Missing, zero, malformed, mismatched
+or unavailable identity/history, new/deleted branches, forced updates and unsupported events stay
+full scope. The existing PR base/head path and strict selected-job inventory are unchanged.
+
+The push boundary uses existing GitHub Actions context and local Git only, with no new network
+request or credential. Payload input is a descriptor-verified regular file, read nonblocking and
+bounded to 1 MiB; uncertain, oversized or malformed payloads select full scope without logging
+payload excerpts. The checked-out HEAD lookup is bounded to 15 seconds within the existing
+five-minute classification job. Caller-supplied local JSON/context is not authentication: actual
+hosted event provenance, resulting scope and selected success remain rollout evidence. Push runs
+still skip PR-only source receipt steps and have no PR metadata requirement; downstream release
+controllers retain their existing policies. Narrow push classification alone claims no deployment
+or measured time/billing savings.
+
 For `prose_only: true`, Repository contracts (including classifier/evaluator regressions and
 repository prose contracts), Classify changes and Source verification must succeed in the same
 current-head/base source workflow run/attempt. Preserve separate metadata, security, review,

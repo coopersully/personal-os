@@ -192,6 +192,19 @@ class CheckpointTest(unittest.TestCase):
         validate_recovery_history(result["recoveryHistory"])
         self.assertEqual(result["recoveryHistory"][:-1], prior)
 
+    def test_typed_history_rejects_retained_integer_flags_equal_to_request_booleans(self):
+        _, payload, _ = self.typed_recovery_fixture()
+        result = self.typed_recovery(payload)
+        from checkpoint import validate_recovery_history
+        for index, numeric_flag in [(0, 1), (-1, 0)]:
+            with self.subTest(index=index, numeric_flag=numeric_flag):
+                history = copy.deepcopy(result["recoveryHistory"])
+                original_request = copy.deepcopy(history[0]["request"])
+                history[0]["retainedEvidence"][index]["provenance"]["historicalProofAvailable"] = numeric_flag
+                with self.assertRaises(ValueError):
+                    validate_recovery_history(history)
+                self.assertEqual(history[0]["request"], original_request)
+
     def test_typed_history_rejects_changed_or_promoted_provenance_and_naive_times(self):
         _, payload, _ = self.typed_recovery_fixture()
         result = self.typed_recovery(payload)

@@ -241,7 +241,8 @@ def validate_recovery_history(history):
                     raise ValueError("Recovery history retained bytes exceed their bound")
                 raw = base64.b64decode(item["bytes"], validate=True)
                 path, digest = item["path"], item["sha256"]
-                if new_policy and ((provenance and item.get("provenance") != provenance.get(path))
+                if new_policy and ((provenance and canonical_digest(item.get("provenance"))
+                                    != canonical_digest(provenance.get(path)))
                                    or (not provenance and "provenance" in item)):
                     raise ValueError("Recovery history provenance is inconsistent")
                 if (item.get("encoding") != "base64" or not isinstance(path, str) or path in actual

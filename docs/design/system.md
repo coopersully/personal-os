@@ -1227,7 +1227,7 @@ keep the page title start-aligned and its controls end-aligned in that lower row
 Compact linked ancestor breadcrumbs sit above the page title within the existing
 44px lower header row. Show workspace and applicable section/parent destinations;
 the title identifies the current page without repeating it in the breadcrumb. Settings
-uses the same search-above-title arrangement. Breadcrumbs never increase bar height.
+uses the same search-above-title arrangement. Breadcrumbs use the tertiary content tone and normal weight, with clearer hover/focus feedback, so they remain subordinate to the title. Breadcrumbs never increase bar height.
 Spatial calendar axes and mail message actions retain their domain context below
 the shared header. Today may retain its compact single-row orientation.
 

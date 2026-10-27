@@ -8879,6 +8879,8 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
   gap: 0;
 }
 .workspace-page-breadcrumbs [data-slot="breadcrumb-list"] {
+  color: var(--content-tertiary);
+  font-weight: 400;
   flex-wrap: nowrap;
   gap: .25rem;
   font-size: .6875rem;

@@ -284,3 +284,58 @@ it("supports daytime quiet windows, any-time mode, elapsed reminders, and local 
     }),
   ).toBe("eligible");
 });
+
+describe("run attention delivery policy", () => {
+  const repair = { ...work, work: { ...work.work, kind: "repair" as const } };
+  const evaluate = (
+    attempts: Parameters<typeof notificationEligibility>[0]["attempts"],
+    at = now,
+  ) => notificationEligibility({ work: repair, preferences, timeZone: "UTC", now: at, attempts });
+  it("never reminds unchanged accepted attention or blindly retries uncertainty", () => {
+    expect(
+      evaluate(
+        [{ actionRevision: "action-1", state: "accepted", submittedAt: now }],
+        new Date(now.getTime() + 30 * 86400000),
+      ),
+    ).toBe("attention_delivered");
+    expect(evaluate([{ actionRevision: "older", state: "uncertain", submittedAt: now }])).toBe(
+      "delivery_uncertain",
+    );
+  });
+  it("bounds known failed sends to three attempts with one and five minute delays", () => {
+    const failure = { actionRevision: "action-1", state: "failed" as const, submittedAt: now };
+    expect(evaluate([failure])).toBe("retry_wait");
+    expect(evaluate([failure], new Date(now.getTime() + 60_000))).toBe("eligible");
+    expect(evaluate([failure, failure], new Date(now.getTime() + 60_000))).toBe("retry_wait");
+    expect(evaluate([failure, failure], new Date(now.getTime() + 300_000))).toBe("eligible");
+    expect(evaluate([failure, failure, failure], new Date(now.getTime() + 86400000))).toBe(
+      "retry_exhausted",
+    );
+  });
+  it("retains quiet hours, opt-out and resolved fences during retry", () => {
+    const failure = {
+      actionRevision: "action-1",
+      state: "failed" as const,
+      submittedAt: new Date(now.getTime() - 300_000),
+    };
+    expect(evaluate([failure], new Date("2026-03-09T02:00:00Z"))).toBe("quiet_hours");
+    expect(
+      notificationEligibility({
+        work: repair,
+        preferences: { ...preferences, enabled: false },
+        timeZone: "UTC",
+        now,
+        attempts: [failure],
+      }),
+    ).toBe("disabled");
+    expect(
+      notificationEligibility({
+        work: { ...repair, active: false },
+        preferences,
+        timeZone: "UTC",
+        now,
+        attempts: [failure],
+      }),
+    ).toBe("resolved");
+  });
+});

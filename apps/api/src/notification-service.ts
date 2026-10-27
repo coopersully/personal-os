@@ -95,6 +95,7 @@ export function createNotificationService(options: Options) {
     const effective = notificationPreferencesSchema.parse(override ?? global);
     // The global disclosure ceiling cannot be widened by a workspace override.
     if (global.detail === "minimal") effective.detail = "minimal";
+    if (!global.enabled) effective.enabled = false;
     return { rows, effective };
   }
   async function savePreferences(
@@ -386,7 +387,7 @@ export function createNotificationService(options: Options) {
             ),
           )
           .orderBy(desc(notificationDeliveryAttempts.submittedAt))
-          .limit(1);
+          .limit(3);
     return rows.flatMap(({ attempt, item }) =>
       attempt.submittedAt && attempt.state !== "claimed" && attempt.state !== "suppressed"
         ? [

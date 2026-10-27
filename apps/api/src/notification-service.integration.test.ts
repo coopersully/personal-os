@@ -3,6 +3,11 @@ import type { TwilioConnector } from "@personal-os/connectors";
 import {
   createDatabaseClient,
   type DatabaseClient,
+  financeAccounts,
+  financeContextualQuestions,
+  financeMaintenanceCandidates,
+  financeReviewCases,
+  financeTransactions,
   migrateDatabase,
   notificationAttemptItems,
   notificationDeliveryAttempts,
@@ -12,6 +17,7 @@ import {
   textMessages,
   textReplyBindings,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import {
   defaultNotificationPreferences,
@@ -20,6 +26,9 @@ import {
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
+import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
+import { resolveFinanceWorks } from "./finance/work-resolver.js";
+import { createFinanceNotificationDispatcher } from "./finance-notification-runtime.js";
 import { createNotificationService } from "./notification-service.js";
 import type { NotificationWorkResolver } from "./notification-work-resolver.js";
 import { encryptJson } from "./security.js";
@@ -128,6 +137,247 @@ describe.sequential("durable notifications", () => {
     });
     service = makeService();
   });
+  it.each([
+    "blocked",
+    "failed_terminal",
+    "completed",
+    "completed_with_questions",
+    "awaiting_approval",
+    "queued",
+  ] as const)("discovers only actionable run attention, once across scans and restart: %s", async (status) => {
+    const [run] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: owner,
+        domain: "finances",
+        scope: { type: "all_outstanding" },
+        status,
+        rulebookVersion: "test",
+        createdAt: current,
+        updatedAt: current,
+      })
+      .returning();
+    if (!run) throw new Error("run");
+    service = makeService(resolveFinanceWorks);
+    const dispatch = () =>
+      createFinanceNotificationDispatcher({
+        db: database.db,
+        enabled: () => true,
+        notifications: service,
+      });
+    const scan = dispatch();
+    await scan();
+    await scan();
+    await dispatch()();
+    const actionable = status === "blocked" || status === "failed_terminal";
+    expect(send).toHaveBeenCalledTimes(actionable ? 1 : 0);
+    const state = await service.status(principal);
+    expect(state.intents).toHaveLength(actionable ? 1 : 0);
+    if (actionable) {
+      expect(state.intents[0]?.work).toMatchObject({
+        id: run.id,
+        kind: "repair",
+        revision: "1",
+        actionRevision: "1",
+      });
+      current = new Date(current.getTime() + 8 * 86400000);
+      await scan();
+      expect(send).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  async function attentionFixture() {
+    const [run] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: owner,
+        domain: "finances",
+        scope: { type: "all_outstanding" },
+        status: "blocked",
+        rulebookVersion: "test",
+        createdAt: current,
+        updatedAt: current,
+      })
+      .returning();
+    if (!run) throw new Error("run");
+    service = makeService(resolveFinanceWorks);
+    const work: FinanceHumanWorkRef = {
+      id: run.id,
+      domain: "finances",
+      kind: "repair",
+      revision: "1",
+      actionRevision: "1",
+    };
+    await service.publish(principal, { work: [work] });
+    return { run, work };
+  }
+  it("revalidates resolved attention before submission and cannot resolve another owner's run", async () => {
+    const { run, work } = await attentionFixture();
+    const resolution = await database.db.transaction((tx) =>
+      resolveFinanceWorks(other, [work], tx),
+    );
+    expect(resolution).toEqual([{ state: "unavailable" }]);
+    const claim = await claimed();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "completed" })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    await service.deliver(principal, claim);
+    expect(send).not.toHaveBeenCalled();
+    expect((await service.status(principal)).attempts[0]?.reason).toBe("resolved");
+  });
+  it("suppresses historical failure attention once a newer run exists", async () => {
+    const { work } = await attentionFixture();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      userId: owner,
+      domain: "finances",
+      scope: { type: "all_outstanding" },
+      status: "completed",
+      rulebookVersion: "test",
+      createdAt: new Date(current.getTime() + 1000),
+    });
+    await service.drain(principal);
+    expect(send).not.toHaveBeenCalled();
+    expect(
+      (await service.status(principal)).intents.find((item) => item.work.id === work.id)?.state,
+    ).toBe("resolved");
+  });
+  it("preserves the exact question route without a second generic run notification", async () => {
+    const { run } = await attentionFixture();
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({ userId: owner, provider: "manual", institution: "Manual", name: "Cash" })
+      .returning();
+    if (!account) throw new Error("account");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: owner,
+        accountId: account.id,
+        amount: 1200,
+        merchant: "Lunch",
+        direction: "expense",
+        transactionDate: "2026-03-08",
+      })
+      .returning();
+    if (!transaction) throw new Error("transaction");
+    const created = await createFinanceContextualQuestionService({
+      db: database.db,
+      now,
+    }).createQuestion(
+      transaction.id,
+      { operationId: crypto.randomUUID() },
+      {
+        principal: { ...principal, scopes: new Set([...principal.scopes, "finances:write"]) },
+        requestId: "attention-question",
+      },
+    );
+    if (created.state !== "available") throw new Error("question");
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({ userId: owner, runId: run.id, revision: "attention-test", state: "challenged" })
+      .returning();
+    if (!candidate) throw new Error("candidate");
+    await database.db
+      .delete(financeContextualQuestions)
+      .where(eq(financeContextualQuestions.id, created.question.id));
+    await database.db
+      .update(financeReviewCases)
+      .set({
+        evidence: {
+          maintenanceRunId: run.id,
+          candidateId: candidate.id,
+          candidateRevision: candidate.revision,
+          prompt: "What did this transaction represent?",
+        },
+      })
+      .where(eq(financeReviewCases.id, created.question.reviewCaseId));
+    const errors: unknown[] = [];
+    const scan = createFinanceNotificationDispatcher({
+      db: database.db,
+      notifications: {
+        publish: async (...args) => {
+          try {
+            return await service.publish(...args);
+          } catch (error) {
+            errors.push(error);
+            throw error;
+          }
+        },
+        drain: (...args) => service.drain(...args),
+      },
+      enabled: () => true,
+    });
+    const scanResult = await scan();
+    expect(errors).toEqual([]);
+    expect(scanResult.failed).toBe(0);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0].body).toContain("Reply with the item number and answer");
+    expect(send.mock.calls[0]?.[0].body).not.toContain("maintenance needs attention");
+    const bindings = await database.db.select().from(textReplyBindings);
+    expect(bindings).toMatchObject([
+      { workKind: "question", workId: created.question.reviewCaseId },
+    ]);
+  });
+  it("bounds known provider rejections while retaining every correlated attempt", async () => {
+    const { work } = await attentionFixture();
+    send.mockRejectedValue({ status: 400, code: 21614, message: "private provider details" });
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(1);
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(1);
+    current = new Date(current.getTime() + 60_000);
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(2);
+    current = new Date(current.getTime() + 299_999);
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(2);
+    current = new Date(current.getTime() + 1);
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(3);
+    current = new Date(current.getTime() + 86400000);
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(3);
+    const state = await service.status(principal);
+    expect(state.intents[0]).toMatchObject({ work, reason: "retry_exhausted" });
+    expect(state.attempts).toHaveLength(3);
+    expect(state.attempts.every((attempt) => attempt.state === "failed" && attempt.messageId)).toBe(
+      true,
+    );
+    expect(JSON.stringify(state)).not.toContain("private provider details");
+  });
+  it("does not retry uncertain attention across rediscovery or restart", async () => {
+    await attentionFixture();
+    send.mockRejectedValueOnce(new Error("unknown provider acceptance"));
+    await service.drain(principal);
+    current = new Date(current.getTime() + 8 * 86400000);
+    const restart = createFinanceNotificationDispatcher({
+      db: database.db,
+      notifications: makeService(resolveFinanceWorks),
+      enabled: () => true,
+    });
+    await restart();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((await service.status(principal)).attempts[0]).toMatchObject({
+      state: "uncertain",
+      recovery: "reconcile_delivery",
+    });
+  });
+  it("honors global opt-out even when a Finance override is enabled", async () => {
+    await attentionFixture();
+    await service.savePreferences(principal, "global", {
+      expectedRevision: null,
+      preferences: { ...defaultNotificationPreferences, enabled: false },
+    });
+    await service.savePreferences(principal, "finances", {
+      expectedRevision: null,
+      preferences: defaultNotificationPreferences,
+    });
+    await service.drain(principal);
+    expect(send).not.toHaveBeenCalled();
+    expect((await service.status(principal)).effective.enabled).toBe(false);
+  });
+
   async function putWork(work: FinanceHumanWorkRef, extra: Partial<NotificationWork> = {}) {
     const value: NotificationWork = {
       work,

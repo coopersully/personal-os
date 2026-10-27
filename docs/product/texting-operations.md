@@ -591,3 +591,41 @@ New enrollment must submit the version of the consent shown by the client. The A
 missing or stale versions before persisting a challenge or contacting Twilio, so cached older
 clients must refresh and review the current text. Existing enrollment history and already-created
 challenges retain their original accepted version; completing a challenge does not upgrade it.
+
+
+## Finance attention and context-to-Chat source contract
+
+Admitted `Finance:` and `Finance context:` notes now append exactly one canonical user Finance
+Chat message in the same transaction as context capture. The immutable context revision retains
+the inbound claim and message identity; Chat history, source context and host batches project that
+SMS provenance. A failed Chat write rolls back capture, its receipt and completion together. Retry
+uses the original claim, and a late note belongs to the next eligible fixed-cutoff batch. Existing
+original-host grant and message-protocol checks still control consumption. Queue admission does
+not establish that Claude has read, processed or completed the request. Previously completed
+captures are not automatically backfilled by this change.
+
+Finance attention reuses notification intents with `repair` work keyed by the latest canonical run.
+Blocked and terminally failed runs can produce one minimal attention text. Healthy runs, automatic
+retry waits and question/approval waits do not produce generic attention. An open question for the
+same run keeps its existing question route rather than producing a second generic prompt. Each
+run has one stable action identity, independent of error wording and timestamp refreshes. Repeated
+scans or restarts do not remind after accepted delivery. The owning resolver rechecks current work
+under the Finance owner/run locks before transport handoff; a resolved or superseded run is quiet.
+
+Known rejected attention sends have at most three total attempts, with a one-minute wait after the
+first failure and five minutes after the second. Each retry rechecks consent, epoch, preferences,
+quiet hours and current work. Uncertain submissions are never automatically resent. Existing
+notification status exposes the run work ID, intent, attempt, outbound message and recovery state;
+this is separate from Finance Activity, which does not project every financial operation or SMS.
+An enabled Finance override cannot override global notification disablement.
+
+Attention texts direct the owner to authenticated Finance review and accept explicit `Finance:`
+context for Chat. They do not infer an approval, pairing or financial action from an unbound reply.
+Existing numbered question and exact approval bindings retain their admission and recovery paths.
+
+An ordinary completed routine produces no completion SMS. Durable monitoring of an explicitly
+requested budget/backlog outcome still requires a request-to-target persistence contract and parent
+schema coordination; it must verify the exact approved budget and resolved reconciliation scope,
+not a host's success label or an empty/partial Activity feed. This source change does not establish
+production activation, actual carrier delivery, original-Claude processing or requested-outcome
+completion. Those remain parent-owned acceptance checks.

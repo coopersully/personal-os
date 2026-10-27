@@ -3,13 +3,14 @@ import {
   financeContextualQuestions,
   financeReviewCases,
   financeTransactions,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import {
   type FinanceHumanWorkRef,
   financeHumanWorkRefSchema,
   type NotificationResolution,
 } from "@personal-os/domain";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "../errors.js";
 import type { FinanceTransaction } from "./context.js";
@@ -22,6 +23,7 @@ import {
   lockContextualQuestion,
   lockContextualQuestions,
 } from "./contextual-question-store.js";
+import { lockFinanceExecutionOwner } from "./execution-owner-guard.js";
 import { resolveMaintenanceReviewQuestion } from "./review-action-service.js";
 
 import { minimalSmsQuestionPrompt } from "./review-prompt.js";
@@ -137,6 +139,53 @@ export async function resolveSmsQuestion(
     : resolved;
 }
 
+/** A repair is attention for the latest canonical run, never a new financial command.
+ * One stable action per run prevents timestamp/error wording refreshes from creating SMS. */
+async function resolveRunAttention(
+  tx: FinanceTransaction,
+  userId: string,
+  work: FinanceHumanWorkRef,
+): Promise<NotificationResolution> {
+  const [run] = await tx
+    .select()
+    .from(workspaceMaintenanceRuns)
+    .where(
+      and(
+        eq(workspaceMaintenanceRuns.userId, userId),
+        eq(workspaceMaintenanceRuns.id, work.id),
+        eq(workspaceMaintenanceRuns.domain, "finances"),
+      ),
+    )
+    .for("share", { noWait: true });
+  if (!run) return { state: "unavailable" };
+  if (work.revision !== "1" || work.actionRevision !== "1") return { state: "stale" };
+  if (!["blocked", "failed_terminal"].includes(run.status)) return { state: "resolved" };
+  const newer = await tx.execute(sql`SELECT id FROM workspace_maintenance_runs
+    WHERE user_id=${userId}::uuid AND domain='finances'
+    AND (created_at,id)>(${run.createdAt},${run.id}::uuid) LIMIT 1`);
+  if (newer.rows.length) return { state: "resolved" };
+  // Questions already have their own exact reply route. Do not send a second generic question.
+  const questions = await tx.execute(sql`SELECT id FROM finance_review_cases r
+    WHERE r.user_id=${userId}::uuid AND r.status='open'
+    AND r.evidence->>'maintenanceRunId'=${run.id}
+    AND (r.human_action->>'state'='open' OR EXISTS (
+      SELECT 1 FROM finance_contextual_questions q WHERE q.user_id=r.user_id
+      AND q.review_case_id=r.id AND q.state='open')) LIMIT 1`);
+  if (questions.rows.length) return { state: "resolved" };
+  return {
+    state: "current",
+    value: {
+      work,
+      active: true,
+      expiresAt: null,
+      disclosure: "minimal",
+      context: null,
+      occurredAt: null,
+      destination: "/finances?review=open",
+    },
+  };
+}
+
 /** Global parent lock order for batches containing interactive and maintenance questions. */
 export async function resolveFinanceWorks(
   userId: string,
@@ -147,9 +196,11 @@ export async function resolveFinanceWorks(
   if (new Set(refs.map((r) => r.id.toLowerCase())).size !== refs.length)
     throw new AppError("invalid_request", "Each Finance work item may appear once.");
   try {
+    // Serialize the run/question snapshot with the domain's canonical mutation gate.
+    if (refs.some((ref) => ref.kind === "repair")) await lockFinanceExecutionOwner(tx, userId);
     await admitContextualOwner(tx, userId);
     const ids = refs.filter((r) => r.kind === "question").map((r) => r.id.toLowerCase());
-    if (!ids.length && !refs.some((ref) => ref.kind === "approval"))
+    if (!ids.length && !refs.some((ref) => ref.kind === "approval" || ref.kind === "repair"))
       return refs.map(() => ({ state: "unavailable" }));
     const manual = await tx
       .select()
@@ -206,13 +257,18 @@ export async function resolveFinanceWorks(
       : [];
     const resultMap = new Map(manualRefs.map((ref, i) => [ref.id.toLowerCase(), manualResults[i]]));
     const results: NotificationResolution[] = [];
-    for (const ref of refs)
-      results.push(
-        ref.kind === "approval"
-          ? await resolveSmsApproval(userId, ref, tx)
-          : (resultMap.get(ref.id.toLowerCase()) ??
-              (await resolveMaintenanceReviewQuestion(userId, ref, tx))),
-      );
+    for (const ref of refs) {
+      const result =
+        ref.kind === "repair"
+          ? await resolveRunAttention(tx, userId, ref)
+          : ref.kind === "approval"
+            ? await resolveSmsApproval(userId, ref, tx)
+            : (resultMap.get(ref.id.toLowerCase()) ??
+              (await resolveMaintenanceReviewQuestion(userId, ref, tx)));
+      // The SMS answer port also returns a private prompt. Notification resolution is strict
+      // and must expose only its own contract; keep the answer-port shape unchanged.
+      results.push(result.state === "current" ? { state: "current", value: result.value } : result);
+    }
     return results;
   } catch (error) {
     let cause: unknown = error;

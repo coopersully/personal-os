@@ -123,7 +123,15 @@ export function notificationEligibility(input: {
     (latest, a) => (!latest || a.submittedAt > latest ? a.submittedAt : latest),
     null,
   );
-  if (last) {
+  // Run attention is delivered once; known rejection gets at most two bounded retries.
+  // Uncertain acceptance above always wins, including across action revisions.
+  if (work.work.kind === "repair") {
+    if (sameAction.some((a) => a.state === "accepted")) return "attention_delivered";
+    const failures = sameAction.filter((a) => a.state === "failed");
+    if (failures.length >= 3) return "retry_exhausted";
+    if (last && now.getTime() - last.getTime() < (failures.length > 1 ? 300_000 : 60_000))
+      return "retry_wait";
+  } else if (last) {
     if (preferences.reminderDays === null) return "reminder_never";
     if (now.getTime() - last.getTime() < preferences.reminderDays * 86400000)
       return "reminder_wait";
@@ -185,6 +193,8 @@ export function composeNotification(input: {
     labels[0] !== "Finance item"
   )
     return `nohmi: 1. ${labels[0]} Reply 1 approve or 1 reject. Review: ${new URL(input.origin).origin}/finances?review=open`;
+  if (input.works.length > 0 && input.works.every((work) => work.work.kind === "repair"))
+    return `nohmi: Finance maintenance needs attention. Review progress: ${new URL(input.origin).origin}/finances?review=open. For context, reply Finance: followed by your note.`;
   const overflow = input.works.length > 3 ? `; ${input.works.length - 3} more` : "";
   const origin = new URL(input.origin).origin;
   return `nohmi: Review needed: ${labels.join("; ")}${overflow}. Review: ${origin}/finances?review=open`;

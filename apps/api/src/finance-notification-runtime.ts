@@ -55,16 +55,20 @@ export function createFinanceNotificationDispatcher(options: {
       id: string;
       revision: string;
       actionRevision: string;
-      kind: "question" | "approval";
+      kind: "question" | "approval" | "repair";
     }>(sql`
      WITH work AS (
        SELECT user_id,id,human_action->'request'->'work'->>'revision' AS revision,human_action->'request'->'work'->>'actionRevision' AS action_revision,'question'::text AS kind,0 AS source FROM finance_review_cases WHERE status='open' AND human_action->>'state'='open'
        UNION ALL
        SELECT user_id,id,work_revision::text AS revision,action_revision::text AS action_revision,'question'::text AS kind,1 AS source FROM finance_contextual_questions WHERE state='open'
        UNION ALL
-       SELECT user_id,work_id AS id,work->>'revision' AS revision,work->>'actionRevision' AS action_revision,work->>'kind' AS kind,2 AS source FROM notification_intents WHERE state='pending' AND work->>'kind' IN ('question','approval') AND work->>'revision' ~ '^[1-9][0-9]{0,18}$' AND work->>'actionRevision' ~ '^[1-9][0-9]{0,18}$'
+       SELECT user_id,work_id AS id,work->>'revision' AS revision,work->>'actionRevision' AS action_revision,work->>'kind' AS kind,2 AS source FROM notification_intents WHERE state IN ('pending','deferred','blocked') AND work->>'kind' IN ('question','approval','repair') AND work->>'revision' ~ '^[1-9][0-9]{0,18}$' AND work->>'actionRevision' ~ '^[1-9][0-9]{0,18}$'
        UNION ALL
        SELECT user_id,id,floor(extract(epoch FROM updated_at)*1000)::bigint::text AS revision,floor(extract(epoch FROM updated_at)*1000)::bigint::text AS action_revision,'approval'::text AS kind,0 AS source FROM finance_agent_action_reviews WHERE status='pending'
+       UNION ALL
+       SELECT user_id,id,'1' AS revision,'1' AS action_revision,'repair'::text AS kind,0 AS source FROM workspace_maintenance_runs r
+       WHERE domain='finances' AND status IN ('blocked','failed_terminal')
+       AND NOT EXISTS (SELECT 1 FROM workspace_maintenance_runs newer WHERE newer.user_id=r.user_id AND newer.domain=r.domain AND (newer.created_at,newer.id)>(r.created_at,r.id))
      ), exact AS (SELECT DISTINCT ON (user_id,id) * FROM work ORDER BY user_id,id,source)
      SELECT user_id::text AS "userId",id::text,revision::text,"action_revision"::text AS "actionRevision",kind FROM exact
      WHERE ${after ? sql`(user_id,id)>(${after.userId}::uuid,${after.id}::uuid)` : sql`true`}

@@ -5,6 +5,7 @@ import {
   automationHostSchedules,
   type Database,
   financeAccounts,
+  financeContextRevisions,
   financeContextualQuestions,
   financeConversationBatches,
   financeConversationBatchMessages,
@@ -69,6 +70,54 @@ function messageValue(
     createdAt: row.createdAt.toISOString(),
   };
 }
+/** Reuse immutable context provenance rather than copying inbound evidence to a new ledger. */
+async function messageValues(
+  db: Pick<Database, "select">,
+  rows: Array<typeof financeConversationMessages.$inferSelect>,
+): Promise<FinanceConversationMessage[]> {
+  const smsRows = rows.filter(
+    (row) =>
+      row.authorKind === "user" &&
+      row.sourceOperationId &&
+      row.idempotencyKey === `sms-context:${row.sourceOperationId}`,
+  );
+  const ownerId = smsRows[0]?.userId;
+  if (!ownerId) return rows.map(messageValue);
+  const sources = await db
+    .select()
+    .from(financeContextRevisions)
+    .where(
+      and(
+        eq(financeContextRevisions.userId, ownerId),
+        eq(financeContextRevisions.sourceKind, "sms"),
+        inArray(
+          financeContextRevisions.operationId,
+          smsRows.flatMap((row) => (row.sourceOperationId ? [row.sourceOperationId] : [])),
+        ),
+      ),
+    );
+  return rows.map((row) => {
+    const value = messageValue(row);
+    const source = sources.find(
+      (source) =>
+        source.userId === row.userId &&
+        source.operationId === row.sourceOperationId &&
+        source.text === row.text,
+    );
+    return source?.operationId
+      ? {
+          ...value,
+          smsProvenance: {
+            claimId: source.operationId,
+            inboundMessageId: source.requestId,
+            contextId: source.contextId,
+            contextRevision: source.revision.toString(),
+          },
+        }
+      : value;
+  });
+}
+
 async function lockOwner(tx: Transaction, userId: string) {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`finance-maintenance:${userId}`}, 0))`,
@@ -431,7 +480,7 @@ export function createFinanceConversationService({
         )
         .orderBy(asc(financeConversationMessages.sequence))
         .limit(limit + 1);
-      const messages = rows.slice(0, limit).map(messageValue);
+      const messages = await messageValues(db, rows.slice(0, limit));
       return {
         messages,
         nextCursor: rows.length > limit ? (messages.at(-1)?.sequence ?? null) : null,
@@ -476,7 +525,7 @@ export function createFinanceConversationService({
           .limit(10);
         return {
           targetMessageId: target.id,
-          messages: [...before.reverse(), target, ...after].map(messageValue),
+          messages: await messageValues(tx, [...before.reverse(), target, ...after]),
         };
       });
     },
@@ -564,7 +613,10 @@ export function createFinanceConversationService({
           )
           .orderBy(asc(financeConversationMessages.sequence))
           .limit(limit + 1);
-        const messages = rows.slice(0, limit).map(({ message }) => messageValue(message));
+        const messages = await messageValues(
+          tx,
+          rows.slice(0, limit).map(({ message }) => message),
+        );
         if (messages.length)
           await tx
             .update(financeConversationBatchMessages)

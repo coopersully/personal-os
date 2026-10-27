@@ -45,8 +45,12 @@ jobs:
         run: |
           set -euo pipefail
           scope_json="$RUNNER_TEMP/ci-scope.json"
+          scope_args=(--base "$BASE_SHA" --head "$HEAD_SHA")
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            scope_args=(--github-push)
+          fi
           node .github/scripts/ci-scope.mjs \
-            --base "$BASE_SHA" --head "$HEAD_SHA" \
+            "${scope_args[@]}" \
             --json --github-output "$GITHUB_OUTPUT" | tee "$scope_json"
           {
             echo "## CI scope"

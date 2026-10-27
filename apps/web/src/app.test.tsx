@@ -10481,12 +10481,22 @@ describe("ilo web app", () => {
     ]);
     const originalInvoke = mocks.invoke.getMockImplementation();
     let failed = true;
+    let rejectPreview: ((reason: unknown) => void) | undefined;
+    const previewFailure = new Promise<string>((_resolve, reject) => {
+      rejectPreview = reject;
+    });
     mocks.invoke.mockImplementation((command: string) => {
-      if (command === "preview_pinterest_wallpaper" && failed)
-        return Promise.reject("Could not decode a Pinterest image");
+      if (command === "preview_pinterest_wallpaper" && failed) return previewFailure;
       return originalInvoke?.(command);
     });
     setup("/settings?page=wallpaper");
+    // Separate fixture reads and the 250ms preview debounce from recovery's error transition.
+    await waitFor(
+      () =>
+        expect(mocks.invoke).toHaveBeenCalledWith("preview_pinterest_wallpaper", expect.anything()),
+      { timeout: 5_000 },
+    );
+    await act(async () => rejectPreview?.("Could not decode a Pinterest image"));
     await readRecovery();
     expect(errorToast).not.toHaveBeenCalled();
     const preview = screen.getByRole("region", { name: "Wallpaper preview", hidden: true });

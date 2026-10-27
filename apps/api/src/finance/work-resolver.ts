@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   financeAccounts,
   financeContextualQuestions,
@@ -8,6 +9,8 @@ import {
 import {
   type FinanceHumanWorkRef,
   financeHumanWorkRefSchema,
+  idSchema,
+  maintenanceScopeSchema,
   type NotificationResolution,
 } from "@personal-os/domain";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -139,39 +142,93 @@ export async function resolveSmsQuestion(
     : resolved;
 }
 
-/** A repair is attention for the latest canonical run, never a new financial command.
- * One stable action per run prevents timestamp/error wording refreshes from creating SMS. */
+/** Only a changed required owner action can reset delivery history. Evidence refresh,
+ * wording and unclassified internal failure codes deliberately share their recovery action. */
+function attentionAction(code: string): string {
+  if (code === "forbidden" || code === "finance_authorization_control_pending")
+    return "restore_finance_authority";
+  if (code === "not_found") return "restore_finance_target";
+  if (code === "invalid_request" || code === "finance_position_scope_unsupported")
+    return "review_finance_scope";
+  if (code === "finance_rulebook_changed") return "review_finance_rules";
+  if (code === "finance_source_not_current") return "restore_finance_source";
+  if (
+    [
+      "finance_budget_evaluation_missing",
+      "finance_budget_evaluation_unavailable",
+      "finance_budget_evaluation_changed",
+    ].includes(code)
+  )
+    return "review_budget_evidence";
+  if (
+    [
+      "finance_position_evidence_missing",
+      "finance_position_evidence_unavailable",
+      "finance_position_evidence_changed",
+      "finance_canonical_evidence_changed",
+    ].includes(code)
+  )
+    return "refresh_finance_evidence";
+  return "inspect_finance_failure";
+}
+
+/** Stable owner/scope slot, semantic action code, exact run correlation. Run IDs, wording,
+ * timestamps, host rotation and internal progress never create a new required action. */
+export function financeRunAttentionWork(
+  run: Pick<
+    typeof workspaceMaintenanceRuns.$inferSelect,
+    "id" | "userId" | "scope" | "lastSafeError" | "settledResult"
+  >,
+): FinanceHumanWorkRef {
+  const scope = maintenanceScopeSchema.parse(run.scope);
+  const digest = createHash("sha256")
+    .update(JSON.stringify(["finance-attention:v1", run.userId, scope]))
+    .digest("hex");
+  const variant = ((Number.parseInt(digest[16] ?? "0", 16) & 3) | 8).toString(16);
+  const id = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-8${digest.slice(13, 16)}-${variant}${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+  const settled = run.settledResult as { code?: unknown } | null;
+  const code =
+    typeof settled?.code === "string"
+      ? settled.code
+      : (run.lastSafeError?.code ?? "finance_maintenance_attention");
+  return {
+    domain: "finances",
+    kind: "repair",
+    id,
+    revision: run.id,
+    actionRevision: `sha256:${createHash("sha256")
+      .update(JSON.stringify(["finance-attention-action:v1", attentionAction(code)]))
+      .digest("hex")}`,
+  };
+}
+
+/** Currentness remains run-bound even when delivery history spans later runs. */
 async function resolveRunAttention(
   tx: FinanceTransaction,
   userId: string,
   work: FinanceHumanWorkRef,
 ): Promise<NotificationResolution> {
+  if (!idSchema.safeParse(work.revision).success) return { state: "stale" };
   const [run] = await tx
     .select()
     .from(workspaceMaintenanceRuns)
     .where(
       and(
         eq(workspaceMaintenanceRuns.userId, userId),
-        eq(workspaceMaintenanceRuns.id, work.id),
+        eq(workspaceMaintenanceRuns.id, work.revision),
         eq(workspaceMaintenanceRuns.domain, "finances"),
       ),
     )
     .for("share", { noWait: true });
   if (!run) return { state: "unavailable" };
-  if (work.revision !== "1" || work.actionRevision !== "1") return { state: "stale" };
+  const expected = financeRunAttentionWork(run);
+  if (work.id !== expected.id || work.actionRevision !== expected.actionRevision)
+    return { state: "stale" };
   if (!["blocked", "failed_terminal"].includes(run.status)) return { state: "resolved" };
   const newer = await tx.execute(sql`SELECT id FROM workspace_maintenance_runs
     WHERE user_id=${userId}::uuid AND domain='finances'
     AND (created_at,id)>(${run.createdAt},${run.id}::uuid) LIMIT 1`);
   if (newer.rows.length) return { state: "resolved" };
-  // Questions already have their own exact reply route. Do not send a second generic question.
-  const questions = await tx.execute(sql`SELECT id FROM finance_review_cases r
-    WHERE r.user_id=${userId}::uuid AND r.status='open'
-    AND r.evidence->>'maintenanceRunId'=${run.id}
-    AND (r.human_action->>'state'='open' OR EXISTS (
-      SELECT 1 FROM finance_contextual_questions q WHERE q.user_id=r.user_id
-      AND q.review_case_id=r.id AND q.state='open')) LIMIT 1`);
-  if (questions.rows.length) return { state: "resolved" };
   return {
     state: "current",
     value: {
@@ -269,7 +326,20 @@ export async function resolveFinanceWorks(
       // and must expose only its own contract; keep the answer-port shape unchanged.
       results.push(result.state === "current" ? { state: "current", value: result.value } : result);
     }
-    return results;
+    const currentQuestionRuns = new Set<string>();
+    for (const [index, ref] of refs.entries()) {
+      if (ref.kind !== "question" || results[index]?.state !== "current") continue;
+      const caseId = manual.find((q) => q.id === ref.id)?.reviewCaseId ?? ref.id;
+      const lineage = reviews.find((review) => review.id === caseId)?.evidence.maintenanceRunId;
+      if (typeof lineage === "string") currentQuestionRuns.add(lineage);
+    }
+    return results.map((result, index) =>
+      refs[index]?.kind === "repair" &&
+      result.state === "current" &&
+      currentQuestionRuns.has(refs[index]?.revision ?? "")
+        ? { state: "resolved" }
+        : result,
+    );
   } catch (error) {
     let cause: unknown = error;
     const seen = new Set<unknown>();

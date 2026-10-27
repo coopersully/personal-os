@@ -500,6 +500,23 @@ export function createNotificationService(options: Options) {
           );
       }
       if (!eligible.length) return { state: "pending", reason: "no_eligible_work" } as const;
+      // Preserve the delivery shapes that can create exact reply bindings. In particular,
+      // repairs must not turn a question or one-choice approval into a generic mixed alert.
+      const replyableQuestions = eligible.filter((intent) => {
+        const index = orderedIntents.findIndex((row) => row.id === intent.id);
+        const result = results[index];
+        return (
+          intent.work.kind === "question" &&
+          result?.state === "current" &&
+          result.value.questionPrompt
+        );
+      });
+      const approval = eligible.find((intent) => intent.work.kind === "approval");
+      const selected = replyableQuestions.length
+        ? replyableQuestions.slice(0, 3)
+        : approval
+          ? [approval]
+          : eligible.filter((intent) => intent.work.kind === eligible[0]?.work.kind);
       const claimId = crypto.randomUUID();
       const [attempt] = await tx
         .insert(notificationDeliveryAttempts)
@@ -514,7 +531,7 @@ export function createNotificationService(options: Options) {
         .returning();
       if (!attempt) throw new AppError("internal_error", "Could not claim notifications.");
       await tx.insert(notificationAttemptItems).values(
-        eligible.map((intent) => ({
+        selected.map((intent) => ({
           userId: user.id,
           attemptId: attempt.id,
           intentId: intent.id,
@@ -621,6 +638,22 @@ export function createNotificationService(options: Options) {
           await tx
             .update(notificationDeliveryAttempts)
             .set({ state: "suppressed", reason: "expired", updatedAt: now() })
+            .where(eq(notificationDeliveryAttempts.id, attempt.id));
+          return null;
+        }
+        // Claims committed by an older process retain immutable membership. Do not deliver
+        // an unsupported mixed shape after restart; suppress it and let the next claim partition.
+        const replyableCount = works.filter(
+          (work) => work.work.kind === "question" && work.questionPrompt,
+        ).length;
+        if (
+          new Set(works.map((work) => work.work.kind)).size > 1 ||
+          (works.some((work) => work.work.kind === "approval") && works.length > 1) ||
+          (replyableCount > 0 && (replyableCount !== works.length || works.length > 3))
+        ) {
+          await tx
+            .update(notificationDeliveryAttempts)
+            .set({ state: "suppressed", reason: "unsupported_delivery_shape", updatedAt: now() })
             .where(eq(notificationDeliveryAttempts.id, attempt.id));
           return null;
         }

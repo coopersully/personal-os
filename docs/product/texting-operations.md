@@ -604,19 +604,34 @@ original-host grant and message-protocol checks still control consumption. Queue
 not establish that Claude has read, processed or completed the request. Previously completed
 captures are not automatically backfilled by this change.
 
-Finance attention reuses notification intents with `repair` work keyed by the latest canonical run.
-Blocked and terminally failed runs can produce one minimal attention text. Healthy runs, automatic
-retry waits and question/approval waits do not produce generic attention. An open question for the
-same run keeps its existing question route rather than producing a second generic prompt. Each
-run has one stable action identity, independent of error wording and timestamp refreshes. Repeated
-scans or restarts do not remind after accepted delivery. The owning resolver rechecks current work
-under the Finance owner/run locks before transport handoff; a resolved or superseded run is quiet.
+Finance attention reuses one notification intent per canonical owner/scope repair identity across
+maintenance runs. The work revision identifies the exact current run; its immutable run row retains
+schedule/connection correlation. The semantic action revision identifies the required recovery
+(e.g. restore authority, restore a missing target, review scope/rules, restore a source, or review
+budget/position evidence). A new run UUID, wording, confidence, timestamp, host rotation, rulebook
+version or internal evidence refresh does not create a new action. Unknown/internal errors share
+the conservative inspect-failure action rather than inventing a new reason to text.
+
+Only the latest blocked or terminally failed run can produce current generic attention. Healthy
+runs, automatic retries and question/approval waits stay quiet. Generic attention is suppressed only
+when the same locked resolution pass proves a question for that run current; an open marker with
+stale transaction/candidate/run parents does not hide terminal failure. Notification claims partition
+replyable questions (up to three), one exact approval, and repair/generic work into separate delivery
+shapes. Omitted work stays pending for later passes. A repair cannot remove the numbered/choice
+bindings from an unrelated question or approval, and existing live reply namespaces remain intact.
+
+Repeated discovery or later runs of the same unresolved action do not send again after acceptance.
+A materially different recovery action may become eligible after revalidation, while any uncertain
+submission for the stable intent blocks resend even across action revisions. Claimed attempt
+membership retains its original exact run; superseded evidence suppresses unsent attempts rather
+than retargeting a queued message. No provider call occurs under domain locks.
 
 Known rejected attention sends have at most three total attempts, with a one-minute wait after the
 first failure and five minutes after the second. Each retry rechecks consent, epoch, preferences,
 quiet hours and current work. Uncertain submissions are never automatically resent. Existing
-notification status exposes the run work ID, intent, attempt, outbound message and recovery state;
-this is separate from Finance Activity, which does not project every financial operation or SMS.
+notification status exposes the stable action work ID, exact run revision, intent, attempt, outbound
+message and recovery state; this is separate from Finance Activity, which does not project every
+financial operation or SMS.
 An enabled Finance override cannot override global notification disablement.
 
 Attention texts direct the owner to authenticated Finance review and accept explicit `Finance:`

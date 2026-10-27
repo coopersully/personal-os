@@ -4,6 +4,8 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
+  financeAgentActionReviews,
+  financeCategories,
   financeContextualQuestions,
   financeMaintenanceCandidates,
   financeReviewCases,
@@ -27,7 +29,9 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
 import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
-import { resolveFinanceWorks } from "./finance/work-resolver.js";
+import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
+import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
+import { financeRunAttentionWork, resolveFinanceWorks } from "./finance/work-resolver.js";
 import { createFinanceNotificationDispatcher } from "./finance-notification-runtime.js";
 import { createNotificationService } from "./notification-service.js";
 import type { NotificationWorkResolver } from "./notification-work-resolver.js";
@@ -175,10 +179,7 @@ describe.sequential("durable notifications", () => {
     expect(state.intents).toHaveLength(actionable ? 1 : 0);
     if (actionable) {
       expect(state.intents[0]?.work).toMatchObject({
-        id: run.id,
-        kind: "repair",
-        revision: "1",
-        actionRevision: "1",
+        ...financeRunAttentionWork(run),
       });
       current = new Date(current.getTime() + 8 * 86400000);
       await scan();
@@ -201,16 +202,207 @@ describe.sequential("durable notifications", () => {
       .returning();
     if (!run) throw new Error("run");
     service = makeService(resolveFinanceWorks);
-    const work: FinanceHumanWorkRef = {
-      id: run.id,
-      domain: "finances",
-      kind: "repair",
-      revision: "1",
-      actionRevision: "1",
-    };
+    const work = financeRunAttentionWork(run);
     await service.publish(principal, { work: [work] });
     return { run, work };
   }
+  it.each([
+    ["question", false],
+    ["approval", false],
+    ["question", true],
+    ["approval", true],
+  ] as const)("preserves exact bindings for unrelated %s mixed with repair (legacy claim=%s)", async (kind, legacyClaim) => {
+    await attentionFixture();
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({ userId: owner, provider: "manual", institution: "Cash", name: "Cash" })
+      .returning();
+    if (!account) throw new Error("account");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: owner,
+        accountId: account.id,
+        amount: 1200,
+        merchant: "Lunch",
+        direction: "expense",
+        transactionDate: "2026-03-08",
+      })
+      .returning();
+    if (!transaction) throw new Error("transaction");
+    let interactive: FinanceHumanWorkRef;
+    if (kind === "question") {
+      const result = await createFinanceContextualQuestionService({
+        db: database.db,
+        now,
+      }).createQuestion(
+        transaction.id,
+        { operationId: crypto.randomUUID() },
+        {
+          principal: { ...principal, scopes: new Set([...principal.scopes, "finances:write"]) },
+          requestId: "unrelated-question",
+        },
+      );
+      if (result.state !== "available") throw new Error("question");
+      interactive = result.question.work;
+    } else {
+      const [category] = await database.db
+        .insert(financeCategories)
+        .values({ userId: owner, group: "Expenses", name: "Dining", slug: "dining" })
+        .returning();
+      if (!category) throw new Error("category");
+      const [review] = await database.db
+        .insert(financeAgentActionReviews)
+        .values({
+          userId: owner,
+          requestingAgentId: "test-agent",
+          actionKind: "categorization",
+          fingerprint: crypto.randomUUID(),
+          privatePayload: {
+            input: {
+              decisions: [
+                { transactionId: transaction.id, categoryId: category.id, learnMerchant: "never" },
+              ],
+            },
+          },
+          safeChanges: [
+            {
+              entityType: "finance_transaction",
+              entityId: transaction.id,
+              summary: "Categorize Lunch as Dining.",
+            },
+          ],
+          createdAt: current,
+          updatedAt: current,
+        })
+        .returning();
+      if (!review) throw new Error("review");
+      interactive = {
+        id: review.id,
+        domain: "finances",
+        kind: "approval",
+        revision: review.updatedAt.getTime().toString(),
+        actionRevision: review.updatedAt.getTime().toString(),
+      };
+    }
+    await service.publish(principal, { work: [interactive] });
+    let legacyId: string | null = null;
+    if (legacyClaim) {
+      const claim = await claimed();
+      legacyId = claim.id;
+      const repair = (await database.db.select().from(notificationIntents)).find(
+        (item) => item.work.kind === "repair",
+      );
+      if (!repair) throw new Error("repair");
+      // Reproduce the immutable mixed membership committed by a pre-partition process.
+      await database.db
+        .insert(notificationAttemptItems)
+        .values({ userId: owner, attemptId: claim.id, intentId: repair.id, work: repair.work });
+      await service.deliver(principal, claim);
+      expect(send).not.toHaveBeenCalled();
+      expect((await service.status(principal)).attempts[0]?.reason).toBe(
+        "unsupported_delivery_shape",
+      );
+    }
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0].body).toContain(
+      kind === "question" ? "Reply with the item number and answer" : "Reply 1 approve or 1 reject",
+    );
+    expect(await database.db.select().from(textReplyBindings)).toMatchObject([
+      {
+        workId: interactive.id,
+        workKind: kind,
+        itemNumber: 1,
+        state: "open",
+        answerMode: kind === "question" ? "free_text" : "choices",
+      },
+    ]);
+    expect(
+      (await database.db.select().from(notificationAttemptItems))
+        .filter((item) => item.attemptId !== legacyId)
+        .map((item) => item.work.id),
+    ).toEqual([interactive.id]);
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]?.[0].body).toContain("maintenance needs attention");
+    expect(await database.db.select().from(textReplyBindings)).toHaveLength(1);
+  });
+
+  it("deduplicates the same unresolved action across runs and admits a material action change", async () => {
+    const { run } = await attentionFixture();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        status: "failed_terminal",
+        lastSafeError: { code: "forbidden", message: "Old wording" },
+      })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const scan = () =>
+      createFinanceNotificationDispatcher({
+        db: database.db,
+        notifications: service,
+        enabled: () => true,
+      });
+    await scan()();
+    expect(send).toHaveBeenCalledTimes(1);
+    const first = (await service.status(principal)).intents.find(
+      (item) => item.work.kind === "repair",
+    );
+    for (const code of ["forbidden", "not_found"]) {
+      current = new Date(current.getTime() + 1000);
+      const [next] = await database.db
+        .insert(workspaceMaintenanceRuns)
+        .values({
+          userId: owner,
+          domain: "finances",
+          scope: run.scope,
+          status: "failed_terminal",
+          rulebookVersion: "test",
+          lastSafeError: { code, message: "New wording" },
+          createdAt: current,
+          updatedAt: current,
+        })
+        .returning();
+      if (!next) throw new Error("next");
+      await scan()();
+      const state = await service.status(principal);
+      expect(state.intents.filter((item) => item.work.kind === "repair")).toHaveLength(1);
+      expect(state.intents[0]?.work.id).toBe(first?.work.id);
+      expect(state.intents[0]?.work.revision).toBe(next.id);
+      expect(send).toHaveBeenCalledTimes(code === "forbidden" ? 1 : 2);
+    }
+  });
+
+  it("preserves uncertainty across new runs and material action revisions", async () => {
+    const { run } = await attentionFixture();
+    send.mockRejectedValueOnce(new Error("unknown handoff"));
+    await service.drain(principal);
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "failed_terminal" })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    for (const code of ["internal_error", "forbidden"]) {
+      current = new Date(current.getTime() + 1000);
+      await database.db.insert(workspaceMaintenanceRuns).values({
+        userId: owner,
+        domain: "finances",
+        scope: run.scope,
+        status: "failed_terminal",
+        rulebookVersion: "new-version",
+        lastSafeError: { code, message: "new message" },
+        createdAt: current,
+        updatedAt: current,
+      });
+      await createFinanceNotificationDispatcher({
+        db: database.db,
+        notifications: service,
+        enabled: () => true,
+      })();
+      expect(send).toHaveBeenCalledTimes(1);
+      expect((await service.status(principal)).intents).toHaveLength(1);
+    }
+  });
   it("revalidates resolved attention before submission and cannot resolve another owner's run", async () => {
     const { run, work } = await attentionFixture();
     const resolution = await database.db.transaction((tx) =>
@@ -242,7 +434,11 @@ describe.sequential("durable notifications", () => {
       (await service.status(principal)).intents.find((item) => item.work.id === work.id)?.state,
     ).toBe("resolved");
   });
-  it("preserves the exact question route without a second generic run notification", async () => {
+  it.each([
+    "current",
+    "terminal",
+    "orphan",
+  ] as const)("only a current actionable question suppresses repair: %s", async (mode) => {
     const { run } = await attentionFixture();
     const [account] = await database.db
       .insert(financeAccounts)
@@ -292,6 +488,20 @@ describe.sequential("durable notifications", () => {
         },
       })
       .where(eq(financeReviewCases.id, created.question.reviewCaseId));
+    await database.db.transaction(async (tx) => {
+      await guardFinanceExecutionTransaction(tx, owner, {});
+      await issueMaintenanceReviewQuestion(tx, owner, created.question.reviewCaseId);
+    });
+    if (mode === "terminal")
+      await database.db
+        .update(workspaceMaintenanceRuns)
+        .set({ status: "failed_terminal" })
+        .where(eq(workspaceMaintenanceRuns.id, run.id));
+    if (mode === "orphan")
+      await database.db
+        .update(financeMaintenanceCandidates)
+        .set({ state: "superseded" })
+        .where(eq(financeMaintenanceCandidates.id, candidate.id));
     const errors: unknown[] = [];
     const scan = createFinanceNotificationDispatcher({
       db: database.db,
@@ -312,12 +522,16 @@ describe.sequential("durable notifications", () => {
     expect(errors).toEqual([]);
     expect(scanResult.failed).toBe(0);
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[0].body).toContain("Reply with the item number and answer");
-    expect(send.mock.calls[0]?.[0].body).not.toContain("maintenance needs attention");
     const bindings = await database.db.select().from(textReplyBindings);
-    expect(bindings).toMatchObject([
-      { workKind: "question", workId: created.question.reviewCaseId },
-    ]);
+    if (mode === "current") {
+      expect(send.mock.calls[0]?.[0].body).toContain("Reply with the item number and answer");
+      expect(bindings).toMatchObject([
+        { workKind: "question", workId: created.question.reviewCaseId },
+      ]);
+    } else {
+      expect(send.mock.calls[0]?.[0].body).toContain("maintenance needs attention");
+      expect(bindings).toEqual([]);
+    }
   });
   it("bounds known provider rejections while retaining every correlated attempt", async () => {
     const { work } = await attentionFixture();

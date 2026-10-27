@@ -298,3 +298,43 @@ it.each([
   expect(view.container.querySelector("canvas")).toHaveAttribute("aria-hidden", "true");
   expect(frame).not.toHaveBeenCalled();
 });
+
+it("updates lighting without rebuilding the cloud field or resetting its animation lifecycle", async () => {
+  const { resolveRitualSky } = await import("./ritual-sky.js");
+  const sky = resolveRitualSky({ now: Date.parse("2026-10-27T12:00:00Z"), timeZone: "UTC" });
+  vi.stubGlobal("CanvasRenderingContext2D", class {});
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect = disconnect;
+    },
+  );
+  vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+    width: 200,
+    height: 100,
+  } as DOMRect);
+  const create = vi.fn((w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }));
+  const paint = vi.fn();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    createImageData: create,
+    putImageData: paint,
+    createPattern: () => ({}),
+    setTransform: vi.fn(),
+    fillRect: vi.fn(),
+    clearRect: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  const view = render(<RitualClouds kind="morning" appearance={sky} />);
+  view.rerender(
+    <RitualClouds
+      kind="morning"
+      appearance={{ ...sky, moonPhase: 0.25, cloud: [255, 211, 175] }}
+    />,
+  );
+  expect(create).toHaveBeenCalledOnce();
+  expect(disconnect).not.toHaveBeenCalled();
+  expect(paint).toHaveBeenCalledTimes(2);
+  view.unmount();
+  expect(disconnect).toHaveBeenCalledOnce();
+});

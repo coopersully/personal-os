@@ -862,6 +862,34 @@ flow even when its controls are flattened, because changing it signs the user ou
 
 ### Full-screen ritual backgrounds
 
+Routine skies interpret the current weather and local daylight in the same ordered-dither
+pixel style as the cloud canvas. Interpolate night, dawn, daylight, sunset and blue-hour
+palettes around the location's sunrise and sunset; a dithered sun or approximate lunar
+phase occupies open sky above the question card. Cloud cover changes density, wind
+changes drift, and rain/snow use quiet pixel precipitation. Fog and overcast mute the
+palette; storms never flash. The routine card retains its normal readable surface.
+Outside-card chrome follows the brightness of its part of the sky, including predawn.
+
+Use the existing saved weather location or an already-granted device location. Opening a
+routine or preview never prompts for location permission. Full previews show current
+conditions; changing the preview weekday changes steps, not a pretend forecast. Settings
+thumbnails remain local representative morning/evening scenes without network reads.
+
+Weather is supplementary: the routine appears immediately with an approximate local-time
+sky, then uses a valid observation no more than thirty minutes old. Missing location,
+partial solar data, stale/future observations, permission denial and offline reads preserve
+the routine and its escape actions. Polar day/night uses the provider's daylight flag when
+sunrise/sunset are absent. An unavailable weather read adds no modal or inline action copy.
+Refresh while visible at a bounded cadence; do not persist device coordinates or weather
+in ritual answers. Reduced motion freezes cloud/precipitation animation while retaining
+manual sky dragging. Lighting updates preserve the cloud field and drag momentum.
+
+
+Scheduled browser routines and full previews always fill the viewport on desktop and mobile;
+they do not use the shared centered modal or bottom drawer presentation. Keep focus trapped
+until a routine action returns to the underlying page, preserving its drafts. Previews retain
+their Close Preview action and Escape dismissal.
+
 The sky, glow and cloud canvas belong to the full viewport/window, independently of the
 width-constrained question card. Keep decorative layers outside the card's stacking context;
 thumbnail previews remain bounded to their own 16:9 scene. Native ritual surfaces fill the webview

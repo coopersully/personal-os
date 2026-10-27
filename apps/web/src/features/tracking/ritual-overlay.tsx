@@ -47,11 +47,11 @@ import {
   submitRitualResponse,
 } from "../desktop/ritual-bridge.js";
 import { RitualCardHeader } from "./ritual-card-header.js";
-import { RitualClouds } from "./ritual-clouds.js";
 import { RitualCompletionWeek } from "./ritual-completion-week.js";
 import { RitualEscapeSummary } from "./ritual-escape-summary.js";
 import { RitualPreviewChecklist } from "./ritual-preview.js";
 import { RitualSkipConfirmation } from "./ritual-skip-confirmation.js";
+import { RitualWeatherSky } from "./ritual-weather-sky.js";
 export function RitualOverlay() {
   const [state, setState] = useState<RitualState | null>(null);
   const [readyId, setReadyId] = useState<string | null>(null);
@@ -825,10 +825,11 @@ export function RitualChecklist({
   );
   return (
     <>
-      <div className="ritual-scene" aria-hidden="true">
-        <div className="ritual-glow" data-ritual-kind={occurrence.definition.kind} />
-        <RitualClouds kind={occurrence.definition.kind} />
-      </div>
+      <RitualWeatherSky
+        key={occurrence.id}
+        kind={occurrence.definition.kind}
+        timeZone={occurrence.timeZone}
+      />
       {presentation}
     </>
   );

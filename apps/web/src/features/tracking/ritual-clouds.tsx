@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { RitualSkyAppearance } from "./ritual-sky.js";
 
 // One timeline drives cloud motion, shape, and ordered dithering.
 const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
@@ -18,8 +19,20 @@ function noise(x: number, y: number) {
 }
 
 /** Cached fields keep interactive sky animation inexpensive. */
-export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
+export function RitualClouds({
+  kind,
+  appearance,
+}: {
+  kind: "morning" | "night";
+  appearance?: RitualSkyAppearance;
+}) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const latestAppearance = useRef(appearance);
+  const repaint = useRef<() => void>(() => {});
+  useEffect(() => {
+    latestAppearance.current = appearance;
+    repaint.current();
+  }, [appearance]);
   useEffect(() => {
     const element = canvas.current;
     if (!element || typeof CanvasRenderingContext2D === "undefined") return;
@@ -55,6 +68,7 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
     let buildTimer: ReturnType<typeof setTimeout> | undefined;
     const paint = () => {
       if (!image || !ready) return;
+      const appearance = latestAppearance.current;
       const elapsed = timeline;
       const evolution = Math.sin(elapsed / 56000) * 0.12;
       // Keep the ordered pattern stable, with a tiny, slow change at its edges.
@@ -67,11 +81,29 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
           const cloud = (field[pixel] ?? 0) + (variation[pixel] ?? 0) * evolution;
           const density = Math.max(
             0,
-            Math.min(0.94, kind === "night" ? (cloud - 0.43) * 2.8 : (cloud - 0.46) * 3.8),
+            Math.min(
+              0.94,
+              appearance
+                ? (cloud - (0.63 - appearance.cover * 0.38)) * 3.3
+                : kind === "night"
+                  ? (cloud - 0.43) * 2.8
+                  : (cloud - 0.46) * 3.8,
+            ),
           );
           const index = pixel * 4;
+          image.data[index] = appearance?.cloud[0] ?? (kind === "night" ? 170 : 255);
+          image.data[index + 1] = appearance?.cloud[1] ?? (kind === "night" ? 185 : 255);
+          image.data[index + 2] = appearance?.cloud[2] ?? (kind === "night" ? 210 : 255);
           image.data[index + 3] =
-            density > (thresholds[(y % 4) * 4 + (x % 4)] ?? 0) ? (kind === "night" ? 34 : 255) : 0;
+            density > (thresholds[(y % 4) * 4 + (x % 4)] ?? 0)
+              ? appearance
+                ? appearance.celestial === "moon"
+                  ? 115
+                  : 240
+                : kind === "night"
+                  ? 34
+                  : 255
+              : 0;
         }
       }
       textureContext.putImageData(image, 0, 0);
@@ -132,10 +164,6 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
           }
           const y = row;
           for (let x = 0; x < width; x++) {
-            const index = (y * width + x) * 4;
-            image.data[index] = kind === "night" ? 170 : 255;
-            image.data[index + 1] = kind === "night" ? 185 : 255;
-            image.data[index + 2] = kind === "night" ? 210 : 255;
             const nx = (x / width) * 5;
             const ny = (y / height) * 4;
             const periodic = (scale: number, vertical: number, offset = 0) => {
@@ -162,7 +190,7 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
       previousFrame = instant;
       if (!document.hidden && !motion?.matches) {
         if (!drag) {
-          timeline += dt * velocity;
+          timeline += dt * velocity * (latestAppearance.current?.wind ?? 1);
           velocity = 1 + (velocity - 1) * Math.exp(-dt / 850);
         }
         if (instant - lastPaint >= 120) {
@@ -231,6 +259,10 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
       previousFrame = performance.now();
       if (!motion?.matches) frame = requestAnimationFrame(tick);
     };
+    repaint.current = () => {
+      paint();
+      draw();
+    };
     resize();
     if (!motion?.matches) frame = requestAnimationFrame(tick);
     surface?.addEventListener("click", click, true);
@@ -243,6 +275,7 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
     const observer = new ResizeObserver(resize);
     observer.observe(element);
     return () => {
+      repaint.current = () => {};
       generation++;
       clearTimeout(buildTimer);
       cancelAnimationFrame(frame);

@@ -376,11 +376,22 @@ describe.sequential("durable notifications", () => {
     }
   });
 
-  it("opens a new same-code episode only after authoritative completion of the same scope", async () => {
+  it.each([
+    ["completed", 7],
+    ["completed_with_questions", 7],
+    ["completed_with_questions", null],
+  ] as const)("opens a new same-code episode after %s with reminders %s", async (terminalStatus, reminderDays) => {
     const { run } = await attentionFixture();
+    await service.savePreferences(principal, "global", {
+      expectedRevision: null,
+      preferences: { ...defaultNotificationPreferences, reminderDays },
+    });
     await database.db
       .update(workspaceMaintenanceRuns)
-      .set({ status: "failed_terminal" })
+      .set({
+        status: "failed_terminal",
+        lastSafeError: { code: "not_found", message: "Missing target" },
+      })
       .where(eq(workspaceMaintenanceRuns.id, run.id));
     const scan = createFinanceNotificationDispatcher({
       db: database.db,
@@ -405,20 +416,97 @@ describe.sequential("durable notifications", () => {
       domain: "finances",
       scope: run.scope,
       status: "failed_terminal",
+      lastSafeError: { code: "not_found", message: "Missing target" },
       rulebookVersion: "test",
       createdAt: current,
     });
     await scan();
     expect(send).toHaveBeenCalledTimes(1);
     current = new Date(current.getTime() + 1000);
-    await database.db.insert(workspaceMaintenanceRuns).values({
-      userId: owner,
-      domain: "finances",
-      scope: run.scope,
-      status: "completed",
-      rulebookVersion: "test",
-      createdAt: current,
-    });
+    const [settled] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: owner,
+        domain: "finances",
+        scope: run.scope,
+        status: terminalStatus,
+        rulebookVersion: "test",
+        createdAt: current,
+      })
+      .returning();
+    if (!settled) throw new Error("settled");
+    let questionWork: FinanceHumanWorkRef | null = null;
+    if (terminalStatus === "completed_with_questions") {
+      const [account] = await database.db
+        .insert(financeAccounts)
+        .values({
+          userId: owner,
+          provider: "manual",
+          institution: "Manual",
+          name: "Cash",
+        })
+        .returning();
+      if (!account) throw new Error("account");
+      const [transaction] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: owner,
+          accountId: account.id,
+          amount: 1200,
+          merchant: "Lunch",
+          direction: "expense",
+          transactionDate: "2026-03-08",
+        })
+        .returning();
+      if (!transaction) throw new Error("transaction");
+      const created = await createFinanceContextualQuestionService({
+        db: database.db,
+        now,
+      }).createQuestion(
+        transaction.id,
+        { operationId: crypto.randomUUID() },
+        {
+          principal: { ...principal, scopes: new Set([...principal.scopes, "finances:write"]) },
+          requestId: "settled-question-route",
+        },
+      );
+      if (created.state !== "available") throw new Error("question");
+      const [candidate] = await database.db
+        .insert(financeMaintenanceCandidates)
+        .values({
+          userId: owner,
+          runId: settled.id,
+          revision: "settled-test",
+          state: "challenged",
+        })
+        .returning();
+      if (!candidate) throw new Error("candidate");
+      await database.db
+        .delete(financeContextualQuestions)
+        .where(eq(financeContextualQuestions.id, created.question.id));
+      await database.db
+        .update(financeReviewCases)
+        .set({
+          evidence: {
+            maintenanceRunId: settled.id,
+            candidateId: candidate.id,
+            candidateRevision: candidate.revision,
+          },
+        })
+        .where(eq(financeReviewCases.id, created.question.reviewCaseId));
+      const issued = await database.db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, owner, {});
+        return issueMaintenanceReviewQuestion(tx, owner, created.question.reviewCaseId);
+      });
+      if (!issued) throw new Error("issued");
+      questionWork = issued.request.request.work;
+      await scan();
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send.mock.calls[1]?.[0].body).toContain("Reply with the item number and answer");
+      expect(await database.db.select().from(textReplyBindings)).toMatchObject([
+        { workId: questionWork.id, workKind: "question", state: "open" },
+      ]);
+    }
     current = new Date(current.getTime() + 1000);
     const [next] = await database.db
       .insert(workspaceMaintenanceRuns)
@@ -427,17 +515,28 @@ describe.sequential("durable notifications", () => {
         domain: "finances",
         scope: run.scope,
         status: "failed_terminal",
+        lastSafeError: { code: "not_found", message: "Missing target" },
         rulebookVersion: "test",
         createdAt: current,
       })
       .returning();
     await scan();
-    expect(send).toHaveBeenCalledTimes(2);
+    const expectedSends = questionWork ? 3 : 2;
+    expect(send).toHaveBeenCalledTimes(expectedSends);
+    expect(send.mock.calls[expectedSends - 1]?.[0].body).toContain("maintenance needs attention");
+    if (questionWork) {
+      const exactQuestion = questionWork;
+      expect(
+        await database.db.transaction((tx) => resolveFinanceWorks(owner, [exactQuestion], tx)),
+      ).toMatchObject([{ state: "current", value: { work: questionWork } }]);
+      expect(await database.db.select().from(textReplyBindings)).toHaveLength(1);
+    }
     const state = await service.status(principal);
-    expect(state.intents).toHaveLength(1);
-    expect(state.intents[0]?.work.id).toBe(first?.id);
-    expect(state.intents[0]?.work.actionRevision).not.toBe(first?.actionRevision);
-    expect(state.intents[0]?.work.revision).toBe(next?.id);
+    const repairs = state.intents.filter((item) => item.work.kind === "repair");
+    expect(repairs).toHaveLength(1);
+    expect(repairs[0]?.work.id).toBe(first?.id);
+    expect(repairs[0]?.work.actionRevision).not.toBe(first?.actionRevision);
+    expect(repairs[0]?.work.revision).toBe(next?.id);
     // History pagination cannot truncate the completed episode boundary or reset its identity.
     await database.db.insert(workspaceMaintenanceRuns).values(
       Array.from({ length: 51 }, (_, i) => ({
@@ -445,16 +544,18 @@ describe.sequential("durable notifications", () => {
         domain: "finances" as const,
         scope: run.scope,
         status: "failed_terminal" as const,
+        lastSafeError: { code: "not_found", message: "Missing target" },
         rulebookVersion: "test",
         createdAt: new Date(current.getTime() + (i + 1) * 1000),
       })),
     );
     current = new Date(current.getTime() + 52_000);
     await scan();
-    expect(send).toHaveBeenCalledTimes(2);
-    expect((await service.status(principal)).intents[0]?.work.actionRevision).toBe(
-      state.intents[0]?.work.actionRevision,
-    );
+    expect(send).toHaveBeenCalledTimes(expectedSends);
+    expect(
+      (await service.status(principal)).intents.find((item) => item.work.kind === "repair")?.work
+        .actionRevision,
+    ).toBe(repairs[0]?.work.actionRevision);
   });
 
   it("distinguishes material canonical targets within all-outstanding without hashing evidence churn", async () => {

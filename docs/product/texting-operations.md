@@ -633,8 +633,10 @@ the configured reminder interval. The default is seven days; `Never` disables re
 handoffs start the interval; known failed reminder handoffs retain the bounded retry policy.
 
 Episode identity is derived from retained authoritative run history in bounded pages, without a
-lookback cutoff. A completed run for the exact canonical scope closes the previous episode even
-if no notification scan observed the completion. A later same-code failure is eligible again.
+lookback cutoff. A `completed` or `completed_with_questions` run for the exact canonical scope
+closes the previous generic repair episode even if no scan observed that settlement. Remaining
+questions retain their exact routes; this does not mark them answered or send a completion text.
+A later same-code blocker is a new eligible episode, including when reminders are `Never`.
 Different-scope completions, retry waits, question waits and manual supersession do not prove
 resolution. A material typed action/target/consequence change starts a new episode, including a
 return to a previously seen target after a different target. The prior terminal boundary is part of

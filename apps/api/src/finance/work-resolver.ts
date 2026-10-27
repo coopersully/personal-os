@@ -288,7 +288,12 @@ export async function loadFinanceRunAttentionWork(
         and(
           eq(workspaceMaintenanceRuns.userId, run.userId),
           eq(workspaceMaintenanceRuns.domain, "finances"),
-          inArray(workspaceMaintenanceRuns.status, ["completed", "blocked", "failed_terminal"]),
+          inArray(workspaceMaintenanceRuns.status, [
+            "completed",
+            "completed_with_questions",
+            "blocked",
+            "failed_terminal",
+          ]),
           sql`${workspaceMaintenanceRuns.scope} = ${JSON.stringify(maintenanceScopeSchema.parse(run.scope))}::jsonb`,
           sql`(${workspaceMaintenanceRuns.createdAt},${workspaceMaintenanceRuns.id}) < (${before.createdAt},${before.id}::uuid)`,
         ),
@@ -304,7 +309,11 @@ export async function loadFinanceRunAttentionWork(
           previous.targets[key] !== null &&
           JSON.stringify(basis.targets[key]) !== JSON.stringify(previous.targets[key]),
       );
-      if (prior.status === "completed" || previous.recovery !== basis.recovery || targetChanged)
+      if (
+        ["completed", "completed_with_questions"].includes(prior.status) ||
+        previous.recovery !== basis.recovery ||
+        targetChanged
+      )
         return work(prior.id);
       // Missing subject evidence is not proof that a target changed. Preserve the earliest
       // compatible episode basis and carry known subjects across incomplete snapshots.

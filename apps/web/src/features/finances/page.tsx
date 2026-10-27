@@ -13,13 +13,14 @@ import type {
   FinanceWealthSummary,
 } from "@personal-os/domain";
 import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
-import { EmptyState, Spinner } from "@personal-os/ui";
+import { EmptyState } from "@personal-os/ui";
 import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { CurrencyInput } from "@/components/currency-input";
 import { type DataColumn, DataTable } from "@/components/data-table";
 import { SortTrigger } from "@/components/data-view-controls";
@@ -735,7 +736,8 @@ export function FinancesPage() {
     </ImportDialog>
   );
   if (importTaskOnly) {
-    if (workspace.isPending) return <p role="status">Loading manual import availability…</p>;
+    if (workspace.isPending)
+      return <ContentSkeleton label="Loading manual import availability…" rows={3} />;
     if (workspace.isError)
       return (
         <InlineError
@@ -1165,7 +1167,7 @@ export function FinancesPage() {
                 />
               ) : section === "review" && linkedReviewId !== undefined ? (
                 reviewQueue.isPending ? (
-                  <p role="status">Loading requested review…</p>
+                  <ContentSkeleton label="Loading requested review…" rows={3} />
                 ) : reviewQueue.error ? null : (
                   <EmptyState icon={<CircleCheckIcon />} title="Requested review unavailable">
                     This item may have been resolved or may not belong to this account.
@@ -2065,7 +2067,7 @@ function BudgetMetricCardContent({
   return (
     <span className="block">
       <span className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="text-xs font-medium lowercase tracking-wide text-muted-foreground">
           {label}
         </span>
         {aside ? <span className="shrink-0">{aside}</span> : null}
@@ -3015,12 +3017,7 @@ function FinanceTransactionsTable({
     [onSort, sort, categories, categoryReadState],
   );
 
-  if (isLoading)
-    return (
-      <div className="flex min-h-48 items-center justify-center">
-        <Spinner />
-      </div>
-    );
+  if (isLoading) return <ContentSkeleton label="Loading transactions" rows={5} />;
 
   if (transactions.length === 0)
     return (

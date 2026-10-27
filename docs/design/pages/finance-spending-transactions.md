@@ -25,3 +25,7 @@ The consumer branch carries exact producer domain/client dependencies from the f
 contract. It does not implement the endpoint or claim server or browser acceptance. Focused parser,
 page and bulk tests cover fail-closed recovery, pagination, totals, all-versus-none account scope
 and failed/successful exact reload. Integrated server and live browser verification remain required.
+
+Transaction header Filters is a borderless icon action with a count badge only
+when filters are active. On mobile, view, sort and display choices share View
+options so search and frequent actions retain distinct, nonoverlapping targets.

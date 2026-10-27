@@ -166,7 +166,7 @@ export function RecurringScheduleForm(props: RecurringScheduleFormProps) {
             payment.
           </DialogDescription>
         </DialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           <FeedbackForm
             feedback={correctionFeedback}
             fieldNames={{ amountCents: "amount", semimonthlyDays: "day1" }}
@@ -198,89 +198,91 @@ export function RecurringScheduleForm(props: RecurringScheduleFormProps) {
               save.mutate();
             }}
           >
-            <FieldSet disabled={save.isPending}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-accountId`}>Schedule account</FieldLabel>
-                  <NativeSelect
-                    id={`${id}-accountId`}
-                    name="accountId"
-                    required
-                    value={draft.accountId}
-                    onChange={(event) =>
-                      setDraft((value) => ({ ...value, accountId: event.target.value }))
-                    }
-                  >
-                    <NativeSelectOption value="">Choose account scope</NativeSelectOption>
-                    <NativeSelectOption value="none">No account established</NativeSelectOption>
-                    {accounts.map((account) => (
-                      <NativeSelectOption key={account.id} value={account.id}>
-                        {account.name} · {account.currencyCode ?? "Currency unknown"}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-cadence`}>Confirmed cadence</FieldLabel>
-                  <NativeSelect
-                    id={`${id}-cadence`}
-                    name="cadence"
-                    required
-                    value={draft.cadence}
-                    onChange={(event) =>
-                      setDraft((value) => ({ ...value, cadence: event.target.value }))
-                    }
-                  >
-                    <NativeSelectOption value="">Choose cadence</NativeSelectOption>
-                    {[
-                      "weekly",
-                      "biweekly",
-                      "semimonthly",
-                      "monthly",
-                      "quarterly",
-                      "yearly",
-                      "irregular",
-                    ].map((cadence) => (
-                      <NativeSelectOption key={cadence} value={cadence}>
-                        {cadence}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                {input("timezone", "Schedule timezone (IANA)")}
-                {input("anchorLocalDate", "Original anchor local date", "date")}
-                {input("effectiveFrom", "Effective from local date", "date")}
-                {draft.cadence === "semimonthly" ? (
-                  <>
-                    {input("day1", "First semimonthly day (1–31)", "number")}
-                    {input("day2", "Second semimonthly day (1–31)", "number")}
-                  </>
-                ) : null}
-                <Field>
-                  <FieldLabel htmlFor={`${id}-amountBasis`}>Amount basis</FieldLabel>
-                  <NativeSelect
-                    id={`${id}-amountBasis`}
-                    name="amountBasis"
-                    required
-                    value={draft.amountBasis}
-                    onChange={(event) =>
-                      setDraft((value) => ({ ...value, amountBasis: event.target.value }))
-                    }
-                  >
-                    <NativeSelectOption value="">Choose fixed or variable</NativeSelectOption>
-                    <NativeSelectOption value="fixed">Fixed</NativeSelectOption>
-                    <NativeSelectOption value="variable">Variable</NativeSelectOption>
-                  </NativeSelect>
-                </Field>
-                {input("amount", "Expected amount (blank if variable and unknown)")}
-                {input("currencyCode", "Schedule currency code")}
-              </FieldGroup>
-            </FieldSet>
-            <p className="text-sm text-muted-foreground">
-              Source revision {expectedSourceRevision}. A replacement retains previous history.
-              Existing matches may need full reversals before an earlier schedule boundary can
-              change.
-            </p>
+            <ResponsiveDialogBody>
+              <FieldSet disabled={save.isPending}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-accountId`}>Schedule account</FieldLabel>
+                    <NativeSelect
+                      id={`${id}-accountId`}
+                      name="accountId"
+                      required
+                      value={draft.accountId}
+                      onChange={(event) =>
+                        setDraft((value) => ({ ...value, accountId: event.target.value }))
+                      }
+                    >
+                      <NativeSelectOption value="">Choose account scope</NativeSelectOption>
+                      <NativeSelectOption value="none">No account established</NativeSelectOption>
+                      {accounts.map((account) => (
+                        <NativeSelectOption key={account.id} value={account.id}>
+                          {account.name} · {account.currencyCode ?? "Currency unknown"}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-cadence`}>Confirmed cadence</FieldLabel>
+                    <NativeSelect
+                      id={`${id}-cadence`}
+                      name="cadence"
+                      required
+                      value={draft.cadence}
+                      onChange={(event) =>
+                        setDraft((value) => ({ ...value, cadence: event.target.value }))
+                      }
+                    >
+                      <NativeSelectOption value="">Choose cadence</NativeSelectOption>
+                      {[
+                        "weekly",
+                        "biweekly",
+                        "semimonthly",
+                        "monthly",
+                        "quarterly",
+                        "yearly",
+                        "irregular",
+                      ].map((cadence) => (
+                        <NativeSelectOption key={cadence} value={cadence}>
+                          {cadence}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  {input("timezone", "Schedule timezone (IANA)")}
+                  {input("anchorLocalDate", "Original anchor local date", "date")}
+                  {input("effectiveFrom", "Effective from local date", "date")}
+                  {draft.cadence === "semimonthly" ? (
+                    <>
+                      {input("day1", "First semimonthly day (1–31)", "number")}
+                      {input("day2", "Second semimonthly day (1–31)", "number")}
+                    </>
+                  ) : null}
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-amountBasis`}>Amount basis</FieldLabel>
+                    <NativeSelect
+                      id={`${id}-amountBasis`}
+                      name="amountBasis"
+                      required
+                      value={draft.amountBasis}
+                      onChange={(event) =>
+                        setDraft((value) => ({ ...value, amountBasis: event.target.value }))
+                      }
+                    >
+                      <NativeSelectOption value="">Choose fixed or variable</NativeSelectOption>
+                      <NativeSelectOption value="fixed">Fixed</NativeSelectOption>
+                      <NativeSelectOption value="variable">Variable</NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                  {input("amount", "Expected amount (blank if variable and unknown)")}
+                  {input("currencyCode", "Schedule currency code")}
+                </FieldGroup>
+              </FieldSet>
+              <p className="text-sm text-muted-foreground">
+                Source revision {expectedSourceRevision}. A replacement retains previous history.
+                Existing matches may need full reversals before an earlier schedule boundary can
+                change.
+              </p>
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose} disabled={save.isPending}>
                 Cancel
@@ -290,7 +292,7 @@ export function RecurringScheduleForm(props: RecurringScheduleFormProps) {
               </Button>
             </DialogFooter>
           </FeedbackForm>
-        </ResponsiveDialogBody>
+        </div>
       </DialogContent>
     </Dialog>
   );

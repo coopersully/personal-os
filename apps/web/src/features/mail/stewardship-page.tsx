@@ -410,7 +410,7 @@ function MailStewardshipSkeleton({ embedded }: { embedded: boolean }) {
 function Metadata({ label: term, value }: { label: string; value: string }) {
   return (
     <dl>
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{term}</dt>
+      <dt className="text-xs font-medium lowercase tracking-wide text-muted-foreground">{term}</dt>
       <dd className="mt-1 text-sm">{value}</dd>
     </dl>
   );

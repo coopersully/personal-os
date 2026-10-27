@@ -8,6 +8,7 @@ import { type QueryClient, skipToken, useQuery, useQueryClient } from "@tanstack
 import { useCallback, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Button } from "@/components/ui/button";
 import { api } from "../../api.js";
 import {
@@ -399,7 +400,7 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
       {!readiness.isError && !accessDenied ? (
         <FinanceConversationHostSummary host={readiness.data?.host} />
       ) : null}
-      {initial.isPending ? <p>Loading conversation…</p> : null}
+      {initial.isPending ? <ContentSkeleton label="Loading conversation…" rows={3} /> : null}
       <Button
         variant="outline"
         className="min-h-11 justify-self-start"

@@ -8,6 +8,7 @@ import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { WorkspaceNavigationPage } from "@/components/workspace-navigation-page";
 import { getTaskListIcon } from "./task-list-icons";
 import {
   archiveScopeFromParams,
@@ -35,7 +36,22 @@ it("exposes collection views and explicitly pinned containers", () => {
     <MemoryRouter initialEntries={["/tasks?view=today"]}>
       <TooltipProvider>
         <SidebarProvider>
-          <TaskNavigation lists={lists} projects={projects} onNavigate={() => {}} />
+          <TaskNavigation
+            lists={lists}
+            projects={projects}
+            counts={{
+              inbox: 3,
+              today: 12,
+              upcoming: 0,
+              all: 24,
+              lists: 3,
+              projects: 1,
+              history: 4,
+              trash: 0,
+              archive: 2,
+            }}
+            onNavigate={() => {}}
+          />
         </SidebarProvider>
       </TooltipProvider>
     </MemoryRouter>,
@@ -54,6 +70,9 @@ it("exposes collection views and explicitly pinned containers", () => {
   const work = screen.getByRole("link", { name: "Work" });
   expect(work).toHaveAttribute("data-user-created", "true");
   expect(work.querySelector('[data-list-icon="star"]')).toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Inbox items: 3" })).toBeVisible();
+  expect(screen.getByRole("group", { name: "Today items: 12" })).toBeVisible();
+  expect(screen.getByRole("group", { name: "Upcoming items: 0" })).toBeVisible();
 });
 
 it("parses bounded destinations and preserves presentation filters", () => {
@@ -169,4 +188,59 @@ it("keeps creation in the primary flow instead of the pinned group", () => {
   expect(screen.getByText("Loading lists")).toBeVisible();
   expect(screen.queryByRole("button", { name: "New List" })).not.toBeInTheDocument();
   expect(screen.queryByText("My lists")).not.toBeInTheDocument();
+});
+
+it("reuses only the requested section in a mobile landing page", () => {
+  render(
+    <MemoryRouter initialEntries={["/tasks?navigation=history"]}>
+      <TooltipProvider>
+        <SidebarProvider>
+          <WorkspaceNavigationPage section="history">
+            <TaskNavigation
+              lists={[]}
+              projects={[]}
+              counts={{ history: 4, trash: 0 }}
+              onNavigate={() => {}}
+            />
+          </WorkspaceNavigationPage>
+        </SidebarProvider>
+      </TooltipProvider>
+    </MemoryRouter>,
+  );
+  expect(screen.getByRole("link", { name: "History" })).toHaveAttribute(
+    "href",
+    "/tasks?view=history",
+  );
+  expect(screen.getByRole("group", { name: "Trash items: 0" })).toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: "Task views" })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("navigation", { name: "Pinned lists and projects" }),
+  ).not.toBeInTheDocument();
+});
+
+it("omits direct app-bar shortcuts only inside the mobile category page", () => {
+  const { unmount } = render(
+    <MemoryRouter>
+      <TooltipProvider>
+        <SidebarProvider>
+          <WorkspaceNavigationPage section="views" shortcuts={["today"]}>
+            <TaskNavigation lists={[]} projects={[]} onNavigate={() => {}} />
+          </WorkspaceNavigationPage>
+        </SidebarProvider>
+      </TooltipProvider>
+    </MemoryRouter>,
+  );
+  expect(screen.queryByRole("link", { name: "Today" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Upcoming" })).toBeInTheDocument();
+  unmount();
+  render(
+    <MemoryRouter>
+      <TooltipProvider>
+        <SidebarProvider>
+          <TaskNavigation lists={[]} projects={[]} onNavigate={() => {}} />
+        </SidebarProvider>
+      </TooltipProvider>
+    </MemoryRouter>,
+  );
+  expect(screen.getByRole("link", { name: "Today" })).toBeInTheDocument();
 });

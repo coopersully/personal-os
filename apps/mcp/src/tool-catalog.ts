@@ -383,6 +383,7 @@ export const iloToolCatalog = {
 
   list_mailboxes: read("mail", ["mail:read"]),
   get_mail_setup_context: read("mail", ["mail:read"], "context"),
+  get_mail_navigation_counts: read("mail", ["mail:read"]),
   list_mail: read("mail", ["mail:read"]),
   read_mail: read("mail", ["mail:read"]),
   list_mail_rules: read("mail", ["mail:read"]),

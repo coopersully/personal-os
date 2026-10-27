@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { WorkspaceSkeleton } from "@/components/workspace-skeleton";
 import {
   financeRouteNeedsSetup,
   financeSetupTask,
@@ -25,10 +25,10 @@ export function FinanceWorkspaceAccess({ children }: { children: ReactNode }) {
   if (!state.snapshot) {
     // Repair routes remain usable when optional access evidence cannot load.
     if (!needsSetup) return children;
+    if (state.isPending) return <WorkspaceSkeleton kind="finances" />;
     return (
       <section aria-label="Finance setup" className="grid gap-4">
         <h2>Finance setup</h2>
-        {state.isPending ? <Skeleton className="h-8 w-48" /> : null}
         {state.isError ? (
           <Button
             onClick={async () => {

@@ -7,13 +7,13 @@ import {
   ritualIsAnswered,
 } from "@personal-os/domain";
 import { useEffect, useRef, useState } from "react";
-import { api } from "../../api.js";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "../../components/ui/dialog.js";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@/components/responsive-dialog";
+import { api } from "../../api.js";
 import { isDesktop } from "../desktop/bridge.js";
 import { showRitualPreview } from "../desktop/ritual-bridge.js";
 import { RitualChecklist } from "./ritual-overlay.js";
@@ -152,7 +152,7 @@ export function RitualPreview({ state, onClose }: { state: RitualState; onClose:
       <DialogContent
         onOpenAutoFocus={(event) => event.preventDefault()}
         showCloseButton={false}
-        className="ritual-browser-preview inset-0 left-0 top-0 h-dvh w-screen max-w-none translate-x-0 translate-y-0 rounded-none sm:max-w-none"
+        className="ritual-browser-preview sm:max-w-xl"
         data-ritual-kind={state.current?.definition.kind}
       >
         <DialogTitle className="sr-only">Ritual preview</DialogTitle>

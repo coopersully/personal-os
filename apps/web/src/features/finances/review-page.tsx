@@ -6,11 +6,12 @@ import {
   financeReviewResolutionSchema,
   idSchema,
 } from "@personal-os/domain";
-import { EmptyState, Spinner } from "@personal-os/ui";
+import { EmptyState } from "@personal-os/ui";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { CircleCheckIcon } from "@/components/icons";
 import {
   ResponsiveDialog as Dialog,
@@ -105,7 +106,9 @@ function TransactionEvidence({ id }: { id: string }) {
             {record?.merchant ?? "Open transaction"}
           </Link>
         </ItemTitle>
-        {transaction.isPending ? <Spinner label="Loading transaction evidence" /> : null}
+        {transaction.isPending ? (
+          <ContentSkeleton label="Loading transaction evidence" rows={3} />
+        ) : null}
         {transaction.error ? (
           <InlineError
             error={transaction.error}
@@ -192,7 +195,7 @@ function FinanceInboxReviewPage() {
           </Button>
         </>
       ) : null}
-      {inbox.isPending ? <Spinner label="Loading Finance Inbox" /> : null}
+      {inbox.isPending ? <ContentSkeleton label="Loading Finance Inbox" rows={3} /> : null}
       {result?.communication.requiredDisclosures.map((disclosure) => (
         <Alert key={disclosure.message}>
           <AlertDescription>{disclosure.message}</AlertDescription>
@@ -295,7 +298,9 @@ export function FinanceReviewHistory() {
   return (
     <section aria-label="Finance review history" className="grid gap-3">
       <h2 className="text-base font-medium">Review history</h2>
-      {history.isPending ? <Spinner label="Loading Finance review history" /> : null}
+      {history.isPending ? (
+        <ContentSkeleton label="Loading Finance review history" rows={3} />
+      ) : null}
       {history.error ? (
         <InlineError
           error={history.error}
@@ -345,7 +350,7 @@ export function FinanceReviewHistory() {
             </DialogDescription>
           </DialogHeader>
           <ResponsiveDialogBody>
-            {detail.isPending ? <Spinner label="Loading review evidence" /> : null}
+            {detail.isPending ? <ContentSkeleton label="Loading review evidence" rows={3} /> : null}
             {detail.error ? (
               <InlineError
                 error={detail.error}
@@ -830,7 +835,7 @@ function NearbyActivity({
         <p className="text-sm text-muted-foreground">
           Same account · {from} through {to}. Nearby activity does not establish a relationship.
         </p>
-        {nearby.isPending ? <Spinner label="Loading nearby activity" /> : null}
+        {nearby.isPending ? <ContentSkeleton label="Loading nearby activity" rows={3} /> : null}
         {nearby.error ? (
           <InlineError
             error={nearby.error}

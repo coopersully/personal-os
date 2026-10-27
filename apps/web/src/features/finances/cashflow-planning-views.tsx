@@ -178,7 +178,7 @@ export function CashflowPlanningControls({
         />
         <div className="flex flex-wrap items-center gap-2">
           <WorkspaceHeaderControls label="Cash flow range" placement="title">
-            <p className="ml-1 whitespace-nowrap text-xs font-normal text-muted-foreground sm:text-sm">
+            <p className="whitespace-nowrap font-normal text-muted-foreground">
               {/^\d{4}-\d{2}-\d{2}$/.test(from)
                 ? formatDateOnly(from, { month: "short", day: "numeric" })
                 : "Choose dates"}{" "}

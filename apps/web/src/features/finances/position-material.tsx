@@ -52,8 +52,10 @@ export function requireFinanceResult<T>(result: FinanceToolResult<T>): FinanceTo
 export function FinanceSourceState({
   label,
   query,
+  loading,
 }: {
   label: string;
+  loading?: ReactNode;
   query: {
     data?: unknown;
     isPending: boolean;
@@ -64,8 +66,8 @@ export function FinanceSourceState({
 }) {
   if (query.isPending)
     return (
-      <div aria-label={`Loading ${label}`} role="status">
-        <Skeleton className="h-12 w-full" />
+      <div aria-label={`Loading ${label}`} role="status" aria-busy="true">
+        {loading ?? <Skeleton className="h-12 w-full" />}
         <span className="sr-only">Loading {label}</span>
       </div>
     );

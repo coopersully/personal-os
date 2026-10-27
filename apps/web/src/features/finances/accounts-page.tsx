@@ -10,6 +10,7 @@ import { Link, useLocation } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { QueryFeedback } from "@/components/async-state";
 import { CurrencyInput } from "@/components/currency-input";
+import { FloatingActionRegion, FloatingActions } from "@/components/floating-actions";
 import { HistoryIcon } from "@/components/icons";
 import { MutationFeedback } from "@/components/mutation-feedback";
 import {
@@ -85,8 +86,12 @@ export function FinanceAccountsPage() {
   const [editing, setEditing] = useState<FinanceAccount | null>(null);
   return (
     <div className="flex flex-col gap-5">
+      <FloatingActionRegion align="end">
+        <FloatingActions aria-label="Account actions">
+          <FinanceCreateButton kind="account" />
+        </FloatingActions>
+      </FloatingActionRegion>
       <WorkspaceHeaderControls label="Account controls">
-        <FinanceCreateButton kind="account" />
         {canImport ? (
           <Button
             asChild
@@ -315,7 +320,7 @@ function AccountEditor({
             Correct how {account.name} contributes to your financial position.
           </DialogDescription>
         </DialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           <FeedbackForm
             feedback={save.feedback}
             className="flex flex-col gap-5"
@@ -324,97 +329,99 @@ function AccountEditor({
               if (validShare && hasChanges) save.mutate();
             }}
           >
-            <FieldSet disabled={save.isPending}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="account-name">Account name</FieldLabel>
-                  <Input
-                    name="name"
-                    id="account-name"
-                    maxLength={160}
-                    onChange={(event) => setName(event.target.value)}
-                    required
-                    value={name}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="account-institution">Institution</FieldLabel>
-                  <Input
-                    name="institution"
-                    id="account-institution"
-                    maxLength={160}
-                    onChange={(event) => setInstitution(event.target.value)}
-                    required
-                    value={institution}
-                  />
-                </Field>
-                <AccountKindField onChange={setKind} value={kind} />
-                <Field>
-                  <FieldLabel htmlFor="account-ownership">Ownership</FieldLabel>
-                  <NativeSelect
-                    name="ownershipType"
-                    id="account-ownership"
-                    onChange={(event) =>
-                      setOwnership(event.target.value as FinanceAccountOwnershipType)
-                    }
-                    value={ownership}
-                  >
-                    <NativeSelectOption value="unknown">Needs confirmation</NativeSelectOption>
-                    <NativeSelectOption value="individual">Individual</NativeSelectOption>
-                    <NativeSelectOption value="joint">Joint</NativeSelectOption>
-                  </NativeSelect>
-                </Field>
-                {ownership === "joint" ? (
+            <ResponsiveDialogBody>
+              <FieldSet disabled={save.isPending}>
+                <FieldGroup>
                   <Field>
-                    <FieldLabel htmlFor="account-share">Your ownership share (%)</FieldLabel>
+                    <FieldLabel htmlFor="account-name">Account name</FieldLabel>
                     <Input
-                      name="ownershipShare"
-                      id="account-share"
-                      min="0.01"
-                      max="100"
-                      step="0.01"
-                      type="number"
+                      name="name"
+                      id="account-name"
+                      maxLength={160}
+                      onChange={(event) => setName(event.target.value)}
                       required
-                      value={share}
-                      onChange={(event) => setShare(event.target.value)}
+                      value={name}
                     />
-                    <FieldDescription>
-                      Only this share contributes to your personal position.
-                    </FieldDescription>
                   </Field>
-                ) : null}
-                <Field orientation="horizontal">
-                  <Switch
-                    checked={included}
-                    id="account-included"
-                    onCheckedChange={(checked) => setIncluded(checked === true)}
-                  />
-                  <FieldLabel htmlFor="account-included">Include in planning</FieldLabel>
-                </Field>
-                {account.provider === "manual" ? (
                   <Field>
-                    <FieldLabel htmlFor="account-balance">Balance</FieldLabel>
-                    <CurrencyInput
-                      name="balance"
-                      id="account-balance"
-                      currencyCode={account.currencyCode}
-                      min={Number.NEGATIVE_INFINITY}
-                      value={balance}
-                      onValueChange={setBalance}
+                    <FieldLabel htmlFor="account-institution">Institution</FieldLabel>
+                    <Input
+                      name="institution"
+                      id="account-institution"
+                      maxLength={160}
+                      onChange={(event) => setInstitution(event.target.value)}
+                      required
+                      value={institution}
                     />
-                    <FieldDescription>
-                      Leave blank when the balance is unavailable.
-                    </FieldDescription>
                   </Field>
-                ) : null}
-              </FieldGroup>
-            </FieldSet>
+                  <AccountKindField onChange={setKind} value={kind} />
+                  <Field>
+                    <FieldLabel htmlFor="account-ownership">Ownership</FieldLabel>
+                    <NativeSelect
+                      name="ownershipType"
+                      id="account-ownership"
+                      onChange={(event) =>
+                        setOwnership(event.target.value as FinanceAccountOwnershipType)
+                      }
+                      value={ownership}
+                    >
+                      <NativeSelectOption value="unknown">Needs confirmation</NativeSelectOption>
+                      <NativeSelectOption value="individual">Individual</NativeSelectOption>
+                      <NativeSelectOption value="joint">Joint</NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                  {ownership === "joint" ? (
+                    <Field>
+                      <FieldLabel htmlFor="account-share">Your ownership share (%)</FieldLabel>
+                      <Input
+                        name="ownershipShare"
+                        id="account-share"
+                        min="0.01"
+                        max="100"
+                        step="0.01"
+                        type="number"
+                        required
+                        value={share}
+                        onChange={(event) => setShare(event.target.value)}
+                      />
+                      <FieldDescription>
+                        Only this share contributes to your personal position.
+                      </FieldDescription>
+                    </Field>
+                  ) : null}
+                  <Field orientation="horizontal">
+                    <Switch
+                      checked={included}
+                      id="account-included"
+                      onCheckedChange={(checked) => setIncluded(checked === true)}
+                    />
+                    <FieldLabel htmlFor="account-included">Include in planning</FieldLabel>
+                  </Field>
+                  {account.provider === "manual" ? (
+                    <Field>
+                      <FieldLabel htmlFor="account-balance">Balance</FieldLabel>
+                      <CurrencyInput
+                        name="balance"
+                        id="account-balance"
+                        currencyCode={account.currencyCode}
+                        min={Number.NEGATIVE_INFINITY}
+                        value={balance}
+                        onValueChange={setBalance}
+                      />
+                      <FieldDescription>
+                        Leave blank when the balance is unavailable.
+                      </FieldDescription>
+                    </Field>
+                  ) : null}
+                </FieldGroup>
+              </FieldSet>
 
-            {save.feedback?.kind === "conflict" ? (
-              <Button onClick={() => void onReload()} size="sm" type="button" variant="outline">
-                Reload account
-              </Button>
-            ) : null}
+              {save.feedback?.kind === "conflict" ? (
+                <Button onClick={() => void onReload()} size="sm" type="button" variant="outline">
+                  Reload account
+                </Button>
+              ) : null}
+            </ResponsiveDialogBody>
             <DialogFooter>
               {canDisconnect ? (
                 <Button
@@ -475,7 +482,7 @@ function AccountEditor({
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </ResponsiveDialogBody>
+        </div>
       </DialogContent>
     </Dialog>
   );

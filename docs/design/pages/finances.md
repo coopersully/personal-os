@@ -745,7 +745,7 @@ shared Settings rows and checked priority choices without changing save, version
 
 Account rows align institution and account identity at the start, with type and recorded current balance at the end. Institution and type sit below the name. A shared Popover behind the account options button contains ownership, source observation details and edit/transaction actions. Debt uses destructive text and an Amount owed label; attention and recovery actions stay visible. Cash flow occurrences use distinct shared card surfaces, end-aligned expected amounts, and explicit money-in/money-out labels.
 
-The shared top navigation starts with the current Finance page name on desktop and mobile. The root Finance route is labelled Overview; page controls follow this identity.
+The shared title sentence starts with the current Finance page name. On mobile it occupies the second header row beneath the utility controls; desktop places both on one row. The root Finance route is labelled Overview. See [shared header rows](../system.md#shared-workspace-header-rows).
 
 Spending keeps its route utilities on the primary navigation baseline. The small muted range label directly beside the page title is the date picker (for example, “this month”, a historical month, single date, or formatted range). Its popover contains period navigation and custom date fields at every viewport size. Other controls align at the end of the primary row; the view picker is an accessible icon button. At phone widths, grouping moves into Spending options while date selection remains beside the title.
 
@@ -835,3 +835,11 @@ occupy the single bottom row. Keep action groups intact and let search shrink
 first. Cash flow’s section and date scope sit beside its title; timeline and
 transaction presentation use icon selectors, and Budget configuration uses a
 labelled icon action. On desktop, title/scope and search/actions share one header.
+
+
+### Overview summary density
+
+The overview starts with Spent this month, then Cash and Net worth. Compose the shared KeyMetrics
+grid variant, including its loading state: two equal columns on mobile and three on wide desktop.
+Keep the exact-value accessibility text, scope descriptions and existing drill-down destinations.
+Other metric rails retain their established presentation unless their page contract changes.

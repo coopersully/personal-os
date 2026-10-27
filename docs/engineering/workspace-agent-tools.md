@@ -6997,6 +6997,33 @@ Read one durable maintenance run and its actual terminal or pending state. Requi
 }
 ```
 
+## get_mail_navigation_counts
+
+Read complete cached Mail destination totals, independent of the conversation page limit. accountIds scopes conversation totals to selected connected inboxes; drafts always counts all unsent drafts owned by the authenticated user.
+
+- Domain: mail; stage: inspect; policy: read_only.
+- Grants (all): mail:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/mail.ts); typed API methods: `getMailNavigationCounts`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "accountIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+        "description": "nohmi object identifier"
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
 ## get_mail_question
 
 Read an owned stewardship question and the evidence needed to answer it. Requires mail:read.

@@ -2,17 +2,8 @@ import { isTauri } from "@tauri-apps/api/core";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { type Icon, SearchIcon } from "@/components/icons";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { settingsPath } from "@/features/settings/settings-routes";
 import { settingMatchScore, settingsFieldId, settingsFields } from "./settings-fields.js";
 
@@ -84,7 +75,8 @@ export type SettingsSearchGroup = {
 };
 
 export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
-  const fieldNavigation = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const words = query.toLocaleLowerCase().trim().split(/\s+/);
@@ -114,54 +106,62 @@ export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
         .sort((a, b) => b.score - a.score || a.field.label.localeCompare(b.field.label))
     : [];
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(value) => {
-        setOpen(value);
-        if (value) fieldNavigation.current = false;
-        if (!value) setQuery("");
-      }}
-    >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <DialogTrigger asChild>
-            <Button
-              aria-label="Search settings"
-              className="settings-search-trigger"
-              size="icon-sm"
-              variant="ghost"
-            >
+    // Popup dismissal can be a temporary focus interruption (for example, a ritual).
+    // Only choosing a destination below clears the person's search draft.
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverAnchor asChild>
+        <div className="workspace-finder settings-search">
+          <InputGroup className="workspace-finder-input w-full rounded-full">
+            <InputGroupAddon>
               <SearchIcon aria-hidden="true" />
-            </Button>
-          </DialogTrigger>
-        </TooltipTrigger>
-        <TooltipContent>Search all settings</TooltipContent>
-      </Tooltip>
-      <DialogContent
-        className="sm:max-w-lg"
+            </InputGroupAddon>
+            <InputGroupInput
+              ref={inputRef}
+              aria-label="Search settings"
+              aria-expanded={open}
+              aria-controls={open ? "settings-search-results" : undefined}
+              placeholder=""
+              value={query}
+              onFocus={() => setOpen(true)}
+              onClick={() => setOpen(true)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setOpen(true);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+                const links = resultsRef.current?.querySelectorAll<HTMLAnchorElement>("a[href]");
+                const destination =
+                  event.key === "ArrowDown" ? links?.[0] : links?.[links.length - 1];
+                if (destination) {
+                  event.preventDefault();
+                  destination.focus();
+                }
+              }}
+              type="search"
+            />
+          </InputGroup>
+        </div>
+      </PopoverAnchor>
+      <PopoverContent
+        aria-label="Settings search"
+        className="settings-search-popover workspace-finder-results"
+        align="center"
+        collisionPadding={16}
+        onOpenAutoFocus={(event) => event.preventDefault()}
+        onInteractOutside={(event) => {
+          if (event.target === inputRef.current) event.preventDefault();
+        }}
         onCloseAutoFocus={(event) => {
-          if (fieldNavigation.current) event.preventDefault();
+          event.preventDefault();
         }}
       >
-        <DialogHeader>
-          <DialogTitle>Search settings</DialogTitle>
-          <DialogDescription>
-            Find preferences, accounts, and access across settings.
-          </DialogDescription>
-        </DialogHeader>
-        <InputGroup>
-          <InputGroupAddon>
-            <SearchIcon aria-hidden="true" />
-          </InputGroupAddon>
-          <InputGroupInput
-            aria-label="Search all settings"
-            placeholder="Try time zone, appearance, or connections…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            type="search"
-          />
-        </InputGroup>
-        <nav aria-label="Settings search results" className="settings-search-results">
+        <nav
+          ref={resultsRef}
+          id="settings-search-results"
+          aria-label="Settings search results"
+          className="settings-search-results"
+        >
           {fieldResults.length ? (
             <div>
               <h2 className="px-2 py-2 text-xs font-medium text-muted-foreground">
@@ -173,7 +173,6 @@ export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
                   to={`${settingsPath(field.section)}&field=${encodeURIComponent(settingsFieldId(field))}`}
                   className="settings-search-result"
                   onClick={() => {
-                    fieldNavigation.current = true;
                     setOpen(false);
                     setQuery("");
                   }}
@@ -229,7 +228,7 @@ export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
             </p>
           )}
         </nav>
-      </DialogContent>
-    </Dialog>
+      </PopoverContent>
+    </Popover>
   );
 }

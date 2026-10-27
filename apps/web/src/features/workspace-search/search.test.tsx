@@ -191,7 +191,7 @@ it("filters discovery without changing the page and paginates server results", a
     ),
   );
   await user.click(screen.getByRole("button", { name: "Search result type" }));
-  await user.click(screen.getByRole("menuitemradio", { name: "Reviews" }));
+  await user.click(screen.getByRole("button", { name: /^Reviews$/ }));
   await waitFor(() =>
     expect(api.searchWorkspace).toHaveBeenLastCalledWith(
       "mail",

@@ -4,6 +4,7 @@ import { EmptyState } from "@personal-os/ui";
 import {
   type InfiniteData,
   useInfiniteQuery,
+  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -103,10 +104,57 @@ export function TasksTopbarControls() {
 export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
   const lists = useQuery({ queryFn: listAllTaskLists, queryKey: ["task-lists"] });
   const projects = useQuery({ queryFn: listAllTaskProjects, queryKey: ["task-projects"] });
+  const inboxId = lists.data?.items.find((list) => list.kind === "inbox")?.id;
+  const scopes = ["inbox", "today", "upcoming", "all", "history", "trash"] as const;
+  const totals = useQueries({
+    queries: scopes.map((scope) => ({
+      queryKey: ["tasks", "navigation", scope, scope === "inbox" ? inboxId : null],
+      enabled: scope !== "inbox" || Boolean(inboxId),
+      queryFn: () =>
+        api.listTaskWorkspace({
+          limit: 1,
+          ...(scope === "inbox"
+            ? {
+                view: "all" as const,
+                ...(inboxId ? { listId: inboxId } : {}),
+                kind: "task" as const,
+              }
+            : { view: scope }),
+        }),
+      staleTime: 30_000,
+      refetchInterval: 60_000,
+    })),
+  });
+  const counts = Object.fromEntries(
+    scopes.map((scope, index) => [scope, totals[index]?.data?.total]),
+  );
+  counts.lists = lists.data?.items.filter((list) => list.availability === "active").length;
+  counts.projects = projects.data?.items.filter(
+    (project) =>
+      project.availability === "active" &&
+      project.lifecycle === "open" &&
+      lists.data?.items.some(
+        (list) => list.id === project.listId && list.availability === "active",
+      ),
+  ).length;
+  counts.archive =
+    lists.isSuccess && projects.isSuccess
+      ? lists.data.items.filter((list) => list.availability === "archived").length +
+        projects.data.items.filter(
+          (project) =>
+            !project.deletedAt &&
+            !lists.data.items.find((list) => list.id === project.listId)?.deletedAt &&
+            (project.availability === "archived" ||
+              project.lifecycle !== "open" ||
+              lists.data.items.find((list) => list.id === project.listId)?.availability ===
+                "archived"),
+        ).length
+      : undefined;
   const activeLists = lists.data?.items.filter((list) => list.availability === "active") ?? [];
   const activeListIds = new Set(activeLists.map((list) => list.id));
   return (
     <TaskNavigation
+      counts={counts}
       lists={activeLists}
       projects={
         projects.data?.items.filter(
@@ -602,13 +650,13 @@ export function TaskRow({
   const description = taskDescription(task, list, project, !dense);
   return (
     <TaskItem
-      className={cn(className, dense && "task-workspace-row min-h-0 items-center")}
+      className={cn(className, dense && "task-workspace-row min-h-0 items-start")}
       data-completed={isCompleted}
       data-status={recommendation?.urgency === "next" ? "next" : undefined}
       data-priority={task.priority}
       size={dense ? "xs" : "default"}
     >
-      <TaskItemCompletion className={dense ? "self-center pt-0" : undefined}>
+      <TaskItemCompletion>
         {task.lifecycle === "cancelled" || isTrashed ? null : (
           <Checkbox
             aria-label={`${isCompleted ? "Reopen" : "Complete"} ${task.title}`}
@@ -716,7 +764,7 @@ export function TaskRow({
       ) : null}
       {task.lifecycle !== "open" || isTrashed ? (
         <TaskItemMetadata>
-          <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+          <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground lowercase">
             {taskLifecycleLabel(task)}
           </span>
         </TaskItemMetadata>

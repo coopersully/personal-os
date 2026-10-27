@@ -75,6 +75,15 @@ locations, not required premerge files or successful production evidence. Select
 and candidate-bound; the exact original object, extra fields and digest remain intact. Entry and
 history replay use the same selector; see [execution and recovery](execution.md#reviewed-plan-recovery-before-merge).
 
+VERSION 8 recovery can explicitly retain typed per-file provenance without changing this
+independent acceptance schema or policy revision 4. Historically hash-attested files retain their
+original proof; freshly reviewed exact bytes with unavailable historical proof retain that distinct
+classification, actual aware review time, author/reviewer separation and continuity/path references.
+Neither class nor retained bytes satisfy readiness or production observations. Entry/history share
+the versioned validation; pre-VERSION-8 history extras remain opaque and unchanged. See the
+[typed recovery contract](execution.md#typed-file-provenance-version-8). The acceptance owner must
+authenticate these underlying review/provenance assertions; helper validation cannot do so.
+
 Before final collection, save the independently reviewed plan into the PR checkpoint's
 `reviewedProductionPlan` with phase `final_check`. The checkpoint freezes that snapshot and refuses
 replacement, including after reopening a phase. Read it back into readiness/delivery state; do not

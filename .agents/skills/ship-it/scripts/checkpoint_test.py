@@ -67,6 +67,156 @@ class CheckpointTest(unittest.TestCase):
                                                "candidateHead": payload["headSha"]})
         return old, payload, evidence
 
+    def typed_recovery_fixture(self):
+        old, payload, _ = self.detailed_recovery_fixture()
+        paths = []
+        rows = {}
+        for index in range(6):
+            path = self.root / f"predecessor-{index}.txt"
+            path.write_bytes(f"unchanged predecessor evidence {index}\n".encode())
+            reference = str(path)
+            paths.append(reference)
+            row = {"sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                   "bindingEvidence": ["accepted-original-plan-paths.json"]}
+            if index < 4:
+                row.update(classification="historical_hash_attested", historicalProofAvailable=True,
+                           historicalReviewEvidence=["original-independent-hash-review.json"])
+            else:
+                row.update(classification="fresh_exact_bytes_historical_hash_unavailable", historicalProofAvailable=False,
+                           continuityEvidence=["first-later-manifest.json", "current-manifest.json"],
+                           currentReview={"acceptedAt": "2026-01-01T01:00:00+01:00",
+                                          "evidence": ["fresh-exact-byte-review.json"],
+                                          "implementers": ["narrative-author"], "reviewers": ["provenance-reviewer"]})
+            rows[reference] = row
+        old["reviewedProductionPlan"]["premerge_evidence"] = paths
+        payload["reviewedProductionPlan"]["premerge_evidence"] = paths[:]
+        self.checkpoint_path().write_text(json.dumps(old))
+        payload.update(expectedCheckpointDigest=self.digest(old), expectedPlanDigest=self.digest(old["reviewedProductionPlan"]),
+                       evidenceProvenanceVersion=1, expectedEvidenceFiles=rows)
+        return old, payload, [Path(p) for p in paths]
+
+    def checkpoint_path(self):
+        return self.root / (hashlib.sha256(self.recovery_key.encode()).hexdigest() + ".json")
+
+    def typed_recovery(self, payload):
+        try:
+            return self.call("recover-plan", payload, key=self.recovery_key)
+        except ValueError as error:
+            self.fail(f"Truthful typed predecessor recovery was rejected: {error}")
+
+    def test_typed_recovery_preserves_six_exact_files_and_two_provenance_classes(self):
+        old, payload, paths = self.typed_recovery_fixture()
+        original_bytes = {str(p): p.read_bytes() for p in paths}
+        original = copy.deepcopy(old)
+        request = copy.deepcopy(payload)
+        result = self.typed_recovery(payload)
+        entry = result["recoveryHistory"][0]
+        self.assertEqual(entry["predecessor"], original)
+        self.assertEqual(entry["request"], request)
+        self.assertEqual(entry["predecessorDigest"], self.digest(original))
+        self.assertEqual({str(p): p.read_bytes() for p in paths}, original_bytes)
+        self.assertEqual(len(entry["retainedEvidence"]), 6)
+        for index, item in enumerate(entry["retainedEvidence"]):
+            row = request["expectedEvidenceFiles"][str(paths[index])]
+            self.assertEqual(item["provenance"], row)
+            self.assertEqual(base64.b64decode(item["bytes"]), original_bytes[item["path"]])
+            self.assertEqual(item["sha256"], row["sha256"])
+            self.assertIs(item["provenance"]["historicalProofAvailable"], index < 4)
+        self.assertIn("recoveredAt", entry)
+        self.assertEqual(result["phase"], "review")
+        self.assertTrue(result["productionPlanFrozen"])
+        self.assertIsNone(result["pending"])
+        self.assertNotIn("delivery", result)
+        self.assertNotIn("production", result)
+        self.assertTrue(all(not Path(c["evidence"]).exists() for c in original["reviewedProductionPlan"]["criteria"]))
+
+    def test_typed_recovery_rejects_ambiguous_incomplete_or_unreviewed_provenance_atomically(self):
+        _, payload, paths = self.typed_recovery_fixture()
+        key = str(paths[-1])
+        row = payload["expectedEvidenceFiles"][key]
+        bad_rows = [None, row["sha256"], {**row, "classification": "unknown"},
+                    {**row, "historicalProofAvailable": True}, {**row, "historicalProofAvailable": 0},
+                    {**row, "sha256": "0" * 64}, {**row, "continuityEvidence": []},
+                    {**row, "bindingEvidence": []}, {**row, "unknown": "ambiguous"},
+                    {**row, "historicalReviewEvidence": ["invented-original-proof"]}]
+        for field, value in [("acceptedAt", "2399-01-01T00:00:00Z"), ("acceptedAt", "2026-01-01T00:00:00"),
+                             ("acceptedAt", "not-a-date"), ("evidence", []), ("implementers", []),
+                             ("reviewers", ["narrative-author"]), ("reviewers", ["worker"]),
+                             ("reviewers", ["reviewer", "reviewer"]), ("unknown", "field")]:
+            bad_rows.append({**row, "currentReview": {**row["currentReview"], field: value}})
+        for bad_row in bad_rows:
+            with self.subTest(row=bad_row):
+                invalid = copy.deepcopy(payload)
+                invalid["expectedEvidenceFiles"][key] = bad_row
+                self.reject_recovery_unchanged(invalid)
+        for expected in [{}, {k: v for k, v in payload["expectedEvidenceFiles"].items() if k != key},
+                         {**payload["expectedEvidenceFiles"], "extra": row}]:
+            self.reject_recovery_unchanged({**payload, "expectedEvidenceFiles": expected})
+        for marker in [None, True, False, 0, 2, "1"]:
+            self.reject_recovery_unchanged({**payload, "evidenceProvenanceVersion": marker})
+        absent = copy.deepcopy(payload)
+        del absent["evidenceProvenanceVersion"]
+        self.reject_recovery_unchanged(absent)
+        self.reject_recovery_unchanged({**payload, "policyVersion": 7})
+        # A nominally historical row cannot use integer1 instead of true, or lose its original proof.
+        invalid = copy.deepcopy(payload)
+        invalid["expectedEvidenceFiles"][str(paths[0])]["historicalProofAvailable"] = 1
+        self.reject_recovery_unchanged(invalid)
+        invalid["expectedEvidenceFiles"][str(paths[0])]["historicalProofAvailable"] = True
+        invalid["expectedEvidenceFiles"][str(paths[0])]["historicalReviewEvidence"] = []
+        self.reject_recovery_unchanged(invalid)
+
+    def test_typed_history_preserves_pre_version8_opaque_extras_and_replays_without_files(self):
+        _, payload, paths = self.typed_recovery_fixture()
+        legacy = copy.deepcopy(payload)
+        del legacy["evidenceProvenanceVersion"]
+        legacy["expectedEvidenceFiles"] = {k: v["sha256"] for k, v in legacy["expectedEvidenceFiles"].items()}
+        old = self.call("recover-plan", legacy, key=self.recovery_key)
+        entry = old["recoveryHistory"][0]
+        # An actual old writer allowed these opaque fields. Only this private fixture is edited.
+        entry["request"].update(policyVersion=7, evidenceProvenanceVersion=True, legacyExtra="preserve")
+        entry["successor"]["policyVersion"] = 7
+        entry["retainedEvidence"][0]["provenance"] = {"opaque": "not typed"}
+        old.update(phase="repair", policyVersion=7)
+        self.checkpoint_path().write_text(json.dumps(old))
+        prior = copy.deepcopy(old["recoveryHistory"])
+        payload.update(expectedCheckpointDigest=self.digest(old), expectedHeadSha=old["headSha"],
+                       expectedPlanDigest=self.digest(old["reviewedProductionPlan"]), headSha="d" * 40)
+        payload["reviewedProductionPlan"]["candidateHead"] = "d" * 40
+        payload["livePr"]["headSha"] = "d" * 40
+        result = self.typed_recovery(payload)
+        self.assertEqual(result["recoveryHistory"][:-1], prior)
+        from checkpoint import validate_recovery_history
+        for path in paths:
+            path.unlink()
+        validate_recovery_history(result["recoveryHistory"])
+        self.assertEqual(result["recoveryHistory"][:-1], prior)
+
+    def test_typed_history_rejects_changed_or_promoted_provenance_and_naive_times(self):
+        _, payload, _ = self.typed_recovery_fixture()
+        result = self.typed_recovery(payload)
+        from checkpoint import validate_recovery_history
+        for target, field, value in [("provenance", "historicalProofAvailable", True),
+                                     ("provenance", "classification", "historical_hash_attested"),
+                                     ("item", "sha256", "0" * 64),
+                                     ("entry", "recoveredAt", "2026-01-01T00:00:00"),
+                                     ("entry", "recoveredAt", "2025-12-31T23:59:59Z")]:
+            with self.subTest(field=field):
+                history = copy.deepcopy(result["recoveryHistory"])
+                entry = history[0]
+                item = entry["retainedEvidence"][-1]
+                obj = entry if target == "entry" else item if target == "item" else item["provenance"]
+                obj[field] = value
+                with self.assertRaises(ValueError):
+                    validate_recovery_history(history)
+        history = copy.deepcopy(result["recoveryHistory"])
+        # Equal instants with different timezone offsets must compare as instants, not strings.
+        history[0]["recoveredAt"] = "2025-12-31T19:00:00-05:00"
+        validate_recovery_history(history)
+        history[0]["request"]["evidenceProvenanceVersion"] = True
+        with self.assertRaises(ValueError):
+            validate_recovery_history(history)
+
     def test_detailed_recovery_retains_premerge_bytes_not_future_outputs(self):
         old, payload, evidence = self.detailed_recovery_fixture()
         original = copy.deepcopy(old)

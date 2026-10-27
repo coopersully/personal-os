@@ -8766,6 +8766,23 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
 .calendar-editor-dialog [data-responsive-slot="footer"] {
   padding-inline: 1rem;
 }
+.calendar-editor-dialog .calendar-event-composer__time {
+  align-items: stretch;
+  flex-direction: column;
+}
+.calendar-editor-dialog .calendar-event-composer__date-time-control {
+  width: 100%;
+}
+.calendar-editor-dialog .calendar-event-composer__date-trigger {
+  flex: 1;
+}
+.calendar-editor-dialog .calendar-event-composer__duration-line {
+  align-self: center;
+  flex: none;
+  height: 0.75rem;
+  min-width: 0;
+  width: 1px;
+}
 
 /* One overlay gutter aligns titles, fields, and fixed actions in every workspace. */
 [data-responsive-slot="content"][data-presentation] {

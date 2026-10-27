@@ -3252,11 +3252,20 @@ describe("ilo web app", () => {
       expect(
         within(dock).queryByRole("button", { name: "Switch workspace" }),
       ).not.toBeInTheDocument();
-      await userEvent.click(within(dock).getByRole("link", { name: workspace === "finances" ? "money" : workspace === "mail" ? "mailboxes" : "views" }));
+      await userEvent.click(
+        within(dock).getByRole("link", {
+          name: workspace === "finances" ? "money" : workspace === "mail" ? "mailboxes" : "views",
+        }),
+      );
       const sheet = screen.getByRole("main");
       expect(
         within(sheet).getByRole("link", {
-          name: workspace === "finances" ? "Transactions" : workspace === "mail" ? "Unread" : /^Inbox(?: \d+)?$/,
+          name:
+            workspace === "finances"
+              ? "Transactions"
+              : workspace === "mail"
+                ? "Unread"
+                : /^Inbox(?: \d+)?$/,
         }),
       ).toBeInTheDocument();
       expect(within(sheet).queryByText("Log out")).not.toBeInTheDocument();
@@ -3354,13 +3363,25 @@ describe("ilo web app", () => {
     expect(within(header).getByRole("button", { name: "Switch workspace" })).toBeInTheDocument();
 
     await browser.click(screen.getByRole("link", { name: "app" }));
-    expect(screen.getByRole("link", { name: "Appearance" })).toHaveAttribute("href", "/settings?page=appearance");
+    expect(screen.getByRole("link", { name: "Appearance" })).toHaveAttribute(
+      "href",
+      "/settings?page=appearance",
+    );
     await browser.click(screen.getByRole("link", { name: "workspaces" }));
-    expect(screen.getByRole("link", { name: "Mail" })).toHaveAttribute("href", "/settings?page=mail");
-    expect(await screen.findByRole("status", { name: "Mail: Action required" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Mail" })).toHaveAttribute(
+      "href",
+      "/settings?page=mail",
+    );
+    expect(
+      await screen.findByRole("status", { name: "Mail: Action required" }),
+    ).toBeInTheDocument();
 
     // Settings follows the five workspaces as the selected utility destination.
-    await browser.click(within(screen.getByRole("navigation", { name: "Top navigation" })).getByRole("button", { name: "Switch workspace" }));
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Top navigation" })).getByRole("button", {
+        name: "Switch workspace",
+      }),
+    );
     const workspaceMenu = screen.getByRole("menu", { name: "Switch workspace" });
     expect(within(workspaceMenu).getAllByRole("menuitem")).toHaveLength(10);
     expect(
@@ -3448,7 +3469,9 @@ describe("ilo web app", () => {
 
     await screen.findByRole("heading", { name: "up next" });
     expect(screen.queryByRole("complementary", { name: "Today Sidebar" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Workspace sections" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("navigation", { name: "Workspace sections" }),
+    ).not.toBeInTheDocument();
     const topNavigation = screen.getByRole("navigation", { name: "Top navigation" });
     expect(screen.getByRole("navigation", { name: "Workspace navigation" })).toBeVisible();
     expect(
@@ -10741,7 +10764,9 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
     expect(mocks.logout).toHaveBeenCalledTimes(2);
     expect(resetQueries).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("navigation", { name: "Workspace sections" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("navigation", { name: "Workspace sections" }),
+    ).not.toBeInTheDocument();
   });
   it.each([
     "login",

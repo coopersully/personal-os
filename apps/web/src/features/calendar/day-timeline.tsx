@@ -202,14 +202,12 @@ export function DayTimeline<T extends TimelinePositionable>({
   preview?: boolean;
 }) {
   const currentMinute = localDateTimeAt(currentTime, timeZone).minute;
-  const startMinute = preview
-    ? Math.min(...items.map((item) => localDateTimeAt(item.startsAt, timeZone).minute))
-    : todayTimelineStartMinute(currentMinute);
-  const layouts = positionTimelineEvents(
-    items,
-    localDateAt(currentTime, timeZone),
-    timeZone,
-  ).filter((layout) => layout.endMinute > startMinute);
+  const positioned = positionTimelineEvents(items, localDateAt(currentTime, timeZone), timeZone);
+  const startMinute =
+    preview && positioned.length > 0
+      ? Math.min(...positioned.map((layout) => layout.startMinute))
+      : todayTimelineStartMinute(currentMinute);
+  const layouts = positioned.filter((layout) => layout.endMinute > startMinute);
   const endMinute = Math.max(startMinute + 60, ...layouts.map((layout) => layout.endMinute));
   const height = minuteToTimelinePixels(endMinute - startMinute);
   return (

@@ -124,12 +124,12 @@ export function WorkspaceRow({
             </TaskItemDescription>
           ) : null}
           {details.includes("notes") && record.notes ? (
-            <TaskItemDescription>{record.notes}</TaskItemDescription>
+            <TaskItemDescription data-user-content>{record.notes}</TaskItemDescription>
           ) : null}
           {details.includes("tags") && item.kind === "task" && item.record.tags.length ? (
             <span className="flex flex-wrap gap-1">
               {item.record.tags.map((tag) => (
-                <Badge variant="secondary" key={tag}>
+                <Badge data-user-content variant="secondary" key={tag}>
                   {tag}
                 </Badge>
               ))}

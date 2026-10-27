@@ -260,7 +260,7 @@ function TaskListBranch({
               data-list-icon={list.kind === "standard" ? list.icon : undefined}
               weight={selected ? "Filled" : "Outline"}
             />
-            <span>{list.name}</span>
+            <span data-user-content>{list.name}</span>
           </Link>
         </SidebarMenuButton>
         <SidebarItemMeta count={count} label={`${list.name} items`} />
@@ -284,7 +284,7 @@ function TaskListBranch({
                     aria-hidden="true"
                     weight={selectedProjectId === project.id ? "Filled" : "Outline"}
                   />
-                  <span>{project.name}</span>
+                  <span data-user-content>{project.name}</span>
                 </Link>
               </SidebarMenuSubButton>
               <TaskContainerActions
@@ -470,7 +470,7 @@ export function TaskNavigation({
                           aria-current={selectedProject?.id === project.id ? "page" : undefined}
                         >
                           <ProjectIcon aria-hidden="true" />
-                          <span>{project.name}</span>
+                          <span data-user-content>{project.name}</span>
                         </Link>
                       </SidebarMenuButton>
                       {lists
@@ -489,7 +489,9 @@ export function TaskNavigation({
                   ))}
               </SidebarMenu>
               {pins.isError ? (
-                <p className="sidebar-helper-text px-2 text-xs text-muted-foreground">Couldn’t load pins.</p>
+                <p className="sidebar-helper-text px-2 text-xs text-muted-foreground">
+                  Couldn’t load pins.
+                </p>
               ) : pins.isSuccess &&
                 !(
                   lists.some((list) => pins.data.preferences.pinnedListIds?.includes(list.id)) ||

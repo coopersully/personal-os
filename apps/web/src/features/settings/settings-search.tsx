@@ -2,8 +2,8 @@ import { isTauri } from "@tauri-apps/api/core";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { type Icon, SearchIcon } from "@/components/icons";
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { settingsPath } from "@/features/settings/settings-routes";
 import { settingMatchScore, settingsFieldId, settingsFields } from "./settings-fields.js";
 

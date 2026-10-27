@@ -252,10 +252,19 @@ function FinderInput({
                 })()}
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-medium">{option.title}</span>
+                    <span
+                      data-user-content={
+                        !["Settings", "Review", "Action", "Navigation", "Date"].includes(
+                          option.kind,
+                        ) || undefined
+                      }
+                      className="truncate font-medium"
+                    >
+                      {option.title}
+                    </span>
                     {option.state ? <Badge variant="secondary">{option.state}</Badge> : null}
                   </div>
-                  <span className="line-clamp-2 text-xs text-muted-foreground">
+                  <span data-user-content className="line-clamp-2 text-xs text-muted-foreground">
                     {option.preview}
                   </span>
                 </div>

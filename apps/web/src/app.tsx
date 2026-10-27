@@ -176,6 +176,7 @@ import {
   XIcon,
 } from "@/components/icons";
 import { LogoMark } from "@/components/logo-mark";
+import { NavigationHighlight } from "@/components/navigation-highlight";
 import { OccasionCard } from "@/components/occasion-card";
 import { OfflineState } from "@/components/offline-state";
 import {
@@ -203,7 +204,6 @@ import {
   FieldLegend as ShadcnFieldLegend,
   FieldSet as ShadcnFieldSet,
 } from "@/components/settings-field";
-import { NavigationHighlight } from "@/components/navigation-highlight";
 import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { TodayWorkspaceIcon, todayWeatherIcon } from "@/components/today-workspace-icon";
 import {

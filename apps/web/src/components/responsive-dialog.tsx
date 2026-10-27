@@ -65,6 +65,7 @@ function ResponsiveDialog({
     <ResponsiveDialogContext.Provider value={{ isMobile, contentRef }}>
       {isMobile ? (
         <Drawer
+          autoFocus
           dismissible={dismissible}
           onOpenChange={handleOpenChange}
           open={resolvedOpen}

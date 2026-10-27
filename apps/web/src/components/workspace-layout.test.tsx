@@ -79,10 +79,10 @@ it("keeps workspace search above page-owned controls", () => {
         <input aria-label="Search finances" />
       </WorkspaceHeaderControls>
       <WorkspaceHeaderControls label="Page tools">
-        <button>Filters</button>
+        <button type="button">Filters</button>
       </WorkspaceHeaderControls>
       <WorkspaceHeaderControls placement="leading" label="Page view">
-        <button>Table view</button>
+        <button type="button">Table view</button>
       </WorkspaceHeaderControls>
     </WorkspaceLayout>,
   );

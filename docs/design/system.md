@@ -1333,8 +1333,8 @@ cue. No per-frame JavaScript, route layout animation, or persistent will-change 
 
 Mobile secondary title rows use a fixed 44px track, whether composed from plain text or
 selectors. The two-row header totals 104px; Today retains its single-row header. Long title
-sentences scroll within their row instead of increasing its height. Desktop keeps the shared
-52px header. Floating controls inherit their owning workspace accent for glyphs and selected,
+sentences scroll within their row instead of increasing its height. Desktop uses the same
+104px workspace/search and page-title rows. Floating controls inherit their owning workspace accent for glyphs and selected,
 open, pressed, hover and focus surfaces; ordinary page controls retain their existing semantics.
 
 On mobile category pages, omit destinations already directly available in the app bar (Tasks

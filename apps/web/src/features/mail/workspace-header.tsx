@@ -1,4 +1,3 @@
-import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -9,6 +8,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { WorkspaceHeaderOptions } from "@/components/workspace-header-options";
 import { MailLayoutControl } from "./layout-control";
 import { isMailListScope, mailListScopeFromSearch, mailListScopeParams } from "./mail";

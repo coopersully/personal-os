@@ -106,6 +106,7 @@ describe("ResponsiveDialog", () => {
     );
     expect(document.querySelector('[data-responsive-slot="actions"]')).toBeInTheDocument();
 
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus());
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

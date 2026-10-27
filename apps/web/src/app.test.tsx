@@ -10473,7 +10473,7 @@ describe("ilo web app", () => {
       await within(view.container).findByAltText("Wallpaper rendered for your display");
       await waitFor(() => expect(refresh).toBeEnabled());
       await browser.click(refresh);
-      await browser.click(screen.getByRole("button", { name: "Refresh", exact: true }));
+      await browser.click(screen.getByRole("button", { name: "Refresh" }));
       await waitFor(() =>
         expect(mocks.invoke).toHaveBeenCalledWith("apply_pinterest_wallpaper", {
           backgroundColor: "#ffffff",

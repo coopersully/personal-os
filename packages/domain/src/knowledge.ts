@@ -4,7 +4,8 @@ import { idSchema, isoDateTimeSchema } from "./common.js";
 
 // PostgreSQL JSONB rejects NUL and unpaired UTF-16 surrogates. Validate before
 // persistence rather than replacing or truncating accepted personal knowledge.
-const storableText = (value: string) => !/[\u0000\uD800-\uDFFF]/u.test(value);
+const storableText = (value: string) =>
+  !value.includes("\u0000") && !/[\uD800-\uDFFF]/u.test(value);
 const text = z
   .string()
   .trim()

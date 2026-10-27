@@ -7095,8 +7095,13 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 .app-shell[data-rail-collapsed="true"] .workspace-sidebar__header {
   padding-inline-start: 3rem;
 }
-.app-shell[data-rail-collapsed="true"]:not([data-sidebar-state]) .workspace-app-bar {
+/* A floating workspace icon needs room only in the upper search row. */
+.app-shell[data-rail-collapsed="true"]:not([data-sidebar-state]) .workspace-app-bar:not([data-header-layout="sentence"]),
+.app-shell[data-rail-collapsed="true"]:not([data-sidebar-state]) .workspace-app-bar[data-workspace="today"] {
   padding-inline-start: 3rem;
+}
+.app-shell[data-rail-collapsed="true"]:not([data-sidebar-state]) .workspace-app-bar[data-header-layout="sentence"]:not([data-workspace="today"]) > .workspace-app-bar__context {
+  margin-inline-start: calc(3rem - var(--workspace-inline-padding));
 }
 
 /* Shared navigation motion: short layout shifts with the existing spatial easing. */
@@ -8879,6 +8884,8 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
   gap: 0;
 }
 .workspace-page-breadcrumbs [data-slot="breadcrumb-list"] {
+  color: var(--content-tertiary);
+  font-weight: 400;
   flex-wrap: nowrap;
   gap: .25rem;
   font-size: .6875rem;
@@ -8891,6 +8898,12 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
   height: 2rem;
   min-height: 2rem;
   line-height: 1.5rem;
+}
+/* Keep keyboard focus clear without giving resting breadcrumbs title-level emphasis. */
+.workspace-page-breadcrumbs [data-slot="breadcrumb-link"]:focus-visible {
+  color: var(--foreground);
+  background: var(--secondary);
+  border-radius: var(--radius-sm);
 }
 .workspace-page-breadcrumbs [data-slot="breadcrumb-separator"] > svg { width: .625rem; height: .625rem; }
 .workspace-app-bar__page-title:has(.settings-page-heading) > .workspace-page-breadcrumbs { display: none; }

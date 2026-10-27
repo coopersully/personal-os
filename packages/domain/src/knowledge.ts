@@ -2,7 +2,15 @@ import { z } from "zod";
 import { accessScopeSchema } from "./auth.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 
-const text = z.string().trim().min(1).max(2048);
+// PostgreSQL JSONB rejects NUL and unpaired UTF-16 surrogates. Validate before
+// persistence rather than replacing or truncating accepted personal knowledge.
+const storableText = (value: string) => !/[\u0000\uD800-\uDFFF]/u.test(value);
+const text = z
+  .string()
+  .trim()
+  .min(1)
+  .max(2048)
+  .refine(storableText, "Text cannot contain NUL or unpaired surrogates.");
 const knowledgeValueMaxBytes = 8192;
 // Inferred propositions preserve JSON.stringify({ kind, value }) losslessly. The
 // fixed kind/value wrapper is under 64 ASCII bytes for every supported kind.
@@ -10,7 +18,8 @@ const inferenceProposition = z
   .string()
   .trim()
   .min(1)
-  .max(knowledgeValueMaxBytes + 64);
+  .max(knowledgeValueMaxBytes + 64)
+  .refine(storableText, "Text cannot contain NUL or unpaired surrogates.");
 export const knowledgePurposeSchema = z.enum([
   "setup",
   "bookkeeping",

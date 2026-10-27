@@ -1792,6 +1792,8 @@ function escapeHtml(value: string): string {
 }
 
 const oauthScopeLabels: Record<string, string> = {
+  "knowledge:read": "Read saved personal knowledge for authorized purposes",
+  "knowledge:write": "Save personal knowledge with source attribution",
   "mail:execute":
     "With review bypass enabled, send exact saved drafts, activate reviewed rules, reconcile delivery, and manage Mail stewardship and preferences. Combined Mail, Calendar, and Tasks execution grants also permit source sync and disconnection. Sending cannot be undone.",
   "finances:execute":

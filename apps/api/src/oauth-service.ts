@@ -19,6 +19,8 @@ import { lockOAuthGrant } from "./oauth-grant-lock.js";
 import { generateToken, hashToken } from "./security.js";
 
 const allScopes = new Set<AccessScope>([
+  "knowledge:read",
+  "knowledge:write",
   "audit:read",
   "automations:read",
   "bookmarks:read",
@@ -44,7 +46,13 @@ const allScopes = new Set<AccessScope>([
   "tasks:execute",
 ]);
 const defaultScopes = new Set<AccessScope>(
-  [...allScopes].filter((scope) => scope !== "finances:maintain" && !scope.endsWith(":execute")),
+  [...allScopes].filter(
+    (scope) =>
+      scope !== "finances:maintain" &&
+      scope !== "knowledge:read" &&
+      scope !== "knowledge:write" &&
+      !scope.endsWith(":execute"),
+  ),
 );
 
 export function createOAuthService(options: { db: Database; now: () => Date; resource: string }) {

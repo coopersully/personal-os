@@ -120,6 +120,9 @@ workflows declare knowledge contracts and consume context packs internally.
 The source now separates knowledge identity, initial immutable revision snapshots, sources,
 relationships and idempotency receipts in owner-keyed PostgreSQL tables. The API owns source
 classification and live disclosure checks; stateless MCP tools use the typed authenticated client.
+OAuth callers must explicitly request `knowledge:read` and `knowledge:write`; consent describes
+these grants, and omitted scopes or refresh of earlier grants never add them. Knowledge text
+rejects NUL and unpaired UTF-16 surrogates before JSONB persistence, preserving valid Unicode.
 Source scope requirements propagate to derived records, which cannot broaden workspace, sensitivity
 or allowed purposes. Knowledge writes emit redacted audit metadata and never alter domain policy.
 Lifecycle mutations, retrieval indexes, context packs and user controls remain follow-up work;

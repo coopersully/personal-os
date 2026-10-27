@@ -1,9 +1,22 @@
 ---
 name: oversight
-description: Coordinate nohmi outcomes, implementation owners, dependencies, evidence and delivery from agreed product intent. Use for project oversight, adopting existing work or explicit network launch; ordinary implementation retains its workflow.
+description: Use when following a legacy nohmi oversight reference. Forward coordination to the user-installed nohmi-orchestrator and apply the repository kickoff, tracking and delivery constraints retained here.
 ---
 
 # nohmi oversight
+
+Use the user-installed `nohmi-orchestrator` skill at
+`~/.codex/skills/nohmi-orchestrator/SKILL.md` as the canonical coordination entrypoint.
+This legacy path remains for existing callers and anchors; it does not define a second
+orchestrator or install or start one. If the personal entrypoint is unavailable, report the
+missing source and continue only work whose required context and authority are available.
+
+The repository `AGENTS.md`, product, security, role, acceptance and delivery contracts remain
+authoritative. Apply the repository-specific kickoff, tracking and recovery constraints below
+alongside the personal entrypoint; its location does not waive them. For status vocabulary and
+per-schedule presentation, use the current user-installed `nohmi-project-manager` and
+`nohmi-orchestrator` instructions. Preserve existing scheduling grants, notification preferences
+and explicit exceptions; no new monitor or authority is created by this forwarding route.
 
 ## Mandatory kickoff and adoption gate
 
@@ -53,9 +66,9 @@ or ask them to approve settled choices again. Carry unfinished obligations forwa
 closes them. Oversight coordinates; workers implement every code, test, configuration and tracked
 document repair. Editing this skill does not launch work or activate monitoring.
 
-This is the repository's self-contained adaptation of the personal oversight procedure. All required
-mechanics are here and in local references; no personal install is required. Existing automation
-heads and outcome orchestrators perform oversight, with no additional supervisor layer. Apply
+The local lifecycle and monitoring references retain repository-specific constraints for existing
+callers. The user-installed `nohmi-orchestrator` owns the coordination entrypoint; existing
+automation heads and outcome orchestrators retain their roles, with no additional supervisor layer. Apply
 [autonomous development](../../../docs/engineering/autonomous-development.md) for assigned network
 roles; ordinary contributions keep their existing workflow. See
 [provenance and evaluation cases](references/provenance.md) for sources and limits.
@@ -79,7 +92,8 @@ still complete the kickoff gate above before dispatch.
   Keep phases, progress, PR links and blockers in records. Reconcile changed issue mappings/names
   through the current `nohmi-project-manager` checklist; never infer identity from similar wording.
   Normalize an authorized issue title before its chat title and read back both. Preserve later
-  explicit exceptions; the portfolio manager maps to `COO-170 - Portfolio oversight`.
+  explicit exceptions: the portfolio manager maps to COO-170 — Portfolio oversight but is named
+  exactly `Nohmi project manager`.
 - Reuse the recorded epic section, with Lead first and persistent owners in dependency/delivery
   order. Subagents have no sidebar rows. Preserve explicit user title choices as recorded
   exclusions when they remain applicable after the October 26 naming instruction.
@@ -189,6 +203,8 @@ existing checkpoint; use actual worktree paths and mark stale evidence Unknown. 
 heartbeat formatting and keep hashes/run IDs in evidence. This does not create a schedule or
 override an explicit user mute/quiet instruction.
 Manual check-ins and worker callbacks need only material updates unless regular reports were requested.
+Use the current personal manager/orchestrator status vocabulary by reference; do not maintain a
+competing icon table or import another product’s approval rules.
 
 For substantive handoffs, report actual artifacts and limits, current stage, owner, remaining gate
 and the real next trigger: verified active monitor, bounded wait or user-driven follow-up. Link each

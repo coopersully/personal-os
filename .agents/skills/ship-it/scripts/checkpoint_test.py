@@ -8,12 +8,14 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from checkpoint import operate, locked
 
 
 class CheckpointTest(unittest.TestCase):
+    policy_version = int((Path(__file__).resolve().parents[1] / "VERSION").read_text().strip())
     recovery_key = "https://github.com/owner/repo/pull/1"
 
     @staticmethod
@@ -31,7 +33,7 @@ class CheckpointTest(unittest.TestCase):
         record = self.call("save", {"phase": "repair"}, key=self.recovery_key)
         payload = {"expectedCheckpointDigest": self.digest(record), "expectedPlanDigest": self.digest(plan),
                    "expectedHeadSha": record["headSha"], "expectedBaseSha": record["baseSha"],
-                   "headSha": "c" * 40, "baseSha": "b" * 40, "policyVersion": 6, "acceptanceRevision": 4,
+                   "headSha": "c" * 40, "baseSha": "b" * 40, "policyVersion": self.policy_version, "acceptanceRevision": 4,
                    "reviewedProductionPlan": {**plan, "reason": "reviewed corrective distribution"},
                    "livePr": {"url": self.recovery_key, "number": 1, "state": "OPEN", "merged": False,
                               "headSha": "c" * 40, "baseSha": "b" * 40, "evidence": ["live-pr.json"]},
@@ -47,6 +49,156 @@ class CheckpointTest(unittest.TestCase):
             self.call("recover-plan", payload, key=self.recovery_key, **kwargs)
         self.assertEqual(snapshot, {p.name: p.read_bytes() for p in self.root.iterdir()
                                     if p.is_file() and p.name != "registry.lock"})
+
+    def detailed_recovery_fixture(self):
+        old, payload, evidence = self.recovery_fixture()
+        plan = {"required": True, "owner": "Finance parent; task-a",
+                "candidateHead": old["headSha"], "candidateBase": old["baseSha"],
+                "premerge_evidence": [str(evidence)],
+                "criteria": [{"id": f"FA-P{index:02d}", "action": "observe actual delivery",
+                              "result": "pending_post_merge",
+                              "evidence": str(self.root / "future" / f"FA-P{index:02d}.json")}
+                             for index in range(1, 9)]}
+        old["reviewedProductionPlan"] = plan
+        path = self.root / (hashlib.sha256(self.recovery_key.encode()).hexdigest() + ".json")
+        path.write_text(json.dumps(old))  # Only this test's private fixture registry.
+        payload.update(expectedCheckpointDigest=self.digest(old), expectedPlanDigest=self.digest(plan),
+                       reviewedProductionPlan={**copy.deepcopy(plan), "owner": "task-a",
+                                               "candidateHead": payload["headSha"]})
+        return old, payload, evidence
+
+    def test_detailed_recovery_retains_premerge_bytes_not_future_outputs(self):
+        old, payload, evidence = self.detailed_recovery_fixture()
+        original = copy.deepcopy(old)
+        request = copy.deepcopy(payload)
+        result = self.call("recover-plan", payload, key=self.recovery_key)
+        entry = result["recoveryHistory"][0]
+        self.assertEqual(entry["predecessor"], original)
+        self.assertEqual(entry["predecessor"]["policyVersion"], 6)
+        self.assertEqual(result["policyVersion"], self.policy_version)
+        self.assertEqual(entry["predecessorDigest"], self.digest(original))
+        self.assertEqual(entry["request"], request)
+        self.assertEqual(payload, request)
+        self.assertEqual(old, original)
+        self.assertEqual(entry["retainedEvidence"], [{"path": str(evidence),
+                         "sha256": request["expectedEvidenceFiles"][str(evidence)],
+                         "encoding": "base64", "bytes": base64.b64encode(evidence.read_bytes()).decode()}])
+        self.assertEqual(result["reviewedProductionPlan"], request["reviewedProductionPlan"])
+        self.assertEqual(len(result["reviewedProductionPlan"]["criteria"]), 8)
+        self.assertTrue(all(not Path(row["evidence"]).exists()
+                            for row in result["reviewedProductionPlan"]["criteria"]))
+        self.assertTrue(result["productionPlanFrozen"])
+        self.assertEqual(result["phase"], "review")
+        self.assertIsNone(result["pending"])
+        self.assertNotIn("production", result)
+        self.assertNotIn("delivery", result)
+
+    def test_detailed_predecessor_history_replays_without_original_files(self):
+        _, payload, evidence = self.detailed_recovery_fixture()
+        self.call("recover-plan", payload, key=self.recovery_key)
+        previous = self.call("save", {"phase": "repair"}, key=self.recovery_key)
+        replacement = self.root / "accepted-successor.txt"
+        evidence.rename(replacement)  # Prior history must use retained bytes, not re-open old paths.
+        successor = copy.deepcopy(previous["reviewedProductionPlan"])
+        successor.update(candidateHead="d" * 40, premerge_evidence=[str(replacement)])
+        payload.update(expectedCheckpointDigest=self.digest(previous), expectedHeadSha=previous["headSha"],
+                       expectedPlanDigest=self.digest(previous["reviewedProductionPlan"]),
+                       headSha="d" * 40, reviewedProductionPlan=successor,
+                       expectedEvidenceFiles={str(evidence): hashlib.sha256(replacement.read_bytes()).hexdigest()})
+        payload["livePr"]["headSha"] = "d" * 40
+        # The current predecessor still requires its accepted source file for this recovery.
+        self.reject_recovery_unchanged(payload)
+        evidence.write_bytes(replacement.read_bytes())
+        result = self.call("recover-plan", payload, key=self.recovery_key)
+        self.assertEqual(result["recoveryHistory"][:-1], previous["recoveryHistory"])
+        entry = result["recoveryHistory"][-1]
+        self.assertEqual(self.digest({**entry["predecessor"], "recoveryHistory": previous["recoveryHistory"]}),
+                         entry["predecessorDigest"])
+        # A third recovery validates both detailed historical entries with no historical file reads.
+        current = self.call("save", {"phase": "repair"}, key=self.recovery_key)
+        evidence.unlink()
+        payload.update(expectedCheckpointDigest=self.digest(current), expectedHeadSha=current["headSha"],
+                       expectedPlanDigest=self.digest(current["reviewedProductionPlan"]),
+                       headSha="e" * 40, expectedEvidenceFiles={str(replacement): hashlib.sha256(replacement.read_bytes()).hexdigest()})
+        payload["reviewedProductionPlan"] = {**successor, "candidateHead": "e" * 40}
+        payload["livePr"]["headSha"] = "e" * 40
+        result = self.call("recover-plan", payload, key=self.recovery_key)
+        self.assertEqual(result["recoveryHistory"][:-1], current["recoveryHistory"])
+
+    def test_detailed_dual_field_plan_preserves_metadata_without_extra_retention(self):
+        old, payload, _ = self.detailed_recovery_fixture()
+        old["reviewedProductionPlan"]["evidence"] = [str(self.root / "not-a-freeze-reference.json")]
+        path = self.root / (hashlib.sha256(self.recovery_key.encode()).hexdigest() + ".json")
+        path.write_text(json.dumps(old))
+        payload.update(expectedCheckpointDigest=self.digest(old),
+                       expectedPlanDigest=self.digest(old["reviewedProductionPlan"]))
+        result = self.call("recover-plan", payload, key=self.recovery_key)
+        entry = result["recoveryHistory"][0]
+        self.assertEqual(entry["predecessor"], old)
+        self.assertEqual({row["path"] for row in entry["retainedEvidence"]},
+                         set(old["reviewedProductionPlan"]["premerge_evidence"]))
+        # Dual-field history must use the same authoritative field on replay.
+        previous = self.call("save", {"phase": "repair"}, key=self.recovery_key)
+        payload.update(expectedCheckpointDigest=self.digest(previous), expectedHeadSha=previous["headSha"],
+                       expectedPlanDigest=self.digest(previous["reviewedProductionPlan"]), headSha="d" * 40)
+        payload["livePr"]["headSha"] = "d" * 40
+        payload["reviewedProductionPlan"]["candidateHead"] = "d" * 40
+        result = self.call("recover-plan", payload, key=self.recovery_key)
+        self.assertEqual(result["recoveryHistory"][:-1], previous["recoveryHistory"])
+
+    def test_legacy_recovery_preserves_extra_premerge_metadata(self):
+        old, payload, evidence = self.recovery_fixture()
+        old["reviewedProductionPlan"]["premerge_evidence"] = [str(self.root / "not-a-legacy-freeze.json")]
+        path = self.root / (hashlib.sha256(self.recovery_key.encode()).hexdigest() + ".json")
+        path.write_text(json.dumps(old))
+        payload.update(expectedCheckpointDigest=self.digest(old),
+                       expectedPlanDigest=self.digest(old["reviewedProductionPlan"]))
+        result = self.call("recover-plan", payload, key=self.recovery_key)
+        entry = result["recoveryHistory"][0]
+        self.assertEqual(entry["predecessor"], old)
+        self.assertEqual(entry["predecessor"]["policyVersion"], 6)
+        self.assertEqual([row["path"] for row in entry["retainedEvidence"]], [str(evidence)])
+
+    def test_detailed_invalid_predecessor_schemas_reject_without_writes(self):
+        old, payload, evidence = self.detailed_recovery_fixture()
+        plan = old["reviewedProductionPlan"]
+        invalid = [None, {}, {**plan, "premerge_evidence": []},
+                   {k: v for k, v in plan.items() if k != "premerge_evidence"},
+                   {**plan, "premerge_evidence": [str(evidence)] * 2},
+                   {**plan, "premerge_evidence": [str(self.root / str(i)) for i in range(33)]},
+                   {**plan, "premerge_evidence": [42]}, {**plan, "candidateHead": "f" * 40},
+                   {**plan, "candidateBase": "f" * 40}, {**plan, "required": False},
+                   {**plan, "criteria": [plan["criteria"][0], "mixed"]},
+                   {**plan, "criteria": [{**plan["criteria"][0], "result": "SUCCESS"}]},
+                   {**plan, "criteria": [plan["criteria"][0]] * 2}]
+        path = self.root / (hashlib.sha256(self.recovery_key.encode()).hexdigest() + ".json")
+        for value in invalid:
+            with self.subTest(plan=value):
+                changed = {**old, "reviewedProductionPlan": value}
+                path.write_text(json.dumps(changed))
+                self.reject_recovery_unchanged({**payload, "expectedCheckpointDigest": self.digest(changed),
+                                               "expectedPlanDigest": self.digest(value)})
+
+    def test_detailed_exact_successor_owner_and_complete_hash_map_remain_required(self):
+        _, payload, evidence = self.detailed_recovery_fixture()
+        for field, value in [("owner", "Finance parent; task-a"), ("owner", "other")]:
+            invalid = copy.deepcopy(payload)
+            invalid["reviewedProductionPlan"][field] = value
+            self.reject_recovery_unchanged(invalid)
+        self.reject_recovery_unchanged(payload, owner="other")
+        for expected in [{}, {str(evidence): "0" * 64},
+                         {**payload["expectedEvidenceFiles"], "extra.json": "f" * 64}]:
+            self.reject_recovery_unchanged({**payload, "expectedEvidenceFiles": expected})
+        self.call("recover-plan", payload, key=self.recovery_key)
+
+    def test_detailed_recovery_atomic_replace_failure_keeps_registry_and_evidence(self):
+        _, payload, _ = self.detailed_recovery_fixture()
+        before = {p.name: p.read_bytes() for p in self.root.iterdir() if p.is_file() and p.name != "registry.lock"}
+        with patch("checkpoint.os.replace", side_effect=OSError("fixture replacement failure")):
+            with self.assertRaises(OSError):
+                self.call("recover-plan", payload, key=self.recovery_key)
+        self.assertEqual(before, {p.name: p.read_bytes() for p in self.root.iterdir()
+                                  if p.is_file() and p.name != "registry.lock"})
 
     def test_reviewed_recovery_preserves_exact_predecessor_and_freezes_successor(self):
         old, payload, evidence = self.recovery_fixture()

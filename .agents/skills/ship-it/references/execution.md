@@ -53,12 +53,29 @@ Supply a sanitized payload containing:
 - A concrete `reason`, nonempty `authorityEvidence`, `reviewEvidence`, `implementers` and
   `reviewers`. All reviewers must be independent of implementers. A same-candidate plan correction
   additionally needs `applicabilityCorrectionEvidence`; a no-op plan/candidate recovery is rejected.
-- `expectedEvidenceFiles`, mapping every original plan `evidence` path to its independently
-  accepted freeze SHA-256, and `predecessorEvidenceBinding` references to that accepted hash/review
+- `expectedEvidenceFiles`, mapping every historical freeze-reference path selected from the
+  original accepted plan schema to its independently accepted freeze SHA-256, and `predecessorEvidenceBinding` references to that accepted hash/review
   record. Do not derive expected hashes merely from files as they exist now. This bounded operation
   supports retained local file evidence only: at most 32 files and 256 KiB total raw bytes. Missing,
   remote, incomplete, changed or oversized evidence blocks recovery; retain a local reviewed
   snapshot when a plan needs remote evidence. Original files must remain untouched.
+
+Historical freeze references are selected without changing the predecessor object. A valid legacy
+string-criterion plan uses its top-level `evidence`; a valid candidate-bound detailed object-criterion
+plan uses `premerge_evidence`. Both recovery entry and retained-history replay use this same schema
+validation and selection. References must be unique and stay within the existing 32-file bound.
+For a detailed plan, any top-level `evidence` is preserved as additional metadata, exactly as the
+acceptance schema permits; it does not supplement or replace `premerge_evidence`. Conversely,
+extra `premerge_evidence` metadata does not replace legacy `evidence`. No loose field fallback is
+allowed for a malformed, mixed or incorrectly candidate-bound plan.
+
+Per-criterion detailed `evidence` may name future production observation destinations. These stay
+inside the exact retained plan but are not historical local freeze files: recovery never requires
+them to exist, generates their hashes or infers successful production acceptance from retention.
+The acceptance owner still authenticates independently accepted historical file hashes and the
+separately reviewed successor's exact claim-owner identity. Reload policy VERSION 7 before using
+this schema-aware recovery; earlier checkpoints and retained history keep their original versions
+and objects. A version reload alone grants no recovery authority or readiness.
 
 Evidence opens are nonblocking and the opened descriptor must identify a regular file. Symlinks
 to regular files are allowed only when the actual opened bytes match the accepted freeze hash;

@@ -125,6 +125,20 @@ def canonical_digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def historical_plan_references(plan, candidate):
+    """Select accepted local freeze references without altering either reviewed schema."""
+    ids = production_criterion_ids(plan, candidate) if isinstance(plan, dict) else None
+    if (ids is None or (plan["required"] and not ids)
+            or (not plan["required"] and (ids or not isinstance(plan.get("reason"), str)
+                                          or not plan["reason"].strip()))):
+        raise ValueError("Recovery predecessor reviewed plan schema is invalid")
+    detailed = bool(plan["criteria"]) and isinstance(plan["criteria"][0], dict)
+    references = plan["premerge_evidence"] if detailed else plan["evidence"]
+    if len(references) > 32 or len(set(references)) != len(references):
+        raise ValueError("Recovery predecessor references exceed bounds or contain duplicates")
+    return list(references)
+
+
 def validate_recovery_history(history):
     if not isinstance(history, list):
         raise ValueError("Recovery history is malformed")
@@ -146,8 +160,8 @@ def validate_recovery_history(history):
             raise ValueError("Recovery history predecessor digest is invalid")
         request, retained = entry.get("request"), entry.get("retainedEvidence")
         original_plan = predecessor.get("reviewedProductionPlan")
+        references = historical_plan_references(original_plan, predecessor)
         if (not isinstance(request, dict) or request.get("expectedCheckpointDigest") != entry["predecessorDigest"]
-                or not isinstance(original_plan, dict) or not strings(original_plan.get("evidence"))
                 or request.get("expectedPlanDigest") != canonical_digest(original_plan)
                 or any(request.get("expected" + k[0].upper() + k[1:]) != predecessor.get(k)
                        for k in ("headSha", "baseSha"))
@@ -171,7 +185,7 @@ def validate_recovery_history(history):
                 raise ValueError("Recovery history retained bytes are invalid") from None
             remaining -= len(raw)
             actual[path] = digest
-        if actual != expected or set(actual) != set(original_plan["evidence"]):
+        if actual != expected or set(actual) != set(references):
             raise ValueError("Recovery history retained evidence is incomplete")
 
 
@@ -235,10 +249,9 @@ def recover_plan(root, key, record, owner, payload):
     same_candidate = head == record["headSha"] and base == record["baseSha"]
     if same_candidate and (successor == plan or not strings(payload.get("applicabilityCorrectionEvidence"))):
         raise ValueError("Recovery needs a changed candidate or concrete reviewed applicability correction")
-    references = plan.get("evidence") if isinstance(plan, dict) else None
+    references = historical_plan_references(plan, record)
     expected = payload.get("expectedEvidenceFiles")
-    if (not strings(references) or len(references) > 32 or len(set(references)) != len(references)
-            or not isinstance(expected, dict) or set(expected) != set(references)
+    if (not isinstance(expected, dict) or set(expected) != set(references)
             or any(not isinstance(v, str) or not re.fullmatch(r"[a-f0-9]{64}", v) for v in expected.values())):
         raise ValueError("Recovery needs the complete independently accepted predecessor file hashes")
     retained, remaining = [], 256 * 1024

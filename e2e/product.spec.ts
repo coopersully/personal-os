@@ -195,12 +195,15 @@ test("desktop navigation fills the viewport while long content scrolls independe
     await expect(switcher).toBeVisible();
     await switcher.click();
     await page.getByRole("menuitem", { name: "Calendar", exact: true }).click();
-    const headerPadding = await page.locator(".workspace-app-bar").evaluate((header) => {
-      const style = getComputedStyle(header);
-      return { left: style.paddingLeft, right: style.paddingRight };
-    });
-    expect(headerPadding.left).toBe(headerPadding.right);
-    expect(Number.parseFloat(headerPadding.left)).toBeGreaterThan(0);
+    await expect(page.locator(".workspace-app-bar")).toHaveAttribute("data-workspace", "calendar");
+    await expect(async () => {
+      const headerPadding = await page.locator(".workspace-app-bar").evaluate((header) => {
+        const style = getComputedStyle(header);
+        return { left: style.paddingLeft, right: style.paddingRight };
+      });
+      expect(headerPadding.left).toBe(headerPadding.right);
+      expect(Number.parseFloat(headerPadding.left)).toBeGreaterThan(0);
+    }).toPass({ timeout: 5000 });
     const storedSidebar = await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"));
     await page.keyboard.press("Control+b");
     expect(await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"))).toBe(

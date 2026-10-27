@@ -1231,6 +1231,8 @@ uses the same search-above-title arrangement. Breadcrumbs use the tertiary conte
 tone and normal weight so they remain subordinate to the title. Links retain hover
 feedback and use a foreground/secondary-surface cue for visible keyboard focus.
 Breadcrumbs never increase bar height.
+When the rail is hidden without a sidebar, reserve the floating workspace icon in
+the upper search row only; keep the lower title row equally inset.
 Spatial calendar axes and mail message actions retain their domain context below
 the shared header. Today may retain its compact single-row orientation.
 

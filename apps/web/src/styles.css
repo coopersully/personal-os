@@ -7095,8 +7095,13 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 .app-shell[data-rail-collapsed="true"] .workspace-sidebar__header {
   padding-inline-start: 3rem;
 }
-.app-shell[data-rail-collapsed="true"]:not([data-sidebar-state]) .workspace-app-bar {
+/* A floating workspace icon needs room only in the upper search row. */
+.app-shell[data-rail-collapsed="true"]:not([data-sidebar-state]) .workspace-app-bar:not([data-header-layout="sentence"]),
+.app-shell[data-rail-collapsed="true"]:not([data-sidebar-state]) .workspace-app-bar[data-workspace="today"] {
   padding-inline-start: 3rem;
+}
+.app-shell[data-rail-collapsed="true"]:not([data-sidebar-state]) .workspace-app-bar[data-header-layout="sentence"]:not([data-workspace="today"]) > .workspace-app-bar__context {
+  margin-inline-start: calc(3rem - var(--workspace-inline-padding));
 }
 
 /* Shared navigation motion: short layout shifts with the existing spatial easing. */

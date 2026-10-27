@@ -29,8 +29,10 @@ a claim that a host automatically enforces the gate.
 The later tracking/heartbeat correction makes `work-context.md` the lifecycle owner for all assigned
 durable work and requires live presentation checks on every oversight heartbeat. The subsequent human
 October 26 correction supersedes subject-only titles with `ISSUE-ID - Issue name` from verified
-Nohmi issue or parent mappings. Prefer concise durable issue subjects, preserve phase stability and
-later explicit exceptions, and use the current project-manager checklist for reconciliation. Repository instructions
+Nohmi issue or parent mappings. Cooper’s October 27 exception now names oversight chats exactly
+`👀 - <epic name>` from their verified parent while ordinary children retain the issue-prefix rule.
+Prefer concise durable issue subjects, preserve phase stability and the exact `Nohmi project manager`
+exception, and use the current project-manager checklist for reconciliation. Repository instructions
 are the authority; installed wrappers delegating here must reload them. This change does not claim
 those external installations have been edited or that a scheduled pass has executed.
 
@@ -43,7 +45,8 @@ runtime tests or proof a host tool works.
 | --- | --- |
 | Unchanged oversight heartbeat | Read live section name/membership/order, dedicated titles and direct issue coverage anyway; retain checked-at/readback in the existing setup entry; no redundant mutation, duplicate issue or status comment |
 | Dedicated epic section retains an old name | Verify stable section ID/membership and current parent issue; rename only proven stale dedicated name to the epic name, preserving ID; shared or user-protected names remain excluded with evidence |
-| Dedicated implementation changes phase or assigned issue | Verify the issue/parent mapping and owner; use `ISSUE-ID - Issue name`, keeping phases out of titles and multi-slice oversight on its parent; reconcile changed issue names and preserve later exceptions/shared chats |
+| Dedicated implementation changes phase or assigned issue | Verify the direct issue mapping and owner; use `ISSUE-ID - Issue name`, keeping phases out of titles; reconcile changed issue names and preserve later exceptions/shared chats |
+| Oversight coordinates several children | Verify the epic parent and keep its mapping; name the oversight exactly `👀 - <epic name>` on kickoff and every heartbeat, without replacing the manager's exact name or touching shared chats |
 | Older installed wrapper prescribes subject-only names or universal Lead prefixes | Load current repository owner through agent-context/AGENTS; use current naming and record installed adoption separately; do not edit generic personal skills |
 | Required sidebar or tracker source is missing on a heartbeat | Retain last verified receipt and explicit gap; do not call the pass unchanged/setup-complete; block dependent new dispatch, preserve active owners and continue independent work |
 | Setup mutation succeeds but readback fails or times out | Record uncertain result and inspect live object before retry; never duplicate creation or report verified success |

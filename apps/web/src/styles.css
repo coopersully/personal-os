@@ -8894,6 +8894,12 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
   min-height: 2rem;
   line-height: 1.5rem;
 }
+/* Keep keyboard focus clear without giving resting breadcrumbs title-level emphasis. */
+.workspace-page-breadcrumbs [data-slot="breadcrumb-link"]:focus-visible {
+  color: var(--foreground);
+  background: var(--secondary);
+  border-radius: .125rem;
+}
 .workspace-page-breadcrumbs [data-slot="breadcrumb-separator"] > svg { width: .625rem; height: .625rem; }
 .workspace-app-bar__page-title:has(.settings-page-heading) > .workspace-page-breadcrumbs { display: none; }
 .settings-page-heading { display: flex; flex-direction: column; align-items: flex-start; }

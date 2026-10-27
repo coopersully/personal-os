@@ -103,9 +103,24 @@ The owner inspects the actual review, identities, exact bytes, original path bin
 sources before invocation. The parser validates assertions; strings cannot authenticate reviewers,
 actual acceptance time, historical truth or continuity before the earliest retained measurement.
 
-Retain stronger original hash attestations as historical. Keep fresh-only records explicitly
-historically unavailable forever; do not relabel them as historical proof in later recovery. The
-request and each exact typed record are retained with the original bytes and hash. Typed history
+Retain stronger original hash attestations as historical. Original fresh-only declarations remain
+historically unavailable in their immutable history entries. Entry and replay track each unavailable
+freeze origin by predecessor head/base/plan digest and exact path/hash. A later recovery of that
+same file identity must carry fresh-only provenance forward; flat hashes or bare historical
+relabeling reject. Different bytes or unrelated paths do not inherit that origin's limitation.
+
+A genuinely newer freeze can supply its own historical attestation without proving the earlier
+unknown freeze. For that case only, a historical row must include `newFreezeBinding` with exact
+`checkpointDigest`, `planDigest`, `headSha`, `baseSha`, `path`, `sha256` and `review` fields.
+The context must match the current predecessor request and file; its head/base/plan origin must
+be distinct from every previously unavailable origin for that file identity. A changed phase or
+checkpoint digest alone does not make a new freeze. `review` uses the same exact fields, aware
+actual acceptance time and independent-author rules as `currentReview`. Its evidence must
+independently attest the bytes at that newer freeze; a new review of current bytes alone cannot
+supply a missing freeze-time hash. The owner authenticates those sources. Both declarations remain
+in history: newer-freeze proof never repairs or removes the earlier unavailable status.
+
+The request and each exact typed record are retained with the original bytes and hash. Typed history
 adds `recoveredAt`; replay uses this retained instant, including offset-aware comparisons, rather
 than the current clock. Entry and replay use the same versioned provenance parser and complete
 path set. A missing/malformed class, independence/time gap, inconsistent retained provenance,

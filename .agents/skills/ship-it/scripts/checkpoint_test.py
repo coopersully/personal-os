@@ -104,6 +104,145 @@ class CheckpointTest(unittest.TestCase):
         except ValueError as error:
             self.fail(f"Truthful typed predecessor recovery was rejected: {error}")
 
+    def sequential_typed_recovery_fixture(self, successor_references=None):
+        old, payload, paths = self.typed_recovery_fixture()
+        if successor_references is not None:
+            payload["reviewedProductionPlan"]["premerge_evidence"] = successor_references
+        first = self.typed_recovery(payload)
+        previous = self.call("save", {"phase": "repair"}, key=self.recovery_key)
+        next_payload = copy.deepcopy(payload)
+        next_payload.update(expectedCheckpointDigest=self.digest(previous), expectedHeadSha=previous["headSha"],
+                            expectedPlanDigest=self.digest(previous["reviewedProductionPlan"]), headSha="d" * 40)
+        next_payload["reviewedProductionPlan"]["candidateHead"] = "d" * 40
+        next_payload["livePr"]["headSha"] = "d" * 40
+        return old, first, previous, next_payload, paths
+
+    def newer_freeze_binding(self, payload, path, row):
+        return {"checkpointDigest": payload["expectedCheckpointDigest"], "planDigest": payload["expectedPlanDigest"],
+                "headSha": payload["expectedHeadSha"], "baseSha": payload["expectedBaseSha"],
+                "path": path, "sha256": row["sha256"],
+                "review": {"acceptedAt": "2026-01-01T01:00:00+01:00", "evidence": ["new-freeze-hash-attestation.json"],
+                           "implementers": ["narrative-author"], "reviewers": ["new-freeze-reviewer"]}}
+
+    def historical_rows(self, payload, with_new_binding=False):
+        result = copy.deepcopy(payload)
+        for path, row in list(result["expectedEvidenceFiles"].items()):
+            if row["classification"] == "fresh_exact_bytes_historical_hash_unavailable":
+                historical = {"classification": "historical_hash_attested", "historicalProofAvailable": True,
+                              "sha256": row["sha256"], "bindingEvidence": ["new-successor-path-binding.json"],
+                              "historicalReviewEvidence": ["new-freeze-hash-attestation.json"]}
+                if with_new_binding:
+                    historical["newFreezeBinding"] = self.newer_freeze_binding(result, path, row)
+                result["expectedEvidenceFiles"][path] = historical
+        return result
+
+    def test_cross_recovery_rejects_unbound_flat_and_historical_promotion(self):
+        old, _, _, payload, paths = self.sequential_typed_recovery_fixture()
+        flat = copy.deepcopy(payload)
+        del flat["evidenceProvenanceVersion"]
+        flat["expectedEvidenceFiles"] = {p: row["sha256"] for p, row in flat["expectedEvidenceFiles"].items()}
+        self.reject_recovery_unchanged(flat)
+        self.reject_recovery_unchanged(self.historical_rows(payload))
+        historical = self.historical_rows(payload, with_new_binding=True)
+        for field, value in [("checkpointDigest", self.digest(old)),
+                             ("planDigest", self.digest(old["reviewedProductionPlan"])),
+                             ("headSha", old["headSha"]), ("path", "other-path"), ("sha256", "0" * 64)]:
+            invalid = copy.deepcopy(historical)
+            invalid["expectedEvidenceFiles"][str(paths[-1])]["newFreezeBinding"][field] = value
+            self.reject_recovery_unchanged(invalid)
+        for field, value in [("acceptedAt", "2399-01-01T00:00:00Z"), ("acceptedAt", "2026-01-01T00:00:00"),
+                             ("reviewers", ["worker"]), ("reviewers", ["narrative-author"]), ("evidence", [])]:
+            invalid = copy.deepcopy(historical)
+            invalid["expectedEvidenceFiles"][str(paths[-1])]["newFreezeBinding"]["review"][field] = value
+            self.reject_recovery_unchanged(invalid)
+
+    def test_cross_recovery_fresh_continuation_replays_and_rejects_reclassification(self):
+        _, first, _, payload, paths = self.sequential_typed_recovery_fixture()
+        result = self.typed_recovery(payload)
+        self.assertEqual(result["recoveryHistory"][:-1], first["recoveryHistory"])
+        from checkpoint import validate_recovery_history
+        for path in paths:
+            path.unlink()
+        validate_recovery_history(result["recoveryHistory"])
+        for mode in ("flat", "historical"):
+            with self.subTest(mode=mode):
+                history = copy.deepcopy(result["recoveryHistory"])
+                entry = history[-1]
+                if mode == "flat":
+                    del entry["request"]["evidenceProvenanceVersion"]
+                    entry["request"]["expectedEvidenceFiles"] = {p: row["sha256"] for p, row in entry["request"]["expectedEvidenceFiles"].items()}
+                    for item in entry["retainedEvidence"]:
+                        del item["provenance"]
+                else:
+                    entry["request"] = self.historical_rows(entry["request"])
+                    for item in entry["retainedEvidence"]:
+                        item["provenance"] = copy.deepcopy(entry["request"]["expectedEvidenceFiles"][item["path"]])
+                with self.assertRaises(ValueError):
+                    validate_recovery_history(history)
+
+    def test_cross_recovery_accepts_independently_bound_new_freeze_without_rewriting_old(self):
+        _, first, _, payload, paths = self.sequential_typed_recovery_fixture()
+        historical = self.historical_rows(payload, with_new_binding=True)
+        result = self.typed_recovery(historical)
+        self.assertEqual(result["recoveryHistory"][:-1], first["recoveryHistory"])
+        self.assertIs(first["recoveryHistory"][0]["retainedEvidence"][-1]["provenance"]["historicalProofAvailable"], False)
+        item = result["recoveryHistory"][-1]["retainedEvidence"][-1]
+        self.assertIs(item["provenance"]["historicalProofAvailable"], True)
+        self.assertEqual(item["provenance"]["newFreezeBinding"]["planDigest"], payload["expectedPlanDigest"])
+        from checkpoint import validate_recovery_history
+        for path in paths:
+            path.unlink()
+        validate_recovery_history(result["recoveryHistory"])
+        history = copy.deepcopy(result["recoveryHistory"])
+        last = history[-1]
+        # A consistent altered request/retained copy cannot claim the old unknown freeze as new.
+        for row in last["request"]["expectedEvidenceFiles"].values():
+            if "newFreezeBinding" in row:
+                row["newFreezeBinding"]["planDigest"] = history[0]["request"]["expectedPlanDigest"]
+        for retained in last["retainedEvidence"]:
+            retained["provenance"] = copy.deepcopy(last["request"]["expectedEvidenceFiles"][retained["path"]])
+        with self.assertRaises(ValueError):
+            validate_recovery_history(history)
+
+    def test_cross_recovery_checkpoint_phase_changes_do_not_create_a_new_freeze_origin(self):
+        _, first, _, payload, _ = self.sequential_typed_recovery_fixture()
+        second = self.typed_recovery(payload)
+        previous = self.call("save", {"phase": "repair"}, key=self.recovery_key)
+        restore = copy.deepcopy(payload)
+        restore.update(expectedCheckpointDigest=self.digest(previous), expectedHeadSha=previous["headSha"],
+                       expectedPlanDigest=self.digest(previous["reviewedProductionPlan"]), headSha=first["headSha"],
+                       reviewedProductionPlan=copy.deepcopy(first["reviewedProductionPlan"]))
+        restore["livePr"]["headSha"] = first["headSha"]
+        self.typed_recovery(restore)
+        previous = self.call("save", {"phase": "repair"}, key=self.recovery_key)
+        attempt = copy.deepcopy(restore)
+        attempt.update(expectedCheckpointDigest=self.digest(previous), expectedHeadSha=previous["headSha"],
+                       expectedPlanDigest=self.digest(previous["reviewedProductionPlan"]), headSha="e" * 40)
+        attempt["reviewedProductionPlan"]["candidateHead"] = "e" * 40
+        attempt["livePr"]["headSha"] = "e" * 40
+        self.reject_recovery_unchanged(self.historical_rows(attempt, with_new_binding=True))
+        self.assertEqual(previous["headSha"], first["headSha"])
+        self.assertEqual(previous["reviewedProductionPlan"], second["recoveryHistory"][-1]["predecessor"]["reviewedProductionPlan"])
+
+    def test_cross_recovery_does_not_taint_different_bytes_or_unrelated_paths(self):
+        _, _, _, payload, paths = self.sequential_typed_recovery_fixture()
+        for path in paths:
+            path.write_bytes(b"genuinely new predecessor material\n")  # Private fixture only; old bytes remain in history.
+        flat = copy.deepcopy(payload)
+        del flat["evidenceProvenanceVersion"]
+        flat["expectedEvidenceFiles"] = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+        result = self.call("recover-plan", flat, key=self.recovery_key)
+        self.assertEqual(result["phase"], "review")
+        # New accepted paths with the same content are a different file identity.
+        from checkpoint import recovery_evidence_bindings, validate_provenance_continuity
+        references = [str(self.root / f"unrelated-{i}") for i in range(6)]
+        request = copy.deepcopy(payload)
+        request.pop("evidenceProvenanceVersion")
+        request["expectedEvidenceFiles"] = {p: row["sha256"] for p, row in zip(references, payload["expectedEvidenceFiles"].values())}
+        expected, provenance = recovery_evidence_bindings(request, references)
+        unknown = {(str(p), payload["expectedEvidenceFiles"][str(p)]["sha256"]): {("a" * 40, "b" * 40, "0" * 64)} for p in paths}
+        validate_provenance_continuity(request, expected, provenance, unknown)
+
     def test_typed_recovery_preserves_six_exact_files_and_two_provenance_classes(self):
         old, payload, paths = self.typed_recovery_fixture()
         original_bytes = {str(p): p.read_bytes() for p in paths}

@@ -149,6 +149,29 @@ def review_instant(value):
         raise ValueError("Recovery provenance requires a timezone-aware ISO review time") from None
 
 
+def validate_current_review(review, request, recovered):
+    if (not isinstance(review, dict) or set(review) != {"acceptedAt", "evidence", "implementers", "reviewers"}
+            or not all(strings(review.get(k)) for k in ("evidence", "implementers", "reviewers"))):
+        raise ValueError("Recovery provenance requires an exact independent review record")
+    if (any(len(review[k]) != len(set(review[k])) for k in ("implementers", "reviewers"))
+            or set(review["reviewers"]) & (set(review["implementers"]) | set(request["implementers"]))
+            or review_instant(review["acceptedAt"]) > recovered):
+        raise ValueError("Recovery provenance review identity or acceptance time is invalid")
+
+
+def validate_provenance_continuity(request, expected, provenance, unavailable):
+    """Preserve unknown original freezes without tainting genuine new accepted origins."""
+    origin = (request.get("expectedHeadSha"), request.get("expectedBaseSha"), request.get("expectedPlanDigest"))
+    for path, digest in expected.items():
+        prior = unavailable.get((path, digest), set())
+        row = provenance.get(path)
+        if prior and (not row or row["classification"] != "fresh_exact_bytes_historical_hash_unavailable"):
+            if (not row or "newFreezeBinding" not in row or origin in prior):
+                raise ValueError("Prior unavailable freeze proof requires fresh continuity or a distinct accepted new freeze")
+        if row and row["classification"] == "fresh_exact_bytes_historical_hash_unavailable":
+            unavailable.setdefault((path, digest), set()).add(origin)
+
+
 def recovery_evidence_bindings(request, references, recovered_at=None, legacy_history=False):
     """Validate asserted provenance, never authenticate the referenced human/reviewer facts."""
     expected = request.get("expectedEvidenceFiles")
@@ -176,22 +199,28 @@ def recovery_evidence_bindings(request, references, recovered_at=None, legacy_hi
             raise ValueError("Recovery file provenance is incomplete")
         classification = row.get("classification")
         if classification == "historical_hash_attested":
-            if (set(row) != common | {"historicalReviewEvidence"}
-                    or row.get("historicalProofAvailable") is not True
+            fields = common | {"historicalReviewEvidence"}
+            if "newFreezeBinding" in row:
+                fields.add("newFreezeBinding")
+            if (set(row) != fields or row.get("historicalProofAvailable") is not True
                     or not strings(row.get("historicalReviewEvidence"))):
                 raise ValueError("Historical provenance requires original independent hash evidence")
+            if "newFreezeBinding" in row:
+                binding = row["newFreezeBinding"]
+                context = {"checkpointDigest": request.get("expectedCheckpointDigest"),
+                           "planDigest": request.get("expectedPlanDigest"), "headSha": request.get("expectedHeadSha"),
+                           "baseSha": request.get("expectedBaseSha"), "path": reference, "sha256": row["sha256"]}
+                if (not isinstance(binding, dict) or set(binding) != set(context) | {"review"}
+                        or {k: binding[k] for k in context} != context):
+                    raise ValueError("New freeze evidence must bind the exact newer predecessor and file")
+                validate_current_review(binding["review"], request, recovered)
         elif classification == "fresh_exact_bytes_historical_hash_unavailable":
             review = row.get("currentReview")
             if (set(row) != common | {"continuityEvidence", "currentReview"}
                     or row.get("historicalProofAvailable") is not False
-                    or not strings(row.get("continuityEvidence")) or not isinstance(review, dict)
-                    or set(review) != {"acceptedAt", "evidence", "implementers", "reviewers"}
-                    or not all(strings(review.get(k)) for k in ("evidence", "implementers", "reviewers"))):
+                    or not strings(row.get("continuityEvidence"))):
                 raise ValueError("Fresh provenance requires exact-byte review and truthful historical unavailability")
-            if (any(len(review[k]) != len(set(review[k])) for k in ("implementers", "reviewers"))
-                    or set(review["reviewers"]) & (set(review["implementers"]) | set(request["implementers"]))
-                    or review_instant(review["acceptedAt"]) > recovered):
-                raise ValueError("Fresh provenance review identity or acceptance time is invalid")
+            validate_current_review(review, request, recovered)
         else:
             raise ValueError("Recovery file provenance classification is unsupported")
         hashes[reference] = row["sha256"]
@@ -201,6 +230,7 @@ def recovery_evidence_bindings(request, references, recovered_at=None, legacy_hi
 def validate_recovery_history(history):
     if not isinstance(history, list):
         raise ValueError("Recovery history is malformed")
+    unavailable = {}
     for index, entry in enumerate(history):
         if not isinstance(entry, dict):
             raise ValueError("Recovery history entry is malformed")
@@ -254,6 +284,8 @@ def validate_recovery_history(history):
             actual[path] = digest
         if actual != expected or set(actual) != set(references):
             raise ValueError("Recovery history retained evidence is incomplete")
+        validate_provenance_continuity(request, expected, provenance, unavailable)
+    return unavailable
 
 
 def recover_plan(root, key, record, owner, payload):
@@ -284,7 +316,7 @@ def recover_plan(root, key, record, owner, payload):
             or any(not sha(record.get(k)) or payload.get("expected" + k[0].upper() + k[1:]) != record[k]
                    for k in ("headSha", "baseSha"))):
         raise ValueError("Recovery predecessor changed; re-read the checkpoint and accepted freeze")
-    validate_recovery_history(record.get("recoveryHistory", []))
+    unavailable = validate_recovery_history(record.get("recoveryHistory", []))
     head, base = payload.get("headSha"), payload.get("baseSha")
     live = payload.get("livePr") or {}
     if (not isinstance(live, dict) or not sha(head) or not sha(base) or live.get("url") != key
@@ -319,6 +351,7 @@ def recover_plan(root, key, record, owner, payload):
     references = historical_plan_references(plan, record)
     recovered_at = datetime.now(timezone.utc).isoformat()
     expected, provenance = recovery_evidence_bindings(payload, references, recovered_at)
+    validate_provenance_continuity(payload, expected, provenance, unavailable)
     retained, remaining = [], 256 * 1024
     for reference in references:
         try:

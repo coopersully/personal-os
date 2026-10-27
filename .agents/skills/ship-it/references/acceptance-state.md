@@ -79,7 +79,10 @@ VERSION 8 recovery can explicitly retain typed per-file provenance without chang
 independent acceptance schema or policy revision 4. Historically hash-attested files retain their
 original proof; freshly reviewed exact bytes with unavailable historical proof retain that distinct
 classification, actual aware review time, author/reviewer separation and continuity/path references.
-Neither class nor retained bytes satisfy readiness or production observations. Entry/history share
+Neither class nor retained bytes satisfy readiness or production observations. Later retention
+preserves unavailable original origins; a historical claim for the same path/hash needs an explicit
+independently accepted newer predecessor-freeze binding, never flat relabeling of the old unknown
+freeze. The immutable earlier declaration remains unavailable. Entry/history share
 the versioned validation; pre-VERSION-8 history extras remain opaque and unchanged. See the
 [typed recovery contract](execution.md#typed-file-provenance-version-8). The acceptance owner must
 authenticate these underlying review/provenance assertions; helper validation cannot do so.

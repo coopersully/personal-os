@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  closeSync,
+  futimesSync,
   linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -22,6 +25,7 @@ import { collect, LIMITS, prepare } from "./collect-node-coverage.mjs";
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const helper = resolve(import.meta.dirname, "collect-node-coverage.mjs");
+const fixtureTimes = new Map();
 
 function fixture(run, event = "pull_request") {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "nohmi-coverage-")));
@@ -75,9 +79,13 @@ function fixture(run, event = "pull_request") {
   }
   const options = { workspace, staging, env };
   try {
-    prepare(options);
+    const marker = prepare(options);
+    // Control synthetic report time; filesystem timestamps need not track Date.now().
+    // Whole seconds avoid sub-millisecond conversion ambiguity without sleeps or tolerances.
+    fixtureTimes.set(workspace, Math.floor(marker.startedMs / 1000) + 1);
     return run({ root, workspace, staging, env, options });
   } finally {
+    fixtureTimes.delete(workspace);
     rmSync(root, { recursive: true, force: true });
   }
 }
@@ -107,12 +115,26 @@ function reports(workspace) {
   return { summary, map };
 }
 
+function writeReport(workspace, name, data) {
+  assert.ok(["coverage-summary.json", "coverage-final.json"].includes(name));
+  const seconds = fixtureTimes.get(workspace);
+  assert.ok(Number.isSafeInteger(seconds));
+  const directory = join(workspace, "coverage");
+  assert.ok(lstatSync(directory).isDirectory());
+  assert.equal(realpathSync(directory), directory);
+  // Exclusive creation refuses existing links/special files; timestamp the opened file.
+  const fd = openSync(join(directory, name), "wx");
+  try {
+    writeFileSync(fd, data);
+    futimesSync(fd, seconds, seconds);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function writeReports(workspace, values = reports(workspace)) {
-  writeFileSync(
-    join(workspace, "coverage", "coverage-summary.json"),
-    JSON.stringify(values.summary),
-  );
-  writeFileSync(join(workspace, "coverage", "coverage-final.json"), JSON.stringify(values.map));
+  writeReport(workspace, "coverage-summary.json", JSON.stringify(values.summary));
+  writeReport(workspace, "coverage-final.json", JSON.stringify(values.map));
 }
 
 function retainedReportFailure(workspace, staging, result) {
@@ -156,6 +178,49 @@ function retainedReportFailure(workspace, staging, result) {
     return "Synthetic retention diagnostic unavailable; original collection assertion failed.";
   }
 }
+
+test("synthetic report timestamps are explicitly fresh relative to their prepare marker", () =>
+  fixture(({ workspace, staging }) => {
+    writeReports(workspace);
+    const marker = JSON.parse(readFileSync(join(staging, ".prepare.json"), "utf8"));
+    for (const name of ["coverage-summary.json", "coverage-final.json"]) {
+      const stat = lstatSync(join(workspace, "coverage", name));
+      assert.equal(stat.mtimeMs, (Math.floor(marker.startedMs / 1000) + 1) * 1000);
+      assert.ok(stat.mtimeMs > marker.startedMs);
+    }
+  }));
+
+for (const kind of ["symlink", "hardlink", "fifo"]) {
+  test(
+    `fixture writer refuses an existing ${kind} without following it`,
+    {
+      skip: kind === "fifo" && process.platform === "win32",
+    },
+    () =>
+      fixture(({ root, workspace }) => {
+        const outside = join(root, "outside.json");
+        const target = join(workspace, "coverage", "coverage-summary.json");
+        writeFileSync(outside, "untouched");
+        if (kind === "symlink") symlinkSync(outside, target);
+        else if (kind === "hardlink") linkSync(outside, target);
+        else execFileSync("mkfifo", [target]);
+        assert.throws(() => writeReport(workspace, "coverage-summary.json", "replacement"), {
+          code: "EEXIST",
+        });
+        assert.equal(readFileSync(outside, "utf8"), "untouched");
+      }),
+  );
+}
+
+test("fixture writer refuses a replaced coverage directory", () =>
+  fixture(({ root, workspace }) => {
+    const directory = join(workspace, "coverage");
+    const outside = join(root, "outside");
+    renameSync(directory, outside);
+    symlinkSync(outside, directory);
+    assert.throws(() => writeReport(workspace, "coverage-summary.json", "replacement"));
+    assert.throws(() => readFileSync(join(outside, "coverage-summary.json")));
+  }));
 
 test("retention failure context preserves synthetic manifest, marker and file stats", () =>
   fixture(({ workspace, staging }) => {
@@ -287,7 +352,7 @@ test("rejects a marker from a different source attempt", () =>
 
 test("rejects malformed JSON without uploading its bytes", () =>
   fixture(({ workspace, staging, options }) => {
-    writeFileSync(join(workspace, "coverage", "coverage-summary.json"), "{invalid");
+    writeReport(workspace, "coverage-summary.json", "{invalid");
     const result = collect(options);
     assert.equal(result.exitCode, 1);
     assert.equal(result.manifest.files[0].reason, "invalid_json");
@@ -390,7 +455,7 @@ test("file and aggregate budgets exclude whole files without truncation", () =>
 
 test("oversized inputs are rejected before JSON parsing", () =>
   fixture(({ workspace, options }) => {
-    writeFileSync(join(workspace, "coverage", "coverage-summary.json"), "x".repeat(1025));
+    writeReport(workspace, "coverage-summary.json", "x".repeat(1025));
     const result = collect({
       ...options,
       limits: { summary: 1024, detailed: 1024, total: 2048, manifest: LIMITS.manifest },
@@ -440,7 +505,7 @@ for (const [name, key, index] of [
   test(`${name} enforces its default hard limit without reading a sparse oversized file`, () =>
     fixture(({ workspace, staging, options }) => {
       const path = join(workspace, "coverage", name);
-      writeFileSync(path, "");
+      writeReport(workspace, name, "");
       truncateSync(path, LIMITS[key] + 1);
       const result = collect(options);
       assert.deepEqual(result.manifest.files[index], {
@@ -482,7 +547,7 @@ test("manifest overflow fails before publishing an uploadable manifest", () =>
 
 test("rejects invalid UTF-8 rather than changing input bytes", () =>
   fixture(({ workspace, options }) => {
-    writeFileSync(join(workspace, "coverage", "coverage-summary.json"), Buffer.from([0xff]));
+    writeReport(workspace, "coverage-summary.json", Buffer.from([0xff]));
     assert.equal(collect(options).manifest.files[0].reason, "invalid_json");
   }));
 

@@ -8,10 +8,10 @@ import {
   financeCompletionScope,
   financeCompletionTargetSchema,
   requestFinanceCompletionInputSchema,
-  sealFinanceCompletionManifest,
   sealFinanceCompletionCapture,
-  validateFinanceCompletionCaptureEvidence,
+  sealFinanceCompletionManifest,
   validateFinanceCompletionBaselineExpansion,
+  validateFinanceCompletionCaptureEvidence,
   validateFinanceCompletionManifestEvidence,
 } from "./completion.js";
 
@@ -104,6 +104,67 @@ describe("completion capture evidence including zero", () => {
       })),
     };
   }
+  it("retains the terminal empty-page cursor after an exact full capture page", () => {
+    const valid = capture(500);
+    const last = valid.targets.at(-1);
+    if (!last) throw new Error("Missing capture cursor");
+    const complete = {
+      ...valid,
+      pageCount: 2,
+      terminalPage: { after: `${last.kind}:${last.id}`, rowCount: 0 },
+    };
+    const sealed = sealFinanceCompletionCapture(complete, digest);
+    expect(
+      validateFinanceCompletionCaptureEvidence(
+        sealed.root,
+        sealed.manifest.root,
+        sealed.manifest.chunks,
+        digest,
+      ),
+    ).toEqual(sealed);
+    expect(() =>
+      sealFinanceCompletionCapture(
+        { ...complete, terminalPage: { after: null, rowCount: 0 } },
+        digest,
+      ),
+    ).toThrow();
+  });
+  it("rejects capture kind-count, order and source-anchor substitutions even with the same target count", () => {
+    const valid = capture(2);
+    expect(() =>
+      sealFinanceCompletionCapture(
+        { ...valid, counts: { transactionFlags: 1, reviewCases: 1 } },
+        digest,
+      ),
+    ).toThrow();
+    expect(() =>
+      sealFinanceCompletionCapture({ ...valid, targets: [...valid.targets].reverse() }, digest),
+    ).toThrow();
+    const first = valid.targets[0];
+    if (!first) throw new Error("Missing capture target");
+    for (const sourceAnchors of [
+      [{ kind: "current_backlog", snapshot: "b".repeat(64), capturedRevision: "1" }],
+      [{ kind: "audit", id: id(77), capturedRevision: "1" }],
+      [...first.sourceAnchors, { kind: "audit", id: id(77), capturedRevision: "1" }],
+    ])
+      expect(() =>
+        sealFinanceCompletionCapture(
+          { ...valid, targets: [{ ...first, sourceAnchors }, ...valid.targets.slice(1)] },
+          digest,
+        ),
+      ).toThrow();
+  });
+  it("rejects a changed retained capture hash while the separately sealed target manifest remains valid", () => {
+    const sealed = sealFinanceCompletionCapture(capture(1), digest);
+    expect(() =>
+      validateFinanceCompletionCaptureEvidence(
+        { ...sealed.root, captureHash: `sha256:${"0".repeat(64)}` },
+        sealed.manifest.root,
+        sealed.manifest.chunks,
+        digest,
+      ),
+    ).toThrow("source_inconsistent");
+  });
   it("seals a complete zero capture independently of its empty target chunks", () => {
     const sealed = sealFinanceCompletionCapture(capture(0), digest);
     expect(sealed.root).toMatchObject({
@@ -256,6 +317,30 @@ describe("Finance completion wire contract", () => {
       ).toBe(false);
   });
 
+  it("canonicalizes explicit audit target order and duplicate audit IDs without dropping exact batch-item binding", () => {
+    const input = request();
+    const a = {
+      kind: "review_case",
+      id: id(10),
+      auditIds: [id(9), id(8), id(9)],
+      batchItem: { batchId: id(20), index: 0 },
+    };
+    const b = { kind: "transaction_flag", id: id(11), auditIds: [id(7)] };
+    const normalize = (auditTargets: unknown[]) =>
+      canonicalizeFinanceCompletionRequest({
+        ...input,
+        historicalSources: { batches: [], auditTargets },
+      });
+    const first = normalize([a, b, a]);
+    expect(first.canonical).toBe(normalize([b, { ...a, auditIds: [id(8), id(9)] }]).canonical);
+    expect(first.input.historicalSources.auditTargets).toHaveLength(2);
+    expect(
+      first.input.historicalSources.auditTargets.find((item) => item.id === a.id),
+    ).toMatchObject({ auditIds: [id(8), id(9)], batchItem: a.batchItem });
+    expect(first.canonical).not.toBe(
+      normalize([b, { ...a, batchItem: { ...a.batchItem, index: 1 } }]).canonical,
+    );
+  });
   it("canonicalizes source ordering and conflicts on one saved batch with two fingerprints", () => {
     const batch = { id: id(10), fingerprint: `sha256:${snapshot}` };
     const a = request();
@@ -544,16 +629,65 @@ describe("complete canonical Finance completion manifests", () => {
     expect(() => canonicalizeFinanceCompletionTargets(sources)).toThrow("evidence_too_large");
   });
 
+  it("rejects two different review cases sharing one saved batch outcome in either order", () => {
+    const anchor = {
+      kind: "review_batch",
+      id: id(20),
+      fingerprint: `sha256:${snapshot}`,
+      index: 0,
+      capturedRevision: "1",
+    };
+    const a = { ...target(30), kind: "review_case", transactionId: id(1), sourceAnchors: [anchor] };
+    const b = { ...a, id: id(31) };
+    for (const pair of [
+      [a, b],
+      [b, a],
+    ])
+      expect(() => canonicalizeFinanceCompletionTargets(pair)).toThrow("source_inconsistent");
+    const flag = { ...target(1), sourceAnchors: [anchor] };
+    expect(canonicalizeFinanceCompletionTargets([flag, a]).counts).toEqual({
+      transactionFlags: 1,
+      reviewCases: 1,
+    });
+    expect(canonicalizeFinanceCompletionTargets([a, flag]).canonical).toBe(
+      canonicalizeFinanceCompletionTargets([flag, a]).canonical,
+    );
+  });
+  it("canonicalizes null-prototype records but rejects symbols, excessive depth and array accessors without executing them", () => {
+    const record = Object.assign(Object.create(null), { b: true, a: null });
+    expect(canonicalFinanceCompletionJson(record)).toBe('{"a":null,"b":true}');
+    expect(() => canonicalFinanceCompletionJson({ [Symbol("hidden")]: "evidence" })).toThrow(
+      "source_inconsistent",
+    );
+    let nested: unknown = "leaf";
+    for (let depth = 0; depth < 34; depth++) nested = { child: nested };
+    expect(() => canonicalFinanceCompletionJson(nested)).toThrow("evidence_too_large");
+    const accessor: unknown[] = [1];
+    let calls = 0;
+    Object.defineProperty(accessor, "0", {
+      get() {
+        calls++;
+        return 1;
+      },
+    });
+    expect(() => canonicalFinanceCompletionJson(accessor)).toThrow("source_inconsistent");
+    expect(calls).toBe(0);
+  });
   it("rejects lossy or executable JSON values instead of hashing fabricated evidence", () => {
     const cycle: { self?: unknown } = {};
     cycle.self = cycle;
+    const sparse: unknown[] = [];
+    sparse.length = 2;
+    sparse[1] = 1;
+    expect(sparse).toHaveLength(2);
+    expect(Object.hasOwn(sparse, 0)).toBe(false);
     for (const value of [
       undefined,
       NaN,
       Infinity,
       new Date(),
       cycle,
-      [, 1],
+      sparse,
       { a: undefined },
       {
         get a() {

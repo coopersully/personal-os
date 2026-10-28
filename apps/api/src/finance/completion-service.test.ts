@@ -335,6 +335,36 @@ describe("exact completion budget evidence", () => {
         .state,
     ).toBe("qualified");
   });
+  it("preserves agent approval attribution and never relabels it as a human instruction", () => {
+    const f = budgetFixture();
+    const budget = { ...f.budget, approvedByActorType: "agent", approvedByActorId: other };
+    const audit = {
+      ...f.audit,
+      actorType: "agent",
+      actorId: other,
+      action: "finance.budget.agent_self_approved",
+      after: { ...f.audit.after, approvalSource: "agent_self_approval" },
+    };
+    expect(validateFinanceCompletionBudget({ ...f, budget, audits: [audit] })).toMatchObject({
+      state: "qualified",
+      actorType: "agent",
+      actorId: other,
+    });
+    expect(
+      validateFinanceCompletionBudget({
+        ...f,
+        budget,
+        audits: [{ ...audit, after: { ...audit.after, approvalSource: "user_instruction" } }],
+      }),
+    ).toMatchObject({ state: "unavailable", reason: "source_inconsistent" });
+    expect(
+      validateFinanceCompletionBudget({
+        ...f,
+        budget: { ...budget, approvedAt: null },
+        audits: [audit],
+      }),
+    ).toMatchObject({ reason: "approval_evidence_missing" });
+  });
   it("does not substitute another approval when the sealed audit is missing", () => {
     const f = budgetFixture();
     expect(
@@ -614,6 +644,22 @@ describe("real saved batch evidence and known-target satisfaction", () => {
       }),
     ).toMatchObject({ reason: "source_inconsistent" });
   });
+  it("rejects outcomes detached from manifest index or transaction even with the genuine saved fingerprint", () => {
+    const f = categorizationFixture();
+    const batch = f.batchItem.batch;
+    const outcome = batch.outcomes[0];
+    if (!outcome) throw new Error("Missing outcome");
+    for (const changed of [
+      { ...outcome, index: 99 },
+      { ...outcome, transactionId: uuid(999) },
+    ])
+      expect(() =>
+        validateFinanceCompletionBatch(owner, { ...batch, outcomes: [changed] }, batch.fingerprint),
+      ).toThrow("outcome is inconsistent");
+    expect(() =>
+      validateFinanceCompletionBatch(owner, { ...batch, actorId: other }, batch.fingerprint),
+    ).toThrow("source is inconsistent");
+  });
   it("rejects forged fingerprints, duplicate outcomes and detached batch targets", () => {
     const f = categorizationFixture();
     const batch = f.batchItem.batch;
@@ -724,6 +770,40 @@ describe("complete current owner capture under a caller-owned snapshot", () => {
         },
       }),
     ).rejects.toThrow("snapshot read failed");
+  });
+  it("rejects an oversized reader page or a flag attached to a different transaction", async () => {
+    await expect(
+      captureFinanceCompletionBacklog({ ownerId: owner, readPage: async () => rows(501) }),
+    ).rejects.toThrow("requested limit");
+    const item = rows(1)[0];
+    if (!item) throw new Error("Missing row");
+    await expect(
+      captureFinanceCompletionBacklog({
+        ownerId: owner,
+        readPage: async () => [{ ...item, transactionId: uuid(999) }],
+      }),
+    ).rejects.toThrow("ownership or keyset order");
+  });
+  it("captures review-case identity separately from its transaction and counts both target kinds", async () => {
+    const flag = rows(1)[0];
+    if (!flag) throw new Error("Missing row");
+    const review = { ...flag, kind: "review_case", id: uuid(20), transactionId: flag.id };
+    const captured = await captureFinanceCompletionBacklog({
+      ownerId: owner,
+      readPage: async () => [review, flag],
+    });
+    expect(captured.counts).toEqual({ reviewCases: 1, transactionFlags: 1 });
+    expect(captured.targets[0]).toMatchObject({
+      kind: "review_case",
+      id: review.id,
+      transactionId: flag.id,
+    });
+    expect(captured.targets[1]).toMatchObject({
+      kind: "transaction_flag",
+      id: flag.id,
+      transactionId: flag.id,
+    });
+    expect(captured.terminalPage).toEqual({ after: null, rowCount: 2 });
   });
   it("rejects another owner or a nonadvancing/duplicate page", async () => {
     const item = rows(1)[0];

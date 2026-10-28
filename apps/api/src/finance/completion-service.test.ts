@@ -186,6 +186,27 @@ describe("owner completion admission", () => {
       admitFinanceCompletionOwner(principal, "owner_endpoint_request", "unknown"),
     ).toThrow("owner session");
   });
+  it("rejects unknown runtime source classifications and malformed owner IDs without manufacturing human proof", () => {
+    // Exercise the runtime boundary; TypeScript literals do not validate arbitrary JS callers.
+    for (const source of ["human_proof", "agent_relay", null])
+      expect(() =>
+        Reflect.apply(admitFinanceCompletionOwner, undefined, [principal, source, "session"]),
+      ).toThrow("source classification");
+    expect(() =>
+      admitFinanceCompletionOwner(
+        { ...principal, userId: "invalid-owner", actorId: "invalid-owner" },
+        "owner_endpoint_request",
+        "session",
+      ),
+    ).toThrow("Only the authenticated owner");
+    expect(
+      admitFinanceCompletionOwner(
+        { ...principal, authorizationConnectionId: other },
+        "labelled_relay",
+        "session",
+      ),
+    ).toMatchObject({ authorizationConnectionId: other, humanProof: "not_established" });
+  });
   it("does not convert finance execution/bypass or another user's actor identity into admission", () => {
     expect(() =>
       admitFinanceCompletionOwner(
@@ -641,6 +662,59 @@ describe("real saved batch evidence and known-target satisfaction", () => {
       qualifyFinanceCompletionTarget({
         ...f,
         transaction: { ...f.transaction, contextualRevision: "5" },
+      }),
+    ).toMatchObject({ reason: "source_inconsistent" });
+  });
+  it("requires an actual matching categorization effect while ignoring unrelated same-owner audits", () => {
+    const f = categorizationFixture();
+    const audit = f.audits[0];
+    if (!audit) throw new Error("Missing effect audit");
+    for (const unrelated of [
+      { ...audit, id: uuid(998), entityType: "finance_budget_version" },
+      { ...audit, id: uuid(998), entityId: uuid(999) },
+      { ...audit, id: uuid(998), action: "finance.transaction_updated" },
+    ]) {
+      expect(qualifyFinanceCompletionTarget({ ...f, audits: [unrelated, audit] }).state).toBe(
+        "qualified",
+      );
+      expect(qualifyFinanceCompletionTarget({ ...f, audits: [unrelated] })).toMatchObject({
+        reason: "qualifying_effect_unavailable",
+      });
+    }
+    for (const after of [
+      null,
+      { ...audit.after, categorySource: "agent" },
+      { ...audit.after, pending: true },
+      { ...audit.after, updatedAt: "invalid-time" },
+      { ...audit.after, updatedAt: "2026-10-02T12:00:00.000Z" },
+    ])
+      expect(qualifyFinanceCompletionTarget({ ...f, audits: [{ ...audit, after }] })).toMatchObject(
+        { reason: "qualifying_effect_unavailable" },
+      );
+    // Even a nonmatching audit cannot cross the owner boundary merely to be skipped.
+    expect(
+      qualifyFinanceCompletionTarget({
+        ...f,
+        audits: [{ ...audit, id: uuid(997), entityId: uuid(999), userId: other }, audit],
+      }),
+    ).toMatchObject({ reason: "source_inconsistent" });
+  });
+  it("does not infer execution from a valid manifest without the exact requested applied outcome", () => {
+    const f = categorizationFixture();
+    for (const index of [-1, 0.5, 99])
+      expect(
+        qualifyFinanceCompletionTarget({ ...f, batchItem: { ...f.batchItem, index } }),
+      ).toMatchObject({ reason: "source_unavailable" });
+    expect(
+      qualifyFinanceCompletionTarget({
+        ...f,
+        batchItem: { ...f.batchItem, batch: { ...f.batchItem.batch, outcomes: [] } },
+      }),
+    ).toMatchObject({ reason: "source_unavailable" });
+    expect(
+      qualifyFinanceCompletionTarget({
+        ...f,
+        batchItem: { ...f.batchItem, fingerprint: `sha256:${"a".repeat(64)}` },
       }),
     ).toMatchObject({ reason: "source_inconsistent" });
   });

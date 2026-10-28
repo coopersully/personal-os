@@ -362,6 +362,94 @@ describe("Finance completion wire contract", () => {
 });
 
 describe("complete canonical Finance completion manifests", () => {
+  it("validates one baseline membership independently of current and other-baseline anchors", () => {
+    const source = {
+      scope: financeCompletionScope,
+      snapshot,
+      total: 1,
+      pages: [
+        {
+          index: 0,
+          items: [
+            {
+              kind: "transaction_flag",
+              id: id(1),
+              transactionId: id(1),
+              capturedRevision: "1",
+              fingerprint: "b".repeat(64),
+            },
+          ],
+        },
+      ],
+    };
+    const expanded = deriveFinanceCompletionBaselineTargets(source);
+    const retained = expanded[0];
+    if (!retained) throw new Error("Missing baseline member");
+    const otherSnapshot = "c".repeat(64);
+    const mixed = {
+      ...retained,
+      sourceAnchors: [
+        ...retained.sourceAnchors,
+        { kind: "current_backlog", snapshot, capturedRevision: "1" },
+        {
+          kind: "historical_baseline",
+          snapshot: otherSnapshot,
+          page: 0,
+          index: 0,
+          fingerprint: "d".repeat(64),
+          capturedRevision: "1",
+        },
+      ],
+    };
+    const validated = validateFinanceCompletionBaselineExpansion(source, [mixed]);
+    expect(validated).toHaveLength(1);
+    expect(validated[0]?.sourceAnchors).toHaveLength(3);
+    // Neither a current anchor nor another baseline can substitute this baseline's member.
+    expect(() =>
+      validateFinanceCompletionBaselineExpansion(source, [
+        { ...retained, sourceAnchors: mixed.sourceAnchors.slice(1) },
+      ]),
+    ).toThrow("source_inconsistent");
+  });
+  it("admits a complete 500-plus-terminal baseline but rejects an incomplete leading page or misbound flag", () => {
+    const items = Array.from({ length: 501 }, (_, n) => ({
+      kind: "transaction_flag",
+      id: id(n + 1),
+      transactionId: id(n + 1),
+      capturedRevision: "1",
+      fingerprint: snapshot,
+    }));
+    const source = {
+      scope: financeCompletionScope,
+      snapshot,
+      total: 501,
+      pages: [
+        { index: 0, items: items.slice(0, 500) },
+        { index: 1, items: items.slice(500) },
+      ],
+    };
+    expect(deriveFinanceCompletionBaselineTargets(source)).toHaveLength(501);
+    const partial = {
+      ...source,
+      total: 500,
+      pages: [
+        { index: 0, items: items.slice(0, 499) },
+        { index: 1, items: items.slice(500) },
+      ],
+    };
+    expect(() => deriveFinanceCompletionBaselineTargets(partial)).toThrow(
+      "complete and contiguous",
+    );
+    expect(() =>
+      deriveFinanceCompletionBaselineTargets({
+        ...source,
+        pages: [
+          { index: 0, items: items.slice(0, 500) },
+          { index: 1, items: [{ ...items[500], transactionId: id(999) }] },
+        ],
+      }),
+    ).toThrow("inconsistent identities");
+  });
   it("carries every baseline item fingerprint through expansion/sealing and rejects substitution", () => {
     const source = {
       scope: financeCompletionScope,

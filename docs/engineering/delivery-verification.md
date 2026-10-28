@@ -110,6 +110,35 @@ Hosted capacity, permissions, provider outages and native dependencies can still
 Existing failure diagnosis and bounded retry rules continue to apply; a failed metadata gate after
 source recovery needs the documented metadata rerun, not a PR-body edit.
 
+## Bounded Node coverage diagnostics
+
+Node quality prepares an attempt-owned marker before install/audit/checks, then always attempts
+collection without changing the original `pnpm check:node` command, exit handling, coverage floors,
+report-on-test-failure behavior or job deadline. The JSON reporter adds exact per-file Istanbul
+maps and counters alongside the existing reporters. Completed reporters run before threshold
+checking; failing tests with `reportOnFailure=false`, or earlier failures, can leave no reports.
+Absence produces a truthful manifest, never regenerated reports, rounded or zero-filled counters,
+or a guessed type/test failure stage.
+
+The seven-day `node-coverage-<run>-<attempt>-<job>` artifact allowlists only `manifest.json`,
+`coverage-summary.json` and `coverage-final.json`. Accepted report files are unchanged bytes with
+SHA-256 digests, limited to 20 MiB each and 25 MiB combined; the manifest is at most 64 KiB.
+The collector rejects unsafe directories, symlinks, non-regular/hard-linked files, stale output,
+malformed or unexpected coverage structures, external paths, embedded source maps and oversized
+files. No workspace glob, HTML, source-rendered output, raw V8 temporary data, environment, event,
+credential or stdout dump is uploaded. Whole rejected files are omitted rather than truncated;
+the manifest records the gap and diagnostic failures remain visible. Safe manifest-only collection
+can succeed while the original source step remains failed. Missing reports after Node success are
+a diagnostic error. A failed preparation, cancelled runner or inability to safely stage a manifest
+can leave no artifact; upload requires the collector's explicit ready signal.
+
+The manifest binds actual checkout and workflow revisions, workflow file hash, repository, run,
+attempt, job and known source-step outcomes. Outcomes do not supply numeric exit codes. A PR's
+`source-candidate-<run>-<attempt>` name is a correlation reference only: the Node collector does not
+fetch or validate that separate receipt. Push runs explicitly have no PR receipt. Diagnostic
+artifacts never replace source-verification evidence; inspect actual provider identity, download,
+content and digest on a genuine run before using them for diagnosis.
+
 ## Shared local capacity
 
 `pnpm verify` enters `.codex/scripts/verification-runner.py` before expensive work. One verifier per

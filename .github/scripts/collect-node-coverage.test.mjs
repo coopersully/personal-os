@@ -599,6 +599,47 @@ test("failed source and successful diagnostic outcomes remain distinct", () =>
     assert.equal(cli.status, 0);
   }));
 
+function assertCoverageUploadPaths(quality) {
+  const uploads = quality
+    .split(/^ {6}- /m)
+    .slice(1)
+    .filter((step) => /^ {8}uses: actions\/upload-artifact@/m.test(step));
+  assert.equal(uploads.length, 1, "expected one coverage upload step");
+  const lines = uploads[0].split("\n");
+  const pathHeaders = lines.flatMap((line, index) => (/^ {10}path:/.test(line) ? [index] : []));
+  assert.equal(pathHeaders.length, 1, "expected one upload path block");
+  const start = pathHeaders[0];
+  assert.equal(lines[start], "          path: |");
+  const entries = [];
+  for (const line of lines.slice(start + 1)) {
+    if (!line.trim()) continue;
+    if (/^ {0,10}\S/.test(line)) break;
+    entries.push(line.slice(12));
+  }
+  assert.deepEqual(entries, [
+    "${{ runner.temp }}/node-coverage/manifest.json",
+    "${{ runner.temp }}/node-coverage/coverage-summary.json",
+    "${{ runner.temp }}/node-coverage/coverage-final.json",
+  ]);
+}
+
+test("coverage upload allowlist rejects multiline path mutations", () => {
+  const workflow = readFileSync(resolve(import.meta.dirname, "../workflows/ci.yml"), "utf8");
+  const entry = "            ${{ runner.temp }}/node-coverage/coverage-final.json\n";
+  assert.ok(workflow.includes(entry));
+  for (const replacement of [
+    "            ${{ runner.temp }}/node-coverage/*\n",
+    "            ${{ runner.temp }}/node-coverage/unexpected.json\n",
+    "",
+    entry.repeat(2),
+    "\n            ${{ runner.temp }}/node-coverage/*\n",
+  ]) {
+    const mutated = workflow.replace(entry, replacement);
+    const quality = mutated.split("  quality:\n")[1].split("  browser:\n")[0];
+    assert.throws(() => assertCoverageUploadPaths(quality), { code: "ERR_ASSERTION" });
+  }
+});
+
 test("repository verification registers fixtures and preserves Node failure gating", () => {
   const root = resolve(import.meta.dirname, "../..");
   const workflow = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
@@ -610,5 +651,5 @@ test("repository verification registers fixtures and preserves Node failure gati
   assert.match(quality, /if: always\(\)/);
   assert.match(quality, /steps\.coverage\.outputs\.artifact_ready == 'true'/);
   assert.match(quality, /retention-days: 7/);
-  assert.doesNotMatch(quality, /path:.*\*/);
+  assertCoverageUploadPaths(quality);
 });

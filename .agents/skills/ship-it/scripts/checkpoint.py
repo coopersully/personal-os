@@ -125,9 +125,112 @@ def canonical_digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def historical_plan_references(plan, candidate):
+    """Select accepted local freeze references without altering either reviewed schema."""
+    ids = production_criterion_ids(plan, candidate) if isinstance(plan, dict) else None
+    if (ids is None or (plan["required"] and not ids)
+            or (not plan["required"] and (ids or not isinstance(plan.get("reason"), str)
+                                          or not plan["reason"].strip()))):
+        raise ValueError("Recovery predecessor reviewed plan schema is invalid")
+    detailed = bool(plan["criteria"]) and isinstance(plan["criteria"][0], dict)
+    references = plan["premerge_evidence"] if detailed else plan["evidence"]
+    if len(references) > 32 or len(set(references)) != len(references):
+        raise ValueError("Recovery predecessor references exceed bounds or contain duplicates")
+    return list(references)
+
+
+def review_instant(value):
+    try:
+        instant = datetime.fromisoformat(value) if isinstance(value, str) else None
+        if instant is None or instant.tzinfo is None or instant.utcoffset() is None:
+            raise ValueError()
+        return instant
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("Recovery provenance requires a timezone-aware ISO review time") from None
+
+
+def validate_current_review(review, request, recovered):
+    if (not isinstance(review, dict) or set(review) != {"acceptedAt", "evidence", "implementers", "reviewers"}
+            or not all(strings(review.get(k)) for k in ("evidence", "implementers", "reviewers"))):
+        raise ValueError("Recovery provenance requires an exact independent review record")
+    if (any(len(review[k]) != len(set(review[k])) for k in ("implementers", "reviewers"))
+            or set(review["reviewers"]) & (set(review["implementers"]) | set(request["implementers"]))
+            or review_instant(review["acceptedAt"]) > recovered):
+        raise ValueError("Recovery provenance review identity or acceptance time is invalid")
+
+
+def validate_provenance_continuity(request, expected, provenance, unavailable):
+    """Preserve unknown original freezes without tainting genuine new accepted origins."""
+    origin = (request.get("expectedHeadSha"), request.get("expectedBaseSha"), request.get("expectedPlanDigest"))
+    for path, digest in expected.items():
+        prior = unavailable.get((path, digest), set())
+        row = provenance.get(path)
+        if prior and (not row or row["classification"] != "fresh_exact_bytes_historical_hash_unavailable"):
+            if (not row or "newFreezeBinding" not in row or origin in prior):
+                raise ValueError("Prior unavailable freeze proof requires fresh continuity or a distinct accepted new freeze")
+        if row and row["classification"] == "fresh_exact_bytes_historical_hash_unavailable":
+            unavailable.setdefault((path, digest), set()).add(origin)
+
+
+def recovery_evidence_bindings(request, references, recovered_at=None, legacy_history=False):
+    """Validate asserted provenance, never authenticate the referenced human/reviewer facts."""
+    expected = request.get("expectedEvidenceFiles")
+    if not isinstance(expected, dict) or set(expected) != set(references):
+        raise ValueError("Recovery needs the complete predecessor file bindings")
+    typed = not legacy_history and "evidenceProvenanceVersion" in request
+    if typed and (type(request["evidenceProvenanceVersion"]) is not int
+                  or request["evidenceProvenanceVersion"] != 1
+                  or type(request.get("policyVersion")) is not int or request["policyVersion"] < 8):
+        raise ValueError("Recovery provenance version is unsupported")
+    if not typed:
+        if any(not isinstance(v, str) or not re.fullmatch(r"[a-f0-9]{64}", v) for v in expected.values()):
+            raise ValueError("Recovery needs independently accepted historical freeze hashes")
+        return expected, {}
+    recovered = review_instant(recovered_at)
+    if (not strings(request.get("implementers")) or not strings(request.get("reviewers"))
+            or set(request["implementers"]) & set(request["reviewers"])):
+        raise ValueError("Typed recovery requires independent successor review")
+    common = {"sha256", "classification", "historicalProofAvailable", "bindingEvidence"}
+    hashes = {}
+    for reference, row in expected.items():
+        if (not isinstance(row, dict) or not isinstance(row.get("sha256"), str)
+                or not re.fullmatch(r"[a-f0-9]{64}", row["sha256"])
+                or not strings(row.get("bindingEvidence"))):
+            raise ValueError("Recovery file provenance is incomplete")
+        classification = row.get("classification")
+        if classification == "historical_hash_attested":
+            fields = common | {"historicalReviewEvidence"}
+            if "newFreezeBinding" in row:
+                fields.add("newFreezeBinding")
+            if (set(row) != fields or row.get("historicalProofAvailable") is not True
+                    or not strings(row.get("historicalReviewEvidence"))):
+                raise ValueError("Historical provenance requires original independent hash evidence")
+            if "newFreezeBinding" in row:
+                binding = row["newFreezeBinding"]
+                context = {"checkpointDigest": request.get("expectedCheckpointDigest"),
+                           "planDigest": request.get("expectedPlanDigest"), "headSha": request.get("expectedHeadSha"),
+                           "baseSha": request.get("expectedBaseSha"), "path": reference, "sha256": row["sha256"]}
+                if (not isinstance(binding, dict) or set(binding) != set(context) | {"review"}
+                        or {k: binding[k] for k in context} != context):
+                    raise ValueError("New freeze evidence must bind the exact newer predecessor and file")
+                validate_current_review(binding["review"], request, recovered)
+        elif classification == "fresh_exact_bytes_historical_hash_unavailable":
+            review = row.get("currentReview")
+            if (set(row) != common | {"continuityEvidence", "currentReview"}
+                    or row.get("historicalProofAvailable") is not False
+                    or not strings(row.get("continuityEvidence"))):
+                raise ValueError("Fresh provenance requires exact-byte review and truthful historical unavailability")
+            validate_current_review(review, request, recovered)
+        else:
+            raise ValueError("Recovery file provenance classification is unsupported")
+        hashes[reference] = row["sha256"]
+    return hashes, expected
+
+
 def validate_recovery_history(history):
     if not isinstance(history, list):
         raise ValueError("Recovery history is malformed")
+    unavailable = {}
     for index, entry in enumerate(history):
         if not isinstance(entry, dict):
             raise ValueError("Recovery history entry is malformed")
@@ -146,8 +249,8 @@ def validate_recovery_history(history):
             raise ValueError("Recovery history predecessor digest is invalid")
         request, retained = entry.get("request"), entry.get("retainedEvidence")
         original_plan = predecessor.get("reviewedProductionPlan")
+        references = historical_plan_references(original_plan, predecessor)
         if (not isinstance(request, dict) or request.get("expectedCheckpointDigest") != entry["predecessorDigest"]
-                or not isinstance(original_plan, dict) or not strings(original_plan.get("evidence"))
                 or request.get("expectedPlanDigest") != canonical_digest(original_plan)
                 or any(request.get("expected" + k[0].upper() + k[1:]) != predecessor.get(k)
                        for k in ("headSha", "baseSha"))
@@ -157,13 +260,21 @@ def validate_recovery_history(history):
         successor["planDigest"] = canonical_digest(request.get("reviewedProductionPlan"))
         if entry.get("successor") != successor:
             raise ValueError("Recovery history successor binding is invalid")
-        expected, actual, remaining = request.get("expectedEvidenceFiles"), {}, 256 * 1024
+        # Older writers permitted arbitrary extras. Preserve their meaning and exact bytes.
+        new_policy = type(request.get("policyVersion")) is int and request["policyVersion"] >= 8
+        expected, provenance = recovery_evidence_bindings(
+            request, references, entry.get("recoveredAt"), legacy_history=not new_policy)
+        actual, remaining = {}, 256 * 1024
         for item in retained:
             try:
                 if not isinstance(item["bytes"], str) or len(item["bytes"]) > 4 * ((remaining + 2) // 3):
                     raise ValueError("Recovery history retained bytes exceed their bound")
                 raw = base64.b64decode(item["bytes"], validate=True)
                 path, digest = item["path"], item["sha256"]
+                if new_policy and ((provenance and canonical_digest(item.get("provenance"))
+                                    != canonical_digest(provenance.get(path)))
+                                   or (not provenance and "provenance" in item)):
+                    raise ValueError("Recovery history provenance is inconsistent")
                 if (item.get("encoding") != "base64" or not isinstance(path, str) or path in actual
                         or len(raw) > remaining or hashlib.sha256(raw).hexdigest() != digest):
                     raise ValueError("Recovery history retained bytes are invalid")
@@ -171,8 +282,10 @@ def validate_recovery_history(history):
                 raise ValueError("Recovery history retained bytes are invalid") from None
             remaining -= len(raw)
             actual[path] = digest
-        if actual != expected or set(actual) != set(original_plan["evidence"]):
+        if actual != expected or set(actual) != set(references):
             raise ValueError("Recovery history retained evidence is incomplete")
+        validate_provenance_continuity(request, expected, provenance, unavailable)
+    return unavailable
 
 
 def recover_plan(root, key, record, owner, payload):
@@ -203,7 +316,7 @@ def recover_plan(root, key, record, owner, payload):
             or any(not sha(record.get(k)) or payload.get("expected" + k[0].upper() + k[1:]) != record[k]
                    for k in ("headSha", "baseSha"))):
         raise ValueError("Recovery predecessor changed; re-read the checkpoint and accepted freeze")
-    validate_recovery_history(record.get("recoveryHistory", []))
+    unavailable = validate_recovery_history(record.get("recoveryHistory", []))
     head, base = payload.get("headSha"), payload.get("baseSha")
     live = payload.get("livePr") or {}
     if (not isinstance(live, dict) or not sha(head) or not sha(base) or live.get("url") != key
@@ -235,12 +348,10 @@ def recover_plan(root, key, record, owner, payload):
     same_candidate = head == record["headSha"] and base == record["baseSha"]
     if same_candidate and (successor == plan or not strings(payload.get("applicabilityCorrectionEvidence"))):
         raise ValueError("Recovery needs a changed candidate or concrete reviewed applicability correction")
-    references = plan.get("evidence") if isinstance(plan, dict) else None
-    expected = payload.get("expectedEvidenceFiles")
-    if (not strings(references) or len(references) > 32 or len(set(references)) != len(references)
-            or not isinstance(expected, dict) or set(expected) != set(references)
-            or any(not isinstance(v, str) or not re.fullmatch(r"[a-f0-9]{64}", v) for v in expected.values())):
-        raise ValueError("Recovery needs the complete independently accepted predecessor file hashes")
+    references = historical_plan_references(plan, record)
+    recovered_at = datetime.now(timezone.utc).isoformat()
+    expected, provenance = recovery_evidence_bindings(payload, references, recovered_at)
+    validate_provenance_continuity(payload, expected, provenance, unavailable)
     retained, remaining = [], 256 * 1024
     for reference in references:
         try:
@@ -255,10 +366,12 @@ def recover_plan(root, key, record, owner, payload):
         except OSError:
             raise ValueError("Retained predecessor evidence is unavailable") from None
         if len(raw) > remaining or hashlib.sha256(raw).hexdigest() != expected[reference]:
-            raise ValueError("Retained predecessor evidence exceeds its bound or differs from the accepted freeze")
+            raise ValueError("Retained predecessor evidence exceeds its bound or differs from the accepted hash")
         remaining -= len(raw)
         retained.append({"path": reference, "sha256": expected[reference], "encoding": "base64",
                          "bytes": base64.b64encode(raw).decode("ascii")})
+        if provenance:
+            retained[-1]["provenance"] = copy.deepcopy(provenance[reference])
     predecessor = copy.deepcopy(record)
     history = predecessor.pop("recoveryHistory", [])
     entry = {"predecessor": predecessor, "predecessorDigest": canonical_digest(record),
@@ -267,6 +380,8 @@ def recover_plan(root, key, record, owner, payload):
              "retainedEvidence": retained, "request": copy.deepcopy(payload),
              "successor": {"headSha": head, "baseSha": base, "planDigest": canonical_digest(successor),
                            "policyVersion": payload["policyVersion"], "acceptanceRevision": payload["acceptanceRevision"]}}
+    if provenance:
+        entry["recoveredAt"] = recovered_at
     recovered = {k: copy.deepcopy(record[k]) for k in
                  ("owner", "key", "authorization", "worktree", "worker", "transferFrom", "transferEvidence") if k in record}
     recovered.update(phase="review", pending=None, headSha=head, baseSha=base,

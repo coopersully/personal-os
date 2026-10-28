@@ -72,11 +72,13 @@ Unknown liveness blocks replacement writes rather than allowing two owners to ra
 Represent each admitted epic with one Codex sidebar section named for the epic, preserving shared
 sections and explicit user-protected names. Reuse the existing section ID when its
 identity and membership match. The head records the epic-to-section mapping; its existing outcome
-lead maintains members. Name managed chats `ISSUE-ID - Issue name` from a verified Nohmi issue
-or epic parent, following the current oversight contract and `nohmi-project-manager` checklist.
-Issue subjects are durable and concise: preferably one or two words, generally at most five.
-Keep phases and progress in records; multi-slice oversight retains its parent mapping. Preserve
-later explicit exceptions and unrelated/shared chats. The portfolio manager maps to
+lead maintains members. Name oversight chats exactly `👀 - <epic name>` from their verified
+Nohmi epic parent; Cooper’s October 27 exception supersedes issue-prefix names for oversight only.
+Ordinary children retain `ISSUE-ID - Issue name` from their verified direct issue, following the
+current oversight contract and `nohmi-project-manager` checklist. Issue subjects are durable and
+concise: preferably one or two words, generally at most five. Keep phases and progress in records;
+multi-slice oversight retains its parent mapping. Preserve later explicit exceptions and
+unrelated/shared chats. The portfolio manager maps to
 COO-170 — Portfolio oversight, with its exact user-selected title `Nohmi project manager`.
 Keep Lead first, then persistent owners in
 planned prerequisite/merge order. Order is a navigation aid, not an additional dependency gate.

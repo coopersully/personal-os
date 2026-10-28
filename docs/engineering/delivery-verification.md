@@ -122,12 +122,20 @@ or a guessed type/test failure stage.
 
 The seven-day `node-coverage-<run>-<attempt>-<job>` artifact allowlists only `manifest.json`,
 `coverage-summary.json` and `coverage-final.json`. Accepted report files are unchanged bytes with
-SHA-256 digests, limited to 20 MiB each and 25 MiB combined; the manifest is at most 64 KiB.
+SHA-256 digests. The summary is limited to 1 MiB, the detailed map to 64 MiB and accepted reports
+to 65 MiB combined; the manifest is at most 64 KiB. These are fixed design budgets, not a claim
+that the current complete report fits or has measured headroom. The earlier 20 MiB cap rejected
+a genuine detailed report; future source runs must establish actual accepted size and schema.
+Artifact consumers cap the downloaded archive at 70 MiB and enforce the same member and expanded
+total limits before extraction or parsing. A compressed archive never waives an expanded bound.
 The collector rejects unsafe directories, symlinks, non-regular/hard-linked files, stale output,
 malformed or unexpected coverage structures, external paths, embedded source maps and oversized
 files. No workspace glob, HTML, source-rendered output, raw V8 temporary data, environment, event,
 credential or stdout dump is uploaded. Whole rejected files are omitted rather than truncated;
-the manifest records the gap and diagnostic failures remain visible. Safe manifest-only collection
+the manifest records the gap and diagnostic failures remain visible. A `file_limit` rejection
+includes `observedBytes` from the opened regular file's size before allocation or reading; it does
+not claim a content hash. Other rejection reasons do not invent an observed size. Safe manifest-only
+collection
 can succeed while the original source step remains failed. Missing reports after Node success are
 a diagnostic error. A failed preparation, cancelled runner or inability to safely stage a manifest
 can leave no artifact; upload requires the collector's explicit ready signal.

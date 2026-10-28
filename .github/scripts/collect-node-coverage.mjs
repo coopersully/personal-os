@@ -18,8 +18,9 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { pathToFileURL } from "node:url";
 
 export const LIMITS = Object.freeze({
-  file: 20 * 1024 * 1024,
-  total: 25 * 1024 * 1024,
+  summary: 1024 * 1024,
+  detailed: 64 * 1024 * 1024,
+  total: 65 * 1024 * 1024,
   manifest: 64 * 1024,
 });
 const REPORTS = ["coverage-summary.json", "coverage-final.json"];
@@ -34,9 +35,10 @@ const integer = (value) => Number.isSafeInteger(value) && value >= 0;
 const owns = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 
 class Rejected extends Error {
-  constructor(reason) {
+  constructor(reason, observedBytes) {
     super(reason);
     this.reason = reason;
+    if (reason === "file_limit" && integer(observedBytes)) this.observedBytes = observedBytes;
   }
 }
 
@@ -79,7 +81,8 @@ function bytes(path, maximum, since) {
     fd = openSync(anchored, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.nlink !== 1) throw new Rejected("not_regular");
-    if (stat.size > maximum) throw new Rejected("file_limit");
+    if (!integer(stat.size)) throw new Rejected("invalid_size");
+    if (stat.size > maximum) throw new Rejected("file_limit", stat.size);
     if (since !== undefined && stat.mtimeMs < since) throw new Rejected("stale");
     const buffer = Buffer.alloc(stat.size + 1);
     let size = 0;
@@ -342,7 +345,8 @@ function report(workspace, name, marker, limits, remaining) {
   try {
     const coverageDirectory = join(workspace, "coverage");
     directory(coverageDirectory);
-    const data = bytes(join(coverageDirectory, name), limits.file, marker.startedMs);
+    const maximum = name === "coverage-summary.json" ? limits.summary : limits.detailed;
+    const data = bytes(join(coverageDirectory, name), maximum, marker.startedMs);
     if (data.length > remaining) throw new Rejected("total_limit");
     let value;
     try {
@@ -362,7 +366,16 @@ function report(workspace, name, marker, limits, remaining) {
         : error.code === "ENOENT"
           ? "absent"
           : "unsafe_directory";
-    return { record: { name, status: reason === "absent" ? "missing" : "rejected", reason } };
+    return {
+      record: {
+        name,
+        status: reason === "absent" ? "missing" : "rejected",
+        reason,
+        ...(reason === "file_limit" && error instanceof Rejected && owns(error, "observedBytes")
+          ? { observedBytes: error.observedBytes }
+          : {}),
+      },
+    };
   }
 }
 

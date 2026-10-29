@@ -350,25 +350,151 @@ test("browser shards retain both complete matrices and the original coverage com
   );
 });
 
-test("production audit fails before expensive Node checks and still blocks readiness", () => {
+// This inspects our block-style workflow steps, including a leading name/id/uses/run
+// in any order. Nested env/with keys and script contents are not step properties.
+function workflowSteps(job) {
+  return [...job.matchAll(/^ {6}- ([^\n]+)(?:\n(?! {6}- | {2}\S)[^\n]*)*/gm)].map(([block]) => {
+    const fields = {};
+    for (const line of block.split("\n")) {
+      const field = line.match(/^(?: {6}- | {8})([a-z][a-z-]*): (.*)$/);
+      if (!field) continue;
+      assert.ok(!Object.hasOwn(fields, field[1]), `Duplicate step key: ${field[1]}`);
+      fields[field[1]] = field[2];
+    }
+    return { block, fields };
+  });
+}
+
+function assertNodeFailureContract(workflow) {
+  const jobs = workflowJobBlocks(workflow);
+  const quality = jobs.find((block) => block.startsWith("  quality:\n"));
+  assert.ok(quality);
+  // Neither the job nor any step may turn a failure into a successful job result.
+  assert.doesNotMatch(quality, /continue-on-error/);
+  const steps = workflowSteps(quality);
+  const source = steps.filter(({ fields }) => ["install", "audit", "node"].includes(fields.id));
+  assert.deepEqual(
+    source.map(({ fields }) => [fields.id, fields.run]),
+    [
+      ["install", "pnpm install --frozen-lockfile"],
+      ["audit", "pnpm audit --prod"],
+      ["node", "pnpm check:node"],
+    ],
+  );
+  for (const { fields } of source) {
+    // Omitted conditions retain GitHub's default success() blocking semantics.
+    assert.equal(fields.if, undefined, `${fields.id} must stop after an earlier failure.`);
+  }
+  const collector = steps.filter(({ fields }) => fields.id === "coverage");
+  const uploads = steps.filter(({ fields }) => fields.uses?.startsWith("actions/upload-artifact@"));
+  assert.equal(collector.length, 1);
+  assert.equal(uploads.length, 1);
+  assert.match(
+    collector[0].fields.run,
+    /^node \.github\/scripts\/collect-node-coverage\.mjs collect /,
+  );
+  assert.equal(collector[0].fields.if, "always()");
+  assert.equal(
+    uploads[0].fields.if,
+    "${{ always() && steps.coverage.outputs.artifact_ready == 'true' }}",
+  );
+  assert.deepEqual(
+    steps.filter(({ fields }) => fields.if !== undefined),
+    [collector[0], uploads[0]],
+    "Only diagnostic collection and upload may run after source failure.",
+  );
+  assert.ok(steps.indexOf(source[2]) < steps.indexOf(collector[0]));
+  assert.ok(steps.indexOf(collector[0]) < steps.indexOf(uploads[0]));
+  const required = jobs.find((block) => block.startsWith("  required:\n"));
+  assert.ok(required);
+  assert.match(required, /^ {6}- quality$/m);
+  assert.match(required, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
+  assert.match(required, /\[name, job\.result\]/);
+  assert.match(required, /if \(!requiredGate\(results, JSON\.parse\(scope\)\)\) \{/);
+  assert.match(required, /process\.exit\(1\)/);
+}
+
+test("production audit remains blocking while diagnostics retain failed source evidence", () => {
   const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
-  const quality = workflowJobBlocks(workflow).find((block) => block.startsWith("  quality:\n"));
-  const commands = [...quality.matchAll(/^ {6}- run: (.+)$/gm)].map((match) => match[1]);
-  assert.deepEqual(commands, [
-    "pnpm install --frozen-lockfile",
-    "pnpm audit --prod",
-    "pnpm check:node",
-  ]);
-  // Default step success conditions must prevent later checks after an audit failure.
-  assert.doesNotMatch(quality, /continue-on-error|always\(\)|if: failure\(\)/);
-  assert.equal(
-    requiredGate({ ...resultsFor(jobIds), quality: "failure" }, scope({ full: true })),
-    false,
+  assertNodeFailureContract(workflow);
+  // A collector/upload success never replaces the quality job's actual result.
+  for (const outcome of ["failure", "cancelled", "skipped"]) {
+    assert.equal(
+      requiredGate({ ...resultsFor(jobIds), quality: outcome }, scope({ full: true })),
+      false,
+      `Source quality ${outcome} must not pass readiness after diagnostic success.`,
+    );
+  }
+});
+
+test("Node failure contract accepts named steps with reordered properties", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const named = workflow.replace(
+    /^( {6})- id: (install|audit|node)\n {8}run: (.+)$/gm,
+    "$1- name: Source $2\n        run: $3\n        id: $2",
   );
-  assert.equal(
-    requiredGate({ ...resultsFor(jobIds), quality: "cancelled" }, scope({ full: true })),
-    false,
-  );
+  assert.notEqual(named, workflow);
+  assertNodeFailureContract(named);
+});
+
+test("Node failure contract rejects source bypasses and diagnostic masking", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const mutations = [
+    [
+      "source command",
+      (text) => text.replace("run: pnpm audit --prod", "run: pnpm audit --prod || true"),
+    ],
+    [
+      "source order",
+      (text) =>
+        text
+          .replace("id: install", "id: audit")
+          .replace("id: audit\n        run: pnpm audit", "id: install\n        run: pnpm audit"),
+    ],
+    ...["install", "audit", "node"].flatMap((id) => [
+      [
+        `${id} unconditional`,
+        (text) => text.replace(`- id: ${id}\n`, `- id: ${id}\n        if: always()\n`),
+      ],
+      [
+        `${id} ignored failure`,
+        (text) => text.replace(`- id: ${id}\n`, `- id: ${id}\n        continue-on-error: true\n`),
+      ],
+    ]),
+    [
+      "extra unconditional step",
+      (text) =>
+        text.replace("- id: coverage-prepare\n", "- id: coverage-prepare\n        if: always()\n"),
+    ],
+    [
+      "collector condition",
+      (text) =>
+        text.replace(
+          "if: always()\n        timeout-minutes: 1",
+          "if: success()\n        timeout-minutes: 1",
+        ),
+    ],
+    [
+      "upload readiness",
+      (text) =>
+        text.replace("always() && steps.coverage.outputs.artifact_ready == 'true'", "always()"),
+    ],
+    [
+      "job ignored failure",
+      (text) => text.replace("  quality:\n", "  quality:\n    continue-on-error: true\n"),
+    ],
+    ["aggregate dependency", (text) => text.replace("      - quality\n", "")],
+    ["aggregate result", (text) => text.replace("[name, job.result]", "[name, 'success']")],
+    [
+      "aggregate rejection",
+      (text) => text.replace("if (!requiredGate(results, JSON.parse(scope)))", "if (false)"),
+    ],
+  ];
+  for (const [name, mutate] of mutations) {
+    const changed = mutate(workflow);
+    assert.notEqual(changed, workflow, `${name} must change its fixture.`);
+    assert.throws(() => assertNodeFailureContract(changed), { name: "AssertionError" }, name);
+  }
 });
 
 function gitFixture(t) {

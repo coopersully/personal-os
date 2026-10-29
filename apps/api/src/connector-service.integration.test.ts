@@ -1168,10 +1168,23 @@ describe.sequential("connector service", () => {
     const provider = mockGoogle();
     if (!provider.syncMail) throw new Error("Missing Mail connector");
     let clock = timestamp;
+    // This scenario projects Calendar siblings; keep them out of the shared
+    // Calendar domain fixture and its canonical-source selection assertions.
+    const [reservationUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Gmail reservation",
+        email: "gmail-attempt-reservation@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!reservationUser) throw new Error("Missing reservation owner fixture");
+    const reservationUserId = reservationUser.id;
     const [account] = await database.db
       .insert(calendarAccounts)
       .values({
-        userId,
+        userId: reservationUserId,
         provider: "google",
         providerAccountId: "gmail-attempt-reservation",
         label: "Quota reservation",
@@ -1215,19 +1228,21 @@ describe.sequential("connector service", () => {
         status: 503,
       });
     });
-    await expect(local.syncAccount(userId, account.id)).rejects.toMatchObject({
+    await expect(local.syncAccount(reservationUserId, account.id)).rejects.toMatchObject({
       code: "service_unavailable",
     });
     clock = new Date(timestamp.getTime() + 71_000);
     for (const options of [{}, { automatic: true }]) {
-      await expect(local.syncAccount(userId, account.id, options)).rejects.toMatchObject({
-        code: "service_unavailable",
-      });
+      await expect(local.syncAccount(reservationUserId, account.id, options)).rejects.toMatchObject(
+        {
+          code: "service_unavailable",
+        },
+      );
     }
     // A push signal is acknowledged once runnable siblings finish; Mail stays
     // blocked by its persisted cooldown instead of replaying provider reads.
     await expect(
-      local.syncAccount(userId, account.id, { automatic: true, triggered: true }),
+      local.syncAccount(reservationUserId, account.id, { automatic: true, triggered: true }),
     ).resolves.toEqual({ changed: 0 });
     expect(provider.syncMail).toHaveBeenCalledOnce();
     const [failed] = await database.db
@@ -1240,7 +1255,7 @@ describe.sequential("connector service", () => {
       Date.parse(failed?.syncCapabilities?.mail?.health.nextSyncAt ?? ""),
     ).toBeGreaterThanOrEqual(timestamp.getTime() + 135_000);
     clock = new Date(failed?.syncCapabilities?.mail?.health.nextSyncAt ?? timestamp.toISOString());
-    await local.syncAccount(userId, account.id);
+    await local.syncAccount(reservationUserId, account.id);
     expect(provider.syncMail).toHaveBeenCalledTimes(2);
   });
 

@@ -115,6 +115,113 @@ Hosted capacity, permissions, provider outages and native dependencies can still
 Existing failure diagnosis and bounded retry rules continue to apply; a failed metadata gate after
 source recovery needs the documented metadata rerun, not a PR-body edit.
 
+## Bounded browser failure diagnostics
+
+The browser matrix preserves the original test command, both projects and four shards, one worker,
+configured single retry, 45-second case deadline and 30-minute job deadline. Existing Playwright
+`retain-on-failure` traces and `only-on-failure` screenshots can remain after a retry succeeds.
+Collection and upload therefore run independently of the terminal test-step result. No extra test,
+retry, reporter, report regeneration or intentional full-suite failure supplies diagnostics.
+
+Prepare binds a new runner-owned directory to the actual checkout/workflow/run attempt and matrix
+member before installation. The one-minute collector reads only existing `test-results` attachments:
+`trace.zip`, `test-failed-N.png` and `error-context.md` below a case directory. It rejects stale,
+linked, special, changed, unsafe-path and over-budget input; Linux reads are anchored to opened
+directory descriptors. It copies accepted bytes into exclusive staged files and publishes the
+manifest last. The uploader sees only that staging directory, never raw `test-results` or the HTML
+report tree. Prepare markers and pending files are outside the upload directory. Hidden files,
+storage-state files, videos, environment dumps and arbitrary workspace files are excluded.
+
+Fixed budgets are 64 MiB per trace ZIP, 8 MiB per PNG, 1 MiB per context file, 128 MiB accepted
+attachments per matrix job, 64 files and a 64 KiB manifest. Traversal stops at 512 entries (exhaustion
+is an explicit gap), four directory levels and 512-character relative paths. A rejected file is
+excluded whole; no truncated trace is represented as usable. Signature/UTF-8 checks are only format
+screening, not validation or sanitization of a trace's internal contents. These policy limits are
+not a claim that an unavailable historical trace fits. Consumers bound the downloaded archive to
+140 MiB, enforce the corresponding member/expanded bounds before extraction, and safely inspect
+nested trace ZIPs without executing embedded content.
+
+The seven-day artifact is named
+`browser-diagnostics-<run-id>-<run-attempt>-<project>-<shard>`. Its manifest records actual checkout
+and workflow SHA/file hash, repository/event, PR head/base where applicable, matrix/job identity,
+prepare/collect time, original test-step outcome, per-file paths/bytes/SHA-256 and explicit gaps.
+The source receipt is an unvalidated correlation reference: acceptance independently binds it to
+the API run/attempt/job and tested merge. Workflow run attempt is not Playwright retry index.
+Absent structured test identity/retry metadata stays `not-recorded`; directory names do not prove
+that identity or the original body/cleanup outcome.
+
+No emitted attachment produces a manifest-only result. This is observed absence, not proof that
+every test passed first try, that reporting occurred, or that an earlier body failure did not exist.
+The original test step's exit remains authoritative; successful diagnostics never clear a failed
+source step. Diagnostic rejection or upload failure remains visible and may fail the job even if
+the source step passed. Upload requires the collector's explicit ready output, including on a
+nonzero collection result with a safely published incomplete manifest. A failed preparation,
+unsafe staging, cancellation, job deadline or runner loss can prevent any artifact.
+
+### Browser content and audience boundary
+
+Raw traces are **not sanitized**. They can contain fixture sessions, DOM snapshots, network
+headers/bodies and source files. The current repository is public; signed-in users with repository
+read access can [download Actions artifacts](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts). Seven-day expiry is retention, not private access
+control. Keep raw artifact contents out of issue comments and public PR prose; report only bounded
+sanitized identity/count/hash/gap metadata there.
+
+The reviewed browser workflow declares `local-e2e-fixtures`, supplies no provider secret inputs and
+does not increase Actions permissions. The harness starts loopback services and a temporary
+PostgreSQL database populated with QA fixtures. Its child processes inherit their environment;
+those static facts alone do not prove that every trace is free of production credentials or
+provider data. The collector requires that declared context but does not claim to attest it or
+redact payloads. Before publishing a retention change, the owner must establish the actual CI
+fixture/environment and artifact audience boundary and review representative fixture content.
+Production sessions/provider secrets are outside this capture contract. An unestablished boundary
+is a publication gap, not a reason to broaden capture or silently claim sanitization.
+
+Focused synthetic fixtures cover retry-success retention, sticky original failures, absence,
+unsafe/stale/oversized input and workflow gating. They do not replace genuine hosted upload and
+once-downloaded artifact identity/digest/retention/content evidence. Verify seven-day service
+expiry and creation against the actual successful upload interval, not an assumed exact start.
+A clean run can prove empty-manifest transport only; actual retry-trace delivery needs a naturally
+observed failed attempt. This CI-only change cannot recover a missing historical trace, explain an
+unobserved Finance timeout, or waive a consuming workstream's incident acceptance. Finance owns
+its test/body/cleanup repairs; the consuming workstream retains its acceptance decision.
+
+## Bounded Node coverage diagnostics
+
+Node quality prepares an attempt-owned marker before install/audit/checks, then always attempts
+collection without changing the original `pnpm check:node` command, exit handling, coverage floors,
+report-on-test-failure behavior or job deadline. The JSON reporter adds exact per-file Istanbul
+maps and counters alongside the existing reporters. Completed reporters run before threshold
+checking; failing tests with `reportOnFailure=false`, or earlier failures, can leave no reports.
+Absence produces a truthful manifest, never regenerated reports, rounded or zero-filled counters,
+or a guessed type/test failure stage.
+
+The seven-day `node-coverage-<run>-<attempt>-<job>` artifact allowlists only `manifest.json`,
+`coverage-summary.json` and `coverage-final.json`. Accepted report files are unchanged bytes with
+SHA-256 digests. The summary is limited to 1 MiB, the detailed map to 64 MiB and accepted reports
+to 65 MiB combined; the manifest is at most 64 KiB. These are fixed design budgets, not a claim
+that the current complete report fits or has measured headroom. The earlier 20 MiB cap rejected
+a genuine detailed report; future source runs must establish actual accepted size and schema.
+Artifact consumers cap the downloaded archive at 70 MiB and enforce the same member and expanded
+total limits before extraction or parsing. A compressed archive never waives an expanded bound.
+The collector rejects unsafe directories, symlinks, non-regular/hard-linked files, stale output,
+malformed or unexpected coverage structures, external paths, embedded source maps and oversized
+files. No workspace glob, HTML, source-rendered output, raw V8 temporary data, environment, event,
+credential or stdout dump is uploaded. Whole rejected files are omitted rather than truncated;
+the manifest records the gap and diagnostic failures remain visible. A `file_limit` rejection
+includes `observedBytes` from the opened regular file's size before allocation or reading; it does
+not claim a content hash. Other rejection reasons do not invent an observed size. Safe manifest-only
+collection
+can succeed while the original source step remains failed. Missing reports after Node success are
+a diagnostic error. A failed preparation, cancelled runner or inability to safely stage a manifest
+can leave no artifact; upload requires the collector's explicit ready signal.
+
+The manifest binds actual checkout and workflow revisions, workflow file hash, repository, run,
+attempt, job and known source-step outcomes. Outcomes do not supply numeric exit codes. A PR's
+`source-candidate-<run>-<attempt>` name is a correlation reference only: the Node collector does not
+fetch or validate that separate receipt. Push runs explicitly have no PR receipt. Diagnostic
+artifacts never replace source-verification evidence; inspect actual provider identity, download,
+content and digest on a genuine run before using them for diagnosis.
+
 ## Shared local capacity
 
 `pnpm verify` enters `.codex/scripts/verification-runner.py` before expensive work. One verifier per

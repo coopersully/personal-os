@@ -591,3 +591,75 @@ New enrollment must submit the version of the consent shown by the client. The A
 missing or stale versions before persisting a challenge or contacting Twilio, so cached older
 clients must refresh and review the current text. Existing enrollment history and already-created
 challenges retain their original accepted version; completing a challenge does not upgrade it.
+
+
+## Finance attention and context-to-Chat source contract
+
+Admitted `Finance:` and `Finance context:` notes now append exactly one canonical user Finance
+Chat message in the same transaction as context capture. The immutable context revision retains
+the inbound claim and message identity; Chat history, source context and host batches project that
+SMS provenance. A failed Chat write rolls back capture, its receipt and completion together. Retry
+uses the original claim, and a late note belongs to the next eligible fixed-cutoff batch. Existing
+original-host grant and message-protocol checks still control consumption. Queue admission does
+not establish that Claude has read, processed or completed the request. Previously completed
+captures are not automatically backfilled by this change.
+
+Finance attention reuses one notification intent per canonical owner/scope repair identity across
+maintenance runs. The work revision identifies the exact current run; its canonical run row retains
+schedule/connection correlation. The semantic action revision identifies the required recovery
+(e.g. restore authority, restore a missing target, review scope/rules, restore a source, or review
+budget/position evidence). A new run UUID, wording, confidence, timestamp, host rotation, rulebook
+version or internal evidence refresh does not create a new action. Unknown/internal errors share
+the conservative inspect-failure action rather than inventing a new reason to text. Typed canonical
+position scopes (account IDs and date window) and budget proposal/policy/plan IDs and decision
+consequences distinguish material targets under a broad run scope. Whole evidence revisions,
+wording and confidence do not. Errors without canonical subject evidence retain the scope-level
+action; the resolver never extracts a target from prose. Missing or newly available subject evidence
+alone does not start a new episode; known subjects are carried through compatible history.
+
+Only the latest blocked or terminally failed run can produce current generic attention. Healthy
+runs, automatic retries and question/approval waits stay quiet. Generic attention is suppressed only
+when the same locked resolution pass proves a question for that run current. Before taking the
+global parent locks, repair resolution discovers all candidate same-run question references from
+owner-scoped database state independently of the dispatcher's 25-row cursor. It then validates
+those references under the ordinary account/transaction/review/question and run/candidate locks.
+Neither page ordering nor an open marker with stale parents can change question ownership.
+Notification claims partition replyable questions (up to three), one exact approval, and repair/generic work into separate delivery
+shapes. Omitted work stays pending for later passes. A repair cannot remove the numbered/choice
+bindings from an unrelated question or approval, and existing live reply namespaces remain intact.
+
+Repeated discovery or later runs of an uninterrupted unresolved action do not send again before
+the configured reminder interval. The default is seven days; `Never` disables reminders. Accepted
+handoffs start the interval; known failed reminder handoffs retain the bounded retry policy.
+
+Episode identity is derived from retained authoritative run history in bounded pages, without a
+lookback cutoff. A `completed` or `completed_with_questions` run for the exact canonical scope
+closes the previous generic repair episode even if no scan observed that settlement. Remaining
+questions retain their exact routes; this does not mark them answered or send a completion text.
+A later same-code blocker is a new eligible episode, including when reminders are `Never`.
+Different-scope completions, retry waits, question waits and manual supersession do not prove
+resolution. A material typed action/target/consequence change starts a new episode, including a
+return to a previously seen target after a different target. The prior terminal boundary is part of
+the action revision; a new run UUID alone is not. No additional episode ledger is published.
+Any uncertain submission for the stable intent blocks resend even across episode/action revisions.
+Claimed attempt membership retains its original exact run; superseded evidence suppresses unsent attempts rather
+than retargeting a queued message. No provider call occurs under domain locks.
+
+Each initial or reminder handoff cycle has at most three known-rejected attempts, with a one-minute
+wait after the first failure and five minutes after the second. Each retry rechecks consent, epoch, preferences,
+quiet hours and current work. Uncertain submissions are never automatically resent. Existing
+notification status exposes the stable action work ID, exact run revision, intent, attempt, outbound
+message and recovery state; this is separate from Finance Activity, which does not project every
+financial operation or SMS.
+An enabled Finance override cannot override global notification disablement.
+
+Attention texts direct the owner to authenticated Finance review and accept explicit `Finance:`
+context for Chat. They do not infer an approval, pairing or financial action from an unbound reply.
+Existing numbered question and exact approval bindings retain their admission and recovery paths.
+
+An ordinary completed routine produces no completion SMS. Durable monitoring of an explicitly
+requested budget/backlog outcome still requires a request-to-target persistence contract and parent
+schema coordination; it must verify the exact approved budget and resolved reconciliation scope,
+not a host's success label or an empty/partial Activity feed. This source change does not establish
+production activation, actual carrier delivery, original-Claude processing or requested-outcome
+completion. Those remain parent-owned acceptance checks.

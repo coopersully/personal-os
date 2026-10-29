@@ -137,9 +137,42 @@ jobs:
         with:
           cache: pnpm
           node-version: 22
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm audit --prod
-      - run: pnpm check:node
+      - id: coverage-prepare
+        name: Prepare attempt-bound coverage diagnostics
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node .github/scripts/collect-node-coverage.mjs prepare "$RUNNER_TEMP/node-coverage"
+      - id: install
+        run: pnpm install --frozen-lockfile
+      - id: audit
+        run: pnpm audit --prod
+      - id: node
+        run: pnpm check:node
+      - id: coverage
+        name: Collect bounded coverage diagnostics
+        if: always()
+        timeout-minutes: 1
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          NODE_OUTCOME: ${{ steps.node.outcome }}
+        run: node .github/scripts/collect-node-coverage.mjs collect "$RUNNER_TEMP/node-coverage"
+      - name: Retain attempt-bound Node coverage diagnostics
+        if: ${{ always() && steps.coverage.outputs.artifact_ready == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-coverage-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: |
+            ${{ runner.temp }}/node-coverage/manifest.json
+            ${{ runner.temp }}/node-coverage/coverage-summary.json
+            ${{ runner.temp }}/node-coverage/coverage-final.json
+          if-no-files-found: error
+          retention-days: 7
 
   browser:
     name: Browser acceptance (${{ matrix.project }}, ${{ matrix.shard }}/4)
@@ -148,6 +181,13 @@ jobs:
     runs-on: ubuntu-latest
     # Leave setup/download headroom outside the bounded test execution.
     timeout-minutes: 45
+    env:
+      BROWSER_PROJECT: ${{ matrix.project }}
+      BROWSER_SHARD: ${{ matrix.shard }}
+      BROWSER_DIAGNOSTIC_CONTEXT: local-e2e-fixtures
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     strategy:
       fail-fast: false
       matrix:
@@ -162,21 +202,34 @@ jobs:
         with:
           cache: pnpm
           node-version: 22
+      - name: Prepare attempt-bound browser diagnostics
+        run: node .github/scripts/collect-browser-diagnostics.mjs prepare "$RUNNER_TEMP/browser-diagnostics"
       - run: pnpm install --frozen-lockfile
       - name: Install Playwright browser
         run: |
           grep -rl "dl.google.com/linux/chrome" /etc/apt/sources.list.d 2>/dev/null \
             | xargs -r sudo rm -f
           pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/4
+      - id: browser_tests
+        run: pnpm test:e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/4
         timeout-minutes: 30
-      - if: failure()
+      - id: browser_diagnostics
+        name: Collect bounded browser diagnostics
+        if: always()
+        timeout-minutes: 1
+        env:
+          BROWSER_TEST_OUTCOME: ${{ steps.browser_tests.outcome }}
+        run: node .github/scripts/collect-browser-diagnostics.mjs collect "$RUNNER_TEMP/browser-diagnostics"
+      - name: Retain attempt-bound browser diagnostics
+        if: ${{ always() && steps.browser_diagnostics.outputs.artifact_ready == 'true' }}
+        timeout-minutes: 2
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report-${{ matrix.project }}-${{ matrix.shard }}
-          path: |
-            playwright-report
-            test-results
+          name: browser-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.project }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/browser-diagnostics/artifact/
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
 
   desktop:
     name: Desktop (${{ matrix.os }})

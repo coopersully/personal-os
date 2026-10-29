@@ -28,7 +28,7 @@ export default defineConfig({
       ],
       include: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}"],
       provider: "v8",
-      reporter: ["text", "html", "json-summary"],
+      reporter: ["text", "html", "json-summary", "json"],
       thresholds: {
         // A high global floor catches meaningful regressions without encouraging brittle
         // implementation-detail tests. New behavior still requires focused coverage.

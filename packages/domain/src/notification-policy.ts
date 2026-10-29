@@ -123,7 +123,32 @@ export function notificationEligibility(input: {
     (latest, a) => (!latest || a.submittedAt > latest ? a.submittedAt : latest),
     null,
   );
-  if (last) {
+  // Current repair episodes obey reminders after acceptance; known rejection gets at most
+  // two bounded retries after the most recent accepted handoff.
+  // Uncertain acceptance above always wins, including across action revisions.
+  if (work.work.kind === "repair") {
+    const accepted = sameAction
+      .filter((a) => a.state === "accepted")
+      .reduce<Date | null>(
+        (latest, a) => (!latest || a.submittedAt > latest ? a.submittedAt : latest),
+        null,
+      );
+    if (accepted) {
+      if (preferences.reminderDays === null) return "reminder_never";
+      if (now.getTime() - accepted.getTime() < preferences.reminderDays * 86400000)
+        return "reminder_wait";
+    }
+    const failures = sameAction.filter(
+      (a) => a.state === "failed" && (!accepted || a.submittedAt > accepted),
+    );
+    if (failures.length >= 3) return "retry_exhausted";
+    if (
+      failures.length &&
+      last &&
+      now.getTime() - last.getTime() < (failures.length > 1 ? 300_000 : 60_000)
+    )
+      return "retry_wait";
+  } else if (last) {
     if (preferences.reminderDays === null) return "reminder_never";
     if (now.getTime() - last.getTime() < preferences.reminderDays * 86400000)
       return "reminder_wait";
@@ -185,6 +210,8 @@ export function composeNotification(input: {
     labels[0] !== "Finance item"
   )
     return `nohmi: 1. ${labels[0]} Reply 1 approve or 1 reject. Review: ${new URL(input.origin).origin}/finances?review=open`;
+  if (input.works.length > 0 && input.works.every((work) => work.work.kind === "repair"))
+    return `nohmi: Finance maintenance needs attention. Review progress: ${new URL(input.origin).origin}/finances?review=open. For context, reply Finance: followed by your note.`;
   const overflow = input.works.length > 3 ? `; ${input.works.length - 3} more` : "";
   const origin = new URL(input.origin).origin;
   return `nohmi: Review needed: ${labels.join("; ")}${overflow}. Review: ${origin}/finances?review=open`;

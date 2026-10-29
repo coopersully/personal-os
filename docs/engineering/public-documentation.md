@@ -42,7 +42,8 @@ The root product page is also rendered from `ProductLanding` during `public:gene
 embeds that shared markup in the root HTML before loading the client app, so the product page and
 its policy links remain readable without JavaScript. The generated fragment is ignored; edit the
 React component rather than maintaining a second copy of the landing text. Browser acceptance
-covers the root and all thirteen documents with JavaScript disabled on desktop and mobile.
+covers the root, seven legacy documents, and the Mail, Tasks, Calendar and Finances guides
+with JavaScript disabled on desktop and mobile. The nginx route test separately covers all thirteen document paths.
 
 The external category is **“a personal harness.”** The landing page, about page, guide, and
 authentication brand panel explain context, tools, and controls in lowercase source copy.

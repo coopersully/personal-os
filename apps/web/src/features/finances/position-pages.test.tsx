@@ -1674,7 +1674,8 @@ it("opens comparison from a duplicate account row and restricts keep choices to 
 it.each([
   "finance_account_disconnected",
   "finance_account_legacy_disconnected",
-])("uses fresh consent for a stopped %s record", async (failureCode) => {
+  "ITEM_LOGIN_REQUIRED",
+])("routes %s to the expected bank consent mode", async (failureCode) => {
   api.listFinanceAccounts.mockResolvedValue({
     accounts: [
       {
@@ -1705,6 +1706,9 @@ it.each([
   expect(
     plaidConnectProps.mock.calls
       .filter(([props]) => props.label === "Reconnect bank")
-      .every(([props]) => props.accountId === undefined),
+      .every(
+        ([props]) =>
+          props.accountId === (failureCode === "ITEM_LOGIN_REQUIRED" ? account.id : undefined),
+      ),
   ).toBe(true);
 });

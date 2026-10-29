@@ -123,7 +123,7 @@ source recovery needs the documented metadata rerun, not a PR-body edit.
 ## Bounded browser failure diagnostics
 
 The browser matrix preserves the original test command, both projects and four shards, one worker,
-configured single retry, 45-second case deadline and 30-minute job deadline. Existing Playwright
+configured single retry, 45-second case deadline and 30-minute test-step deadline. Existing Playwright
 `retain-on-failure` traces and `only-on-failure` screenshots can remain after a retry succeeds.
 Collection and upload therefore run independently of the terminal test-step result. No extra test,
 retry, reporter, report regeneration or intentional full-suite failure supplies diagnostics.

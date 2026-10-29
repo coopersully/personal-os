@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, expect, it, vi } from "vitest";
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 import { api } from "../../api.js";
 import { PlaidConnectButton } from "./plaid-connect.js";
 
@@ -14,7 +15,28 @@ vi.mock("react-plaid-link", () => ({
     return { open: vi.fn(), ready: false };
   },
 }));
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  toast.dismiss();
+  vi.restoreAllMocks();
+});
+const reconnectSuccess = "Bank authorization verified; synchronization scheduled.";
+const reconnectRetryError =
+  "Couldn’t verify bank authorization and schedule synchronization. Try again.";
+const reconnectConflictError =
+  "Couldn’t verify bank authorization and schedule synchronization. This item changed or is no longer available. Check the latest version before trying again.";
+async function expectToast(type: "success" | "error", message: string) {
+  await waitFor(() =>
+    expect(
+      [...document.querySelectorAll(`[data-sonner-toast][data-type="${type}"]`)].some(
+        (node) =>
+          node.getAttribute("data-removed") !== "true" && node.textContent?.includes(message),
+      ),
+    ).toBe(true),
+  );
+  expect(
+    within(screen.getByRole("region", { name: "Bank connection controls" })).queryByText(message),
+  ).not.toBeInTheDocument();
+}
 
 async function setup(accountId?: string) {
   vi.spyOn(api, "getPlaidStatus").mockResolvedValue({ available: true });
@@ -24,7 +46,9 @@ async function setup(accountId?: string) {
   });
   render(
     <QueryClientProvider client={client}>
-      <PlaidConnectButton {...(accountId ? { accountId } : {})} onConnected={vi.fn()} />
+      <section aria-label="Bank connection controls">
+        <PlaidConnectButton {...(accountId ? { accountId } : {})} onConnected={vi.fn()} />
+      </section>
     </QueryClientProvider>,
   );
   await screen.findByRole("button", { name: "Connect bank" });
@@ -56,12 +80,11 @@ it("uses Sonner for missing token feedback without inline action-result copy", a
   expect(error).toHaveBeenCalledWith(
     "Plaid completed without a bank connection. Try connecting again.",
   );
-  expect(
-    screen.queryByText("Plaid completed without a bank connection. Try connecting again."),
-  ).not.toBeInTheDocument();
+  await expectToast("error", "Plaid completed without a bank connection. Try connecting again.");
 });
 
-it("completes update-mode consent without a public-token exchange", async () => {
+it("completes update-mode reconnect consent without a public-token exchange", async () => {
+  const success = vi.spyOn(toast, "success");
   const complete = vi.spyOn(api, "completePlaidReconnect").mockResolvedValue({
     accountId: "owned-account",
     authorizationVerified: true,
@@ -71,6 +94,11 @@ it("completes update-mode consent without a public-token exchange", async () => 
   act(() => link.onSuccess("", {}));
   await waitFor(() => expect(complete).toHaveBeenCalledWith("owned-account", expect.any(String)));
   expect(exchange).not.toHaveBeenCalled();
+  await expectToast("success", reconnectSuccess);
+  expect(success).toHaveBeenCalledWith(
+    reconnectSuccess,
+    expect.objectContaining({ id: expect.any(String) }),
+  );
 });
 
 it("clearly identifies a sandbox connection before authorization", async () => {
@@ -101,13 +129,16 @@ it("retains an uncertain reconnect key and renews it after a confirmed rejection
   await setup("owned-account");
   act(() => link.onSuccess("", {}));
   await waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+  await expectToast("error", reconnectRetryError);
   await waitFor(() => expect(screen.getByRole("button", { name: "Connect bank" })).toBeEnabled());
   act(() => link.onSuccess("", {}));
   await waitFor(() => expect(complete).toHaveBeenCalledTimes(2));
+  await expectToast("error", reconnectConflictError);
   await waitFor(() => expect(screen.getByRole("button", { name: "Connect bank" })).toBeEnabled());
   expect(complete.mock.calls[1]?.[1]).toBe(complete.mock.calls[0]?.[1]);
   act(() => link.onSuccess("", {}));
   await waitFor(() => expect(complete).toHaveBeenCalledTimes(3));
+  await expectToast("success", reconnectSuccess);
   expect(complete.mock.calls[2]?.[1]).not.toBe(complete.mock.calls[1]?.[1]);
 });
 
@@ -129,8 +160,10 @@ it("replays the same reconnect receipt after an uncertain HTTP 503 response", as
   await setup("owned-account");
   act(() => link.onSuccess("", {}));
   await waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+  await expectToast("error", reconnectRetryError);
   await waitFor(() => expect(screen.getByRole("button", { name: "Connect bank" })).toBeEnabled());
   act(() => link.onSuccess("", {}));
   await waitFor(() => expect(complete).toHaveBeenCalledTimes(2));
+  await expectToast("success", reconnectSuccess);
   expect(complete.mock.calls[1]?.[1]).toBe(complete.mock.calls[0]?.[1]);
 });

@@ -5,9 +5,18 @@ description: Verify personal-os changes at the appropriate unit, API integration
 
 # personal-os testing
 
-The repository requires `pnpm verify` before handoff. It runs environment
+Apply the repository [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+to assigned durable work; pure read-only use of this skill creates no tracking work.
+
+Final acceptance requires policy-complete local or hosted verification under
+`docs/engineering/delivery-verification.md`, including its Git-verified prose-only exception;
+iteration and early handoffs use focused evidence.
+The local `pnpm verify` runs environment
 checks, linting, type checks, high-threshold coverage, production builds, and
 desktop/mobile Playwright acceptance tests.
+
+Use `docs/engineering/development-handbook.md` and its offline planner to identify missing steps
+and reusable receipts. This does not replace this skill's authority, role or acceptance gates.
 
 ## Choose the narrowest effective layer
 
@@ -29,7 +38,21 @@ Avoid tests that only mirror component internals or generated UI primitives.
 
 ## Run proportionate verification
 
-Run the nearest focused test while iterating, then run `pnpm verify` for the
-complete change. Do not lower coverage thresholds or exclude product code to
+Follow `docs/engineering/verification-efficiency.md` for iteration. Use the shared verification
+planner for package/consumer scope, then select behavior-specific tests. Share current-candidate
+receipts with reviewers; only one execution owner runs checks. The planner never grants merge
+readiness or replaces the final verification contract.
+
+
+Run the nearest focused test while iterating, then obtain the final verification scope
+required by the delivery contract. Do not run application suites for proven prose-only scope. Do not lower coverage thresholds or exclude product code to
 make a change pass. Preserve deterministic fixtures and avoid real provider
 credentials or network calls in tests.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow `docs/engineering/delivery-verification.md`: converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

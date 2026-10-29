@@ -11,9 +11,11 @@ comment handling. A resolved thread is not proof that its acceptance criteria ar
 ## Write safety
 
 An explicit invocation grants permission to edit, test, commit, push, and resolve inline threads for
-the current PR. Do not post GitHub comment replies during the initial pass. Draft useful replies and
-wait for `c` or `confirm` before posting them. Thread resolution after a verified pushed fix does not
-need separate confirmation.
+the current PR. Standalone invocations draft useful GitHub replies and wait for `c` or `confirm`
+before posting. When called under an explicit `ship-it` invocation, inherit its authority for
+bounded factual replies and review requests on that PR: post only useful evidence-backed explanations,
+deduplicate against existing comments, and record their URLs. This does not authorize reviewer-intent
+override or scope expansion. Thread resolution after a verified pushed fix needs no confirmation.
 
 ## Workflow
 
@@ -112,7 +114,9 @@ review summaries cannot be resolved as threads.
 ### 7. Verify the complete PR
 
 1. Run focused checks for affected behavior.
-2. Run `pnpm verify`.
+2. Reuse valid verification evidence. After review convergence, commit/freeze and obtain complete
+   local or equivalent hosted verification before merge under `delivery-verification.md`; do not
+   run the full suite after each feedback repair.
 3. Re-fetch feedback with `--include-resolved`.
 4. Re-audit every human item, including resolved threads, against current code.
 5. Confirm no actionable unresolved thread remains unless explicitly blocked/deferred.
@@ -129,19 +133,21 @@ short factual reply when:
 - a top-level thematic comment needs a consolidated answer; or
 - repo-specific context will prevent repeated bot feedback.
 
-Show each draft with its real target URL. Ask for `c` or `confirm` only when at least one post-ready
-reply exists. After confirmation, post only the confirmed text and return the resulting comment URLs.
+For a standalone invocation, show each draft with its real target URL and ask for `c` or `confirm`
+only when a post-ready reply exists; post only confirmed text. Under explicit ship-it authority,
+post useful factual replies directly after verification. Return the resulting comment URLs in either mode.
 
 ## Final gate
 
 - Every non-noise item has a ledger entry and source evidence.
 - Every acceptance criterion was checked against the pushed head.
 - Same-pattern occurrences were audited at the right level.
-- Focused checks and `pnpm verify` passed or the blocker is explicit.
+- Focused checks passed or the blocker is explicit; final verification remains pending until a
+  complete frozen-candidate set passes. Feedback handling alone does not establish merge readiness.
 - Inline threads were resolved only after adequate handling.
 - Linked issue state/context remains accurate.
 - The PR Work map and every linked Nohmi issue's structured backlink agree.
-- No GitHub replies were posted without confirmation.
+- GitHub replies have standalone confirmation or recorded explicit ship-it authority.
 
 ## Output
 
@@ -155,3 +161,11 @@ Use the PR workflow output contract in `docs/engineering/pr-rubric.md`, then inc
 - linked issue updates;
 - proposed GitHub replies, or `None`; and
 - blockers requiring reviewer or user judgment.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow `docs/engineering/delivery-verification.md`: converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

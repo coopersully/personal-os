@@ -85,3 +85,16 @@ export const connectedAccountHealthSchema = z.object({
   state: connectionHealthStateSchema,
 });
 export type ConnectedAccountHealth = z.infer<typeof connectedAccountHealthSchema>;
+
+// Durable per-capability evidence; account-level health remains the aggregate.
+export const connectorCapabilitySyncSchema = z.object({
+  lastAttemptAt: isoDateTimeSchema,
+  lastSyncedAt: isoDateTimeSchema.nullable(),
+  failureCount: z.number().int().nonnegative(),
+  errorCode: z.string().nullable(),
+  errorCategory: connectorFailureCategorySchema.nullable(),
+  status: z.number().int().nullable(),
+  health: connectedAccountHealthSchema,
+});
+export type ConnectorCapabilitySync = z.infer<typeof connectorCapabilitySyncSchema>;
+export type ConnectorCapabilities = Partial<Record<"calendar" | "mail", ConnectorCapabilitySync>>;

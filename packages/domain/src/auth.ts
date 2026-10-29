@@ -30,8 +30,10 @@ export type InvitationValidation = z.infer<typeof invitationValidationSchema>;
 
 export const passwordSchema = z
   .string()
-  .min(PASSWORD_MIN_LENGTH)
-  .max(PASSWORD_MAX_LENGTH)
+  // Match existing credentials, passwordRequirementState and native form length limits.
+  .refine((value) => passwordRequirementState(value).length, {
+    message: `Use between ${PASSWORD_MIN_LENGTH} and ${PASSWORD_MAX_LENGTH} characters.`,
+  })
   .regex(/[a-z]/, "Include a lowercase letter.")
   .regex(/[A-Z]/, "Include an uppercase letter.")
   .regex(/[0-9]/, "Include a number.")
@@ -57,7 +59,11 @@ export type RegisterInput = z.infer<typeof registerInputSchema>;
 
 export const loginInputSchema = z.object({
   email: emailAddressSchema,
-  password: z.string().min(1).max(128),
+  password: z
+    .string()
+    .min(1)
+    .max(PASSWORD_MAX_LENGTH)
+    .refine((value) => value.length <= PASSWORD_MAX_LENGTH, "Password exceeds the length limit."),
 });
 export type LoginInput = z.infer<typeof loginInputSchema>;
 
@@ -202,10 +208,13 @@ export const accessScopeSchema = z.enum([
   "reminders:write",
   "tasks:read",
   "tasks:write",
+  "tasks:execute",
   "calendar:read",
   "calendar:write",
+  "calendar:execute",
   "mail:read",
   "mail:write",
+  "mail:execute",
   "goals:read",
   "goals:write",
   "tracking:read",
@@ -215,10 +224,12 @@ export const accessScopeSchema = z.enum([
   "audit:read",
   "finances:read",
   "finances:write",
+  "finances:execute",
   "finances:maintain",
   "bookmarks:read",
   "texting:read",
   "texting:write",
+  "texting:execute",
 ]);
 export type AccessScope = z.infer<typeof accessScopeSchema>;
 

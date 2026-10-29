@@ -3,9 +3,9 @@ import "@testing-library/jest-dom/vitest";
 import type { ConnectedAccountHealth } from "@personal-os/domain";
 import { render, screen } from "@testing-library/react";
 import {
+  ConnectionCapabilityHealth,
   ConnectionHealthBadge,
   ConnectionHealthDescription,
-  ConnectionRecoveryAlert,
   connectionHealth,
   visibleConnectorRefreshInterval,
 } from "./health.js";
@@ -18,6 +18,45 @@ const baseHealth: ConnectedAccountHealth = {
 };
 
 describe("connection health presentation", () => {
+  it("shows independent capability state and freshness during an outage", () => {
+    render(
+      <ConnectionCapabilityHealth
+        enabled={{ calendar: true, mail: true }}
+        fallback={{ health: baseHealth, lastSyncedAt: null }}
+        capabilities={{
+          calendar: {
+            health: {
+              ...baseHealth,
+              state: "reconnect",
+              recovery: "reconnect",
+              message: "Calendar needs permission.",
+            },
+            lastAttemptAt: "2026-10-11T12:00:00.000Z",
+            lastSyncedAt: "2026-09-30T12:00:00.000Z",
+            failureCount: 1,
+            errorCode: "google_permission_missing",
+            errorCategory: "authorization",
+            status: 403,
+          },
+          mail: {
+            health: baseHealth,
+            lastAttemptAt: "2026-10-11T12:00:00.000Z",
+            lastSyncedAt: "2026-10-11T12:00:00.000Z",
+            failureCount: 0,
+            errorCode: null,
+            errorCategory: null,
+            status: null,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Calendar")).toBeInTheDocument();
+    expect(screen.getByText("Mail")).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+    expect(screen.getByText("Reconnect required")).toBeInTheDocument();
+    expect(screen.getAllByText(/Last successful sync/)).toHaveLength(2);
+  });
+
   it.each([
     ["ready", "Ready"],
     ["syncing", "Syncing"],
@@ -51,31 +90,6 @@ describe("connection health presentation", () => {
       />,
     );
     expect(screen.getByText(/Synced 5 minutes ago/u)).toBeInTheDocument();
-  });
-
-  it("links reconnecting accounts directly to Connections without raw provider material", () => {
-    render(
-      <ConnectionRecoveryAlert
-        accounts={[
-          {
-            health: {
-              message: "Google authorization is no longer valid. Reconnect to resume syncing.",
-              nextSyncAt: null,
-              recovery: "reconnect",
-              state: "reconnect",
-            },
-            id: "account-1",
-            label: "Personal Google",
-          },
-        ]}
-      />,
-    );
-    expect(screen.getByRole("alert")).toHaveTextContent("Personal Google");
-    expect(screen.getByRole("link", { name: "Review connections" })).toHaveAttribute(
-      "href",
-      "/settings?section=connections",
-    );
-    expect(screen.queryByText(/raw-provider-canary/u)).not.toBeInTheDocument();
   });
 
   it("uses safe descriptions for every incomplete health payload", () => {
@@ -115,24 +129,6 @@ describe("connection health presentation", () => {
     expect(screen.getByText("Ready to sync")).toBeInTheDocument();
   });
 
-  it("summarizes multiple reconnects and omits the alert when none need authorization", () => {
-    const reconnect = {
-      health: { ...baseHealth, recovery: "reconnect" as const, state: "reconnect" as const },
-      id: "account-1",
-      label: "Personal Google",
-    };
-    const { rerender } = render(
-      <ConnectionRecoveryAlert
-        accounts={[reconnect, { ...reconnect, id: "account-2", label: "Work Google" }]}
-      />,
-    );
-    expect(screen.getByText("Reconnect accounts")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Personal Google, Work Google");
-
-    rerender(<ConnectionRecoveryAlert accounts={[]} />);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
   it("projects legacy account states without exposing legacy error details", () => {
     expect(connectionHealth({ health: baseHealth, syncStatus: "error" })).toBe(baseHealth);
     expect(connectionHealth({ syncStatus: "syncing" })).toMatchObject({ state: "syncing" });
@@ -151,5 +147,60 @@ describe("connection health presentation", () => {
     expect(visibleConnectorRefreshInterval()).toBe(false);
     if (visibility) Object.defineProperty(Document.prototype, "visibilityState", visibility);
     Reflect.deleteProperty(document, "visibilityState");
+  });
+  it("shows an unsynced Mail-only account without inventing Calendar health or success", () => {
+    render(
+      <ConnectionCapabilityHealth
+        enabled={{ calendar: false, mail: true }}
+        fallback={{ health: baseHealth, lastSyncedAt: null }}
+        capabilities={{
+          mail: {
+            lastAttemptAt: "2026-10-11T12:00:00.000Z",
+            lastSyncedAt: null,
+            failureCount: 0,
+            errorCode: null,
+            errorCategory: null,
+            status: null,
+            health: baseHealth,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Mail")).toBeInTheDocument();
+    expect(screen.queryByText("Calendar")).not.toBeInTheDocument();
+    expect(screen.getByText("No successful sync recorded yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/Last successful sync:/)).not.toBeInTheDocument();
+  });
+  it("keeps an enabled unobserved sibling visible using account health", () => {
+    const { rerender } = render(
+      <ConnectionCapabilityHealth
+        enabled={{ calendar: true, mail: true }}
+        fallback={{ health: { ...baseHealth, state: "syncing" }, lastSyncedAt: null }}
+        capabilities={{
+          calendar: {
+            health: baseHealth,
+            lastAttemptAt: "2026-10-12T12:00:00.000Z",
+            lastSyncedAt: "2026-10-12T12:00:00.000Z",
+            failureCount: 0,
+            errorCode: null,
+            errorCategory: null,
+            status: null,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Mail")).toBeInTheDocument();
+    expect(screen.getByText("Syncing")).toBeInTheDocument();
+    expect(screen.getByText("No successful sync recorded yet.")).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+    rerender(
+      <ConnectionCapabilityHealth
+        enabled={{ calendar: false, mail: true }}
+        fallback={{ health: baseHealth, lastSyncedAt: "2026-10-11T12:00:00.000Z" }}
+        capabilities={{}}
+      />,
+    );
+    expect(screen.queryByText("Calendar")).not.toBeInTheDocument();
+    expect(screen.getByText(/Last successful sync/)).toBeInTheDocument();
   });
 });

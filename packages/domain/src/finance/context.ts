@@ -1,16 +1,26 @@
 import { z } from "zod";
-import { idSchema } from "../common.js";
+import { idSchema, isoDateTimeSchema } from "../common.js";
 
 const revision = z
   .string()
   .regex(/^[1-9]\d{0,18}$/)
   .refine((value) => value.length < 19 || value <= "9223372036854775807");
-const instant = z.iso
-  .datetime({ offset: true })
-  .transform((value) => new Date(value).toISOString())
-  .nullable();
+const instant = isoDateTimeSchema.transform((value) => new Date(value).toISOString()).nullable();
+export const financeContextTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(10_000)
+  .refine(
+    (text) => !/[\p{Cc}\p{Cf}]/u.test(text.replace(/[\t\n\r\u200C\u200D]/g, "")),
+    "Context must not contain invisible controls.",
+  )
+  .refine(
+    (text) => /[^\s\p{Default_Ignorable_Code_Point}]/u.test(text),
+    "Context must contain visible text.",
+  );
 const content = {
-  text: z.string().trim().min(1).max(10_000),
+  text: financeContextTextSchema,
   validFrom: instant,
   validThrough: instant,
   participants: z.array(z.string().trim().min(1).max(200)).max(50),

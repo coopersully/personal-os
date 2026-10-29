@@ -11,6 +11,7 @@ type CurrencyInputProps = Omit<
   ComponentProps<"input">,
   "value" | "defaultValue" | "onChange" | "type" | "min" | "max" | "step"
 > & {
+  currencyCode?: string | null;
   value: string;
   onValueChange: (value: string) => void;
   min?: number;
@@ -20,6 +21,7 @@ type CurrencyInputProps = Omit<
 /** USD display formatting never changes the canonical decimal string saved by the form. */
 export function CurrencyInput({
   value,
+  currencyCode = "USD",
   onValueChange,
   name,
   min = 0,
@@ -57,7 +59,15 @@ export function CurrencyInput({
   }, [name, value, props.disabled]);
   return (
     <InputGroup data-disabled={props.disabled}>
-      <InputGroupAddon aria-hidden="true">$</InputGroupAddon>
+      {currencyCode ? (
+        <InputGroupAddon aria-hidden="true">
+          {
+            new Intl.NumberFormat("en-US", { style: "currency", currency: currencyCode })
+              .formatToParts(0)
+              .find((part) => part.type === "currency")?.value
+          }
+        </InputGroupAddon>
+      ) : null}
       <InputGroupInput
         {...props}
         ref={input}

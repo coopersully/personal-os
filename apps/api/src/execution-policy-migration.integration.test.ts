@@ -11,15 +11,19 @@ describe.sequential("global execution policy migration", () => {
   it("preserves only aligned grants and never confers budget activation authority", async () => {
     const container = await new PostgreSqlContainer("postgres:17.5-alpine").start();
     const database = createDatabaseClient(container.getConnectionUri());
-    const beforePolicy = await migrationsWithout(migrationsFolder, "nohmi-execution-policy-", [
-      "0083_global_execution_policy",
-      "0084_finance_setup_profile_lineage",
-      "0085_finance_context_capture",
-      "0086_notification_foundation",
-      "0087_finance_budget_policy_management",
-      "0088_finance_budget_policy_nonempty_text",
-      "0089_finance_contextual_questions",
-    ]);
+    const beforePolicy = await migrationsWithout(
+      migrationsFolder,
+      "personal-os-execution-policy-",
+      [
+        "0083_global_execution_policy",
+        "0084_finance_setup_profile_lineage",
+        "0085_finance_context_capture",
+        "0086_notification_foundation",
+        "0087_finance_budget_policy_management",
+        "0088_finance_budget_policy_nonempty_text",
+        "0089_finance_contextual_questions",
+      ],
+    );
     try {
       await migrateDatabase(database.db, beforePolicy);
       const cases = [
@@ -95,7 +99,12 @@ describe.sequential("global execution policy migration", () => {
         });
         expect(() =>
           requireFinanceMutation(context, { approvalSource: "agent_self_approval" }),
-        ).toThrow("explicit Finance budget activation policy");
+        ).toThrow(
+          expect.objectContaining({
+            code: "forbidden",
+            message: "Agent self-approval requires explicit Finance execution authority.",
+          }),
+        );
       }
     } finally {
       await database.close();

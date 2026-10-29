@@ -11,6 +11,7 @@
       "!**/test-results",
       "!**/target",
       "!.superpowers",
+      "!.context",
       "!apps/desktop/src-tauri/gen",
       "!apps/desktop/src-tauri/vendor",
       "!apps/web/dev-dist",

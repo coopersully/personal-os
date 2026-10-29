@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Database } from "@personal-os/database";
+import { type Database, users } from "@personal-os/database";
 import type { AccessScope } from "@personal-os/domain";
 import { createOAuthService } from "./oauth-service.js";
 
@@ -169,7 +169,18 @@ describe("OAuth authorized clients", () => {
     const set = vi.fn(() => ({ where }));
     const update = vi.fn(() => ({ set }));
     const transaction = vi.fn(async (run: (value: { update: typeof update }) => Promise<void>) =>
-      run({ update }),
+      run({
+        update,
+        execute: vi.fn().mockResolvedValue(undefined),
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              for: () => ({ limit: async () => [{ id: "user-1" }] }),
+              orderBy: () => ({ for: async () => [] }),
+            }),
+          }),
+        }),
+      } as { update: typeof update }),
     );
     const db = { transaction } as unknown as Database;
     const now = new Date("2026-07-21T12:00:00.000Z");
@@ -325,6 +336,16 @@ describe("OAuth authorized clients", () => {
             }),
           }),
         }),
+        transaction: async (run: (tx: unknown) => unknown) =>
+          run({
+            execute: vi.fn(),
+            select: () => ({
+              from: () => ({
+                where: () => ({ for: () => ({ limit: async () => [{ id: "user-1" }] }) }),
+              }),
+            }),
+            update: () => ({ set: () => ({ where: () => ({ returning: async () => used }) }) }),
+          }),
       }) as unknown as Database;
 
     await expect(
@@ -355,12 +376,16 @@ describe("OAuth authorized clients", () => {
       refreshToken: "refresh",
       resource: serviceOptions.resource,
     };
-    const createDb = (selectResults: unknown[][], replaced: unknown[]) =>
-      ({
+    const createDb = (selectResults: unknown[][], replaced: unknown[]) => {
+      const executor = {
         select: () => ({
-          from: () => ({
+          from: (table: unknown) => ({
             where: () => ({
               limit: async () => selectResults.shift() ?? [],
+              for: () => ({
+                limit: async () =>
+                  table === users ? [{ id: "user-1" }] : (selectResults.shift() ?? []),
+              }),
             }),
           }),
         }),
@@ -371,7 +396,13 @@ describe("OAuth authorized clients", () => {
             }),
           }),
         }),
-      }) as unknown as Database;
+      };
+      return {
+        ...executor,
+        transaction: async (run: (tx: unknown) => unknown) =>
+          run({ ...executor, execute: vi.fn().mockResolvedValue(undefined) }),
+      } as unknown as Database;
+    };
 
     await expect(
       createOAuthService({ db: createDb([[]], []), ...serviceOptions }).refresh(input),
@@ -419,6 +450,18 @@ describe("OAuth authorized clients", () => {
       }),
     } as unknown as Database;
 
+    Object.assign(db, {
+      transaction: async (run: (tx: unknown) => unknown) =>
+        run({
+          ...db,
+          execute: vi.fn(),
+          select: () => ({
+            from: () => ({
+              where: () => ({ for: () => ({ limit: async () => [{ id: "user-1" }] }) }),
+            }),
+          }),
+        }),
+    });
     await expect(
       createOAuthService({ db, ...serviceOptions }).exchangeCode({
         clientId: "client-1",

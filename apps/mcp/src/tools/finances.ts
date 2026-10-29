@@ -2,18 +2,35 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import {
   answerFinanceReviewInputSchema,
+  automationHostPromptIssueInputSchema,
+  automationHostPromptPageInputSchema,
+  automationHostScheduleObservationInputSchema,
   type FinanceReceiptReview,
   type FinanceToolResult,
+  financeBudgetBaselineQualificationQuerySchema,
+  financeCashflowProjectionQuerySchema,
+  financeConversationAcknowledgmentInputSchema,
+  financeConversationEvidenceReadInputSchema,
+  financeConversationProofOperationSchema,
+  financeConversationReplyInputSchema,
   financeMaintenanceInputSchema,
+  financeOnboardingCompleteInputSchema,
+  financeOnboardingSaveInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
+  financeSpendingQuerySchema,
+  financeSpendingReferenceFilterSchema,
   maintenanceRunStatusSchema,
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
+  prepareFinanceBudgetBaselineQualificationInputSchema,
+  refreshFinanceMaintenanceExecutionInputSchema,
+  updateFinanceTransactionInputSchema,
+  utcIsoDateTimeSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
-import { apiResult } from "../tool-result.js";
+import { apiResult, result } from "../tool-result.js";
 
 const id = z.string().uuid().describe("nohmi object identifier");
 const idempotencyKey = z
@@ -34,16 +51,8 @@ function envelope<T>(data: T, headline: string): FinanceToolResult<T> {
 }
 
 function financeResult<T>(value: FinanceToolResult<T>) {
-  const question = value.communication.nextQuestion?.prompt;
   return {
-    content: [
-      {
-        type: "text" as const,
-        text: question
-          ? `${value.communication.headline}\n\n${question}`
-          : value.communication.headline,
-      },
-    ],
+    ...result(value),
     structuredContent: value,
   };
 }
@@ -166,11 +175,51 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       ),
   );
   server.registerTool(
+    "get_finance_onboarding",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the current owner's durable Finance setup revision, actual source/context evidence and review blockers. Existing access and host registration do not mean setup is completed or Chat is verified. This read never inserts setup state.",
+      inputSchema: z.object({}).strict(),
+      title: "Read Finance setup readiness",
+    },
+    async () => apiResult(() => api.getFinanceOnboarding()),
+  );
+  server.registerTool(
+    "save_finance_onboarding_answers",
+    {
+      annotations: { openWorldHint: false, idempotentHint: true },
+      description:
+        "Save reviewed Finance setup dispositions using exact question IDs and the current onboarding revision. Save canonical financial values through their owned operations first; answered requires actual stored evidence, none requires allowsNone, and unknown never means zero. Requires current owner-authorized Finance execution; this does not approve a budget or complete setup.",
+      inputSchema: financeOnboardingSaveInputSchema,
+      title: "Save Finance setup review",
+    },
+    async (input) =>
+      apiResult(() =>
+        api.saveFinanceOnboardingAnswers(financeOnboardingSaveInputSchema.parse(input)),
+      ),
+  );
+  server.registerTool(
+    "complete_finance_onboarding",
+    {
+      annotations: { openWorldHint: false, idempotentHint: true },
+      description:
+        "Complete the exact reviewed Finance setup revision after the server revalidates source, context, display review and automation choice. Later needs no host; now requires an actual authorized registration and cadence, while Chat proof remains separate. Only returned completedAt confirms completion. Requires current owner-authorized execution and never approves or activates a budget.",
+      inputSchema: financeOnboardingCompleteInputSchema,
+      title: "Complete Finance setup",
+    },
+    async (input) =>
+      apiResult(() =>
+        api.completeFinanceOnboarding(financeOnboardingCompleteInputSchema.parse(input)),
+      ),
+  );
+
+  server.registerTool(
     "setup_finances",
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation requires an authenticated user decision bound to the current profile and proposal; agent tokens cannot activate it. Do not ask the user to name a tool.",
+        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal. Agents can activate with finances:write, finances:execute and enabled review bypass using agent_self_approval; otherwise the owner approves in nohmi. Do not ask the user to name a tool.",
       inputSchema: financeSetupInputSchema,
       title: "Set up finances",
     },
@@ -178,6 +227,278 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       financeApiResult(() => api.setupFinances(financeSetupInputSchema.parse(input))),
   );
 
+  server.registerTool(
+    "get_finance_conversation_evidence",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the committed financial-effect receipt for one exact existing Finance run, candidate and revision, using the original verified host with current execution authority. Follow nextCursor for bounded audit/record reference pages. This read never applies or retries effects and never reads a live conversation queue. Expired/revoked original credentials require explicit recovery.",
+      inputSchema: z
+        .object({ runId: id, ...financeConversationEvidenceReadInputSchema.shape })
+        .strict(),
+      title: "Read committed Finance run evidence",
+    },
+    async ({ runId, ...input }) =>
+      apiResult(() =>
+        api.getFinanceConversationEvidence(
+          runId,
+          financeConversationEvidenceReadInputSchema.parse(input),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_finance_conversation_batch",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Page only the immutable message batch captured by the existing maintain_finances run, using its original verified host connection. Follow the returned signed cursor; never scan a live queue or start another Chat job. Reading persists exact delivery receipts but does not acknowledge messages or mark them read by the human. Later messages belong to a later run.",
+      inputSchema: z
+        .object({
+          runId: id,
+          cursor: z.string().min(1).max(2000).optional(),
+          limit: z.int().min(1).max(100).optional(),
+        })
+        .strict(),
+      title: "Read fixed Finance conversation batch",
+    },
+    async ({ runId, cursor, limit }) =>
+      apiResult(() =>
+        api.getFinanceConversationBatch(runId, {
+          ...(cursor === undefined ? {} : { cursor }),
+          ...(limit === undefined ? {} : { limit }),
+        }),
+      ),
+  );
+  server.registerTool(
+    "acknowledge_finance_conversation_batch",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Acknowledge only the exact delivered message IDs from this existing Finance run's fixed batch. The server validates original host authority and delivery receipts. This does not move the human rendered/read cursor, approve a financial change or consume later messages.",
+      inputSchema: z
+        .object({ runId: id, ...financeConversationAcknowledgmentInputSchema.shape })
+        .strict(),
+      title: "Acknowledge delivered Finance messages",
+    },
+    async ({ runId, ...input }) =>
+      apiResult(() =>
+        api.acknowledgeFinanceConversationBatch(
+          runId,
+          financeConversationAcknowledgmentInputSchema.parse(input),
+        ),
+      ),
+  );
+  server.registerTool(
+    "reply_to_finance_conversation_batch",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Persist a contextual reply to exact source messages delivered within this existing Finance run's fixed cutoff. Reuse the idempotency key only for the same reply. Read committed effect evidence before recovering a lost reply; publishing text never authorizes or repeats a financial effect and cannot approve a budget.",
+      inputSchema: z.object({ runId: id, ...financeConversationReplyInputSchema.shape }).strict(),
+      title: "Reply to fixed Finance conversation batch",
+    },
+    async ({ runId, ...input }) =>
+      apiResult(() =>
+        api.replyToFinanceConversationBatch(
+          runId,
+          financeConversationReplyInputSchema.parse(input),
+        ),
+      ),
+  );
+  server.registerTool(
+    "exchange_finance_conversation_challenge",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Complete a human-issued Finance message-protocol challenge with the original authorized host connection: fetch the actual challenge, acknowledge its exact nonce and ID, then persist a harmless response. Verification is server-owned; registration, check-in and self-reported verified flags cannot unlock Chat. Challenge traffic stays outside conversation history and unread counts.",
+      inputSchema: z
+        .object({ challengeId: id, operation: financeConversationProofOperationSchema })
+        .strict(),
+      title: "Verify Finance message protocol",
+    },
+    async ({ challengeId, operation }) =>
+      apiResult(() =>
+        api.exchangeFinanceConversationChallenge(
+          challengeId,
+          financeConversationProofOperationSchema.parse(operation),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_finance_spending",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the Finance Spending dashboard for the exact account/category selection, dates, timezone, basis and grouping. This read never approves or changes a budget.",
+      inputSchema: financeSpendingQuerySchema,
+      title: "Read Finance Spending",
+    },
+    async (query) =>
+      apiResult(() => api.getFinanceSpending(financeSpendingQuerySchema.parse(query))),
+  );
+  server.registerTool(
+    "list_finance_spending_transactions",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read transactions from an exact Spending reference revision and bounded group/date filter. Follow its returned cursor; stale references require a fresh Spending read. This POST-backed read does not mutate records.",
+      inputSchema: z
+        .object({
+          filter: financeSpendingReferenceFilterSchema,
+          cursor: z.string().max(100).optional(),
+          limit: z.number().int().min(1).max(100).default(50),
+        })
+        .strict(),
+      title: "Read Spending source transactions",
+    },
+    async ({ filter, cursor, limit }) =>
+      apiResult(() =>
+        api.listFinanceSpendingTransactions(
+          financeSpendingReferenceFilterSchema.parse(filter),
+          cursor,
+          limit,
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_finance_budget_baseline_qualification",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the exact qualified monthly Finance budget baseline or why qualification is unavailable. Candidates are context for an exact approval under the current review policy; this read never confirms a baseline or approves a budget.",
+      inputSchema: financeBudgetBaselineQualificationQuerySchema,
+      title: "Read monthly baseline qualification",
+    },
+    async ({ month }) => apiResult(() => api.getFinanceBudgetBaselineQualification(month)),
+  );
+  server.registerTool(
+    "prepare_finance_budget_baseline_qualification",
+    {
+      annotations: {
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+      description:
+        "Prepare a durable, exact monthly baseline review for the selected budget version, accounts, currency and timezone. Reuse the idempotency key only for the same selection. Return the exact server snapshot and fingerprint for confirmation by the owner or an execution agent under enabled review bypass; preparation alone never qualifies a baseline or activates a budget.",
+      inputSchema: prepareFinanceBudgetBaselineQualificationInputSchema,
+      title: "Prepare monthly baseline review",
+    },
+    async (input) =>
+      apiResult(() =>
+        api.prepareFinanceBudgetBaselineQualification(
+          prepareFinanceBudgetBaselineQualificationInputSchema.parse(input),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_finance_continuations",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the current host schedule version, observed health, and accepted Finance answer continuations bound to this exact active host schedule and authorization connection. Use the returned schedule version and state for observe_finance_host_schedule. Follow nextCursor while hasMore is true to read every page. Continue each pending item with maintain_finances operation continue and the returned continuation ID; retain the run ID through challenge, approval and verification.",
+      inputSchema: z.object({ scheduleId: id, cursor: id.optional() }),
+      title: "Read Finance continuations",
+    },
+    async (input) => apiResult(() => api.getFinanceContinuations(input.scheduleId, input.cursor)),
+  );
+  server.registerTool(
+    "get_finance_host_prompt_history",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read a bounded page of immutable prompts nohmi issued for this schedule under its original authorized connection. Use nextCursor as beforeVersion for older templates. Stored text does not prove the external host adopted it or verify Chat capability.",
+      inputSchema: z
+        .object({ scheduleId: id, ...automationHostPromptPageInputSchema.shape })
+        .strict(),
+      title: "Read Finance host prompt history",
+    },
+    async ({ scheduleId, ...input }) => {
+      const page = automationHostPromptPageInputSchema.parse(input);
+      return apiResult(() =>
+        api.getAutomationHostPromptHistory(scheduleId, {
+          limit: page.limit,
+          ...(page.beforeVersion === undefined ? {} : { beforeVersion: page.beforeVersion }),
+        }),
+      );
+    },
+  );
+  server.registerTool(
+    "get_finance_host_prompt",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read exact stored instructions for one schedule/template version using the original authorized connection. This never regenerates instructions or changes the external job. A schedule ID is not a credential.",
+      inputSchema: z.object({ scheduleId: id, templateVersion: z.int().positive() }).strict(),
+      title: "Read Finance host prompt",
+    },
+    async ({ scheduleId, templateVersion }) =>
+      apiResult(() => api.getAutomationHostPrompt(scheduleId, templateVersion)),
+  );
+  server.registerTool(
+    "issue_finance_host_prompt",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Persist the current server-issued prompt for an existing schedule with its original connection and explicit Finance execution authority. First issuance checks the schedule revision; repeating the same schedule/template returns the immutable original. This does not install instructions, change external scheduling, verify Chat, or grant financial authority.",
+      inputSchema: z
+        .object({
+          scheduleId: id,
+          templateVersion: z.int().positive(),
+          ...automationHostPromptIssueInputSchema.shape,
+        })
+        .strict(),
+      title: "Issue Finance host prompt",
+    },
+    async ({ scheduleId, templateVersion, ...input }) =>
+      apiResult(() =>
+        api.issueAutomationHostPrompt(
+          scheduleId,
+          templateVersion,
+          automationHostPromptIssueInputSchema.parse(input),
+        ),
+      ),
+  );
+  server.registerTool(
+    "observe_finance_host_schedule",
+    {
+      annotations: { openWorldHint: false },
+      description:
+        "Record the host's observed active or paused state. Scheduled Claude routines report invocationObserved:true only during an actual invocation; generic active checks do not advance outstanding projected slots. Use the evidence timestamp, not receipt time. Only the originally bound Finance maintenance connection may report observations. This does not create, repair or reschedule host work.",
+      inputSchema: z.object({
+        scheduleId: id,
+        observation: automationHostScheduleObservationInputSchema,
+      }),
+      title: "Observe Finance host schedule",
+    },
+    async (input) =>
+      apiResult(() => api.observeAutomationHostSchedule(input.scheduleId, input.observation)),
+  );
   server.registerTool(
     "maintain_finances",
     {
@@ -192,12 +513,42 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   );
 
   server.registerTool(
+    "get_finance_maintenance_execution_authorization",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read fresh candidate execution facts for the original Finance host with current maintenance, write and execution grants, policy, protocol proof and canonical OAuth lineage. This observation does not adopt credentials or expose financial history.",
+      inputSchema: z.strictObject({ runId: id }),
+      title: "Get Finance maintenance execution authorization",
+    },
+    async ({ runId }) => apiResult(() => api.getFinanceMaintenanceExecutionAuthorization(runId)),
+  );
+  server.registerTool(
+    "refresh_finance_maintenance_execution_authorization",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Explicitly refresh an existing submitted candidate's execution binding through proven canonical OAuth succession on its original host. Requires current maintenance, write and execution grants, policy and protocol proof. Reuse operationId only for the exact command retry: its persisted pending result stays stable. After control progression, read fresh execution facts and use a NEW operationId. Active claims remain pending until their lease deadline; never steal a claim or replay financial effects. Missing historical bindings and unrelated credentials fail closed.",
+      inputSchema: refreshFinanceMaintenanceExecutionInputSchema.extend({ runId: id }),
+      title: "Refresh Finance maintenance execution authorization",
+    },
+    async ({ runId, ...input }) =>
+      apiResult(() =>
+        api.refreshFinanceMaintenanceExecutionAuthorization(
+          runId,
+          refreshFinanceMaintenanceExecutionInputSchema.parse(input),
+        ),
+      ),
+  );
+
+  server.registerTool(
     "get_finance_maintenance_history",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read resumable and settled Finance maintenance runs. Results expose canonical run status, typed next actions, and legacy recovery.",
+        "Read a bounded page of resumable and settled Finance maintenance runs. Pass nextCursor as cursor with the same filters. Results expose canonical run status, typed next actions, and legacy recovery.",
       inputSchema: {
+        cursor: id.optional(),
         limit: z.number().int().min(1).max(100).default(20),
         status: maintenanceRunStatusSchema.optional(),
       },
@@ -296,7 +647,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Create or update a planning bucket and its category membership. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.",
+        "Create or update a planning bucket and its category membership. Icons are assigned automatically from meaning; do not ask about or narrate cosmetic icon choices unless the user requests them. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.",
       inputSchema: z.discriminatedUnion("operation", [
         z
           .object({
@@ -361,7 +712,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Submit an exact displayed proposal and profile revision for approval. Activation requires an authenticated user decision; agent tokens cannot activate a budget by claiming user_instruction or enabling review bypass.",
+        "Activate the exact inspected budget version. Agents use agent_self_approval and require finances:write, finances:execute and persisted review bypass; otherwise direct the owner to review the proposal in nohmi.",
       inputSchema: {
         approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
         budgetVersionId: id,
@@ -403,17 +754,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
         "Create, revise, pause, resume, complete, or remove a financial goal. These are separate from general nohmi goals.",
-      inputSchema: {
-        changes: z.record(z.string(), z.unknown()).optional(),
-        deadline: z.iso.date().nullable().optional(),
-        expectedVersion: z.number().int().positive().optional(),
-        goalId: id.optional(),
-        idempotencyKey,
-        name: z.string().max(240).optional(),
-        operation: z.enum(["create", "update", "complete", "pause", "resume", "remove"]),
-        priority: z.enum(["low", "medium", "high"]).optional(),
-        targetAmount: z.number().nonnegative().optional(),
-      },
+      inputSchema: manageFinanceGoalInputSchema,
       title: "Manage Finance goal",
     },
     async (input) =>
@@ -502,11 +843,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read forecast income, obligations, alerts, and safe-to-spend evidence before near-term advice.",
-      inputSchema: {},
+        "Read legacy forecast income, obligations and alerts in their existing owner-wide scope. For qualified near-term advice, supply an explicit window to read the canonical occurrence/match evidence and qualified payday projection; preserve unavailable reasons and unknown amounts. Raw supporting context is separate from that qualified projection: current schedules and balance statements are account-scoped, and balance-statement sources cover capped all-known account history rather than only the calendar window. Preserve returned coverage/truncation flags; these independently read context records are not an atomic projection snapshot. Schedule/match, goal-progress and balance confirmations require the owner or an execution agent with enabled review bypass; preserve the actual confirming actor and never fabricate evidence.",
+      inputSchema: z.object({ window: financeCashflowProjectionQuerySchema.optional() }).strict(),
       title: "Get Finance cash flow",
     },
-    async () =>
+    async ({ window }) =>
       financeApiResult(async () => {
         const [alerts, forecast, incomeStreams, recurringItems] = await Promise.all([
           api.listFinanceAlerts(),
@@ -514,9 +855,49 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
           api.listFinanceIncomeStreams(),
           api.listFinanceRecurringObligations(),
         ]);
+        if (!window)
+          return envelope(
+            { alerts, forecast, incomeStreams, recurringItems },
+            "Cash-flow evidence loaded.",
+          );
+        const { selectedIncomeStreamId: _selectedIncome, ...sourceWindow } = window;
+        const [
+          qualifiedCashflow,
+          schedules,
+          balanceBases,
+          balanceStatementSources,
+          cashflowSources,
+        ] = await Promise.all([
+          api.getFinanceCashflowProjection(window),
+          api.listFinanceRecurringSchedules(),
+          api.listFinanceBalanceBases(window.accountIds),
+          api.listFinanceBalanceBasisSources(
+            window.accountIds === undefined ? {} : { accountIds: window.accountIds },
+          ),
+          api.listFinanceCashflowSources(sourceWindow),
+        ]);
+        const recurringSchedules =
+          window.accountIds === undefined
+            ? schedules
+            : schedules.filter(
+                (schedule) =>
+                  schedule.accountId !== null && window.accountIds?.includes(schedule.accountId),
+              );
         return envelope(
-          { alerts, forecast, incomeStreams, recurringItems },
-          "Cash-flow evidence loaded.",
+          {
+            alerts,
+            forecast,
+            incomeStreams,
+            recurringItems,
+            qualifiedCashflow,
+            rawCashflowContext: {
+              recurringSchedules,
+              balanceBases,
+              balanceStatementSources,
+              cashflowSources,
+            },
+          },
+          "Qualified cash-flow window and separate supporting context loaded.",
         );
       }),
   );
@@ -543,11 +924,23 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   );
 
   server.registerTool(
+    "complete_finance_account_connection",
+    {
+      title: "Complete Finance account connection",
+      description:
+        "Check provider-confirmed consent for a hosted bank connection and persist connected accounts. Returns pending until the owner finishes consent at the URL from start_finance_account_connection. Never accepts or returns provider credentials. Safe to poll; uncertain token exchanges require fresh authorization. Requires finances:write, finances:execute and enabled review bypass for agents.",
+      inputSchema: { connectionId: id },
+    },
+    async ({ connectionId }) =>
+      financeApiResult(() => api.completeFinanceAccountConnection(connectionId)),
+  );
+
+  server.registerTool(
     "start_finance_account_connection",
     {
       annotations: { openWorldHint: true },
       description:
-        "Start a secure external bank connection when the user asks to connect an account. Return the provider handoff directly in chat; never send the user to the nohmi web application. The external provider may still require the user to authenticate and consent.",
+        "Start a secure external bank connection when the user asks to connect an account. Return the hosted HTTPS provider authorization URL directly in chat, then call complete_finance_account_connection after consent; never send the user to the nohmi web application. The external provider may still require the user to authenticate and consent. Requires finances:write, finances:execute and enabled review bypass for agents.",
       inputSchema: { idempotencyKey, provider: z.literal("plaid").default("plaid") },
       title: "Start Finance account connection",
     },
@@ -573,11 +966,16 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         } catch (error) {
           issues.push({
             affectedWork: [accountId],
-            code: "account_sync_failed",
+            code: error instanceof ApiClientError ? error.code : "account_sync_failed",
             plainLanguage: error instanceof Error ? error.message : "This account did not sync.",
             remedy:
-              "Reconnect this account if its provider authorization expired, then retry only this account.",
-            retryable: true,
+              error instanceof ApiClientError && (error.status === 401 || error.status === 403)
+                ? "Use a valid credential with finances:write and finances:execute, and have the owner enable review bypass. Reconnecting the bank does not grant agent permission."
+                : "Inspect this account's connection diagnostic, resolve its reported cause, then retry only this account.",
+            retryable: !(
+              error instanceof ApiClientError &&
+              (error.status === 401 || error.status === 403)
+            ),
             scope: "account",
             unaffectedWork: accountIds.filter((id) => id !== accountId),
           });
@@ -598,7 +996,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Inspect one bank-connection attempt or connection state when setup, synchronization, or reauthorization needs diagnosis.",
+        "Inspect bank-connection status and redacted errors. This read never returns the bearer authorization URL. To recover that URL, replay start_finance_account_connection with the original idempotency key and current Finance execution authority plus bypass.",
       inputSchema: { connectionId: id },
       title: "Get Finance account connection",
     },
@@ -615,7 +1013,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {
         accountId: id,
         balance: z.number().finite().nullable().optional(),
-        expectedUpdatedAt: z.iso.datetime().optional(),
+        expectedUpdatedAt: utcIsoDateTimeSchema.optional(),
         expectedVersion: z.number().int().nonnegative().optional(),
         idempotencyKey,
         includeInPlanning: z.boolean().optional(),
@@ -645,6 +1043,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         limit: z.number().int().min(1).max(200).default(50),
         pending: z.boolean().optional(),
         review: z.enum(["all", "needs_review", "resolved"]).default("all"),
+        sortBy: z.enum(["amount", "date", "merchant"]).default("date"),
+        sortDirection: z.enum(["asc", "desc"]).default("desc"),
         search: z.string().trim().min(1).max(160).optional(),
         to: z.iso.date().optional(),
       },
@@ -690,7 +1090,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read one ledger transaction with its classification and reconciliation evidence before changing or explaining it.",
+        "Read one ledger transaction with its classification and reconciliation evidence before changing or explaining it. Copy version into split_finance_transaction expectedVersion and updatedAt into category-review expectedTransactionUpdatedAt.",
       inputSchema: { transactionId: id },
       title: "Get Finance transaction",
     },
@@ -702,14 +1102,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Correct a transaction category or note with provenance. Use classify_finance_transactions for reasoned batch categorization.",
-      inputSchema: {
-        category: z.string().min(1).max(80).nullable().optional(),
+        "Correct a transaction category or note with provenance. Requires finances:write, finances:execute and enabled bypass for agents. Every agent category change, including clearing with null, requires expectedTransactionUpdatedAt from get_finance_transaction. Non-null category decisions also require confidence and rationale. learnMerchant is an explicit reusable-rule decision. Use classify_finance_transactions for reasoned batch categorization.",
+      inputSchema: updateFinanceTransactionInputSchema.safeExtend({
         idempotencyKey,
-        learnMerchant: z.boolean().optional(),
-        notes: z.string().max(4000).nullable().optional(),
         transactionId: id,
-      },
+      }),
       title: "Update Finance transaction",
     },
     async ({ transactionId, ...input }) =>

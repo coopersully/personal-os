@@ -16,11 +16,7 @@ import {
   mailListScopeParams,
   mailListScopeQuery,
   mailReplyRecipient,
-  persistMailListDensity,
-  persistMailReaderLayout,
   Reader,
-  storedMailListDensity,
-  storedMailReaderLayout,
 } from "./mail.js";
 
 function memoryStorage(): Storage {
@@ -210,9 +206,25 @@ describe("Mail workspace helpers", () => {
       },
     ];
 
-    render(<Reader messages={messages} thread={thread} timeZone="UTC" />);
+    render(
+      <Reader
+        messages={messages}
+        thread={thread}
+        timeZone="UTC"
+        ownAddresses={["SENDER@example.com"]}
+      />,
+    );
     expect(screen.getByText("undisclosed recipients")).toBeVisible();
     expect(screen.getByText("brief.pdf")).toBeVisible();
+    expect(screen.getByRole("region", { name: "Sent by you" })).toHaveAttribute(
+      "data-direction",
+      "outgoing",
+    );
+    expect(screen.getByText("You")).toBeVisible();
+    expect(screen.getByRole("region", { name: "Received from Unknown sender" })).toHaveAttribute(
+      "data-direction",
+      "incoming",
+    );
     expect(screen.getByText("This message has no plain-text body.")).toBeVisible();
     const collapse = screen.getByRole("button", { name: "Collapse message from Sender" });
     fireEvent.click(collapse);
@@ -278,52 +290,6 @@ describe("Mail workspace helpers", () => {
     expect(screen.queryByText("Stewardship review")).not.toBeInTheDocument();
     expect(screen.queryByText("Personal Google")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Accounts" })).not.toBeInTheDocument();
-  });
-
-  it("accepts only a complete numeric reader layout and tolerates unavailable storage", () => {
-    expect(storedMailReaderLayout()).toBeUndefined();
-    for (const value of [
-      "[]",
-      '{"mail-list":"wide"}',
-      '{"mail-list":40,"mail-reader":"wide"}',
-      "{",
-    ]) {
-      window.localStorage.setItem("ilo.mail.reader-layout.v1", value);
-      expect(storedMailReaderLayout()).toBeUndefined();
-    }
-    window.localStorage.setItem(
-      "ilo.mail.reader-layout.v1",
-      JSON.stringify({ "mail-list": 42, "mail-reader": 58 }),
-    );
-    expect(storedMailReaderLayout()).toEqual({ "mail-list": 42, "mail-reader": 58 });
-
-    vi.spyOn(window.localStorage, "setItem").mockImplementationOnce(() => {
-      throw new Error("storage blocked");
-    });
-    expect(() => persistMailReaderLayout({ "mail-list": 45, "mail-reader": 55 })).not.toThrow();
-
-    vi.stubGlobal("window", undefined);
-    expect(storedMailReaderLayout()).toBeUndefined();
-  });
-
-  it("defaults list density safely when its device preference is missing or unavailable", () => {
-    expect(storedMailListDensity()).toBe("comfortable");
-    window.localStorage.setItem("ilo.mail.list-density.v1", "compact");
-    expect(storedMailListDensity()).toBe("compact");
-    window.localStorage.setItem("ilo.mail.list-density.v1", "unsupported");
-    expect(storedMailListDensity()).toBe("comfortable");
-
-    vi.spyOn(window.localStorage, "getItem").mockImplementationOnce(() => {
-      throw new Error("storage blocked");
-    });
-    expect(storedMailListDensity()).toBe("comfortable");
-    vi.spyOn(window.localStorage, "setItem").mockImplementationOnce(() => {
-      throw new Error("storage blocked");
-    });
-    expect(() => persistMailListDensity("expanded")).not.toThrow();
-
-    vi.stubGlobal("window", undefined);
-    expect(storedMailListDensity()).toBe("comfortable");
   });
 
   it("replaces and clears pending debounced Mail searches", () => {

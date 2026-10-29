@@ -12,21 +12,22 @@ history distinct. Preserve a single canonical editor for each value and all exis
 | Account | Profile, Connections, Security & access, Activity log |
 | Personal | Goals, Motives, Rituals |
 | Workspaces | Calendar, Tasks, Mail, Finances |
-| App | Appearance, Notifications (where supported), Texting, Desktop app |
+| App | Appearance, Wallpaper (native), Notifications (where supported), Texting, Desktop app, Desktop pet (native) |
 
 Connections owns external-account management and links to connected-assistant credentials.
 Security & access owns password/session controls, approval policy and the cross-workspace access
 overview. Invitations are permission-gated within that area. Assistant-specific permission editing
 remains at its existing canonical connection editor. Workspace pages link to scoped access details.
 Setup is available from Profile and contextual workspace recovery, not a permanent sidebar item.
-Wallpaper belongs beneath Appearance; Desktop pet beneath Desktop app. Secondary pages remain
+Wallpaper is a primary App sidebar page, with a persistent preview beside its controls. Desktop pet is a primary App destination, alongside Desktop app; it must remain directly reachable in both sidebar and narrow-layout navigation. Secondary pages remain
 searchable, show their parent, and select their parent's sidebar row. Search indexes fields as
 well as pages, including secondary destinations; platform and invitation permissions still apply.
 
 ## Work versus configuration
 
 Reviews now opens as a shared dialog/drawer from the action beside each workspace Settings title
-or its workspace attention alert. Today and Account overview do not offer additional review entry
+or its workspace attention alert; workspace search also offers **Items needing review**.
+Today and Account overview do not offer additional review entry
 points. The former queue layout is retained but hidden; see [Reviews](reviews.md).
 
 The account Activity log is an audit of recorded changes and actors. It is not a universal record
@@ -35,7 +36,7 @@ history with connections. Do not claim aggregate history coverage that the API d
 
 ## Workspace page anatomy
 
-Use the shared bento SettingsSection and secondary SettingsRecord compositions. Lead with supported
+Use the shared stacked SettingsSection and secondary SettingsRecord compositions. Lead with supported
 configuration, not an agent introduction, capability brochure, or a repeated page title:
 
 1. Sources and synchronization where supported: actual accounts, health and canonical management.
@@ -55,3 +56,40 @@ Check desktop/mobile navigation, legacy redirects and query preservation, field 
 secondary pages, permission/platform visibility, setup recovery, and populated/empty/error states.
 Cover version-preserving guidance changes, failed writes, rule review and pause behavior.
 This is the target structure; implementation evidence belongs in tests and the implementation log.
+
+## Presentation and editing architecture
+
+The [platform-agnostic settings model](settings.md#platform-agnostic-settings-model)
+separates preferences, effective state, records, navigation, and commands. The
+[engineering composition model](../../engineering/settings-ui-standards.md#typed-composition-and-ownership-model)
+assigns navigation, groups, typed rows, editor state, and domain persistence to distinct
+owners. It builds on the existing architecture; it does not move workspace-owned
+configuration into centralized Settings or introduce a second source of truth.
+
+
+```mermaid
+flowchart TD
+  Shell[Navigation shell and search] --> Page[Page identity and scoped groups]
+  Page --> Row[Typed rows and specialized previews]
+  Row --> Editor[Inline editor or bounded workflow]
+  Row --> Detail[Persistent detail route]
+  Editor --> Domain[Domain adapter: authority, validation, persistence]
+  Detail --> Domain
+  Domain --> State[Saved and effective state]
+  State --> Row
+```
+
+This diagram describes the nohmi design boundary, not Apple's private implementation.
+
+## Shared header
+
+Every Settings page supplies its title to the shared workspace title slot and its
+search, back action, and review action to the top utility slot. Search appears
+once, at the top on both desktop and mobile. Page descriptions remain above the
+settings groups; decorative centered icon/title cards are removed. Mobile uses
+the shared two-row header and bounded bottom app bar with the full settings list
+in More. Field search and deep links retain their existing behavior.
+
+Settings publishes a wrapping breadcrumb in the shared top title slot: `settings /
+current page`, including a linked parent on nested pages. Ancestors are links; the
+current title remains the page heading and is never ellipsized on mobile.

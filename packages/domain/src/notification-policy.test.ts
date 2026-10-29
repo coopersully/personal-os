@@ -1,12 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   composeNotification,
   defaultNotificationPreferences,
   notificationEligibility,
   notificationPreferencesSchema,
   notificationWorkSchema,
+  type PublishNotificationResult,
   validateNotificationResolution,
 } from "./notification-policy.js";
+
+it("includes disabled delivery in the public notification result contract", () => {
+  expectTypeOf<{
+    state: "unavailable";
+    reason: "delivery_not_enabled";
+  }>().toExtend<PublishNotificationResult>();
+});
 
 const work = {
   work: {
@@ -21,7 +29,7 @@ const work = {
   disclosure: "context" as const,
   context: "Dinner",
   occurredAt: "2026-03-07T23:00:00.000Z",
-  destination: "/settings?section=reviews" as const,
+  destination: "/finances?review=open" as const,
 };
 const now = new Date("2026-03-08T12:00:00.000Z");
 const preferences = defaultNotificationPreferences;
@@ -141,7 +149,7 @@ describe("notification policy", () => {
         works: Array.from({ length: 4 }, (_, i) => ({ ...work, context: `Item ${i}` })),
       }),
     ).not.toContain("Item 3");
-    expect(composeNotification(input)).toContain("https://nohmi.test/settings?section=reviews");
+    expect(composeNotification(input)).toContain("https://nohmi.test/finances?review=open");
     expect(composeNotification(input)).not.toContain("Reply");
   });
 });
@@ -275,4 +283,83 @@ it("supports daytime quiet windows, any-time mode, elapsed reminders, and local 
       ],
     }),
   ).toBe("eligible");
+});
+
+describe("run attention delivery policy", () => {
+  const repair = { ...work, work: { ...work.work, kind: "repair" as const } };
+  const evaluate = (
+    attempts: Parameters<typeof notificationEligibility>[0]["attempts"],
+    at = now,
+  ) => notificationEligibility({ work: repair, preferences, timeZone: "UTC", now: at, attempts });
+  it("honors repair reminder intervals and never while preserving uncertainty", () => {
+    expect(
+      evaluate(
+        [{ actionRevision: "action-1", state: "accepted", submittedAt: now }],
+        new Date(now.getTime() + 30 * 86400000),
+      ),
+    ).toBe("eligible");
+    const accepted = [{ actionRevision: "action-1", state: "accepted" as const, submittedAt: now }];
+    expect(evaluate(accepted)).toBe("reminder_wait");
+    expect(
+      notificationEligibility({
+        work: repair,
+        preferences: { ...preferences, reminderDays: null },
+        timeZone: "UTC",
+        now: new Date(now.getTime() + 365 * 86400000),
+        attempts: accepted,
+      }),
+    ).toBe("reminder_never");
+    expect(evaluate([{ actionRevision: "older", state: "uncertain", submittedAt: now }])).toBe(
+      "delivery_uncertain",
+    );
+  });
+  it("bounds known failed sends to three attempts with one and five minute delays", () => {
+    const failure = { actionRevision: "action-1", state: "failed" as const, submittedAt: now };
+    expect(evaluate([failure])).toBe("retry_wait");
+    expect(evaluate([failure], new Date(now.getTime() + 60_000))).toBe("eligible");
+    expect(evaluate([failure, failure], new Date(now.getTime() + 60_000))).toBe("retry_wait");
+    expect(evaluate([failure, failure], new Date(now.getTime() + 300_000))).toBe("eligible");
+    expect(evaluate([failure, failure, failure], new Date(now.getTime() + 86400000))).toBe(
+      "retry_exhausted",
+    );
+  });
+  it("bounds failed reminder retries after the prior accepted handoff", () => {
+    const accepted = {
+      actionRevision: "action-1",
+      state: "accepted" as const,
+      submittedAt: new Date(now.getTime() - 8 * 86400000),
+    };
+    const failed = { actionRevision: "action-1", state: "failed" as const, submittedAt: now };
+    expect(evaluate([accepted, failed])).toBe("retry_wait");
+    expect(evaluate([accepted, failed], new Date(now.getTime() + 60_000))).toBe("eligible");
+    expect(evaluate([accepted, failed, failed, failed], new Date(now.getTime() + 300_000))).toBe(
+      "retry_exhausted",
+    );
+  });
+  it("retains quiet hours, opt-out and resolved fences during retry", () => {
+    const failure = {
+      actionRevision: "action-1",
+      state: "failed" as const,
+      submittedAt: new Date(now.getTime() - 300_000),
+    };
+    expect(evaluate([failure], new Date("2026-03-09T02:00:00Z"))).toBe("quiet_hours");
+    expect(
+      notificationEligibility({
+        work: repair,
+        preferences: { ...preferences, enabled: false },
+        timeZone: "UTC",
+        now,
+        attempts: [failure],
+      }),
+    ).toBe("disabled");
+    expect(
+      notificationEligibility({
+        work: { ...repair, active: false },
+        preferences,
+        timeZone: "UTC",
+        now,
+        attempts: [failure],
+      }),
+    ).toBe("resolved");
+  });
 });

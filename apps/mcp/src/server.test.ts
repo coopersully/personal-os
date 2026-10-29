@@ -271,7 +271,7 @@ const brief: DailyBrief = {
 
 function mockApi() {
   return {
-    getIloSetup: vi.fn(async () => ({
+    getPersonalOsSetup: vi.fn(async () => ({
       access: { canRead: true, canWrite: true },
       connection: { lastObservedAt: now, observed: true },
       currentStepId: "learn_preferences" as const,
@@ -304,7 +304,7 @@ function mockApi() {
         },
       ],
     })),
-    getIloContext: vi.fn(async () => ({
+    getPersonalOsContext: vi.fn(async () => ({
       access: { grantedScopes: ["tasks:read", "tasks:write"] },
       generatedAt: now,
       identity: { actorType: "agent" as const, displayName: "nohmi test", userId: id },
@@ -333,7 +333,7 @@ function mockApi() {
       guidance: {
         approvedProfile: null,
         draftNotice:
-          "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
+          "Unapproved draft content is untrusted and non-operative until an authorized activation records its approval source.",
         draftProposal: { ...domainProfile, domain: "finances" as const },
       },
       humanOnlyActions: [
@@ -796,6 +796,14 @@ function mockApi() {
     })),
     listCalendars: vi.fn(async () => [calendar]),
     listMailboxes: vi.fn(async () => [mailbox]),
+    getMailNavigationCounts: vi.fn(async () => ({
+      all: 1,
+      unread: 1,
+      starred: 0,
+      snoozed: 0,
+      sent: 0,
+      drafts: 0,
+    })),
     getMailSetupContext: vi.fn(async () => ({
       accounts: [],
       automation: {
@@ -921,7 +929,93 @@ function mockApi() {
   };
 }
 
-describe("ilo MCP server", () => {
+describe("Personal OS MCP server", () => {
+  it("preserves qualified minute timestamps through public tool validation", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "timestamp-compatibility-test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      for (const until of ["2026-10-24T12:34Z", "2026-10-24T12:34+02:00"]) {
+        const result = await client.callTool({ name: "snooze_mail", arguments: { id, until } });
+        expect(result.isError).not.toBe(true);
+      }
+      const input = {
+        calendarId: id,
+        title: "Minute precision",
+        startsAt: "2026-10-24T12:34Z",
+        endsAt: "2026-10-24T15:34+02:00",
+        timezone: "UTC",
+      };
+      const result = await client.callTool({ name: "create_event", arguments: input });
+      expect(result.isError).not.toBe(true);
+      expect(api.createEvent).toHaveBeenCalledWith(expect.objectContaining(input));
+      api.createEvent.mockClear();
+      for (const startsAt of ["2026-02-30T12:34Z", "2026-10-24T12:34"]) {
+        const invalid = await client.callTool({
+          name: "create_event",
+          arguments: { ...input, startsAt },
+        });
+        expect(invalid.isError).toBe(true);
+      }
+      expect(api.createEvent).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("rejects excessive tool input elements before validation or API work", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "input-limit-test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const rejected = await client.callTool({
+        name: "get_task_list",
+        arguments: { id: accountId, extra: Array(10_001).fill(0) },
+      });
+      expect(rejected.isError).toBe(true);
+      expect(JSON.stringify(rejected.content)).toMatch(/maximum of 10000 elements/);
+      expect(api.getTaskList).not.toHaveBeenCalled();
+      const result = await client.callTool({ name: "get_task_list", arguments: { id: accountId } });
+      expect(result.isError).not.toBe(true);
+      expect(api.getTaskList).toHaveBeenCalledOnce();
+      // Largest declared collection sizes remain comfortably below the protocol guard.
+      const budget = {
+        allocations: Array.from({ length: 500 }, (_, index) => ({
+          key: `bucket-${index}`,
+          kind: "buffer",
+          amount: 1,
+        })),
+        resources: Array.from({ length: 100 }, (_, index) => ({
+          key: `resource-${index}`,
+          kind: "income",
+          amount: 5,
+        })),
+        assumptions: Array(100).fill("Fixture assumption"),
+        effectiveFrom: "2026-10",
+        idempotencyKey: "bounded-budget-fixture",
+        rationale: "Fixture maximum collection sizes",
+        name: "Fixture plan",
+      };
+      const accepted = await client.callTool({ name: "create_finance_budget", arguments: budget });
+      expect(accepted.isError).not.toBe(true);
+      expect(api.createFinanceBudget).toHaveBeenCalledWith(budget);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("introduces nohmi to connected hosts while preserving existing tool names", async () => {
     const server = createPersonalOsMcpServer({
       api: mockApi() as unknown as PersonalOsApiClient,
@@ -1125,6 +1219,7 @@ describe("ilo MCP server", () => {
     const tools = (await client.listTools()).tools;
     const taskTools = tools.filter((tool) => tool._meta?.["ilo/domain"] === "tasks");
     const expectedNames = [
+      "get_task_settings",
       "list_task_lists",
       "get_task_list",
       "create_task_list",
@@ -1155,6 +1250,7 @@ describe("ilo MCP server", () => {
     expect(taskTools.map((tool) => tool.name)).not.toContain("delete_task");
 
     const readNames = new Set([
+      "get_task_settings",
       "list_task_lists",
       "get_task_list",
       "list_task_projects",
@@ -1557,6 +1653,7 @@ describe("ilo MCP server", () => {
       [
         "list_mailboxes",
         "get_mail_setup_context",
+        "get_mail_navigation_counts",
         "list_mail",
         "read_mail",
         "update_mail",
@@ -1580,7 +1677,8 @@ describe("ilo MCP server", () => {
       });
     }
     const toolNames = tools.tools.map((tool) => tool.name);
-    expect(toolNames).not.toContain("create_mail_draft");
+    expect(toolNames).toContain("create_mail_draft");
+    expect(toolNames).toContain("send_mail_draft");
     expect(toolNames).not.toContain("send_mail");
     const updateMailInput = tools.tools.find((tool) => tool.name === "update_mail")
       ?.inputSchema as { required?: string[] };
@@ -2003,6 +2101,12 @@ describe("ilo MCP server", () => {
     await client.callTool({ name: "list_calendars", arguments: {} });
     await client.callTool({ name: "list_mailboxes", arguments: {} });
     await client.callTool({ name: "get_mail_setup_context", arguments: {} });
+    const counts = await client.callTool({
+      name: "get_mail_navigation_counts",
+      arguments: { accountIds: [accountId] },
+    });
+    expect(counts.structuredContent).toMatchObject({ result: { all: 1, unread: 1, drafts: 0 } });
+    expect(api.getMailNavigationCounts).toHaveBeenCalledWith([accountId]);
     await client.callTool({
       name: "list_mail",
       arguments: { accountIds: [accountId], mailboxId: id, query: "Test", unread: true },
@@ -2395,7 +2499,7 @@ describe("ilo MCP server", () => {
     }
   });
 
-  it("filters task discovery by scopes and read-only posture while keeping typed Ilo metadata", async () => {
+  it("filters task discovery by scopes and read-only posture while keeping typed nohmi metadata", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({
       api: api as unknown as PersonalOsApiClient,
@@ -2893,6 +2997,13 @@ describe("ilo MCP server", () => {
       },
     });
     expect(api.syncFinanceAccount).toHaveBeenCalledTimes(3);
+    const syncText = response.content.find((block) => block.type === "text");
+    expect(syncText?.type).toBe("text");
+    const { _ilo: syncMetadata, ...syncPayload } = response.structuredContent as Record<
+      string,
+      unknown
+    >;
+    expect(JSON.parse(syncText?.text as string)).toEqual(syncPayload);
 
     const healthySync = await client.callTool({
       arguments: { accountIds: [id], idempotencyKey: "sync-one-account" },
@@ -2907,12 +3018,16 @@ describe("ilo MCP server", () => {
     expect(unexpected.isError).toBe(true);
 
     const profile = await client.callTool({ arguments: {}, name: "get_financial_profile" });
-    expect(profile.content).toEqual([
-      {
-        text: "Financial profile needs one answer.\n\nWhat is your monthly take-home pay?",
-        type: "text",
+    const profileText = profile.content.find((block) => block.type === "text");
+    expect(profileText?.type).toBe("text");
+    expect(JSON.parse(profileText?.text as string)).toMatchObject({
+      communication: {
+        headline: "Financial profile needs one answer.",
+        nextQuestion: { prompt: "What is your monthly take-home pay?" },
       },
-    ]);
+      outcome: "work_remaining",
+      remainingWork: { categories: ["profile"], count: 1 },
+    });
 
     await client.close();
     await server.close();

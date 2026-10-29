@@ -10,7 +10,7 @@ export type SettingsField = {
   aliases?: string;
   reveal?: string[];
   desktopOnly?: boolean;
-  fallbackTarget?: string;
+  fallbackTarget?: string | string[];
 };
 const fields = (
   section: string,
@@ -26,7 +26,72 @@ const fields = (
   }));
 
 export const settingsFields: SettingsField[] = [
-  ...["mail", "tasks"].flatMap((domain) =>
+  ...fields("finances", [
+    ["Transaction view", "financeTransactionView", "table cards saved default"],
+    [
+      "Group cards by",
+      "financeTransactionGroup",
+      "date category merchant direction posting grouping",
+    ],
+  ]),
+  ...fields("tasks", [
+    ["Default capture list", "tasks-default-capture-list", "inbox new task"],
+    ["Show completed tasks in lists and projects", "tasks-show-completed", "visibility done"],
+    [
+      "Sort by",
+      "taskSort",
+      "recommended relevant date reserved priority newest oldest title estimate",
+    ],
+    ["Group by", "taskGroup", "date list project grouping"],
+    ["List and project sorting", "taskContainerSort", "recent updated name target date"],
+    ["Estimates", "task-details-estimate", "row details"],
+    ["Tags", "task-details-tags", "row details"],
+    ["Notes", "task-details-notes", "row details"],
+  ]),
+  ...fields("mail", [
+    ["Inbox style", "mail-inbox-style", "signal balanced conservative custom"],
+    ["Important email handling", "mail-important-email-handling", "inbox attention"],
+    [
+      "Low-priority email handling",
+      "mail-noise-disposition",
+      "noise review archive trash retention",
+    ],
+    ["Low-priority email waiting period", "mail-noise-disposition", "retention days"],
+    ["Conversation layout", "mail-conversation-layout", "split full width reading pane mobile"],
+    [
+      "Conversation density",
+      "mail-list-density",
+      "message list layout compact comfortable expanded",
+    ],
+    ["Conversation list width", "mail-list-width", "reader split layout percent"],
+  ]),
+  ...["calendar", "tasks", "mail", "finances"].flatMap((workspace) =>
+    fields(workspace, [
+      [
+        "Include completed and archived items in search",
+        `${workspace}-search-archived`,
+        "search scope history",
+      ],
+    ]),
+  ),
+  ...fields("calendar", [
+    ["Default calendar", "calendar-default-destination", "event destination source"],
+    ["Buffer before events", "calendar-beforeBufferMinutes", "minutes preparation"],
+    ["Buffer after events", "calendar-afterBufferMinutes", "minutes travel"],
+    ["Busy block privacy", "calendar-busy-block-privacy", "details visibility"],
+    ["Week starts on", "calendar-week-start", "sunday monday"],
+    ["Default event duration", "calendar-default-duration", "minutes new meeting"],
+    ["Preferred view", "calendar-default-view", "default day week month automatic saved"],
+    ["Automatically follow today", "calendar-auto-follow", "target current time midnight opening"],
+    ["Snap back to Follow", "calendar-snap-follow", "target scroll snap enable disable"],
+    [
+      "Follow snap sensitivity",
+      "calendar-snap-sensitivity",
+      "precise balanced generous target scroll",
+    ],
+    ["Show weekends", "calendar-show-weekends", "saturday sunday work week"],
+  ]),
+  ...["mail", "tasks", "calendar"].flatMap((domain) =>
     fields(domain, [
       ["Objective", `${domain}-objective`, "preferences guidance"],
       ["Guidance", `${domain}-instructions`, "instructions preferences"],
@@ -66,7 +131,7 @@ export const settingsFields: SettingsField[] = [
     { reveal: ["Add goal"] },
   ),
   ...fields(
-    "motives",
+    "goals",
     [
       ["Motive", "motive-title", "values purpose"],
       ["Context", "motive-detail", "motivation details"],
@@ -93,14 +158,19 @@ export const settingsFields: SettingsField[] = [
     ["Day end", "profile-workday-end", "working hours workday end time"],
     ["Home Location", "profile-home-location", "city weather address"],
     ["Time zone", "profile-timezone", "timezone local time"],
-  ]),
+  ]).map((field) => ({
+    ...field,
+    reveal: ["First name", "Last name", "Email"].includes(field.label)
+      ? [`Edit ${field.label}`]
+      : [],
+  })),
   ...fields(
     "profile",
     [
       ["Phone number", "texting-phone", "mobile verified texting contact"],
       ["Phone country", "texting-country", "country code"],
     ],
-    { reveal: ["Add phone number", "Change number"] },
+    { reveal: ["Edit Phone"] },
   ),
   ...fields("security", [["Change password", "Send link", "reset password security"]]),
   ...fields("setup", [
@@ -111,55 +181,54 @@ export const settingsFields: SettingsField[] = [
     ["Guided setup experience", "View setup experience", "onboarding welcome tour"],
   ]),
   ...fields("appearance", [["Color mode", "Color mode", "theme light dark system appearance"]]),
-  ...["morning", "night"].flatMap((kind) =>
-    fields(
-      "rituals",
-      [
+  ...["morning", "night"].flatMap((kind) => {
+    const title = kind === "morning" ? "Morning" : "Evening";
+    return [
+      ...fields("rituals", [
+        [`${title} ritual enabled`, `${kind}-enabled`, "enable routine"],
+        [`${title} available from`, `${kind}-time`, "schedule start time"],
+        [`${title} reminder time`, `${kind}-reminder-time`, "optional steps follow up"],
+      ]),
+      ...fields(
+        kind === "morning" ? "ritual-morning" : "ritual-evening",
         [
-          `${kind === "morning" ? "Morning" : "Evening"} ritual enabled`,
-          `${kind}-enabled`,
-          "enable routine",
+          [`${title} step prompt`, "Prompt", "steps routine question checklist"],
+          [
+            `${title} response type`,
+            "Response type",
+            "checkbox short entry date number multiple choice",
+          ],
+          [`${title} answer choices`, "Choices", "multiple choice options"],
         ],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} available from`,
-          `${kind}-time`,
-          "schedule start time",
-        ],
-        [`${kind === "morning" ? "Morning" : "Evening"} time zone`, `${kind}-zone`, "timezone"],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} checklist prompt`,
-          "Prompt",
-          "steps routine question",
-        ],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} response type`,
-          "Response type",
-          "checkbox short entry date number multiple choice",
-        ],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} answer choices`,
-          "Choices",
-          "multiple choice options",
-        ],
-      ],
-      { reveal: [kind === "morning" ? "Morning" : "Evening"], fallbackTarget: "Response type" },
-    ),
+        { reveal: ["Edit step 1"], fallbackTarget: ["Response type", "Steps"] },
+      ),
+    ];
+  }),
+  ...fields(
+    "wallpaper",
+    [
+      ["Public board URL", "pinterest-board-url", "pinterest board link"],
+      ["Refresh every day", "pinterest-daily", "daily automatic wallpaper"],
+    ],
+    { desktopOnly: true },
   ),
-  ...fields("wallpaper", [
-    ["Public board URL", "pinterest-board-url", "pinterest board link"],
-    ["Refresh every day", "pinterest-daily", "daily automatic wallpaper"],
-    ["Layout", "Layout", "mosaic stacked collage"],
-    ["Mosaic fit", "Mosaic fit", "crop contain cover"],
-    ["Backdrop", "Backdrop", "background color match daily"],
-    ["Image size", "pinterest-tile-size", "tile scale"],
-    ["Rotation", "pinterest-rotation", "tilt angle"],
-    ["Image gap", "pinterest-frame-spacing", "spacing"],
-    ["Image corners", "pinterest-corner-radius", "round radius"],
-    ["Link edge padding", "pinterest-padding-linked", "framing margins"],
-    ["Top padding", "pinterest-padding-top", "framing margins"],
+  ...fields(
+    "wallpaper",
+    [
+      ["Layout", "Layout", "mosaic stacked collage"],
+      ["Mosaic fit", "Mosaic fit", "crop contain cover"],
+      ["Backdrop", "Backdrop", "background color match daily"],
+      ["Image size", "pinterest-tile-size", "tile scale"],
+      ["Rotation", "pinterest-rotation", "tilt angle"],
+      ["Image gap", "pinterest-frame-spacing", "spacing"],
+      ["Image corners", "pinterest-corner-radius", "round radius"],
+      ["Link edge padding", "pinterest-padding-linked", "framing margins"],
+      ["Top padding", "pinterest-padding-top", "framing margins"],
 
-    ["Show desktop safe areas", "pinterest-desktop-overlay", "widget"],
-  ]),
+      ["Show desktop safe areas", "pinterest-desktop-overlay", "widget"],
+    ],
+    { desktopOnly: true },
+  ),
   ...fields(
     "wallpaper",
     [
@@ -167,7 +236,7 @@ export const settingsFields: SettingsField[] = [
       ["Start padding", "pinterest-padding-start", "left framing margins"],
       ["End padding", "pinterest-padding-end", "right framing margins"],
     ],
-    { fallbackTarget: "pinterest-padding-top" },
+    { desktopOnly: true, fallbackTarget: "pinterest-padding-top" },
   ),
   ...fields("desktop", [["Custom API server", "desktop-server", "self hosted endpoint url"]], {
     desktopOnly: true,
@@ -188,27 +257,60 @@ export const settingsFields: SettingsField[] = [
   ]),
   ...fields("notifications", [
     ["Enable notifications", "Enable notifications", "alerts"],
-    ["Tasks due", "Tasks due"],
-    ["Reminders due", "Reminders due"],
-    ["Upcoming events", "Upcoming events"],
-    ["Minutes before an event", "event-notice", "advance notice lead time"],
-    ["Calendar selection", "Calendar selection"],
-    ["New mail", "New mail", "email"],
-    ["Mail accounts", "Mail accounts"],
     ["Play notification sounds", "Play notification sounds", "audio mute"],
     ["Show message previews", "Show message previews", "privacy"],
     ["Quiet hours start", "quiet-start", "from do not disturb"],
     ["Quiet hours end", "quiet-end", "until do not disturb"],
   ]),
-  ...fields("invitations", [["Expires after", "invite-expiry", "invitation expiry duration"]]),
-  ...fields("texting", [
-    ["Country", "Country", "phone dialing code"],
-    ["Mobile number", "Mobile number", "phone sms"],
+  ...["calendar", "tasks", "mail", "finances"].flatMap((section) =>
+    fields(section, [["Notifications", "Notifications", "desktop alerts"]], { desktopOnly: true }),
+  ),
+  ...fields(
+    "tasks",
+    [
+      ["Tasks due", "Tasks due"],
+      ["Reminders due", "Reminders due"],
+    ],
+    { desktopOnly: true },
+  ),
+  ...fields(
+    "calendar",
+    [
+      ["Upcoming events", "Upcoming events"],
+      ["Minutes before an event", "event-notice"],
+      ["Calendar selection", "Calendar selection"],
+    ],
+    { desktopOnly: true },
+  ),
+  ...fields(
+    "mail",
+    [
+      ["New mail", "New mail"],
+      ["Mail accounts", "Mail accounts"],
+    ],
+    { desktopOnly: true },
+  ),
+  ...fields(
+    "invitations",
+    [
+      ["Expires after", "invite-expiry", "invitation expiry duration"],
+      ["Recipient", "invite-email", "invitation email"],
+    ],
+    { reveal: ["New invitation"] },
+  ),
+  ...fields(
+    "texting",
+    [
+      ["Country", "texting-country", "phone dialing code"],
+      ["Mobile number", "texting-phone", "phone sms"],
 
-    ["Allow agent text messages", "texting-consent", "consent sms opt in"],
-  ]),
+      ["Allow agent text messages", "texting-consent", "consent sms opt in"],
+    ],
+    { reveal: ["Edit Phone"] },
+  ),
   ...fields("texting", [["Verification code", "texting-code", "otp sms"]], {
-    fallbackTarget: "Mobile number",
+    reveal: ["Edit Phone"],
+    fallbackTarget: "texting-phone",
   }),
   ...fields("agent-connections", [["nohmi MCP URL", "nohmi MCP URL", "endpoint server assistant"]]),
   ...fields(
@@ -229,30 +331,33 @@ export const settingsFields: SettingsField[] = [
   ...fields("finances", [
     ["Employer", "Employer"],
     ["Role", "Role", "job"],
-    ["Employment type", "finance-employment-type"],
-    ["Effective date", "Effective date"],
+    ["Employment type", "finance-employmentType"],
     ["Gross annual income", "Gross annual income", "salary earnings"],
     ["Expected net paycheck", "Expected net paycheck", "take home pay"],
-    ["Pay frequency", "finance-pay-frequency"],
+    ["Pay frequency", "finance-payFrequency"],
     ["Next payday", "Next payday"],
-    ["Pay account", "finance-pay-account", "deposit bank"],
+    ["Pay account", "finance-payAccountId", "deposit bank"],
   ]),
-  ...fields(
-    "finances",
-    [
-      ["Jurisdiction", "profile-jurisdiction", "country state region"],
-      ["Income stability", "profile-income-stability"],
-      ["Household size", "profile-householdSize"],
-      ["Dependents", "profile-dependents"],
-      ["Expected monthly take-home", "profile-expectedMonthlyTakeHome", "net income earnings"],
-      ["Liquid reserves", "profile-liquidReserves", "savings emergency fund"],
-      ["Reserve target (months)", "profile-reserve-months", "emergency savings"],
-      ["Buffer target (USD)", "profile-buffer", "cash cushion"],
-      ["Debt priority", "profile-debt-priority", "repayment"],
-      ["Planning notes", "profile-notes"],
-    ],
-    { reveal: ["Edit financial profile", "Create financial profile"] },
-  ),
+  ...fields("finances", [
+    ["Jurisdiction", "finance-config-jurisdiction", "country state region"],
+    ["Income stability", "finance-config-incomeStability"],
+    ["Household size", "finance-config-householdSize"],
+    ["Dependents", "finance-config-dependents"],
+    ["Expected monthly take-home", "finance-config-expectedMonthlyTakeHome", "net income earnings"],
+    ["Liquid reserves", "finance-config-liquidReserves", "savings emergency fund"],
+    ["Reserve target (months)", "finance-config-reserveMonths", "emergency savings"],
+    ["Buffer target (USD)", "finance-config-bufferTarget", "cash cushion"],
+    ["Debt priority", "finance-config-debtPriority", "repayment"],
+    ["Planning notes", "finance-config-notes"],
+    ["Reliable monthly income", "finance-config-reliable-income", "budget resources"],
+    ["Next reliable payment", "finance-config-next-payment"],
+    ["Bills and minimum payments", "Bills and minimum payments", "expenses obligations"],
+    ["Other possible income", "Other possible income"],
+    ["One-time resources", "One-time resources"],
+    ["Goal contributions", "Goal contributions"],
+    ["Spending priorities", "Spending priorities"],
+    ["Debts", "Debts"],
+  ]),
   ...fields(
     "connections",
     [

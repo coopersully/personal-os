@@ -4,6 +4,14 @@ Every pull request must be small enough to understand, accurate in its descripti
 merge. Read the diff and infer intent; never invent context that the request, Linear issue, docs, or
 code do not support.
 
+Apply the [acceptance contract](acceptance-contract.md) and [code standards](code-standards.md).
+New and materially changed behavior must meet the applicable standards; any migration exception
+must be explicitly approved, scoped, owned and time- or release-bounded. Record applicable gate
+and standard IDs, evidence, unresolved gaps and exception references in the existing PR/review
+record. Legacy divergence alone does not justify new violations or unrelated wholesale rewrites.
+The acceptance contract distinguishes merge readiness from production acceptance; current shipping
+tools are not evidence that every new policy gate is mechanically enforced.
+
 ## Work identity
 
 Every repository PR must be traceable to concrete work in the live `Nohmi` Linear Project. Resolve
@@ -20,7 +28,7 @@ title merely as decoration.
 
 Before a PR is ready for review or merge:
 
-1. **PR Work map** must validate the submitted PR body against the live Nohmi Project URL and at
+1. **PR Work map validation**, inside **CI required**, must validate the submitted PR body against the live Nohmi Project URL and at
    least one concrete, internally consistent `COO-*` issue link.
 2. **CI required** and every selected scoped job must pass. This includes repository contracts,
    lint and formatting, types, coverage at the configured floor, production builds, browser
@@ -151,9 +159,11 @@ See [work-context.md](work-context.md) for the ownership and two-phase synchroni
 - Use the repository catch-up workflow for a published branch; do not rewrite shared history merely
   to become current.
 - Use `create-pr` so Linear is resolved before PR creation and linked afterward.
-- Run `pnpm lint` before pushing; use `pnpm format` only to fix formatting, then review its diff.
-- Run `pnpm verify` before requesting review unless a maintainer explicitly approves a narrower
-  check.
+- Use changed-file formatting/lint and affected contract checks during iteration; full lint remains
+  in the final verification set. Format only owned changed files and inspect the diff.
+- Follow [the development handbook](development-handbook.md): draft publication and early review
+  use focused evidence; after review convergence, obtain complete verification on the frozen committed
+  candidate before merge. Reuse valid local or equivalent hosted evidence, never waive missing stages.
 - Verify changed behavior with focused tests as well as the required suite.
 - For UI work, state the immediate user job and apply
   [`docs/design/governance.md`](../design/governance.md): diagnose before editing, change the
@@ -202,8 +212,16 @@ URL when one exists.
 
 - a PR with all conversations resolved;
 - strict, up-to-date branches and linear history;
-- **PR Work map**, **CI required**, and the selected scoped checks;
+- **CI required** (including Work map validation) and the selected scoped checks;
 - no force pushes or deletion; and
 - enforcement for administrators.
 
 Treat live branch protection as authoritative if it differs from this snapshot.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow [delivery verification](delivery-verification.md): converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

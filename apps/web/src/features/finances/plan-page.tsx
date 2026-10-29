@@ -7,29 +7,33 @@ import type {
   FinanceCategory,
   FinanceGoal,
 } from "@personal-os/domain";
+import {
+  financeBudgetApprovalReadinessSchema,
+  financeConfigurationCapabilities,
+} from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { ActionButton as Button } from "@/components/action-button";
+import { QueryFeedback } from "@/components/async-state";
+import { ContentSkeleton } from "@/components/content-skeleton";
+import { EditIcon, SettingsIcon } from "@/components/icons";
+import { RecoveryRequest } from "@/components/recovery-request";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty";
+import { Progress } from "@/components/ui/progress";
 import {
   Table,
   TableBody,
@@ -38,24 +42,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  WorkspaceSecondaryAppBar,
-  WorkspaceSecondaryAppBarActions,
-  WorkspaceSecondaryAppBarLeading,
-} from "@/components/workspace-secondary-app-bar";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
-import { InlineError, PageLoading } from "../../components/async-state.js";
+import { PageLoading } from "../../components/async-state.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
+import {
+  BudgetApprovalReadiness,
+  isBudgetApprovalConflict,
+  useBudgetApproval,
+} from "./budget-approval.js";
+import { FinanceDisclosure } from "./disclosure";
+import { FinanceSection } from "./finance-section";
 import { formatMoney } from "./format.js";
 import { isConfirmedFinanceMutationFailure } from "./mutation-retry.js";
 import { FinancePlanEditor } from "./plan-editor.js";
-import {
-  allocationLabels,
-  isFinancePlanConflict,
-  requireFinancePlanResult,
-  resourceLabels,
-} from "./plan-helpers.js";
+import { allocationLabels, requireFinancePlanResult, resourceLabels } from "./plan-helpers.js";
+import { FinancePrerequisiteScreen } from "./prerequisite-screen.js";
 
 type Relations = {
   accounts: FinanceAccount[];
@@ -113,114 +116,146 @@ function AllocationRelation({
 function PlanDetails({ plan, relations }: { plan: FinanceBudgetVersion; relations: Relations }) {
   return (
     <div className="grid min-w-0 gap-7">
-      <section aria-label="Plan resources" className="grid min-w-0 gap-3">
-        <h2 className="text-base font-medium">Resources</h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Resource</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead className="text-right">Planned amount</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {plan.resources.map((resource) => (
-              <TableRow key={resource.key}>
-                <TableCell className="min-w-40 whitespace-normal">
-                  <span className="font-medium">{resource.key}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {resourceLabels[resource.kind]}
-                  </span>
-                  {resource.description ? (
-                    <span className="block text-sm text-muted-foreground">
-                      {resource.description}
-                    </span>
-                  ) : null}
-                </TableCell>
-                <TableCell className="max-w-64 whitespace-normal">
-                  {resource.sourceId ? (
-                    <span>
-                      {relations.accounts.find((account) => account.id === resource.sourceId)
-                        ?.name ?? "Saved source"}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">No linked source</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatMoney(resource.amount)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </section>
-      <section aria-label="Plan allocations" className="grid min-w-0 gap-3">
-        <h2 className="text-base font-medium">Allocations</h2>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Allocation</TableHead>
-              <TableHead>Linked record</TableHead>
-              <TableHead className="text-right">Planned amount</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {plan.allocations.map((allocation) => (
-              <TableRow key={allocation.key}>
-                <TableCell className="min-w-40 whitespace-normal">
-                  <span className="font-medium">{allocation.key}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {allocationLabels[allocation.kind]}
-                  </span>
-                  {allocation.description ? (
-                    <span className="block text-sm text-muted-foreground">
-                      {allocation.description}
-                    </span>
-                  ) : null}
-                </TableCell>
-                <TableCell className="max-w-64 whitespace-normal">
-                  <AllocationRelation allocation={allocation} relations={relations} />
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {formatMoney(allocation.amount)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </section>
-      <section aria-label="Plan reasoning" className="grid gap-3">
-        <h2 className="text-base font-medium">Rationale</h2>
-        <p className="whitespace-pre-wrap text-sm">{plan.rationale}</p>
-        <h3 className="font-medium">Assumptions</h3>
-        {plan.assumptions.length ? (
-          <ul className="grid list-disc gap-2 pl-5 text-sm">
-            {plan.assumptions.map((assumption) => (
-              <li className="whitespace-pre-wrap" key={assumption}>
-                {assumption}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-muted-foreground">No assumptions recorded.</p>
-        )}
-        <p className="text-xs text-muted-foreground">
-          Created {new Date(plan.createdAt).toLocaleString()}
-          {plan.approvedAt ? ` · Approved ${new Date(plan.approvedAt).toLocaleString()}` : ""}
-        </p>
+      <FinanceSection title="Resources" label="Plan resources">
+        <Card>
+          <CardContent>
+            {plan.resources.length ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Resource</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead className="text-right">Planned amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {plan.resources.map((resource) => (
+                    <TableRow key={resource.key}>
+                      <TableCell className="min-w-40 whitespace-normal">
+                        <span className="font-medium">{resource.key}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {resourceLabels[resource.kind]}
+                        </span>
+                        {resource.description ? (
+                          <span className="block text-sm text-muted-foreground">
+                            {resource.description}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="max-w-64 whitespace-normal">
+                        {resource.sourceId ? (
+                          <span>
+                            {relations.accounts.find((account) => account.id === resource.sourceId)
+                              ?.name ?? "Saved source"}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">No linked source</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatMoney(resource.amount)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No resources recorded. Add income or other available funds in your financial
+                profile.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </FinanceSection>
+      <FinanceSection title="Allocations" label="Plan allocations">
+        <Card>
+          <CardContent>
+            {plan.allocations.length ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Allocation</TableHead>
+                    <TableHead>Linked record</TableHead>
+                    <TableHead className="text-right">Planned amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {plan.allocations.map((allocation) => (
+                    <TableRow key={allocation.key}>
+                      <TableCell className="min-w-40 whitespace-normal">
+                        <span className="font-medium">{allocation.key}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {allocationLabels[allocation.kind]}
+                        </span>
+                        {allocation.description ? (
+                          <span className="block text-sm text-muted-foreground">
+                            {allocation.description}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="max-w-64 whitespace-normal">
+                        <AllocationRelation allocation={allocation} relations={relations} />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatMoney(allocation.amount)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Nothing allocated yet. Add expenses and priorities in your financial profile, then
+                revise this budget.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </FinanceSection>
+      <section aria-label="Plan reasoning" className="flex flex-col gap-2">
+        <FinanceDisclosure title={`${plan.assumptions.length} assumptions · Show details`}>
+          {plan.assumptions.length ? (
+            <ul className="flex flex-col gap-2">
+              {plan.assumptions.map((assumption) => (
+                <li key={assumption}>{assumption}</li>
+              ))}
+            </ul>
+          ) : (
+            <p>No assumptions recorded.</p>
+          )}
+        </FinanceDisclosure>
+        <FinanceDisclosure title="Why this budget?">
+          <p className="whitespace-pre-wrap">{plan.rationale}</p>
+          <p className="text-xs text-muted-foreground">
+            Created {new Date(plan.createdAt).toLocaleString()}
+            {plan.approvedAt ? ` · Approved ${new Date(plan.approvedAt).toLocaleString()}` : ""}
+          </p>
+        </FinanceDisclosure>
       </section>
     </div>
   );
 }
 
-export function FinancePlanPage() {
+export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boolean }) {
+  const [params] = useSearchParams();
+  const requestedPlanId = params.get("planId");
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ plan: FinanceBudgetVersion | null } | null>(null);
+  const [approvalNeedsRefresh, setApprovalNeedsRefresh] = useState(false);
   const approvalKeys = useRef(new Map<string, string>());
   const planQuery = useQuery({
-    queryKey: ["finance-plan"],
-    queryFn: async () => requireFinancePlanResult(await api.getFinanceBudget()),
+    queryKey: ["finance-plan", requestedPlanId],
+    queryFn: async () => {
+      const result = await (requestedPlanId
+        ? api.getFinanceBudget(requestedPlanId)
+        : api.getFinanceBudget());
+      requireFinancePlanResult(result);
+      const readiness = financeBudgetApprovalReadinessSchema.safeParse(
+        "approvalReadiness" in result ? result.approvalReadiness : undefined,
+      );
+      return { ...result, approvalReadiness: readiness.success ? readiness.data : undefined };
+    },
   });
   const statusQuery = useQuery({
     queryKey: ["finance-canonical-budget-status"],
@@ -268,13 +303,14 @@ export function FinancePlanPage() {
       return requireFinancePlanResult(result);
     },
     onSuccess: async (result) => {
-      queryClient.setQueryData(["finance-plan"], result);
+      toast.success(`Version ${result.data.version} saved.`);
+      queryClient.setQueryData(["finance-plan", requestedPlanId], result);
       setEditing(null);
       await refresh();
     },
   });
-  const approve = useFeedbackMutation({
-    feedback: { action: "approve this financial change", safeToRetry: false, form: false },
+  const approve = useBudgetApproval({
+    refresh: refreshApproval,
     mutationFn: async (displayed: FinanceBudgetVersion) => {
       const identity = `${displayed.id}:${displayed.version}`;
       let key = approvalKeys.current.get(identity);
@@ -293,11 +329,12 @@ export function FinancePlanPage() {
       );
     },
     onError: (error, displayed) => {
+      if (isBudgetApprovalConflict(error)) setApprovalNeedsRefresh(true);
       if (isConfirmedFinanceMutationFailure(error))
         approvalKeys.current.delete(`${displayed.id}:${displayed.version}`);
     },
     onSuccess: async (result) => {
-      queryClient.setQueryData(["finance-plan"], result);
+      queryClient.setQueryData(["finance-plan", requestedPlanId], result);
       queryClient.setQueryData(["finance-canonical-budget-status"], result);
       await refresh();
     },
@@ -306,10 +343,27 @@ export function FinancePlanPage() {
   const distinctActive = active?.status === "active" && active.id !== plan?.id;
   const loaded = !planQuery.isPending && !planQuery.isError;
   function openEditor() {
+    if (approvalTask) return;
     approve.reset();
     save.reset();
     setEditing({ plan: plan ?? null });
   }
+
+  async function refreshApproval() {
+    const notification = toast.loading("Refreshing plan…");
+    const refreshed = await planQuery.refetch();
+    if (refreshed.isError) {
+      toast.error(
+        "Could not refresh the plan. Your local decisions are preserved. Try refreshing again.",
+        { id: notification },
+      );
+      return;
+    }
+    approve.reset();
+    setApprovalNeedsRefresh(false);
+    toast.success("Plan refreshed. Review readiness before approving.", { id: notification });
+  }
+
   function reload() {
     approve.reset();
     save.reset();
@@ -319,88 +373,92 @@ export function FinancePlanPage() {
 
   return (
     <>
-      <WorkspaceSecondaryAppBar aria-label="Plan controls">
-        <WorkspaceSecondaryAppBarLeading>
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/finances/setup">Financial setup</Link>
-          </Button>
-        </WorkspaceSecondaryAppBarLeading>
-        <WorkspaceSecondaryAppBarActions>
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button size="sm" variant="ghost">
-                Budget buckets
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
-              <DialogHeader>
-                <DialogTitle>Organize budget categories</DialogTitle>
-                <DialogDescription>
-                  Group transaction categories into planning buckets.
-                </DialogDescription>
-              </DialogHeader>
-              {categoryQuery.isError ? (
-                <InlineError
-                  error={categoryQuery.error}
-                  retry={() => categoryQuery.refetch()}
-                  stale={categoryQuery.data !== undefined}
-                />
-              ) : (
-                <FinanceBudgetBucketManager categories={relations.categories} month={month} />
-              )}
-            </DialogContent>
-          </Dialog>
+      <WorkspaceHeaderControls label="Plan controls">
+        {!approvalTask && plan && loaded ? (
           <Button
-            size="sm"
+            size="icon-sm"
             variant="ghost"
-            disabled={planQuery.isFetching || approve.isPending || save.isPending}
-            onClick={reload}
+            disabled={approve.isPending}
+            onClick={openEditor}
+            aria-label="Revise plan"
+            title="Revise plan"
           >
-            Refresh
+            <EditIcon />
           </Button>
-          {plan && loaded ? (
-            <Button size="sm" variant="outline" disabled={approve.isPending} onClick={openEditor}>
-              Revise plan
-            </Button>
-          ) : null}
-        </WorkspaceSecondaryAppBarActions>
-      </WorkspaceSecondaryAppBar>
-      <div className="grid min-w-0 gap-7">
-        {planQuery.isPending ? <PageLoading workspace="finances" /> : null}
-        {planQuery.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>{plan ? "Saved plan may be out of date" : "Plan unavailable"}</AlertTitle>
-            <AlertDescription>
-              {"Couldn’t refresh this information. Try again."}
-              <Button variant="outline" onClick={reload}>
-                Try again
-              </Button>
-            </AlertDescription>
-          </Alert>
         ) : null}
-        {loaded && !plan ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>No complete plan yet</EmptyTitle>
-              <EmptyDescription>
-                Allocate income and other resources across spending, savings, debt, goals, and a
-                buffer.
-              </EmptyDescription>
-            </EmptyHeader>
-            <EmptyContent>
-              <Button onClick={openEditor}>Create plan</Button>
-              <Button asChild variant="ghost">
-                <Link to="/finances/setup">Continue financial setup</Link>
-              </Button>
-            </EmptyContent>
-          </Empty>
+      </WorkspaceHeaderControls>
+      <div className="grid min-w-0 gap-7">
+        {!approvalTask ? (
+          <WorkspaceHeaderControls label="Budget controls">
+            <div className="flex flex-wrap items-center gap-2">
+              <div>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="Budget buckets"
+                      title="Budget buckets"
+                    >
+                      <SettingsIcon />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent data-finance-dialog data-finance-size="wide">
+                    <DialogHeader>
+                      <DialogTitle>Organize budget categories</DialogTitle>
+                      <DialogDescription>
+                        Group transaction categories into planning buckets.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <ResponsiveDialogBody>
+                      {categoryQuery.isError ? (
+                        <Button variant="secondary" onClick={() => void categoryQuery.refetch()}>
+                          Retry categories
+                        </Button>
+                      ) : (
+                        <FinanceBudgetBucketManager
+                          categories={relations.categories}
+                          month={month}
+                        />
+                      )}
+                    </ResponsiveDialogBody>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              {bucketQuery.isPending ? (
+                <ContentSkeleton label="Loading buckets…" rows={3} />
+              ) : bucketQuery.isSuccess && !relations.buckets.length ? (
+                <p className="text-sm text-muted-foreground">No budget buckets yet.</p>
+              ) : null}
+            </div>
+          </WorkspaceHeaderControls>
+        ) : null}
+        {planQuery.isPending ? <PageLoading workspace="finances" /> : null}
+        <QueryFeedback query={planQuery} title="Couldn’t load the plan." />
+        <QueryFeedback query={categoryQuery} title="Couldn’t load categories." />
+        <QueryFeedback query={accountQuery} title="Couldn’t load accounts." />
+        <QueryFeedback query={goalQuery} title="Couldn’t load goals." />
+        <QueryFeedback query={bucketQuery} title="Couldn’t load buckets." />
+        {loaded && !plan && approvalTask ? (
+          <p>No budget proposal is available to approve.</p>
+        ) : null}
+        {loaded && !plan && !approvalTask ? (
+          <FinancePrerequisiteScreen
+            title="Set up your budget"
+            readiness={financeConfigurationCapabilities({ state: "loaded", value: null }).budget}
+            returnTo="/finances/plan"
+            retry={reload}
+          />
         ) : null}
         {plan ? (
           <>
-            <Card>
-              <CardHeader>
-                <div className="flex flex-wrap items-center gap-2">
-                  <CardTitle>Version {plan.version}</CardTitle>
+            <FinanceSection
+              title="Monthly budget"
+              description={<>Effective {plan.effectiveFrom} · Monthly budget</>}
+              action={
+                <div className="flex items-center gap-2">
+                  {" "}
+                  <span className="text-xs text-muted-foreground">Version {plan.version}</span>
                   <Badge variant={plan.status === "active" ? "default" : "secondary"}>
                     {plan.status === "proposed"
                       ? "Proposed"
@@ -411,97 +469,117 @@ export function FinancePlanPage() {
                           : "Incomplete"}
                   </Badge>
                 </div>
-                <CardDescription>
-                  Effective {plan.effectiveFrom} · Complete monthly allocation
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-5">
-                <dl className="grid gap-4 sm:grid-cols-3">
-                  {[
-                    ["Expected resources", plan.expectedResources],
-                    ["Allocated", plan.allocatedTotal],
-                    ["Unassigned", plan.balanceDelta],
-                  ].map(([label, value]) => (
-                    <div key={String(label)}>
-                      <dt className="text-sm text-muted-foreground">{label}</dt>
-                      <dd className="text-xl font-medium tabular-nums">
-                        {typeof value === "number" ? formatMoney(value) : "Unavailable"}
-                      </dd>
+              }
+            >
+              <Card>
+                <CardContent className="grid gap-5">
+                  <dl className="grid gap-4 sm:grid-cols-3">
+                    {[
+                      ["Expected resources", plan.expectedResources],
+                      ["Allocated", plan.allocatedTotal],
+                      ["Unassigned", plan.balanceDelta],
+                    ].map(([label, value]) => (
+                      <div key={String(label)}>
+                        <dt className="text-sm text-muted-foreground">{label}</dt>
+                        <dd className="text-xl font-medium tabular-nums">
+                          {typeof value === "number"
+                            ? !plan.resources.length &&
+                              label !== "Allocated" &&
+                              plan.status !== "active"
+                              ? "Not provided"
+                              : formatMoney(value)
+                            : "Unavailable"}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {plan.expectedResources > 0 ? (
+                    <div className="grid gap-2">
+                      <Progress
+                        aria-label="Budget allocated"
+                        value={Math.min(
+                          100,
+                          Math.max(0, (plan.allocatedTotal / plan.expectedResources) * 100),
+                        )}
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        {Math.round((plan.allocatedTotal / plan.expectedResources) * 100)}%
+                        allocated
+                        {plan.balanceDelta < 0 ? " · Over budget" : ""}
+                      </p>
                     </div>
-                  ))}
-                </dl>
-                <p className="text-sm text-muted-foreground">
-                  These are planned amounts. Review actual spending in Transactions.
-                </p>
-                {planQuery.data?.communication.requiredDisclosures.map((disclosure) => (
-                  <p className="text-sm" key={disclosure.message}>
-                    {disclosure.message}
+                  ) : null}
+                  <p className="text-sm text-muted-foreground">
+                    These are planned amounts. Review actual spending in Transactions.
                   </p>
-                ))}
-                {plan.status === "proposed" ? (
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button
-                      disabled={
-                        approve.isPending ||
-                        !loaded ||
-                        plan.balanceDelta !== 0 ||
-                        isFinancePlanConflict(approve.error)
-                      }
-                      onClick={() => approve.mutate(plan)}
-                    >
-                      {approve.isPending ? "Approving…" : `Approve version ${plan.version}`}
-                    </Button>
-                    <p className="text-sm text-muted-foreground">
-                      Activates this exact proposal for {plan.effectiveFrom}.
-                    </p>
-                  </div>
-                ) : null}
-                {approve.error ? (
-                  <Alert variant="destructive">
-                    <AlertTitle>
-                      {isFinancePlanConflict(approve.error)
-                        ? "The plan changed before approval"
-                        : "Approval did not complete"}
-                    </AlertTitle>
-                    <AlertDescription>
-                      {approve.feedback?.message}
-                      {isFinancePlanConflict(approve.error) ? (
-                        <Button variant="outline" onClick={reload}>
-                          Reload latest plan
+                  {plan.status !== "active" &&
+                  plan.status !== "proposed" &&
+                  plan.status !== "retired" ? (
+                    <Alert variant="warning">
+                      <AlertTitle>Complete your financial profile</AlertTitle>
+                      <AlertDescription>
+                        This budget is incomplete. Missing information is not a confirmed zero.
+                        <Button asChild variant="outline">
+                          <Link to="/finances/setup">Update financial profile</Link>
                         </Button>
-                      ) : null}
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-                {approve.isSuccess ? (
-                  <p role="status" className="text-sm">
-                    Version {approve.data.data.version} approved.
-                  </p>
-                ) : null}
-              </CardContent>
-            </Card>
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {plan.status === "proposed" ? (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button
+                        disabled={
+                          approve.isPending ||
+                          !loaded ||
+                          planQuery.isFetching ||
+                          !planQuery.data?.approvalReadiness?.ready ||
+                          approvalNeedsRefresh
+                        }
+                        onClick={() => approve.mutate(plan)}
+                      >
+                        {approve.isPending ? "Approving…" : `Approve version ${plan.version}`}
+                      </Button>
+                      <p className="text-sm text-muted-foreground">
+                        Activates this exact proposal for {plan.effectiveFrom}.
+                      </p>
+                    </div>
+                  ) : null}
+                  <BudgetApprovalReadiness
+                    readiness={planQuery.data?.approvalReadiness}
+                    revisionHref={`/finances/plan?planId=${encodeURIComponent(plan.planId)}`}
+                    onRevise={approvalTask ? undefined : openEditor}
+                    onRefresh={() => void refreshApproval()}
+                  />
+                  <RecoveryRequest
+                    toastId={approve.feedback?.toastId}
+                    open={approve.isError}
+                    title="Approval needs review"
+                    description={
+                      approve.feedback?.message ?? "Check the latest plan before trying again."
+                    }
+                    actions={
+                      <>
+                        <Button variant="secondary" onClick={() => approve.reset()}>
+                          Return to plan
+                        </Button>
+                        <Button onClick={() => void refreshApproval()}>Refresh plan</Button>
+                      </>
+                    }
+                  />
+                  {approve.error || approvalNeedsRefresh ? (
+                    <Button variant="outline" onClick={() => void refreshApproval()}>
+                      Refresh plan
+                    </Button>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </FinanceSection>
             {statusQuery.isPending ? (
               <p className="text-sm text-muted-foreground">Checking active plan…</p>
             ) : statusQuery.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>Active plan status unavailable</AlertTitle>
-                <AlertDescription>
-                  {"Couldn’t refresh this information. Try again."}
-                </AlertDescription>
-              </Alert>
+              <QueryFeedback query={statusQuery} title="Couldn’t load active plan status." />
             ) : !active ? (
               <p className="text-sm text-muted-foreground">No approved plan is active yet.</p>
-            ) : null}
-            {[categoryQuery, accountQuery, goalQuery, bucketQuery].some(
-              (query) => query.isError,
-            ) ? (
-              <Alert>
-                <AlertTitle>Some linked records are unavailable</AlertTitle>
-                <AlertDescription>
-                  Saved identities and amounts remain visible. Refresh to reload category, account,
-                  goal, or bucket names.
-                </AlertDescription>
-              </Alert>
             ) : null}
             <PlanDetails plan={plan} relations={relations} />
           </>
@@ -523,7 +601,7 @@ export function FinancePlanPage() {
           </Collapsible>
         ) : null}
       </div>
-      {editing ? (
+      {!approvalTask && editing ? (
         <FinancePlanEditor
           plan={editing.plan}
           accounts={relations.accounts}

@@ -63,6 +63,7 @@ import {
   serializeMailThread,
 } from "./serialization.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 type MailSourceExecutor = Pick<Database, "select">;
@@ -265,6 +266,7 @@ export function createMailService({
         truncated: scannedWindow.length > 200,
       },
     };
+
     return {
       ...preview,
       fingerprint: previewFingerprint(preview),
@@ -433,6 +435,61 @@ export function createMailService({
         threadId: before.id,
       });
     }
+  }
+
+  async function threadConditions(userId: string, query: MailListQuery) {
+    const conditions = [eq(mailThreads.userId, userId), isNull(mailThreads.deletedAt)];
+    const activeSnooze = sql`exists (
+        select 1 from ${mailSnoozes}
+        where ${mailSnoozes.threadId} = ${mailThreads.id}
+          and ${mailSnoozes.until} > ${now()}
+      )`;
+    conditions.push(query.snoozed ? activeSnooze : sql`not ${activeSnooze}`);
+    if (query.accountIds?.length) conditions.push(inArray(mailThreads.accountId, query.accountIds));
+    if (query.starred !== undefined) conditions.push(eq(mailThreads.starred, query.starred));
+    if (query.unread !== undefined) conditions.push(eq(mailThreads.unread, query.unread));
+    if (query.query) {
+      const pattern = `%${query.query}%`;
+      const search = or(
+        ilike(mailThreads.subject, pattern),
+        ilike(mailThreads.snippet, pattern),
+        sql`${mailThreads.from}->>'address' ilike ${pattern}`,
+        sql`${mailThreads.from}->>'name' ilike ${pattern}`,
+      );
+      if (search) conditions.push(search);
+    }
+    if (query.mailboxId) {
+      const [mailbox] = await db
+        .select()
+        .from(mailboxes)
+        .where(
+          and(
+            eq(mailboxes.id, query.mailboxId),
+            eq(mailboxes.userId, userId),
+            isNull(mailboxes.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!mailbox) throw new AppError("not_found", "The mailbox was not found.");
+      conditions.push(eq(mailThreads.accountId, mailbox.accountId));
+      conditions.push(
+        sql`${mailThreads.remoteMailboxIds} @> ${JSON.stringify([mailbox.remoteMailboxId])}::jsonb`,
+      );
+    }
+    if (query.mailboxRole) {
+      conditions.push(sql`exists (
+          select 1 from ${mailboxes}
+          inner join ${calendarAccounts}
+            on ${calendarAccounts.id} = ${mailboxes.accountId}
+           and ${calendarAccounts.mailEnabled} = true
+          where ${mailboxes.userId} = ${userId}
+            and ${mailboxes.accountId} = ${mailThreads.accountId}
+            and ${mailboxes.role} = ${query.mailboxRole}
+            and ${mailboxes.deletedAt} is null
+            and ${mailThreads.remoteMailboxIds} @> jsonb_build_array(${mailboxes.remoteMailboxId})
+        )`);
+    }
+    return conditions;
   }
 
   return {
@@ -719,27 +776,35 @@ export function createMailService({
       }
       const claimId = randomUUID();
       const claimedAt = now();
-      const [claimed] = await db
-        .update(mailDrafts)
-        .set({
-          sendClaimedAt: claimedAt,
-          sendClaimId: claimId,
-          sendStatus: "sending",
-          updatedAt: claimedAt,
-        })
-        .where(
-          and(
-            eq(mailDrafts.id, input.draftId),
-            eq(mailDrafts.userId, userId),
-            eq(mailDrafts.sendStatus, "draft"),
-            sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${draft.updatedAt}`,
-            isNull(mailDrafts.sentAt),
-          ),
-        )
-        .returning({ id: mailDrafts.id });
-      if (!claimed) {
-        throw new AppError("conflict", "This draft is already being sent or changed.");
-      }
+      await db.transaction(async (tx) => {
+        await tx
+          .select({ id: mailDrafts.id })
+          .from(mailDrafts)
+          .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
+          .for("update");
+        await requireWorkspaceExecution(tx, context.principal, "mail", now());
+        const [claimed] = await tx
+          .update(mailDrafts)
+          .set({
+            sendClaimedAt: claimedAt,
+            sendClaimId: claimId,
+            sendStatus: "sending",
+            updatedAt: claimedAt,
+          })
+          .where(
+            and(
+              eq(mailDrafts.id, input.draftId),
+              eq(mailDrafts.userId, userId),
+              eq(mailDrafts.sendStatus, "draft"),
+              sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${draft.updatedAt}`,
+              isNull(mailDrafts.sentAt),
+            ),
+          )
+          .returning({ id: mailDrafts.id });
+        if (!claimed) {
+          throw new AppError("conflict", "This draft is already being sent or changed.");
+        }
+      });
       try {
         await gateway.send(userId, draft.accountId, {
           body: draft.body,
@@ -894,6 +959,7 @@ export function createMailService({
       context: MutationContext,
     ): Promise<MailDraft> {
       return db.transaction(async (transaction) => {
+        await requireWorkspaceExecution(transaction, context.principal, "mail", now());
         const [draft] = await transaction
           .select()
           .from(mailDrafts)
@@ -1176,7 +1242,7 @@ export function createMailService({
       const sendCapabilities = new Map(
         await Promise.all(
           accounts.map(async (account) => {
-            const health = connectionHealthForAccount(account);
+            const health = connectionHealthForAccount(account, "mail");
             let capability: "available" | "reconnect" | "unavailable";
             if (health.state === "reconnect") capability = "reconnect";
             else {
@@ -1202,16 +1268,30 @@ export function createMailService({
           },
           automaticRuleExecution: account.provider === "google",
           email: account.email,
-          health: connectionHealthForAccount(account),
+          health: connectionHealthForAccount(account, "mail"),
           label: account.label,
-          lastSyncAttemptAt: account.lastSyncAttemptAt?.toISOString() ?? null,
-          lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null,
+          lastSyncAttemptAt:
+            account.syncCapabilities?.mail?.lastAttemptAt ??
+            account.lastSyncAttemptAt?.toISOString() ??
+            null,
+          lastSyncedAt: account.syncCapabilities?.mail
+            ? account.syncCapabilities.mail.lastSyncedAt
+            : (account.lastSyncedAt?.toISOString() ?? null),
           mailboxes: mailboxesByAccount.get(account.id) ?? [],
           provider: account.provider as "google" | "icloud",
           sendCapability: sendCapabilities.get(account.id) ?? "unavailable",
-          nextSyncAt: account.nextSyncAt?.toISOString() ?? null,
-          syncError: account.syncError,
-          syncStatus: account.syncStatus,
+          nextSyncAt: account.syncCapabilities?.mail
+            ? account.syncCapabilities.mail.health.nextSyncAt
+            : (account.nextSyncAt?.toISOString() ?? null),
+          syncError: connectionHealthForAccount(account, "mail").message,
+          syncStatus:
+            account.syncStatus === "syncing"
+              ? "syncing"
+              : account.syncCapabilities?.mail
+                ? account.syncCapabilities.mail.errorCode
+                  ? "error"
+                  : "idle"
+                : account.syncStatus,
         })),
         automation: {
           executionLimitPerRun: MAIL_RULE_EXECUTION_LIMIT_PER_RUN,
@@ -1290,12 +1370,7 @@ export function createMailService({
       input: ActivateMailRuleInput,
       context: MutationContext,
     ): Promise<{ preview: MailRulePreview; rule: MailRule }> {
-      if (context.principal.actorType !== "user") {
-        throw new AppError(
-          "forbidden",
-          "Mail rule activation requires an interactive user session.",
-        );
-      }
+      await requireWorkspaceExecution(db, context.principal, "mail", now());
       const existing = await findRule(context.principal.userId, id);
       if (!existing) throw new AppError("not_found", "The mail rule was not found.");
       if (existing.version !== input.expectedVersion) {
@@ -1406,6 +1481,7 @@ export function createMailService({
         );
       }
       const updated = await db.transaction(async (transaction) => {
+        await requireWorkspaceExecution(transaction, context.principal, "mail", now());
         const lockedSources = await transaction
           .select({
             id: calendarAccounts.id,
@@ -1743,6 +1819,54 @@ export function createMailService({
       return serializeMailThread(record, await mailboxMap(userId));
     },
 
+    async downloadAttachment(
+      userId: string,
+      messageId: string,
+      attachmentId: string,
+      signal?: AbortSignal,
+    ) {
+      signal?.throwIfAborted();
+      const [record] = await db
+        .select({ message: mailMessages, accountId: mailThreads.accountId })
+        .from(mailMessages)
+        .innerJoin(mailThreads, eq(mailMessages.threadId, mailThreads.id))
+        .where(
+          and(
+            eq(mailMessages.id, messageId),
+            eq(mailThreads.userId, userId),
+            isNull(mailThreads.deletedAt),
+          ),
+        )
+        .limit(1);
+      const attachment = record?.message.attachments.find((file) => file.id === attachmentId);
+      if (!record || !attachment) throw new AppError("not_found", "The attachment was not found.");
+      if (attachment.projectionIssue || (attachment.size ?? 0) > 10 * 1024 * 1024)
+        throw new AppError(
+          "invalid_request",
+          "This attachment is too large to download here. Open it in your mail provider.",
+        );
+      if (!gateway.downloadAttachment)
+        throw new AppError(
+          "service_unavailable",
+          "Attachment downloads are unavailable for this connection.",
+        );
+      signal?.throwIfAborted();
+      const bytes = await gateway.downloadAttachment(
+        userId,
+        record.accountId,
+        record.message.remoteMessageId,
+        attachment,
+        signal,
+      );
+      if (bytes.length > 10 * 1024 * 1024)
+        throw new AppError("invalid_request", "This attachment exceeds the 10 MB download limit.");
+      return {
+        filename: (attachment.filename || "attachment").replace(/[/\\\p{Cc}]/gu, "_"),
+        contentType: attachment.contentType,
+        data: Buffer.from(bytes).toString("base64"),
+        size: bytes.length,
+      };
+    },
     async listMessages(userId: string, threadId: string): Promise<MailMessage[]> {
       const records = await db
         .select({ message: mailMessages })
@@ -1792,59 +1916,40 @@ export function createMailService({
       return records.map(({ mailbox }) => serializeMailbox(mailbox));
     },
 
+    async navigationCounts(userId: string, accountIds?: string[]) {
+      const scopes = {
+        all: { mailboxRole: "inbox" },
+        unread: { unread: true },
+        starred: { starred: true },
+        snoozed: { snoozed: true },
+        sent: { mailboxRole: "sent" },
+      } as const;
+      const entries = await Promise.all(
+        Object.entries(scopes).map(async ([scope, filter]) => {
+          const conditions = await threadConditions(userId, {
+            ...filter,
+            ...(accountIds?.length ? { accountIds } : {}),
+            limit: 1,
+          });
+          const [result] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(mailThreads)
+            .where(and(...conditions));
+          return [scope, result?.count ?? 0] as const;
+        }),
+      );
+      const [drafts] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(mailDrafts)
+        .where(and(eq(mailDrafts.userId, userId), sql`${mailDrafts.sendStatus} <> 'sent'`));
+      return {
+        ...Object.fromEntries(entries),
+        drafts: drafts?.count ?? 0,
+      } as import("@personal-os/domain").MailNavigationCounts;
+    },
+
     async listThreads(userId: string, query: MailListQuery): Promise<MailThread[]> {
-      const conditions = [eq(mailThreads.userId, userId), isNull(mailThreads.deletedAt)];
-      const activeSnooze = sql`exists (
-        select 1 from ${mailSnoozes}
-        where ${mailSnoozes.threadId} = ${mailThreads.id}
-          and ${mailSnoozes.until} > ${now()}
-      )`;
-      conditions.push(query.snoozed ? activeSnooze : sql`not ${activeSnooze}`);
-      if (query.accountIds?.length)
-        conditions.push(inArray(mailThreads.accountId, query.accountIds));
-      if (query.starred !== undefined) conditions.push(eq(mailThreads.starred, query.starred));
-      if (query.unread !== undefined) conditions.push(eq(mailThreads.unread, query.unread));
-      if (query.query) {
-        const pattern = `%${query.query}%`;
-        const search = or(
-          ilike(mailThreads.subject, pattern),
-          ilike(mailThreads.snippet, pattern),
-          sql`${mailThreads.from}->>'address' ilike ${pattern}`,
-          sql`${mailThreads.from}->>'name' ilike ${pattern}`,
-        );
-        if (search) conditions.push(search);
-      }
-      if (query.mailboxId) {
-        const [mailbox] = await db
-          .select()
-          .from(mailboxes)
-          .where(
-            and(
-              eq(mailboxes.id, query.mailboxId),
-              eq(mailboxes.userId, userId),
-              isNull(mailboxes.deletedAt),
-            ),
-          )
-          .limit(1);
-        if (!mailbox) throw new AppError("not_found", "The mailbox was not found.");
-        conditions.push(eq(mailThreads.accountId, mailbox.accountId));
-        conditions.push(
-          sql`${mailThreads.remoteMailboxIds} @> ${JSON.stringify([mailbox.remoteMailboxId])}::jsonb`,
-        );
-      }
-      if (query.mailboxRole) {
-        conditions.push(sql`exists (
-          select 1 from ${mailboxes}
-          inner join ${calendarAccounts}
-            on ${calendarAccounts.id} = ${mailboxes.accountId}
-           and ${calendarAccounts.mailEnabled} = true
-          where ${mailboxes.userId} = ${userId}
-            and ${mailboxes.accountId} = ${mailThreads.accountId}
-            and ${mailboxes.role} = ${query.mailboxRole}
-            and ${mailboxes.deletedAt} is null
-            and ${mailThreads.remoteMailboxIds} @> jsonb_build_array(${mailboxes.remoteMailboxId})
-        )`);
-      }
+      const conditions = await threadConditions(userId, query);
       const records = await db
         .select()
         .from(mailThreads)

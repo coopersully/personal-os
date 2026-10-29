@@ -40,3 +40,15 @@ backend.hcl
 crash.log
 # Local design previews and implementation ledgers
 .superpowers/
+
+# Public document HTML is rendered from reviewed content during dev/build.
+apps/web/public/about/
+apps/web/public/docs/
+apps/web/public/privacy/
+apps/web/public/terms/
+apps/web/public/data-use/
+apps/web/public/sms/
+apps/web/public/support/
+
+# Shared static landing render consumed by Vite.
+apps/web/.public-site/

@@ -1,11 +1,16 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
+  ActivityIcon,
+  AgentIcon,
   BankIcon,
+  CircleAlertIcon,
   DollarIcon,
   GridIcon,
   type Icon,
+  LockIcon,
   ReceiptIcon,
-  SettingsIcon,
+  ReplyIcon,
   ShieldCheckIcon,
   TargetIcon,
   WalletIcon,
@@ -16,11 +21,23 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import {
+  useNavigationSection,
+  useNavigationShortcuts,
+} from "@/components/workspace-navigation-page";
+import { api } from "../../api.js";
+import { financeAccountNeedsAttention, financeProfileNeedsAttention } from "./attention";
+import { useFinanceConfiguration } from "./use-finance-configuration.js";
+import { useFinanceConversationUnread } from "./use-finance-conversation-unread.js";
 
 export type FinanceSection =
+  | "chat"
+  | "automations"
+  | "activity"
   | "accounts"
   | "budgets"
   | "cashflow"
@@ -33,23 +50,38 @@ export type FinanceSection =
   | "decisions"
   | "review"
   | "subscriptions"
-  | "transactions";
+  | "transactions"
+  | "spending";
 
 const navigation: Array<{
   items: Array<{ icon: Icon; id: FinanceSection; label: string }>;
   label: string;
 }> = [
   {
+    label: "Money",
     items: [
       { icon: GridIcon, id: "overview", label: "Overview" },
-
       { icon: ReceiptIcon, id: "transactions", label: "Transactions" },
-      { icon: WalletIcon, id: "plan", label: "Plan" },
-      { icon: DollarIcon, id: "cashflow", label: "Cash flow" },
-      { icon: TargetIcon, id: "wealth", label: "Wealth" },
+      { icon: DollarIcon, id: "spending", label: "Spending" },
       { icon: BankIcon, id: "accounts", label: "Accounts" },
     ],
-    label: "Finances",
+  },
+  {
+    label: "Planning",
+    items: [
+      { icon: WalletIcon, id: "plan", label: "Budget" },
+      { icon: DollarIcon, id: "cashflow", label: "Cash flow" },
+      { icon: TargetIcon, id: "wealth", label: "Wealth" },
+    ],
+  },
+  {
+    label: "Manage",
+    items: [
+      { icon: ReplyIcon, id: "chat", label: "Chat" },
+      { icon: AgentIcon, id: "automations", label: "Automations" },
+      { icon: ActivityIcon, id: "activity", label: "Activity" },
+      { icon: ShieldCheckIcon, id: "setup", label: "Financial profile" },
+    ],
   },
 ];
 
@@ -59,6 +91,9 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
   if (section === "reviews") return "overview";
   return (
     [
+      "chat",
+      "automations",
+      "activity",
       "decisions",
       "accounts",
       "budgets",
@@ -72,6 +107,7 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
       "review",
       "subscriptions",
       "transactions",
+      "spending",
     ] as const
   ).some((item) => item === section)
     ? (section as FinanceSection)
@@ -88,79 +124,151 @@ function financeNavigationActive(section: FinanceSection, destination: FinanceSe
 
 export function FinanceSidebarNavigation({
   onNavigate,
+  ownerId,
+  sessionKey,
   reviewCount,
   section,
 }: {
   onNavigate: () => void;
+  ownerId: string;
+  sessionKey: string;
   reviewCount: number;
   section: FinanceSection;
 }) {
-  return navigation.map((group) => (
-    <div key={group.label}>
-      <SidebarGroup>
-        <SidebarGroupLabel>Views</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <nav aria-label={group.label}>
-            <SidebarMenu>
-              {group.items.map(({ icon: Icon, id, label }) => (
-                <SidebarMenuItem key={id}>
-                  <SidebarMenuButton
-                    className={
-                      id === "review" && reviewCount > 0 ? "sidebar-item-with-meta" : undefined
-                    }
-                    asChild
-                    isActive={financeNavigationActive(section, id)}
-                    tooltip={label}
-                  >
-                    <Link
-                      aria-current={financeNavigationActive(section, id) ? "page" : undefined}
-                      aria-label={
-                        id === "review" && reviewCount > 0 ? `${label} ${reviewCount}` : label
-                      }
-                      onClick={onNavigate}
-                      to={id === "overview" ? "/finances" : `/finances/${id}`}
-                    >
-                      <Icon
-                        aria-hidden="true"
-                        weight={financeNavigationActive(section, id) ? "Filled" : "Outline"}
-                      />
-                      <span>{label}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                  {id === "review" && reviewCount > 0 ? (
-                    <SidebarItemMeta label="Reviews" count={reviewCount} />
-                  ) : null}
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </nav>
-        </SidebarGroupContent>
-      </SidebarGroup>
-      <SidebarGroup>
-        <SidebarGroupLabel>Manage</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={section === "setup"} tooltip="Financial setup">
-                <Link
-                  aria-current={section === "setup" ? "page" : undefined}
-                  onClick={onNavigate}
-                  to="/finances/setup"
-                >
-                  <ShieldCheckIcon /> <span>Financial setup</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Finance settings">
-                <Link onClick={onNavigate} to="/settings?section=finances">
-                  <SettingsIcon /> <span>Finance settings</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-    </div>
-  ));
+  const navigationSection = useNavigationSection();
+  const navigationShortcuts = useNavigationShortcuts();
+  const configuration = useFinanceConfiguration();
+  const unread = useFinanceConversationUnread(ownerId, sessionKey);
+  const unreadCount = BigInt(unread?.unreadCount ?? "0");
+  const readiness = useQuery({
+    queryKey: ["finance-conversation-readiness", ownerId],
+    queryFn: () => api.getFinanceConversationReadiness(),
+    refetchInterval: 30_000,
+  });
+  const accounts =
+    configuration.data?.accounts?.state === "loaded"
+      ? configuration.data.accounts.value?.accounts
+      : undefined;
+  const profile = configuration.data?.profile;
+  const budget = configuration.data?.budget;
+  const budgetNeedsInput = configuration.data?.capabilities.budget.state === "needs_input";
+  return navigation
+    .filter((group) => !navigationSection || group.label.toLowerCase() === navigationSection)
+    .map((group) => (
+      <div key={group.label}>
+        <SidebarGroup>
+          <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <nav aria-label={group.label}>
+              <SidebarMenu>
+                {group.items
+                  .filter((item) => !navigationShortcuts.includes(item.id))
+                  .map(({ icon: Icon, id, label }) => {
+                    const attention =
+                      id === "accounts"
+                        ? accounts?.some((account) => financeAccountNeedsAttention(account)) ||
+                          Boolean(
+                            configuration.data?.accounts?.state === "loaded" &&
+                              configuration.data.accounts.value?.accountSemantics
+                                ?.possibleDuplicateGroups.length,
+                          )
+                        : id === "setup"
+                          ? profile?.state === "loaded" &&
+                            financeProfileNeedsAttention(profile.value)
+                          : id === "plan"
+                            ? budgetNeedsInput ||
+                              (budget?.state === "loaded" && budget.value?.status !== "active")
+                            : false;
+                    const count = id === "accounts" ? accounts?.length : undefined;
+                    const locked =
+                      (id === "plan" && budgetNeedsInput) ||
+                      (id === "chat" && readiness.data?.canSend !== true);
+                    return (
+                      <SidebarMenuItem key={id} data-locked={locked || undefined}>
+                        <SidebarMenuButton
+                          className={
+                            locked ||
+                            attention ||
+                            count !== undefined ||
+                            (id === "chat" && unreadCount > 0n)
+                              ? "sidebar-item-with-meta"
+                              : undefined
+                          }
+                          asChild
+                          isActive={financeNavigationActive(section, id)}
+                          tooltip={label}
+                        >
+                          <Link
+                            aria-current={financeNavigationActive(section, id) ? "page" : undefined}
+                            aria-label={
+                              id === "review" && reviewCount > 0 ? `${label} ${reviewCount}` : label
+                            }
+                            aria-describedby={
+                              navigationSection && (id === "chat" || id === "automations")
+                                ? `finance-navigation-${id}-description`
+                                : undefined
+                            }
+                            onClick={onNavigate}
+                            to={id === "overview" ? "/finances" : `/finances/${id}`}
+                          >
+                            <Icon
+                              aria-hidden="true"
+                              weight={financeNavigationActive(section, id) ? "Filled" : "Outline"}
+                            />
+                            <span className="workspace-navigation-label">
+                              <span>{label}</span>
+                              {navigationSection && (id === "chat" || id === "automations") ? (
+                                <span
+                                  id={`finance-navigation-${id}-description`}
+                                  className="workspace-navigation-description"
+                                >
+                                  {id === "chat"
+                                    ? "Discuss your finances with your finance assistant."
+                                    : "Manage recurring financial checks and actions."}
+                                </span>
+                              ) : null}
+                            </span>
+                          </Link>
+                        </SidebarMenuButton>
+                        {locked ? (
+                          <SidebarMenuBadge className="sidebar-item-lock">
+                            <LockIcon
+                              aria-label={
+                                id === "chat"
+                                  ? "Chat verification required"
+                                  : "Prerequisites required"
+                              }
+                              className="size-3.5 text-muted-foreground"
+                            />
+                          </SidebarMenuBadge>
+                        ) : null}
+                        {id === "chat" && unreadCount > 0n ? (
+                          <SidebarMenuBadge
+                            role="group"
+                            aria-label={`Chat: ${unreadCount} unread messages`}
+                            className="sidebar-item-meta"
+                          >
+                            <CircleAlertIcon
+                              aria-label="Unread messages need attention"
+                              className="size-3"
+                            />
+                            <span aria-hidden="true">
+                              {unreadCount > 99n ? "99+" : unreadCount.toString()}
+                            </span>
+                          </SidebarMenuBadge>
+                        ) : null}
+                        <SidebarItemMeta
+                          label={label}
+                          attention={Boolean(attention)}
+                          count={count}
+                        />
+                      </SidebarMenuItem>
+                    );
+                  })}
+              </SidebarMenu>
+            </nav>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </div>
+    ));
 }

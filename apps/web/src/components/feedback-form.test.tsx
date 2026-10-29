@@ -2,10 +2,32 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
+import { toast } from "sonner";
 import { describe, expect, it, vi } from "vitest";
+import { SettingsFeedbackContext } from "../lib/settings-feedback.js";
 import { FeedbackForm } from "./feedback-form.js";
 
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() } }));
 describe("FeedbackForm", () => {
+  it("announces settings validation failures through Sonner while retaining correction hints", async () => {
+    render(
+      <SettingsFeedbackContext.Provider value={true}>
+        <FeedbackForm feedback={null}>
+          <label>
+            Email
+            <input name="email" type="email" required />
+          </label>
+          <button type="submit">Connect</button>
+        </FeedbackForm>
+      </SettingsFeedbackContext.Provider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(toast.error).toHaveBeenCalledWith(
+      "Check the highlighted settings fields.",
+      expect.anything(),
+    );
+    expect(screen.getByLabelText("Email")).toHaveAttribute("aria-invalid", "true");
+  });
   it("validates only on submit, focuses a field, preserves helpers and clears corrections", async () => {
     const user = userEvent.setup();
     const submit = vi.fn((event) => event.preventDefault());
@@ -78,7 +100,7 @@ describe("FeedbackForm", () => {
     expect(screen.getByRole("textbox")).not.toHaveAttribute("aria-invalid");
     expect(screen.getByRole("textbox")).toHaveValue("draft");
   });
-  it("keeps unmapped errors in the form and supports custom constraints", () => {
+  it("announces unmapped errors through Sonner and retains custom constraints", () => {
     render(
       <FeedbackForm
         feedback={{
@@ -92,7 +114,8 @@ describe("FeedbackForm", () => {
         <button type="submit">Save</button>
       </FeedbackForm>,
     );
-    expect(screen.getByRole("status")).toHaveTextContent("Check the date range.");
+    expect(toast.error).toHaveBeenCalledWith("Check the date range.", expect.anything());
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     const input = screen.getByRole("textbox") as HTMLInputElement;
     input.setCustomValidity("End must be after start.");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

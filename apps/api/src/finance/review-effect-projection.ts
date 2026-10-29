@@ -5,18 +5,27 @@ import {
 } from "@personal-os/database";
 import type { AgentAccessWorkItem } from "@personal-os/domain";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import type { FinanceTransaction } from "./context.js";
 import { findUnverifiedLegacyFinanceEffects } from "./legacy-maintenance-evidence.js";
+import { readProjectionRows } from "./search-projection-bounds.js";
 
 /** Project authoritative repair evidence without changing or reinterpreting ledger truth. */
 export async function readFinanceEffectWork(
   db: Database,
   { userId, snapshotAt }: { userId: string; snapshotAt: Date },
+  searchLimit?: number,
 ): Promise<AgentAccessWorkItem[]> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
-    const effects = await findUnverifiedLegacyFinanceEffects(tx, userId, {
-      type: "all_outstanding",
-    });
+  const read = async (tx: FinanceTransaction) => {
+    if (searchLimit === undefined)
+      await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
+    const effects = await findUnverifiedLegacyFinanceEffects(
+      tx,
+      userId,
+      {
+        type: "all_outstanding",
+      },
+      searchLimit,
+    );
     if (!effects.length) return [];
     const revisionIds = effects
       .filter((effect) => effect.kind !== "relationship")
@@ -25,32 +34,38 @@ export async function readFinanceEffectWork(
       .filter((effect) => effect.kind === "relationship")
       .map((effect) => effect.effectId);
     const revisions = revisionIds.length
-      ? await tx
-          .select({
-            id: financeTransactionRevisions.id,
-            createdAt: financeTransactionRevisions.createdAt,
-          })
-          .from(financeTransactionRevisions)
-          .where(
-            and(
-              eq(financeTransactionRevisions.userId, userId),
-              inArray(financeTransactionRevisions.id, revisionIds),
+      ? await readProjectionRows(
+          tx
+            .select({
+              id: financeTransactionRevisions.id,
+              createdAt: financeTransactionRevisions.createdAt,
+            })
+            .from(financeTransactionRevisions)
+            .where(
+              and(
+                eq(financeTransactionRevisions.userId, userId),
+                inArray(financeTransactionRevisions.id, revisionIds),
+              ),
             ),
-          )
+          searchLimit,
+        )
       : [];
     const relationships = relationshipIds.length
-      ? await tx
-          .select({
-            id: financeTransactionRelationships.id,
-            createdAt: financeTransactionRelationships.createdAt,
-          })
-          .from(financeTransactionRelationships)
-          .where(
-            and(
-              eq(financeTransactionRelationships.userId, userId),
-              inArray(financeTransactionRelationships.id, relationshipIds),
+      ? await readProjectionRows(
+          tx
+            .select({
+              id: financeTransactionRelationships.id,
+              createdAt: financeTransactionRelationships.createdAt,
+            })
+            .from(financeTransactionRelationships)
+            .where(
+              and(
+                eq(financeTransactionRelationships.userId, userId),
+                inArray(financeTransactionRelationships.id, relationshipIds),
+              ),
             ),
-          )
+          searchLimit,
+        )
       : [];
     const observed = new Map(
       [...revisions, ...relationships].map((row) => [row.id, row.createdAt]),
@@ -81,5 +96,8 @@ export async function readFinanceEffectWork(
       });
     }
     return [...work.values()];
-  });
+  };
+  return searchLimit === undefined
+    ? db.transaction(read)
+    : read(db as unknown as FinanceTransaction);
 }

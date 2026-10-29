@@ -1,12 +1,18 @@
 import { ChevronDownIcon } from "@/components/icons";
 import type * as React from "react";
+import { useContext } from "react";
+import { SettingsControlsContext } from "../settings-controls-context";
+import { SettingsSelect } from "../settings-select";
 import { cn } from "@/lib/utils";
 
 type NativeSelectProps = Omit<React.ComponentProps<"select">, "size"> & {
   size?: "sm" | "default";
+  showIndicator?: boolean;
 };
 
-function NativeSelect({ className, size = "default", ...props }: NativeSelectProps) {
+function NativeSelect({ className, size = "default", showIndicator = true, ...props }: NativeSelectProps) {
+  const settings = useContext(SettingsControlsContext);
+  if (settings && !props.multiple) return <SettingsSelect {...props} className={className}>{props.children}</SettingsSelect>;
   return (
     <div
       className={cn(
@@ -22,11 +28,11 @@ function NativeSelect({ className, size = "default", ...props }: NativeSelectPro
         className="h-8 w-full min-w-0 truncate appearance-none rounded-lg border border-transparent bg-input/60 py-1 pr-8 pl-2.5 text-sm transition-colors outline-none select-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground hover:bg-input/80 focus-visible:border-foreground/50 focus-visible:bg-selection disabled:pointer-events-none disabled:cursor-not-allowed aria-invalid:border-destructive data-[size=sm]:h-7 data-[size=sm]:rounded-md data-[size=sm]:py-0.5 dark:aria-invalid:border-destructive/50"
         {...props}
       />
-      <ChevronDownIcon
+      {showIndicator ? <ChevronDownIcon
         className="pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-muted-foreground select-none"
         aria-hidden="true"
         data-slot="native-select-icon"
-      />
+      /> : null}
     </div>
   );
 }

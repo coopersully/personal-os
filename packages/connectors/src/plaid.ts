@@ -60,6 +60,12 @@ export type PlaidTransactionPage = {
 export type PlaidConnector = {
   validateCredentials(): Promise<void>;
   createLinkToken(input: PlaidLinkTokenInput): Promise<string>;
+  createHostedLink?(
+    input: PlaidLinkTokenInput,
+  ): Promise<{ linkToken: string; url: string; expiresAt: string }>;
+  getHostedLinkResult?(
+    linkToken: string,
+  ): Promise<{ publicTokens: string[]; institutions?: Record<string, string> }>;
   exchangePublicToken(publicToken: string): Promise<PlaidItemToken>;
   getItem(accessToken: string): Promise<PlaidItemSnapshot>;
   getAccounts(accessToken: string): Promise<PlaidAccountSnapshot[]>;
@@ -131,12 +137,13 @@ const transactionPageSchema = z.object({
     .optional(),
 });
 
-function transportFailure(): ConnectorError {
+function transportFailure(transportCause: unknown): ConnectorError {
   return new ConnectorError({
     category: "transport",
     code: "plaid_transport_failure",
     disposition: "retry",
     message: "Plaid is temporarily unavailable.",
+    transportCause,
   });
 }
 
@@ -198,8 +205,8 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
         headers: { "content-type": "application/json" },
         method: "POST",
       });
-    } catch {
-      throw transportFailure();
+    } catch (error) {
+      throw transportFailure(error);
     }
     if (!response.ok) {
       if (await isInvalidCursorResponse(response.clone())) {
@@ -270,6 +277,100 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
         }),
       );
       return value.link_token;
+    },
+    async createHostedLink(input) {
+      const value = parse(
+        z.object({
+          link_token: z.string().min(1),
+          hosted_link_url: z.url(),
+          expiration: z.iso.datetime(),
+        }),
+        await plaidRequest("/link/token/create", {
+          client_name: input.clientName,
+          country_codes: input.countryCodes,
+          language: input.language,
+          link_customization_name: input.linkCustomizationName,
+          products: input.products,
+          transactions: { days_requested: input.transactions.daysRequested },
+          user: { client_user_id: input.userId },
+          hosted_link: { url_lifetime_seconds: 1800 },
+        }),
+      );
+      const url = new URL(value.hosted_link_url);
+      if (
+        url.origin !== "https://secure.plaid.com" ||
+        url.username ||
+        url.password ||
+        !url.pathname.startsWith("/hl/")
+      )
+        throw new ConnectorError({
+          message: "Plaid returned an invalid hosted authorization URL.",
+          category: "invalid_response",
+          code: "invalid_hosted_link",
+          disposition: "operator",
+        });
+      return {
+        linkToken: value.link_token,
+        url: value.hosted_link_url,
+        expiresAt: value.expiration,
+      };
+    },
+    async getHostedLinkResult(linkToken) {
+      const value = parse(
+        z.object({
+          link_token: z.string(),
+          link_sessions: z
+            .array(
+              z.object({
+                results: z
+                  .object({
+                    item_add_results: z
+                      .array(
+                        z.object({
+                          public_token: z.string().min(1),
+                          institution: z
+                            .object({
+                              name: z.string().trim().min(1).max(240),
+                              institution_id: z.string(),
+                            })
+                            .nullish(),
+                        }),
+                      )
+                      .max(100)
+                      .optional(),
+                  })
+                  .nullable()
+                  .optional(),
+              }),
+            )
+            .max(100),
+        }),
+        await plaidRequest("/link/token/get", { link_token: linkToken }),
+      );
+      if (value.link_token !== linkToken)
+        throw new ConnectorError({
+          message: "Plaid returned a mismatched hosted session.",
+          category: "invalid_response",
+          code: "invalid_hosted_session",
+          disposition: "operator",
+        });
+      return {
+        institutions: Object.fromEntries(
+          value.link_sessions.flatMap((session) =>
+            (session.results?.item_add_results ?? []).flatMap((item) =>
+              item.institution ? [[item.public_token, item.institution.name]] : [],
+            ),
+          ),
+        ),
+        publicTokens: [
+          ...new Set(
+            value.link_sessions.flatMap(
+              (session) =>
+                session.results?.item_add_results?.map((item) => item.public_token) ?? [],
+            ),
+          ),
+        ],
+      };
     },
     async exchangePublicToken(publicToken) {
       const value = parse(

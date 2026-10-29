@@ -16,6 +16,7 @@ import {
   financeLedgerChallenges,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
+  financeMaintenanceExecutionBindings,
   financeMerchants,
   financeProfiles,
   financeRecurringObligations,
@@ -40,8 +41,8 @@ import {
   type FinanceSafeChange,
   financeActionKindSchema,
   financeActionReviewSchema,
+  financeConversationCausalClaimSchema,
   financeMaintenanceCandidateItemDraftSchema,
-  financeQuestionSchema,
   financeReimbursementQuestionAnswerSchema,
   idSchema,
   type MaterialSourceReference,
@@ -61,6 +62,20 @@ import {
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
+import { projectFinanceActionQuestion } from "./finance/action-question-projection.js";
+import { isActiveBudgetAction } from "./finance/budget-authority.js";
+import { commitFinanceCandidateEffects } from "./finance/candidate-effect-receipt.js";
+import { lockFinanceEffectOwner } from "./finance/conversation-causality.js";
+import {
+  type FinanceExecutionFence,
+  loadCandidateExecutionPrincipal,
+} from "./finance/execution-binding.js";
+import {
+  guardFinanceExecutionTransaction,
+  requireFinanceExecutionGuard,
+  withFinanceExecutionOwner,
+} from "./finance/execution-owner-guard.js";
+import { createFinanceMaintenanceControlRecovery } from "./finance/maintenance-control-recovery.js";
 import {
   financeActionFingerprint,
   financeCandidateActionFingerprint,
@@ -76,8 +91,10 @@ import {
 import { deriveReimbursementStatus } from "./finance-reimbursement-service.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type MutationContext = {
+  financeExecution?: FinanceExecutionFence;
   principal: Principal;
   requestId: string;
 };
@@ -443,16 +460,30 @@ function reviewFromRow(row: typeof financeAgentActionReviews.$inferSelect): Fina
   });
 }
 
-function questionFromRow(row: typeof financeAgentActionReviews.$inferSelect): FinanceQuestion {
-  const payload = row.privatePayload as { question: FinanceQuestion };
-  return financeQuestionSchema.parse({ ...payload.question, id: row.id });
-}
-
 /**
  * Separates Finance semantic preparation from its eventual disposition. The
  * only source of bypass authority is the persisted Finance settings row.
  */
 export function createFinanceActionService({ db, finances, now }: FinanceActionServiceOptions) {
+  const controlRecovery = createFinanceMaintenanceControlRecovery({ db });
+  type ActionTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+  function actionTransaction<T>(
+    executor: ActionTransaction | undefined,
+    context: MutationContext,
+    reviewId: string,
+    run: (tx: ActionTransaction) => Promise<T>,
+  ): Promise<T> {
+    return withFinanceExecutionOwner(
+      db,
+      context.principal.userId,
+      {
+        reviewIds: [reviewId],
+        actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+      },
+      run,
+      executor,
+    );
+  }
   async function prepare(
     actionKind: SupportedActionKind,
     rawInput: Record<string, unknown>,
@@ -826,27 +857,46 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             expectedAnswer("limit", "number"),
             expectedAnswer("month", "string", { example: "2026-08" }),
           ]);
-        const existing = await lockRead(
+        const plans = await lockRead(
+          executor
+            .select()
+            .from(financeBudgetPlans)
+            .where(
+              and(
+                eq(financeBudgetPlans.userId, userId),
+                eq(financeBudgetPlans.month, String(input.month)),
+              ),
+            )
+            .orderBy(financeBudgetPlans.id),
+        );
+        const allocations = await lockRead(
           executor
             .select()
             .from(financeBudgets)
             .where(
-              and(
-                eq(financeBudgets.userId, userId),
-                eq(financeBudgets.month, String(input.month)),
-                eq(financeBudgets.category, String(input.category)),
-              ),
+              and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, String(input.month))),
             )
-            .orderBy(financeBudgets.id)
-            .limit(1),
+            .orderBy(financeBudgets.id),
         );
-        const revision = existing[0]?.updatedAt.toISOString() ?? "absent";
+        const existing = allocations.find((item) => item.category === String(input.category));
+        // A complete replacement can remove this category and leave it absent.
+        // Bind to the whole month so that absence cannot revive an old approval.
+        const revision = snapshotRevision({
+          plans: plans.map((item) => [item.id, item.version, item.updatedAt.toISOString()]),
+          allocations: allocations.map((item) => [
+            item.id,
+            item.category,
+            item.limit,
+            item.bucketId,
+            item.updatedAt.toISOString(),
+          ]),
+        });
         return prepared(
           input,
           revision,
           [
             {
-              entityId: existing[0]?.id ?? null,
+              entityId: existing?.id ?? null,
               entityType: "finance_budget",
               summary: `Set ${String(input.category)} budget to $${Number(input.limit).toFixed(2)} for ${String(input.month)}.`,
             },
@@ -956,6 +1006,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           return missing(
             "The categorization evidence is incomplete, low-confidence, or protected as an ambiguous transfer.",
             [expectedAnswer("decisions", "object_array", { example: "[...]" })],
+            sourceRefs,
           );
         return prepared(
           input,
@@ -1873,7 +1924,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         if (!input.success)
           return missing("Provide a valid reimbursement operation and its current revision.", [
             expectedAnswer("operation", "string", {
-              choices: ["create", "match_credit", "cancel"],
+              choices: ["create", "match_credit", "cancel", "correct_expected", "unmatch_credit"],
             }),
           ]);
         if (
@@ -2127,7 +2178,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           matches: matches.map((match) => [match.id, match.amount, match.updatedAt.toISOString()]),
         });
         // Evidence references are capability-bearing provenance, never caller
-        // assertions. Retain the bounded human summary but replace every
+        // assertions. Retain the bounded summary but replace every
         // supplied reference with the owned records just locked above.
         const canonicalInput = {
           ...input.data,
@@ -2146,7 +2197,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                   ? "Cancel the reimbursement and restore its unmatched share to personal spending."
                   : input.data.operation === "match_credit"
                     ? "Match an observed credit to a reimbursement."
-                    : "Track an expected reimbursement against a reimbursable allocation.",
+                    : input.data.operation === "correct_expected"
+                      ? "Correct the expected reimbursement amount and payer."
+                      : input.data.operation === "unmatch_credit"
+                        ? "Remove the incorrect reimbursement credit match."
+                        : "Track an expected reimbursement against a reimbursable allocation.",
             },
           ],
           [
@@ -2484,6 +2539,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     prepared: PreparedAction,
     context: MutationContext,
     executor?: FinanceExecutor,
+    humanApproval?: { principal: Principal; reviewId: string },
   ) {
     const input = prepared.input;
     const privilegedContext = { ...context, financePreparedAction: true };
@@ -2513,17 +2569,28 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         // corrected owned account in the private revision snapshot without
         // widening the public budget-plan writer contract or result.
         const { payAccountId: _payAccountId, ...budgetInput } = input;
+        const budgetContext = {
+          ...privilegedContext,
+          ...(humanApproval
+            ? {
+                financeBudgetApproval: {
+                  ...humanApproval,
+                  fingerprint: financeActionFingerprint("budget_plan", budgetInput),
+                },
+              }
+            : {}),
+        };
         return "allocations" in input
           ? invoke(
               finances.setBudgetPlan,
               budgetInput as never,
-              privilegedContext as never,
+              budgetContext as never,
               executor as never,
             )
           : invoke(
               finances.createBudget,
               budgetInput as never,
-              privilegedContext as never,
+              budgetContext as never,
               executor as never,
             );
       }
@@ -2771,8 +2838,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     executor: FinanceExecutor;
     mode: "apply" | "queue";
     reviewId?: string;
+    humanApproval?: { principal: Principal; reviewId: string };
+    serverHandoff?: boolean;
   }) {
-    const { candidateId, context, executor, expectedRevision } = input;
+    const { candidateId, executor, expectedRevision } = input;
+    let context = input.context;
+    await lockFinanceEffectOwner(executor as ActionTransaction, context.principal.userId);
     const [candidate] = await executor
       .select()
       .from(financeMaintenanceCandidates)
@@ -2786,7 +2857,40 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       .limit(1);
     if (!candidate)
       throw new AppError("not_found", "The Finance maintenance candidate is not available.");
-    if (candidate.state === "committed") return { candidateId, status: "committed" as const };
+    if (candidate.state === "committed") {
+      if (
+        candidate.revision !== expectedRevision ||
+        (input.expectedRunId && input.expectedRunId !== candidate.runId)
+      )
+        throw new AppError("conflict", "The committed candidate has a different exact revision.");
+      const [committedRun] = await executor
+        .select()
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.id, candidate.runId),
+            eq(workspaceMaintenanceRuns.userId, context.principal.userId),
+          ),
+        )
+        .for("update");
+      if (!committedRun)
+        throw new AppError("conflict", "The committed Finance run is unavailable.");
+      await loadCandidateExecutionPrincipal(
+        executor as ActionTransaction,
+        committedRun,
+        candidate.id,
+        expectedRevision,
+        context.principal,
+        {
+          fence: context.financeExecution,
+          humanApproval: input.humanApproval?.principal,
+          serverHandoff: input.serverHandoff,
+          requireExecution: input.mode === "apply",
+          receiptOnly: true,
+        },
+      );
+      return { candidateId, status: "committed" as const };
+    }
     const acceptsState =
       candidate.state === input.expectedState ||
       (input.mode === "queue" && candidate.state === "awaiting_approval");
@@ -2808,12 +2912,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       );
     }
     const [run] = await executor
-      .select({
-        checkpoint: workspaceMaintenanceRuns.checkpoint,
-        id: workspaceMaintenanceRuns.id,
-        scope: workspaceMaintenanceRuns.scope,
-        status: workspaceMaintenanceRuns.status,
-      })
+      .select()
       .from(workspaceMaintenanceRuns)
       .where(
         and(
@@ -2824,6 +2923,22 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       .for("update")
       .limit(1);
     if (!run) throw new AppError("conflict", "The Finance maintenance run is no longer available.");
+    context = {
+      ...context,
+      principal: await loadCandidateExecutionPrincipal(
+        executor as ActionTransaction,
+        run,
+        candidate.id,
+        expectedRevision,
+        context.principal,
+        {
+          fence: context.financeExecution,
+          humanApproval: input.humanApproval?.principal,
+          serverHandoff: input.serverHandoff,
+          requireExecution: input.mode === "apply",
+        },
+      ),
+    };
     const checkpoint = run.checkpoint as {
       candidateId?: string;
       phase?: string;
@@ -3009,13 +3124,58 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           eq(financeMaintenanceCandidates.revision, expectedRevision),
         ),
       );
-    for (const { item, prepared } of currentItems) {
-      await applyPrepared(prepared, context, executor);
-      await executor
-        .update(financeMaintenanceCandidateItems)
-        .set({ disposition: "committed", updatedAt: now() })
-        .where(eq(financeMaintenanceCandidateItems.id, item.id));
-    }
+    const [sourceChallenge] = await executor
+      .select({ coverage: financeLedgerChallenges.coverage })
+      .from(financeLedgerChallenges)
+      .where(
+        and(
+          eq(financeLedgerChallenges.userId, run.userId),
+          eq(financeLedgerChallenges.candidateId, candidate.id),
+        ),
+      )
+      .limit(1);
+    const rawClaim = (sourceChallenge?.coverage as { conversationEvidence?: unknown } | undefined)
+      ?.conversationEvidence;
+    const claim =
+      rawClaim === undefined ? undefined : financeConversationCausalClaimSchema.parse(rawClaim);
+    await commitFinanceCandidateEffects({
+      db,
+      tx: executor as ActionTransaction,
+      run,
+      candidateId: candidate.id,
+      candidateRevision: expectedRevision,
+      principal: context.principal,
+      requestId: context.requestId,
+      items: currentItems.map(({ item }) => item),
+      now: now(),
+      ...(claim ? { claim } : {}),
+      ...(input.humanApproval ? { humanApproval: input.humanApproval } : {}),
+      applyEffects: async (effectRequestId) => {
+        const effectContext = { ...context, requestId: effectRequestId };
+        for (const { item, prepared } of currentItems) {
+          await applyPrepared(prepared, effectContext, executor, input.humanApproval);
+          await executor
+            .update(financeMaintenanceCandidateItems)
+            .set({ disposition: "committed", updatedAt: now() })
+            .where(eq(financeMaintenanceCandidateItems.id, item.id));
+        }
+        // Expiry is wall-clock state: recheck after the whole loop so any loss rolls
+        // back financial writes, audits and their immutable effect receipt together.
+        await loadCandidateExecutionPrincipal(
+          executor as ActionTransaction,
+          run,
+          candidate.id,
+          expectedRevision,
+          context.principal,
+          {
+            fence: context.financeExecution,
+            humanApproval: input.humanApproval?.principal,
+            serverHandoff: input.serverHandoff,
+            requireExecution: input.mode === "apply",
+          },
+        );
+      },
+    });
     await executor
       .update(financeMaintenanceCandidates)
       .set({ state: "committed", updatedAt: now() })
@@ -3097,6 +3257,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     /** Recover only the persisted, fully challenged handoff; this never creates new work. */
     async recoverFinanceMaintenanceHandoff(userId: string, runId: string) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, userId, { runIds: [runId] });
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-maintenance:${userId}`}, 0))`,
         );
@@ -3270,9 +3431,54 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           expectedState: "challenged",
           executor: tx,
           mode: bypass ? "apply" : "queue",
+          serverHandoff: true,
         });
         return { recovered: true, outcome };
       });
+    },
+    resumeFinanceMaintenanceControl: controlRecovery.resumeFinanceMaintenanceControl,
+    async getMaintenanceExecutionFence(
+      userId: string,
+      runId: string,
+    ): Promise<
+      (FinanceExecutionFence & { candidateId: string; candidateRevision: string }) | null
+    > {
+      const [binding] = await db
+        .select({
+          currentActorId: financeMaintenanceExecutionBindings.currentActorId,
+          bindingRevision: financeMaintenanceExecutionBindings.bindingRevision,
+          candidateId: financeMaintenanceExecutionBindings.candidateId,
+          candidateRevision: financeMaintenanceExecutionBindings.candidateRevision,
+        })
+        .from(financeMaintenanceExecutionBindings)
+        .innerJoin(
+          financeMaintenanceCandidates,
+          and(
+            eq(financeMaintenanceCandidates.id, financeMaintenanceExecutionBindings.candidateId),
+            eq(financeMaintenanceCandidates.userId, financeMaintenanceExecutionBindings.userId),
+            eq(
+              financeMaintenanceCandidates.revision,
+              financeMaintenanceExecutionBindings.candidateRevision,
+            ),
+            sql`${financeMaintenanceCandidates.state}<>'superseded'`,
+          ),
+        )
+        .where(
+          and(
+            eq(financeMaintenanceExecutionBindings.userId, userId),
+            eq(financeMaintenanceExecutionBindings.runId, runId),
+          ),
+        )
+        .orderBy(desc(financeMaintenanceExecutionBindings.createdAt))
+        .limit(1);
+      return binding
+        ? {
+            currentActorId: binding.currentActorId,
+            bindingRevision: binding.bindingRevision.toString(),
+            candidateId: binding.candidateId,
+            candidateRevision: binding.candidateRevision,
+          }
+        : null;
     },
     async settleFinanceMaintenanceCandidate(
       candidateId: string,
@@ -3280,6 +3486,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       context: MutationContext,
     ) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+          candidateIds: [candidateId],
+          actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+        });
+        await lockFinanceEffectOwner(tx, context.principal.userId);
         const bypass = await readBypass(tx, context.principal.userId, true);
         const outcome = await settleMaintenanceCandidateInTransaction({
           candidateId,
@@ -3360,10 +3571,29 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const payload = existing.privatePayload as { question: FinanceQuestion };
         return { question: { ...payload.question, id: existing.id }, status: "needs_input" };
       }
+      // Human legacy allocation submissions also need a durable review identity and
+      // source revision; authentication alone cannot make a delayed PUT fresh.
+      if (
+        context.principal.actorType === "user" &&
+        isActiveBudgetAction(prepared.actionKind, prepared.input) &&
+        !(await readBypass(db, context.principal.userId))
+      ) {
+        return db.transaction(async (tx) => {
+          const current = await revalidate(prepared, context.principal.userId, tx, "user");
+          if ("status" in current) return current;
+          return {
+            review: (await queue(current, context, tx)) as FinancePendingActionReview,
+            status: "pending_review",
+          };
+        });
+      }
       // Lock and re-read immediately before the semantic writer. This closes
       // the setting TOCTOU window for agent actions without accepting token or
       // request-body bypass authority.
-      if (context.principal.actorType === "agent") {
+      if (
+        context.principal.actorType === "agent" ||
+        isActiveBudgetAction(prepared.actionKind, prepared.input)
+      ) {
         return db.transaction(async (tx) => {
           // Reimbursement terminal paths hold topology before every semantic
           // lock, including the bypass-setting row. A new proposal must take
@@ -3417,16 +3647,18 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         )
         .orderBy(desc(financeAgentActionReviews.createdAt))
         .limit(limit);
-      return rows.map(questionFromRow);
+      return Promise.all(rows.map((row) => projectFinanceActionQuestion(db, row)));
     },
-    async approve<T>(id: string, context: MutationContext): Promise<FinanceActionOutcome<T>> {
-      if (context.principal.actorType !== "user") {
-        throw new AppError(
-          "forbidden",
-          "Only an interactive user can approve a Finance action review.",
-        );
-      }
-      const approval = await db.transaction(async (tx) => {
+    async approve<T>(
+      id: string,
+      context: MutationContext,
+      executor?: ActionTransaction,
+    ): Promise<FinanceActionOutcome<T>> {
+      if (executor) requireFinanceExecutionGuard(executor, context.principal.userId);
+      await requireWorkspaceExecution(executor ?? db, context.principal, "finances", now());
+      const approval = await actionTransaction(executor, context, id, async (tx) => {
+        await lockFinanceEffectOwner(tx, context.principal.userId);
+        await requireWorkspaceExecution(tx, context.principal, "finances", now());
         const [preview] = await tx
           .select()
           .from(financeAgentActionReviews)
@@ -3486,6 +3718,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             executor: tx,
             mode: "apply",
             reviewId: review.id,
+            ...(context.principal.actorType === "user"
+              ? { humanApproval: { principal: context.principal, reviewId: review.id } }
+              : {}),
           });
           if (settlement.status === "needs_input")
             return {
@@ -3502,6 +3737,20 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .update(financeAgentActionReviews)
             .set({ privatePayload: { ...payload, result }, status: "applied", updatedAt: now() })
             .where(eq(financeAgentActionReviews.id, review.id));
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.action_review_approved",
+              after: {
+                actionKind: review.actionKind,
+                fingerprint: review.fingerprint,
+                reviewId: review.id,
+              },
+              before: null,
+              entityId: review.id,
+              entityType: "finance_agent_action_review",
+              ...context,
+            }),
+          );
           return { result: result as T, status: "applied" as const };
         }
         const prepared: PreparedAction = {
@@ -3534,7 +3783,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .where(eq(financeAgentActionReviews.id, review.id));
           return current;
         }
-        const result = await applyPrepared(current, actionContext, tx);
+        const result = await applyPrepared(
+          current,
+          actionContext,
+          tx,
+          isActiveBudgetAction(current.actionKind, current.input)
+            ? { principal: context.principal, reviewId: review.id }
+            : undefined,
+        );
         await tx
           .update(financeAgentActionReviews)
           .set({ privatePayload: { ...payload, result }, status: "applied", updatedAt: now() })
@@ -3559,14 +3815,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         throw new AppError("conflict", approval.message);
       return approval as FinanceActionOutcome<T>;
     },
-    async dismiss(id: string, context: MutationContext) {
-      if (context.principal.actorType !== "user") {
-        throw new AppError(
-          "forbidden",
-          "Only an interactive user can dismiss a Finance action review.",
-        );
-      }
-      return db.transaction(async (tx) => {
+    async dismiss(id: string, context: MutationContext, executor?: ActionTransaction) {
+      if (executor) requireFinanceExecutionGuard(executor, context.principal.userId);
+      await requireWorkspaceExecution(executor ?? db, context.principal, "finances", now());
+      return actionTransaction(executor, context, id, async (tx) => {
+        await requireWorkspaceExecution(tx, context.principal, "finances", now());
         const [review] = await tx
           .select()
           .from(financeAgentActionReviews)
@@ -3617,7 +3870,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                 },
                 lastSafeError: {
                   code: "finance_maintenance_review_dismissed",
-                  message: "The user dismissed the proposed Finance maintenance turn.",
+                  message: "The proposed Finance maintenance turn was dismissed.",
                 },
                 leaseClaimId: null,
                 leaseExpiresAt: null,
@@ -3646,6 +3899,20 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .where(eq(financeAgentActionReviews.id, review.id))
             .returning();
           if (!dismissed) throw new Error("The Finance action review could not be dismissed.");
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.action_review_dismissed",
+              after: {
+                actionKind: review.actionKind,
+                fingerprint: review.fingerprint,
+                reviewId: review.id,
+              },
+              before: null,
+              entityId: review.id,
+              entityType: "finance_agent_action_review",
+              ...context,
+            }),
+          );
           return reviewFromRow(dismissed);
         }
         return reviewFromRow(review);

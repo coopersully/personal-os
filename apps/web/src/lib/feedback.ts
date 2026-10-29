@@ -3,14 +3,21 @@ import { ApiClientError } from "@personal-os/api-client";
 export type FeedbackOptions = {
   action: string;
   success?: string;
+  pending?: string;
+  successDescription?: string;
   form?: boolean;
   safeToRetry?: boolean;
+  /** A domain decision surface owns the initial explanation for recognized conflicts. */
+  ownsError?: (error: unknown) => boolean;
+  errorPosition?: "top-center";
 };
 
 export type MutationFeedbackState = {
   kind: "validation" | "access" | "conflict" | "unsaved" | "uncertain" | "retryable";
   message: string;
   persistent: boolean;
+  /** The mutation hook owns this result; legacy adapters must not announce it again. */
+  toastId?: string | undefined;
   fields: Record<string, string>;
 };
 
@@ -25,6 +32,12 @@ const knownCorrections: Record<string, { field: string; message: string }> = {
     field: "endsAt",
     message: "End time must be after start time.",
   },
+  "Pinterest could not resolve that public board and its images. Check that the board exists and is public.":
+    {
+      field: "boardUrl",
+      message:
+        "Check that this Pinterest board exists and is public. Your saved board and wallpaper have not changed.",
+    },
   "Workday end must be after the start.": {
     field: "workdayEndMinute",
     message: "Workday end must be after workday start.",

@@ -1,19 +1,29 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import { type AccessScope, accessScopeSchema, localDayRange } from "@personal-os/domain";
-import { registerIloContextTool, registerIloDiscovery } from "./discovery.js";
-import { createIloToolSurface } from "./tool-surface.js";
+import { registerPersonalOsContextTool, registerPersonalOsDiscovery } from "./discovery.js";
+import { createPersonalOsToolSurface } from "./tool-surface.js";
 import { registerActivityTools } from "./tools/activity.js";
+import { registerAgentAccountTools } from "./tools/agent-account.js";
 import { registerAssistantTools } from "./tools/assistant.js";
 import { registerCalendarEventTools, registerCalendarListTools } from "./tools/calendar.js";
+import { registerCalendarManagementTools } from "./tools/calendar-management.js";
+import { registerFinanceReviewBacklogTools } from "./tools/finance-review-backlog.js";
 import { registerFinanceTools } from "./tools/finances.js";
+import { registerFinanceManagementTools } from "./tools/finances-management.js";
+import { registerFinancePolicyManagementTools } from "./tools/finances-policy-management.js";
 import { registerFinanceStewardshipTools } from "./tools/finances-stewardship.js";
 import { registerMailTools } from "./tools/mail.js";
+import { registerMailManagementTools } from "./tools/mail-management.js";
 import { registerMailStewardshipTools } from "./tools/mail-stewardship.js";
 import { registerPlanningTools } from "./tools/planning.js";
 import { registerReminderTools } from "./tools/reminders.js";
 import { registerTaskWorkspaceTools } from "./tools/task-workspace.js";
 import { registerTextingTools } from "./tools/texting.js";
+import { registerWorkspaceNotificationTools } from "./tools/workspace-notifications.js";
+import { registerWorkspaceRecoveryTools } from "./tools/workspace-recovery.js";
+import { registerWorkspaceSettingsTools } from "./tools/workspace-settings.js";
+import { registerWorkspaceSourceTools } from "./tools/workspace-sources.js";
 import { registerXBookmarkTools } from "./tools/x-bookmarks.js";
 
 export type ServerOptions = {
@@ -26,7 +36,7 @@ export type ServerOptions = {
   timeZone: string;
 };
 
-/** Thin composition root for nohmi's feature-owned, scope-aware MCP surface. */
+/** Thin composition root for Personal OS's feature-owned, scope-aware MCP surface. */
 export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   const appBaseUrl = (options.appBaseUrl ?? "http://localhost").replace(/\/$/, "");
   const readOnly = options.readOnly ?? false;
@@ -40,11 +50,12 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
       version: "0.1.0",
     },
     {
+      maxToolInputElements: 10_000,
       instructions:
         "Call get_ilo_context first. Inspect authoritative state before proposing changes, use preview tools before consequential commits, and verify mutations from returned state or activity. nohmi's API remains the authority for access and policy.",
     },
   );
-  const tools = createIloToolSurface(server, {
+  const tools = createPersonalOsToolSurface(server, {
     appBaseUrl,
     includeCompatibility,
     readOnly,
@@ -60,23 +71,33 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
     timeZone: options.timeZone,
   };
 
-  registerIloContextTool(tools, discovery);
+  registerPersonalOsContextTool(tools, discovery);
+  registerAgentAccountTools(tools, options.api);
   registerAssistantTools(tools, options.api);
   registerPlanningTools(tools, options.api);
   registerCalendarListTools(tools, options.api);
+  registerCalendarManagementTools(tools, options.api);
   registerCalendarEventTools(tools, options.api);
   registerReminderTools(tools, options.api);
   registerTaskWorkspaceTools(tools, options.api);
   registerMailTools(tools, options.api);
   registerMailStewardshipTools(tools, options.api);
   registerFinanceTools(tools, options.api);
+  registerFinanceReviewBacklogTools(tools, options.api);
+  registerFinanceManagementTools(tools, options.api);
+  registerWorkspaceRecoveryTools(tools, options.api);
+  registerWorkspaceNotificationTools(tools, options.api);
+  registerWorkspaceSourceTools(tools, options.api);
+  registerWorkspaceSettingsTools(tools, options.api);
+  registerFinancePolicyManagementTools(tools, options.api);
+  registerMailManagementTools(tools, options.api);
   registerFinanceStewardshipTools(tools, options.api);
   registerXBookmarkTools(tools, options.api);
   registerTextingTools(tools, options.api, options.timeZone);
   registerActivityTools(tools, options.api);
 
   registerCompatibilityResources(server, options, scopes);
-  registerIloDiscovery(server, discovery);
+  registerPersonalOsDiscovery(server, discovery);
   return server;
 }
 

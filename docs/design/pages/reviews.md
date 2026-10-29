@@ -6,16 +6,56 @@ desktop and a drawer on mobile. The underlying workspace or Settings page stays 
 
 ## Entry and retained layout
 
-Exactly two product entry locations: the workspace's attention alert (SidebarFooter/SidebarMenu for
+Two persistent product entry locations are the workspace's attention alert (SidebarFooter/SidebarMenu for
 Mail, Tasks and Finances; beside the Calendar title), and the action at the top right of its workspace
 Settings header. Use the shared hand icon and **N items need review**, with singular grammar. Pending
 work uses semantic warning tones; confirmed zero is neutral; unavailable counts never display zero.
+Workspace search also exposes **Items needing review**, linking to `/<workspace>?review=open`
+and opening the same scoped flow. It is a search result, not a separate queue or review authority.
 
 The previous `ReviewsPage` bento layout remains in code, with its search, filters and sorting, but is
 not routed or advertised. `/<workspace>/decisions` and old Finance/Mail review links redirect into the
 workspace flow. Old Mail `reviewRule` links open the corresponding item in Settings. Removed item links
 must report unavailable instead of silently substituting a different decision. `/reviews` falls back
 to Account; Today, account summary cards and Finance's Views menu no longer advertise review pages.
+
+## Generated links and remaining navigation gaps
+
+At the `2d957702` merged-source checkpoint, Finance notification composition and delivery use
+`/finances?review=open`. Exact contextual-question and case links use
+`/finances/review?contextualQuestion=<uuid>` and `/finances/review?case=<uuid>`; the legacy Finance
+route redirects into the scoped flow while retaining the target. Saved contextual answers can
+reopen their owner-scoped read-only result after leaving outstanding work. These links let a
+person inspect the evidence behind a message without giving the URL approval authority.
+
+The cutover remains incomplete: assistant context still advertises `/reviews`, and Texting reply
+status still returns `/settings?section=reviews`. Both fall back to Account rather than opening
+the requested work. MCP approval mappings also retain legacy or bare workspace destinations.
+[Texting](../../product/texting-operations.md) also retains an accepted requirement for one
+unified destination when a message spans workspaces. The current flow accepts only one
+workspace, so that cross-workspace destination is not implemented. Migrating single-workspace
+links alone cannot satisfy it; do not substitute one workspace for the complete requested set
+or claim that the current UI fulfills this target. This documentation records the divergence
+without selecting a new cross-workspace routing design.
+
+The producer and contract inventory distinguishes migrated Finance paths from remaining work:
+
+- `packages/domain/src/notification-policy.ts` and `apps/api/src/notification-service.ts`: SMS
+  composition and delivery now use the Finance flow; preserve their routing coverage.
+- `apps/api/src/assistant-service.ts`: assistant context approval links.
+- `apps/api/src/routes/texting-recovery.ts` and the literal `reviewHref` schema in
+  `packages/domain/src/texting.ts`: Finance reply recovery links.
+- `apps/mcp/src/app-links.ts`, attached by `apps/mcp/src/tool-surface.ts`: every MCP `approvals`
+  mapping, including assistant/default legacy links and domain-specific destinations. Mail,
+  Calendar, Tasks, and Reminders currently link to bare workspace routes without opening the
+  review flow. Cover all mappings in `apps/mcp/src/app-links.test.ts` and navigation tests;
+  arriving in a workspace alone does not prove that the requested review opens.
+- `apps/web/src/app.tsx`: legacy redirects and the single-workspace flow host.
+
+Migration evidence must cover notification composition/delivery, assistant context, Texting schema
+and recovery route tests, MCP app-link/tool-result tests, and authenticated browser navigation.
+Tests that merely assert the old URL do not prove the destination opens the requested work.
+This limitation does not change domain approval or recovery requirements.
 
 ## Session behavior
 

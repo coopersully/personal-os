@@ -18,15 +18,20 @@ export function calendarPeriodDays(
   view: CalendarView,
   anchor: LocalDate,
   includeWeekends: boolean,
+  weekStartsOn: "sunday" | "monday" = "sunday",
 ): LocalDate[] {
   if (view === "day") return [anchor];
-  const weekStart = startOfLocalWeek(anchor);
+  const startOfWeek = (date: LocalDate) =>
+    weekStartsOn === "monday"
+      ? addLocalDays(startOfLocalWeek(addLocalDays(date, -1)), 1)
+      : startOfLocalWeek(date);
+  const weekStart = startOfWeek(anchor);
   if (view === "week") {
     return Array.from({ length: includeWeekends ? 7 : 5 }, (_, index) =>
-      addLocalDays(weekStart, includeWeekends ? index : index + 1),
+      addLocalDays(weekStart, includeWeekends || weekStartsOn === "monday" ? index : index + 1),
     );
   }
   const monthStart = { day: 1, month: anchor.month, year: anchor.year };
-  const gridStart = startOfLocalWeek(monthStart);
+  const gridStart = startOfWeek(monthStart);
   return Array.from({ length: 42 }, (_, index) => addLocalDays(gridStart, index));
 }

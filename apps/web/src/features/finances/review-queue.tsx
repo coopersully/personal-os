@@ -1,7 +1,8 @@
 import type { FinanceActionReview, FinanceQuestion } from "@personal-os/domain";
-import { EmptyState, Spinner } from "@personal-os/ui";
+import { EmptyState } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { CircleCheckIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,7 +95,7 @@ export function FinanceAgentReviewQueue({
       <MutationFeedback feedback={answer.feedback} />
       <MutationFeedback feedback={approve.feedback} />
       <MutationFeedback feedback={dismiss.feedback} />
-      {loading ? <Spinner label="Loading Finance review work" /> : null}
+      {loading ? <ContentSkeleton label="Loading Finance review work" rows={3} /> : null}
       {pendingQuestions.map((question) => (
         <QuestionCard
           answer={answers[question.id] ?? ""}

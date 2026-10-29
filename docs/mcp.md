@@ -32,9 +32,9 @@ add another alias or describe them as the product's permanent vocabulary.
 
 The HTTP server uses the MCP TypeScript v2 per-request factory. Modern July 2026 requests and the
 stateless 2025 compatibility path are built from the same server definition. Before constructing
-that definition, the adapter validates the audience-bound Ilo token through
+that definition, the adapter validates the audience-bound nohmi token through
 `GET /v1/assistant/context`. The returned user identity, scopes, planning time zone, setup
-readiness, and Ilo links determine the request's discovery surface. Provider credentials never
+readiness, and nohmi links determine the request's discovery surface. Provider credentials never
 enter the MCP process.
 
 `APP_BASE_URL` is required in deployed API and MCP containers. The MCP container uses it for
@@ -170,9 +170,9 @@ Discovery follows these rules:
    orient itself and repair setup. The legacy `get_agent_setup_status` alias is omitted from normal
    discovery; a bounded compatibility host can opt in through the server construction option while
    it migrates.
-2. A domain tool is advertised only when the token has one of its required scopes.
+2. A domain tool is advertised only when the token satisfies its catalog scope match. Multi-scope workspace tools require every listed grant; shared orientation tools may explicitly accept any listed read scope.
 3. A read-only server never advertises mutation tools, even when the token itself has write scopes.
-4. Every advertised tool has all four annotation hints, a shared output schema, an Ilo icon, and
+4. Every advertised tool has all four annotation hints, a shared output schema, a nohmi icon, and
    metadata identifying its domain, policy, and workflow stage.
 5. The API rechecks scope, ownership, policy, revisions, and provider capability. Discovery and
    annotations improve agent behavior but never grant authority.
@@ -183,9 +183,12 @@ rules use `approved_rule`; normal reads use `read_only`. `get_ilo_context` retur
 actually available on that connection together with the safe workflow and links back to Today,
 activity, Reviews, Workspace access, approvals, and recovery.
 
-Every tool result keeps its feature payload under `result` (or its structured `error`/empty `ok`)
-and adds `_ilo` with the domain, stage, policy, read-only state, and first-party links. Text content
-remains available for clients that do not consume structured output.
+Tool results keep their feature payload under `result` (or their structured `error`/empty `ok`);
+existing Finance workflow results retain their versioned envelope with `data`, `communication`,
+and outcome/recovery fields. The surface adds `_ilo` with the domain, stage, policy, read-only state,
+and first-party links. Text content serializes the complete feature payload, including records,
+pagination, questions, disclosures, and recovery details, so clients that expose only text can
+use the result. A headline alone is not a data result. Empty acknowledgments may use plain text.
 
 ## Resources, prompts, and selective visual presentations
 
@@ -221,7 +224,7 @@ resources. New clients should begin with `get_ilo_context` or `ilo://context/sel
 The server publishes task-oriented prompts for setup, daily planning, Mail triage, Calendar
 commitment preparation, overdue Reminder review, Finance review, and a weekly review. Prompts
 compose existing tools and approval boundaries; they do not embed new authority or business
-rules. MCP protocol Tasks are long-running operation handles and are unrelated to Ilo's user-owned
+rules. MCP protocol Tasks are long-running operation handles and are unrelated to nohmi's user-owned
 Lists, Projects, and Tasks. Protocol Tasks remain unadvertised: current long-lived Mail and Finance
 work has durable API-owned lifecycle state, but no shared MCP operation-handle contract. Exposing
 protocol Tasks before that contract exists would create a misleading in-memory completion surface.
@@ -266,13 +269,23 @@ reserved time is a Task schedule, not a new notification or autonomous execution
 
 Finance exposes the same canonical records and mutations as the portal. Read operations
 require `finances:read`; canonical setup, ledger, financial-profile, complete-budget,
-Inbox, and goal mutations require `finances:write`. Budgets can be created and revised through MCP. Activation requires an authenticated person
-and `user_instruction`; an agent cannot gain that authority by supplying the same label, even
-with global review bypass enabled. No agent budget-activation policy is registered. Connection handoffs, synchronization, account
-corrections, and transaction import have scoped tools; disconnection remains a signed-in-person
-portal action, and provider authentication
-and consent may still require the person. Money movement, bill payment, trading, and external
-subscription cancellation are not supported Finance effects.
+Inbox, and goal mutations require `finances:write`. Budget proposals remain version-bound.
+An agent may activate the exact inspected budget with `approvalSource: agent_self_approval`,
+`finances:write`, explicit `finances:execute`, and persisted review bypass. It cannot claim
+`user_instruction`. Active guidance records the same distinction in approval provenance.
+Sensitive execution grants are excluded from default OAuth scopes and are never added to old tokens.
+
+Connection handoffs return a hosted provider authorization URL. After owner authentication and
+consent, `complete_finance_account_connection` polls for the provider receipt and persists the
+connected accounts without exposing provider tokens. Synchronization, account management,
+reporting, contextual questions, action reviews, budget-policy preparation, and routine source
+ disconnection have scoped tools. Policy management reports `executionAvailable: false` while
+automatic budget-policy execution remains unimplemented. Money movement, bill payment, trading,
+and external subscription cancellation remain unsupported.
+
+The [complete tool dictionary](engineering/workspace-agent-tools.md) contains discovered schemas,
+required grants, descriptions and adapter links. The [capability and test inventory](engineering/workspace-agent-capabilities.md)
+distinguishes runtime execution evidence, provider simulations, semantic equivalents, and owner controls.
 
 The canonical Inbox (`get_finance_inbox`, `answer_finance_review`) and complete budget
 (`get_finance_budget`, `create_finance_budget`, `revise_finance_budget`, `approve_finance_budget`)
@@ -337,17 +350,19 @@ Mail is the first executable implementation:
 - `create_mail_attention_item` derives source attribution from an owned conversation and
   serializes same-thread/kind updates so important mail uses the shared attention envelope without
   duplicate open records.
-- agent sending is unavailable: `create_mail_draft` and `send_mail` are not registered MCP tools.
-  Durable drafts, exact confirmation, provider delivery, and ambiguous-send reconciliation belong
-  exclusively to the signed-in human Mail surface.
+- durable draft CRUD is available through scoped MCP tools. `send_mail_draft` and
+  `reconcile_mail_draft` additionally require `mail:execute`, `mail:write` and enabled review bypass.
+  Delivery binds to the observed draft revision and sender capability; uncertain effects must be
+  reconciled without blind resend. Autonomous maintenance does not compose or send messages.
 - proposed rules preview against a dated, bounded window of at most 200 recent cached
   conversations. The response names the window and reports when it may be truncated.
 - previously observed threads are retained when a provider returns its capped recent page; absence
   from that page is not treated as provider deletion. Reviewed Google archive and recoverable
   Trash rules, including one-day preferences, create durable work for matching observed and future
   synchronized conversations. Permanent deletion remains unavailable.
-- saved rules are re-reviewed with `review_mail_rule`, then activated only by the signed-in person
-  in **Settings → Workspace access → Mail**. The API rechecks the reviewed version,
+- saved rules are re-reviewed with `review_mail_rule`, then activated by the signed-in person
+  in **Settings → Workspace access → Mail**, or by an agent holding `mail:write` and `mail:execute`
+  with enabled review bypass. The API rechecks the reviewed version,
   candidate facts, action due states, and fingerprint inside one locked transaction, rejects
   preview drift, and atomically records
   `approved_rule` plus enabled state. Acceptance must state that the candidates are a bounded recent
@@ -390,13 +405,12 @@ remain `incomplete` while the qualified position producer reports `producer_not_
 uncertain income, exceptional resources, and liquid reserves do not silently fund them.
 Bookkeeping remains available during setup. When setup requests budget approval, the host reads
 `get_finance_budget` and presents the exact proposal, including all resources, allocations,
-rationale, and assumptions, for person-authenticated approval in the portal. The MCP agent cannot
-approve or activate a budget. The person-authenticated API approval operation
-`approve_finance_budget` uses the budget version; person-authenticated setup approval uses the
-setup session version. Both bind the matching `budgetVersionId` and echo
-`expectedProfileVersionId` from the displayed proposal. A changed profile or superseding proposal
-requires the person to review again. The portal follows this protocol without asking the person
-to copy instructions into an agent.
+rationale, and assumptions. `approve_finance_budget` binds the displayed budget version and
+`expectedProfileVersionId`. With review bypass disabled, activation requires authenticated owner `user_instruction`
+approval in nohmi. With persisted review bypass enabled, an agent with `finances:write` and
+`finances:execute` may activate the exact proposal using `agent_self_approval`. The same standing
+approval applies to every Finance application approval gate; agent provenance is never relabeled as a human decision. Setup approval additionally binds
+the setup session version. Changed profiles and superseding proposals require fresh inspection.
 
 `get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
 the latest plan, including an explicit incomplete draft, and `get_finance_budget_status` the active plan. Creation and revision
@@ -450,8 +464,9 @@ the ledger. Compatibility `finances:write` action tools may submit ledger, profi
 budget changes and receive `applied`, `pending_review`, or
 `needs_input`. The API derives the disposition from the signed-in user's
 persisted app-only review bypass and current evidence; this includes the Finance
-insight refresh mutation. Agents cannot toggle bypass or approve/dismiss action
-reviews. They may apply a permanent merchant-learning rule only as part of an
+insight refresh mutation. Agents cannot toggle bypass. Approving or dismissing action reviews
+additionally requires explicit `finances:execute`, enabled bypass, and the current work reference.
+They may apply a permanent merchant-learning rule only as part of an
 explicitly prepared categorization action, and it remains subject to the same
 confidence, ambiguity, evidence, ownership, and revision checks; bypass never
 waives those checks. A scoped same-user agent may list pending Finance questions
@@ -465,7 +480,19 @@ questions use a typed answer and may conditionally classify allocations or
 create/match an internal reimbursement case; they never initiate a payment or
 any other external financial activity. The deprecated `resolve_finance_review`
 compatibility alias only translates legacy categorization answers. Legacy action-review
-approval/dismissal remains a signed-in control. Canonical connection,
+approval/dismissal is available to the signed-in owner or explicitly authorized Finance execution
+agents with enabled review bypass and exact current work references, including active budget changes.
+Legacy category allocations and complete plan writes follow the same policy: with bypass disabled,
+`PUT /v1/finances/budget-plan` and `POST /v1/finances/budgets` submissions queue a durable review;
+with bypass enabled the exact prepared change applies directly. Approval
+revalidates the monthly plan and full allocation revision, including proposals for absent categories,
+and replaying an applied review returns its recorded result
+without replacing newer allocations. Bucket organization remains ordinary bookkeeping. Answering a budget
+evidence question follows the same persisted review policy for the completed proposal. Reimbursement expectation corrections and credit unmatching also follow that policy, retaining bounded evidence, current revisions and actual actor attribution. Maintenance retains the
+exact reviewed candidate and human approval identity separately from its executing agent, and
+revalidates all item fingerprints and source revisions before writing. Monthly baseline and planning confirmations accept the owner or an execution agent under persisted
+bypass. Confirmation records preserve the actual agent identity separately from the owner; existing
+human and historical approval provenance remains readable. Canonical connection,
 import, account correction, and typed transaction-relationship tools have their own scoped API
 contracts and are available to authorized MCP callers; no relationship operation moves money.
 
@@ -478,11 +505,12 @@ query or resume support, and abort-aware scheduling. MCP exposes it as
 other Finance actions.
 
 The shared `save_domain_profile` tool may save a Finance guidance draft with
-`finances:write`. It cannot activate that draft: activation is a signed-in
-action in **Finance settings → Profile**, requires an owned account source, and uses
-the profile version guard. `get_finance_guided_setup` exposes active guidance
+`finances:write`. Activation requires an owned account source, the profile version guard,
+and either a signed-in action in **Finance settings → Profile** or opt-in
+`finances:execute` with owner-enabled review bypass. `get_finance_guided_setup` exposes active guidance
 separately from a draft proposal. Draft text is explicitly untrusted and
-non-operative until that signed-in activation; hosts must not inject it as
+non-operative until authorized activation; approval readback distinguishes user instruction from
+agent self-approval. Hosts must not inject unapproved drafts as
 operating instructions. `sourceContexts` describe how to interpret accounts;
 they do not limit which accounts a token can read. Scalar alert preferences
 currently use one USD planning currency. Cadence and threshold preferences
@@ -534,7 +562,7 @@ current local day with that day's selected-calendar events.
 
 | Concern | MCP answer |
 | --- | --- |
-| Capability and owner | MCP translates protocol operations to the authenticated Ilo API. Domain services and the API own behavior and authorization. |
+| Capability and owner | MCP translates protocol operations to the authenticated nohmi API. Domain services and the API own behavior and authorization. |
 | Configuration and authority | `MCP_PUBLIC_URL`, `APP_BASE_URL`, `PERSONAL_OS_API_URL`, `MCP_INTERNAL_SECRET`, the bearer token audience, and returned scopes must agree. |
 | Transport | Public HTTPS Streamable HTTP terminates at `/mcp`; local hosts use stdio. The MCP-to-API hop is HTTPS in production and carries no provider credential. |
 | Time and capacity | Requests use the existing API/provider deadlines and MCP fixed-window rate limit. Large or delayed provider work must already cross an API-owned durable handoff. |
@@ -551,9 +579,11 @@ era. Deployment verification must therefore perform a least-privilege authentica
 the intended account without invoking a provider mutation.
 
 Tool annotations are host hints, not authorization. Read-only cached Mail tools are closed-world;
-provider writes and sending are open-world. Rule activation is intentionally absent from MCP
-because approved rules can mutate provider state; it requires the signed-in Settings review.
-Reviewed Google archive and recoverable Trash rules may activate after signed-in review; automatic
+provider writes and sending are open-world. `activate_mail_rule` requires the exact saved rule
+version and current bounded preview; agent callers also need `mail:write`, opt-in `mail:execute`,
+and owner-enabled review bypass. These grants do not replace the preview's evidence or provider
+capability. Reviewed Google archive and recoverable Trash rules may activate through the signed-in
+surface or this explicit execution path; automatic
 execution for unsupported providers remains unavailable. The API still enforces scopes, source
 ownership, policy, optimistic versions, audit, and the distinction between recoverable Trash and
 permanent deletion. Bulk
@@ -564,19 +594,28 @@ local commits and a controlled response. If a provider succeeds but the atomic l
 projection-and-audit transaction fails, the item failure reports `partialEffect: true` and directs
 the caller to synchronize that Mail account before retrying.
 
-Repair actions are signed-in user actions, not MCP tools. `sync_mail_account` means **Mail → Sync**;
-`reconnect_then_sync_mail_account` means **Settings → Connections → reconnect**, then **Mail →
-Sync**. `verify_sent_mail_then_reconcile_draft` means inspect provider **Sent Mail** and then use
-the signed-in **Ilo Mail** recovery panel; never resend automatically. First-party/API sends without
+Recovery hints describe the required operation, not necessarily an MCP tool name.
+`sync_mail_account` means **Mail → Sync**; authorized agents may use the registered
+`sync_workspace_source` path with all affected workspace grants and enabled bypass.
+`reconnect_then_sync_mail_account` still requires owner-controlled provider reconnection before sync.
+`verify_sent_mail_then_reconcile_draft` means inspect provider **Sent Mail** and then use
+the signed-in Mail recovery panel or explicitly authorized `reconcile_mail_draft` with
+Mail write/execute grants and enabled bypass. Reconciliation records the observed outcome and never
+resends. Inspecting Sent Mail is a caller prerequisite, not a server-enforced evidence check:
+the API accepts the caller's `sent` or `not_sent` outcome and does not query the provider to
+verify it. `not_sent` makes the draft sendable again, so an incorrect conclusion can cause a
+duplicate message on a later send. Keep an uncertain outcome unresolved until reliable provider
+evidence supports reconciliation; a successful reconciliation response alone is not that evidence.
+First-party/API sends without
 a draft have no durable recovery object: `verify_sent_mail_never_retry` means inspect Sent Mail and
-do not replay the request, not that Ilo can reconcile a missing audit record.
+do not replay the request, not that nohmi can reconcile a missing audit record.
 
 ## Authorization
 
 Open **Settings → Connected agents** for the current deployment's MCP URL. A new
 account can go directly there from the Ready step. The person completes that
 one unavoidable connection handoff; after authentication, the host calls
-`get_ilo_setup` and Ilo supplies the current domain context and next work. A
+`get_ilo_setup` and nohmi supplies the current domain context and next work. A
 separate skill install or copied procedural prompt is not required.
 
 For compatibility with skill-aware hosts, the connection guide also reports one
@@ -596,9 +635,9 @@ profile-only fallback, and hosts must not infer executable behavior from a
 different domain's support level.
 
 Remote MCP OAuth is the recommended connection. The host dynamically registers,
-the user signs in to Ilo, and the consent page lists the requested permissions
+the user signs in to nohmi, and the consent page lists the requested permissions
 before issuing audience-bound access and rotating refresh tokens. Provider
-credentials remain inside Ilo. Local or manual hosts that cannot complete OAuth
+credentials remain inside nohmi. Local or manual hosts that cannot complete OAuth
 can use an explicitly scoped personal access token from the advanced section.
 
 Grant only the scopes the host needs:
@@ -613,6 +652,15 @@ Grant only the scopes the host needs:
 - `audit:read`
 - `finances:read`, `finances:write`, `finances:maintain`
 - `texting:read`, `texting:write` (`texting:write` requires read access)
+
+Optional execution scopes are `calendar:execute`, `mail:execute`, `tasks:execute`,
+`finances:execute`, and `texting:execute`. OAuth excludes them from default grants;
+request them explicitly alongside the read/write scopes required by each tool.
+An execution grant does not enable owner-controlled review bypass or replace exact
+revision, preview, ownership, and provider prerequisites. The execution adapters
+require bypass to be enabled separately. Existing tokens gain no new authority.
+The scope registry is implemented in `apps/api/src/oauth-service.ts` and advertised
+by protected-resource metadata in `apps/mcp/src/http.ts`.
 
 Texting exposes `read_text_conversation` and `send_text_message`. Sending needs
 a fresh receipt from a preceding read, so the agent sees the current thread and
@@ -649,3 +697,42 @@ Users can instead choose a category or link an exact related transaction immedia
 use the same authenticated, idempotent API and conditional case mutation. Failed saves retain the
 user's input and retry key. A saved note remains visibly outstanding until actually resolved, but is excluded from the next unanswered question. An Inbox containing only saved notes reports work remaining, not completion.
 An empty Inbox or a completed maintenance run does not establish budget balance or source completeness.
+
+
+Finance category and planning-bucket icons are presentation metadata inferred automatically by
+the domain from record meaning. Creating a category or bucket requires no icon decision. Agents
+should not ask users about or narrate cosmetic icon choices unless users explicitly request them.
+
+### Shared agent identity
+
+`get_agent_account` reads the authenticated connection's account-level profile.
+`register_agent_account` idempotently registers/reuses that identity and accepts only an optional
+unverified platform label. The orientation context also includes `agentAccount` for authenticated
+agents. These tools do not require Finance access and never expand credential scopes.
+
+One account identity may span several surfaces after its owner links their connections in shared
+Connected agents settings. Agents cannot enumerate other profiles or supply an account ID to select
+or impersonate one. Platform account IDs and email addresses are not inferred or requested from the
+model. See [Shared agent accounts](product/agent-accounts.md) for ownership, attribution and recovery.
+
+### Historical Finance backlog and bounded batches
+
+`get_finance_review_backlog` assesses all owned flagged transactions and open/deferred cases,
+including prior years. It reports these counting units separately; overlapping flags and cases
+are not a count of independent user decisions. `list_finance_review_backlog_items` pages exact
+records with evidence, saved answers, revisions and a snapshot-bound cursor. Restart pagination
+when the snapshot changes. A group such as possible roundups is an investigation hint, not a
+verified transfer classification.
+
+After investigating, `preview_finance_review_batch` durably stores up to 100 explicit decisions
+with an idempotency key, exact revisions, rationale and evidence. It applies no financial changes.
+`execute_finance_review_batch` processes at most ten items per call. Each financial write and its
+outcome commit together. Retrieve or list saved batches to recover after interruption, then resume
+pending items. Completed exceptions require corrected evidence and a new preview; never silently
+retry an applied item or treat an unresolved exception as a resolution. Merchant learning is not
+part of these batches.
+
+The owner can inspect and explicitly apply prepared batches in Finance review. An agent can only
+resume its own originating authorization and needs current read/write/execute grants and the
+owner's execution policy. Revocation and current evidence are checked during execution. Saved
+answers remain available for agent follow-through; ask only for missing facts, not repeated answers.

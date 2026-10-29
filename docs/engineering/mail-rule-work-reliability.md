@@ -7,8 +7,11 @@ This record specializes
 ## Capability and authority
 
 - The Mail domain owns rule/profile validation and the durable work ledger.
-- A signed-in person activates a 15-minute reviewed rule. MCP may draft, preview, and review but
-  cannot activate it.
+- A signed-in person or an explicitly authorized MCP execution agent activates a rule against
+  its exact current version and valid 15-minute review. MCP activation requires `mail:write`,
+  `mail:execute`, and owner-enabled review bypass; the grant does not toggle bypass or waive
+  preview, version, ownership, and provider checks. Autonomous Mail maintenance cannot grant
+  itself activation authority and remains unable to compose or send.
 - An executable item snapshots the user, Google account, provider thread ID, local thread ID,
   rule/profile versions, source projection revision, action, action fingerprint, and due time.
 - Execution revalidates the active `approved_rule`, exact rule version and action, active compatible

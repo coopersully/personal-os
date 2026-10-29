@@ -23,6 +23,11 @@ import {
 } from "@personal-os/domain";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { AppError } from "./errors.js";
+import {
+  assertFinanceDerivedCompletionClaim,
+  type FinanceDerivedCompletionClaim,
+} from "./finance/execution-claim-fence.js";
+import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
 import type { createFinanceService } from "./finance-service.js";
 
 type StatusReader = {
@@ -113,11 +118,16 @@ export function createFinancePeriodReviewService({ db, finances, status }: Optio
       userId: string,
       runId: string,
       positionEvidence: FinancePositionEvidenceCheckpoint,
+      completionClaim?: FinanceDerivedCompletionClaim,
     ): Promise<FinancePeriodReview> {
       const canonicalPosition = financePositionEvidenceCheckpointSchema.parse(positionEvidence);
       return retrySerializationFailure(
         db,
         async (tx) => {
+          if (completionClaim) {
+            await guardFinanceExecutionTransaction(tx, userId, { runIds: [runId] });
+            await assertFinanceDerivedCompletionClaim(tx, userId, runId, completionClaim);
+          }
           const [run] = await tx
             .select()
             .from(workspaceMaintenanceRuns)
@@ -357,6 +367,8 @@ export function createFinancePeriodReviewService({ db, finances, status }: Optio
             ...findings.map((finding) => finding.id),
           ];
           const reviewStatus = questions > 0 ? "completed_with_questions" : "completed";
+          if (completionClaim)
+            await assertFinanceDerivedCompletionClaim(tx, userId, runId, completionClaim);
           const [created] = await tx
             .insert(financePeriodReviews)
             .values({

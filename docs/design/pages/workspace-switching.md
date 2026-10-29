@@ -35,20 +35,33 @@ Setup. Change password and Log out remain actions inside the Account page rather
 than navigation destinations.
 
 Today has no contextual sidebar; Tasks remains the workspace owner for
-Reminders. Goals, Motives, Reviews, Activity, and setup remain inside account
-utilities rather than becoming workspace destinations.
+Reminders. Goals, Motives, Activity, and setup remain inside account utilities rather than
+becoming workspace destinations. [Reviews](reviews.md) is a workspace-scoped dialog/drawer
+opened from its attention alert, Settings header, or workspace search; it is not a separate
+account utility or workspace identity.
 
-At 900 px and below, the desktop rail/sidebar is replaced by the bottom
-workspace dock. Its active-workspace trigger exposes the same manifest-ordered
-destinations; the separate Actions control opens the active workspace's pages
-and account utilities. Calendar retains its compact selector in the app bar.
+At 900 px and below, the desktop rail/sidebar is replaced by a persistent bottom
+app bar styled as a floating pill with a translucent theme surface and 20px backdrop
+blur. It sits above the safe area, with inset edges and a bounded width. Scrollable
+panes extend behind it and include trailing space to keep the final item reachable.
+The workspace selector remains at the top left. The bottom bar exposes
+at most three stable primary destinations, followed by “more” when the workspace
+has additional pages. More opens a shared modal Drawer containing the full page
+hierarchy, including account/list children. Mark the selected primary destination;
+mark More when the current page is outside those shortcuts. Preserve safe-area
+insets and reserve content space for the bar.
 
-Tasks, Mail, and Finances use the shared shadcn Sidebar, Header, Content, Group,
-GroupLabel, and Menu primitives. Their desktop workspace title lives in the sidebar
-header; the app bar contains workspace tools. Calendar and Today keep their title
-in the app bar, as do narrow layouts without contextual sidebars. All sidebar
-sections have labels; feature tools compose the standard actions, badges, and
-submenus without custom resting surfaces or per-workspace spacing.
+Tasks exposes tasks and reminders; Mail exposes inbox, snoozed, and drafts;
+Finances exposes overview, spending, and budget. Calendar exposes day, week, and
+month while preserving the current date/query. Today exposes today and goals.
+Settings uses its first three canonical destinations and More for the full list.
+Creation, search, filtering, and review actions belong in the top header; opening
+an editor may still use the existing dialog or floating editor surface.
+
+Tasks, Mail, Finances, and Settings share the title/header frame. On mobile,
+workspace actions occupy row one and the editable title sentence row two. Today
+uses a compact single row. Desktop contextual sidebars retain their workspace
+identity and page hierarchy.
 
 ## Interaction contract
 
@@ -110,3 +123,12 @@ Collapsing while focus is inside that sidebar transfers focus to its persistent 
 every surviving icon destination supplies its label to the Shadcn tooltip primitive.
 Mail sync details open automatically only after a user-started sync fails. Background
 account-query errors expose the details control without opening it or stealing focus.
+
+The selected picker row has a filled identity glyph, explicit check and a second
+line reading “current workspace”. Other rows retain their single label. Keep the
+existing palette and highlight tokens; selected meaning must not rely on color.
+The second line uses the shared brief content fade and reduced-motion policy.
+
+Mobile scroll owners use `--mobile-app-bar-clearance`, including the full backdrop
+fade and safe area, so the last content can scroll entirely above the decoration.
+Page and pane scroll owners use the same value without double-insetting panes.

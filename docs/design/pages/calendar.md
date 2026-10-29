@@ -82,8 +82,10 @@ and verify matching computed backgrounds and column alignment in both themes.
   while the date grid scrolls. These are wayfinding anchors, not optional
   decoration.
 - The app-frame controls keep Day/Week/Month, Today, period back/forward, and
-  the synced-calendar disclosure in that order. The disclosure shows account
-  avatars with an `X of X calendars` label and uses switches for visibility.
+  the synced-calendar disclosure in that order. The disclosure uses the shared account icon/count trigger
+  with an accessible `X of X calendars` label and uses switches for visibility.
+  At widths of 600 px or less, Today and Previous/Next period commands move
+  into the Calendar view menu after the view choices, keeping the app bar compact.
 - Timeline columns carry 15-minute rules with an hour/half-hour/quarter-hour
   weight hierarchy. Half-hour labels in the gutter make the hierarchy readable
   without counting subdivisions. At scroll-top, the midnight label remains
@@ -91,12 +93,10 @@ and verify matching computed backgrounds and column alignment in both themes.
   standard border token, with half- and quarter-hour marks progressively more
   subdued. Rules remain behind events, drag previews, and the current-time
   marker.
-- Overlapping timed events with different start instants stack at full column width,
-  with later starts above earlier ones and a 4px horizontal step capped at 16px. Only events sharing the same start instant
-  divide into equal side-by-side lanes. Time and duration geometry stays intact.
-  A quiet layers icon and count button identifies each overlap group and reveals the existing
-  spread interaction. Hover, keyboard focus, click/touch, and Escape remain available;
-  the control has no decorative push-pin anatomy.
+- Overlapping timed events divide their day column into equal side-by-side lanes,
+  including transitive overlap groups. Reuse a free lane when an event ends exactly
+  as another starts. Preserve event time/duration and accessible individual targets;
+  there is no stacked/spread interaction.
 - Vertical day separation remains visible. Horizontal rules communicate time,
   not card boundaries. Week timelines alternate between two subtle
   neutral row-style surfaces so adjacent days read as distinct tiles. Today
@@ -110,14 +110,12 @@ and verify matching computed backgrounds and column alignment in both themes.
   into the scrolling timeline so content recedes without a hard edge. The fade
   remains translucent and paints behind header and all-day material; navigation
   content itself stays fully opaque and sharp.
-- A bottom-centred floating pill owns date jump, search, and event creation.
-  Its complete resting surface uses the primary button treatment, with all
-  three actions inheriting its foreground. Each action transforms the pill in
-  place. Search moves to screen centre,
-  focuses immediately, searches a bounded event range plus dates, and supports
-  direct relative-date phrases such as `last Christmas`. Creation exposes the
+- A bottom-right floating pill owns date jump and event creation at every
+  viewport width. Search stays in the top navigation. Its resting surface uses
+  the shared translucent navigation treatment, with both actions inheriting its
+  foreground. Each action transforms the pill in place. Creation exposes the
   standard event fields without launching a second surface.
-- The pill and its date, search, create, and event-detail states share one
+- The pill and its date, create, and event-detail states share one
   persistent Motion layout surface. Bounds morph with a restrained spring while
   outgoing and incoming content only crossfade; they never run a competing
   positional transform. Exiting controls become inert, and the global
@@ -150,12 +148,12 @@ and verify matching computed backgrounds and column alignment in both themes.
 - Optional location, conferencing, and related-link fields expand in place and
   dismiss back to their compact add actions. Time inputs expose editable hour
   and minute segments with an explicit meridiem. An untouched end follows start
-  changes at a one-hour duration; a manually chosen valid end is preserved, and
-  any end invalidated by a later start is repaired to one hour after that start.
+  changes at a saved default duration; a manually chosen valid end is preserved, and
+  any end invalidated by a later start is repaired using that saved duration.
 - Conferencing follows the selected calendar's real capabilities. Writable Google calendars can
   request a unique Google Meet conference from Google; every calendar can attach an existing Zoom,
   Teams, Webex, or other meeting URL. Provider-generated options are never shown as available when
-  Ilo does not hold that provider's host authority. Provider acceptance is not treated as link
+  nohmi does not hold that provider's host authority. Provider acceptance is not treated as link
   completion: pending generation and provider failure remain explicit in the returned event and
   produce visible, non-blocking feedback.
 
@@ -168,7 +166,7 @@ and verify matching computed backgrounds and column alignment in both themes.
 - Current-time, selection, event, and drag states remain visually dominant over
   the quarter-hour grid. Dragging a writable event visibly lifts it and the
   drop preview advances only in 15-minute increments. Pointer range creation
-  cancels with Escape. A keyboard user can start a one-hour range, adjust its
+  cancels with Escape. A keyboard user can start a range using the saved default duration, adjust its
   end in 15-minute increments, and commit it into the same inline composer.
 - Day, week, and month views retain an explicit app-frame date-range heading
   at every scroll position. The Today control remains a standard action, not a
@@ -214,7 +212,7 @@ immutable review, but neither the page nor its typed API changes events, invitat
 state, or user policy. Calendar judgment and versioned playbook policy remain in the domain/API.
 There is no MCP change and no external client automation; MCP remains a stateless intent surface.
 
-This is not the complete Calendar Ilo target. Durable maintenance runs and recovery,
+This is not the complete Calendar nohmi target. Durable maintenance runs and recovery,
 `maintain_calendar`, MCP wiring, bounded questions and one-off decisions, explicitly approved
 reusable rules, rule-authorized Calendar actions, collaboration stewardship, and travel routing
 remain deferred. Live travel feasibility stays unknown until a separately approved routing
@@ -250,17 +248,6 @@ narrow layouts. Floating controls overlay the calendar rather than reserving mob
 dock padding. Month rows stretch equally to fill tall viewports, retain a minimum
 readable height, and scroll when that minimum exceeds the available height.
 
-Hovering any event brings it above every sibling, whether the overlap stack is pinned
-or transiently expanded. The hover and control layers derive from the group size,
-so large stacks cannot cover the hovered event or their toggle. The stack toggle has no tooltip and appears at the center only while the stack is
-open (hovered, pinned, or an event card is keyboard-focused). The toggle also stays
-visible when it has keyboard focus, without forcing cards open; Escape closes the
-stack and returns focus to that toggle. Its resting state is visually hidden on hover-capable devices. Touch/coarse-pointer
-devices keep the control visible so users can open and close the stack. Opening a stack changes card positions only; it
-does not apply hover styling to every card. A stationary padded hover envelope covers
-the resting and spread cards, including their gaps, to prevent hover flicker during
-movement. Opening a stack adds no background gradient.
-
 Calendar uses the default page background across Day, Week, and Month. Hour rules,
 cell dividers, and the alternating `--calendar-tile-background` provide spatial
 structure. The same tile token drives Week columns and their all-day fades;
@@ -270,3 +257,24 @@ the page background in Week and Month.
 Floating action sizing, colors, and labels use the shared
 [floating workspace actions contract](../system.md#floating-workspace-actions).
 Workspace placement and opened-workflow behavior remain owned by this page.
+
+## Saved workspace defaults
+
+Week, month, and the date-jump picker use the saved Sunday/Monday week start. Hiding weekends still
+shows Monday through Friday. New timed events, keyboard creation, and repair of an invalid end time
+use the saved event duration (initially 60 minutes). Explicit selected intervals and existing event
+durations retain their meaning. Default destination, buffers, and busy-block privacy are
+edited through the existing versioned Calendar profile; action rules retain their approval gates.
+
+### Shared workspace header
+
+Calendar uses the shared title row for its date and selectable view phrase. The date remains visible at 320px. Search and account controls stay in the mobile utility row; spatial date axes remain with their grid. See [shared header rows](../system.md#shared-workspace-header-rows) for sizing and responsive placement.
+
+Today and Calendar share `TimelineAxis`, the minute-to-pixel scale, lane geometry,
+time formatting, and spatial event rendering. Today clips the grid to its remaining
+day; collapsed mode shows one timed event and all-day cards with the same styling.
+Calendar previous/next precede search on desktop; the phone view menu retains them.
+
+The floating Calendar actions sit at the bottom right at every viewport width and contain Choose date
+and Create event. Search belongs to the top navigation and is not repeated in that pill.
+Phone controls stay in the same bottom-right floating surface. Do not relocate create/date actions into the header or show a duplicate day/week/month dock; the selectable title phrase owns view switching.

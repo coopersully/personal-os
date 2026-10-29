@@ -14,25 +14,38 @@ import type {
   RegisterInput,
   RequestPasswordResetInput,
   ResetPasswordInput,
+  SearchableWorkspace,
   StartGoogleAuthorizationInput,
   UpdateAccountSetupInput,
   UpdatePinterestWallpaperSettingsInput,
   UpdateUserInput,
+  UpdateWorkspaceSettings,
   User,
   ValidateInvitationInput,
   WeatherCoordinates,
   WeatherLocationOption,
   WeatherSnapshot,
+  WorkspaceSearchPage,
+  WorkspaceSettings,
 } from "@personal-os/domain";
 import {
   type ConnectedAccountHealth,
+  type ConnectorCapabilities,
   type ConnectorSyncStatus,
   connectedAccountHealthSchema,
   connectorAuthorizationOutcomeSchema,
 } from "@personal-os/domain";
+import { createAgentAccountApi } from "./features/agent-accounts.js";
 import { createAssistantApiClient } from "./features/assistant.js";
+import { createAutomationHostApi } from "./features/automation-hosts.js";
 import { createCalendarApiClient } from "./features/calendar.js";
 import { createDesktopReleaseApiClient } from "./features/desktop-release.js";
+import { createFinanceActivityApi } from "./features/finance-activity.js";
+import { createFinanceConversationApi } from "./features/finance-conversation.js";
+import { createFinanceConversationEvidenceApi } from "./features/finance-conversation-evidence.js";
+import { createFinanceConversationUnreadApi } from "./features/finance-conversation-unread.js";
+import { createFinanceMaintenanceExecutionApi } from "./features/finance-maintenance-execution.js";
+import { createFinanceReviewBacklogApi } from "./features/finance-review-backlog.js";
 import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
 import { createMailApiClient } from "./features/mail.js";
@@ -88,6 +101,7 @@ export type AuditEvent = {
 };
 
 export type CalendarAccount = {
+  capabilities?: ConnectorCapabilities;
   avatarUrl?: string | null;
   calendarEnabled: boolean;
   email: string | null;
@@ -202,6 +216,14 @@ export function createApiClient(options: ClientOptions) {
       );
     },
     ...createFinanceApi(request),
+    ...createFinanceReviewBacklogApi(request),
+    ...createFinanceConversationApi(request),
+    ...createFinanceConversationUnreadApi(request),
+    ...createFinanceMaintenanceExecutionApi(request),
+    ...createFinanceConversationEvidenceApi(request),
+    ...createFinanceActivityApi(request),
+    ...createAutomationHostApi(request),
+    ...createAgentAccountApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
     ...createRitualsApiClient(request),
@@ -396,6 +418,36 @@ export function createApiClient(options: ClientOptions) {
 
     async recordPinterestWallpaperApplied(): Promise<void> {
       await request<void>("/v1/pinterest/applied", { method: "POST" });
+    },
+
+    async searchWorkspace(
+      workspace: SearchableWorkspace,
+      query: {
+        q: string;
+        offset?: number | undefined;
+        limit?: number | undefined;
+        includeArchived?: boolean | undefined;
+        kind?: "all" | "content" | "reviews" | undefined;
+      },
+      signal?: AbortSignal,
+    ): Promise<WorkspaceSearchPage> {
+      return request(`/v1/workspaces/${workspace}/search?${toQuery(query)}`, {
+        ...(signal ? { signal } : {}),
+      });
+    },
+    async getWorkspaceSettings<W extends SearchableWorkspace>(
+      workspace: W,
+    ): Promise<WorkspaceSettings<W>> {
+      return request(`/v1/workspaces/${workspace}/settings`);
+    },
+    async updateWorkspaceSettings<W extends SearchableWorkspace>(
+      workspace: W,
+      input: UpdateWorkspaceSettings<NoInfer<W>>,
+    ): Promise<WorkspaceSettings<W>> {
+      return request(`/v1/workspaces/${workspace}/settings`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      });
     },
 
     async listSessions(): Promise<Session[]> {

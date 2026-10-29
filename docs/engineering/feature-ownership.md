@@ -20,7 +20,8 @@ parallel worktree ownership. It complements the system boundary in
    append-only.
 4. A feature is complete only with its domain contract, API behavior, typed
    client surface, UI state handling, audit behavior for mutations, and tests.
-   `pnpm verify` is required before handoff.
+   Complete frozen-candidate verification is required before merge under
+   [delivery verification](delivery-verification.md); early handoffs identify remaining evidence.
 5. Provider material is a projection, not a local replacement. Provider
    failures, stale data, missing capability, and reconnect state must remain
    visible to the user and caller.
@@ -129,6 +130,22 @@ coordination, channel settings, and response composition. A workspace owns every
 work node, policy decision, and terminal result. Workspace maintainers publish typed notification
 intents rather than rendered SMS and never call Twilio or consume the shared conversation directly.
 
+### Review and attention projections
+
+Mail, Calendar, Tasks, and Finances own their review/attention interpretation and native destinations
+in `mail-review-projection.ts`, `calendar-review-projection.ts`, `task-review-projection.ts`, and
+`finance/work-item-projection.ts`. Mail owns maintenance questions, runs, and inactive rules;
+Finances owns cases, approvals, reconnect work, and draft guidance, composing its existing effect
+and contextual-question projections. Calendar and Tasks retain their current attention semantics.
+
+`review-projections` supplies the internal row-reader contract, thin provider registry, and mechanical
+shared attention/account/profile reads and display helpers. Source identities, row-reader overrides,
+and conservative affected-domain/kind declarations remain stable. Each source settles independently:
+healthy siblings remain visible, while failed sources make affected counts unavailable rather than
+zero. `agent-access-work-items.ts` owns readable-scope enforcement, collection, summaries, ordering,
+signed snapshot pagination, and bounded transaction-based search; it owns no domain eligibility,
+wording, or destination decisions. Public domain schemas remain unchanged.
+
 ## Required seams
 
 ### Domain and API
@@ -189,3 +206,11 @@ vertical features are independently verified.
 
 This preserves a single source of truth for data, a single policy decision point
 for agent actions, and predictable review/merge order.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow [delivery verification](delivery-verification.md): converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

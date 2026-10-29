@@ -1,13 +1,39 @@
+import { type FinanceOnboardingSnapshot, resolveWorkspaceSettings } from "@personal-os/domain";
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { type Action, toast } from "sonner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api.js";
 import { FinancesPage } from "./page.js";
+import { financeWorkspaceReadinessKey } from "./use-finance-workspace-readiness";
 
 vi.mock("react-plaid-link", () => ({ usePlaidLink: () => ({ open: vi.fn(), ready: false }) }));
+// Exercise real access/visibility derivation rather than bypassing the workspace gate.
+function seedManualFinanceReadiness(client: QueryClient) {
+  client.setQueryData(["me"], { id: "finance-feedback-owner" });
+  const snapshot: FinanceOnboardingSnapshot = {
+    revision: 0,
+    completedAt: null,
+    existingAccess: true,
+    source: { state: "usable", summary: "Manual accounts", recoveryHref: null },
+    contextReview: "needs_review",
+    questions: [],
+    displayPreferences: { reviewed: false, summary: [] },
+    automationChoice: null,
+    manualVisibility: "show",
+    automation: {
+      registrationCount: 0,
+      authorizedRegistrationWithCadence: false,
+      chatVerification: "pending",
+      canSendChat: false,
+      historyAvailable: true,
+    },
+  };
+  client.setQueryData(financeWorkspaceReadinessKey, snapshot);
+}
 afterEach(() => vi.restoreAllMocks());
 describe("Finance form feedback", () => {
   it("validates account fields on submit and retains entered values after a failed save", async () => {
@@ -22,10 +48,12 @@ describe("Finance form feedback", () => {
     });
     vi.spyOn(api, "getFinanceCategories").mockResolvedValue([]);
     vi.spyOn(api, "getPlaidStatus").mockResolvedValue({ available: false });
+    vi.spyOn(toast, "error");
     vi.spyOn(api, "createFinanceAccount").mockRejectedValue(new Error("private database failure"));
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
+    seedManualFinanceReadiness(client);
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={["/finances/accounts"]}>
@@ -41,7 +69,13 @@ describe("Finance form feedback", () => {
     await userEvent.type(screen.getByLabelText("Account name"), "Checking");
     await userEvent.click(screen.getByRole("button", { name: "Add account" }));
     await waitFor(() => expect(api.createFinanceAccount).toHaveBeenCalledOnce());
-    expect(await screen.findByText(/Couldn’t confirm/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringMatching(/Couldn’t confirm/),
+        expect.anything(),
+      ),
+    );
+    expect(screen.queryByText(/Couldn’t confirm/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Institution")).toHaveValue("My bank");
     expect(screen.getByLabelText("Account name")).toHaveValue("Checking");
     expect(screen.queryByText("private database failure")).not.toBeInTheDocument();
@@ -127,6 +161,7 @@ const queryCases = [
       null,
       { sortBy: "date", sortDirection: "desc" },
       { review: "all" },
+      50,
     ],
   },
   {
@@ -185,7 +220,7 @@ const queryCases = [
   },
   {
     method: "getFinanceLedgerHealth",
-    route: "health",
+    route: "overview",
     title: "Couldn’t load account health.",
     key: ["finance-ledger-health"],
   },
@@ -201,6 +236,7 @@ function querySetup(route: string, cached?: { key: readonly unknown[]; value: un
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  seedManualFinanceReadiness(client);
   if (cached) client.setQueryData(cached.key, cached.value);
   render(
     <QueryClientProvider client={client}>
@@ -212,6 +248,7 @@ function querySetup(route: string, cached?: { key: readonly unknown[]; value: un
   return client;
 }
 function mockFinanceQueries() {
+  vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue(resolveWorkspaceSettings("finances"));
   for (const [method, value] of Object.entries(queryDefaults)) {
     vi.spyOn(api, method as keyof typeof queryDefaults).mockResolvedValue(value as never);
   }
@@ -229,7 +266,7 @@ describe("Finance query recovery", () => {
     querySetup(route);
     const message = await screen.findByText(title);
     expect(screen.queryByText("private provider details")).not.toBeInTheDocument();
-    const status = message.closest('[role="status"]');
+    const status = message.closest('[role="region"]');
     if (!status) throw new Error("Persistent query feedback is missing");
     await userEvent.click(within(status as HTMLElement).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
@@ -249,22 +286,26 @@ describe("Finance query recovery", () => {
     request.mockRejectedValueOnce(new Error("private background failure"));
     const data = queryDefaults[method];
     const client = querySetup(route, { key, value: data });
-    const message = await screen.findByText(title);
-    const status = message.closest('[role="status"]');
-    if (!status) throw new Error("Persistent query feedback is missing");
-    expect(
-      within(status as HTMLElement).getByText(/Showing the last available update/),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(title, expect.any(Object)));
+    expect(screen.queryByText(title)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument();
     expect(client.getQueryData(key)).toEqual(data);
-
-    await userEvent.click(within(status as HTMLElement).getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
+    const notice = vi.mocked(toast.error).mock.calls.findLast(([message]) => message === title);
+    const action = notice?.[1]?.action as Action;
+    await act(async () => action.onClick({} as Parameters<Action["onClick"]>[0]));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
     expect(request).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a scoped spending failure visible until its selected-account query recovers", async () => {
     mockFinanceQueries();
-    sessionStorage.setItem("finance-account-scope:spend", JSON.stringify(["selected-account"]));
+    vi.mocked(api.getWorkspaceSettings).mockResolvedValue(
+      resolveWorkspaceSettings("finances", { spendAccountIds: [] }),
+    );
+    vi.mocked(api.getFinanceOverview).mockResolvedValue({
+      ...overview,
+      accounts: [{ id: "selected-account", kind: "cash" }] as never,
+    });
     try {
       vi.mocked(api.getFinanceOverviewForAccounts).mockRejectedValueOnce(
         new Error("scoped spending unavailable"),
@@ -272,7 +313,7 @@ describe("Finance query recovery", () => {
       querySetup("overview");
       const message = await screen.findByText("Couldn’t load account spending.");
       await userEvent.click(
-        within(message.closest('[role="status"]') as HTMLElement).getByRole("button", {
+        within(message.closest('[role="region"]') as HTMLElement).getByRole("button", {
           name: "Try again",
         }),
       );
@@ -281,7 +322,7 @@ describe("Finance query recovery", () => {
       );
       expect(api.getFinanceOverviewForAccounts).toHaveBeenCalledTimes(2);
     } finally {
-      sessionStorage.removeItem("finance-account-scope:spend");
+      vi.mocked(api.getWorkspaceSettings).mockReset();
     }
   });
 
@@ -291,7 +332,7 @@ describe("Finance query recovery", () => {
     const client = querySetup("accounts");
     const initial = await screen.findByText("Couldn’t load your finances.");
     await userEvent.click(
-      within(initial.closest('[role="status"]') as HTMLElement).getByRole("button", {
+      within(initial.closest('[role="region"]') as HTMLElement).getByRole("button", {
         name: "Try again",
       }),
     );
@@ -300,15 +341,23 @@ describe("Finance query recovery", () => {
     await act(async () => {
       await client.invalidateQueries({ queryKey: ["finance-overview"] });
     });
-    const stale = await screen.findByText("Couldn’t refresh your finances.");
-    expect(screen.getByRole("button", { name: "Track account" })).toBeInTheDocument();
-    await userEvent.click(
-      within(stale.closest('[role="status"]') as HTMLElement).getByRole("button", {
-        name: "Try again",
-      }),
-    );
     await waitFor(() =>
-      expect(screen.queryByText("Couldn’t refresh your finances.")).not.toBeInTheDocument(),
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn’t refresh your finances.",
+        expect.any(Object),
+      ),
     );
+    expect(screen.getByRole("button", { name: "Track account" })).toBeInTheDocument();
+    expect(screen.queryByText("Couldn’t refresh your finances.")).not.toBeInTheDocument();
+    const notice = vi
+      .mocked(toast.error)
+      .mock.calls.findLast(([message]) => message === "Couldn’t refresh your finances.");
+    const action = notice?.[1]?.action as Action;
+    await act(async () => action.onClick({} as Parameters<Action["onClick"]>[0]));
+    await waitFor(() => expect(api.getFinanceOverview).toHaveBeenCalledTimes(4));
   });
+});
+
+beforeEach(() => {
+  vi.spyOn(toast, "error");
 });

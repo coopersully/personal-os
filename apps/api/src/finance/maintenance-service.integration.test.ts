@@ -1,25 +1,39 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
+  accessTokens,
+  auditEvents,
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
+  financeAgentActionReviews,
+  financeAnswerContinuations,
+  financeConversationBatches,
+  financeEconomicEvents,
   financeLedgerChallenges,
   financeMaintenanceCandidates,
+  financeMaintenanceExecutionBindings,
   financeMaintenanceRuns,
   financePeriodReviews,
   financeSetupSessions,
+  financeTransactionRelationships,
+  financeTransactionRevisions,
+  financeTransactions,
   migrateDatabase,
   users,
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
 } from "@personal-os/database";
-import type { FinanceStatus } from "@personal-os/domain";
+import { type FinanceStatus, financeMaintenancePayloadSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
+import { createAutomationHostService } from "../automation-host-service.js";
+import { createFinanceHostDispatcher } from "../finance-host-dispatcher.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { Principal } from "../types.js";
+import { answerContextualWork } from "./answer-service.js";
+import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 import { createFinanceMaintenanceIntentService } from "./maintenance-intent-service.js";
 import { legacyMaintenanceScope } from "./maintenance-service.js";
 
@@ -117,6 +131,201 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
     if (!run) throw new Error("Missing old run");
     return run;
   }
+  it("continues a saved answer only through its bound live grant and replays the same bounded run", async () => {
+    const f = await fixture();
+    const encryptionKey = Buffer.alloc(32, 7).toString("base64");
+    const connectionId = randomUUID();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.userId,
+        name: "Host",
+        authorizationConnectionId: connectionId,
+        tokenHash: randomUUID(),
+        scopes: ["finances:maintain"],
+      })
+      .returning();
+    if (!token) throw new Error("token");
+    const human: Principal = {
+      userId: f.userId,
+      actorId: f.userId,
+      actorType: "user",
+      scopes: new Set(["finances:read", "finances:write"]),
+    };
+    const agent: Principal = {
+      ...f.principal,
+      actorId: token.id,
+      authorizationConnectionId: connectionId,
+    };
+    const hosts = createAutomationHostService({ db: database.db, now, encryptionKey });
+    const schedule = await hosts.create(human, {
+      tenantAuthorizationConnectionId: connectionId,
+      label: "Routine",
+      requestedScopes: ["finances:maintain"],
+      hostSurface: "claude_code_routine",
+      trigger: { type: "event", expectedMaximumLatencyMinutes: 15 },
+    });
+    await hosts.bind(human, schedule.schedule.id, {
+      expectedVersion: 1,
+      expectedState: "setup_pending",
+      hostSurface: "claude_code_routine",
+      hostAutomationId: "trig_01ABCDEFGHJKLMNOPQRSTUVW",
+    });
+    await hosts.saveFireToken(human, schedule.schedule.id, "sk-ant-oat01-abcdefghijklmno", 2);
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({ userId: f.userId, name: "Cash", institution: "Cash", provider: "manual" })
+      .returning();
+    if (!account) throw new Error("account");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: f.userId,
+        accountId: account.id,
+        merchant: "Merchant",
+        transactionDate: "2026-09-15",
+        amount: 1200,
+        direction: "expense",
+      })
+      .returning();
+    if (!transaction) throw new Error("transaction");
+    const context = { principal: human, requestId: "host-answer" };
+    const question = await createFinanceContextualQuestionService({
+      db: database.db,
+    }).createQuestion(transaction.id, { operationId: randomUUID() }, context);
+    if (question.state !== "available") throw new Error("question");
+    const operationId = randomUUID();
+    expect(
+      (
+        await answerContextualWork(
+          { db: database.db },
+          {
+            operationId,
+            work: question.question.work,
+            text: "Lunch",
+            source: { kind: "app", messageId: null },
+          },
+          context,
+        )
+      ).state,
+    ).toBe("accepted");
+    const [outbox] = await database.db
+      .select()
+      .from(financeAnswerContinuations)
+      .where(eq(financeAnswerContinuations.operationId, operationId));
+    if (!outbox) throw new Error("outbox");
+    expect(outbox.automationScheduleId).toBeNull();
+    await expect(
+      f.service.maintainFinances(
+        {
+          operation: "continue",
+          continuationId: outbox.id,
+          automationScheduleId: schedule.schedule.id,
+        },
+        agent,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await hosts.bindAnswer(human, outbox.id, schedule.schedule.id);
+    expect(await hosts.continuations(agent, schedule.schedule.id)).toMatchObject({
+      schedule: { id: schedule.schedule.id, version: 3 },
+      continuations: [
+        { id: outbox.id, state: "pending", answer: { text: "Lunch", sourceKind: "app" } },
+      ],
+    });
+    await expect(hosts.bindAnswer(human, outbox.id, schedule.schedule.id)).resolves.toEqual({
+      id: outbox.id,
+    });
+    const fetch = vi.fn(
+      async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) =>
+        Response.json({
+          type: "routine_fire",
+          claude_code_session_id: "session_01HJKLMNOPQRSTUVWXYZ",
+        }),
+    );
+    const dispatch = createFinanceHostDispatcher({ db: database.db, now, encryptionKey, fetch });
+    expect(await dispatch()).toEqual({ processed: 1 });
+    await expect(hosts.bindAnswer(human, outbox.id, schedule.schedule.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(await dispatch()).toEqual({ processed: 0 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]?.[0]).toBe(
+      "https://api.anthropic.com/v1/claude_code/routines/trig_01ABCDEFGHJKLMNOPQRSTUVW/fire",
+    );
+    const input = {
+      operation: "continue" as const,
+      continuationId: outbox.id,
+      automationScheduleId: schedule.schedule.id,
+    };
+    await expect(
+      f.service.maintainFinances(input, { ...agent, authorizationConnectionId: randomUUID() }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    const [existingRun] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: f.userId,
+        domain: "finances",
+        rulebookVersion: "test-v1",
+        scope: {
+          type: "target",
+          entityType: "finance_review_case",
+          id: question.question.reviewCaseId,
+        },
+        status: "queued",
+      })
+      .returning();
+    if (!existingRun) throw new Error("existing run");
+    await expect(f.service.maintainFinances(input, agent)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        authorizationConnectionId: randomUUID(),
+        automationScheduleId: schedule.schedule.id,
+      })
+      .where(eq(workspaceMaintenanceRuns.id, existingRun.id));
+    await expect(f.service.maintainFinances(input, agent)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeAnswerContinuations)
+          .where(eq(financeAnswerContinuations.id, outbox.id))
+      )[0]?.maintenanceRunId,
+    ).toBeNull();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        authorizationConnectionId: connectionId,
+        automationScheduleId: schedule.schedule.id,
+      })
+      .where(eq(workspaceMaintenanceRuns.id, existingRun.id));
+    const first = await f.service.maintainFinances(input, agent),
+      replay = await f.service.maintainFinances(input, agent);
+    expect(first.data.run?.scope).toEqual({
+      type: "target",
+      entityType: "finance_review_case",
+      id: question.question.reviewCaseId,
+    });
+    expect(first.data.run?.id).toBe(existingRun.id);
+    expect(replay.data.run?.id).toBe(first.data.run?.id);
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeAnswerContinuations)
+          .where(eq(financeAnswerContinuations.id, outbox.id))
+      )[0],
+    ).toMatchObject({
+      state: "accepted",
+      maintenanceRunId: first.data.run?.id,
+      fireState: "accepted",
+      hostSessionId: "session_01HJKLMNOPQRSTUVWXYZ",
+    });
+  });
   it("starts/resumes one canonical run, exposes durable progress and denies read-only callers", async () => {
     const f = await fixture();
     const [left, right] = await Promise.all([
@@ -763,6 +972,384 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
     expect(await prepared.service.recoverAcceptedWork(1)).toMatchObject({ failedRecoveries: 0 });
     expect(prepared.recoverHandoff).toHaveBeenNthCalledWith(2, later.userId, later.runId);
   });
+  async function scheduledFixture() {
+    const f = await fixture();
+    const connectionId = randomUUID();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.userId,
+        name: "Recovery routine",
+        tokenHash: randomUUID(),
+        authorizationConnectionId: connectionId,
+        scopes: ["finances:maintain"],
+      })
+      .returning();
+    const human: Principal = {
+      userId: f.userId,
+      actorId: f.userId,
+      actorType: "user",
+      scopes: new Set(["finances:read", "finances:write"]),
+    };
+    const hosts = createAutomationHostService({
+      db: database.db,
+      now,
+      encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+    });
+    const schedule = await hosts.create(human, {
+      tenantAuthorizationConnectionId: connectionId,
+      label: "Recovery routine",
+      requestedScopes: ["finances:maintain"],
+      hostSurface: "claude_code_routine",
+      trigger: { type: "event", expectedMaximumLatencyMinutes: 15 },
+    });
+    await hosts.bind(human, schedule.schedule.id, {
+      expectedVersion: 1,
+      expectedState: "setup_pending",
+      hostSurface: "claude_code_routine",
+      hostAutomationId: "trig_01ABCDEFGHJKLMNOPQRSTUVW",
+    });
+    return {
+      ...f,
+      principal: {
+        ...f.principal,
+        actorId: required(token).id,
+        authorizationConnectionId: connectionId,
+      },
+      scheduleId: schedule.schedule.id,
+    };
+  }
+  async function preflightRun(userId: string) {
+    const [run] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId,
+        domain: "finances",
+        scope: { type: "all_outstanding" },
+        rulebookVersion: "legacy-v1",
+        status: "blocked",
+        checkpoint: { completedStep: "preflight" },
+        settledResult: {
+          verification: { state: "blocked", freshness: "partial" },
+          questions: { total: 10, created: 0 },
+        },
+      })
+      .returning();
+    await database.db.insert(workspaceMaintenanceSteps).values({
+      runId: required(run).id,
+      stepName: "preflight",
+      status: "completed",
+      attemptClaimId: randomUUID(),
+      idempotencyKey: "legacy:preflight",
+      safeResult: { freshness: "partial" },
+    });
+    return required(run);
+  }
+  it("returns genuine blockers for routine start before recovering an unbound legacy preflight", async () => {
+    const f = await scheduledFixture();
+    const run = await preflightRun(f.userId);
+    const [question] = await database.db
+      .insert(financeAgentActionReviews)
+      .values({
+        userId: f.userId,
+        actionKind: "question",
+        requestingAgentId: "old-agent",
+        fingerprint: randomUUID(),
+        privatePayload: { question: { actionKind: "categorization", sourceRefs: [] } },
+      })
+      .returning();
+    const blocked = {
+      details: { rulebookVersion: "test-v1" },
+      state: "blocked",
+      freshness: {
+        state: "partial",
+        blockers: [
+          { code: "plaid_authorization_failed" },
+          { code: "legacy_maintenance_unverified" },
+        ],
+      },
+    } as unknown as FinanceStatus;
+    f.getFinanceStatus.mockResolvedValue(blocked);
+    const input = {
+      operation: "start" as const,
+      automationScheduleId: f.scheduleId,
+      scope: { type: "all_outstanding" as const },
+    };
+    const blockedResult = await f.service.maintainFinances(input, f.principal);
+    expect(financeMaintenancePayloadSchema.parse(blockedResult.data).nextAction?.tool).toBe(
+      "get_finance_status",
+    );
+    expect(blockedResult).toMatchObject({
+      outcome: "user_input_required",
+      data: {
+        run: {
+          id: run.id,
+          status: "blocked",
+          rulebookVersion: "test-v1",
+        },
+      },
+      nextAction: { tool: "get_finance_status" },
+    });
+    expect(
+      await database.db.query.workspaceMaintenanceRuns.findFirst({
+        where: eq(workspaceMaintenanceRuns.id, run.id),
+      }),
+    ).toMatchObject({
+      automationScheduleId: null,
+      settledResult: run.settledResult,
+    });
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, run.id)),
+    ).toEqual([
+      expect.objectContaining({ after: { rulebookVersion: "test-v1", status: "blocked" } }),
+    ]);
+    f.getFinanceStatus.mockResolvedValue({
+      ...blocked,
+      state: "needs_work",
+      freshness: { observedAt: now().toISOString(), state: "current", blockers: [] },
+    });
+    const started = await f.service.maintainFinances(input, f.principal);
+    expect(started).toMatchObject({
+      data: { run: { id: run.id, status: "queued", rulebookVersion: "test-v1" } },
+      nextAction: { tool: "maintain_finances", arguments: { operation: "resume", runId: run.id } },
+    });
+    expect(
+      await database.db.query.workspaceMaintenanceRuns.findFirst({
+        where: eq(workspaceMaintenanceRuns.id, run.id),
+      }),
+    ).toMatchObject({
+      automationScheduleId: f.scheduleId,
+      authorizationConnectionId: f.principal.authorizationConnectionId,
+    });
+    const next = required(started.nextAction);
+    await f.service.maintainFinances(
+      next.arguments as { operation: "resume"; runId: string },
+      f.principal,
+    );
+    expect(
+      await database.db
+        .select()
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, required(question).id)),
+    ).toEqual([question]);
+    await expect(
+      f.service.maintainFinances(
+        { operation: "resume", runId: run.id },
+        { ...f.principal, authorizationConnectionId: randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+  it("serializes concurrent starts and resumes and denies other owners and missing scope", async () => {
+    const f = await fixture();
+    const run = await preflightRun(f.userId);
+    const other = await fixture();
+    await expect(
+      f.service.maintainFinances({ operation: "resume", runId: run.id }, other.principal),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      f.service.maintainFinances(
+        { operation: "resume", runId: run.id },
+        { ...f.principal, scopes: new Set() },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    const results = await Promise.all([
+      f.service.maintainFinances(
+        { operation: "start", scope: { type: "all_outstanding" } },
+        f.principal,
+      ),
+      f.service.maintainFinances({ operation: "resume", runId: run.id }, f.principal),
+    ]);
+    expect(results.map((r) => required(r.data.run).id)).toEqual([run.id, run.id]);
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, run.id)),
+    ).toHaveLength(1);
+  });
+  it.each([
+    "later_step",
+    "relationship",
+    "execution_binding",
+    "candidate",
+    "snapshot",
+    "effect",
+    "bound_host",
+    "batch",
+    "action",
+  ])("does not reinterpret legacy %s evidence", async (kind) => {
+    const scheduled = kind === "execution_binding" ? await scheduledFixture() : null;
+    const f = scheduled ?? (await fixture());
+    const run = await preflightRun(f.userId);
+    if (kind === "relationship") {
+      const [event] = await database.db
+        .insert(financeEconomicEvents)
+        .values({ userId: f.userId, kind: "transfer", stableKey: randomUUID() })
+        .returning();
+      await database.db.insert(financeTransactionRelationships).values({
+        userId: f.userId,
+        economicEventId: required(event).id,
+        relationship: "transfer",
+        transactionIds: [],
+        rationale: "Historical relationship evidence",
+        provenance: { maintenanceRunId: run.id },
+      });
+    }
+    if (scheduled) {
+      const [candidate] = await database.db
+        .insert(financeMaintenanceCandidates)
+        .values({ userId: f.userId, runId: run.id, revision: "legacy-candidate" })
+        .returning();
+      // A binding cannot exist without its exact candidate; do not weaken foreign keys to
+      // manufacture an impossible binding-only state just to isolate the redundant guard.
+      await database.db.insert(financeMaintenanceExecutionBindings).values({
+        userId: f.userId,
+        runId: run.id,
+        candidateId: required(candidate).id,
+        candidateRevision: "legacy-candidate",
+        submittedFromRevision: "legacy-submission",
+        submissionFingerprint: "legacy-fingerprint",
+        originalActorId: scheduled.principal.actorId,
+        currentActorId: scheduled.principal.actorId,
+        authorizationConnectionId: scheduled.principal.authorizationConnectionId,
+        automationScheduleId: scheduled.scheduleId,
+        protocolVersion: "v1",
+        createdAt: now(),
+        updatedAt: now(),
+      });
+    }
+    if (kind === "later_step")
+      await database.db.insert(workspaceMaintenanceSteps).values({
+        runId: run.id,
+        stepName: "prepare",
+        status: "completed",
+        attemptClaimId: randomUUID(),
+        idempotencyKey: "prepare",
+        safeResult: {},
+      });
+    if (kind === "candidate")
+      await database.db
+        .insert(financeMaintenanceCandidates)
+        .values({ userId: f.userId, runId: run.id, revision: "legacy-candidate" });
+    if (kind === "batch")
+      await database.db.insert(financeConversationBatches).values({
+        userId: f.userId,
+        runId: run.id,
+        cursorKey: "test",
+        cutoffSequence: 0n,
+        capturedAt: now(),
+      });
+    if (kind === "action")
+      await database.db.insert(financeAgentActionReviews).values({
+        userId: f.userId,
+        maintenanceRunId: run.id,
+        actionKind: "categorization",
+        requestingAgentId: "old-agent",
+        fingerprint: randomUUID(),
+        privatePayload: {},
+      });
+    if (kind === "snapshot")
+      await database.db
+        .update(workspaceMaintenanceRuns)
+        .set({ sourceSnapshot: {} })
+        .where(eq(workspaceMaintenanceRuns.id, run.id));
+    if (kind === "bound_host")
+      await database.db
+        .update(workspaceMaintenanceRuns)
+        .set({ authorizationConnectionId: randomUUID() })
+        .where(eq(workspaceMaintenanceRuns.id, run.id));
+    if (kind === "effect") {
+      const [account] = await database.db
+        .insert(financeAccounts)
+        .values({ userId: f.userId, name: "Cash", institution: "Cash", provider: "manual" })
+        .returning();
+      const [transaction] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: f.userId,
+          accountId: required(account).id,
+          merchant: "Merchant",
+          transactionDate: "2026-09-15",
+          amount: 1200,
+          direction: "expense",
+        })
+        .returning();
+      await database.db.insert(financeTransactionRevisions).values({
+        userId: f.userId,
+        transactionId: required(transaction).id,
+        version: 1,
+        changes: {},
+        provenance: { maintenanceRunId: run.id },
+      });
+    }
+    const operation = f.service.maintainFinances(
+      { operation: "resume", runId: run.id },
+      f.principal,
+    );
+    if (kind === "bound_host") await expect(operation).rejects.toMatchObject({ code: "forbidden" });
+    else
+      expect(await operation).toMatchObject({
+        data: { run: { status: "blocked", rulebookVersion: "legacy-v1" } },
+      });
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, run.id)),
+    ).toHaveLength(0);
+  });
+
+  it("recovers a preflight-only legacy run under the current rulebook without answering questions", async () => {
+    const f = await fixture();
+    const [run] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: f.userId,
+        domain: "finances",
+        scope: { type: "all_outstanding" },
+        rulebookVersion: "legacy-v1",
+        status: "blocked",
+        checkpoint: { completedStep: "preflight" },
+        settledResult: {
+          verification: { state: "blocked", freshness: "partial" },
+          questions: { total: 10, created: 0 },
+        },
+      })
+      .returning();
+    const runId = required(run).id;
+    await database.db.insert(workspaceMaintenanceSteps).values({
+      runId,
+      stepName: "preflight",
+      status: "completed",
+      attemptClaimId: randomUUID(),
+      idempotencyKey: "legacy:preflight",
+      safeResult: { freshness: "partial" },
+    });
+    const recovered = await f.service.maintainFinances({ operation: "resume", runId }, f.principal);
+    expect(recovered).toMatchObject({
+      outcome: "work_remaining",
+      data: {
+        run: {
+          id: runId,
+          status: "queued",
+          rulebookVersion: "test-v1",
+        },
+      },
+    });
+    expect(
+      await database.db
+        .select()
+        .from(workspaceMaintenanceSteps)
+        .where(eq(workspaceMaintenanceSteps.runId, runId)),
+    ).toHaveLength(1);
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, runId)),
+    ).toEqual([
+      expect.objectContaining({
+        action: "finance.maintenance_preflight_recovered",
+        userId: f.userId,
+      }),
+    ]);
+    await f.service.maintainFinances({ operation: "resume", runId }, f.principal);
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, runId)),
+    ).toHaveLength(1);
+  });
+
   it("resumes a blocked canonical run only after its evidence blocker is repaired", async () => {
     const f = await fixture();
     const started = await f.service.maintainFinances(

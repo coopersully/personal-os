@@ -1,591 +1,798 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import type {
-  FinanceBudgetVersion,
-  FinanceSetupPayload,
-  FinanceToolResult,
+import {
+  type FinanceConfiguration,
+  type FinanceOnboardingAdapter,
+  type FinanceOnboardingSnapshot,
+  financeConfigurationCapabilities,
+  financeProfileVersionSchema,
 } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { vi } from "vitest";
+import { financeStatementSource } from "./configuration-values.js";
 import { FinanceSetupPage } from "./setup-page.js";
 
 const api = vi.hoisted(() => ({
+  getFinanceConfiguration: vi.fn(),
+  getFinanceOnboarding: vi.fn(),
+  saveFinanceOnboardingAnswers: vi.fn(),
+  completeFinanceOnboarding: vi.fn(),
+  updateFinancialProfile: vi.fn(),
+  updateFinanceProfile: vi.fn(),
   setupFinances: vi.fn(),
-  getFinanceBudget: vi.fn(),
-  getFinanceCategories: vi.fn(),
   maintainFinances: vi.fn(),
+  listFinanceGoals: vi.fn(),
+  listFinanceAccounts: vi.fn(),
 }));
-vi.mock("../../api.js", () => ({
-  api,
-  errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Unknown error"),
-}));
-const sessionId = "11111111-1111-4111-8111-111111111111";
-const budgetVersionId = "22222222-2222-4222-8222-222222222222";
-const categoryId = "33333333-3333-4333-8333-333333333333";
-const now = "2026-09-03T12:00:00.000Z";
-function setupResponse(
-  overrides: Partial<FinanceSetupPayload> = {},
-): FinanceToolResult<FinanceSetupPayload> {
-  const data: FinanceSetupPayload = {
-    budgetVersionId: null,
-    maintenanceRunId: null,
-    canonicalMaintenanceRunId: null,
-    question: {
-      id: "profile:location",
-      prompt: "Where do you live for tax purposes?",
-      answerType: "location",
-    },
-    sessionId,
-    stage: "collecting_profile",
-    version: 7,
-    ...overrides,
-  };
+vi.mock("../../api.js", () => ({ api, errorMessage: (e: Error) => e.message }));
+const id = "11111111-1111-4111-8111-111111111111";
+const profile = financeProfileVersionSchema.parse({
+  id,
+  userId: id,
+  version: 1,
+  createdAt: "2026-10-06T12:00:00Z",
+  debts: [],
+  dependents: null,
+  expectedMonthlyTakeHome: null,
+  householdSize: null,
+  incomeStability: "unknown",
+  insurance: [],
+  jurisdiction: null,
+  liquidReserves: null,
+  preferences: { bufferTarget: null, debtPriority: null, emergencyReserveMonths: null, notes: [] },
+  provenance: {},
+});
+function onboarding(): FinanceOnboardingSnapshot {
   return {
-    data,
-    ...(data.stage === "initial_maintenance"
-      ? {
-          nextAction: {
-            tool: "maintain_finances",
-            arguments:
-              data.canonicalMaintenanceRunId || data.maintenanceRunId
-                ? {
-                    operation: "resume",
-                    runId: data.canonicalMaintenanceRunId ?? data.maintenanceRunId,
-                  }
-                : { operation: "start", scope: { type: "all_outstanding" } },
-            reason: "Continue the authoritative maintenance action.",
-          },
-        }
-      : {}),
-    changes: [],
-    communication: {
-      headline: "Your saved financial setup",
-      optionalDetails: [],
-      requiredDisclosures: [],
-      ...(data.question ? { nextQuestion: data.question } : {}),
+    revision: 1,
+    completedAt: null,
+    existingAccess: false,
+    source: {
+      state: "usable",
+      summary: "Included account with confirmed ownership",
+      recoveryHref: "/finances/accounts",
     },
-    outcome:
-      data.stage === "settled"
-        ? "completed"
-        : data.question
-          ? "user_input_required"
-          : "work_remaining",
-    remainingWork: { categories: [], count: data.stage === "settled" ? 0 : 1 },
-    schemaVersion: 1,
-  };
-}
-function plan(): FinanceBudgetVersion {
-  return {
-    id: budgetVersionId,
-    planId: budgetVersionId,
-    status: "proposed",
-    version: 2,
-    expectedResources: 5000,
-    allocatedTotal: 5000,
-    balanceDelta: 0,
-    effectiveFrom: "2026-09",
-    createdAt: now,
-    approvedAt: null,
-    rationale: "A balanced starting plan.",
-    assumptions: ["Income varies; this is a starting estimate."],
-    resources: [{ key: "income", kind: "income", amount: 5000, description: "Monthly take-home" }],
-    allocations: [
-      { key: "living", kind: "spending", categoryId, amount: 4000 },
-      { key: "savings", kind: "savings", amount: 750 },
-      { key: "buffer", kind: "buffer", amount: 250 },
+    contextReview: "reviewed",
+    questions: [
+      {
+        questionId: "profile:income",
+        label: "Review saved income",
+        disposition: "unreviewed",
+        answerSummary: null,
+        allowsNone: false,
+      },
     ],
+    displayPreferences: { reviewed: false, summary: ["Current month, personal cost"] },
+    automationChoice: null,
+    manualVisibility: "auto",
+    automation: {
+      registrationCount: 0,
+      authorizedRegistrationWithCadence: false,
+      chatVerification: "pending",
+      canSendChat: false,
+      historyAvailable: true,
+    },
   };
 }
-function mount() {
+function configuration(): FinanceConfiguration {
+  return {
+    profile: { state: "loaded", value: profile },
+    income: { state: "loaded", value: null },
+    accounts: {
+      state: "loaded",
+      value: {
+        accounts: [],
+        accountSemantics: {
+          excludedAccountIds: [],
+          possibleDuplicateGroups: [],
+          trustworthy: true,
+          unresolvedOwnershipAccountIds: [],
+        },
+        totals: { cash: 0, debt: 0, investments: 0, netWorth: 0, otherAssets: 0 },
+      },
+    },
+    budget: { state: "loaded", value: null },
+    guidance: { state: "loaded", value: null },
+    execution: { state: "loaded", value: null },
+    preferences: { state: "unavailable" },
+    capabilities: financeConfigurationCapabilities({ state: "loaded", value: null }),
+  };
+}
+function show(url = "/finances/setup", onboardingAdapter?: FinanceOnboardingAdapter | null) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  client.setQueryData(["me"], { id, planningTimezone: "America/New_York" });
   render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })
-      }
-    >
-      <MemoryRouter>
-        <FinanceSetupPage />
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[url]}>
+        <FinanceSetupPage {...(onboardingAdapter === undefined ? {} : { onboardingAdapter })} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return client;
 }
+it("dates first payroll settings in the account's planning timezone", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-07T01:00:00Z"));
+  try {
+    api.updateFinanceProfile.mockImplementation(async (input) => ({
+      profile: { ...input, updatedAt: "2026-10-07T01:00:00Z" },
+    }));
+    show();
+    const user = userEvent.setup();
+    const employer = await screen.findByLabelText("Employer");
+    await user.type(employer, "New employer");
+    await user.tab();
+    await waitFor(() =>
+      expect(api.updateFinanceProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ effectiveDate: "2026-10-06" }),
+      ),
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 beforeEach(() => {
   vi.resetAllMocks();
-  api.getFinanceCategories.mockResolvedValue([{ id: categoryId, name: "Living expenses" }]);
-  api.getFinanceBudget.mockResolvedValue({ data: plan() });
-  api.setupFinances.mockResolvedValue(setupResponse());
+  api.getFinanceConfiguration.mockResolvedValue(configuration());
+  api.getFinanceOnboarding.mockResolvedValue(onboarding());
+  api.listFinanceGoals.mockResolvedValue({ outcome: "completed", data: [] });
+  api.listFinanceAccounts.mockResolvedValue({ accounts: [] });
+  api.updateFinancialProfile.mockImplementation(async (input) => ({
+    outcome: "completed",
+    data: { ...profile, ...input.changes, version: input.expectedVersion + 1 },
+  }));
 });
-it("starts only on request and answers one saved question with the exact session version", async () => {
-  const user = userEvent.setup();
-  mount();
+it("loads every profile question without starting setup, approval, or maintenance", async () => {
+  show();
+  expect(await screen.findByLabelText("Household size")).toBeVisible();
+  expect(screen.getByLabelText("Reliable monthly income")).toBeVisible();
+  expect(screen.getByLabelText("Expected net paycheck")).toBeVisible();
+  expect(screen.getByText("Spending priorities")).toBeVisible();
+  expect(screen.queryByText("Start or resume setup")).not.toBeInTheDocument();
   expect(api.setupFinances).not.toHaveBeenCalled();
-  expect(api.getFinanceBudget).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  expect(api.setupFinances).toHaveBeenCalledWith({ operation: "start" });
-  await user.type(await screen.findByLabelText("Where do you live for tax purposes?"), "New York");
-  api.setupFinances.mockResolvedValue(
-    setupResponse({
-      question: {
-        id: "profile:household_size",
-        prompt: "How many people are in your household?",
-        answerType: "integer",
-      },
-      version: 8,
-    }),
-  );
-  await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(api.setupFinances).toHaveBeenLastCalledWith({
-    operation: "answer",
-    sessionId,
-    questionId: "profile:location",
-    expectedVersion: 7,
-    answer: "New York",
-    idempotencyKey: expect.any(String),
-  });
-  expect(await screen.findByLabelText("How many people are in your household?")).toHaveValue("");
-  expect(screen.queryByLabelText("Where do you live for tax purposes?")).not.toBeInTheDocument();
-});
-it("keeps interrupted input and resumes a changed session before retrying", async () => {
-  const user = userEvent.setup();
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  await user.type(
-    await screen.findByLabelText("Where do you live for tax purposes?"),
-    "California",
-  );
-  api.setupFinances.mockRejectedValueOnce(
-    new Error("Finance setup is at version 8; resume it before continuing."),
-  );
-  await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(
-    await screen.findByText(/Couldn’t confirm whether we could update financial setup/),
-  ).toBeInTheDocument();
-  expect(screen.getByLabelText("Where do you live for tax purposes?")).toHaveValue("California");
-  api.setupFinances.mockResolvedValueOnce(setupResponse({ version: 8 }));
-  await user.click(screen.getByRole("button", { name: "Resume saved progress" }));
-  await waitFor(() =>
-    expect(api.setupFinances).toHaveBeenLastCalledWith({ operation: "resume", sessionId }),
-  );
-  expect(screen.getByLabelText("Where do you live for tax purposes?")).toHaveValue("California");
-  await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(api.setupFinances).toHaveBeenLastCalledWith(
-    expect.objectContaining({ expectedVersion: 8, answer: "California", operation: "answer" }),
-  );
-});
-it("shows complete allocations and assumptions before approving the displayed budget with the setup version", async () => {
-  const user = userEvent.setup();
-  api.setupFinances.mockResolvedValueOnce(
-    setupResponse({
-      budgetVersionId,
-      stage: "budget_approval",
-      version: 12,
-      question: {
-        id: "budget:approval",
-        prompt: "Approve this starting budget?",
-        answerType: "approval",
-      },
-    }),
-  );
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  expect(await screen.findByText("Monthly take-home")).toBeInTheDocument();
-  expect(await screen.findByText("Living expenses")).toBeInTheDocument();
-  expect(screen.getByText("$750.00")).toBeInTheDocument();
-  expect(screen.getByText("$250.00")).toBeInTheDocument();
-  expect(screen.getByText("Income varies; this is a starting estimate.")).toBeInTheDocument();
-  api.setupFinances.mockResolvedValueOnce(
-    setupResponse({ budgetVersionId, stage: "initial_maintenance", question: null, version: 13 }),
-  );
-  await user.click(screen.getByRole("button", { name: "Approve displayed budget" }));
-  expect(api.setupFinances).toHaveBeenLastCalledWith({
-    approvalSource: "user_instruction",
-    expectedProfileVersionId: null,
-    budgetVersionId,
-    expectedVersion: 12,
-    idempotencyKey: expect.any(String),
-    operation: "approve_budget",
-    sessionId,
-  });
-  expect(await screen.findByText("Initial maintenance remains")).toBeInTheDocument();
   expect(api.maintainFinances).not.toHaveBeenCalled();
-  expect(screen.queryByText("Setup complete")).not.toBeInTheDocument();
 });
-it("blocks approval when the server's current budget differs from the setup proposal", async () => {
+it("saves independent scalar edits using the latest version, preserving zero", async () => {
+  show();
   const user = userEvent.setup();
-  api.setupFinances.mockResolvedValue(
-    setupResponse({ budgetVersionId, stage: "budget_approval", question: null }),
-  );
-  api.getFinanceBudget.mockResolvedValue({ data: { ...plan(), id: categoryId } });
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  expect(await screen.findByText("Budget version changed")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Approve displayed budget" })).toBeDisabled();
-  expect(screen.getByRole("link", { name: "Open Plan" })).toHaveAttribute("href", "/finances/plan");
-});
-it("keeps maintenance judgment visibly pending and resumes the same run without fabricating completion", async () => {
-  const user = userEvent.setup();
-  api.setupFinances.mockResolvedValue(
-    setupResponse({ budgetVersionId, stage: "initial_maintenance", question: null }),
-  );
-  api.maintainFinances.mockResolvedValue({
-    data: {
-      run: { id: categoryId, status: "awaiting_agent_challenge" },
-      challengeId: sessionId,
-      nextAction: {
-        tool: "get_finance_ledger_challenge",
-        arguments: { challengeId: sessionId },
-        reason: "Complete the ledger challenge.",
-      },
-      recovery: null,
-    },
-    communication: { headline: "Reasoning remains.", requiredDisclosures: [] },
-    outcome: "work_remaining",
-  });
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  await user.click(await screen.findByRole("button", { name: "Start initial maintenance" }));
-  expect(api.maintainFinances).toHaveBeenCalledWith({
-    operation: "start",
-    scope: { type: "all_outstanding" },
-  });
-  expect(await screen.findByText("Ledger challenge required")).toBeInTheDocument();
-  expect(screen.queryByText("Setup complete")).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Check maintenance progress" }));
-  expect(api.maintainFinances).toHaveBeenLastCalledWith({ operation: "resume", runId: categoryId });
-});
-
-it("keeps approval disabled until the exact budget has loaded", async () => {
-  const user = userEvent.setup();
-  let resolve: ((value: { data: FinanceBudgetVersion }) => void) | undefined;
-  api.setupFinances.mockResolvedValue(
-    setupResponse({ budgetVersionId, stage: "budget_approval", question: null }),
-  );
-  api.getFinanceBudget.mockImplementation(
-    () =>
-      new Promise((done) => {
-        resolve = done;
-      }),
-  );
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  expect(await screen.findByRole("button", { name: "Approve displayed budget" })).toBeDisabled();
-  resolve?.({ data: plan() });
+  await user.type(await screen.findByLabelText("Dependents"), "0");
+  await user.tab();
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Approve displayed budget" })).toBeEnabled(),
+    expect(api.updateFinancialProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedVersion: 1, changes: { dependents: 0 } }),
+    ),
+  );
+  await user.type(screen.getByLabelText("Household size"), "2");
+  await user.tab();
+  await waitFor(() =>
+    expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedVersion: 2, changes: { householdSize: 2 } }),
+    ),
+  );
+});
+it("keeps a newer draft while a prior save completes and serializes the next save", async () => {
+  let resolve!: (value: unknown) => void;
+  api.updateFinancialProfile.mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+  );
+  show();
+  const user = userEvent.setup();
+  const field = await screen.findByLabelText("Country and state or region");
+  await user.type(field, "US");
+  await user.tab();
+  await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledTimes(1));
+  await user.type(field, "-NY");
+  await user.tab();
+  expect(api.updateFinancialProfile).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    resolve({ outcome: "completed", data: { ...profile, jurisdiction: "US", version: 2 } }),
+  );
+  await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledTimes(2));
+  expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+    expect.objectContaining({ expectedVersion: 2, changes: { jurisdiction: "US-NY" } }),
+  );
+  expect(field).toHaveValue("US-NY");
+});
+it("keeps invalid drafts and makes absent collections explicitly None", async () => {
+  show();
+  const user = userEvent.setup();
+  await user.type(await screen.findByLabelText("Household size"), "0");
+  await user.tab();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Your edit is preserved");
+  expect(screen.getByLabelText("Household size")).toHaveValue(0);
+  expect(api.updateFinancialProfile).not.toHaveBeenCalled();
+  const none = screen.getAllByRole("button", { name: "None" })[0];
+  if (!none) throw new Error("Missing None action");
+  await user.click(none);
+  await waitFor(() =>
+    expect(api.updateFinancialProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ changes: { debts: [] } }),
+    ),
+  );
+});
+it("keeps incomplete collection rows local across section navigation", async () => {
+  show();
+  const user = userEvent.setup();
+  await screen.findByLabelText("Household size");
+  await user.click(screen.getByRole("button", { name: "Add debts" }));
+  await user.type(screen.getByLabelText("Name"), "Loan");
+  await user.click(screen.getByRole("button", { name: /Accounts and records/ }));
+  expect(api.updateFinancialProfile).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: /Profile Editable/ }));
+  expect(screen.getByLabelText("Name")).toHaveValue("Loan");
+});
+it("opens independent sections without mutations and retains a safe return link", async () => {
+  show("/finances/setup?section=budget&returnTo=%2Ffinances%2Fplan");
+  expect(await screen.findByRole("button", { name: "Prepare budget" })).toBeEnabled();
+  expect(screen.queryByRole("link", { name: "Continue" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Correct existing records" })).toHaveAttribute(
+    "href",
+    "/finances/transactions?financeTask=correct",
+  );
+  expect(screen.getByRole("link", { name: "Import records" })).toHaveAttribute(
+    "href",
+    "/finances/transactions?financeTask=import",
+  );
+  expect(api.setupFinances).not.toHaveBeenCalled();
+});
+it("keeps successful sections editable when a sibling read fails", async () => {
+  api.getFinanceConfiguration.mockResolvedValue({
+    ...configuration(),
+    income: { state: "unavailable" },
+  });
+  show();
+  expect(await screen.findByLabelText("Household size")).toBeEnabled();
+  expect(screen.getByRole("alert")).toHaveTextContent("Payroll details could not load");
+});
+it("does not show failed budget reads as missing setup", async () => {
+  api.getFinanceConfiguration.mockResolvedValue({
+    ...configuration(),
+    budget: { state: "unavailable" },
+  });
+  show("/finances/setup?section=budget");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Your budget could not load");
+  expect(screen.queryByRole("button", { name: "Prepare budget" })).not.toBeInTheDocument();
+});
+
+it("persists a return to the original value while its earlier save is pending", async () => {
+  let resolve: ((value: unknown) => void) | undefined;
+  api.getFinanceConfiguration.mockResolvedValue({
+    ...configuration(),
+    profile: { state: "loaded", value: { ...profile, jurisdiction: "US" } },
+  });
+  api.updateFinancialProfile.mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+  );
+  show();
+  const user = userEvent.setup();
+  const field = await screen.findByLabelText("Country and state or region");
+  await user.type(field, "-NY");
+  await user.tab();
+  await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledTimes(1));
+  await user.clear(field);
+  await user.type(field, "US");
+  await user.tab();
+  await act(async () =>
+    resolve?.({ outcome: "completed", data: { ...profile, jurisdiction: "US-NY", version: 2 } }),
+  );
+  await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledTimes(2));
+  expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+    expect.objectContaining({ changes: { jurisdiction: "US" } }),
+  );
+});
+it("saves calendar selections without requiring a subsequent input blur", async () => {
+  api.getFinanceConfiguration.mockResolvedValue({
+    ...configuration(),
+    profile: {
+      state: "loaded",
+      value: {
+        ...profile,
+        planning: {
+          recurringIncome: {
+            amountCents: null,
+            nextDate: "2026-10-01",
+            provenance: financeStatementSource,
+          },
+        },
+      },
+    },
+  });
+  show();
+  const user = userEvent.setup();
+  await screen.findByLabelText("Next reliable payment");
+  const field = screen.getByLabelText("Next reliable payment").closest('[data-slot="field"]');
+  if (!field) throw new Error("Missing date field");
+  await user.click(within(field as HTMLElement).getByRole("button", { name: "Choose date" }));
+  await user.click(screen.getByRole("button", { name: /Saturday, October 3rd, 2026/ }));
+  await waitFor(() =>
+    expect(api.updateFinancialProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changes: expect.objectContaining({
+          planning: expect.objectContaining({
+            recurringIncome: expect.objectContaining({ nextDate: "2026-10-03" }),
+          }),
+        }),
+      }),
+    ),
   );
 });
 
-it("preserves a confirmed failed answer and uses a new attempt key", async () => {
-  const user = userEvent.setup();
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  await user.type(await screen.findByLabelText("Where do you live for tax purposes?"), "Texas");
-  api.setupFinances.mockResolvedValueOnce({
-    ...setupResponse(),
-    outcome: "failed",
-    communication: {
-      headline: "Saved profile unavailable",
-      optionalDetails: [],
-      requiredDisclosures: [],
-    },
-  });
-  await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText("Saved profile unavailable")).toBeInTheDocument();
-  expect(screen.getByLabelText("Where do you live for tax purposes?")).toHaveValue("Texas");
-  const failedInput = api.setupFinances.mock.calls[1]?.[0];
-  await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(api.setupFinances.mock.calls[2]?.[0]).toEqual({
-    ...failedInput,
-    idempotencyKey: expect.any(String),
-  });
-  expect(api.setupFinances.mock.calls[2]?.[0].idempotencyKey).not.toBe(failedInput.idempotencyKey);
-});
-
-it("renders every resumable setup state and its conservative fallback evidence", async () => {
-  const user = userEvent.setup();
-  api.setupFinances
-    .mockResolvedValueOnce(
-      setupResponse({
-        question: {
-          id: "profile:income",
-          prompt: "What is your monthly income?",
-          answerType: "currency",
-        },
-      }),
+it("serializes payroll changes and preserves a revert during the first save", async () => {
+  const income = {
+    effectiveDate: "2026-10-06",
+    updatedAt: "2026-10-06T12:00:00.000Z",
+    employer: "Original",
+    role: null,
+    employmentType: null,
+    expectedNetPay: null,
+    grossAnnualIncome: null,
+    nextPayday: null,
+    payAccountId: null,
+    payFrequency: null,
+  };
+  let current = { ...configuration(), income: { state: "loaded" as const, value: income } };
+  api.getFinanceConfiguration.mockImplementation(async () => current);
+  let resolve: ((value: unknown) => void) | undefined;
+  api.updateFinanceProfile
+    .mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
     )
-    .mockRejectedValueOnce(new Error("previously failed; use a new idempotency key"))
-    .mockResolvedValueOnce({
-      ...setupResponse({
-        budgetVersionId,
-        maintenanceRunId: categoryId,
-        question: null,
-        stage: "settled",
-      }),
-      communication: {
-        headline: "Setup needs one review",
-        optionalDetails: ["One account still needs attention."],
-        requiredDisclosures: [],
-      },
-      outcome: "work_remaining",
-      remainingWork: { categories: ["review"], count: 1 },
-    })
-    .mockResolvedValueOnce(
-      setupResponse({
-        budgetVersionId,
-        maintenanceRunId: categoryId,
-        question: null,
-        stage: "initial_maintenance",
-      }),
-    );
-  api.getFinanceBudget.mockResolvedValue({
-    data: {
-      ...plan(),
-      resources: [{ key: "fallback", kind: "income", amount: 5000 }],
-      allocations: [
-        {
-          key: "legacy",
-          kind: "spending",
-          categoryId: null,
-          legacyCategory: "Household",
-          amount: 5000,
+    .mockImplementation(async (input) => {
+      current = {
+        ...current,
+        income: {
+          state: "loaded",
+          value: { ...income, ...input, updatedAt: "2026-10-06T12:00:02.000Z" },
         },
-      ],
-    },
-  });
-  api.maintainFinances
-    .mockResolvedValueOnce({
-      data: {
-        run: { id: categoryId, status: "awaiting_approval" },
-        challengeId: null,
-        nextAction: null,
-        recovery: null,
-      },
-      communication: {
-        headline: "Audit pending",
-        optionalDetails: ["One account still needs attention."],
-        requiredDisclosures: [{ message: "No changes were applied." }],
-      },
-      outcome: "work_remaining",
-      remainingWork: { categories: ["review"], count: 1 },
-    })
-    .mockRejectedValueOnce(new Error("Maintenance unavailable"));
-
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  expect(await screen.findByLabelText("What is your monthly income?")).toHaveAttribute(
-    "inputmode",
-    "decimal",
-  );
-  await user.type(screen.getByLabelText("What is your monthly income?"), "5000");
-  await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(
-    await screen.findByText(/Couldn’t confirm whether we could update financial setup/),
-  ).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Save answer" }));
-
-  expect(await screen.findByText("Setup progress")).toBeVisible();
-  expect(screen.getByText("fallback")).toBeVisible();
-  expect(screen.getByText(/spending · Household/)).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Setup details" }));
-  expect(screen.getByText("One account still needs attention.")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Resume saved progress" }));
-  await user.click(screen.getByRole("button", { name: "Check maintenance progress" }));
-  expect(api.maintainFinances).toHaveBeenCalledWith({ operation: "resume", runId: categoryId });
-  expect(await screen.findByText("Action approval required")).toBeVisible();
-  expect(screen.getByRole("link", { name: "Answer in Review" })).toBeVisible();
-  expect(screen.getByText("No changes were applied.")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Check maintenance progress" }));
-  expect(
-    await screen.findByText(/Couldn’t confirm whether we could run financial maintenance/),
-  ).toBeVisible();
-});
-
-it("prefers the canonical setup run and keeps blocked legacy recovery visible", async () => {
+      };
+      return current.income.value;
+    });
+  show();
   const user = userEvent.setup();
-  api.setupFinances.mockResolvedValue(
-    setupResponse({
-      stage: "initial_maintenance",
-      question: null,
-      maintenanceRunId: sessionId,
-      canonicalMaintenanceRunId: categoryId,
+  const field = await screen.findByLabelText("Employer");
+  await user.clear(field);
+  await user.type(field, "Changed");
+  await user.tab();
+  await waitFor(() => expect(api.updateFinanceProfile).toHaveBeenCalledTimes(1));
+  await user.clear(field);
+  await user.type(field, "Original");
+  await user.tab();
+  current = {
+    ...current,
+    income: {
+      state: "loaded",
+      value: { ...income, employer: "Changed", updatedAt: "2026-10-06T12:00:01.000Z" },
+    },
+  };
+  await act(async () => resolve?.(current.income.value));
+  await waitFor(() => expect(api.updateFinanceProfile).toHaveBeenCalledTimes(2));
+  expect(api.updateFinanceProfile).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      employer: "Original",
+      expectedUpdatedAt: "2026-10-06T12:00:01.000Z",
     }),
   );
-  api.maintainFinances.mockResolvedValue({
-    data: {
-      run: null,
-      challengeId: null,
-      nextAction: null,
-      recovery: {
-        legacyRunId: categoryId,
-        state: "blocked",
-        originalScope: { type: "since" },
-        throughDate: null,
-        reason: "Choose an explicit supported scope to recover this work.",
+});
+
+it("retains in-flight field ordering across section remounts", async () => {
+  let resolve: ((value: unknown) => void) | undefined;
+  api.getFinanceConfiguration.mockResolvedValue({
+    ...configuration(),
+    profile: { state: "loaded", value: { ...profile, jurisdiction: "US" } },
+  });
+  api.updateFinancialProfile.mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+  );
+  show();
+  const user = userEvent.setup();
+  await user.type(await screen.findByLabelText("Country and state or region"), "-NY");
+  await user.tab();
+  await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledTimes(1));
+  await user.click(screen.getByRole("button", { name: /Accounts and records/ }));
+  await user.click(screen.getByRole("button", { name: /Profile Editable/ }));
+  const field = screen.getByLabelText("Country and state or region");
+  await user.clear(field);
+  await user.type(field, "US");
+  await user.tab();
+  await act(async () =>
+    resolve?.({ outcome: "completed", data: { ...profile, jurisdiction: "US-NY", version: 2 } }),
+  );
+  await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledTimes(2));
+  expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+    expect.objectContaining({ changes: { jurisdiction: "US" }, expectedVersion: 2 }),
+  );
+});
+it("preserves sub-cent currency drafts without silently rounding or saving", async () => {
+  show();
+  const user = userEvent.setup();
+  await user.type(await screen.findByLabelText("Reliable monthly income"), "1.234");
+  await user.tab();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Your edit is preserved");
+  expect(api.updateFinancialProfile).not.toHaveBeenCalled();
+});
+
+it("saves reserve and income settings without overwriting sibling preferences", async () => {
+  let current = profile;
+  api.updateFinancialProfile.mockImplementation(async (input) => {
+    current = { ...current, ...input.changes, version: input.expectedVersion + 1 };
+    return { outcome: "completed", data: current };
+  });
+  show();
+  const user = userEvent.setup();
+  await screen.findByLabelText("Household size");
+  for (const [label, value, changes] of [
+    ["Expected monthly take-home", "4200", { expectedMonthlyTakeHome: 4200 }],
+    [
+      "Reliable monthly income",
+      "4000",
+      {
+        planning: expect.objectContaining({
+          recurringIncome: expect.objectContaining({ amountCents: 400000 }),
+        }),
+      },
+    ],
+    ["Liquid reserves", "12000", { liquidReserves: 12000 }],
+    ["Monthly buffer", "250", { preferences: expect.objectContaining({ bufferTarget: 250 }) }],
+    [
+      "Reserve target (months)",
+      "6",
+      { preferences: expect.objectContaining({ bufferTarget: 250, emergencyReserveMonths: 6 }) },
+    ],
+    [
+      "Planning notes",
+      "Keep a buffer",
+      {
+        preferences: expect.objectContaining({
+          notes: ["Keep a buffer"],
+          emergencyReserveMonths: 6,
+        }),
+      },
+    ],
+  ] as const) {
+    await user.type(screen.getByLabelText(label), value);
+    await user.tab();
+    await waitFor(() =>
+      expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+        expect.objectContaining({ changes }),
+      ),
+    );
+  }
+  await user.selectOptions(screen.getByLabelText("Income stability"), "variable");
+  await waitFor(() =>
+    expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({ changes: { incomeStability: "variable" } }),
+    ),
+  );
+  await user.selectOptions(screen.getByLabelText("Debt priority"), "avalanche");
+  await waitFor(() =>
+    expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        changes: {
+          preferences: expect.objectContaining({ debtPriority: "avalanche", bufferTarget: 250 }),
+        },
+      }),
+    ),
+  );
+});
+it("creates and removes debt rows while retaining recorded debt metadata", async () => {
+  const saved = {
+    ...profile,
+    debts: [
+      { name: "Loan", balance: 500, minimumMonthlyPayment: 20, interestRate: 4, accountId: null },
+    ],
+  };
+  api.getFinanceConfiguration.mockResolvedValue({
+    ...configuration(),
+    profile: { state: "loaded", value: saved },
+  });
+  api.listFinanceAccounts.mockResolvedValue({ accounts: [{ id, name: "Credit card" }] });
+  show();
+  const user = userEvent.setup();
+  const row = await screen.findByRole("group", { name: "debts entry" });
+  await user.clear(within(row).getByLabelText("Balance"));
+  await user.type(within(row).getByLabelText("Balance"), "600");
+  await user.selectOptions(within(row).getByLabelText("Debt account"), id);
+  await user.click(screen.getByLabelText("Planning notes"));
+  await waitFor(() =>
+    expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        changes: {
+          debts: [
+            expect.objectContaining({ name: "Loan", balance: 600, interestRate: 4, accountId: id }),
+          ],
+        },
+      }),
+    ),
+  );
+  await user.click(screen.getByRole("button", { name: "Remove Loan" }));
+  await waitFor(() =>
+    expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({ changes: { debts: [] } }),
+    ),
+  );
+});
+it.each([
+  ["Bills and minimum payments", "obligations"],
+  ["Other possible income", "uncertainIncome"],
+  ["One-time resources", "exceptionalResources"],
+  ["Spending priorities", "priorities"],
+] as const)("saves and removes %s rows", async (title, kind) => {
+  show();
+  const user = userEvent.setup();
+  await screen.findByLabelText("Household size");
+  await user.click(screen.getByRole("button", { name: `Add ${title.toLowerCase()}` }));
+  const row = screen.getByRole("group", { name: `${kind} entry` });
+  await user.type(within(row).getByLabelText("Name"), "Planned item");
+  await user.type(within(row).getByLabelText(/^(Expected|Monthly) amount$/), "125");
+  const day = within(row).queryByLabelText("Due day of month");
+  if (day) await user.type(day, "15");
+  if (kind === "priorities") await user.click(within(row).getByRole("switch"));
+  await user.click(screen.getByLabelText("Planning notes"));
+  await waitFor(() =>
+    expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        changes: {
+          planning: expect.objectContaining({
+            [kind]: [
+              expect.objectContaining({
+                name: "Planned item",
+                amountCents: 12500,
+                ...(kind === "priorities" ? { protected: true } : {}),
+              }),
+            ],
+          }),
+        },
+      }),
+    ),
+  );
+  await user.click(screen.getByRole("button", { name: "Remove Planned item" }));
+  await waitFor(() =>
+    expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+      expect.objectContaining({ changes: { planning: expect.objectContaining({ [kind]: [] }) } }),
+    ),
+  );
+});
+it("requires a goal before saving contributions and preserves a failed collection draft for retry", async () => {
+  api.listFinanceGoals.mockResolvedValue({ outcome: "completed", data: [{ id, name: "Reserve" }] });
+  show();
+  const user = userEvent.setup();
+  await screen.findByLabelText("Household size");
+  await user.click(screen.getByRole("button", { name: "Add goal contributions" }));
+  const row = screen.getByRole("group", { name: "contributions entry" });
+  await user.type(within(row).getByLabelText("Name"), "Emergency savings");
+  await user.type(within(row).getByLabelText("Monthly amount"), "100");
+  await user.click(screen.getByLabelText("Planning notes"));
+  expect(api.updateFinancialProfile).not.toHaveBeenCalled();
+  await user.selectOptions(within(row).getByLabelText("Goal"), id);
+  api.updateFinancialProfile.mockRejectedValueOnce(new Error("Offline"));
+  await user.click(screen.getByLabelText("Planning notes"));
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("edits are preserved");
+  await user.click(within(alert).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(api.updateFinancialProfile).toHaveBeenCalledTimes(2));
+  expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      changes: {
+        planning: expect.objectContaining({
+          contributions: [expect.objectContaining({ goalId: id, amountCents: 10000 })],
+        }),
+      },
+    }),
+  );
+});
+
+it("prepares a budget only after an explicit action and refreshes saved configuration", async () => {
+  api.setupFinances.mockResolvedValue({
+    outcome: "completed",
+    data: {},
+    communication: {
+      headline: "Prepared",
+      requiredDisclosures: [{ message: "Review before approval" }],
+      optionalDetails: [],
+    },
+  });
+  show("/finances/setup?section=budget");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Prepare budget" }));
+  await waitFor(() =>
+    expect(api.setupFinances).toHaveBeenCalledWith({ operation: "prepare_budget" }),
+  );
+  expect(await screen.findByText("Review before approval")).toBeVisible();
+  await waitFor(() => expect(api.getFinanceConfiguration).toHaveBeenCalledTimes(2));
+});
+it.each([
+  "all",
+  "profile",
+  "income",
+  "accounts",
+  "execution",
+  "budget",
+] as const)("retries unavailable %s configuration without creating a budget", async (part) => {
+  if (part === "all") api.getFinanceConfiguration.mockRejectedValueOnce(new Error("Offline"));
+  else
+    api.getFinanceConfiguration.mockResolvedValueOnce({
+      ...configuration(),
+      [part]: { state: "unavailable" },
+    });
+  const section =
+    part === "accounts" || part === "execution"
+      ? "accounts"
+      : part === "budget"
+        ? "budget"
+        : "profile";
+  show(`/finances/setup?section=${section}`);
+  const user = userEvent.setup();
+  const retry = (await screen.findAllByRole("button", { name: "Retry" }))[0];
+  if (!retry) throw new Error("Missing recovery action");
+  await user.click(retry);
+  await waitFor(() =>
+    expect(api.getFinanceConfiguration.mock.calls.length).toBeGreaterThanOrEqual(2),
+  );
+  expect(api.setupFinances).not.toHaveBeenCalled();
+});
+it("renders account connection states and links an existing budget", async () => {
+  const config = configuration();
+  if (config.accounts.state !== "loaded") throw new Error("Missing fixture");
+  api.getFinanceConfiguration.mockResolvedValue({
+    ...config,
+    accounts: {
+      state: "loaded",
+      value: {
+        ...config.accounts.value,
+        accounts: [
+          { id: "a", name: "Savings", status: "needs_reauth" },
+          { id: "b", name: "Cash", status: "manual" },
+          { id: "c", name: "Card", status: "connected" },
+        ],
       },
     },
-    communication: { headline: "Saved maintenance needs recovery.", requiredDisclosures: [] },
-    outcome: "work_remaining",
+    budget: { state: "loaded", value: { id } },
   });
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  await user.click(await screen.findByRole("button", { name: "Check maintenance progress" }));
-  expect(api.maintainFinances).toHaveBeenCalledWith({ operation: "resume", runId: categoryId });
-  expect(await screen.findByText("Maintenance recovery")).toBeVisible();
+  show("/finances/setup?section=accounts&returnTo=https%3A%2F%2Fevil.test");
+  expect(await screen.findByText("Reconnect required")).toBeVisible();
+  expect(screen.getByText("Manual account")).toBeVisible();
+  expect(screen.getByText("Connected")).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Return to previous page" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /Budget Draft/ }));
+  expect(screen.getByRole("link", { name: "Open budget" })).toHaveAttribute(
+    "href",
+    "/finances/plan?financeTask=approve",
+  );
+});
+it("retries a rejected payroll change without losing the draft", async () => {
+  api.updateFinanceProfile
+    .mockRejectedValueOnce(new Error("Offline"))
+    .mockImplementation(async (input) => ({ ...input, updatedAt: "2026-10-06T12:00:00Z" }));
+  show();
+  const user = userEvent.setup();
+  await user.type(await screen.findByLabelText("Expected net paycheck"), "2000");
+  await user.tab();
+  const alert = await screen.findByRole("alert");
+  expect(screen.getByLabelText("Expected net paycheck")).toHaveValue("2,000.00");
+  await user.click(within(alert).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(api.updateFinanceProfile).toHaveBeenCalledTimes(2));
+  expect(api.updateFinanceProfile).toHaveBeenLastCalledWith(
+    expect.objectContaining({ expectedNetPay: 2000 }),
+  );
+});
+it.each([
+  "Country and state or region",
+  "Expected net paycheck",
+])("discards the failed %s draft when reloading saved information", async (label) => {
+  api.updateFinancialProfile.mockRejectedValue(new Error("Offline"));
+  api.updateFinanceProfile.mockRejectedValue(new Error("Offline"));
+  show();
+  const user = userEvent.setup();
+  const field = await screen.findByLabelText(label);
+  await user.type(field, label === "Expected net paycheck" ? "2000" : "US-NY");
+  await user.tab();
+  const alert = await screen.findByRole("alert");
+  await user.click(within(alert).getByRole("button", { name: "Reload saved information" }));
+  await waitFor(() => expect(field).toHaveValue(""));
+  await user.click(field);
+  await user.tab();
   expect(
-    screen.getByText("Choose an explicit supported scope to recover this work."),
+    api.updateFinancialProfile.mock.calls.length + api.updateFinanceProfile.mock.calls.length,
+  ).toBe(1);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("uses the real onboarding API adapter by default and advances only on server receipts", async () => {
+  show();
+  const user = userEvent.setup();
+  await user.selectOptions(await screen.findByLabelText("Review saved income"), "unknown");
+  await user.click(screen.getByRole("checkbox", { name: "I reviewed my display preferences" }));
+  await user.click(screen.getByRole("radio", { name: "Use Finance manually" }));
+  const saved = {
+    ...onboarding(),
+    revision: 2,
+    automationChoice: "later" as const,
+    displayPreferences: { reviewed: true, summary: [] },
+    questions: onboarding().questions.map((q) => ({ ...q, disposition: "unknown" as const })),
+  };
+  api.saveFinanceOnboardingAnswers.mockResolvedValue(saved);
+  await user.click(screen.getByRole("button", { name: "Save review" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Finish setup" })).toBeEnabled());
+  expect(api.saveFinanceOnboardingAnswers).toHaveBeenCalledWith({
+    expectedRevision: 1,
+    idempotencyKey: expect.any(String),
+    automationChoice: "later",
+    displayPreferencesReviewed: true,
+    answers: [{ questionId: "profile:income", disposition: "unknown" }],
+  });
+  let finish!: (value: FinanceOnboardingSnapshot) => void;
+  api.completeFinanceOnboarding.mockReturnValue(
+    new Promise<FinanceOnboardingSnapshot>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Finish setup" }));
+  expect(
+    screen.queryByText("Setup complete. Your workspace remains available."),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Reload setup review" })).toBeDisabled();
+  expect(api.completeFinanceOnboarding).toHaveBeenCalledWith({
+    expectedRevision: 2,
+    idempotencyKey: expect.any(String),
+    automationChoice: "later",
+  });
+  await act(async () => finish({ ...saved, revision: 3, completedAt: "2026-10-18T12:00:00Z" }));
+  expect(
+    await screen.findByText("Setup complete. Your workspace remains available."),
   ).toBeVisible();
-  expect(screen.queryByText("Setup complete")).not.toBeInTheDocument();
+});
+
+it("preserves an explicitly injected durable adapter without calling the default API", async () => {
+  const adapter = {
+    getFinanceOnboarding: vi.fn().mockResolvedValue(onboarding()),
+    saveFinanceOnboardingAnswers: vi.fn(),
+    completeFinanceOnboarding: vi.fn(),
+  };
+  show("/finances/setup", adapter);
+  await screen.findByLabelText("Review saved income");
+  expect(adapter.getFinanceOnboarding).toHaveBeenCalledTimes(1);
+  expect(api.getFinanceOnboarding).not.toHaveBeenCalled();
+});
+it("allows explicit null only when a composition stages setup review separately", async () => {
+  show("/finances/setup", null);
+  await screen.findByLabelText("Household size");
+  expect(screen.queryByRole("region", { name: "Setup review" })).not.toBeInTheDocument();
+  expect(api.getFinanceOnboarding).not.toHaveBeenCalled();
 });
 
 it.each([
-  "legacy",
-  "canonical",
-])("honors a new start despite a retained %s run ID", async (kind) => {
-  const user = userEvent.setup();
-  const response = setupResponse({
-    stage: "initial_maintenance",
-    question: null,
-    maintenanceRunId: sessionId,
-    canonicalMaintenanceRunId: kind === "canonical" ? categoryId : null,
+  ["/finances/plan?financeTask=approve", "/finances/plan?financeTask=approve"],
+  ["https://evil.test", "/finances"],
+  ["/finances/setup", "/finances"],
+])("continues to a validated destination only after durable completion: %s", async (returnTo, expected) => {
+  api.getFinanceOnboarding.mockResolvedValue({
+    ...onboarding(),
+    completedAt: "2026-10-18T12:00:00Z",
+    automationChoice: "later",
   });
-  response.nextAction = {
-    tool: "maintain_finances",
-    arguments: { operation: "start", scope: { type: "all_outstanding" } },
-    reason: "The previous run is historical. Start current maintenance.",
-  };
-  api.setupFinances.mockResolvedValue(response);
-  api.maintainFinances.mockResolvedValue({
-    data: {
-      run: { id: budgetVersionId, status: "running" },
-      challengeId: null,
-      nextAction: null,
-      recovery: null,
-    },
-    communication: { headline: "Current maintenance started.", requiredDisclosures: [] },
-    outcome: "work_remaining",
-  });
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  await user.click(await screen.findByRole("button", { name: "Start initial maintenance" }));
-  expect(api.maintainFinances).toHaveBeenCalledWith({
-    operation: "start",
-    scope: { type: "all_outstanding" },
-  });
-  await user.click(await screen.findByRole("button", { name: "Check maintenance progress" }));
-  expect(api.maintainFinances).toHaveBeenLastCalledWith({
-    operation: "resume",
-    runId: budgetVersionId,
-  });
+  show(`/finances/setup?returnTo=${encodeURIComponent(returnTo)}`);
+  expect(await screen.findByRole("link", { name: "Continue" })).toHaveAttribute("href", expected);
 });
-
-it("does not execute retained IDs without an authoritative maintenance action", async () => {
-  const user = userEvent.setup();
-  const response = setupResponse({
-    stage: "initial_maintenance",
-    question: null,
-    canonicalMaintenanceRunId: categoryId,
-    maintenanceRunId: sessionId,
-  });
-  delete response.nextAction;
-  api.setupFinances.mockResolvedValue(response);
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  expect(await screen.findByRole("button", { name: "Start initial maintenance" })).toBeDisabled();
-  expect(api.maintainFinances).not.toHaveBeenCalled();
-});
-
-it("refreshes the maintenance instruction after a terminal result even when setup version is unchanged", async () => {
-  const user = userEvent.setup();
-  api.setupFinances.mockResolvedValue(
-    setupResponse({ stage: "initial_maintenance", question: null }),
-  );
-  api.maintainFinances.mockResolvedValue({
-    data: {
-      run: { id: categoryId, status: "completed_with_questions" },
-      challengeId: null,
-      nextAction: null,
-      recovery: null,
-    },
-    communication: { headline: "Questions remain.", requiredDisclosures: [] },
-    outcome: "user_input_required",
-  });
-  mount();
-  await user.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  await user.click(await screen.findByRole("button", { name: "Start initial maintenance" }));
-  expect(await screen.findByText("Maintenance complete with questions")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Resume saved progress" }));
-  await user.click(await screen.findByRole("button", { name: "Start initial maintenance" }));
-  expect(api.maintainFinances).toHaveBeenLastCalledWith({
-    operation: "start",
-    scope: { type: "all_outstanding" },
-  });
-});
-
-it("skips without inventing an answer and keeps incomplete deficit plans unapprovable", async () => {
-  mount();
-  await userEvent.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  await screen.findByLabelText("Where do you live for tax purposes?");
-  api.getFinanceBudget.mockResolvedValue({
-    data: { ...plan(), status: "incomplete", balanceDelta: -250, allocatedTotal: 5250 },
-  });
-  api.setupFinances.mockResolvedValue(
-    setupResponse({ stage: "budget_proposal", question: null, budgetVersionId, version: 8 }),
-  );
-  await userEvent.click(screen.getByRole("button", { name: "Skip for now — keep unknown" }));
-  expect(api.setupFinances).toHaveBeenLastCalledWith({
-    operation: "skip",
-    sessionId,
-    questionId: "profile:location",
-    expectedVersion: 7,
-    idempotencyKey: expect.any(String),
-  });
-  expect(
-    await screen.findByText("First plan saved; evidence remains incomplete"),
-  ).toBeInTheDocument();
-  expect(await screen.findByText("Unfunded known needs: $250.00")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument();
-});
-
-it("submits structured income without turning an unknown payment date into a fact", async () => {
-  api.setupFinances.mockResolvedValue(
-    setupResponse({
-      question: {
-        id: "planning:recurringIncome",
-        prompt: "Reliable income",
-        answerType: "planning:recurringIncome",
-      },
-    }),
-  );
-  mount();
-  await userEvent.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  await userEvent.type(await screen.findByLabelText("Reliable monthly take-home (USD)"), "1000.25");
-  await userEvent.click(screen.getByRole("button", { name: "Save answer" }));
-  await waitFor(() =>
-    expect(api.setupFinances).toHaveBeenLastCalledWith({
-      operation: "answer",
-      sessionId,
-      questionId: "planning:recurringIncome",
-      expectedVersion: 7,
-      answer: JSON.stringify({ amountCents: 100025, nextDate: null }),
-      idempotencyKey: expect.any(String),
-    }),
-  );
-});
-
-it("keeps setup recoverable when plan and category reads fail", async () => {
-  api.setupFinances.mockResolvedValue(
-    setupResponse({ stage: "budget_proposal", question: null, budgetVersionId }),
-  );
-  api.getFinanceBudget.mockRejectedValue(new Error("Plan unavailable"));
-  api.getFinanceCategories.mockRejectedValue(new Error("Categories unavailable"));
-  mount();
-  await userEvent.click(screen.getByRole("button", { name: "Start or resume setup" }));
-  expect(await screen.findAllByText("Couldn’t load this material.")).toHaveLength(2);
-  expect(screen.getByRole("link", { name: "Continue bookkeeping" })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument();
+it("keeps grandfathered access distinct from completed setup navigation", async () => {
+  api.getFinanceOnboarding.mockResolvedValue({ ...onboarding(), existingAccess: true });
+  show("/finances/setup?returnTo=%2Ffinances%2Fplan");
+  await screen.findByRole("radiogroup", { name: "Initial Finance mode" });
+  expect(screen.queryByRole("link", { name: "Continue" })).not.toBeInTheDocument();
 });

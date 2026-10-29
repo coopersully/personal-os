@@ -1,5 +1,11 @@
 # nohmi workspaces and interfaces
 
+> October 18 Finance experience revision: the consolidated [design](../superpowers/specs/2026-10-18-finance-experience-design.md)
+> and [implementation plan](../superpowers/plans/2026-10-18-finance-experience.md) define the target for setup,
+> Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
+> earlier setup targets below. The current [Finance review-bypass policy](../design/pages/finances.md#accepted-direction-approvals-and-finance-activity) supersedes the budget-only human approval exception. This is not a
+> declaration that the redesigned experience has shipped.
+
 - Status: Target product contract; current implementation is recorded separately
 - Last reconciled: 2026-09-10
 
@@ -53,6 +59,39 @@ publish concise SMS results and questions through Texting according to the perso
 per-workspace settings. The complete contracts are
 [`texting and SMS`](texting-operations.md) and
 [`per-workspace settings`](workspace-settings.md).
+
+## Agent parity verification
+
+Every supported workspace capability must have a documented typed agent path or a named
+provider-consent, security, or unsupported-capability boundary. Coverage includes settings,
+search, reviews, history, and recovery as well as ordinary domain records. Test each operation
+through MCP into the authenticated API and real persistence, with the documented behavior under
+both review-bypass settings. Registration tests and mocked API success do not establish working
+parity; verify returned data, persisted effects, ownership, and recovery outcomes. Provider runtime
+verification remains separate from deterministic tests.
+
+MCP coverage is measured by complete user outcomes and all supported operation variants, not by
+the number of tools. Tool names, typed arguments, lifecycle verbs, pagination, revisions, and
+recovery instructions must form a coherent interface across workspaces. Each operation has an
+executable example and a mapped execution test; a declared or skipped test does not establish
+coverage. Existing interface exceptions require explicit documentation and intentional migration.
+
+The [cross-workspace parity design](../superpowers/specs/2026-10-11-workspace-agent-parity-design.md)
+and [implementation plan](../superpowers/plans/2026-10-11-workspace-agent-parity.md) describe the
+approved implementation scope. The [capability inventory](../engineering/workspace-agent-capabilities.md)
+and [execution evidence](../engineering/workspace-agent-execution.md) distinguish branch-local
+implementation and verification from production deployment and provider consent.
+
+## Workspace search
+
+Each workspace has one first-class search entry in its header. It searches the workspace's
+records, settings fields, navigation, actions, and open reviews, independently of the current
+page filters. Calendar also recognizes dates and days. A result opens its existing record view,
+settings field, editor, or review flow; search never silently executes a write. Results identify
+archived/completed items and hidden calendar sources, exclude deleted/trash content, and describe
+available synced data rather than implying a live provider-wide search. The same interaction,
+result groups, and keyboard behavior apply across all four workspaces, with inline results in
+the shared mobile search drawer. Details live in the [design system](../design/system.md#workspace-discovery).
 
 ## Mail
 
@@ -164,11 +203,32 @@ without obscuring provider truth.
 
 ## Finances
 
+Finances is designed as an automated financial assistant with a strong analytical foundation. Use
+available authorized context to make money understandable through visual exploration, explainable
+patterns, evidence-backed forecasts, and hypothetical scenarios. Collect additional context for a
+clear user benefit, not merely because it might be interesting. Manual operation remains supported;
+agent maintenance is the intended way to keep the workspace useful and current. See
+[Finance intelligence and visual exploration](finance-workspace-plan.md#finance-intelligence-and-visual-exploration)
+for the durable motivation, evidence standards, and human decision boundary.
+
 The [Finance MVP specification](finance-workspace-plan.md) defines the first complete delivery
 journey against this larger target. Both Codex and Claude must support separately verified
 maintenance and two-way Finance SMS at launch, including durable answers and continuation after
 the original agent session ends. Users retain equivalent inspection and manual correction in the
 app. Shared Texting owns the conversation; Finance owns meaning, policy and bookkeeping.
+
+An explicit `Finance:` or `Finance context:` SMS records the person's note verbatim as prospective
+context. It does not infer an amount, recipient, matching transaction or bookkeeping change. An
+unbound ambiguous reply requires clarification. Acknowledgments confirm durable domain receipts;
+quiet hours, consent, delivery limits and uncertain provider submission remain visible pending
+states. Acknowledging an answer does not claim that its maintenance run has finished.
+
+SMS may approve or reject one exact, current, reversible transaction categorization after its
+complete safe proposal and numbered choices have been delivered. It cannot create a permanent
+merchant rule, change budget authority, credentials, recipients or connection scopes, or approve
+an entire maintenance batch. Those decisions require the authenticated app. Stale proposals never
+apply through an old SMS binding.
+
 
 ### Goal
 
@@ -248,3 +308,48 @@ separate and report their own honest result.
 This document defines the complete target. The implementation log, current API and MCP contracts,
 database migrations, tests, and production evidence determine what is shipped; documentation and
 interfaces must never present target behavior as available before those sources agree.
+
+Calendar opening preferences are account-owned: remember the selected Day/Week/Month view,
+open today in that view, and automatically follow the current time by default. People may disable
+automatic Follow to start at midnight instead. Explicit links to events, dates, views, or a Follow
+state retain their intent. Snap-to-follow can be disabled independently, with Precise, Balanced,
+and Generous sensitivity when enabled. These preferences belong in Calendar settings and search.
+
+### Finance configuration and prerequisites
+
+Finance's resumable setup gate merged in
+[PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270).
+Ordinary workspace entry requires recorded completion or the persisted migration-time existing-access
+grant. Loading and failed reads grant neither. Existing access preserves read/correction workflows
+without manufacturing completion or messaging authority. The
+[onboarding contract](../design/pages/finance-onboarding-review.md) owns the exact readiness rules.
+
+People review financial context and display preferences, connect a usable or syncing source, and
+choose automation now or later. Unknown answers remain valid where supported; a budget is never a
+setup prerequisite. Manual-later completion keeps Chat visible with sending locked until its own
+registration, verification, and capability requirements pass. Completed setup does not restart when
+sources or messaging later fail.
+
+Profile, accounts/records, and budget retain independent canonical editors. Setup and Finance
+Settings share fields and mutation contracts; versioned financial facts, effective-dated payroll,
+and workspace preferences keep their authoritative stores. Explicit preparation, exact human budget
+approval, and record-check actions remain separate. This replaces the earlier ungated-access target,
+not the independence of the underlying records. Source implementation does not establish production
+or external-host acceptance; see the [implementation log](implementation-log.md).
+
+Finance navigation and disclosure: Financial profile owns durable planning inputs; Accounts owns
+connection health and account corrections; Transactions owns pending activity and transaction
+checks. Import opens in a responsive flow from a labeled header action alongside Export. The
+standalone Ledger health page is retired without dropping its checks. Budget displays each amount
+and assumption once, with visible blocking gaps and expandable supporting detail. Sidebar counts
+and attention indicators describe live connected accounts, missing planning inputs, and budget
+proposals awaiting approval; optional profile blanks and ordinary pending activity are not errors.
+
+Finance refinements: Accounts navigation counts all tracked accounts, including manual ones, and reflects unresolved ownership, missing balances, duplicate concerns, and connection freshness. Wealth shows current KPI cards without duplicating account records. Historical wealth views remain deferred pending reliable recorded balance history. Transaction pending/review shortcuts are omitted; only nonzero diagnostics not guaranteed to enter Reviews remain available on Transactions.
+
+Finance collection creation is contextual: transaction, account, budget bucket, and goal Add controls live in their collection card headers. Account attention is expressed on its record instead of a separate warning card. Posting state and decision-review state remain independent concepts and URL controls.
+
+Finance backlog assessment, canonical profile precedence, grouped evidence and bounded execution
+follow [Finance review backlog](finance-review-backlog.md). Historical outstanding work and
+selected-period spending are separate scopes; an agent must never report a bounded page as a
+complete backlog or clear review records solely to reduce a count.

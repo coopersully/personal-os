@@ -133,13 +133,14 @@ fit within the API deadline without retrying an unbounded provider workflow.
 The durable commit point is a `finance_account_connections` row in `pending` state, created before
 the provider request. A successful provider response stores the short-lived handoff artifact and
 its expiry before returning it. Provider rejection or transport failure changes the attempt to
-`failed` with a redacted, retryable error. Completed exchange changes it to `connected`; expired
+`failed` with a redacted error requiring a new attempt. Replay of the same key never repeats
+the provider request. Completed exchange changes it to `connected`; expired
 artifacts remain observable as pending-but-expired and require a new connection attempt. Process
 loss after the pending commit is therefore visible and recoverable rather than indistinguishable
 from a request that never started.
 
-API and MCP structured content may expose only the short-lived authorization artifact, provider,
-and expiry. It must never contain Plaid access tokens, refresh tokens, encrypted credentials, or
+Only execution-authorized start/completion responses may expose the short-lived authorization
+artifact, provider and expiry. Ordinary connection-status reads redact the bearer artifact. It must never contain Plaid access tokens, refresh tokens, encrypted credentials, or
 raw provider errors. Idempotency is scoped to the user and requested attempt; a failed attempt is
 retried with a new key, while replay of a completed key returns the original result.
 
@@ -147,3 +148,43 @@ Behavior coverage must prove pending persistence, success metadata, expiry, reda
 idempotent replay. Production-equivalent evidence must separately prove runtime authority,
 outbound HTTPS reachability, Link configuration, callback correctness, and successful transition
 from a handoff to connected accounts. Green mock tests do not prove any of those runtime facts.
+
+## Ritual optional-step follow-ups
+
+The ritual API owns acceptance of optional follow-ups. A human-session completion action authorizes
+up to 20 owner-scoped native Reminder rows in the same PostgreSQL transaction as ritual completion
+and its idempotency receipt. No new provider, port, credential, or recurring scheduler is introduced.
+The desktop coordinator fetches these reminders over the existing authenticated HTTPS API and uses
+the existing OS reminder scheduling path, preferences, quiet hours, and permission checks.
+
+The database commit is the acceptance point. Failure before commit rolls back completion and every
+reminder; replay returns the stored outcome without creating duplicates. The encrypted desktop
+queue holds offline intent, labels it pending sync, and uses existing conflict/export/discard
+recovery when a ritual expires or changes before synchronization. An accepted late reminder is
+moved to at least one minute after API acceptance so it remains eligible for scheduling. Requests
+are bounded to a time within 26 hours of the observed completion (including a DST fall-back day).
+Redacted reminder audit events link the occurrence without copying answers or step labels.
+
+Unit, database integration, and native tests establish acceptance and replay behavior. OS delivery
+can still fail with green tests if notifications are disabled, the Mac is asleep, the coordinator
+cannot refresh, or the OS refuses presentation. A rebuilt desktop app and an authorized real-device
+notification smoke are required before claiming production notification delivery for this change.
+
+
+## Browser ritual presentation
+
+The authenticated ritual API remains the authority for browser and desktop occurrences, revisions,
+responses, and actions. The browser uses its existing session transport and the configured app/API
+origin; it introduces no provider, port, permission, or screen-capture dependency. Read the current
+state every ten seconds while visible and on focus/reconnection. Browser timers may be throttled
+or suspended, so anchor snooze/expiry to server time plus monotonic elapsed time and refresh on
+return. A closed tab cannot deliver a ritual.
+
+A successful mutation response is the commit evidence; browser writes do not cross the native
+queue and cannot claim offline acceptance. Cancel old reads before accepting mutation state and
+scope caches to the authenticated owner. Existing denial handling clears private ritual state on read 401/403 and expired-session mutations;
+late writes cannot populate a replacement account's cache. Read failures retain the last known
+window only until expiry, expose Sonner retry feedback without repeated polling toasts, and never
+claim completion. Mutation failures preserve the shared checklist's correction/retry behavior.
+Shared revisions resolve races with other tabs and desktop; refresh settles the other view.
+Actual browser background scheduling and native macOS window delivery still require runtime checks.

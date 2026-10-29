@@ -1,8 +1,12 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
+import { createApiClient } from "@personal-os/api-client";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { loadQaFixtures } from "../apps/api/src/qa-fixtures.js";
+import { loadQaFixtures, qaFixtureAccounts } from "../apps/api/src/qa-fixtures.js";
 import { createDatabaseClient } from "../packages/database/src/index.js";
+import { completeFinanceSetupViaApi } from "./finance-setup-fixtures.js";
+import { prepareFinanceLegacyMigrationFixture } from "./finance-setup-legacy.js";
 
 const root = resolve(import.meta.dirname, "..");
 const apiPort = process.env.ILO_E2E_API_PORT ?? "8797";
@@ -63,11 +67,25 @@ try {
     .withPassword("personal_os")
     .withUsername("personal_os")
     .start();
+  const historicalDatabase = createDatabaseClient(postgres.getConnectionUri());
+  try {
+    await prepareFinanceLegacyMigrationFixture(
+      historicalDatabase,
+      resolve(root, "packages/database/migrations"),
+    );
+  } finally {
+    await historicalDatabase.close();
+  }
+  // Normal API startup now applies the actual published legacy migration and
+  // every later journal entry to the canonical historical records above.
   api = start("pnpm", ["--filter", "@personal-os/api", "exec", "tsx", "src/main.ts"], {
     ALLOWED_ORIGINS: webUrl,
     API_BASE_URL: apiUrl,
     APP_BASE_URL: webUrl,
     APP_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+    // Browser cases use fresh sessions but share one loopback client address.
+    // Rate-limit enforcement is covered independently by API tests.
+    AUTH_RATE_LIMIT_MAX_REQUESTS: "1000",
     DATABASE_URL: postgres.getConnectionUri(),
     GOOGLE_REDIRECT_URI: `${apiUrl}/v1/connectors/google/callback`,
     X_REDIRECT_URI: `${apiUrl}/v1/x-bookmarks/callback`,
@@ -83,6 +101,20 @@ try {
   } finally {
     await fixtureDatabase.close();
   }
+  // Post-migration records are not legacy access. Prepare populated browser
+  // personas through canonical ownership/review/completion HTTP writers instead.
+  // Empty and recovery personas retain their actual incomplete/recovery state.
+  for (const key of ["demo-full", "qa-loaded"]) {
+    const account = qaFixtureAccounts.find((candidate) => candidate.key === key);
+    if (!account) throw new Error(`Missing browser fixture ${key}`);
+    const human = createApiClient({ baseUrl: apiUrl });
+    await human.login({ email: account.email, password: account.password });
+    await completeFinanceSetupViaApi(human);
+  }
+  // Browser CI starts from a clean checkout without generated public HTML.
+  await promisify(execFile)("pnpm", ["--filter", "@personal-os/web", "public:generate"], {
+    cwd: root,
+  });
   web = start(
     "pnpm",
     [

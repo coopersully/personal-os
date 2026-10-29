@@ -1,18 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import {
-  agentAccessWorkItemSnapshots,
-  attentionItems,
-  calendarAccounts,
-  type Database,
-  domainProfiles,
-  financeAccounts,
-  financeAgentActionReviews,
-  financeReviewCases,
-  financeTransactions,
-  mailRules,
-  mailStewardshipQuestions,
-  workspaceMaintenanceRuns,
-} from "@personal-os/database";
+import { agentAccessWorkItemSnapshots, type Database } from "@personal-os/database";
 import {
   type AgentAccessDomain,
   type AgentAccessWorkItem,
@@ -24,52 +11,13 @@ import {
   agentAccessDomains,
   featureAccessPolicies,
 } from "@personal-os/domain";
-import { and, eq, gt, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gt, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "./errors.js";
-import { readFinanceContextualWork } from "./finance/contextual-question-projection.js";
-import { readFinanceEffectWork } from "./finance/review-effect-projection.js";
-import type { Principal } from "./types.js";
-
-type SourceInput = { snapshotAt: Date; userId: string };
-type SourceReaders = {
-  accounts: (input: SourceInput) => Promise<Array<typeof calendarAccounts.$inferSelect>>;
-  attention: (input: SourceInput) => Promise<Array<typeof attentionItems.$inferSelect>>;
-  financeEffects: (input: SourceInput) => Promise<AgentAccessWorkItem[]>;
-  financeAccounts: (input: SourceInput) => Promise<Array<typeof financeAccounts.$inferSelect>>;
-  financeActions: (
-    input: SourceInput,
-  ) => Promise<Array<typeof financeAgentActionReviews.$inferSelect>>;
-  financeContextual: (input: SourceInput) => Promise<AgentAccessWorkItem[]>;
-  financeReviews: (input: SourceInput) => Promise<
-    Array<
-      typeof financeReviewCases.$inferSelect & {
-        transaction?: typeof financeTransactions.$inferSelect | null;
-      }
-    >
-  >;
-  mailQuestions: (
-    input: SourceInput,
-  ) => Promise<Array<typeof mailStewardshipQuestions.$inferSelect>>;
-  mailRules: (input: SourceInput) => Promise<Array<typeof mailRules.$inferSelect>>;
-  mailRuns: (input: SourceInput) => Promise<Array<typeof workspaceMaintenanceRuns.$inferSelect>>;
-  profiles: (input: SourceInput) => Promise<Array<typeof domainProfiles.$inferSelect>>;
-};
-
-type SourceKey = keyof SourceReaders;
-type SourceResult = {
-  accounts: Awaited<ReturnType<SourceReaders["accounts"]>>;
-  attention: Awaited<ReturnType<SourceReaders["attention"]>>;
-  financeEffects: Awaited<ReturnType<SourceReaders["financeEffects"]>>;
-  financeAccounts: Awaited<ReturnType<SourceReaders["financeAccounts"]>>;
-  financeActions: Awaited<ReturnType<SourceReaders["financeActions"]>>;
-  financeContextual: Awaited<ReturnType<SourceReaders["financeContextual"]>>;
-  financeReviews: Awaited<ReturnType<SourceReaders["financeReviews"]>>;
-  mailQuestions: Awaited<ReturnType<SourceReaders["mailQuestions"]>>;
-  mailRules: Awaited<ReturnType<SourceReaders["mailRules"]>>;
-  mailRuns: Awaited<ReturnType<SourceReaders["mailRuns"]>>;
-  profiles: Awaited<ReturnType<SourceReaders["profiles"]>>;
-};
+import { ReviewSearchOverflowError } from "./finance/search-projection-bounds.js";
+import type { SourceKey, SourceReaders, SourceResult } from "./review-projections/contract.js";
+import { buildSourceReaders, projectItems, sourceImpact } from "./review-projections/registry.js";
+import type { Principal, RequestLog } from "./types.js";
 
 const priorityOrder: Record<AgentAccessWorkItemPriority, number> = {
   person_review: 0,
@@ -92,165 +40,84 @@ const cursorSchema = z.object({
 });
 type Cursor = z.infer<typeof cursorSchema>;
 
-const sourceImpact: Record<
-  SourceKey,
-  { domains: AgentAccessDomain[]; kinds: AgentAccessWorkItemKind[] }
-> = {
-  accounts: { domains: ["mail", "calendar"], kinds: ["attention"] },
-  attention: {
-    domains: [...agentAccessDomains],
-    kinds: ["attention"],
-  },
-  financeEffects: { domains: ["finances"], kinds: ["review"] },
-  financeAccounts: { domains: ["finances"], kinds: ["review"] },
-  financeActions: { domains: ["finances"], kinds: ["review"] },
-  financeContextual: { domains: ["finances"], kinds: ["review"] },
-  financeReviews: { domains: ["finances"], kinds: ["review"] },
-  mailQuestions: { domains: ["mail"], kinds: ["review"] },
-  mailRules: { domains: ["mail"], kinds: ["review"] },
-  mailRuns: { domains: ["mail"], kinds: ["review"] },
-  profiles: {
-    domains: [...agentAccessDomains],
-    kinds: ["review"],
-  },
-};
-
-const workspaceRoutes: Record<AgentAccessDomain, string> = {
-  calendar: "/calendar",
-  finances: "/finances",
-  mail: "/mail",
-  tasks: "/tasks",
-};
-
 export function createAgentAccessWorkItemService({
   cursorSigningKey,
   db,
   now,
   sourceReaders: sourceReaderOverrides,
+  log,
 }: {
   cursorSigningKey: string;
   db: Database;
   now: () => Date;
   sourceReaders?: Partial<SourceReaders>;
+  log?: (entry: RequestLog) => void;
 }) {
-  const sourceReaders: SourceReaders = {
-    accounts: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(calendarAccounts)
-        .where(
-          and(
-            eq(calendarAccounts.userId, userId),
-            eq(calendarAccounts.syncRecovery, "reconnect"),
-            lte(calendarAccounts.updatedAt, snapshotAt),
-          ),
-        ),
-    attention: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(attentionItems)
-        .where(
-          and(
-            eq(attentionItems.userId, userId),
-            eq(attentionItems.status, "open"),
-            lte(attentionItems.updatedAt, snapshotAt),
-          ),
-        ),
-    financeEffects: (input) => readFinanceEffectWork(db, input),
-    financeAccounts: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(financeAccounts)
-        .where(
-          and(
-            eq(financeAccounts.userId, userId),
-            or(
-              eq(financeAccounts.syncRecovery, "reconnect"),
-              and(eq(financeAccounts.status, "needs_reauth"), isNull(financeAccounts.syncRecovery)),
-            ),
-            lte(financeAccounts.updatedAt, snapshotAt),
-          ),
-        ),
-    financeActions: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(financeAgentActionReviews)
-        .where(
-          and(
-            eq(financeAgentActionReviews.userId, userId),
-            eq(financeAgentActionReviews.status, "pending"),
-            lte(financeAgentActionReviews.updatedAt, snapshotAt),
-          ),
-        ),
-    financeContextual: (input) => readFinanceContextualWork(db, input),
-    financeReviews: async ({ snapshotAt, userId }) => {
-      const rows = await db
-        .select({ review: financeReviewCases, transaction: financeTransactions })
-        .from(financeReviewCases)
-        .leftJoin(
-          financeTransactions,
-          and(
-            eq(financeTransactions.id, financeReviewCases.transactionId),
-            eq(financeTransactions.userId, userId),
-          ),
-        )
-        .where(
-          and(
-            eq(financeReviewCases.userId, userId),
-            or(eq(financeReviewCases.status, "open"), eq(financeReviewCases.status, "deferred")),
-            lte(financeReviewCases.updatedAt, snapshotAt),
-          ),
-        );
-      return rows.map(({ review, transaction }) => ({ ...review, transaction }));
-    },
-    mailRules: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(mailRules)
-        .where(
-          and(
-            eq(mailRules.userId, userId),
-            eq(mailRules.enabled, false),
-            lte(mailRules.updatedAt, snapshotAt),
-          ),
-        ),
-    mailQuestions: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(mailStewardshipQuestions)
-        .where(
-          and(
-            eq(mailStewardshipQuestions.userId, userId),
-            eq(mailStewardshipQuestions.status, "open"),
-            lte(mailStewardshipQuestions.updatedAt, snapshotAt),
-          ),
-        ),
-    mailRuns: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(workspaceMaintenanceRuns)
-        .where(
-          and(
-            eq(workspaceMaintenanceRuns.userId, userId),
-            eq(workspaceMaintenanceRuns.domain, "mail"),
-            lte(workspaceMaintenanceRuns.updatedAt, snapshotAt),
-          ),
-        ),
-    profiles: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(domainProfiles)
-        .where(
-          and(
-            eq(domainProfiles.userId, userId),
-            eq(domainProfiles.status, "draft"),
-            lte(domainProfiles.updatedAt, snapshotAt),
-          ),
-        ),
-    ...sourceReaderOverrides,
-  };
+  const sourceReaders = { ...buildSourceReaders(db), ...sourceReaderOverrides };
 
   return {
+    /** Reuse the review projection for workspace search without creating pagination snapshots. */
+    async searchItems(
+      principal: Principal,
+      workspace: AgentAccessDomain,
+      requestId = "unattributed",
+    ): Promise<{ items: AgentAccessWorkItem[]; unavailableSources: SourceKey[] }> {
+      if (!principal.scopes.has(featureAccessPolicies[workspace].readScope)) {
+        throw new AppError("forbidden", "This workspace requires read access.");
+      }
+      const input = { snapshotAt: now(), userId: principal.userId };
+      const entries = (
+        Object.entries(sourceReaders) as Array<[SourceKey, SourceReaders[SourceKey]]>
+      ).filter(([key]) => sourceImpact[key].domains.includes(workspace));
+      const settled = await Promise.allSettled(
+        entries.map(async ([key]) => {
+          const started = Date.now();
+          try {
+            return await db.transaction(async (tx) => {
+              // PostgreSQL cancels blocked/slow SQL and terminates over-budget transactions;
+              // a Promise.race alone would leave database work running after the response.
+              await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
+              await tx.execute(sql`SET LOCAL transaction_timeout = '2500ms'`);
+              await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
+              const reader =
+                sourceReaderOverrides?.[key] ??
+                buildSourceReaders(tx as unknown as Database, 200)[key];
+              return reader(input);
+            });
+          } catch (error) {
+            log?.({
+              event: "workspace_review_search_source_failed",
+              requestId,
+              workspace,
+              source: key,
+              category: reviewSearchFailureCategory(error),
+              durationMs: Date.now() - started,
+              method: "GET",
+              path: `/v1/workspaces/${workspace}/search`,
+              status: 503,
+            });
+            throw error;
+          }
+        }),
+      );
+      const results = {} as Partial<SourceResult>;
+      const unavailableSources: SourceKey[] = [];
+      for (const [index, result] of settled.entries()) {
+        const key = entries[index]?.[0];
+        if (!key) continue;
+        if (result.status === "fulfilled") Object.assign(results, { [key]: result.value });
+        else unavailableSources.push(key);
+      }
+      return {
+        items: projectItems({
+          accessibleDomains: new Set([workspace]),
+          results,
+          includePreview: principal.actorType === "user",
+        }).filter((item) => item.domain === workspace),
+        unavailableSources,
+      };
+    },
+
     async list(
       principal: Principal,
       query: AgentAccessWorkItemQuery,
@@ -418,286 +285,6 @@ export function createAgentAccessWorkItemService({
   };
 }
 
-function projectItems({
-  accessibleDomains,
-  results,
-  includePreview,
-}: {
-  includePreview: boolean;
-  accessibleDomains: Set<AgentAccessDomain>;
-  results: Partial<SourceResult>;
-}): AgentAccessWorkItem[] {
-  const items: AgentAccessWorkItem[] = [];
-  for (const item of results.attention ?? []) {
-    if (!isAgentAccessDomain(item.domain) || !accessibleDomains.has(item.domain)) continue;
-    items.push({
-      action: { label: `Open ${workspaceLabel(item.domain)}`, to: workspaceRoutes[item.domain] },
-      actionAt: item.occursAt?.toISOString() ?? null,
-      domain: item.domain,
-      id: `attention:${item.id}`,
-      kind: "attention",
-      priority: item.importance,
-      source: item.source,
-      summary: item.summary,
-      title: item.title,
-      updatedAt: item.updatedAt.toISOString(),
-    });
-  }
-
-  if (accessibleDomains.has("mail")) {
-    const representedRun = (results.mailRuns ?? []).toSorted(
-      (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime(),
-    )[0];
-    const representedOpenQuestions = (results.mailQuestions ?? []).filter(
-      (question) =>
-        representedRun && question.updatedAt.getTime() <= representedRun.updatedAt.getTime(),
-    );
-    if (
-      representedRun?.status === "blocked" ||
-      (representedRun?.status === "completed_with_questions" && representedOpenQuestions.length > 0)
-    ) {
-      const blocked = representedRun.status === "blocked";
-      items.push({
-        action: { label: "Review Mail", to: "/mail/review" },
-        actionAt: null,
-        domain: "mail",
-        id: `mail-run:${representedRun.id}`,
-        kind: "review",
-        priority: blocked ? "blocked" : "person_review",
-        source: null,
-        summary: blocked
-          ? "A Mail maintenance turn is blocked and needs signed-in review."
-          : "A Mail maintenance turn settled with questions that need signed-in judgment.",
-        ...(includePreview
-          ? {
-              preview: workPreview([
-                ["What stopped", blocked ? representedRun.lastSafeError?.message : null],
-                [
-                  "Needs your input",
-                  representedOpenQuestions.map((question) => question.reason).join("; "),
-                ],
-              ]),
-            }
-          : {}),
-        title: blocked ? "Mail maintenance is blocked" : "Mail needs your input",
-        updatedAt: representedRun.updatedAt.toISOString(),
-      });
-    }
-    for (const question of results.mailQuestions ?? []) {
-      if (!representedRun || question.updatedAt.getTime() > representedRun.updatedAt.getTime()) {
-        items.push({
-          action: { label: "Answer in Mail", to: `/mail/review?question=${question.id}` },
-          actionAt: null,
-          domain: "mail",
-          id: `mail-question:${question.id}`,
-          kind: "review",
-          priority: "person_review",
-          source: null,
-          summary: `${question.reason} Question type: ${question.kind}. Account ${question.accountId}; thread ${question.threadId}. Open since ${question.createdAt.toISOString()}.`,
-          ...(includePreview
-            ? {
-                preview: workPreview([
-                  ["Question", question.reason],
-                  ["Choices", question.options.map((option) => option.label).join(" · ")],
-                ]),
-              }
-            : {}),
-          title: "Answer a Mail stewardship question",
-          updatedAt: question.updatedAt.toISOString(),
-        });
-      }
-    }
-    for (const rule of results.mailRules ?? []) {
-      items.push({
-        action: {
-          label: "Review rule",
-          to: `/settings?section=mail&reviewRule=${rule.id}`,
-        },
-        actionAt: null,
-        domain: "mail",
-        id: `mail-rule:${rule.id}`,
-        kind: "review",
-        priority: "person_review",
-        source: null,
-        ...(includePreview
-          ? {
-              preview: workPreview([
-                [
-                  "When",
-                  rule.condition
-                    ? `${rule.condition.field === "any" ? "Message" : humanize(rule.condition.field)} ${rule.condition.operator.replaceAll("_", " ")} “${rule.condition.value}”`
-                    : null,
-                ],
-                [
-                  "Proposed action",
-                  rule.actions
-                    ?.map(
-                      (action) =>
-                        `${humanize(action.type)}${action.afterDays ? ` after ${action.afterDays} days` : " immediately"}`,
-                    )
-                    .join("; "),
-                ],
-              ]),
-            }
-          : {}),
-        summary: rule.description || "Review the current bounded sample before activation.",
-        title: `Review ${rule.name}`,
-        updatedAt: rule.updatedAt.toISOString(),
-      });
-    }
-  }
-
-  if (accessibleDomains.has("finances")) {
-    items.push(...(results.financeEffects ?? []));
-    items.push(...(results.financeContextual ?? []));
-    for (const review of results.financeReviews ?? []) {
-      items.push({
-        action: {
-          label: "Open Finance review",
-          to: review.economicEventId
-            ? `/finances/review?item=${review.id}`
-            : `/finances/review/legacy?item=${review.id}`,
-        },
-        actionAt: null,
-        domain: "finances",
-        id: `finance-review:${review.id}`,
-        kind: "review",
-        priority: "person_review",
-        source: null,
-        summary:
-          review.resolution?.type === "clarify" || typeof review.evidence.clarification === "string"
-            ? "A note is saved for maintenance. This Finance decision remains open."
-            : "A Finance decision needs signed-in judgment; nohmi will not guess.",
-        ...(includePreview
-          ? {
-              preview: workPreview([
-                [
-                  "Transaction",
-                  review.transaction
-                    ? `${review.transaction.merchant} · ${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(review.transaction.amount / 100)} ${review.transaction.currencyCode ?? "(currency not recorded)"} · ${review.transaction.transactionDate}`
-                    : null,
-                ],
-                ["Decision", humanize(review.economicEventId ? review.reasonCode : review.reason)],
-                ["Why it needs review", review.rationale],
-                [
-                  "Your note",
-                  review.resolution?.type === "clarify"
-                    ? review.resolution.clarification
-                    : review.evidence.clarification,
-                ],
-              ]),
-            }
-          : {}),
-        title: "Review a Finance decision",
-        updatedAt: review.updatedAt.toISOString(),
-      });
-    }
-    for (const review of results.financeActions ?? []) {
-      const question = review.actionKind === "question";
-      items.push({
-        action: {
-          label: question ? "Answer Finance question" : "Review Finance approval",
-          to: `/finances/review?${question ? "question" : "approval"}=${review.id}`,
-        },
-        actionAt: null,
-        domain: "finances",
-        id: `finance-action:${review.id}`,
-        kind: "review",
-        priority: "person_review",
-        source: null,
-        summary: question
-          ? "A Finance question needs your judgment. Open its current evidence before answering."
-          : "A proposed Finance change needs signed-in approval of its current evidence.",
-        ...(includePreview
-          ? {
-              preview: workPreview([
-                [
-                  question ? "Question" : "Proposed change",
-                  question
-                    ? isRecord(review.privatePayload.question)
-                      ? review.privatePayload.question.prompt
-                      : null
-                    : review.safeChanges
-                        .map((change) => (typeof change.summary === "string" ? change.summary : ""))
-                        .filter(Boolean)
-                        .join("; "),
-                ],
-                ["Reason", review.privatePayload.rationale],
-                ["Change type", humanize(review.actionKind)],
-              ]),
-            }
-          : {}),
-        title: question ? "Answer a Finance question" : "Approve a Finance change",
-        updatedAt: review.updatedAt.toISOString(),
-      });
-    }
-    for (const account of results.financeAccounts ?? []) {
-      items.push({
-        action: {
-          label: "Inspect Finance account",
-          to: `/finances/accounts#account-${account.id}`,
-        },
-        actionAt: null,
-        domain: "finances",
-        id: `finance-reconnect:${account.id}`,
-        kind: "review",
-        priority: "blocked",
-        source: null,
-        summary:
-          "This Finance source needs renewed authorization before synchronization can continue.",
-        ...(includePreview
-          ? {
-              preview: workPreview([
-                ["Account", account.name],
-                ["Institution", account.institution],
-              ]),
-            }
-          : {}),
-        title: "Reconnect a Finance account",
-        updatedAt: account.updatedAt.toISOString(),
-      });
-    }
-    for (const profile of results.profiles ?? []) {
-      if (profile.domain !== "finances") continue;
-      items.push({
-        action: { label: "Review guidance", to: "/settings?section=finances#guidance" },
-        actionAt: null,
-        domain: "finances",
-        id: `profile:${profile.id}:${profile.version}`,
-        kind: "review",
-        priority: "person_review",
-        source: null,
-        summary: profile.summary,
-        title: "Review Finances guidance",
-        updatedAt: profile.updatedAt.toISOString(),
-      });
-    }
-  }
-
-  for (const account of results.accounts ?? []) {
-    for (const domain of [
-      ...(account.mailEnabled ? (["mail"] as const) : []),
-      ...(account.calendarEnabled ? (["calendar"] as const) : []),
-    ]) {
-      if (!accessibleDomains.has(domain)) continue;
-      items.push({
-        action: { label: "Reconnect", to: "/settings?section=connections" },
-        actionAt: null,
-        domain,
-        id: `reconnect:${domain}:${account.id}`,
-        kind: "attention",
-        priority: "blocked",
-        source: null,
-        summary: `${workspaceLabel(domain)} cannot use this source until authorization is renewed.`,
-        title: `Reconnect ${account.label} for ${workspaceLabel(domain)}`,
-        updatedAt: account.updatedAt.toISOString(),
-      });
-    }
-  }
-
-  return items;
-}
-
 function summarizeItems(
   items: AgentAccessWorkItem[],
   unavailableDomains: Set<AgentAccessDomain>,
@@ -800,37 +387,15 @@ function signaturesMatch(left: string, right: string): boolean {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function isAgentAccessDomain(value: string): value is AgentAccessDomain {
-  return agentAccessDomains.includes(value as AgentAccessDomain);
-}
-
-function workspaceLabel(domain: AgentAccessDomain): string {
-  return domain === "finances" ? "Finances" : `${domain[0]?.toUpperCase()}${domain.slice(1)}`;
-}
-
-function humanize(value: string) {
-  const text = value.replaceAll("_", " ");
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** Explicit display fields only: never serialize arbitrary evidence or private payloads. */
-function workPreview(
-  fields: Array<[string, unknown]>,
-): NonNullable<AgentAccessWorkItem["preview"]> {
-  return fields
-    .flatMap(([label, value]) =>
-      typeof value === "string" && value.trim()
-        ? [
-            {
-              label,
-              value: value.trim().length > 600 ? `${value.trim().slice(0, 599)}…` : value.trim(),
-            },
-          ]
-        : [],
-    )
-    .slice(0, 4);
+/** Classify known boundary failures without ever serializing driver errors or query parameters. */
+function reviewSearchFailureCategory(error: unknown): "timeout" | "overflow" | "unexpected" {
+  const seen = new Set<unknown>();
+  let cause = error;
+  while (typeof cause === "object" && cause !== null && !seen.has(cause)) {
+    seen.add(cause);
+    if (cause instanceof ReviewSearchOverflowError) return "overflow";
+    if ("code" in cause && (cause.code === "57014" || cause.code === "25P04")) return "timeout";
+    cause = "cause" in cause ? cause.cause : null;
+  }
+  return "unexpected";
 }

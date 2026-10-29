@@ -115,7 +115,7 @@ App
 Settings
 ├── Back to app
 ├── Account: Profile settings, password, log out
-├── Personal: User Knowledge, Goals, Priorities, Motives, Reviews
+├── Personal: User Knowledge, Goals, Priorities, Motives
 ├── Experience: Appearance, wallpaper where supported, locale & time
 ├── History & access: Activity, sessions, invitations, account recovery, privacy, exports
 ├── Communications: Shared notification policy, channel connections/defaults, widgets
@@ -302,7 +302,78 @@ two 2026-08-12 Tasks and Tracking specifications. Cross-workspace goals, priorit
 relationships, circumstances, preferences, constraints, and inferred patterns belong to User
 Knowledge rather than a separate top-level workspace.
 
+#### Morning and evening rituals
+
+Enabled rituals also present automatically inside the signed-in browser application. A due,
+unexpired, unsnoozed occurrence opens the shared checklist in a modal over the existing page,
+with the page visible through a blurred backdrop. Keep the page mounted and restore its focus
+when the ritual is completed, snoozed, skipped, or settled by another client. Escape and outside
+clicks do not bypass the ritual. Authentication and standalone setup flows remain unobstructed;
+the desktop shell keeps its native presentation without a duplicate browser modal.
+
+The browser and desktop use the same account occurrence, revisions, answers, streaks, weekly
+progress, optional follow-ups, and snooze/skip policy. Browser writes require API acceptance and
+never claim to be queued offline. Refresh while visible and on focus/reconnection; recheck snooze
+and expiry using server time plus elapsed monotonic time. Read access denials and session expiry clear private state;
+read outages use deduplicated Sonner feedback and retry. Browser presentation covers only the
+open nohmi tab, with no screen capture or control over other tabs/apps. Use the shared browser
+interface for rapid visual iteration, then smoke-test native presentation on macOS.
+
+Ritual steps support required or optional participation and everyday, weekday, weekend, or custom
+weekday inclusion. Existing steps remain required every day. Resolve inclusion using the ritual's
+scheduled local date and profile planning time zone, then preserve the daily snapshot even if settings change. Morning and evening schedules share the profile time zone; they do not expose a separate ritual time-zone preference.
+Only scheduled required steps gate explicit completion. A day with no scheduled steps settles
+without opening the checklist; an all-optional day still permits voluntary participation.
+
+Each ritual has a configurable default follow-up time (initially noon for morning and 22:00 for
+evening). When unfinished optional steps remain, offer an unchecked “Remind me about these later”
+checkbox with an editable time. Show Today or Tomorrow explicitly when the chosen time rolls over.
+Checking it requests one standalone Reminder per unfinished optional step on completion; leaving
+it unchecked records those steps as optional and not done. Completed optional steps never generate
+follow-ups. These reminders remain independently editable and completable in Reminders; completing
+them does not rewrite the settled ritual's original answers. Deleting ritual history does not
+remove independently created reminders.
+
+Reminder creation and completion must be atomic, owner-scoped, and safe to retry. Offline desktop
+completion retains the reminder request in its durable queue and does not claim a scheduled
+reminder until the API accepts it. If an otherwise valid completion syncs after its requested time,
+make the reminder due shortly after acceptance. Expired/conflicting completions retain the existing
+explicit recovery flow. Delivery follows the person's existing reminder notification settings and
+OS permissions; accepting a reminder is not evidence of a displayed notification.
+
+Show the current ritual's streak at the top of its main checklist. Morning and evening have
+separate streaks of consecutive completed scheduled days. Today's pending ritual leaves the
+streak intact; skipped or missed scheduled days break it. Optional answers never gate a streak,
+and days with no scheduled steps neither add to nor break it. Streaks use retained history;
+an unrecorded scheduled day interrupts continuity. For unrecorded dates, use the current weekday
+schedule; recorded daily snapshots remain authoritative. Deleting history can reduce a streak.
+
+Keep the streak alongside a compact rolling seven-day completion strip at the top of the main
+ritual. Each morning/evening strip ends on that occurrence's scheduled local date, including
+night rituals that continue after midnight. Preserve visible completed days across streak breaks;
+show a completion count, dated days, and accessible completed, skipped, missed, pending,
+not-scheduled, and no-record states. Unscheduled days are neutral, and absent/deleted records
+must not be presented as verified misses or completions. Preview has no personal progress strip.
+Queued local completions update the current day and remain labeled as waiting to sync; clear
+cached weekly progress when offline advancement changes the current occurrence.
+
+
+“Skip for Today” first shows this ritual's applied skip count over the last 72 hours and warns
+when a streak will end. Require a continuous 30-second pointer or keyboard hold, with a visible
+countdown and progress fill, before submitting the skip. Release, pointer exit/cancellation,
+focus loss, tab visibility changes, or leaving confirmation resets the hold. The hold is an
+interaction safeguard in the shared web/desktop checklist, not an API authorization boundary.
+Offline skip history is explicitly unavailable; cached streaks are labeled as last synchronized
+and are cleared when advancing to another occurrence.
+
 ### 6.7 Finances
+
+Finances should turn the person's authorized financial data and context into visual understanding,
+useful predictions, and explorable choices, maintained through agent automation. Its analytical
+foundation must make evidence, assumptions, uncertainty, and correction paths inspectable. More
+collection or more charts is not the objective; useful understanding and less repetitive work are.
+The [Finance intelligence principles](finance-workspace-plan.md#finance-intelligence-and-visual-exploration)
+define this target alongside supported manual operation and exact human approval of budget changes.
 
 The first complete Finance release follows the [Finance MVP specification](finance-workspace-plan.md).
 It includes two-way day-to-day SMS with both Codex and Claude: durable questions and user context,
@@ -356,13 +427,21 @@ while retaining domain-owned conditions, actions, validation, and execution.
 **Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
 Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
-**Reviews:** `/reviews`, owned by Today, is the account-wide action queue for work that explicitly
-requires the person: questions, approvals, connector failures, recovery steps, and other Review or
-Attention items. Kind and workspace filters are URL-owned, results are cursor-paginated, and every
-action routes to the domain that owns the decision. Informational state, routine success, and work
-nohmi can recover automatically do not enter the queue; setup and access configuration never appear
-as queue work merely because they exist. Legacy `/settings?section=reviews` links redirect while
-preserving filters.
+**Reviews:** the [workspace Reviews contract](../design/pages/reviews.md) owns the current
+presentation: a workspace-scoped dialog or mobile drawer opened from its attention alert,
+workspace Settings header, or the **Items needing review** workspace search result. It collects work that explicitly requires the person: questions,
+approvals, connector failures, recovery steps, and other Review or Attention items. Results are
+cursor-paginated and every action retains domain-owned authority. Informational state, routine
+success, and work nohmi can recover automatically do not enter the flow; setup and access
+configuration never appear as review work merely because they exist. This supersedes the earlier
+Today-owned account-wide `/reviews` queue while keeping the underlying workspace in place.
+Legacy workspace decision links enter the scoped flow; `/reviews` and
+`/settings?section=reviews` currently fall back to Account. Some notification and agent link
+producers still emit those old destinations; the Reviews contract records this unresolved
+implementation gap. Do not claim those generated links preserve their requested review target.
+The accepted multi-workspace Texting requirement below still needs a unified destination: the
+shipped single-workspace flow does not fulfill that target, and this reconciliation does not
+replace it with a newly selected routing design.
 
 Centralized Settings is the canonical editor for account-wide identity, security, privacy ceilings,
 review bypass, shared notification policy, channel connections/defaults, connected-agent
@@ -415,12 +494,14 @@ coherent response without reproducing domain expertise.
   `yesterday`, or `tomorrow` immediately before sending.
 - SMS is formal, short, and concise. It may include as many directly answerable questions or exact
   reviews as reasonably fit, with a hard cap of three. If even two would make the text difficult to
-  scan, include only one. Every multi-item message includes the unified Settings-owned Reviews link;
+  scan, include only one. The accepted target is one unified Reviews link for every multi-item message;
   when more items remain, it summarizes the overflow. Texting does not send separate proactive
   messages per item or workspace.
 - A self-contained single question omits the link. Texting adds an exact-item or workspace link when
   that question needs more context or is too long for a reasonable SMS; every multi-item message
-  uses the unified Reviews link.
+  uses the unified Reviews link. This cross-workspace destination remains unimplemented after
+  the workspace flow cutover; the [Texting contract](texting-operations.md) distinguishes the
+  accepted requirement from the current legacy-link fallback.
 - Quiet hours default to 10:00 PM–8:00 AM in the person's current time zone. Proactive maintenance
   texts wait until the window ends unless the person selects `any time`; direct replies to the
   person's messages remain immediate. Multiple deferred items consolidate into one Reviews alert.
@@ -433,7 +514,8 @@ coherent response without reproducing domain expertise.
   wording, evidence, confidence, rediscovery, or internal progress alone do not qualify; quiet
   hours and send-time revalidation still apply.
 - SMS links require normal nohmi authentication and contain no bearer credential or action
-  authority. After sign-in, the app returns the person to the requested review destination.
+  authority. The accepted behavior is to return the person to the requested review destination
+  after sign-in; the current legacy-link fallback to Account does not satisfy that requirement.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized
   reversible work may execute directly; when disabled, it enters exact review, which may be
   approved by a bound, unexpired SMS response.
@@ -457,6 +539,15 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 
+Closing the main desktop window keeps enabled pet, routine presentation, and notification
+refresh active in the menu-bar process. Explicit **Quit nohmi** stops that process until the next
+launch; it does not create a separate companion that survives Quit. Already scheduled operating
+system notifications may still arrive. Setup guides the person through launch at login and
+notification permission, reports actual OS approval separately from saved preferences, and
+links to recovery when permission or routine delivery is unavailable. Login startup restores
+background operation after the person signs in. Sleeping or powered-off computers do not run
+interactive routines; wake recovery respects the existing catch-up window.
+
 - Tauri desktop shell for macOS/Windows supports compact, pinned, always-on-top, click-through-disabled interactive modes, global shortcut, docked sprite/pet, and full-app deep links.
 - The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact nohmi panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
 - Widgets on desktop and mobile show selectable blocks: Now/Next, due tasks, unread triage count, finance reviews, habit prompts, and compact calendar. Widgets show private-safe summaries unless the user opts into detail. Apple widgets use a native WidgetKit extension, shared container, and timeline/push update model; Windows widgets use a Windows widget provider/PWA-specific Adaptive Card adapter. Widgets are glanceable deep-link surfaces, not a second full application, a source of high-sensitivity content, or a real-time alert guarantee; notifications carry time-critical delivery.
@@ -475,7 +566,12 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 - **Blocked:** neither human shortcut nor agent token may perform it through that route.
 
 Global review bypass is a settlement preference, not another policy tier. It allows an otherwise
-policy-authorized reversible action to execute instead of entering review; it cannot alter scopes,
+policy-authorized reversible action to execute instead of entering review. Separately registered
+operations (such as exact-draft Mail sending, rule activation, guidance and budget activation,
+and workspace settings) may use explicit owner-granted `<workspace>:execute` authority together
+with enabled bypass. Sending remains irreversible. Existing write grants do not acquire these
+execution grants automatically, and unregistered irreversible effects keep their existing denial
+or approval requirements. Bypass cannot alter scopes,
 source selection, provider capability, reversibility, evidence requirements, or a stronger
 approval boundary.
 
@@ -518,6 +614,10 @@ API + Domain policy engine ──► Postgres + encrypted credential store + aud
   retrieves only the facts, preferences, inferences, policy, and missing requirements needed for a
   specific workflow; semantic indexes are rebuildable aids rather than truth.
 - Maintain provider-neutral connectors with capability discovery. Google uses incremental OAuth and Gmail write scopes only when needed; iCloud uses IMAP/CalDAV and app-specific passwords; Plaid uses Link, webhook/sync cursor, and transaction enrichment.
+- Track Calendar and Mail health, last successful sync and recovery independently, even when they
+  share a provider account. A failed service must not block a healthy sibling. Temporary failures
+  retry automatically; prolonged failures remain visible, and reconnect is reserved for evidence
+  that authorization needs renewal. Expose the same scoped health to people and agents.
 - Add connector contracts for mail mutations, calendar RSVP/availability, attachments, finance transactions/rules, notification targets, and platform widgets. A capability matrix prevents unsupported controls from appearing enabled. Gmail "delete" means move to Trash unless a provider offers a separately scoped reversible behavior; permanent deletion is never implied by an archive/triage shortcut.
 - Build normalized projections with remote ID, version/etag, original timezone, raw encrypted/provider payload reference, and tombstone state. Webhooks are hints; sync is idempotent reconciliation.
 - Keep coding-agent skills and host prompts as documentation and invocation aids, never as product
@@ -575,7 +675,8 @@ The research basis is recorded in the 2026-07-18 product analysis. Key experienc
 
 ### Contextual review flow
 
-Reviews open from a workspace attention alert or the actions beside its Settings title. A shared
+Reviews open from a workspace attention alert, the actions beside its Settings title, or the
+**Items needing review** workspace search result. A shared
 responsive dialog/drawer presents one decision at a time, using domain-owned controls and evidence.
 Progress shows completed, remaining, and total items. Advance only after the server confirms a
 resolution; Later never counts as completion. Reconnection and source repair remain explicit source

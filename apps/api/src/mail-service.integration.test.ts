@@ -17,6 +17,7 @@ import {
   migrateDatabase,
   users,
 } from "@personal-os/database";
+import type { ConnectedAccountHealth } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
@@ -24,6 +25,7 @@ import { type ConnectedMailGateway, MailProviderRejectedError } from "./connecto
 import { errorResponse } from "./errors.js";
 import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
 import { createMailService } from "./mail-service.js";
+import { projectReconnect } from "./review-projections/helpers.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { AppEnv } from "./types.js";
@@ -45,6 +47,9 @@ describe.sequential("mail service", () => {
   let temporaryMigrationsFolder: string | null = null;
   let setupMigrationsFolder: string | null = null;
   const gateway = {
+    downloadAttachment: vi.fn<NonNullable<ConnectedMailGateway["downloadAttachment"]>>(async () =>
+      Buffer.from("test"),
+    ),
     sendCapability: vi.fn<NonNullable<ConnectedMailGateway["sendCapability"]>>(
       async () => "available",
     ),
@@ -433,6 +438,68 @@ describe.sequential("mail service", () => {
     });
   });
 
+  it("downloads only attachments owned by the caller and rejects oversized files", async () => {
+    const [message] = await database.db
+      .insert(mailMessages)
+      .values({
+        threadId,
+        remoteMessageId: "download-message",
+        receivedAt: new Date(),
+        from: { address: "sender@example.com", name: null },
+        to: [],
+        cc: [],
+        bodyText: "",
+        attachments: [
+          {
+            id: "download-attachment",
+            filename: "../notes\n.txt",
+            contentType: "text/plain",
+            size: 4,
+          },
+        ],
+      })
+      .returning();
+    if (!message) throw new Error("Missing test message");
+    const controller = new AbortController();
+    gateway.downloadAttachment.mockClear();
+    await expect(
+      service.downloadAttachment(userId, message.id, "download-attachment", controller.signal),
+    ).resolves.toMatchObject({ data: "dGVzdA==", filename: ".._notes_.txt", size: 4 });
+    expect(gateway.downloadAttachment).toHaveBeenCalledWith(
+      userId,
+      enabledAccountId,
+      "download-message",
+      expect.objectContaining({ id: "download-attachment" }),
+      controller.signal,
+    );
+    gateway.downloadAttachment.mockClear();
+    await expect(
+      service.downloadAttachment(crypto.randomUUID(), message.id, "download-attachment"),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(service.downloadAttachment(userId, message.id, "missing")).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(gateway.downloadAttachment).not.toHaveBeenCalled();
+    await database.db
+      .update(mailMessages)
+      .set({
+        attachments: [
+          {
+            id: "big",
+            filename: "large.zip",
+            contentType: "application/zip",
+            size: 11 * 1024 * 1024,
+          },
+        ],
+      })
+      .where(eq(mailMessages.id, message.id));
+    await expect(service.downloadAttachment(userId, message.id, "big")).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    expect(gateway.downloadAttachment).not.toHaveBeenCalled();
+    await database.db.delete(mailMessages).where(eq(mailMessages.id, message.id));
+  });
+
   it("lists enabled mailboxes and serializes mailbox membership", async () => {
     await database.db.insert(mailMessages).values({
       attachments: [
@@ -813,6 +880,61 @@ describe.sequential("mail service", () => {
     await expect(
       service.listThreads(userId, { limit: 100, mailboxId: disabledAccountId }),
     ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("counts complete navigation scopes beyond the thread page limit and keeps owner isolation", async () => {
+    for (const [key, scope] of Object.entries({
+      all: { mailboxRole: "inbox" as const },
+      unread: { unread: true },
+      starred: { starred: true },
+      snoozed: { snoozed: true },
+      sent: { mailboxRole: "sent" as const },
+    })) {
+      const counts = await service.navigationCounts(userId);
+      expect(counts[key as keyof typeof counts]).toBe(
+        (await service.listThreads(userId, { ...scope, limit: 200 })).length,
+      );
+    }
+    const baseline = await service.navigationCounts(userId, [enabledAccountId]);
+    const inserted = await database.db
+      .insert(mailThreads)
+      .values(
+        Array.from({ length: 201 }, (_, i) => ({
+          accountId: enabledAccountId,
+          userId,
+          provider: "google" as const,
+          remoteThreadId: `count-${i}`,
+          remoteMailboxIds: ["INBOX"],
+          subject: "Count fixture",
+          snippet: "",
+          bodyText: "",
+          from: { address: "count@example.com", name: null },
+          to: [],
+          unread: false,
+          receivedAt: new Date("2026-07-13T12:00:00Z"),
+        })),
+      )
+      .returning({ id: mailThreads.id });
+    try {
+      expect((await service.navigationCounts(userId, [enabledAccountId])).all).toBe(
+        baseline.all + 201,
+      );
+      expect(await service.navigationCounts("00000000-0000-4000-8000-000000000099")).toEqual({
+        all: 0,
+        unread: 0,
+        starred: 0,
+        snoozed: 0,
+        sent: 0,
+        drafts: 0,
+      });
+    } finally {
+      await database.db.delete(mailThreads).where(
+        inArray(
+          mailThreads.id,
+          inserted.map((record) => record.id),
+        ),
+      );
+    }
   });
 
   it("validates and persists only explicit thread organization changes", async () => {
@@ -2092,5 +2214,79 @@ describe.sequential("mail service", () => {
       scannedCount: 200,
       window: { limit: 200, truncated: true },
     });
+  });
+  it.each([
+    "ready",
+    "retrying",
+    "reconnect",
+    "syncing",
+  ] as const)("keeps scoped Mail %s health independent of Calendar authorization", async (state) => {
+    const at = "2026-07-16T12:00:00.000Z";
+    const recovery =
+      state === "reconnect" ? "reconnect" : state === "retrying" ? "automatic" : null;
+    const health: ConnectedAccountHealth = {
+      state: state === "syncing" ? ("ready" as const) : state,
+      recovery,
+      message: recovery ? "Mail needs recovery" : null,
+      nextSyncAt: recovery === "reconnect" ? null : at,
+    };
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: `scoped-${state}`,
+        label: `Scoped ${state}`,
+        calendarEnabled: true,
+        mailEnabled: true,
+        syncStatus: state === "syncing" ? "syncing" : "error",
+        syncRecovery: "reconnect",
+        syncFailureCount: 1,
+        syncErrorCode: "google_permission_missing",
+        syncErrorCategory: "authorization",
+        syncClaimId: state === "syncing" ? "11111111-1111-4111-8111-111111111111" : null,
+        syncError: "Calendar authorization required",
+        lastSyncedAt: new Date(at),
+        syncCapabilities: {
+          calendar: {
+            lastAttemptAt: at,
+            lastSyncedAt: null,
+            failureCount: 1,
+            errorCode: "google_permission_missing",
+            errorCategory: "authorization",
+            status: 403,
+            health: {
+              state: "reconnect",
+              recovery: "reconnect",
+              message: "Calendar authorization required",
+              nextSyncAt: null,
+            },
+          },
+          mail: {
+            lastAttemptAt: at,
+            lastSyncedAt: null,
+            failureCount: recovery ? 1 : 0,
+            errorCode: recovery ? "google_permission_missing" : null,
+            errorCategory: recovery ? "authorization" : null,
+            status: recovery ? 403 : null,
+            health,
+          },
+        },
+      })
+      .returning();
+    if (!account) throw new Error("Missing scoped account");
+    const setup = await service.listSetupContext(userId);
+    const mail = setup.accounts.find((source) => source.accountId === account.id);
+    expect(mail).toMatchObject({
+      health: { state },
+      lastSyncedAt: null,
+      lastSyncAttemptAt: at,
+      nextSyncAt: health.nextSyncAt,
+      syncStatus: state === "syncing" ? "syncing" : recovery ? "error" : "idle",
+      sendCapability: state === "reconnect" ? "reconnect" : "available",
+    });
+    expect(projectReconnect("mail", "Mail", account)).toHaveLength(state === "reconnect" ? 1 : 0);
+    expect(projectReconnect("calendar", "Calendar", account)).toHaveLength(1);
+    await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, account.id));
   });
 });

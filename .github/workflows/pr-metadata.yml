@@ -1,0 +1,36 @@
+name: PR metadata
+
+on:
+  pull_request:
+    types: [edited, opened, ready_for_review, reopened, synchronize]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pr-metadata-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  required:
+    name: CI required
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Require successful source verification for this candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_RETARGETED: ${{ github.event.action == 'edited' && github.event.changes.base != null }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/wait-source-ci.mjs

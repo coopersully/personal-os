@@ -1,4 +1,4 @@
-import { ConnectorError } from "@personal-os/connectors";
+import { ConnectorError, classifyICloudError } from "@personal-os/connectors";
 import {
   classifyConnectorSyncFailure,
   connectionHealthForAccount,
@@ -48,6 +48,25 @@ describe("connector sync health policy", () => {
     );
     expect(failure).toMatchObject({ category: "unknown", recovery: "automatic" });
     expect(JSON.stringify(failure)).not.toContain("token=secret");
+  });
+
+  it.each([
+    "google",
+    "plaid",
+  ] as const)("settles %s recovery classification when diagnostic access throws", (provider) => {
+    const error = Object.defineProperty({}, "code", {
+      get() {
+        throw new Error("PRIVATE_CANARY");
+      },
+    });
+    const failure = classifyConnectorSyncFailure(error, provider);
+    expect(failure).toMatchObject({
+      category: "unknown",
+      recovery: "automatic",
+      code: "connector_unknown_failure",
+    });
+    expect(failure.transportCode).toBeUndefined();
+    expect(JSON.stringify(failure)).not.toContain("PRIVATE_CANARY");
   });
 
   it.each([
@@ -206,4 +225,22 @@ describe("connector sync health policy", () => {
     });
     expect(JSON.stringify([configuration, rateLimited])).not.toContain("raw-plaid");
   });
+});
+
+it("preserves safe transport evidence through sync policy without leaking exception context", () => {
+  const error = new Error("PRIVATE_CANARY", {
+    cause: { code: "ENOTFOUND", hostname: "PRIVATE_CANARY" },
+  });
+  for (const input of [error, classifyICloudError("calendar", error)]) {
+    const failure = classifyConnectorSyncFailure(input, "icloud");
+    expect(failure).toMatchObject({
+      transportCode: "ENOTFOUND",
+      transportPhase: "dns",
+      recovery: "automatic",
+    });
+    expect(JSON.stringify(failure)).not.toContain("PRIVATE_CANARY");
+    expect(JSON.stringify(connectorSyncAppError(failure, accountId, "icloud", null))).not.toContain(
+      "transportCode",
+    );
+  }
 });

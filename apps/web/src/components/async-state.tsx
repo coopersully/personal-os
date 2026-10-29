@@ -1,10 +1,19 @@
 import { ApiClientError } from "@personal-os/api-client";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert.js";
+import { useContext } from "react";
+import { ReadRecoveryContext } from "../lib/read-recovery";
+import { useErrorToast, useSettingsError } from "../lib/settings-feedback.js";
 import { Button } from "./ui/button.js";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty.js";
 import { WorkspaceSkeleton, type WorkspaceSkeletonKind } from "./workspace-skeleton.js";
 
-export function PageLoading({ workspace = "generic" }: { workspace?: WorkspaceSkeletonKind }) {
-  return <WorkspaceSkeleton kind={workspace} />;
+export function PageLoading({
+  workspace = "generic",
+  calendarView = "week",
+}: {
+  workspace?: WorkspaceSkeletonKind;
+  calendarView?: "day" | "week" | "month";
+}) {
+  return <WorkspaceSkeleton kind={workspace} calendarView={calendarView} />;
 }
 
 export function InlineError({
@@ -12,38 +21,44 @@ export function InlineError({
   title = "Couldn’t load this material.",
   retry,
   stale = false,
+  toastOnly = false,
 }: {
   error: unknown;
   title?: string;
   retry?: () => unknown;
   stale?: boolean;
+  toastOnly?: boolean;
 }) {
+  const recoveredGlobally = useContext(ReadRecoveryContext)(error);
+  const settingsFeedback = useSettingsError(recoveredGlobally ? null : error, title, retry);
+  useErrorToast(error, title, retry, !settingsFeedback && !recoveredGlobally);
+  if (recoveredGlobally || settingsFeedback || stale || toastOnly) return null;
   const description =
     error instanceof ApiClientError && error.status === 401
       ? "Your session has expired. Sign in again to continue."
       : error instanceof ApiClientError && error.status === 403
         ? "You don’t have access to this material. Check the account’s permissions."
-        : stale
-          ? "Showing the last available update. Try refreshing before relying on this information."
-          : "Try again. If the problem continues, check your connection.";
+        : "Try again. If the problem continues, check your connection.";
   return (
-    <Alert variant={stale ? "warning" : "destructive"} role="status">
-      <AlertTitle>{title}</AlertTitle>
-      <AlertDescription>{description}</AlertDescription>
+    <Empty role="region" aria-label={title}>
+      <EmptyHeader>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
       {retry ? (
-        <AlertAction>
+        <EmptyContent>
           <Button
             onClick={() => {
               void retry();
             }}
-            variant="outline"
+            variant="secondary"
             size="sm"
           >
             Try again
           </Button>
-        </AlertAction>
+        </EmptyContent>
       ) : null}
-    </Alert>
+    </Empty>
   );
 }
 
@@ -51,16 +66,19 @@ export function QueryFeedback({
   query,
   title,
   staleOnly = false,
+  toastOnly = false,
 }: {
   query: { isError: boolean; error: unknown; data?: unknown; refetch?: () => unknown };
   title: string;
   staleOnly?: boolean;
+  toastOnly?: boolean;
 }) {
   if (!query.isError || (staleOnly && query.data === undefined)) return null;
   return (
     <InlineError
       error={query.error}
       title={title}
+      toastOnly={toastOnly}
       stale={query.data !== undefined}
       {...(query.refetch ? { retry: query.refetch } : {})}
     />

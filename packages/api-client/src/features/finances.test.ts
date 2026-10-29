@@ -1,3 +1,6 @@
+import type { FinanceBudgetReadResult } from "@personal-os/domain";
+import { expectTypeOf } from "vitest";
+import { createApiClient } from "../client.js";
 import { createFinanceApi, type FinanceRequest } from "./finances.js";
 
 describe("Finance position client", () => {
@@ -139,5 +142,126 @@ describe("contextual question client", () => {
       method: "POST",
       body: JSON.stringify(answer),
     });
+  });
+});
+
+it("reads Finance configuration without a mutation or tenant parameter", async () => {
+  const request = vi.fn().mockResolvedValue({ profile: { state: "loaded", value: null } });
+  await createFinanceApi(request as FinanceRequest).getFinanceConfiguration();
+  expect(request).toHaveBeenCalledExactlyOnceWith("/v1/finances/configuration");
+});
+
+it("encodes exact Spending all/none/uncategorized scopes and validates response", async () => {
+  const request = vi.fn().mockResolvedValue({ spending: { invalid: true } });
+  const api = createFinanceApi(request as FinanceRequest);
+  const base = {
+    scope: {
+      from: "2026-03-07",
+      through: "2026-03-09",
+      timezone: "America/New_York",
+      accountIds: [] as string[] | null,
+      categoryIds: [null, "food"],
+      basis: "personal_cost" as const,
+      includePending: false,
+      subtractRefunds: true,
+    },
+    grouping: "auto" as const,
+    includeUncategorized: true,
+  };
+  await expect(api.getFinanceSpending(base)).rejects.toThrow();
+  let params = new URL(request.mock.calls[0]?.[0] as string, "http://localhost").searchParams;
+  expect(params.get("accountIdsSelection")).toBe("none");
+  expect(params.getAll("categoryIds")).toEqual(["uncategorized", "food"]);
+  expect(params.has("userId")).toBe(false);
+  await expect(
+    api.getFinanceSpending({ ...base, scope: { ...base.scope, accountIds: null } }),
+  ).rejects.toThrow();
+  params = new URL(request.mock.calls[1]?.[0] as string, "http://localhost").searchParams;
+  expect(params.get("accountIdsSelection")).toBe("all");
+});
+
+it("posts bounded exact Spending filters without granting tenant authority", async () => {
+  const query = {
+    scope: {
+      from: "2026-03-07",
+      through: "2026-03-09",
+      timezone: "America/New_York",
+      accountIds: null,
+      categoryIds: null,
+      basis: "personal_cost" as const,
+      includePending: true,
+      subtractRefunds: true,
+    },
+    grouping: "auto" as const,
+    includeUncategorized: true,
+  };
+  const filter = {
+    query,
+    referenceRevision: "a".repeat(64),
+    groupId: null,
+    from: query.scope.from,
+    through: query.scope.through,
+  };
+  const response = {
+    items: [],
+    nextCursor: null,
+    referenceRevision: filter.referenceRevision,
+    totalTransactions: 0,
+    netCents: 0,
+    scope: query.scope,
+    contributions: [],
+  };
+  const request = vi.fn().mockResolvedValue(response);
+  await expect(
+    createFinanceApi(request as FinanceRequest).listFinanceSpendingTransactions(
+      filter,
+      undefined,
+      50,
+    ),
+  ).resolves.toEqual(response);
+  expect(request).toHaveBeenCalledWith("/v1/finances/spending/transactions", {
+    method: "POST",
+    body: JSON.stringify({ filter, limit: 50 }),
+  });
+  request.mockResolvedValue({ items: [] });
+  await expect(
+    createFinanceApi(request as FinanceRequest).listFinanceSpendingTransactions(filter),
+  ).rejects.toThrow();
+});
+
+describe("Finance budget approval readiness client", () => {
+  it("exposes the additive readiness contract through the composed HTTP client", async () => {
+    const value: FinanceBudgetReadResult = {
+      schemaVersion: 1,
+      data: null,
+      changes: [],
+      outcome: "completed",
+      communication: {
+        headline: "Create a proposal",
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+      remainingWork: { categories: [], count: 0 },
+      approvalReadiness: {
+        ready: false,
+        code: "no_budget",
+        recovery: "create_proposal",
+        message: "Create a proposal",
+        budgetVersionId: null,
+        latestBudgetVersionId: null,
+        currentProfileVersionId: null,
+      },
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(value));
+    const api = createApiClient({ baseUrl: "https://example.test", token: "test-token", fetch });
+    expectTypeOf<
+      Awaited<ReturnType<typeof api.getFinanceBudget>>
+    >().toEqualTypeOf<FinanceBudgetReadResult>();
+    expect(await api.getFinanceBudget()).toEqual(value);
+    expect(await api.getFinanceBudget("plan/id &")).toEqual(value);
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://example.test/v1/finances/budget-plans",
+      "https://example.test/v1/finances/budget-plans?planId=plan%2Fid%20%26",
+    ]);
   });
 });

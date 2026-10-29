@@ -41,6 +41,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
+import { financeActionFingerprint } from "./finance-action-identity.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -113,7 +114,11 @@ function plaidFetch(): typeof globalThis.fetch {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     if (path === "/link/token/create") {
       expect(body.link_customization_name).toBe("default");
-      return Response.json({ link_token: "link-token" });
+      return Response.json({
+        link_token: "link-token",
+        hosted_link_url: "https://secure.plaid.com/hl/fixture",
+        expiration: "2026-07-19T12:30:00.000Z",
+      });
     }
     if (path === "/item/public_token/exchange") {
       expect(body.public_token).toBe("public-token");
@@ -350,6 +355,49 @@ function plaidFetch(): typeof globalThis.fetch {
 describe.sequential("finance service", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
+
+  // These persistence tests exercise the semantic writer inside the already-reviewed
+  // transaction. Public review/revision/replay behavior is covered by action-service tests.
+  function reviewedSetBudgetPlan(
+    service: ReturnType<typeof createFinanceService>,
+    input: Parameters<typeof service.setBudgetPlan>[0],
+    context: Parameters<typeof service.setBudgetPlan>[1],
+  ) {
+    return database.db.transaction((tx) =>
+      service.setBudgetPlan(
+        input,
+        {
+          ...context,
+          financeBudgetApproval: {
+            principal: context.principal,
+            reviewId: context.requestId,
+            fingerprint: financeActionFingerprint("budget_plan", input),
+          },
+        },
+        tx,
+      ),
+    );
+  }
+  function reviewedCreateBudget(
+    service: ReturnType<typeof createFinanceService>,
+    input: Parameters<typeof service.createBudget>[0],
+    context: Parameters<typeof service.createBudget>[1],
+  ) {
+    return database.db.transaction((tx) =>
+      service.createBudget(
+        input,
+        {
+          ...context,
+          financeBudgetApproval: {
+            principal: context.principal,
+            reviewId: context.requestId,
+            fingerprint: financeActionFingerprint("budget_plan", input),
+          },
+        },
+        tx,
+      ),
+    );
+  }
   let userId: string;
 
   it("keeps import errors useful even for non-Error throws", () => {
@@ -930,12 +978,7 @@ describe.sequential("finance service", () => {
       executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: false }, context),
     ).rejects.toMatchObject({ code: "conflict" });
     await expect(service.getGuidedSetupContext(userId)).resolves.toMatchObject({
-      humanOnlyActions: [
-        "connect_or_disconnect_source",
-        "import_transactions",
-        "manage_accounts",
-        "refresh_provider_data",
-      ],
+      humanOnlyActions: ["provider_authorization"],
     });
     await expect(
       database.db
@@ -1041,7 +1084,7 @@ describe.sequential("finance service", () => {
       scenarioFingerprint: `sha256:${"a".repeat(64)}`,
     };
 
-    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(reviewedSetBudgetPlan(service, input, context)).resolves.toEqual(input);
     await expect(
       database.db
         .select({ category: financeBudgets.category, limit: financeBudgets.limit })
@@ -1063,7 +1106,8 @@ describe.sequential("finance service", () => {
       },
     ]);
     await expect(
-      service.setBudgetPlan(
+      reviewedSetBudgetPlan(
+        service,
         { ...input, allocations: [{ categoryId: category.id, limit: 6_000 }] },
         context,
       ),
@@ -1114,7 +1158,7 @@ describe.sequential("finance service", () => {
     };
     const context = { principal: financePrincipal(owner.id), requestId: "budget-plan-metadata" };
 
-    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(reviewedSetBudgetPlan(service, input, context)).resolves.toEqual(input);
     await expect(
       database.db
         .select({
@@ -1152,7 +1196,7 @@ describe.sequential("finance service", () => {
         .where(eq(auditEvents.requestId, context.requestId)),
     ).resolves.toEqual([
       {
-        after: {
+        after: expect.objectContaining({
           allocationCount: 1,
           assumptionsCount: 2,
           goalCount: 1,
@@ -1160,8 +1204,13 @@ describe.sequential("finance service", () => {
           planVersion: 1,
           rationaleProvided: true,
           scenarioFingerprint: input.scenarioFingerprint,
+        }),
+        before: {
+          allocations: [],
+          allocationCount: 0,
+          month: input.month,
+          priorAllocationCount: 0,
         },
-        before: { allocationCount: 0, month: input.month, priorAllocationCount: 0 },
       },
     ]);
 
@@ -1178,13 +1227,15 @@ describe.sequential("finance service", () => {
     const auditCount = await database.db.$count(auditEvents, eq(auditEvents.userId, owner.id));
 
     await expect(
-      service.setBudgetPlan(
+      reviewedSetBudgetPlan(
+        service,
         { ...input, allocations: [{ categoryId: foreignCategory.id, limit: 100 }] },
         { ...context, requestId: "budget-plan-foreign-category" },
       ),
     ).rejects.toMatchObject({ code: "not_found" });
     await expect(
-      service.setBudgetPlan(
+      reviewedSetBudgetPlan(
+        service,
         { ...input, goalIds: [foreignGoal.id] },
         { ...context, requestId: "budget-plan-foreign-goal" },
       ),
@@ -1226,7 +1277,8 @@ describe.sequential("finance service", () => {
     try {
       let allocationFailure: unknown;
       try {
-        await service.setBudgetPlan(
+        await reviewedSetBudgetPlan(
+          service,
           {
             ...input,
             allocations: [
@@ -1318,13 +1370,13 @@ describe.sequential("finance service", () => {
     let first: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
     let second: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
     try {
-      first = service.setBudgetPlan(firstPlan, {
+      first = reviewedSetBudgetPlan(service, firstPlan, {
         principal: financePrincipal(owner.id),
         requestId: "concurrent-budget-plan-first",
       });
       void first.catch(() => undefined);
       await waitForPostgresSleep(database.pool);
-      second = service.setBudgetPlan(secondPlan, {
+      second = reviewedSetBudgetPlan(service, secondPlan, {
         principal: financePrincipal(owner.id),
         requestId: "concurrent-budget-plan-second",
       });
@@ -2125,18 +2177,85 @@ describe.sequential("finance service", () => {
     ).toEqual([]);
   });
 
-  it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
+  it("creates reusable categories without transactions and isolates owners", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
-    const context = { principal: financePrincipal(userId), requestId: "manual-finance" };
+    const context = { principal: financePrincipal(userId), requestId: "category-create" };
+    const first = await service.createCategory({ name: "Custom hobby supplies" }, context);
+    const repeated = await service.createCategory({ name: "custom hobby supplies" }, context);
+    expect(repeated.id).toBe(first.id);
+    expect(await service.listCategories(userId)).toContainEqual(first);
+    expect(await service.listCategories("00000000-0000-4000-8000-000000000000")).not.toContainEqual(
+      first,
+    );
+  });
+
+  it("keeps colliding and non-ASCII category names distinct without renaming", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "category-collision" };
+    const names = ["R&D", "R and D", "食費", "交通"];
+    const created = await Promise.all(
+      names.map((name) => service.createCategory({ name }, context)),
+    );
+    expect(new Set(created.map((category) => category.id)).size).toBe(names.length);
+    const stored = await service.listCategories(userId);
+    for (const category of created) expect(stored).toContainEqual(category);
+    const original = created[0];
+    if (!original) throw new Error("Missing category");
+    await database.db
+      .update(financeCategories)
+      .set({ name: "Renamed research" })
+      .where(eq(financeCategories.id, original.id));
+    const recreated = await service.createCategory({ name: "R&D" }, context);
+    expect(recreated.id).not.toBe(original.id);
+    expect(recreated.name).toBe("R&D");
+    expect(await service.listCategories(userId)).toContainEqual(
+      expect.objectContaining({ id: original.id, name: "Renamed research" }),
+    );
+    const repeated = await Promise.all([
+      service.createCategory({ name: "Concurrent custom" }, context),
+      service.createCategory({ name: "Concurrent custom" }, context),
+    ]);
+    expect(repeated[0]?.id).toBe(repeated[1]?.id);
+  });
+
+  async function manualFinanceFixture(label: string) {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Manual Finance scenario",
+      email: `manual-finance-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: `manual-finance-${label}` };
+    const agentContext = {
+      principal: financeAgentPrincipal(userId),
+      requestId: `agent-finance-${label}`,
+    };
+    // The original scenario inherited this owner's approval from a sibling test.
+    await createExecutionPolicyService({ db: database.db, now: () => now }).update(
+      { expectedVersion: 1, reviewBypassEnabled: true },
+      context,
+    );
+    const account = await service.createAccount(
+      { balance: 1500, institution: "Cash", name: "Wallet", provider: "manual" },
+      context,
+    );
+    const shopping = (await service.listCategories(userId)).find(
+      (item) => item.slug === "shopping",
+    );
+    if (!shopping) throw new Error("Shopping category was not seeded.");
+    return { service, context, agentContext, userId, account, shopping };
+  }
+
+  it("keeps manual account availability and wealth independent of other scenarios", async () => {
+    const { service, context, userId } = await manualFinanceFixture("accounts");
     await expect(service.listMerchants("00000000-0000-4000-8000-000000000000")).resolves.toEqual(
       [],
     );
     expect(service.plaidAvailable()).toBe(false);
     await expect(service.createPlaidLinkToken(userId)).rejects.toThrow("Plaid is not configured");
-    const account = await service.createAccount(
-      { balance: 1500, institution: "Cash", name: "Wallet", provider: "manual" },
-      context,
-    );
     const wealthAccounts = await Promise.all(
       [
         { balance: 250, kind: "debt" as const, name: "Card" },
@@ -2157,6 +2276,11 @@ describe.sequential("finance service", () => {
     for (const wealthAccount of wealthAccounts) {
       await service.deleteAccount(wealthAccount.id, context);
     }
+  });
+
+  it("preserves categorization authority, stale previews and deferred-review replay", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("categorization");
     const categorized = await service.createTransaction(
       {
         accountId: account.id,
@@ -2189,10 +2313,6 @@ describe.sequential("finance service", () => {
       needsReview: false,
     });
     expect(review.needsReview).toBe(true);
-    const shopping = (await service.listCategories(userId)).find(
-      (item) => item.slug === "shopping",
-    );
-    if (!shopping) throw new Error("Shopping category was not seeded.");
     const [pendingCandidate] = await database.db
       .insert(financeTransactions)
       .values({
@@ -2236,10 +2356,6 @@ describe.sequential("finance service", () => {
         .from(financeClassificationDecisions)
         .where(eq(financeClassificationDecisions.transactionId, pendingCandidate.id)),
     ).resolves.toHaveLength(0);
-    const agentContext = {
-      principal: financeAgentPrincipal(userId),
-      requestId: "agent-finance",
-    };
     await expect(
       service.applyCategorizations(
         {
@@ -2500,6 +2616,24 @@ describe.sequential("finance service", () => {
         expectedTransactionUpdatedAt: lowConfidenceReview.transaction.updatedAt,
         learnMerchant: "never",
         rationale: "The user accepted the individual category.",
+      },
+      context,
+    );
+  });
+
+  it("fences concurrent category evidence and reviewed mutations with paginated reads", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("evidence");
+    const review = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Mystery Shop",
+        notes: null,
       },
       context,
     );
@@ -2862,6 +2996,11 @@ describe.sequential("finance service", () => {
           staleAgentReviewCandidate.id,
         ]),
       );
+  });
+
+  it("keeps transfer guidance, human decisions and concurrent review outcomes together", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("transfers");
     const transferCandidate = await service.createTransaction(
       {
         accountId: account.id,
@@ -3036,6 +3175,96 @@ describe.sequential("finance service", () => {
         (item) => item.transaction.id === recategorizedTransfer.id,
       ),
     ).toBe(false);
+  });
+
+  it("preserves the manual ledger through learning, import, budgets and guidance-fenced deletion", async () => {
+    const { service, context, userId, account, shopping } = await manualFinanceFixture("ledger");
+    const review = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Mystery Shop",
+        notes: null,
+      },
+      context,
+    );
+    // Preserve the same posted/pending and transfer contributions as the original journey.
+    // Their edge-case mutations are covered above; this fixture makes the aggregate explicit.
+    for (const item of [
+      { amount: 12.5, category: null, merchant: "Trader Joe's" },
+      { amount: 7, category: null, merchant: "Revision Race" },
+      { amount: 1, category: "Shopping", merchant: "Single Evidence" },
+      { amount: 2, category: "Shopping", merchant: "Single Evidence" },
+      { amount: 3, category: "Shopping", merchant: "Everyday Supplies" },
+      { amount: 4, category: "Shopping", merchant: "Everyday Supplies" },
+      { amount: 5, category: "Shopping", merchant: "Everyday Supplies" },
+    ]) {
+      await service.createTransaction(
+        {
+          ...item,
+          accountId: account.id,
+          categoryConfidence: null,
+          date: "2026-07-19",
+          direction: "expense",
+          notes: item.merchant === "Revision Race" ? "Changed after preview" : null,
+        },
+        context,
+      );
+    }
+    await database.db.insert(financeTransactions).values({
+      accountId: account.id,
+      amount: 800,
+      category: "Shopping",
+      categoryId: shopping.id,
+      direction: "expense",
+      merchant: "Pending Card Hold",
+      needsReview: false,
+      pending: true,
+      transactionDate: "2026-07-19",
+      userId,
+    });
+    // Exercise transfer recognition and both human decisions before the aggregate read.
+    for (const [amount, merchant, action] of [
+      [25, "Account movement", "confirm_transfer"],
+      [18, "Misclassified purchase", "recategorize"],
+    ] as const) {
+      const candidate = await service.createTransaction(
+        {
+          accountId: account.id,
+          amount,
+          category: null,
+          categoryConfidence: null,
+          date: "2026-07-19",
+          direction: "transfer",
+          merchant,
+          notes: null,
+        },
+        context,
+      );
+      await service.reconcileTransfers(userId);
+      const queued = (await service.listReviewQueue(userId)).find(
+        (item) => item.transaction.id === candidate.id,
+      );
+      if (!queued) throw new Error("Ledger transfer was not queued for review.");
+      await service.resolveReview(
+        queued.id,
+        {
+          action,
+          ...(action === "recategorize"
+            ? { categoryId: shopping.id, nonTransferDirection: "expense" as const }
+            : {}),
+          expectedTransactionUpdatedAt: queued.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "Preserve the ledger fixture's human transfer decision.",
+        },
+        context,
+      );
+      await service.reconcileTransfers(userId);
+    }
     await service.updateTransaction(
       review.id,
       { category: "Shopping", learnMerchant: true },
@@ -3168,7 +3397,11 @@ describe.sequential("finance service", () => {
     await expect(
       service.updateTransaction("00000000-0000-4000-8000-000000000000", { notes: "Nope" }, context),
     ).rejects.toThrow("transaction was not found");
-    await service.createBudget({ category: "Groceries", limit: 400, month: "2026-07" }, context);
+    await reviewedCreateBudget(
+      service,
+      { category: "Groceries", limit: 400, month: "2026-07" },
+      context,
+    );
     const overview = await service.listOverview(userId);
     expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 97.75 });
     expect(overview.budgets).toHaveLength(1);
@@ -3659,8 +3892,13 @@ describe.sequential("finance service", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "conflict" });
-    await service.createBudget({ category: "Health", limit: 100, month: "2026-07" }, context);
-    await service.createBudget(
+    await reviewedCreateBudget(
+      service,
+      { category: "Health", limit: 100, month: "2026-07" },
+      context,
+    );
+    await reviewedCreateBudget(
+      service,
       { category: "Personal Care", limit: 100, month: "2026-07" },
       context,
     );
@@ -5061,7 +5299,11 @@ describe.sequential("finance service", () => {
       },
       context,
     );
-    await service.createBudget({ category: "Shopping", limit: 90, month: "2026-07" }, context);
+    await reviewedCreateBudget(
+      service,
+      { category: "Shopping", limit: 90, month: "2026-07" },
+      context,
+    );
 
     await expect(service.getBudgetStatus(integrityId, "2026-07")).resolves.toEqual([
       expect.objectContaining({ remaining: 10, spent: 80 }),
@@ -5757,7 +5999,11 @@ describe.sequential("finance service", () => {
       { balance: 5_000, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
       context,
     );
-    await service.createBudget({ category: "Dining", limit: 310, month: "2026-07" }, context);
+    await reviewedCreateBudget(
+      service,
+      { category: "Dining", limit: 310, month: "2026-07" },
+      context,
+    );
     for (const [date, amount] of [
       ["2026-07-01", 100],
       ["2026-07-19", 150],
@@ -5866,7 +6112,7 @@ describe.sequential("finance service", () => {
       data: {
         connectionId: expect.any(String),
         externalHandoff: {
-          artifact: "link-token",
+          artifact: "https://secure.plaid.com/hl/fixture",
           expiresAt: "2026-07-19T12:30:00.000Z",
         },
         status: "pending",
@@ -5878,7 +6124,7 @@ describe.sequential("finance service", () => {
       .from(financeAccountConnections)
       .where(eq(financeAccountConnections.id, connectionResult.data.connectionId));
     expect(persistedConnection).toMatchObject({
-      externalHandoffUrl: "link-token",
+      externalHandoffUrl: "https://secure.plaid.com/hl/fixture",
       status: "pending",
     });
     const accounts = await service.exchangePlaidToken(
@@ -6454,7 +6700,8 @@ describe.sequential("finance service", () => {
       },
       context,
     );
-    await service.createBudget(
+    await reviewedCreateBudget(
+      service,
       { category: firstCategory.name, limit: 100, month: "2026-07" },
       context,
     );

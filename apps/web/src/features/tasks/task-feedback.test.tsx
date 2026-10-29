@@ -156,9 +156,15 @@ it("shows project completion choices without a generic conflict but preserves re
   ).toBeVisible();
   expect(screen.queryByText(/Couldn’t/)).not.toBeInTheDocument();
   await browser.click(screen.getByRole("button", { name: "Complete open Tasks" }));
+  await waitFor(() =>
+    expect(mocks.error).toHaveBeenCalledWith(
+      expect.stringMatching(/Couldn’t confirm whether we could update this project/),
+      expect.anything(),
+    ),
+  );
   expect(
-    await screen.findByText(/Couldn’t confirm whether we could update this project/),
-  ).toBeVisible();
+    screen.queryByText(/Couldn’t confirm whether we could update this project/),
+  ).not.toBeInTheDocument();
   await browser.click(screen.getByRole("button", { name: "Complete open Tasks" }));
   await waitFor(() => expect(close).toHaveBeenCalled());
   expect(mocks.completeTaskProject).toHaveBeenLastCalledWith("project", {

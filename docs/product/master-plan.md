@@ -199,11 +199,12 @@ flowchart TD
 - Defer fine-grained per-agent controls over which workspace records or User Knowledge categories
   may enter each external model host's context. Plan that later disclosure-control layer without
   blocking initial capability parity, credential scopes, or purpose-bounded API results.
-- Retain the existing Settings-owned Reviews destination that composes Review and Attention work,
-  and expand it to every question, approval, connector failure, recovery step, or other item that
-  explicitly requires the person. Preserve workspace/type filters, honest partial availability,
-  stable pagination, and deep links back to the owning domain; exclude informational and
-  automatically recoverable states.
+- Use the [workspace Reviews flow](../design/pages/reviews.md) for questions, approvals, connector
+  failures, recovery steps, and other work that explicitly requires the person. Preserve domain
+  authority, honest partial availability, stable pagination, exact targets, and recovery; exclude
+  informational and automatically recoverable states. The accepted Settings architecture supersedes
+  the earlier central queue. Texting’s unified cross-workspace destination remains pending rather
+  than being an existing capability of this scoped flow.
 - Keep the daily brief as a generated projection over current material. It is not an installable routine and has no generic lifecycle UI.
 - Give an internal timer or durable queue only to a domain workflow that needs to continue already accepted work, such as approved delayed Mail rule work. The owning domain defines trigger, policy, idempotency, retry, recovery, evidence, and stop behavior; internal timing never originates recurring maintenance.
 - Expand MCP tools/resources to match domain actions while making scope/policy/capability failures structured and comprehensible. MCP never owns business rules.
@@ -311,9 +312,11 @@ delivery plan maps current capabilities and remaining work into independently re
   before sending, and use accurate `today`, `yesterday`, or `tomorrow` labels for nearby dates.
 - Keep SMS formal, short, and concise. Render as many directly answerable questions or actions as
   reasonably fit, with a hard cap of three and permission to include only one or two when clarity
-  requires. Include the existing Settings-owned unified Reviews link in every multi-item message;
+  requires. The accepted target includes one unified Reviews link in every multi-item message;
   when additional work remains or context is too large, summarize the overflow. Send one
-  cross-workspace notification, not separate proactive messages per item or workspace.
+  cross-workspace notification, not separate proactive messages per item or workspace. This
+  destination is still unimplemented: current legacy links fall back to Account. Follow the
+  [Texting contract](texting-operations.md) for the target/implementation boundary.
 - Number every item in a multi-item SMS and bind the short reference to the exact outbound message
   and proposal revision. Require replies to identify each answered number; accept a direct bounded
   answer without a reference only for one unambiguous active item.

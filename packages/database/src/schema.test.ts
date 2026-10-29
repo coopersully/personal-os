@@ -26,6 +26,7 @@ import {
   financeProviderItems,
   financeReimbursementMatches,
   financeReimbursements,
+  financeReviewCases,
   financeTransactionAllocations,
   financeTransactions,
   mailCalendarCommitmentIntakes,
@@ -486,7 +487,171 @@ describe("database schema contracts", () => {
       "0091_texting_provider_submission_evidence",
       "0092_finance_sms_answer_provenance",
       "0093_ritual_tracking",
+      "0094_workspace_preferences",
+      "0095_calendar_follow_preferences",
+      "0096_task_container_pins",
+      "0097_task_display_preferences",
+      "0098_mail_layout_preferences",
+      "0099_mail_conversation_layout",
+      "0100_finance_transaction_preferences",
+      "0101_calendar_creation_preferences",
+      "0102_task_capture_preferences",
+      "0103_finance_display_account_preferences",
+      "0104_finance_review_history_index",
+      "0105_finance_review_history_archive",
+      "0109_finance_review_history_archive_upgrade",
+      "0106_finance_review_action_authority",
+      "0107_finance_host_continuation",
+      "0108_finance_sms_completion",
+      "0110_workspace_agent_approval_provenance",
+      "0111_finance_hosted_link_state",
+      "0112_connector_capability_health",
+      "0113_finance_host_prompt_issues",
+      "0114_finance_budget_baseline_qualifications",
+      "0115_finance_conversation_core",
+      "0116_finance_onboarding_receipts",
+      "0117_finance_planning_evidence",
+      "0118_finance_preferences_legacy_access",
+      "0119_finance_recurring_occurrences",
+      "0120_finance_legacy_access_erasure_guard",
+      "0121_oauth_access_token_rotations",
+      "0122_finance_reimbursement_relationship_generation",
+      "0123_finance_maintenance_execution_binding",
+      "0124_finance_transaction_coverage",
+      "0125_finance_bypass_confirmation_provenance",
+      "0126_finance_spending_list_default",
+      "0127_finance_spending_week_default",
+      "0128_shared_agent_accounts",
+      "0129_finance_review_batches",
     ]);
+  });
+
+  it("keeps issued Finance prompts immutable by identity and attached to the schedule owner", async () => {
+    const prompts = getTableConfig(requiredTable("automationHostPromptIssues"));
+    expect(prompts.columns.map((column) => column.name)).toEqual([
+      "user_id",
+      "schedule_id",
+      "template_version",
+      "schedule_version_at_issue",
+      "text",
+      "issued_at",
+    ]);
+    expect(prompts.columns.every((column) => column.notNull)).toBe(true);
+    expect(prompts.primaryKeys).toHaveLength(1);
+    expect(prompts.primaryKeys[0]?.columns.map((column) => column.name)).toEqual([
+      "user_id",
+      "schedule_id",
+      "template_version",
+    ]);
+    expect(prompts.primaryKeys[0]?.getName()).toBe("automation_host_prompt_issues_pkey");
+    expect(
+      prompts.foreignKeys.map((key) => ({
+        name: key.getName(),
+        table: getTableName(key.reference().foreignTable),
+        columns: key.reference().columns.map((column) => column.name),
+        foreignColumns: key.reference().foreignColumns.map((column) => column.name),
+        onDelete: key.onDelete,
+      })),
+    ).toEqual([
+      {
+        name: "automation_host_prompt_issues_owner_fk",
+        table: "automation_host_schedules",
+        columns: ["user_id", "schedule_id"],
+        foreignColumns: ["user_id", "id"],
+        onDelete: "cascade",
+      },
+    ]);
+    const dialect = new PgDialect();
+    const checks = new Map(
+      prompts.checks.map((check) => [check.name, dialect.sqlToQuery(check.value).sql]),
+    );
+    expect(checks.get("automation_host_prompt_issues_template_version_check")).toContain(
+      '"template_version" > 0',
+    );
+    expect(checks.get("automation_host_prompt_issues_schedule_version_check")).toContain(
+      '"schedule_version_at_issue" > 0',
+    );
+    expect(checks.get("automation_host_prompt_issues_text_check")).toContain(
+      'length("automation_host_prompt_issues"."text") > 0',
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0113_finance_host_prompt_issues.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain("PRIMARY KEY(user_id, schedule_id, template_version)");
+    expect(migrationSql).toContain(
+      "CONSTRAINT automation_host_prompt_issues_owner_fk FOREIGN KEY(user_id,schedule_id)",
+    );
+    expect(migrationSql).toContain(
+      "REFERENCES automation_host_schedules(user_id,id) ON DELETE CASCADE",
+    );
+    for (const name of checks.keys()) expect(migrationSql).toContain(name);
+    expect(migrationSql).not.toMatch(/\b(?:INSERT|UPDATE|ALTER)\b/i);
+    const journal = JSON.parse(
+      await readFile(
+        resolve(process.cwd(), "packages/database/migrations/meta/_journal.json"),
+        "utf8",
+      ),
+    ) as { entries: Array<{ tag: string; when: number }> };
+    const position = journal.entries.findIndex(
+      (entry) => entry.tag === "0113_finance_host_prompt_issues",
+    );
+    expect(position).toBeGreaterThan(0);
+    expect(
+      journal.entries.filter((entry) => entry.tag === "0113_finance_host_prompt_issues"),
+    ).toHaveLength(1);
+    expect(journal.entries[position]?.when).toBeGreaterThan(
+      journal.entries[position - 1]?.when ?? 0,
+    );
+  });
+
+  it("keeps SMS completion evidence bound to its signed claim, context and acknowledgement", async () => {
+    const completion = getTableConfig(requiredTable("financeSmsCompletions"));
+    expect(completion.foreignKeys.map((key) => key.getName())).toEqual(
+      expect.arrayContaining([
+        "finance_sms_completions_claim_fk",
+        "finance_sms_completions_context_fk",
+        "finance_sms_completions_ack_fk",
+      ]),
+    );
+    const claim = completion.foreignKeys.find(
+      (key) => key.getName() === "finance_sms_completions_claim_fk",
+    );
+    expect(claim?.reference().columns.map((column) => column.name)).toEqual([
+      "user_id",
+      "claim_id",
+      "connection_id",
+    ]);
+    expect(claim?.onDelete).toBe("cascade");
+    expect(completion.checks.map((check) => check.name)).toEqual(
+      expect.arrayContaining([
+        "finance_sms_completions_disposition_check",
+        "finance_sms_completions_context_check",
+      ]),
+    );
+    const migration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0108_finance_sms_completion.sql"),
+      "utf8",
+    );
+    expect(migration).toContain("Finance SMS completion evidence is immutable");
+    expect(migration).toContain("Finance SMS completion evidence remains until owner deletion");
+  });
+
+  it("keeps Finance review history ordering aligned with migration 0104", async () => {
+    const reviews = getTableConfig(financeReviewCases);
+    const historyIndex = reviews.indexes.find(
+      (index) => index.config.name === "finance_review_cases_user_first_seen_id_idx",
+    );
+    expect(
+      historyIndex?.config.columns.map((column) => (column as { name?: string }).name),
+    ).toEqual(["user_id", "first_seen_at", "id"]);
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0104_finance_review_history_index.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain(
+      'CREATE INDEX "finance_review_cases_user_first_seen_id_idx" ON "finance_review_cases" USING btree ("user_id", "first_seen_at" DESC, "id" DESC);',
+    );
   });
 
   it("keeps reimbursement ownership, many-to-many credit matching, and migration 0062 aligned", async () => {

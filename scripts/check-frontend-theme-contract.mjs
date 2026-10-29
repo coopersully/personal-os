@@ -34,6 +34,28 @@ const forbiddenPatterns = [
 
 const stylesheet = await readFile(resolve(root, "styles.css"), "utf8");
 const stylesheetForDecorativeChecks = stylesheet
+  // The approved mobile edge fade extends blur around the floating pill.
+  // Only these exact declarations on its decorative sibling are exempt.
+  .replace(/\.workspace-app-bar-backdrop\s*\{[^}]*\}/g, (block) =>
+    block
+      .replace(/background: linear-gradient\(to bottom, transparent, var\(--background\)\);/g, "")
+      .replace(/(?:-webkit-)?backdrop-filter: blur\(20px\);/g, "")
+      .replace(
+        /(?:-webkit-)?mask-image: linear-gradient\(to bottom, transparent, black 70%\);/g,
+        "",
+      ),
+  )
+  // Cooper approved matching translucent app bars and shared floating action pills.
+  .replace(
+    /(\.(?:workspace-app-bar|floating-actions)\s*\{[^}]*?)-webkit-backdrop-filter: blur\(20px\);\s*backdrop-filter: blur\(20px\);/g,
+    "$1",
+  )
+  // The mobile app bar uses the same approved surface treatment.
+  // Keep the exception bound to this selector and these exact blur declarations.
+  .replace(
+    /(\.workspace-dock\.workspace-app-tabs\s*\{[^}]*?)-webkit-backdrop-filter: blur\(20px\);\s*backdrop-filter: blur\(20px\);/g,
+    "$1",
+  )
   // A flat autofill repaint masks the browser's forced background, not elevation.
   // Allow only this exact declaration within the autofill selector.
   .replace(
@@ -44,21 +66,23 @@ const stylesheetForDecorativeChecks = stylesheet
     /\/\* theme-contract-allow-start: functional-calendar-grid \*\/[\s\S]*?\/\* theme-contract-allow-end: functional-calendar-grid \*\//g,
     "",
   )
+  // Approved Mail history navigation fade preserves legibility over scrolling messages.
+  // Limit the exception to this selector and the page-background gradient.
+  .replace(
+    /(\.mail-reader__history-nav\s*\{[^}]*?)background: linear-gradient\(\s*to bottom,\s*var\(--background\) 0%,\s*color-mix\(in srgb, var\(--background\) 90%, transparent\) 55%,\s*transparent 100%\s*\);/g,
+    "$1",
+  )
   // The approved Setup edge fade keeps floating controls legible over content.
   // Exempt only this selector and canvas-colored declaration, not other effects.
   .replace(
     /(\.setup-navigation__fade\s*\{\s*)background: linear-gradient\(to bottom, transparent, var\(--canvas\) 62%\);/g,
     "$1",
   );
-// Ritual previews mirror the explicitly approved native sunrise/moonlight backdrop.
-// Keep this exception restricted to those two selectors and their exact colors.
+// The approved shared ritual glow is bounded to its decorative sky layer.
 const stylesheetForRitualChecks = stylesheetForDecorativeChecks
+  .replace(/(\.browser-ritual\s*\{\s*)backdrop-filter: blur\(24px\);/g, "$1")
   .replace(
-    /(\.ritual-browser-preview\s*\{\s*)background: radial-gradient\(ellipse at 50% 100%, rgb\(255 210 64 \/ 65%\), transparent 65%\), rgb\(38 79 133\);/g,
-    "$1",
-  )
-  .replace(
-    /(\.ritual-browser-preview\[data-ritual-kind="night"\]\s*\{\s*)background: radial-gradient\(ellipse at 50% 0%, rgb\(240 248 255 \/ 65%\), transparent 65%\), rgb\(9 18 48\);/g,
+    /(\.ritual-glow\s*\{[^}]*?)background: radial-gradient\(ellipse at 50% 50%, var\(--ritual-glow-color\) 0%, transparent 65%\);/g,
     "$1",
   );
 const stylesheetPatterns = [

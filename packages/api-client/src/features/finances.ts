@@ -4,12 +4,16 @@ import type {
   ApproveFinanceBudgetInput,
   AttentionItem,
   ClassifyFinanceTransactionsInput,
+  ConfirmFinanceBalanceBasisInput,
+  ConfirmFinanceBudgetBaselineQualificationInput,
+  ConfirmFinanceRecurringScheduleInput,
   CreateFinanceAccountInput,
   CreateFinanceBudgetBucketInput,
   CreateFinanceBudgetInput,
   CreateFinanceBudgetPolicyInput,
   CreateFinanceBudgetRevisionProposalInput,
   CreateFinanceBudgetVersionInput,
+  CreateFinanceCategoryInput,
   CreateFinanceContextualQuestionInput,
   CreateFinanceTransactionInput,
   DesignateFinanceBudgetBaselineInput,
@@ -23,7 +27,12 @@ import type {
   FinanceActionReview,
   FinanceAlert,
   FinanceAnswer,
+  FinanceBalanceBasis,
+  FinanceBalanceBasisSourceSnapshots,
+  FinanceBalanceBasisSourcesQuery,
   FinanceBudget,
+  FinanceBudgetBaselineQualificationRead,
+  FinanceBudgetBaselineReview,
   FinanceBudgetBucketList,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
@@ -34,13 +43,18 @@ import type {
   FinanceBudgetPolicyListInput,
   FinanceBudgetPolicyPreviewRecord,
   FinanceBudgetPolicyRecord,
+  FinanceBudgetReadResult,
   FinanceBudgetRevisionProposalRecord,
   FinanceBudgetStatus,
   FinanceBudgetVersion,
+  FinanceCashflowProjectionQuery,
+  FinanceCashflowProjectionView,
+  FinanceCashflowSourceSnapshots,
   FinanceCategorizationApplyResult,
   FinanceCategorizationProposal,
   FinanceCategorizationProposalPage,
   FinanceCategory,
+  FinanceConfiguration,
   FinanceContextualQuestionResult,
   FinanceCsvImportInput,
   FinanceDomainOutcome,
@@ -57,6 +71,10 @@ import type {
   FinanceMaintenanceInput,
   FinanceMaintenancePayload,
   FinanceMerchant,
+  FinanceOccurrenceMatchEvent,
+  FinanceOnboardingCompleteInput,
+  FinanceOnboardingSaveInput,
+  FinanceOnboardingSnapshot,
   FinanceOverview,
   FinancePeriodReview,
   FinancePlaybookResponse,
@@ -68,16 +86,26 @@ import type {
   FinanceReceiptReview,
   FinanceReceiptReviewInput,
   FinanceRecurringObligation,
+  FinanceRecurringOccurrencesQuery,
+  FinanceRecurringOccurrencesView,
+  FinanceRecurringSchedule,
   FinanceReimbursement,
   FinanceReimbursementQuestionAnswer,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceReviewHistoryItem,
+  FinanceReviewHistoryPage,
+  FinanceReviewHistoryQuery,
   FinanceRule,
   FinanceScenarioInput,
   FinanceScenarioResult,
   FinanceSetupInput,
   FinanceSetupPayload,
   FinanceSnapshot,
+  FinanceSpendingDashboard,
+  FinanceSpendingQuery,
+  FinanceSpendingReferenceFilter,
+  FinanceSpendingReferencePage,
   FinanceStatus,
   FinanceToolResult,
   FinanceTransaction,
@@ -87,9 +115,11 @@ import type {
   LinkFinanceTransactionsInput,
   MaintenanceScope,
   ManageFinanceGoalInput,
+  ManageFinanceOccurrenceMatchInput,
   ManageFinanceRecurringItemInput,
   ManageFinanceRuleInput,
   MergeFinanceMerchantsInput,
+  PrepareFinanceBudgetBaselineQualificationInput,
   PreviewFinanceBudgetPolicyInput,
   ReconcileFinanceReimbursementInput,
   RemoveFinanceTransactionInput,
@@ -113,9 +143,14 @@ import type {
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import {
+  financeBudgetBaselineQualificationReadSchema,
+  financeBudgetBaselineReviewSchema,
   financeLedgerChallengePageSchema,
   financeLedgerChallengeSchema,
+  financeOnboardingSnapshotSchema,
   financePeriodReviewSchema,
+  financeSpendingDashboardSchema,
+  financeSpendingReferencePageSchema,
   financeStatusSchema,
 } from "@personal-os/domain";
 
@@ -159,7 +194,155 @@ export function createFinanceApi(request: FinanceRequest) {
     return actionResult(response, "budget");
   }
 
+  function cashflowQuery(query: FinanceRecurringOccurrencesQuery) {
+    const params = new URLSearchParams({ from: query.from, to: query.to });
+    if (query.accountIds !== undefined) params.set("accountIds", query.accountIds.join(","));
+    return params;
+  }
   return {
+    async getFinanceOnboarding(): Promise<FinanceOnboardingSnapshot> {
+      return financeOnboardingSnapshotSchema.parse(await request("/v1/finances/onboarding"));
+    },
+    async saveFinanceOnboardingAnswers(
+      input: FinanceOnboardingSaveInput,
+    ): Promise<FinanceOnboardingSnapshot> {
+      return financeOnboardingSnapshotSchema.parse(
+        await request("/v1/finances/onboarding/answers", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
+    async completeFinanceOnboarding(
+      input: FinanceOnboardingCompleteInput,
+    ): Promise<FinanceOnboardingSnapshot> {
+      return financeOnboardingSnapshotSchema.parse(
+        await request("/v1/finances/onboarding/complete", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
+    async listFinanceRecurringSchedules(): Promise<FinanceRecurringSchedule[]> {
+      return request("/v1/finances/recurring-schedules");
+    },
+    async confirmFinanceRecurringSchedule(
+      input: ConfirmFinanceRecurringScheduleInput,
+    ): Promise<FinanceToolResult<FinanceRecurringSchedule>> {
+      return request("/v1/finances/recurring-schedules", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+    },
+    async listFinanceRecurringOccurrences(
+      query: FinanceRecurringOccurrencesQuery,
+    ): Promise<FinanceRecurringOccurrencesView> {
+      return request(`/v1/finances/recurring-occurrences?${cashflowQuery(query)}`);
+    },
+    async manageFinanceOccurrenceMatch(
+      input: ManageFinanceOccurrenceMatchInput,
+    ): Promise<FinanceToolResult<FinanceOccurrenceMatchEvent>> {
+      return request("/v1/finances/recurring-occurrence-matches", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+    },
+    async listFinanceBalanceBases(accountIds?: string[]): Promise<FinanceBalanceBasis[]> {
+      const params = new URLSearchParams();
+      if (accountIds !== undefined) params.set("accountIds", accountIds.join(","));
+      return request(`/v1/finances/balance-bases?${params}`);
+    },
+    async confirmFinanceBalanceBasis(
+      input: ConfirmFinanceBalanceBasisInput,
+    ): Promise<FinanceToolResult<FinanceBalanceBasis>> {
+      return request("/v1/finances/balance-bases", { method: "POST", body: JSON.stringify(input) });
+    },
+    async listFinanceBalanceBasisSources(
+      query: FinanceBalanceBasisSourcesQuery = {},
+    ): Promise<FinanceBalanceBasisSourceSnapshots> {
+      const params = new URLSearchParams();
+      if (query.accountIds !== undefined) params.set("accountIds", query.accountIds.join(","));
+      return request(`/v1/finances/balance-basis-sources?${params}`);
+    },
+    async listFinanceCashflowSources(
+      query: FinanceRecurringOccurrencesQuery,
+    ): Promise<FinanceCashflowSourceSnapshots> {
+      return request(`/v1/finances/cashflow-sources?${cashflowQuery(query)}`);
+    },
+    async getFinanceCashflowProjection(
+      query: FinanceCashflowProjectionQuery,
+    ): Promise<FinanceCashflowProjectionView> {
+      const params = cashflowQuery(query);
+      if (query.selectedIncomeStreamId !== null)
+        params.set("selectedIncomeStreamId", query.selectedIncomeStreamId);
+      return request(`/v1/finances/cashflow-projection?${params}`);
+    },
+
+    async getFinanceBudgetBaselineQualification(
+      month: string,
+    ): Promise<FinanceBudgetBaselineQualificationRead> {
+      return financeBudgetBaselineQualificationReadSchema.parse(
+        await request(
+          `/v1/finances/budget-baselines/qualification?${new URLSearchParams({ month })}`,
+        ),
+      );
+    },
+    async prepareFinanceBudgetBaselineQualification(
+      input: PrepareFinanceBudgetBaselineQualificationInput,
+    ): Promise<FinanceBudgetBaselineReview> {
+      return financeBudgetBaselineReviewSchema.parse(
+        await request("/v1/finances/budget-baselines/qualification/prepare", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
+    async confirmFinanceBudgetBaselineQualification(
+      input: ConfirmFinanceBudgetBaselineQualificationInput,
+    ): Promise<FinanceBudgetBaselineQualificationRead> {
+      return financeBudgetBaselineQualificationReadSchema.parse(
+        await request("/v1/finances/budget-baselines/qualification/confirm", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
+    async listFinanceSpendingTransactions(
+      filter: FinanceSpendingReferenceFilter,
+      cursor?: string,
+      limit = 50,
+    ): Promise<FinanceSpendingReferencePage> {
+      return financeSpendingReferencePageSchema.parse(
+        await request("/v1/finances/spending/transactions", {
+          method: "POST",
+          body: JSON.stringify({ filter, ...(cursor ? { cursor } : {}), limit }),
+        }),
+      );
+    },
+    async getFinanceSpending(query: FinanceSpendingQuery): Promise<FinanceSpendingDashboard> {
+      const search = new URLSearchParams({
+        from: query.scope.from,
+        through: query.scope.through,
+        timezone: query.scope.timezone,
+        basis: query.scope.basis,
+        includePending: String(query.scope.includePending),
+        subtractRefunds: String(query.scope.subtractRefunds),
+        grouping: query.grouping,
+        includeUncategorized: String(query.includeUncategorized),
+      });
+      for (const key of ["accountIds", "categoryIds"] as const) {
+        const values = query.scope[key];
+        search.set(
+          `${key}Selection`,
+          values === null ? "all" : values.length ? "selected" : "none",
+        );
+        for (const id of values ?? []) search.append(key, id ?? "uncategorized");
+      }
+      const response = await request<{ spending: FinanceSpendingDashboard }>(
+        `/v1/finances/spending?${search}`,
+      );
+      return financeSpendingDashboardSchema.parse(response.spending);
+    },
     async getFinancePosition(scope: FinancePositionReadScope): Promise<FinancePositionEvidence> {
       const search = new URLSearchParams({ from: scope.from, through: scope.through });
       if (scope.accountIds !== undefined) search.set("accountIds", scope.accountIds.join(","));
@@ -306,6 +489,9 @@ export function createFinanceApi(request: FinanceRequest) {
       return response.review;
     },
     createFinanceBudget,
+    async getFinanceConfiguration(): Promise<FinanceConfiguration> {
+      return request("/v1/finances/configuration");
+    },
     async setupFinances(input: FinanceSetupInput): Promise<FinanceToolResult<FinanceSetupPayload>> {
       return request("/v1/finances/setup", {
         body: JSON.stringify(input),
@@ -523,9 +709,7 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "PATCH",
       });
     },
-    async getFinanceBudget(
-      planId?: string,
-    ): Promise<FinanceToolResult<FinanceBudgetVersion | null>> {
+    async getFinanceBudget(planId?: string): Promise<FinanceBudgetReadResult> {
       return request(
         `/v1/finances/budget-plans${planId ? `?planId=${encodeURIComponent(planId)}` : ""}`,
       );
@@ -643,6 +827,13 @@ export function createFinanceApi(request: FinanceRequest) {
       const response = await request<{ export: FinanceExport }>("/v1/finances/export");
       return response.export;
     },
+    async createFinanceCategory(input: CreateFinanceCategoryInput): Promise<FinanceCategory> {
+      const response = await request<{ category: FinanceCategory }>("/v1/finances/categories", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      return response.category;
+    },
     async getFinanceCategories(): Promise<FinanceCategory[]> {
       const response = await request<{ categories: FinanceCategory[] }>("/v1/finances/categories");
       return response.categories;
@@ -688,6 +879,18 @@ export function createFinanceApi(request: FinanceRequest) {
     },
     async getFinanceInbox(): Promise<FinanceToolResult<FinanceInboxCase[]>> {
       return request("/v1/finances/inbox");
+    },
+    async listFinanceReviewHistory(
+      query: Partial<FinanceReviewHistoryQuery> = {},
+    ): Promise<FinanceReviewHistoryPage> {
+      const search = new URLSearchParams();
+      if (query.limit !== undefined) search.set("limit", String(query.limit));
+      if (query.cursor !== undefined) search.set("cursor", query.cursor);
+      const suffix = search.size ? `?${search.toString()}` : "";
+      return request(`/v1/finances/inbox/history${suffix}`);
+    },
+    async getFinanceReviewHistoryItem(id: string): Promise<FinanceReviewHistoryItem> {
+      return request(`/v1/finances/inbox/history/${encodeURIComponent(id)}`);
     },
     async answerFinanceReview(
       id: string,
@@ -736,9 +939,20 @@ export function createFinanceApi(request: FinanceRequest) {
     ): Promise<FinanceToolResult<FinanceAccountConnection>> {
       return request(`/v1/finances/account-connections/${encodeURIComponent(id)}`);
     },
-    async startFinanceAccountConnection(
-      input: StartFinanceAccountConnectionInput,
+    async completeFinanceAccountConnection(
+      id: string,
     ): Promise<FinanceToolResult<FinanceAccountConnection>> {
+      return request(`/v1/finances/account-connections/${encodeURIComponent(id)}/complete`, {
+        method: "POST",
+      });
+    },
+    async startFinanceAccountConnection(input: StartFinanceAccountConnectionInput): Promise<
+      FinanceToolResult<{
+        connectionId: string;
+        status: FinanceAccountConnection["status"];
+        externalHandoff: FinanceAccountConnection["externalHandoff"];
+      }>
+    > {
       return request("/v1/finances/account-connections", {
         body: JSON.stringify(input),
         method: "POST",
@@ -762,7 +976,9 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "POST",
       });
     },
-    async getFinanceTransaction(id: string): Promise<FinanceToolResult<FinanceTransaction>> {
+    async getFinanceTransaction(
+      id: string,
+    ): Promise<FinanceToolResult<FinanceTransaction & { version: number }>> {
       return request(`/v1/finances/transactions/${encodeURIComponent(id)}`);
     },
     async removeFinanceTransaction(

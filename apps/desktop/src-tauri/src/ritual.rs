@@ -327,7 +327,7 @@ async fn api(
     validate_api_result(method, response.status, &value)?;
     Ok((response.status, value))
 }
-fn valid_definition(value: &Value) -> bool {
+fn valid_definition(value: &Value, allow_empty: bool) -> bool {
     value["id"].as_str().is_some_and(|id| !id.is_empty())
         && matches!(value["kind"].as_str(), Some("morning" | "night"))
         && value["revision"]
@@ -341,7 +341,7 @@ fn valid_definition(value: &Value) -> bool {
             .as_str()
             .is_some_and(|at| chrono::DateTime::parse_from_rfc3339(at).is_ok())
         && value["steps"].as_array().is_some_and(|steps| {
-            !steps.is_empty()
+            (allow_empty || !steps.is_empty())
                 && steps.len() <= 20
                 && steps.iter().all(|step| {
                     step["id"].is_string()
@@ -363,7 +363,7 @@ fn valid_definition(value: &Value) -> bool {
 fn valid_occurrence(value: &Value) -> bool {
     value["id"].is_string()
         && value["ritualId"].is_string()
-        && valid_definition(&value["definition"])
+        && valid_definition(&value["definition"], true)
         && value["revision"]
             .as_u64()
             .is_some_and(|revision| revision > 0)
@@ -392,7 +392,10 @@ fn valid_occurrence(value: &Value) -> bool {
 }
 fn valid_state(value: &Value) -> bool {
     value["definitions"].as_array().is_some_and(|definitions| {
-        definitions.len() <= 2 && definitions.iter().all(valid_definition)
+        definitions.len() <= 2
+            && definitions
+                .iter()
+                .all(|definition| valid_definition(definition, false))
     }) && value
         .get("current")
         .is_some_and(|current| current.is_null() || valid_occurrence(current))
@@ -592,6 +595,49 @@ pub async fn ritual_ready(
     *runtime.ready.lock().await = Some(occurrence_id);
     Ok(())
 }
+// Pet transport authorizes its window before calling these account-fenced adapters.
+pub async fn pet_state(
+    app: &tauri::AppHandle,
+    server: &str,
+    account: &str,
+) -> Result<Value, String> {
+    let runtime = app.state::<RitualRuntime>();
+    let _lock = runtime.lock.lock().await;
+    let (current_server, current_account, generation) = identity(app).await?;
+    if current_server != server || current_account != account {
+        return Err("Your account changed. Reopen quick access.".into());
+    }
+    let mut data = read(app, &identity_key(server, account)).await?;
+    sync(app, server, account, generation, &mut data).await?;
+    if data["state"].is_null() {
+        return Err("Ritual status is unavailable.".into());
+    }
+    Ok(data["state"].clone())
+}
+pub async fn pet_open(
+    app: &tauri::AppHandle,
+    server: &str,
+    account: &str,
+    occurrence: &str,
+) -> Result<(), String> {
+    if crate::updates::startup_blocking(app) {
+        return Err("Open nohmi before starting a ritual".into());
+    }
+    let runtime = app.state::<RitualRuntime>();
+    let _lock = runtime.lock.lock().await;
+    let (current_server, current_account, generation) = identity(app).await?;
+    if current_server != server || current_account != account {
+        return Err("Your account changed. Reopen quick access.".into());
+    }
+    let mut data = read(app, &identity_key(server, account)).await?;
+    sync(app, server, account, generation, &mut data).await?;
+    if data["state"]["current"]["id"].as_str() != Some(occurrence)
+        || !can_open_current(&data["state"], &current_time())
+    {
+        return Err("This ritual is no longer available. Refresh quick access.".into());
+    }
+    present(app, &data, true).await
+}
 #[tauri::command]
 pub async fn ritual_state(app: tauri::AppHandle) -> Result<Value, String> {
     let runtime = app.state::<RitualRuntime>();
@@ -663,7 +709,7 @@ pub async fn ritual_preview(
             Some("morning" | "night")
         ) || !state["current"]["definition"]["steps"]
             .as_array()
-            .is_some_and(|s| !s.is_empty() && s.len() <= 20)
+            .is_some_and(|s| s.len() <= 20)
         {
             return Err("Invalid ritual preview".into());
         }
@@ -863,52 +909,27 @@ fn apply_offline(
             let done = current["definition"]["steps"]
                 .as_array()
                 .is_some_and(|steps| {
-                    steps.iter().all(|step| {
-                        let answer = current["responses"]
-                            .as_array()
-                            .and_then(|r| r.iter().rev().find(|r| r["stepId"] == step["id"]));
-                        answer.is_some_and(|r| {
-                            r["submitted"] == true
-                                && if step["kind"] == "checkbox" {
-                                    r["value"] == true
-                                } else {
-                                    r["value"].as_str().is_some_and(|v| {
-                                        if v.trim().is_empty() {
-                                            return false;
-                                        }
-                                        match step["kind"].as_str() {
-                                            Some("time") => {
-                                                v.len() == 5
-                                                    && chrono::NaiveTime::parse_from_str(v, "%H:%M")
-                                                        .is_ok()
-                                            }
-                                            Some("date") => {
-                                                v.len() == 10
-                                                    && chrono::NaiveDate::parse_from_str(
-                                                        v, "%Y-%m-%d",
-                                                    )
-                                                    .is_ok()
-                                            }
-                                            Some("number") => {
-                                                v.parse::<f64>().is_ok_and(|n| n.is_finite())
-                                            }
-                                            Some("multiple_choice") => {
-                                                step["options"].as_array().is_some_and(|options| {
-                                                    options
-                                                        .iter()
-                                                        .any(|option| option.as_str() == Some(v))
-                                                })
-                                            }
-                                            _ => true,
-                                        }
-                                    })
-                                }
-                        })
-                    })
+                    steps
+                        .iter()
+                        .all(|step| step["optional"] == true || step_answered(current, step))
                 });
             if done {
+                if body["optionalReminderAt"].is_string() {
+                    let steps: Vec<Value> = current["definition"]["steps"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|step| step["optional"] == true && !step_answered(current, step))
+                        .map(|step| step["id"].clone())
+                        .collect();
+                    if !steps.is_empty() {
+                        current["optionalFollowUp"] =
+                            json!({"dueAt": body["optionalReminderAt"], "stepIds": steps});
+                    }
+                }
                 current["status"] = json!("completed");
                 current["settledAt"] = json!(now);
+                mark_local_completion_day(state, "completed");
             }
             Ok(json!({"outcome": if done { "applied" } else { "conflict" }, "state":state}))
         }
@@ -924,12 +945,24 @@ fn apply_offline(
         Some("skip") => {
             current["status"] = json!("skipped");
             current["settledAt"] = json!(now);
+            mark_local_completion_day(state, "skipped");
             Ok(json!({"outcome":"applied","state":state}))
         }
         Some("cancel_snooze") => Ok(json!({"outcome":"applied","state":state})),
         _ => Err("Invalid ritual action".into()),
     }
 }
+fn mark_local_completion_day(state: &mut Value, status: &str) {
+    let date = state["current"]["scheduledLocalDate"].clone();
+    if let Some(days) = state.get_mut("completionWeek").and_then(Value::as_array_mut) {
+        for day in days {
+            if day["date"] == date {
+                day["status"] = json!(status);
+            }
+        }
+    }
+}
+
 fn delivery_health(stage: Option<&str>, at: chrono::DateTime<chrono::Utc>) -> Value {
     match stage {
         Some(stage @ ("identity" | "store_read" | "sync" | "store_write" | "presentation")) => {
@@ -1262,9 +1295,15 @@ mod recovery_tests {
     #[test]
     fn sleep_catches_up_from_cached_horizon_without_stacking() {
         let mut data = json!({"state":{"current":{"id":"old","dueAt":"2026-09-29T06:00:00Z","expiresAt":"2026-09-29T21:00:00Z","status":"pending","responses":[{"value":"partial"}]},"upcoming":[{"id":"night","dueAt":"2026-09-29T21:00:00Z","expiresAt":"2026-09-30T06:00:00Z","status":"pending"},{"id":"morning","dueAt":"2026-09-30T06:00:00Z","expiresAt":"2026-09-30T21:00:00Z","status":"pending"}]}});
+        data["state"]["streakCount"] = json!(12);
+        data["state"]["skipCount"] = json!(1);
+        data["state"]["completionWeek"] = json!([]);
         data["queue"] = json!([{"path":"/v1/rituals/occurrences/old/responses/one"}]);
         advance_offline(&mut data, "2026-09-30T08:00:00Z");
         assert_eq!(data["state"]["current"]["id"], "morning");
+        assert!(data["state"].get("streakCount").is_none());
+        assert!(data["state"].get("skipCount").is_none());
+        assert!(data["state"].get("completionWeek").is_none());
         assert_eq!(data["localHistory"][0]["status"], "missed");
         assert_eq!(data["localHistory"][0]["responses"][0]["value"], "partial");
         advance_offline(&mut data, "2026-09-30T08:00:00Z");
@@ -1304,6 +1343,12 @@ fn advance_offline(data: &mut Value, now: &str) {
             history.push(old);
         }
         data["localHistory"] = json!(history);
+        // Counts refer to the last synchronized occurrence, not this new boundary.
+        if let Some(state) = data["state"].as_object_mut() {
+            state.remove("streakCount");
+            state.remove("skipCount");
+            state.remove("completionWeek");
+        }
         data["state"]["current"] = next;
         data["state"]["snoozeCount"] = json!(0);
         data["state"]["syncStatus"] = json!("queued");
@@ -1706,5 +1751,91 @@ mod completion_tests {
         assert_eq!(complete(&mut data)["outcome"], "conflict");
         answer(&mut data, "one", json!("Final"), true);
         assert_eq!(complete(&mut data)["outcome"], "applied");
+    }
+}
+
+#[cfg(test)]
+mod optional_step_tests {
+    use super::*;
+
+    #[test]
+    fn optional_steps_complete_offline_with_a_pending_follow_up() {
+        let mut data = json!({"state":{"current":{"id":"today","status":"pending","revision":1,"expiresAt":"2099-01-01T00:00:00Z","definition":{"steps":[{"id":"journal","kind":"short_text","optional":true}]},"responses":[]}}});
+        let result = apply_offline(
+            &mut data,
+            "/actions",
+            "POST",
+            &json!({"kind":"complete","optionalReminderAt":"2090-01-01T12:00:00Z"}),
+        )
+        .unwrap();
+        assert_eq!(result["outcome"], "applied");
+        assert_eq!(
+            data["state"]["current"]["optionalFollowUp"]["stepIds"],
+            json!(["journal"])
+        );
+        assert!(data["state"]["current"]["optionalFollowUp"]["reminderIds"].is_null());
+    }
+}
+
+fn step_answered(current: &Value, step: &Value) -> bool {
+    let answer = current["responses"]
+        .as_array()
+        .and_then(|r| r.iter().rev().find(|r| r["stepId"] == step["id"]));
+    answer.is_some_and(|r| {
+        r["submitted"] == true
+            && if step["kind"] == "checkbox" {
+                r["value"] == true
+            } else {
+                r["value"].as_str().is_some_and(|v| {
+                    if v.trim().is_empty() {
+                        return false;
+                    }
+                    match step["kind"].as_str() {
+                        Some("time") => {
+                            v.len() == 5 && chrono::NaiveTime::parse_from_str(v, "%H:%M").is_ok()
+                        }
+                        Some("date") => {
+                            v.len() == 10
+                                && chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d").is_ok()
+                        }
+                        Some("number") => v.parse::<f64>().is_ok_and(|n| n.is_finite()),
+                        Some("multiple_choice") => {
+                            step["options"].as_array().is_some_and(|options| {
+                                options.iter().any(|option| option.as_str() == Some(v))
+                            })
+                        }
+                        _ => true,
+                    }
+                })
+            }
+    })
+}
+
+
+#[cfg(test)]
+mod completion_week_tests {
+    use super::*;
+    #[test]
+    fn queued_completions_and_skips_update_only_the_current_day() {
+        for (kind, status) in [("complete", "completed"), ("skip", "skipped")] {
+            let mut data = json!({"state": {"current": {
+                "status": "pending", "revision": 1, "expiresAt": "2099-01-01T00:00:00Z",
+                "scheduledLocalDate": "2026-10-20", "definition": {"steps": []}
+            }, "completionWeek": [
+                {"date": "2026-10-19", "status": "completed"},
+                {"date": "2026-10-20", "status": "pending"}
+            ]}});
+            let result = apply_offline(&mut data, "/actions", "POST", &json!({"kind": kind})).unwrap();
+            assert_eq!(result["outcome"], "applied");
+            assert_eq!(data["state"]["completionWeek"][0]["status"], "completed");
+            assert_eq!(data["state"]["completionWeek"][1]["status"], status);
+            assert_eq!(data["state"]["syncStatus"], "queued");
+        }
+    }
+    #[test]
+    fn old_caches_do_not_fabricate_weekly_history() {
+        let mut state = json!({"current": {"scheduledLocalDate": "2026-10-20"}});
+        mark_local_completion_day(&mut state, "completed");
+        assert!(state.get("completionWeek").is_none());
     }
 }

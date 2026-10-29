@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { NohmiBrandMark as BrandMark } from "./brand-marks.js";
+import { PersonalOsBrandMark as BrandMark } from "./brand-marks.js";
 
 describe("BrandMark", () => {
   it("renders the neutral wordmark", () => {

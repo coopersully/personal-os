@@ -7,8 +7,13 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 
 ## Product Spelling
 
-- The internal repository, package, and infrastructure name is `personal-os`.
+- The internal application name is `Personal OS`. Use `personal-os` for repository, package,
+  infrastructure and machine identifiers, `PersonalOs` / `personalOs` in code, and `PERSONAL_OS`
+  for constants and environment variables.
 - The user-facing product name is `nohmi`, always lowercase, including at the start of a sentence.
+- This applies to signed-in screens, accessibility labels, notifications, exports, native/PWA
+  display names and agent-facing copy. Follow `docs/product/naming.md` and the CS-15 Product
+  identity section in `docs/engineering/code-standards.md` when implementing or reviewing names.
 - Do not introduce former product names in paths, prose, protocol identifiers, examples, fixtures,
   or agent guidance. The target contains none; remaining current runtime identifiers require an
   explicit hard-cutover migration rather than new compatibility aliases.
@@ -25,8 +30,38 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 - When a product conversation settles a durable decision, update the nearest canonical document in
   the same documentation change and keep target scope separate from implementation claims.
 
+## Merge authority
+
+Cooper grants standing authority to the assigned nohmi oversight outcome owner to carry assigned
+work and its necessary bounded prerequisites through review, verification and normal protected
+merge. Record that source and scope once; do not request separate per-PR or prerequisite merge
+permission. Review your own work and delegated implementation before accepting it. Self-review
+never substitutes for applicable independent review, eligible approvals or live branch protections.
+
+Honor a read-only, plan-only, draft-only or no-merge instruction, later pause/revocation, and genuine
+scope limits. Ordinary contribution owners outside an oversight assignment still need explicit merge
+intent such as “get this merged” or “ship it”; preserve an existing grant without asking again.
+Assigned workers never merge; their outcome orchestrator owns acceptance and merge. The automation
+head never merges. No bypass or deferred auto-merge.
+
+Choose reasonable scope-consistent defaults and continue authorized work without routine
+clarification. Ask only when indispensable information cannot be obtained from context or an
+explicit platform approval is required; identify the specific missing fact or approval. A necessary
+bounded prerequisite is part of the assigned outcome, not a reason to ask for merge permission again.
+
 ## Linear Routing
 
+- All skills and installed nohmi role/context wrappers follow the canonical lifecycle in
+  `docs/engineering/work-context.md`; it covers implementation, documentation, prerequisite repair
+  and review fixes. Helper invocation does not exempt assigned durable work.
+- Implementation and durable repository changes MUST be tracked in Linear from intake through
+  completion. Match/create the direct Nohmi issue before implementation when possible; reconcile
+  already-started work immediately. Update material scope, progress, blockers, PR links and final
+  acceptance without repetitive status comments. This standing instruction authorizes bounded
+  in-project tracking for assigned work; it does not authorize unrelated taxonomy or assignment changes.
+  Pure discussion/read-only review needs no new issue unless it yields assigned follow-up work.
+  If Linear is unavailable or ambiguous, preserve work and report the tracking gap; no merge until
+  traceability is restored. Do not silently skip tracking.
 - This repository belongs exclusively to the `Nohmi` Project in the Cooper Sullivan Linear workspace.
 - Any Linear issue created from this repository, its branches, commits, pull requests, docs, or task history must be created directly in the live `Nohmi` Project. Repository-derived updates may target only issues already assigned to that Project.
 - Never route repository work to `Cooper Sullivan Games`, `Notepad++ for Mac`, `Portfolio`, `Upper Thought`, another Project, or no Project.
@@ -47,7 +82,7 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 - A head or orchestrator never implements, and a worker never merges or enables auto-merge.
   These boundaries remain in force when invoking another skill, including `ship-it`.
 - Only an assigned orchestrator with user-authorized merge scope may merge after all documented
-  gates pass, including current CodeRabbit coverage and zero unresolved review threads.
+  gates pass, including current independent deep-review acceptance and zero unresolved review threads.
 - Ordinary contribution tasks retain their existing workflows unless assigned a network role.
 
 ## Codex Local Environment
@@ -70,13 +105,34 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 
 ## Validation
 
-Run the deterministic verification action before opening a pull request:
+Apply `docs/engineering/acceptance-contract.md` and `docs/engineering/code-standards.md` to new
+and materially changed behavior. Record evidence for applicable requirements; migration exceptions
+require explicit approval, bounded scope, an owner and an exit condition. These documents define
+policy, not proof that all gates are already automated. Preserve existing role and merge boundaries.
+
+Use `docs/engineering/development-handbook.md` to select the next required step and reuse valid
+evidence. Run policy-complete verification on the frozen candidate after review convergence and before
+merge; only the Git-verified prose exception in `delivery-verification.md` may omit full stages.
+Draft publication and early review use focused checks. The complete local command remains:
 
 ```bash
 pnpm verify
 ```
 
 This includes repository mirror checks, lint, type checking, coverage enforcement (95% statements/functions/lines and 94% branches), production builds, and desktop/mobile E2E acceptance tests.
+
+## Frontend Feedback: Sonner Required
+
+- All settings errors and discrete action feedback MUST use Sonner. This includes notification
+  tests, connection tests, permission requests, refreshes, native actions, and autosave failures.
+- Never add an inline paragraph, status row, Alert, banner, or card for an action's pending,
+  success, or failure message. `role="status"` and asynchronous native completion do not exempt it.
+- For an asynchronous action, update one Sonner toast from loading to the confirmed outcome.
+  OS acceptance is not proof that a notification banner appeared; say exactly what is confirmed.
+- Successful background autosaves stay silent. Actual permission/configuration state and field
+  correction/retry controls may remain beside settings; they do not replace Sonner error feedback.
+- Regression tests must assert Sonner delivery AND the absence of inline action-result copy.
+  Follow `docs/design/feedback.md`; this rule takes precedence over generic inline-alert guidance.
 
 ## Frontend Icons
 
@@ -103,3 +159,11 @@ This includes repository mirror checks, lint, type checking, coverage enforcemen
   and failure states. Record what could still fail in production despite green tests.
 - Connector changes also follow `docs/engineering/connector-reliability.md` and keep provider
   timeouts and required ports aligned with the checked production network contract.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow `docs/engineering/delivery-verification.md`: converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

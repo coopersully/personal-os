@@ -1,0 +1,344 @@
+import { readdir, readFile } from "node:fs/promises";
+import * as domain from "@personal-os/domain";
+import { canDiscoverTool } from "../../apps/mcp/src/tool-catalog.js";
+import { runtimeScenarios, workspaceApiExceptions } from "./operation-cases.js";
+import { discoverToolDictionary, renderToolDictionary } from "./tool-dictionary.js";
+
+it("exposes domain input fields instead of silently narrowing workspace mutations", async () => {
+  const mappings = {
+    save_finance_onboarding_answers: domain.financeOnboardingSaveInputSchema,
+    complete_finance_onboarding: domain.financeOnboardingCompleteInputSchema,
+    submit_finance_ledger_challenge: domain.submitFinanceLedgerChallengeInputSchema,
+    get_finance_conversation_evidence: domain.financeConversationEvidenceReadInputSchema,
+    refresh_finance_maintenance_execution_authorization:
+      domain.refreshFinanceMaintenanceExecutionInputSchema,
+    get_finance_spending: domain.financeSpendingQuerySchema,
+    get_finance_budget_baseline_qualification: domain.financeBudgetBaselineQualificationQuerySchema,
+    prepare_finance_budget_baseline_qualification:
+      domain.prepareFinanceBudgetBaselineQualificationInputSchema,
+    acknowledge_finance_conversation_batch: domain.financeConversationAcknowledgmentInputSchema,
+    reply_to_finance_conversation_batch: domain.financeConversationReplyInputSchema,
+    list_events: domain.eventListQuerySchema,
+    get_finance_host_prompt_history: domain.automationHostPromptPageInputSchema,
+    issue_finance_host_prompt: domain.automationHostPromptIssueInputSchema,
+    list_mail: domain.mailListQuerySchema,
+    list_reminders: domain.reminderListQuerySchema,
+    list_tasks: domain.taskListQuerySchema,
+    list_task_workspace: domain.taskWorkspaceQuerySchema,
+    list_finance_accounts: domain.financeAccountQuerySchema,
+    list_finance_transactions: domain.financeTransactionQuerySchema,
+    list_finance_budget_buckets: domain.financeBudgetBucketQuerySchema,
+    list_finance_review_history: domain.financeReviewHistoryQuerySchema,
+    get_finance_maintenance_history: domain.financeMaintenanceHistoryQuerySchema,
+    create_calendar: domain.createLocalCalendarInputSchema,
+    update_calendar: domain.updateLocalCalendarInputSchema,
+    create_event: domain.createEventInputSchema,
+    update_event: domain.updateEventInputSchema,
+    create_reminder: domain.createReminderInputSchema,
+    update_reminder: domain.updateReminderInputSchema,
+    create_task: domain.createTaskInputSchema,
+    update_task: domain.updateTaskInputSchema,
+    create_task_list: domain.createTaskListInputSchema,
+    update_task_list: domain.updateTaskListInputSchema,
+    create_task_project: domain.createTaskProjectInputSchema,
+    update_task_project: domain.updateTaskProjectInputSchema,
+    create_mail_draft: domain.createMailDraftInputSchema,
+    update_mail_draft: domain.updateMailDraftInputSchema,
+    update_mail: domain.updateMailThreadInputSchema,
+    bulk_update_mail: domain.bulkUpdateMailInputSchema,
+    create_mail_obligation: domain.createMailObligationInputSchema,
+    update_mail_obligation: domain.updateMailObligationInputSchema,
+    create_finance_account: domain.createFinanceAccountInputSchema,
+    update_finance_account: domain.updateFinanceAccountInputSchema,
+    create_finance_category: domain.createFinanceCategoryInputSchema,
+    update_finance_transaction: domain.updateFinanceTransactionInputSchema,
+    update_financial_profile: domain.updateFinancialProfileInputSchema,
+    update_finance_profile: domain.updateFinanceProfileInputSchema,
+    update_finance_income_stream: domain.updateFinanceIncomeStreamInputSchema,
+    update_finance_recurring_obligation: domain.updateFinanceRecurringObligationInputSchema,
+    manage_finance_goal: domain.manageFinanceGoalInputSchema,
+    manage_finance_rule: domain.manageFinanceRuleInputSchema,
+    manage_finance_recurring_item: domain.manageFinanceRecurringItemInputSchema,
+    manage_finance_budget_bucket: domain.manageFinanceBudgetBucketInputSchema,
+  };
+  function fields(schema: unknown): Set<string> {
+    if (!schema || typeof schema !== "object") return new Set();
+    const node = schema as {
+      properties?: Record<string, unknown>;
+      allOf?: unknown[];
+      anyOf?: unknown[];
+      oneOf?: unknown[];
+    };
+    return new Set([
+      ...Object.keys(node.properties ?? {}),
+      ...[...(node.allOf ?? []), ...(node.anyOf ?? []), ...(node.oneOf ?? [])].flatMap((part) => [
+        ...fields(part),
+      ]),
+    ]);
+  }
+  const dictionary = new Map((await discoverToolDictionary()).map(({ tool }) => [tool.name, tool]));
+  const missing: string[] = [];
+  for (const [name, schema] of Object.entries(mappings)) {
+    const tool = dictionary.get(name);
+    expect(tool, name).toBeDefined();
+    const actual = fields(tool?.inputSchema);
+    for (const field of fields(schema.toJSONSchema({ io: "input" })))
+      if (!actual.has(field)) missing.push(`${name}.${field}`);
+  }
+  expect(missing).toEqual([]);
+});
+
+it("keeps every documented schema and scope equal to actual MCP discovery", async () => {
+  expect(await readFile("docs/engineering/workspace-agent-tools.md", "utf8")).toBe(
+    await renderToolDictionary(),
+  );
+}, 30_000);
+it("accounts for every typed workspace operation with an adapter or named semantic boundary", async () => {
+  const sourceFiles = (await readdir("apps/mcp/src/tools")).filter(
+    (name) => name.endsWith(".ts") && !name.endsWith(".test.ts"),
+  );
+  const source = (
+    await Promise.all(sourceFiles.map((name) => readFile(`apps/mcp/src/tools/${name}`, "utf8")))
+  ).join("\n");
+  const methods = new Set([...source.matchAll(/api\.([A-Za-z0-9_]+)\(/g)].map((m) => m[1]));
+  const missing: string[] = [];
+  for (const feature of [
+    "finances",
+    "finance-conversation",
+    "finance-conversation-unread",
+    "finance-conversation-evidence",
+    "finance-activity",
+    "mail",
+    "mail-stewardship",
+    "calendar",
+    "tasks",
+    "task-workspace",
+    "reminders",
+    "automation-hosts",
+    "texting",
+  ]) {
+    const text = await readFile(`packages/api-client/src/features/${feature}.ts`, "utf8");
+    for (const match of text.matchAll(
+      /(?:async ([A-Za-z0-9_]+)\(|^ {4}([A-Za-z0-9_]+)(?:: (?:async )?)?\()/gm,
+    )) {
+      const name = match[1] ?? match[2];
+      if (name && !methods.has(name) && !(name in workspaceApiExceptions))
+        missing.push(`${feature}.${name}`);
+    }
+  }
+  expect(missing).toEqual([]);
+  const discovered = new Set((await discoverToolDictionary()).map(({ tool }) => tool.name));
+  for (const entry of Object.values(workspaceApiExceptions))
+    if ("tool" in entry) expect(discovered.has(entry.tool), entry.tool).toBe(true);
+  for (const scenario of runtimeScenarios)
+    expect(await readFile(`integration/workspace-agent/${scenario.file}`, "utf8")).toContain(
+      "createMcpWorkspaceFixture",
+    );
+});
+it("requires every listed grant for multi-scope tools and hides all mutations from read-only discovery", async () => {
+  for (const { tool, definition } of await discoverToolDictionary()) {
+    const grants = new Set(definition.requiredScopes);
+    if (!definition.compatibility)
+      expect(canDiscoverTool(definition, grants, false), tool.name).toBe(true);
+    if (!definition.readOnly)
+      expect(canDiscoverTool(definition, grants, true), tool.name).toBe(false);
+    if (definition.scopeMatch === "all")
+      for (const scope of grants) {
+        const fewer = new Set(grants);
+        fewer.delete(scope);
+        expect(canDiscoverTool(definition, fewer, false), `${tool.name} without ${scope}`).toBe(
+          false,
+        );
+      }
+  }
+});
+
+it("does not publish strict intersections that forbid their own sibling arguments", async () => {
+  function inspect(schema: unknown) {
+    if (!schema || typeof schema !== "object") return;
+    const node = schema as {
+      allOf?: Array<{ properties?: Record<string, unknown>; additionalProperties?: boolean }>;
+    };
+    if (node.allOf) {
+      const keys = new Set(node.allOf.flatMap((part) => Object.keys(part.properties ?? {})));
+      for (const part of node.allOf)
+        if (part.additionalProperties === false)
+          for (const key of keys) expect(part.properties).toHaveProperty(key);
+    }
+    for (const value of Object.values(schema))
+      if (Array.isArray(value)) value.forEach(inspect);
+      else inspect(value);
+  }
+  for (const { tool } of await discoverToolDictionary()) inspect(tool.inputSchema);
+});
+
+it("exposes prompt artifact adapters with original-connection maintenance grants and no consent exception", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map((entry) => [entry.tool.name, entry]),
+  );
+  for (const name of ["get_finance_host_prompt_history", "get_finance_host_prompt"]) {
+    const entry = dictionary.get(name);
+    expect(entry?.definition).toMatchObject({
+      readOnly: true,
+      requiredScopes: ["finances:maintain"],
+      scopeMatch: "all",
+    });
+    expect(entry?.tool.inputSchema.properties).toHaveProperty("scheduleId");
+  }
+  const issue = dictionary.get("issue_finance_host_prompt");
+  expect(issue?.definition).toMatchObject({
+    readOnly: false,
+    policy: "approved_rule",
+    scopeMatch: "all",
+    requiredScopes: ["finances:maintain", "finances:write", "finances:execute"],
+  });
+  expect(issue?.tool.inputSchema.properties).toHaveProperty("templateVersion");
+  expect(issue?.tool.inputSchema.properties).toHaveProperty("expectedScheduleVersion");
+  for (const method of [
+    "getAutomationHostPromptHistory",
+    "getAutomationHostPrompt",
+    "issueAutomationHostPrompt",
+  ])
+    expect(workspaceApiExceptions).not.toHaveProperty(method);
+});
+
+it("gates every conversation delivery/proof tool by original execution grants and keeps human cursors separate", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map(({ tool, definition }) => [tool.name, definition]),
+  );
+  for (const name of [
+    "get_finance_conversation_batch",
+    "acknowledge_finance_conversation_batch",
+    "reply_to_finance_conversation_batch",
+    "exchange_finance_conversation_challenge",
+  ]) {
+    expect(dictionary.get(name)).toMatchObject({
+      readOnly: false,
+      policy: "approved_rule",
+      idempotent: true,
+      requiredScopes: ["finances:maintain", "finances:write", "finances:execute"],
+    });
+  }
+  for (const name of [
+    "getFinanceConversationReadiness",
+    "getFinanceConversationHostReadiness",
+    "getFinanceConversationHistory",
+    "sendFinanceConversationMessage",
+    "markFinanceConversationRendered",
+    "issueFinanceConversationChallenge",
+  ] as const) {
+    expect(workspaceApiExceptions[name].kind).toBe("owner_interaction");
+  }
+});
+
+it("keeps baseline preparation discoverable only with write authority and human confirmation out of MCP", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map(({ tool, definition }) => [tool.name, definition]),
+  );
+  const read = dictionary.get("get_finance_budget_baseline_qualification");
+  const prepare = dictionary.get("prepare_finance_budget_baseline_qualification");
+  expect(read).toMatchObject({ readOnly: true, requiredScopes: ["finances:read"] });
+  expect(prepare).toMatchObject({
+    readOnly: false,
+    requiredScopes: ["finances:write"],
+    policy: "preview",
+    stage: "prepare",
+  });
+  if (!prepare) throw new Error("Missing baseline preparation tool.");
+  expect(canDiscoverTool(prepare, new Set(["finances:read"]), false)).toBe(false);
+  expect(canDiscoverTool(prepare, new Set(["finances:write"]), true)).toBe(false);
+  expect(dictionary.has("confirm_finance_budget_baseline_qualification")).toBe(false);
+  expect(workspaceApiExceptions.confirmFinanceBudgetBaselineQualification.kind).toBe(
+    "owner_consent",
+  );
+});
+
+it("keeps both Spending reads discoverable with only Finance read authority", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map(({ tool, definition }) => [tool.name, definition]),
+  );
+  for (const name of ["get_finance_spending", "list_finance_spending_transactions"])
+    expect(dictionary.get(name)).toMatchObject({
+      readOnly: true,
+      requiredScopes: ["finances:read"],
+    });
+});
+
+it("requires all original execution grants for read-only committed effect evidence", async () => {
+  const entry = (await discoverToolDictionary()).find(
+    ({ tool }) => tool.name === "get_finance_conversation_evidence",
+  );
+  expect(entry?.definition).toMatchObject({
+    readOnly: true,
+    scopeMatch: "all",
+    requiredScopes: ["finances:maintain", "finances:write", "finances:execute"],
+  });
+  expect(entry?.tool.inputSchema.properties).toHaveProperty("candidateRevision");
+  expect(entry?.tool.inputSchema.properties).not.toHaveProperty("userId");
+});
+
+it("keeps durable onboarding reads separate from current execution mutations", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map(({ tool, definition }) => [tool.name, definition]),
+  );
+  expect(dictionary.get("get_finance_onboarding")).toMatchObject({
+    readOnly: true,
+    requiredScopes: ["finances:read"],
+  });
+  for (const name of ["save_finance_onboarding_answers", "complete_finance_onboarding"])
+    expect(dictionary.get(name)).toMatchObject({
+      readOnly: false,
+      scopeMatch: "all",
+      requiredScopes: ["finances:write", "finances:execute"],
+    });
+});
+
+it("keeps qualified cash-flow context read-only and explicit human statements outside agent authority", async () => {
+  const entry = (await discoverToolDictionary()).find(
+    ({ tool }) => tool.name === "get_finance_cashflow",
+  );
+  expect(entry?.definition).toMatchObject({ readOnly: true, requiredScopes: ["finances:read"] });
+  expect(entry?.tool.inputSchema.properties).toHaveProperty("window");
+  expect(entry?.tool.inputSchema.additionalProperties).toBe(false);
+  for (const name of [
+    "confirmFinanceRecurringSchedule",
+    "manageFinanceOccurrenceMatch",
+    "confirmFinanceBalanceBasis",
+  ] as const)
+    expect(workspaceApiExceptions[name].kind).toBe("owner_consent");
+  expect(workspaceApiExceptions.listFinanceRecurringOccurrences.tool).toBe("get_finance_cashflow");
+});
+
+it("requires every current execution grant for both recovery tools", async () => {
+  const entries = await discoverToolDictionary();
+  for (const name of [
+    "get_finance_maintenance_execution_authorization",
+    "refresh_finance_maintenance_execution_authorization",
+  ]) {
+    const entry = entries.find(({ tool }) => tool.name === name);
+    expect(entry?.definition).toMatchObject({
+      scopeMatch: "all",
+      requiredScopes: ["finances:maintain", "finances:write", "finances:execute"],
+      openWorld: false,
+    });
+    expect(entry?.tool.inputSchema.additionalProperties).toBe(false);
+    expect(entry?.tool.inputSchema.properties).not.toHaveProperty("userId");
+    expect(entry?.tool.inputSchema.properties).not.toHaveProperty("claimId");
+  }
+});
+
+it("keeps complete Mail navigation counts available only with Mail read authority", async () => {
+  const entry = (await discoverToolDictionary()).find(
+    ({ tool }) => tool.name === "get_mail_navigation_counts",
+  );
+  expect(entry?.definition).toMatchObject({
+    readOnly: true,
+    requiredScopes: ["mail:read"],
+    domain: "mail",
+  });
+  if (!entry) throw new Error("Missing Mail navigation counts adapter.");
+  expect(canDiscoverTool(entry.definition, new Set(["mail:read"]), true)).toBe(true);
+  expect(canDiscoverTool(entry.definition, new Set(["tasks:read"]), false)).toBe(false);
+  expect(entry.tool.inputSchema.properties).toHaveProperty("accountIds");
+  expect(entry.tool.inputSchema.properties).not.toHaveProperty("userId");
+});

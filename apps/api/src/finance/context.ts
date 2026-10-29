@@ -8,6 +8,12 @@ import {
 import { and, eq, sql } from "drizzle-orm";
 import { AppError, isUniqueViolation } from "../errors.js";
 import type { Principal } from "../types.js";
+import { requireWorkspaceExecution } from "../workspace-execution.js";
+import {
+  type FinanceTokenLockPlan,
+  guardFinanceExecutionTransaction,
+  requireFinanceExecutionGuard,
+} from "./execution-owner-guard.js";
 
 export type FinanceMutationContext = {
   actorId: string;
@@ -15,6 +21,8 @@ export type FinanceMutationContext = {
   bypassEnabled: boolean;
   canMutate: boolean;
   canSelfApprove: boolean;
+  requiresApprovalBypass?: boolean;
+  executionPrincipal?: Principal;
   requestId: string;
   userId: string;
 };
@@ -30,13 +38,13 @@ export async function loadFinanceAuthorization(input: {
   const canMutate = input.principal.scopes.has("finances:write");
   const bypassEnabled = setting?.reviewBypassEnabled ?? false;
   return {
+    ...(input.principal.actorType === "agent" ? { executionPrincipal: input.principal } : {}),
     actorId: input.principal.actorId,
     actorType: input.principal.actorType,
     bypassEnabled,
     canMutate,
-    // Review bypass controls timing, not authority to activate a budget.
-    // Fail closed until the explicit Finance budget policy supplies that authority.
-    canSelfApprove: false,
+    // Persisted bypass supplies standing approval for every Finance operation.
+    canSelfApprove: canMutate && bypassEnabled && input.principal.scopes.has("finances:execute"),
     requestId: input.requestId,
     userId: input.principal.userId,
   };
@@ -52,12 +60,28 @@ export function requireFinanceMutation(
   if (options.approvalSource === "agent_self_approval" && !context.canSelfApprove) {
     throw new AppError(
       "forbidden",
-      "Agent self-approval requires an explicit Finance budget activation policy.",
+      "Agent self-approval requires explicit Finance execution authority.",
     );
   }
 }
 
+export async function requireFinanceExecution(
+  db: Pick<Database, "select">,
+  context: FinanceMutationContext,
+  at?: Date,
+) {
+  if (context.actorType === "user") return;
+  if (
+    !context.executionPrincipal ||
+    context.executionPrincipal.actorId !== context.actorId ||
+    context.executionPrincipal.userId !== context.userId
+  )
+    throw new AppError("forbidden", "Finance execution requires authenticated authority.");
+  await requireWorkspaceExecution(db, context.executionPrincipal, "finances", at);
+}
+
 type IdempotentOperation = {
+  executionOwnerPlan?: FinanceTokenLockPlan;
   idempotencyKey: string;
   lockIdentities?: string[];
   operation: string;
@@ -247,6 +271,8 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
   );
 
   const execute = async (tx: FinanceTransaction, markClaimed: () => void) => {
+    if (context.actorType === "agent" && context.requiresApprovalBypass)
+      await requireFinanceExecution(tx, context, new Date());
     if (operation.requireUserAdmission && !(await admitFinanceUser(tx, context.userId))) {
       throw new AppError("not_found", "Account not found.");
     }
@@ -307,6 +333,9 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
       /* v8 ignore stop */
       record = inserted;
     }
+    // Admission and idempotency locks may outlive the token. Recheck at the write boundary.
+    if (context.actorType === "agent" && context.requiresApprovalBypass)
+      await requireFinanceExecution(tx, context, new Date());
     markClaimed();
     const response = await mutate(tx);
     await tx
@@ -325,16 +354,29 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
   // Agent actions already own a terminal transaction. Reuse it so the
   // idempotency claim, semantic write, audit, and action terminalization commit
   // atomically without opening a second connection behind held locks.
-  if (executor) return execute(executor, () => {});
+  if (executor) {
+    if (operation.executionOwnerPlan) requireFinanceExecutionGuard(executor, context.userId);
+    return execute(executor, () => {});
+  }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let claimed = false;
     try {
-      return await db.transaction((tx) => execute(tx, () => (claimed = true)));
+      return await db.transaction(async (tx) => {
+        if (operation.executionOwnerPlan)
+          await guardFinanceExecutionTransaction(tx, context.userId, operation.executionOwnerPlan);
+        return execute(tx, () => (claimed = true));
+      });
     } catch (error) {
       if (isUniqueViolation(error) && !claimed && attempt === 0) continue;
       if (claimed) {
         await db.transaction(async (tx) => {
+          if (operation.executionOwnerPlan)
+            await guardFinanceExecutionTransaction(
+              tx,
+              context.userId,
+              operation.executionOwnerPlan,
+            );
           // The owner may have been deleted after the operation rolled back. In that case a
           // user-owned failure receipt cannot survive, so preserve the original operation error.
           if (operation.requireUserAdmission && !(await admitFinanceUser(tx, context.userId)))

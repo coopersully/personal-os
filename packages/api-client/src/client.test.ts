@@ -1477,7 +1477,7 @@ function apiFetch() {
   });
 }
 
-describe("ilo API client", () => {
+describe("Personal OS API client", () => {
   it("uses canonical task organization HTTP transport", async () => {
     const fetch = apiFetch();
     const api = createApiClient({ baseUrl: "https://api.example.com", fetch });
@@ -2937,14 +2937,14 @@ describe("ilo API client", () => {
     await expect(api.getAssistantSetupStatus()).resolves.toMatchObject({
       domains: [expect.objectContaining({ domain: "mail" })],
     });
-    await expect(api.getIloContext()).resolves.toMatchObject({
+    await expect(api.getPersonalOsContext()).resolves.toMatchObject({
       access: { grantedScopes: ["mail:read", "mail:write"] },
       identity: { actorType: "agent", displayName: "Test" },
       links: { today: "https://app.example.com/today" },
       time: { timezone: "UTC" },
     });
     await expect(
-      api.getIloSetup({ domain: "mail", stepId: "learn_preferences" }),
+      api.getPersonalOsSetup({ domain: "mail", stepId: "learn_preferences" }),
     ).resolves.toMatchObject({
       currentStepId: "learn_preferences",
       domain: "mail",

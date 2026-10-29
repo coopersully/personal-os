@@ -1,8 +1,9 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinanceCategory, FinanceTransaction } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
@@ -125,4 +126,22 @@ it("saves a single-category future rule and keeps a failed save recoverable", as
   expect(
     await screen.findByText(/Couldn’t confirm whether we could save this transaction breakdown/),
   ).toBeVisible();
+});
+
+it("does not round sub-cent amounts into a saveable split", async () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <TransactionBreakdownDialog
+        categories={categories}
+        onOpenChange={vi.fn()}
+        open
+        transaction={transaction}
+      />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  const amounts = await screen.findAllByLabelText("Amount");
+  await user.clear(amounts[0] as HTMLInputElement);
+  await user.type(amounts[0] as HTMLInputElement, "310.001");
+  expect(screen.getByRole("button", { name: "Save breakdown" })).toBeDisabled();
 });

@@ -1,13 +1,25 @@
 import {
+  agentAccountLinkSchema,
+  agentAccountRegistrationSchema,
+  agentAccountSchema,
+  agentAccountUpdateSchema,
+  executeFinanceReviewBatchInputSchema,
   financeMaintenanceInputSchema,
   financeMaintenancePayloadSchema,
+  financeReviewBacklogAssessmentSchema,
+  financeReviewBacklogPageSchema,
+  financeReviewBatchRunSchema,
   financeToolResultSchema,
   idSchema,
   maintenanceRunStatusSchema,
+  previewFinanceReviewBatchInputSchema,
+  resetFinanceNotificationPreferencesSchema,
   ritualActionInputSchema,
   ritualDefinitionInputSchema,
   ritualResponseInputSchema,
   taskWorkspacePageSchema,
+  updateWorkspaceSettingsSchema,
+  workspaceSettingsSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 
@@ -50,6 +62,20 @@ export function createOpenApiDocument(apiBaseUrl: string) {
   return {
     components: {
       schemas: {
+        FinanceReviewBacklog: z.toJSONSchema(financeReviewBacklogAssessmentSchema, { io: "input" }),
+        FinanceReviewBacklogPage: z.toJSONSchema(financeReviewBacklogPageSchema, { io: "input" }),
+        FinanceReviewBatch: z.toJSONSchema(financeReviewBatchRunSchema, { io: "input" }),
+        PreviewFinanceReviewBatch: z.toJSONSchema(previewFinanceReviewBatchInputSchema, {
+          io: "input",
+        }),
+        ExecuteFinanceReviewBatch: z.toJSONSchema(executeFinanceReviewBatchInputSchema, {
+          io: "input",
+        }),
+
+        AgentAccount: z.toJSONSchema(agentAccountSchema),
+        AgentAccountRegistration: z.toJSONSchema(agentAccountRegistrationSchema),
+        AgentAccountUpdate: z.toJSONSchema(agentAccountUpdateSchema),
+        AgentAccountLink: z.toJSONSchema(agentAccountLinkSchema),
         RitualDefinitionInput: z.toJSONSchema(ritualDefinitionInputSchema, { io: "input" }),
         RitualResponseInput: z.toJSONSchema(ritualResponseInputSchema, { io: "input" }),
         RitualActionInput: z.toJSONSchema(ritualActionInputSchema, { io: "input" }),
@@ -263,6 +289,280 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     },
     openapi: "3.1.0",
     paths: {
+      "/v1/finances/review-backlog": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          responses: {
+            200: {
+              description: "Complete historical assessment; flags and cases counted separately",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceReviewBacklog" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/finances/review-backlog/items": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          parameters: [
+            ...paginationParameters,
+            queryParameter("group", {
+              type: "string",
+              enum: [
+                "roundups",
+                "internal_movements",
+                "card_payments",
+                "ambiguous_payments",
+                "other_categorization",
+              ],
+            }),
+          ],
+          responses: {
+            200: {
+              description: "Snapshot-bound evidence page",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceReviewBacklogPage" },
+                },
+              },
+            },
+            409: { description: "Evidence changed; restart pagination" },
+          },
+        },
+      },
+      "/v1/finances/review-batches": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          parameters: [queryParameter("limit", { type: "integer", minimum: 1, maximum: 50 })],
+          responses: {
+            200: {
+              description: "Recent batches visible to this owner or originating agent",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/FinanceReviewBatch" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          security,
+          "x-required-scopes": ["finances:read", "finances:write"],
+          requestBody: jsonRequest("PreviewFinanceReviewBatch"),
+          responses: {
+            201: {
+              description: "Durably saved exact manifest, without applying its decisions",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FinanceReviewBatch" } },
+              },
+            },
+            409: { description: "Stale evidence or reused key with another manifest" },
+          },
+        },
+      },
+      "/v1/finances/review-batches/{id}": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          parameters: [taskIdParameter],
+          responses: {
+            200: {
+              description: "Persisted decisions and per-item outcomes",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FinanceReviewBatch" } },
+              },
+            },
+            404: { description: "Batch not visible to this authorization" },
+          },
+        },
+      },
+      "/v1/finances/review-batches/{id}/execute": {
+        post: {
+          security,
+          "x-required-scopes": ["finances:read", "finances:write"],
+          description:
+            "Owner confirmation or originating agent with finances:execute and current execution policy. Authority is rechecked for every item.",
+          parameters: [taskIdParameter],
+          requestBody: jsonRequest("ExecuteFinanceReviewBatch"),
+          responses: {
+            200: {
+              description:
+                "At most ten decisions processed; pending and exception outcomes remain explicit",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FinanceReviewBatch" } },
+              },
+            },
+            403: { description: "Execution authority unavailable or revoked" },
+            409: { description: "Manifest fingerprint changed" },
+          },
+        },
+      },
+      "/v1/agent-accounts": {
+        get: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          summary: "List the owner's shared agent profiles and connections",
+          responses: {
+            200: { description: "Owner-scoped directory" },
+            403: { description: "Human session required" },
+          },
+        },
+      },
+      "/v1/agent-accounts/current": {
+        get: {
+          security: [{ bearerAuth: [] }],
+          summary: "Read the authenticated connection's agent identity",
+          responses: { 200: { description: "Agent account or null" } },
+        },
+        post: {
+          security: [{ bearerAuth: [] }],
+          summary: "Register or reuse the authenticated connection's identity",
+          requestBody: jsonRequest("AgentAccountRegistration"),
+          responses: { 200: { description: "Idempotently registered agent account" } },
+        },
+      },
+      "/v1/agent-accounts/{id}": {
+        patch: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          parameters: [taskIdParameter],
+          summary: "Update an owner-controlled agent profile",
+          requestBody: jsonRequest("AgentAccountUpdate"),
+          responses: { 200: { description: "Updated profile; connection authority unchanged" } },
+        },
+      },
+      "/v1/agent-accounts/connections/{id}": {
+        put: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          parameters: [taskIdParameter],
+          summary: "Link a connection to an account or create a separate identity",
+          requestBody: jsonRequest("AgentAccountLink"),
+          responses: { 200: { description: "Linked account; connection authority unchanged" } },
+        },
+      },
+      "/v1/workspaces/{workspace}/search": {
+        get: {
+          security,
+          summary: "Search all available synced workspace content, independent of view filters",
+          parameters: [
+            {
+              name: "workspace",
+              in: "path",
+              required: true,
+              schema: { type: "string", enum: ["calendar", "tasks", "mail", "finances"] },
+            },
+            {
+              name: "q",
+              in: "query",
+              required: true,
+              schema: { type: "string", minLength: 1, maxLength: 200 },
+            },
+            {
+              name: "offset",
+              in: "query",
+              schema: { type: "integer", minimum: 0, maximum: 10000 },
+            },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+            },
+            { name: "includeArchived", in: "query", schema: { type: "boolean", default: true } },
+            {
+              name: "kind",
+              in: "query",
+              schema: { type: "string", enum: ["all", "content", "reviews"], default: "all" },
+            },
+          ],
+          responses: {
+            200: {
+              description:
+                "Ranked items with bounded previews, internal destinations, nextOffset, synced coverage and any unavailable review source",
+            },
+            400: { description: "Invalid search" },
+            401: { description: "Authentication required" },
+            403: { description: "Workspace read scope required" },
+          },
+        },
+      },
+      "/v1/texting/notifications/preferences/finances": {
+        delete: {
+          security,
+          summary: "Reset Finance notification overrides to global preferences; human session only",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: z.toJSONSchema(resetFinanceNotificationPreferencesSchema),
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Finance now inherits global notification preferences",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { scope: { const: "finances" }, inherited: { const: true } },
+                    required: ["scope", "inherited"],
+                  },
+                },
+              },
+            },
+            403: { description: "Interactive Texting write and Finance read access required" },
+            409: { description: "Override missing or revision changed" },
+          },
+        },
+      },
+      "/v1/workspaces/{workspace}/settings": {
+        parameters: [
+          {
+            name: "workspace",
+            in: "path",
+            required: true,
+            schema: { type: "string", enum: ["calendar", "tasks", "mail", "finances"] },
+          },
+        ],
+        get: {
+          security,
+          summary: "Read account-owned workspace preferences",
+          responses: {
+            200: {
+              description:
+                "Resolved workspace-specific preferences and revision; revision zero denotes untouched defaults",
+              content: { "application/json": { schema: z.toJSONSchema(workspaceSettingsSchema) } },
+            },
+          },
+        },
+        patch: {
+          security,
+          summary: "Update preferences with optimistic concurrency; human session only",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: z.toJSONSchema(updateWorkspaceSettingsSchema, { io: "input" }),
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Saved preferences and incremented revision",
+              content: { "application/json": { schema: z.toJSONSchema(workspaceSettingsSchema) } },
+            },
+            403: { description: "Interactive workspace write access required" },
+            409: { description: "Preferences changed; reload before retrying" },
+          },
+        },
+      },
       "/v1/desktop-release": {
         get: {
           summary: "Published official desktop installers and release notes",
@@ -688,7 +988,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             }),
             queryParameter("status", {
               type: "string",
-              enum: ["all", "open", "completed", "cancelled", "archived"],
+              enum: ["all", "open", "open_and_completed", "completed", "cancelled", "archived"],
             }),
             queryParameter("listId", { format: "uuid", type: "string" }),
             queryParameter("projectId", { format: "uuid", type: "string" }),
@@ -1075,6 +1375,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             queryParameter("kind", { type: "string", enum: ["morning", "night"] }),
             queryParameter("dateFrom", { type: "string", format: "date" }),
             queryParameter("dateTo", { type: "string", format: "date" }),
+            queryParameter("status", {
+              type: "string",
+              enum: ["pending", "completed", "skipped", "missed", "cancelled_configuration"],
+            }),
+            queryParameter("search", { type: "string", maxLength: 200 }),
+            queryParameter("sort", { type: "string", enum: ["newest", "oldest"] }),
           ],
           "x-required-scopes": ["tracking:read"],
           responses: { 200: { description: "Paginated ritual history" } },

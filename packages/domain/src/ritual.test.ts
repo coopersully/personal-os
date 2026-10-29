@@ -7,6 +7,7 @@ import {
   ritualDefinitionInputSchema,
   ritualIsAnswered,
   ritualStepSchema,
+  ritualStreakCount,
   upcomingRitualWindows,
 } from "./ritual.js";
 
@@ -166,4 +167,203 @@ it("a revised schedule cutoff excludes retroactive boundaries", () => {
   expect(upcoming.find((window) => window.ritualId === "night")?.dueAt).toBe(
     "2026-09-30T15:00:00.000Z",
   );
+});
+
+it("optional steps do not block completion, while legacy steps remain required", () => {
+  const occurrence = {
+    definition: {
+      ...definition("morning"),
+      steps: [{ id: "journal", label: "Journal", kind: "short_text", optional: true }],
+    },
+    responses: [],
+  } as unknown as RitualOccurrence;
+  expect(ritualIsAnswered(occurrence)).toBe(true);
+  occurrence.definition.steps.push({ id: "teeth", label: "Teeth", kind: "checkbox" });
+  expect(ritualIsAnswered(occurrence)).toBe(false);
+});
+
+it("rejects empty, duplicate, and invalid custom weekdays", () => {
+  for (const days of [[], [1, 1], [-1], [7], [1.5]]) {
+    expect(
+      ritualStepSchema.safeParse({ id: "one", label: "One", kind: "checkbox", days }).success,
+    ).toBe(false);
+  }
+});
+
+it("resolves selected days by the ritual's local date and preserves definitions", async () => {
+  const { ritualDefinitionForDate } = await import("./ritual.js");
+  const original = {
+    ...definition("morning"),
+    steps: [
+      { id: "daily", label: "Daily", kind: "checkbox" as const },
+      { id: "weekdays", label: "Weekdays", kind: "checkbox" as const, days: [1, 2, 3, 4, 5] },
+      { id: "weekends", label: "Weekends", kind: "checkbox" as const, days: [0, 6] },
+      { id: "tuesday", label: "Tuesday", kind: "checkbox" as const, days: [2] },
+    ],
+  };
+  expect(ritualDefinitionForDate(original, "2026-10-17").steps.map((s) => s.id)).toEqual([
+    "daily",
+    "weekends",
+  ]);
+  expect(ritualDefinitionForDate(original, "2026-10-20").steps.map((s) => s.id)).toEqual([
+    "daily",
+    "weekdays",
+    "tuesday",
+  ]);
+  expect(original.steps).toHaveLength(4);
+});
+
+it("resolves reminder times across midnight and daylight saving changes", async () => {
+  const { nextRitualReminderAt, defaultRitualReminderTime } = await import("./ritual.js");
+  expect(defaultRitualReminderTime(definition("morning"))).toBe("12:00");
+  expect(defaultRitualReminderTime(definition("night"))).toBe("22:00");
+  expect(defaultRitualReminderTime({ ...definition("night"), reminderTime: "23:00" })).toBe(
+    "23:00",
+  );
+  expect(nextRitualReminderAt(definition("night"), "22:00", "2026-10-18T03:00:00Z")).toBe(
+    "2026-10-19T02:00:00.000Z",
+  );
+  expect(nextRitualReminderAt(definition("morning"), "02:30", "2026-03-08T05:00:00Z")).toBe(
+    "2026-03-08T07:00:00.000Z",
+  );
+  expect(nextRitualReminderAt(definition("morning"), "01:30", "2026-11-01T04:00:00Z")).toBe(
+    "2026-11-01T05:30:00.000Z",
+  );
+  expect(nextRitualReminderAt(definition("night"), "25:00", "2026-10-18T03:00:00Z")).toBeNull();
+});
+
+describe("ritual streaks", () => {
+  const history = (dates: string[], status: RitualOccurrence["status"] = "completed") =>
+    dates.map((scheduledLocalDate) => ({ scheduledLocalDate, status, hasSteps: true }));
+  it("counts beyond a week and leaves today's pending ritual open", () => {
+    const entries = history(
+      Array.from({ length: 12 }, (_, i) => `2026-10-${String(i + 1).padStart(2, "0")}`),
+    );
+    expect(
+      ritualStreakCount(
+        definition("morning"),
+        { scheduledLocalDate: "2026-10-13", status: "pending" },
+        entries,
+      ),
+    ).toBe(12);
+  });
+  it.each(["skipped", "missed", "cancelled_configuration"] as const)("breaks on %s", (status) => {
+    expect(
+      ritualStreakCount(
+        definition("morning"),
+        { scheduledLocalDate: "2026-10-03", status: "pending" },
+        [...history(["2026-10-01"]), ...history(["2026-10-02"], status)],
+      ),
+    ).toBe(0);
+  });
+  it("breaks at an unrecorded scheduled day", () => {
+    expect(
+      ritualStreakCount(
+        definition("morning"),
+        { scheduledLocalDate: "2026-10-03", status: "pending" },
+        history(["2026-10-01"]),
+      ),
+    ).toBe(0);
+  });
+  it("ignores unscheduled weekend days and empty snapshots", () => {
+    const def = definition("morning");
+    const weekdays = {
+      ...def,
+      steps: def.steps.map((step) => ({ ...step, days: [1, 2, 3, 4, 5] })),
+    };
+    expect(
+      ritualStreakCount(weekdays, { scheduledLocalDate: "2026-10-05", status: "completed" }, [
+        ...history(["2026-10-02", "2026-10-05"]),
+        { scheduledLocalDate: "2026-10-03", status: "completed", hasSteps: false },
+      ]),
+    ).toBe(2);
+    expect(
+      ritualStreakCount(def, { scheduledLocalDate: "2026-10-05", status: "pending" }, []),
+    ).toBe(0);
+  });
+});
+
+describe("ritual completion week", () => {
+  it("keeps completed days visible across a skipped day and leaves today pending", async () => {
+    const { ritualCompletionWeek } = await import("./ritual.js");
+    const week = ritualCompletionWeek(definition("morning"), "2026-10-07", [
+      { scheduledLocalDate: "2026-10-01", status: "completed", hasSteps: true },
+      { scheduledLocalDate: "2026-10-02", status: "skipped", hasSteps: true },
+      { scheduledLocalDate: "2026-10-03", status: "missed", hasSteps: true },
+      { scheduledLocalDate: "2026-10-04", status: "completed", hasSteps: false },
+      { scheduledLocalDate: "2026-10-05", status: "cancelled_configuration", hasSteps: true },
+      { scheduledLocalDate: "2026-10-07", status: "pending", hasSteps: true },
+    ]);
+    expect(week.map((day) => day.status)).toEqual([
+      "completed",
+      "skipped",
+      "missed",
+      "not_scheduled",
+      "not_scheduled",
+      "not_recorded",
+      "pending",
+    ]);
+    expect(week.map((day) => day.date)).toEqual(
+      Array.from({ length: 7 }, (_, i) => `2026-10-0${i + 1}`),
+    );
+  });
+  it("excludes unscheduled days and dates before enabling, preserving historical snapshots", async () => {
+    const { ritualCompletionWeek } = await import("./ritual.js");
+    const def = {
+      ...definition("morning"),
+      enabledAt: "2026-10-02T12:00:00Z",
+      steps: [{ id: "one", label: "One", kind: "checkbox" as const, days: [1, 2, 3, 4, 5] }],
+    };
+    const week = ritualCompletionWeek(def, "2026-10-05", [
+      { scheduledLocalDate: "2026-10-03", status: "completed", hasSteps: true },
+      { scheduledLocalDate: "2026-10-05", status: "pending", hasSteps: true },
+    ]);
+    expect(week.map((day) => day.status)).toEqual([
+      "not_scheduled",
+      "not_scheduled",
+      "not_scheduled",
+      "not_scheduled",
+      "completed",
+      "not_scheduled",
+      "pending",
+    ]);
+  });
+  it("crosses month/year boundaries using logical ritual dates", async () => {
+    const { ritualCompletionWeek } = await import("./ritual.js");
+    const week = ritualCompletionWeek(definition("night"), "2027-01-02", []);
+    expect(week[0]?.date).toBe("2026-12-27");
+    expect(week[6]?.date).toBe("2027-01-02");
+    expect(week.every((day) => day.status === "not_recorded")).toBe(true);
+  });
+});
+
+describe("ritual presentation", () => {
+  it("only presents pending, due, unexpired, unsnoozed occurrences", async () => {
+    const { ritualShouldPresent } = await import("./ritual.js");
+    const current = {
+      status: "pending" as const,
+      dueAt: "2026-10-20T06:00:00Z",
+      expiresAt: "2026-10-20T21:00:00Z",
+      snoozedUntil: null,
+    };
+    expect(ritualShouldPresent(null, "2026-10-20T07:00:00Z")).toBe(false);
+    expect(ritualShouldPresent(current, "2026-10-20T05:59:59Z")).toBe(false);
+    expect(ritualShouldPresent(current, current.dueAt)).toBe(true);
+    expect(ritualShouldPresent(current, current.expiresAt)).toBe(false);
+    expect(ritualShouldPresent({ ...current, status: "completed" }, "2026-10-20T07:00:00Z")).toBe(
+      false,
+    );
+    expect(
+      ritualShouldPresent(
+        { ...current, snoozedUntil: "2026-10-20T07:00:00Z" },
+        "2026-10-20T06:59:59Z",
+      ),
+    ).toBe(false);
+    expect(
+      ritualShouldPresent(
+        { ...current, snoozedUntil: "2026-10-20T07:00:00Z" },
+        "2026-10-20T07:00:00Z",
+      ),
+    ).toBe(true);
+  });
 });

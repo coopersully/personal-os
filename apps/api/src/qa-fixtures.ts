@@ -9,16 +9,31 @@ import {
   domainProfiles,
   financeAccounts,
   financeAlerts,
+  financeBalanceInclusions,
+  financeBudgetAllocations,
+  financeBudgetBucketCategories,
+  financeBudgetBuckets,
+  financeBudgetPlans,
   financeBudgets,
+  financeBudgetTaxonomies,
+  financeBudgetVersions,
+  financeCashBalanceBases,
   financeCategories,
   financeCategoryRules,
   financeClassificationDecisions,
+  financeGoals,
   financeIncomeStreams,
   financeMerchantAliases,
   financeMerchants,
+  financeMutationRecords,
+  financeOnboardingStates,
+  financePlanningEvidence,
   financeProfiles,
+  financeProfileVersions,
   financeRecurringObligations,
+  financeRecurringScheduleVersions,
   financeReviewCases,
+  financeTransactionCoverage,
   financeTransactions,
   goals,
   mailboxes,
@@ -37,11 +52,17 @@ import {
   taskLists,
   taskProjects,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from "@personal-os/domain";
 import { and, eq, inArray, or } from "drizzle-orm";
+import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
+import { loadFinanceAuthorization } from "./finance/context.js";
 import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
+import { financeActivityFixture } from "./qa-finance-activity.js";
+import { financeHistoryFixture } from "./qa-finance-history.js";
+import { financePlanningFixture } from "./qa-finance-planning.js";
 import { demoPlanningStory } from "./qa-planning-story.js";
 import { hashPassword } from "./security.js";
 
@@ -170,10 +191,25 @@ export const qaFixtureAccounts = [
 type FixtureData = {
   attentionItems: Array<typeof attentionItems.$inferInsert>;
   auditEvents: Array<typeof auditEvents.$inferInsert>;
+  financeMutationRecords: (typeof financeMutationRecords.$inferInsert)[];
+  workspaceMaintenanceRuns: (typeof workspaceMaintenanceRuns.$inferInsert)[];
   calendarAccounts: Array<typeof calendarAccounts.$inferInsert>;
   calendarEvents: Array<typeof calendarEvents.$inferInsert>;
   calendars: Array<typeof calendars.$inferInsert>;
   domainProfiles: Array<typeof domainProfiles.$inferInsert>;
+  financeBudgetAllocations: Array<typeof financeBudgetAllocations.$inferInsert>;
+  financeBudgetPlans: Array<typeof financeBudgetPlans.$inferInsert>;
+  financeBudgetVersions: Array<typeof financeBudgetVersions.$inferInsert>;
+  financeGoals: Array<typeof financeGoals.$inferInsert>;
+  financeOnboardingStates: Array<typeof financeOnboardingStates.$inferInsert>;
+  financePlanningEvidence: Array<typeof financePlanningEvidence.$inferInsert>;
+  financeProfileVersions: Array<typeof financeProfileVersions.$inferInsert>;
+  financeRecurringScheduleVersions: Array<typeof financeRecurringScheduleVersions.$inferInsert>;
+  financeCashBalanceBases: Array<typeof financeCashBalanceBases.$inferInsert>;
+  financeBalanceInclusions: Array<typeof financeBalanceInclusions.$inferInsert>;
+  financeBudgetTaxonomies: Array<typeof financeBudgetTaxonomies.$inferInsert>;
+  financeBudgetBuckets: Array<typeof financeBudgetBuckets.$inferInsert>;
+  financeBudgetBucketCategories: Array<typeof financeBudgetBucketCategories.$inferInsert>;
   financeAccounts: Array<typeof financeAccounts.$inferInsert>;
   financeAlerts: Array<typeof financeAlerts.$inferInsert>;
   financeBudgets: Array<typeof financeBudgets.$inferInsert>;
@@ -186,6 +222,7 @@ type FixtureData = {
   financeProfiles: Array<typeof financeProfiles.$inferInsert>;
   financeRecurringObligations: Array<typeof financeRecurringObligations.$inferInsert>;
   financeReviewCases: Array<typeof financeReviewCases.$inferInsert>;
+  financeTransactionCoverage: (typeof financeTransactionCoverage.$inferInsert)[];
   financeTransactions: Array<typeof financeTransactions.$inferInsert>;
   goals: Array<typeof goals.$inferInsert>;
   mailDrafts: Array<typeof mailDrafts.$inferInsert>;
@@ -210,10 +247,25 @@ function emptyFixtureData(): FixtureData {
   return {
     attentionItems: [],
     auditEvents: [],
+    financeMutationRecords: [],
+    workspaceMaintenanceRuns: [],
     calendarAccounts: [],
     calendarEvents: [],
     calendars: [],
     domainProfiles: [],
+    financeBudgetAllocations: [],
+    financeBudgetPlans: [],
+    financeBudgetVersions: [],
+    financeGoals: [],
+    financeOnboardingStates: [],
+    financePlanningEvidence: [],
+    financeProfileVersions: [],
+    financeRecurringScheduleVersions: [],
+    financeCashBalanceBases: [],
+    financeBalanceInclusions: [],
+    financeBudgetTaxonomies: [],
+    financeBudgetBuckets: [],
+    financeBudgetBucketCategories: [],
     financeAccounts: [],
     financeAlerts: [],
     financeBudgets: [],
@@ -226,6 +278,7 @@ function emptyFixtureData(): FixtureData {
     financeProfiles: [],
     financeRecurringObligations: [],
     financeReviewCases: [],
+    financeTransactionCoverage: [],
     financeTransactions: [],
     goals: [],
     mailDrafts: [],
@@ -353,6 +406,14 @@ function addBaseAccount(
     updatedAt: now,
     userId: account.id,
   });
+}
+
+/** Keep the demo's final agenda item available through the end of its local day. */
+export function qaEveningAgendaStart(now: Date, timezone: string): Date {
+  const today = localDateAt(now, timezone);
+  const evening = localDateTimeToUtc(today, 21 * 60, timezone).getTime();
+  const latest = localDateTimeToUtc(today, 23 * 60 + 30, timezone).getTime();
+  return new Date(Math.min(Math.max(evening, now.getTime() + 15 * 60_000), latest));
 }
 
 function addLoadedWorkspace(
@@ -751,6 +812,48 @@ function addLoadedWorkspace(
       userId: account.id,
     },
   );
+  if (account.key === "demo-full") {
+    // Keep a useful evening and next-week agenda when fixtures are loaded after work.
+    const eveningStart = qaEveningAgendaStart(now, timezone).getTime();
+    data.calendarEvents.push({
+      id: fixtureId(account, 2100),
+      userId: account.id,
+      calendarId: localCalendarId,
+      title: "Read and plan tomorrow",
+      notes: "Put the library book by the keys, then choose tomorrow's one priority.",
+      startsAt: new Date(eveningStart),
+      endsAt: new Date(eveningStart + 30 * 60_000),
+      timezone,
+      provider: "local",
+      status: "confirmed",
+      transparency: "busy",
+      visibility: "private",
+      createdAt: ago(24),
+      updatedAt: now,
+    });
+    for (const [offset, title] of [
+      [2, "Autumn workshop volunteer briefing"],
+      [3, "River loop with Priya"],
+      [5, "Friday money check-in"],
+    ] as const) {
+      const date = addLocalDays(today, offset);
+      data.calendarEvents.push({
+        id: fixtureId(account, 2100 + offset),
+        userId: account.id,
+        calendarId: localCalendarId,
+        title,
+        startsAt: at(date, 17 * 60),
+        endsAt: at(date, 18 * 60),
+        timezone,
+        provider: "local",
+        status: "confirmed",
+        transparency: "busy",
+        visibility: "private",
+        createdAt: ago(24),
+        updatedAt: now,
+      });
+    }
+  }
   data.reminders.push(
     {
       createdAt: ago(72),
@@ -1229,7 +1332,7 @@ function addLoadedWorkspace(
     ],
     [
       "Protect time around the dentist appointment",
-      "The dentist appointment is scheduled for Thursday. Decide whether travel time should be reserved before or after it.",
+      "The dentist appointment is scheduled for tomorrow. Decide whether travel time should be reserved before or after it.",
     ],
     [
       "Revisit the monthly finance task",
@@ -1935,6 +2038,197 @@ export async function loadQaFixtures(
     addBaseAccount(data, account, passwordHash, now);
     if (account.scenario === "complete") addLoadedWorkspace(data, account, now, false);
     if (account.scenario === "degraded") addLoadedWorkspace(data, account, now, true);
+    if (
+      account.scenario === "complete" &&
+      (account.key === "demo-full" || account.key === "qa-loaded")
+    ) {
+      const planning = financePlanningFixture(account.id, now, account.key === "demo-full");
+      data.financeProfileVersions.push(planning.profile);
+      data.financeBudgetPlans.push(planning.plan);
+      data.financeBudgetVersions.push(planning.budget);
+      data.financeBudgetAllocations.push(...planning.allocations);
+      data.financeGoals.push(...planning.goals);
+      data.financeRecurringObligations.push(...planning.obligations);
+      data.financeRecurringScheduleVersions.push(...planning.schedules);
+      data.financePlanningEvidence.push(...planning.evidence);
+      data.financeOnboardingStates.push(planning.onboarding);
+      if (account.key === "demo-full") {
+        for (const goal of data.financeGoals.filter((goal) => goal.userId === account.id)) {
+          goal.createdAt = new Date(now.getTime() - 7 * 86_400_000);
+        }
+        const activity = financeActivityFixture(account.id, now);
+        data.auditEvents.push(...activity.audits);
+        data.financeMutationRecords.push(...activity.mutations);
+        data.workspaceMaintenanceRuns.push(...activity.runs);
+        data.financeBudgetTaxonomies.push({
+          id: fixtureId(account, 800),
+          userId: account.id,
+          name: "Everyday budget",
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        });
+        data.financeBudgetBuckets.push(
+          {
+            id: fixtureId(account, 801),
+            taxonomyId: fixtureId(account, 800),
+            userId: account.id,
+            name: "Essentials",
+            position: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: fixtureId(account, 802),
+            taxonomyId: fixtureId(account, 800),
+            userId: account.id,
+            name: "Lifestyle",
+            position: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+        );
+        for (const [index, category] of [422, 421, 420, 424, 776].entries()) {
+          data.financeBudgetBucketCategories.push({
+            id: fixtureId(account, 810 + index),
+            userId: account.id,
+            taxonomyId: fixtureId(account, 800),
+            bucketId: fixtureId(account, index < 2 ? 801 : 802),
+            categoryId: fixtureId(account, category),
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      if (account.key === "demo-full") {
+        for (const [record, name] of [
+          [1900, "AMTRAK"],
+          [1901, "HUDSON TABLE"],
+        ] as const)
+          data.financeMerchants.push({
+            id: fixtureId(account, record),
+            userId: account.id,
+            displayName: name,
+            normalizedName: name.toLowerCase(),
+            isUserConfirmed: true,
+            createdAt: now,
+            updatedAt: now,
+          });
+        data.financeTransactions.push(...financeHistoryFixture(account.id, now));
+        const todayIso = localDateToIso(localDateAt(now, "America/New_York"));
+        const fromDate = new Date(
+          Date.UTC(Number(todayIso.slice(0, 4)), Number(todayIso.slice(5, 7)) - 5, 1),
+        )
+          .toISOString()
+          .slice(0, 10);
+        for (const record of [400, 401, 402, 403])
+          data.financeTransactionCoverage.push({
+            id: fixtureId(account, 4000 + record),
+            userId: account.id,
+            accountId: fixtureId(account, record),
+            fromDate,
+            throughDate: localDateToIso(addLocalDays(localDateAt(now, "America/New_York"), -1)),
+            timezone: "America/New_York",
+            currencyCode: "USD",
+            evidenceRef: "qa-fixture:full-demo-complete-ledger:v1",
+            recordedAt: now,
+          });
+      }
+      // Complete canonical references before snapshotting balances: startup learning
+      // must not enrich these transactions and invalidate their reflection revisions.
+      const movements = data.financeTransactions.filter((row) => row.userId === account.id);
+      for (const [index, movement] of movements.entries()) {
+        if (movement.direction === "transfer")
+          movement.providerDirection =
+            movement.accountId === fixtureId(account, 400) ? "expense" : "income";
+        if (!movement.merchantId) {
+          movement.merchantId = fixtureId(account, 750 + index);
+          data.financeMerchants.push({
+            id: movement.merchantId,
+            userId: account.id,
+            displayName: movement.merchant,
+            normalizedName: movement.merchant.toLowerCase(),
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+        if (movement.category && !movement.categoryId) {
+          const existing = data.financeCategories.find(
+            (category) => category.userId === account.id && category.name === movement.category,
+          );
+          if (existing?.id) movement.categoryId = existing.id;
+          else {
+            movement.categoryId = fixtureId(account, 770 + index);
+            data.financeCategories.push({
+              id: movement.categoryId,
+              userId: account.id,
+              name: movement.category,
+              slug: movement.category.toLowerCase(),
+              group: movement.direction === "transfer" ? "Financial" : "Spending",
+              color: "#64748B",
+              isSystem: true,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        }
+        if (movement.categorySource === "user" || movement.categorySource === "agent")
+          movement.categoryDecidedAt = now;
+      }
+      for (const financeAccount of data.financeAccounts.filter(
+        (row) => row.userId === account.id,
+      )) {
+        financeAccount.ownershipType = "individual";
+        financeAccount.ownershipShareBps = 10_000;
+        financeAccount.currencyCode = "USD";
+        financeAccount.syncState = "current";
+        if (
+          financeAccount.kind === "cash" &&
+          financeAccount.balance !== null &&
+          financeAccount.balance !== undefined
+        ) {
+          if (!financeAccount.id) throw new Error("Cash fixture requires a stable account ID.");
+          const basisId = fixtureId(
+            account,
+            financeAccount.id === fixtureId(account, 400) ? 710 : 711,
+          );
+          data.financeCashBalanceBases.push({
+            id: basisId,
+            userId: account.id,
+            actorUserId: account.id,
+            accountId: financeAccount.id,
+            basisRevision: 1,
+            accountContextualRevision: 1n,
+            kind: "current",
+            amountCents: financeAccount.balance,
+            currencyCode: "USD",
+            asOf: now,
+            validUntil: new Date(now.getTime() + 30 * 86_400_000),
+            protectedFloorCents: financeAccount.id === fixtureId(account, 401) ? 1_520_000 : 50_000,
+            recordedAt: now,
+          });
+          for (const movement of data.financeTransactions.filter(
+            (row) => row.accountId === financeAccount.id,
+          )) {
+            if (!movement.id) throw new Error("Cash fixture requires a stable transaction ID.");
+            data.financeBalanceInclusions.push({
+              id: fixtureId(
+                account,
+                720 +
+                  data.financeBalanceInclusions.filter((row) => row.userId === account.id).length,
+              ),
+              userId: account.id,
+              basisId,
+              transactionId: movement.id,
+              transactionContextualRevision: 1n,
+              reimbursementRelationshipRevision: 1n,
+              reflection: movement.pending ? "not_included" : "included",
+              recordedAt: now,
+            });
+          }
+        }
+      }
+    }
     if (account.key === "demo-full" && account.scenario === "complete") {
       const story = demoPlanningStory(account.id, taskInboxPlaceholderId(account), now);
       for (const key of ["goals", "motives", "reminders", "taskProjects"] as const) {
@@ -2000,6 +2294,8 @@ export async function loadQaFixtures(
       await transaction.insert(financeMerchants).values(data.financeMerchants);
     if (data.financeMerchantAliases.length)
       await transaction.insert(financeMerchantAliases).values(data.financeMerchantAliases);
+    if (data.financeTransactionCoverage.length)
+      await transaction.insert(financeTransactionCoverage).values(data.financeTransactionCoverage);
     if (data.financeTransactions.length)
       await transaction.insert(financeTransactions).values(data.financeTransactions);
     if (data.financeClassificationDecisions.length)
@@ -2012,6 +2308,14 @@ export async function loadQaFixtures(
       await transaction.insert(financeCategoryRules).values(data.financeCategoryRules);
     if (data.financeBudgets.length)
       await transaction.insert(financeBudgets).values(data.financeBudgets);
+    if (data.financeBudgetTaxonomies.length)
+      await transaction.insert(financeBudgetTaxonomies).values(data.financeBudgetTaxonomies);
+    if (data.financeBudgetBuckets.length)
+      await transaction.insert(financeBudgetBuckets).values(data.financeBudgetBuckets);
+    if (data.financeBudgetBucketCategories.length)
+      await transaction
+        .insert(financeBudgetBucketCategories)
+        .values(data.financeBudgetBucketCategories);
     if (data.financeProfiles.length)
       await transaction.insert(financeProfiles).values(data.financeProfiles);
     if (data.financeIncomeStreams.length)
@@ -2020,11 +2324,72 @@ export async function loadQaFixtures(
       await transaction
         .insert(financeRecurringObligations)
         .values(data.financeRecurringObligations);
+    if (data.financeGoals.length) await transaction.insert(financeGoals).values(data.financeGoals);
+    if (data.financeProfileVersions.length)
+      await transaction.insert(financeProfileVersions).values(data.financeProfileVersions);
+    if (data.financeBudgetPlans.length)
+      await transaction.insert(financeBudgetPlans).values(data.financeBudgetPlans);
+    if (data.financeBudgetVersions.length)
+      await transaction.insert(financeBudgetVersions).values(data.financeBudgetVersions);
+    if (data.financeBudgetAllocations.length)
+      await transaction.insert(financeBudgetAllocations).values(data.financeBudgetAllocations);
+    if (data.financeRecurringScheduleVersions.length)
+      await transaction
+        .insert(financeRecurringScheduleVersions)
+        .values(data.financeRecurringScheduleVersions);
+    if (data.financePlanningEvidence.length)
+      await transaction.insert(financePlanningEvidence).values(data.financePlanningEvidence);
+    if (data.financeOnboardingStates.length)
+      await transaction.insert(financeOnboardingStates).values(data.financeOnboardingStates);
+    if (data.financeCashBalanceBases.length)
+      await transaction.insert(financeCashBalanceBases).values(data.financeCashBalanceBases);
+    if (data.financeBalanceInclusions.length)
+      await transaction.insert(financeBalanceInclusions).values(data.financeBalanceInclusions);
     if (data.financeAlerts.length)
       await transaction.insert(financeAlerts).values(data.financeAlerts);
     if (data.pinterestConnections.length)
       await transaction.insert(pinterestConnections).values(data.pinterestConnections);
+    if (data.workspaceMaintenanceRuns.length)
+      await transaction.insert(workspaceMaintenanceRuns).values(data.workspaceMaintenanceRuns);
     if (data.auditEvents.length) await transaction.insert(auditEvents).values(data.auditEvents);
+    if (data.financeMutationRecords.length)
+      await transaction.insert(financeMutationRecords).values(data.financeMutationRecords);
   });
+  // The golden persona includes the same exact month/account/currency confirmation
+  // as a manual setup, through the canonical prepare/confirm writers.
+  for (const account of accounts.filter(
+    (row) => row.key === "demo-full" && row.scenario === "complete",
+  )) {
+    const context = await loadFinanceAuthorization({
+      db,
+      principal: {
+        actorId: account.id,
+        actorType: "user",
+        userId: account.id,
+        scopes: new Set(["finances:write"]),
+      },
+      requestId: "qa-budget-scope",
+    });
+    const qualification = createFinanceBudgetBaselineQualificationService({ db, now: () => now });
+    const review = await qualification.prepare(
+      {
+        month: localDateToIso(localDateAt(now, "America/New_York")).slice(0, 7),
+        budgetVersionId: fixtureId(account, 651),
+        accountIds: [400, 401, 403].map((record) => fixtureId(account, record)),
+        currency: "USD",
+        timezone: "America/New_York",
+        idempotencyKey: "qa-budget-scope-prepare",
+      },
+      context,
+    );
+    await qualification.confirm(
+      {
+        reviewId: review.id,
+        expectedFingerprint: review.fingerprint,
+        idempotencyKey: "qa-budget-scope-confirm",
+      },
+      context,
+    );
+  }
   return { accountCount: accounts.length, emails };
 }

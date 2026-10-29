@@ -15,6 +15,8 @@ import {
   type MaintenanceScope,
 } from "@personal-os/domain";
 import { AppError } from "./errors.js";
+import type { FinanceExecutionFence } from "./finance/execution-binding.js";
+import type { FinanceDerivedCompletionClaim } from "./finance/execution-claim-fence.js";
 import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
 import type { FinanceSyncBatchResult } from "./finance-service.js";
 import type { Principal } from "./types.js";
@@ -41,6 +43,7 @@ export const financeCandidateMaintenanceSteps = financeMaintenanceSteps;
 type FinanceCandidateMaintenanceStep = (typeof financeCandidateMaintenanceSteps)[number];
 
 type MutationContext = {
+  financeExecution?: FinanceExecutionFence;
   maintenance: {
     idempotencyKey: string;
     policy: "approved_rule";
@@ -196,10 +199,27 @@ type FinanceStatusReader = {
 
 type Options = {
   actions: {
+    resumeFinanceMaintenanceControl?: (
+      input: import("@personal-os/domain").FinanceMaintenanceControlInput,
+      claimId: string,
+    ) => Promise<{ state: "continue" | "released" | "reconciliation_required"; reason?: string }>;
+    getMaintenanceExecutionFence?: (
+      userId: string,
+      runId: string,
+    ) => Promise<{
+      currentActorId: string;
+      bindingRevision: string;
+      candidateId: string;
+      candidateRevision: string;
+    } | null>;
     settleFinanceMaintenanceCandidate: (
       candidateId: string,
       expectedRevision: string,
-      context: { principal: Principal; requestId: string },
+      context: {
+        principal: Principal;
+        requestId: string;
+        financeExecution?: { currentActorId: string; bindingRevision: string };
+      },
     ) => Promise<unknown>;
   };
   budget: {
@@ -213,6 +233,7 @@ type Options = {
     resolve: (
       userId: string,
       runId: string,
+      controlClaim?: FinanceDerivedCompletionClaim,
     ) => Promise<{
       candidateId: string;
       candidateRevision: string | undefined;
@@ -228,6 +249,7 @@ type Options = {
       userId: string,
       runId: string,
       position: FinancePositionEvidenceCheckpoint,
+      completionClaim?: FinanceDerivedCompletionClaim,
     ) => Promise<{ id: string; status: string }>;
   };
   position: {
@@ -586,6 +608,33 @@ export function createFinanceMaintenanceService({
     const claim = await maintenance.claim(runId);
     if (!claim) return null;
     const { claimId, run } = claim;
+    const executionFence =
+      (await actions?.getMaintenanceExecutionFence?.(run.userId, runId)) ?? null;
+    let controlOnly = false;
+    let derivedCompletionOnly = false;
+    if (executionFence && actions.resumeFinanceMaintenanceControl) {
+      const control = await actions.resumeFinanceMaintenanceControl(
+        {
+          kind: "submitted_with_binding",
+          runId,
+          candidateId: executionFence.candidateId,
+          candidateRevision: executionFence.candidateRevision,
+          expectedBindingRevision: executionFence.bindingRevision,
+        },
+        claimId,
+      );
+      if (control.state === "released") return maintenance.getOwnedRun(run.userId, runId);
+      if (control.state === "reconciliation_required")
+        return maintenance.releaseForRetry({
+          claimId,
+          runId,
+          code: control.reason ?? "economic_reconciliation_required",
+          safeMessage:
+            "The exact stored economic receipt requires owner reconciliation; no effects were replayed.",
+        });
+      controlOnly = control.reason === "control_only_challenge_resolve";
+      derivedCompletionOnly = control.reason === "committed_derived_completion";
+    }
     const records = await maintenance.listStepRecords(runId);
     const prepared = records.find((record) => record.step === "prepare")?.result as
       | { candidateId: string; questions: number; revision: string }
@@ -640,8 +689,10 @@ export function createFinanceMaintenanceService({
           status: "blocked",
         });
       }
-      if (checkpoint?.phase === "challenge" && prepared) return releaseAtChallenge(prepared);
+      if (!derivedCompletionOnly && checkpoint?.phase === "challenge" && prepared)
+        return releaseAtChallenge(prepared);
       if (
+        derivedCompletionOnly ||
         checkpoint?.phase === "health_refresh" ||
         completed.has("commit_or_queue_review") ||
         completed.has("health_refresh")
@@ -651,7 +702,7 @@ export function createFinanceMaintenanceService({
         )?.result as
           | { candidateId: string; candidateRevision?: string; questions: number }
           | undefined;
-        if (questionResolution && questionResolution.questions > 0) {
+        if (!derivedCompletionOnly && questionResolution && questionResolution.questions > 0) {
           if (!questionResolution.candidateRevision)
             throw new AppError("conflict", "The challenged Finance candidate is unavailable.");
           const replayedQuestions = await finances.projectMaintenanceCandidateQuestionsForUser({
@@ -670,7 +721,19 @@ export function createFinanceMaintenanceService({
           const refreshed = await finances.refreshCashflowForUser(
             run.userId,
             run.scope,
-            mutationContext(run, "health_refresh", claimId),
+            {
+              ...mutationContext(run, "health_refresh", claimId),
+              ...(executionFence
+                ? {
+                    financeExecution: executionFence,
+                    principal: {
+                      ...mutationContext(run, "health_refresh", claimId).principal,
+                      actorId: executionFence.currentActorId,
+                      scopes: new Set(),
+                    },
+                  }
+                : {}),
+            },
             async () => maintenance.renewClaim({ claimId, runId }).then(() => undefined),
           );
           await maintenance.completeStep({
@@ -796,11 +859,12 @@ export function createFinanceMaintenanceService({
               runId,
               status: "blocked",
             });
-          const periodReview = await periodReviews.createForRun(
-            run.userId,
-            runId,
-            positionCheckpoint,
-          );
+          const periodReview = executionFence
+            ? await periodReviews.createForRun(run.userId, runId, positionCheckpoint, {
+                claimId,
+                financeExecution: executionFence,
+              })
+            : await periodReviews.createForRun(run.userId, runId, positionCheckpoint);
           await maintenance.completeStep({
             claimId,
             idempotencyKey: `finances:${run.rulebookVersion}:period_review`,
@@ -820,6 +884,14 @@ export function createFinanceMaintenanceService({
       for (const step of financeCandidateMaintenanceSteps) {
         if (completed.has(step) && step !== "challenge_resolve") continue;
         currentStep = step;
+        if (controlOnly && !["questions", "challenge_prepare", "challenge_resolve"].includes(step))
+          return maintenance.releaseForRetry({
+            claimId,
+            runId,
+            code: "finance_authorization_control_pending",
+            safeMessage:
+              "Resume the saved candidate authorization before additional maintenance work.",
+          });
         const idempotencyKey = `finances:${run.rulebookVersion}:${step}`;
         if (step === "preflight") {
           const allocationBackfill = finances.backfillTransactionAllocations
@@ -1081,7 +1153,12 @@ export function createFinanceMaintenanceService({
             ? (records.find((record) => record.step === "challenge_resolve")?.result as Awaited<
                 ReturnType<Options["challenge"]["resolve"]>
               >)
-            : await challenge.resolve(run.userId, runId);
+            : executionFence
+              ? await challenge.resolve(run.userId, runId, {
+                  claimId,
+                  financeExecution: executionFence,
+                })
+              : await challenge.resolve(run.userId, runId);
           if (!resolution.candidateRevision)
             throw new AppError("conflict", "The challenged Finance candidate is unavailable.");
           const projectedQuestions =
@@ -1089,7 +1166,10 @@ export function createFinanceMaintenanceService({
               ? await finances.projectMaintenanceCandidateQuestionsForUser({
                   candidateId: resolution.candidateId,
                   candidateRevision: resolution.candidateRevision,
-                  context: mutationContext(run, step, claimId),
+                  context: {
+                    ...mutationContext(run, step, claimId),
+                    ...(executionFence ? { financeExecution: executionFence } : {}),
+                  },
                   runId,
                   userId: run.userId,
                 })
@@ -1133,17 +1213,22 @@ export function createFinanceMaintenanceService({
             runId,
             status: "awaiting_agent_challenge",
           });
+          if (controlOnly) return maintenance.getOwnedRun(run.userId, runId);
           await actions.settleFinanceMaintenanceCandidate(
             resolution.candidateId,
             resolution.candidateRevision,
             {
               principal: {
-                actorId: resolution.submittingAgentId ?? "finance-maintenance-agent",
+                actorId:
+                  executionFence?.currentActorId ??
+                  resolution.submittingAgentId ??
+                  "finance-maintenance-agent",
                 actorType: "agent",
                 scopes: new Set(["finances:maintain", "finances:write"]),
                 userId: run.userId,
               },
               requestId: `finance-maintenance-settle:${runId}`,
+              ...(executionFence ? { financeExecution: executionFence } : {}),
             },
           );
           return maintenance.getOwnedRun(run.userId, runId);

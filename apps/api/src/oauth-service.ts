@@ -2,13 +2,20 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   accessTokens,
   type Database,
+  oauthAccessTokenRotations,
   oauthAuthorizationCodes,
   oauthClients,
   oauthRefreshTokens,
 } from "@personal-os/database";
 import type { AccessScope } from "@personal-os/domain";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
 import { AppError } from "./errors.js";
+import {
+  type OAuthActorIdentity,
+  oauthActorIdentitySelection,
+  oauthScopeSubset,
+} from "./oauth-actor-lineage.js";
+import { lockOAuthGrant } from "./oauth-grant-lock.js";
 import { generateToken, hashToken } from "./security.js";
 
 const allScopes = new Set<AccessScope>([
@@ -17,22 +24,27 @@ const allScopes = new Set<AccessScope>([
   "bookmarks:read",
   "calendar:read",
   "calendar:write",
+  "calendar:execute",
   "mail:read",
   "mail:write",
+  "mail:execute",
   "goals:read",
   "goals:write",
   "finances:read",
   "finances:write",
+  "finances:execute",
   "finances:maintain",
   "reminders:read",
   "reminders:write",
   "texting:read",
   "texting:write",
+  "texting:execute",
   "tasks:read",
   "tasks:write",
+  "tasks:execute",
 ]);
 const defaultScopes = new Set<AccessScope>(
-  [...allScopes].filter((scope) => scope !== "finances:maintain"),
+  [...allScopes].filter((scope) => scope !== "finances:maintain" && !scope.endsWith(":execute")),
 );
 
 export function createOAuthService(options: { db: Database; now: () => Date; resource: string }) {
@@ -47,15 +59,34 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       throw new AppError("invalid_request", "The redirect URI is not registered for this client.");
     return { id: client.id, name: client.name };
   };
-  const issue = async (userId: string, clientId: string, scopes: AccessScope[]) => {
+  const issue = async (
+    userId: string,
+    clientId: string,
+    scopes: AccessScope[],
+    authorizationConnectionId: string | undefined,
+    executor: Pick<Database, "insert">,
+    predecessor?: OAuthActorIdentity,
+  ) => {
+    // Only this private issuer can append an edge. Its successor identity is
+    // the ID returned by its own fresh INSERT, never a caller-supplied target.
+    if (
+      predecessor &&
+      (predecessor.userId !== userId ||
+        predecessor.clientId !== clientId ||
+        predecessor.audience !== resource ||
+        predecessor.authorizationConnectionId !== authorizationConnectionId ||
+        !oauthScopeSubset(scopes, predecessor.scopes))
+    )
+      throw new AppError("internal_error", "OAuth predecessor does not match canonical issuance.");
     const token = generateToken("mcp");
     const refreshToken = generateToken("mcp_refresh");
     const expiresAt = new Date(now().getTime() + 60 * 60_000);
     const refreshExpiresAt = new Date(now().getTime() + 30 * 86_400_000);
-    const [access] = await db
+    const [access] = await executor
       .insert(accessTokens)
       .values({
         audience: resource,
+        ...(authorizationConnectionId ? { authorizationConnectionId } : {}),
         clientId,
         expiresAt,
         name: `MCP OAuth (${clientId})`,
@@ -63,21 +94,39 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
         tokenHash: hashToken(token),
         userId,
       })
-      .returning();
+      .returning({ id: accessTokens.id });
     if (!access) throw new AppError("internal_error", "Could not issue OAuth access token.");
-    await db.insert(oauthRefreshTokens).values({
+    await executor.insert(oauthRefreshTokens).values({
       accessTokenId: access.id,
       clientId,
       expiresAt: refreshExpiresAt,
       tokenHash: hashToken(refreshToken),
       userId,
     });
+    if (predecessor) {
+      if (access.id === predecessor.id)
+        throw new AppError("internal_error", "OAuth successor must be newly issued.");
+      await executor.insert(oauthAccessTokenRotations).values({
+        userId,
+        fromAccessTokenId: predecessor.id,
+        toAccessTokenId: access.id,
+        clientId,
+        audience: resource,
+        authorizationConnectionId: predecessor.authorizationConnectionId,
+        predecessorScopes: predecessor.scopes,
+        successorScopes: scopes,
+        rotatedAt: now(),
+      });
+    }
     return {
-      access_token: token,
-      expires_in: 3600,
-      refresh_token: refreshToken,
-      scope: scopes.join(" "),
-      token_type: "Bearer",
+      accessTokenId: access.id,
+      response: {
+        access_token: token,
+        expires_in: 3600,
+        refresh_token: refreshToken,
+        scope: scopes.join(" "),
+        token_type: "Bearer",
+      },
     };
   };
   return {
@@ -132,8 +181,22 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       return [...clients.values()];
     },
     async revokeAuthorizedClient(userId: string, clientId: string) {
-      const current = now();
       await db.transaction(async (transaction) => {
+        await lockOAuthGrant(transaction, userId, clientId, resource);
+        // Full audience set is stable behind the same gate as both issue callers.
+        await transaction
+          .select({ id: accessTokens.id })
+          .from(accessTokens)
+          .where(
+            and(
+              eq(accessTokens.userId, userId),
+              eq(accessTokens.clientId, clientId),
+              eq(accessTokens.audience, resource),
+            ),
+          )
+          .orderBy(asc(accessTokens.id))
+          .for("update");
+        const current = now();
         await transaction
           .update(accessTokens)
           .set({ revokedAt: current })
@@ -145,6 +208,7 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
               isNull(accessTokens.revokedAt),
             ),
           );
+        // Audience-specific grant key must never retire another resource's refresh.
         await transaction
           .update(oauthRefreshTokens)
           .set({ replacedAt: current })
@@ -153,6 +217,7 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
               eq(oauthRefreshTokens.userId, userId),
               eq(oauthRefreshTokens.clientId, clientId),
               isNull(oauthRefreshTokens.replacedAt),
+              sql`EXISTS (SELECT 1 FROM ${accessTokens} WHERE ${accessTokens.id}=${oauthRefreshTokens.accessTokenId} AND ${accessTokens.userId}=${oauthRefreshTokens.userId} AND ${accessTokens.clientId}=${oauthRefreshTokens.clientId} AND ${accessTokens.audience}=${resource})`,
             ),
           );
       });
@@ -210,19 +275,31 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
         .limit(1);
       if (!code || pkceChallenge(input.codeVerifier) !== code.codeChallenge)
         throw new AppError("unauthorized", "The authorization code is invalid or expired.");
-      const [used] = await db
-        .update(oauthAuthorizationCodes)
-        .set({ usedAt: current })
-        .where(and(eq(oauthAuthorizationCodes.id, code.id), isNull(oauthAuthorizationCodes.usedAt)))
-        .returning({ id: oauthAuthorizationCodes.id });
-      if (!used)
-        throw new AppError("unauthorized", "The authorization code is invalid or expired.");
-      return issue(code.userId, code.clientId, code.scopes);
+      return db.transaction(async (transaction) => {
+        await lockOAuthGrant(transaction, code.userId, code.clientId, resource);
+        const [used] = await transaction
+          .update(oauthAuthorizationCodes)
+          .set({ usedAt: now() })
+          .where(
+            and(
+              eq(oauthAuthorizationCodes.id, code.id),
+              isNull(oauthAuthorizationCodes.usedAt),
+              gt(oauthAuthorizationCodes.expiresAt, now()),
+            ),
+          )
+          .returning({ id: oauthAuthorizationCodes.id });
+        if (!used)
+          throw new AppError("unauthorized", "The authorization code is invalid or expired.");
+        // Code-row UPDATE may itself wait. Recheck at the actual issuance decision.
+        if (code.expiresAt <= now())
+          throw new AppError("unauthorized", "The authorization code is invalid or expired.");
+        return (await issue(code.userId, code.clientId, code.scopes, undefined, transaction))
+          .response;
+      });
     },
     async refresh(input: { clientId: string; refreshToken: string; resource: string }) {
       if (input.resource !== resource)
         throw new AppError("unauthorized", "The requested resource is not this MCP server.");
-      const current = now();
       const [record] = await db
         .select()
         .from(oauthRefreshTokens)
@@ -230,26 +307,53 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
           and(
             eq(oauthRefreshTokens.tokenHash, hashToken(input.refreshToken)),
             eq(oauthRefreshTokens.clientId, input.clientId),
+            sql`EXISTS (SELECT 1 FROM ${accessTokens} WHERE ${accessTokens.id}=${oauthRefreshTokens.accessTokenId} AND ${accessTokens.userId}=${oauthRefreshTokens.userId} AND ${accessTokens.clientId}=${oauthRefreshTokens.clientId} AND ${accessTokens.audience}=${resource})`,
             isNull(oauthRefreshTokens.replacedAt),
-            gt(oauthRefreshTokens.expiresAt, current),
+            gt(oauthRefreshTokens.expiresAt, now()),
           ),
         )
         .limit(1);
       if (!record) throw new AppError("unauthorized", "The refresh token is invalid or expired.");
-      const [replaced] = await db
-        .update(oauthRefreshTokens)
-        .set({ replacedAt: current })
-        .where(and(eq(oauthRefreshTokens.id, record.id), isNull(oauthRefreshTokens.replacedAt)))
-        .returning({ id: oauthRefreshTokens.id });
-      if (!replaced) throw new AppError("unauthorized", "The refresh token has already been used.");
-      const [access] = await db
-        .select()
-        .from(accessTokens)
-        .where(eq(accessTokens.id, record.accessTokenId))
-        .limit(1);
-      if (!access || access.audience !== resource || access.revokedAt)
-        throw new AppError("unauthorized", "The refresh token is no longer valid.");
-      return issue(record.userId, record.clientId, access.scopes);
+      return db.transaction(async (transaction) => {
+        await lockOAuthGrant(transaction, record.userId, record.clientId, resource);
+        const [replaced] = await transaction
+          .update(oauthRefreshTokens)
+          .set({ replacedAt: now() })
+          .where(
+            and(
+              eq(oauthRefreshTokens.id, record.id),
+              isNull(oauthRefreshTokens.replacedAt),
+              gt(oauthRefreshTokens.expiresAt, now()),
+            ),
+          )
+          .returning({ id: oauthRefreshTokens.id });
+        if (!replaced)
+          throw new AppError("unauthorized", "The refresh token has already been used.");
+        const [access] = await transaction
+          .select({ ...oauthActorIdentitySelection, revokedAt: accessTokens.revokedAt })
+          .from(accessTokens)
+          .where(eq(accessTokens.id, record.accessTokenId))
+          .for("share")
+          .limit(1);
+        if (
+          record.expiresAt <= now() ||
+          !access ||
+          access.audience !== resource ||
+          access.revokedAt ||
+          access.userId !== record.userId ||
+          access.clientId !== record.clientId
+        )
+          throw new AppError("unauthorized", "The refresh token is no longer valid.");
+        const issued = await issue(
+          record.userId,
+          record.clientId,
+          access.scopes,
+          access.authorizationConnectionId,
+          transaction,
+          access,
+        );
+        return issued.response;
+      });
     },
     parseScopes(value: string | undefined): AccessScope[] {
       const scopes = value?.split(" ").filter(Boolean) ?? [...defaultScopes];

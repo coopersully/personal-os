@@ -1,6 +1,7 @@
 import {
   auditEvents,
   type Database,
+  financeBudgetBaselineQualifications,
   financeBudgetPeriodBaselines,
   financeBudgetPolicies,
   financeBudgetPolicyPreviews,
@@ -17,6 +18,7 @@ import {
   type FinanceBudgetPolicyRevisionTuple,
   type FinanceBudgetPolicyTerms,
   type FinancePositionEvidence,
+  financeBudgetBaselineSnapshotSchema,
   financeBudgetEvaluationCheckpointSchema,
   financeBudgetPeriodBaselineRecordSchema,
   financeBudgetPolicyEvaluationSchema,
@@ -52,6 +54,7 @@ import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
   type FinanceTransaction,
+  requireFinanceExecution,
 } from "./context.js";
 
 const capability = {
@@ -70,10 +73,13 @@ function conflict(
   if (condition) throw new AppError("conflict", message);
 }
 function requirePerson(context: FinanceMutationContext) {
-  if (context.actorType !== "user" || !context.canMutate)
+  if (
+    !context.canMutate ||
+    (context.actorType !== "user" && (!context.canSelfApprove || !context.bypassEnabled))
+  )
     throw new AppError(
       "forbidden",
-      "Budget policy management requires a person with finances:write.",
+      "Budget policy management requires finances:write and explicit execution authority for agents.",
     );
 }
 
@@ -111,7 +117,10 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
         requireUserAdmission: true,
         lockIdentities: [`finance-profile:${context.userId}`],
       },
-      fn,
+      async (tx) => {
+        await requireFinanceExecution(tx, context, now());
+        return fn(tx);
+      },
     );
   };
   async function audit(
@@ -201,7 +210,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     );
     conflict(
       !(await policyBaseline(tx, userId, planId, terms)),
-      "Confirm the exact human-approved period baseline first.",
+      "Confirm the exact approved period baseline first.",
     );
     conflict(now().getTime() >= new Date(terms.expiresAt).getTime(), "Policy terms have expired.");
   }
@@ -676,6 +685,20 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
             snapshot.allocations.reduce((n, a) => n + a.amountCents, 0) !== budget.allocatedTotal,
           "Baseline must be an exact, complete, human-approved budget for this plan and period.",
         );
+        const qualification = await tx.query.financeBudgetBaselineQualifications.findFirst({
+          where: and(
+            eq(financeBudgetBaselineQualifications.userId, context.userId),
+            eq(financeBudgetBaselineQualifications.periodMonth, input.period.from.slice(0, 7)),
+          ),
+        });
+        if (qualification) {
+          const qualified = financeBudgetBaselineSnapshotSchema.parse(qualification.snapshot);
+          conflict(
+            qualified.budgetVersionId !== input.budget.id ||
+              !samePolicyValue(qualified.period, input.period),
+            "This month's human-qualified comparison baseline cannot be replaced.",
+          );
+        }
         const existing = await tx.query.financeBudgetPeriodBaselines.findFirst({
           where: and(
             eq(financeBudgetPeriodBaselines.userId, context.userId),

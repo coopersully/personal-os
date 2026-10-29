@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
+import { financeConversationCausalClaimSchema } from "./finance/conversation.js";
 import { financePositionEvidenceCheckpointSchema } from "./finance/workflow-contracts.js";
 import {
   applyFinanceCategorizationsInputSchema,
@@ -24,7 +25,11 @@ import {
   updateFinanceTransactionInputSchema,
 } from "./finance.js";
 import { goalSchema, motiveSchema } from "./goals.js";
-import { maintenanceOperationSchema, workspaceStatusSchema } from "./maintenance.js";
+import {
+  maintenanceOperationSchema,
+  maintenanceScopeSchema,
+  workspaceStatusSchema,
+} from "./maintenance.js";
 
 export const financeDataConfidenceSchema = z.enum(["insufficient", "provisional", "reliable"]);
 export type FinanceDataConfidence = z.infer<typeof financeDataConfidenceSchema>;
@@ -173,6 +178,16 @@ export const financeStatusDetailsSchema = z.object({
   }),
   reviewMode: z.object({ reviewBypassEnabled: z.boolean() }),
   review: z.object({
+    // Optional only for historical status snapshots; live status supplies complete coverage.
+    coverage: z
+      .object({
+        scope: maintenanceScopeSchema,
+        complete: z.boolean(),
+        flaggedTransactions: z.int().nonnegative(),
+        outstandingReviewRows: z.int().nonnegative(),
+        transactionsWithOutstandingReviews: z.int().nonnegative(),
+      })
+      .optional(),
     byReason: z.record(z.string(), z.int().nonnegative()),
     total: z.int().nonnegative(),
   }),
@@ -552,6 +567,7 @@ export const financeLedgerChallengeFindingInputSchema = z
 
 export const submitFinanceLedgerChallengeInputSchema = z
   .object({
+    conversationEvidence: financeConversationCausalClaimSchema.optional(),
     candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
     challengeId: idSchema,
     checked: z

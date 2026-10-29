@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
+import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { createAppQueryClient } from "../../lib/query-client.js";
+import { SettingsFeedbackContext } from "../../lib/settings-feedback";
 
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn(), success: vi.fn() } }));
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), desktop: true }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("./bridge.js", () => ({ isDesktop: () => mocks.desktop }));
@@ -16,11 +21,12 @@ function mount(child: React.ReactNode) {
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
-      {child}
+      <SettingsFeedbackContext.Provider value={true}>{child}</SettingsFeedbackContext.Provider>
     </QueryClientProvider>,
   );
 }
 beforeEach(() => {
+  vi.mocked(toast.error).mockClear();
   mocks.desktop = true;
   status = {
     installedVersion: "0.1.0",
@@ -138,9 +144,11 @@ it("keeps restart confirmation open and reports a ritual restart refusal", async
   fireEvent.click(
     within(screen.getByRole("dialog")).getByRole("button", { name: "Restart to update" }),
   );
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
   expect(
-    await screen.findByText("Finish or snooze the ritual before restarting"),
-  ).toBeInTheDocument();
+    screen.queryByText("Finish or snooze the ritual before restarting"),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Not now" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 });
@@ -154,6 +162,63 @@ it("allows canceling restart without invoking installation", async () => {
 it("supports retrying an unreadable settings status", async () => {
   mocks.invoke.mockRejectedValueOnce(new Error("unavailable"));
   mount(<DesktopUpdates />);
-  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Couldn’t read desktop update status.",
+      expect.objectContaining({ action: expect.anything() }),
+    ),
+  );
+  expect(screen.queryByText(/Could not read update status/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  const retry = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action;
+  if (!retry || typeof retry !== "object" || !("onClick" in retry))
+    throw new Error("Expected toast retry action");
+  retry.onClick({} as React.MouseEvent<HTMLButtonElement>);
   expect(await screen.findByText("Installed version 0.1.0")).toBeInTheDocument();
+});
+
+it("keeps sign-in reachable after the server returns an unauthenticated session", async () => {
+  status.startupBlocking = false;
+  status.phase = "unavailable";
+  const client = createAppQueryClient({ queries: { retry: false } });
+  render(
+    <QueryClientProvider client={client}>
+      <DesktopStartupGate>
+        <input aria-label="Sign in email" />
+      </DesktopStartupGate>
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("textbox", { name: "Sign in email" });
+  await expect(
+    client.fetchQuery({
+      queryKey: ["me"],
+      queryFn: async () => {
+        throw new ApiClientError({
+          status: 401,
+          code: "unauthorized",
+          message: "Authentication is required.",
+        });
+      },
+    }),
+  ).rejects.toMatchObject({ status: 401 });
+  expect(screen.getByRole("textbox", { name: "Sign in email" })).toBeInTheDocument();
+  expect(client.getQueryState(["desktop-update-status"])?.status).toBe("success");
+  client.clear();
+});
+
+it("reports a manual check failure through Sonner without an inline action result", async () => {
+  status.phase = "current";
+  status.startupBlocking = false;
+  mocks.invoke.mockImplementation(async (command) => {
+    if (command === "desktop_update_check") throw new Error("private failure");
+    return { ...status };
+  });
+  mount(<DesktopUpdates />);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.queryByText(/Could not read update status/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });

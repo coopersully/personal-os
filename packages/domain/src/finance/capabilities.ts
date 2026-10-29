@@ -1,5 +1,140 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceMaintenanceExecutionAuthorization",
+    capability: "workflow.execution_authorization_observation",
+    mcpTool: "get_finance_maintenance_execution_authorization",
+    mode: "read",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "refreshFinanceMaintenanceExecutionAuthorization",
+    capability: "workflow.execution_authorization_refresh",
+    mcpTool: "refresh_finance_maintenance_execution_authorization",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "getFinanceOnboarding",
+    capability: "setup.durable_readiness",
+    mcpTool: "get_finance_onboarding",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "saveFinanceOnboardingAnswers",
+    capability: "setup.review_answers",
+    mcpTool: "save_finance_onboarding_answers",
+    mode: "write",
+    requiredScope: "finances:write",
+  },
+  {
+    apiOperation: "completeFinanceOnboarding",
+    capability: "setup.complete_review",
+    mcpTool: "complete_finance_onboarding",
+    mode: "write",
+    requiredScope: "finances:write",
+  },
+  {
+    apiOperation: "getFinanceConversationEvidence",
+    capability: "workflow.committed_effect_evidence",
+    mcpTool: "get_finance_conversation_evidence",
+    mode: "read",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "getFinanceSpending",
+    capability: "ledger.spending_dashboard",
+    mcpTool: "get_finance_spending",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "listFinanceSpendingTransactions",
+    capability: "ledger.spending_sources",
+    mcpTool: "list_finance_spending_transactions",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "getFinanceBudgetBaselineQualification",
+    capability: "planning.baseline_qualification_read",
+    mcpTool: "get_finance_budget_baseline_qualification",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "prepareFinanceBudgetBaselineQualification",
+    capability: "planning.baseline_qualification_prepare",
+    mcpTool: "prepare_finance_budget_baseline_qualification",
+    mode: "write",
+    requiredScope: "finances:write",
+  },
+
+  {
+    apiOperation: "getFinanceConversationBatch",
+    capability: "workflow.conversation_batch_delivery",
+    mcpTool: "get_finance_conversation_batch",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "acknowledgeFinanceConversationBatch",
+    capability: "workflow.conversation_batch_acknowledgment",
+    mcpTool: "acknowledge_finance_conversation_batch",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "replyToFinanceConversationBatch",
+    capability: "workflow.conversation_batch_reply",
+    mcpTool: "reply_to_finance_conversation_batch",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "exchangeFinanceConversationChallenge",
+    capability: "workflow.conversation_protocol_verification",
+    mcpTool: "exchange_finance_conversation_challenge",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+
+  {
+    apiOperation: "getAutomationHostPromptHistory",
+    capability: "workflow.host_prompt_history",
+    mcpTool: "get_finance_host_prompt_history",
+    mode: "read",
+    requiredScope: "finances:maintain",
+  },
+  {
+    apiOperation: "getAutomationHostPrompt",
+    capability: "workflow.host_prompt_read",
+    mcpTool: "get_finance_host_prompt",
+    mode: "read",
+    requiredScope: "finances:maintain",
+  },
+  {
+    apiOperation: "issueAutomationHostPrompt",
+    capability: "workflow.host_prompt_issue",
+    mcpTool: "issue_finance_host_prompt",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "getFinanceContinuations",
+    capability: "workflow.answer_continuations",
+    mcpTool: "get_finance_continuations",
+    mode: "read",
+    requiredScope: "finances:maintain",
+  },
+  {
+    apiOperation: "observeAutomationHostSchedule",
+    capability: "workflow.host_observation",
+    mcpTool: "observe_finance_host_schedule",
+    mode: "write",
+    requiredScope: "finances:maintain",
+  },
+  {
     apiOperation: "getFinancePlaybook",
     capability: "policy.playbook",
     mcpTool: "get_finance_playbook",
@@ -124,6 +259,13 @@ export const financeCapabilityManifest = [
     mcpTool: "start_finance_account_connection",
     mode: "external",
     requiredScope: "finances:write",
+  },
+  {
+    apiOperation: "completeFinanceAccountConnection",
+    capability: "account.connection_complete",
+    mcpTool: "complete_finance_account_connection",
+    mode: "external",
+    requiredScope: "finances:execute",
   },
   {
     apiOperation: "getFinanceAccountConnection",
@@ -319,7 +461,7 @@ export const financeCapabilityManifest = [
   capability: string;
   mcpTool: string;
   mode: "external" | "read" | "write";
-  requiredScope: "finances:read" | "finances:write" | "finances:maintain";
+  requiredScope: "finances:read" | "finances:write" | "finances:maintain" | "finances:execute";
 }>;
 
 export type FinanceCapability = (typeof financeCapabilityManifest)[number]["capability"];

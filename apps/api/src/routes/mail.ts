@@ -1,3 +1,4 @@
+import type { Database } from "@personal-os/database";
 import {
   activateMailRuleInputSchema,
   bulkUpdateMailInputSchema,
@@ -15,19 +16,22 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createMailService } from "../mail-service.js";
+import { attachmentReadBudget } from "../read-budget.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
+import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
+import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
 type MailRouteOptions = {
   app: Hono<AppEnv>;
+  db?: Database;
   mail: ReturnType<typeof createMailService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
 };
 
 /** Register the Mail-owned HTTP surface. */
-export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOptions) {
+export function registerMailRoutes({ app, db, mail, mutationContext }: MailRouteOptions) {
   app.use("/v1/mailboxes", requireScope("mail:read"));
   const mailReadAccess = requireScope("mail:read");
   const mailFeatureAccess = requireFeatureAccess("mail");
@@ -36,9 +40,9 @@ export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOpti
       ? mailReadAccess(context, next)
       : mailFeatureAccess(context, next),
   );
-  app.use("/v1/mail/rules/:id/activate", requireHuman);
-  app.use("/v1/mail/send", requireHuman);
-  app.use("/v1/mail/drafts/:id/reconcile", requireHuman);
+  app.use("/v1/mail/rules/:id/activate", requireWorkspaceExecutionRoute(db, "mail"));
+  app.use("/v1/mail/send", requireWorkspaceExecutionRoute(db, "mail"));
+  app.use("/v1/mail/drafts/:id/reconcile", requireWorkspaceExecutionRoute(db, "mail"));
   app.get("/v1/mailboxes", async (context) =>
     context.json({ mailboxes: await mail.listMailboxes(context.get("principal").userId) }),
   );
@@ -146,6 +150,14 @@ export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOpti
       ),
     }),
   );
+  app.get("/v1/mail/counts", requireScope("mail:read"), async (context) =>
+    context.json({
+      counts: await mail.navigationCounts(
+        context.get("principal").userId,
+        mailListQuerySchema.parse(context.req.query()).accountIds,
+      ),
+    }),
+  );
   app.get("/v1/mail/threads", async (context) =>
     context.json({
       threads: await mail.listThreads(
@@ -153,6 +165,23 @@ export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOpti
         mailListQuerySchema.parse(context.req.query()),
       ),
     }),
+  );
+  app.get(
+    "/v1/mail/messages/:id/attachments/:attachmentId",
+    requireScope("mail:read"),
+    async (context) => {
+      context.header("Cache-Control", "no-store");
+      return attachmentReadBudget(context.get("principal").userId, async () =>
+        context.json({
+          attachment: await mail.downloadAttachment(
+            context.get("principal").userId,
+            context.req.param("id"),
+            context.req.param("attachmentId"),
+            context.req.raw.signal,
+          ),
+        }),
+      );
+    },
   );
   app.get("/v1/mail/threads/:id/messages", async (context) =>
     context.json({

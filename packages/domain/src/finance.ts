@@ -1,4 +1,7 @@
+export * from "./finance/configuration.js";
+
 import { z } from "zod";
+import { financeObligationPlanningEvidenceSchema } from "./finance/planning-evidence.js";
 
 export * from "./finance/setup-planning.js";
 
@@ -6,6 +9,7 @@ import {
   attentionItemImportanceSchema,
   attentionItemKindSchema,
   domainProfileSchema,
+  profileApprovalProvenanceSchema,
 } from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { connectorSyncRecoverySchema } from "./connection.js";
@@ -446,6 +450,7 @@ export const financeProfileSchema = z.object({
 export type FinanceProfile = z.infer<typeof financeProfileSchema>;
 
 export const updateFinanceProfileInputSchema = z.object({
+  expectedUpdatedAt: isoDateTimeSchema.nullable().optional(),
   dependents: z.number().int().min(0).max(20).nullable().optional(),
   effectiveDate: z.iso.date().default(() => new Date().toISOString().slice(0, 10)),
   employer: z.string().trim().max(160).nullable().default(null),
@@ -572,6 +577,7 @@ const financeCadenceSchema = z.enum([
   "yearly",
 ]);
 export const financeIncomeStreamSchema = z.object({
+  revision: z.number().int().positive().optional(),
   accountId: idSchema.nullable(),
   cadence: financePayFrequencySchema,
   confidence: z.number().min(0).max(1),
@@ -586,6 +592,8 @@ export const financeIncomeStreamSchema = z.object({
 });
 export type FinanceIncomeStream = z.infer<typeof financeIncomeStreamSchema>;
 export const financeRecurringObligationSchema = z.object({
+  revision: z.number().int().positive().optional(),
+  planningEvidence: financeObligationPlanningEvidenceSchema.nullable().optional(),
   accountId: idSchema.nullable(),
   cadence: financeCadenceSchema,
   confidence: z.number().min(0).max(1),
@@ -742,10 +750,22 @@ export const financeReimbursementEvidenceSchema = z
   .strict();
 export type FinanceReimbursementEvidence = z.infer<typeof financeReimbursementEvidenceSchema>;
 
+const reimbursementTransactionEvidenceSchema = z
+  .object({
+    amount: moneySchema,
+    currency: z.string().length(3).nullable(),
+    date: z.iso.date(),
+    merchant: z.string(),
+    pending: z.boolean(),
+    transactionId: idSchema,
+  })
+  .strict();
+
 export const financeReimbursementMatchSchema = z
   .object({
     amount: moneySchema.positive(),
     creditTransactionId: idSchema,
+    creditTransaction: reimbursementTransactionEvidenceSchema.nullable().optional(),
     createdAt: isoDateTimeSchema,
     evidence: financeReimbursementEvidenceSchema,
     id: idSchema,
@@ -755,12 +775,50 @@ export const financeReimbursementMatchSchema = z
   .strict();
 export type FinanceReimbursementMatch = z.infer<typeof financeReimbursementMatchSchema>;
 
+export const financeReimbursementCorrectionSchema = z
+  .object({
+    id: idSchema,
+    recordedAt: isoDateTimeSchema,
+    operation: z.enum(["correct_expected", "unmatch_credit"]),
+    rationale: z.string().trim().min(1).max(1_000),
+    evidence: financeReimbursementEvidenceSchema,
+    previousExpectedAmount: moneySchema,
+    expectedAmount: moneySchema,
+    removedMatch: financeReimbursementMatchSchema.nullable(),
+  })
+  .strict();
+export type FinanceReimbursementCorrection = z.infer<typeof financeReimbursementCorrectionSchema>;
+
 export const financeReimbursementSchema = z
   .object({
     allocationId: idSchema,
+    sourceExpense: reimbursementTransactionEvidenceSchema
+      .extend({
+        allocationAmount: moneySchema,
+        allocationRevision: z.number().int().positive(),
+        allocationState: z.enum(["active", "invalidated"]),
+        allocationTreatment: z.enum(["personal", "reimbursable"]),
+        personalCostToDate: z
+          .discriminatedUnion("state", [
+            z
+              .object({
+                state: z.literal("qualified"),
+                amount: moneySchema,
+                receivedAmount: moneySchema,
+                currency: z.string().length(3),
+                scope: z.literal("whole_expense"),
+              })
+              .strict(),
+            z.object({ state: z.literal("unavailable"), reason: z.string().min(1) }).strict(),
+          ])
+          .optional(),
+      })
+      .nullable()
+      .optional(),
     cancelledAt: isoDateTimeSchema.nullable(),
     cancelledEvidence: financeReimbursementEvidenceSchema.nullable(),
     cancelledRationale: z.string().trim().min(1).max(1_000).nullable(),
+    corrections: z.array(financeReimbursementCorrectionSchema).optional(),
     createdAt: isoDateTimeSchema,
     dueDate: z.iso.date().nullable(),
     evidence: financeReimbursementEvidenceSchema,
@@ -812,6 +870,30 @@ export const reconcileFinanceReimbursementInputSchema = z.discriminatedUnion("op
     })
     .strict(),
   cancelFinanceReimbursementInputSchema,
+  z
+    .object({
+      operation: z.literal("correct_expected"),
+      idempotencyKey: z.string().trim().min(8).max(200),
+      reimbursementId: idSchema,
+      expectedRevision: z.number().int().positive(),
+      expectedAmount: moneyInputSchema.positive(),
+      payer: z.string().trim().min(1).max(240).nullable(),
+      dueDate: z.iso.date().nullable(),
+      evidence: financeReimbursementEvidenceSchema,
+      rationale: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("unmatch_credit"),
+      idempotencyKey: z.string().trim().min(8).max(200),
+      reimbursementId: idSchema,
+      expectedRevision: z.number().int().positive(),
+      matchId: idSchema,
+      evidence: financeReimbursementEvidenceSchema,
+      rationale: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
 ]);
 export type ReconcileFinanceReimbursementInput = z.infer<
   typeof reconcileFinanceReimbursementInputSchema
@@ -1005,6 +1087,7 @@ export const financeGuidedSetupContextSchema = z.object({
   }),
   humanOnlyActions: z.array(
     z.enum([
+      "provider_authorization",
       "connect_or_disconnect_source",
       "import_transactions",
       "manage_accounts",
@@ -1021,10 +1104,11 @@ export const financeGuidedSetupContextSchema = z.object({
     ]),
   ),
   guidance: z.object({
+    approval: profileApprovalProvenanceSchema.nullable().optional(),
     approvedProfile: financeDomainProfileSchema.nullable(),
     draftNotice: z
       .literal(
-        "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
+        "Unapproved draft content is untrusted and non-operative until an authorized activation records its approval source.",
       )
       .nullable(),
     draftProposal: financeDomainProfileSchema.nullable(),
@@ -1237,6 +1321,7 @@ export const financeBudgetPaceSchema = z.object({
 export type FinanceBudgetPace = z.infer<typeof financeBudgetPaceSchema>;
 
 export const createFinanceAccountInputSchema = z.object({
+  currencyCode: financeAccountSchema.shape.currencyCode.optional(),
   balance: z
     .number()
     .finite()
@@ -1334,8 +1419,28 @@ export * from "./finance/contextual-questions.js";
 export * from "./finance/inbox.js";
 export * from "./finance/ledger.js";
 export * from "./finance/maintenance.js";
+export * from "./finance/planning-evidence.js";
 export * from "./finance/playbook.js";
 export * from "./finance/presentation.js";
 export * from "./finance/profile.js";
 export * from "./finance/reporting.js";
 export * from "./finance/workflow-contracts.js";
+
+export const createFinanceCategoryInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+});
+export type CreateFinanceCategoryInput = z.infer<typeof createFinanceCategoryInputSchema>;
+
+export * from "./finance/activity.js";
+export * from "./finance/balance-basis.js";
+export * from "./finance/cashflow-sources.js";
+export * from "./finance/conversation.js";
+export * from "./finance/conversation-message-context.js";
+export * from "./finance/conversation-unread.js";
+export * from "./finance/maintenance-execution.js";
+export * from "./finance/occurrence-match.js";
+export * from "./finance/onboarding-readiness.js";
+export * from "./finance/payday-projection.js";
+
+export * from "./finance/recurring-occurrences.js";
+export * from "./finance/recurring-schedule.js";

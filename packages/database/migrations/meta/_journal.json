@@ -708,6 +708,258 @@
       "when": 1790699000000,
       "tag": "0093_ritual_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1791060000000,
+      "tag": "0094_workspace_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1791220000000,
+      "tag": "0095_calendar_follow_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1791221000000,
+      "tag": "0096_task_container_pins",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1791222000000,
+      "tag": "0097_task_display_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1791223000000,
+      "tag": "0098_mail_layout_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1791224000000,
+      "tag": "0099_mail_conversation_layout",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1791310000000,
+      "tag": "0100_finance_transaction_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1791311000000,
+      "tag": "0101_calendar_creation_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1791312000000,
+      "tag": "0102_task_capture_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1791313000000,
+      "tag": "0103_finance_display_account_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1791314000000,
+      "tag": "0104_finance_review_history_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1791315000000,
+      "tag": "0105_finance_review_history_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1791319000000,
+      "tag": "0109_finance_review_history_archive_upgrade",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1791320000000,
+      "tag": "0106_finance_review_action_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1791558000000,
+      "tag": "0107_finance_host_continuation",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1791562000000,
+      "tag": "0108_finance_sms_completion",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1791734400000,
+      "tag": "0110_workspace_agent_approval_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1791734401000,
+      "tag": "0111_finance_hosted_link_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1791806400000,
+      "tag": "0112_connector_capability_health",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1792353600000,
+      "tag": "0113_finance_host_prompt_issues",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1792353601000,
+      "tag": "0114_finance_budget_baseline_qualifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1792353602000,
+      "tag": "0115_finance_conversation_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1792353603000,
+      "tag": "0116_finance_onboarding_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1792353604000,
+      "tag": "0117_finance_planning_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1792353605000,
+      "tag": "0118_finance_preferences_legacy_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1792353606000,
+      "tag": "0119_finance_recurring_occurrences",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1792353607000,
+      "tag": "0120_finance_legacy_access_erasure_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1792353608000,
+      "tag": "0121_oauth_access_token_rotations",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1792353609000,
+      "tag": "0122_finance_reimbursement_relationship_generation",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1792353610000,
+      "tag": "0123_finance_maintenance_execution_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1792692000000,
+      "tag": "0124_finance_transaction_coverage",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1792805833756,
+      "tag": "0125_finance_bypass_confirmation_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1792812516989,
+      "tag": "0126_finance_spending_list_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1792812516990,
+      "tag": "0127_finance_spending_week_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1792812516991,
+      "tag": "0128_shared_agent_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "7",
+      "when": 1792812516992,
+      "tag": "0129_finance_review_batches",
+      "breakpoints": true
     }
   ]
 }

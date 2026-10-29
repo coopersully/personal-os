@@ -1,9 +1,19 @@
 import type { FinanceAccount, FinanceSnapshot, FinanceToolResult } from "@personal-os/domain";
 import type { QueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ActionButton as Button } from "@/components/action-button";
+import { QueryFeedback } from "@/components/async-state";
+import {
+  BankIcon,
+  CircleAlertIcon,
+  EditIcon,
+  MoreHorizontalIcon,
+  ReceiptIcon,
+  TargetIcon,
+  WalletIcon,
+} from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -13,7 +23,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { financeAccountNeedsAttention } from "./attention";
 import { formatMoney } from "./format.js";
 
 export function refreshFinancePosition(client: QueryClient) {
@@ -39,8 +52,10 @@ export function requireFinanceResult<T>(result: FinanceToolResult<T>): FinanceTo
 export function FinanceSourceState({
   label,
   query,
+  loading,
 }: {
   label: string;
+  loading?: ReactNode;
   query: {
     data?: unknown;
     isPending: boolean;
@@ -51,35 +66,22 @@ export function FinanceSourceState({
 }) {
   if (query.isPending)
     return (
-      <div aria-label={`Loading ${label}`} role="status">
-        <Skeleton className="h-12 w-full" />
+      <div aria-label={`Loading ${label}`} role="status" aria-busy="true">
+        {loading ?? <Skeleton className="h-12 w-full" />}
         <span className="sr-only">Loading {label}</span>
       </div>
     );
-  if (!query.isError) return null;
-  return (
-    <Alert variant="destructive">
-      <AlertTitle>{label} unavailable</AlertTitle>
-      <AlertDescription>
-        <p>
-          {query.data !== undefined
-            ? "Showing the last available update. Refresh before relying on this information."
-            : "Couldn’t load this information. Try again."}
-        </p>
-        <Button onClick={() => void query.refetch()} size="sm" variant="outline">
-          Retry {label.toLowerCase()}
-        </Button>
-      </AlertDescription>
-    </Alert>
-  );
+  return <QueryFeedback query={query} title={`${label} unavailable`} />;
 }
 
 export function FinancePositionMaterial({
   result,
   wealth = false,
+  hideMetrics = false,
 }: {
   result: FinanceToolResult<FinanceSnapshot>;
   wealth?: boolean;
+  hideMetrics?: boolean;
 }) {
   const snapshot = result.data;
   const metrics = wealth
@@ -108,23 +110,27 @@ export function FinancePositionMaterial({
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {metrics.map((metric) => (
-            <div className="flex flex-col gap-1" key={metric.label}>
-              <dt className="text-muted-foreground text-sm">
-                <Link
-                  className="underline underline-offset-4"
-                  to={
-                    "href" in metric ? (metric.href ?? "/finances/accounts") : "/finances/accounts"
-                  }
-                >
-                  {metric.label}
-                </Link>
-              </dt>
-              <dd className="text-xl tabular-nums">{financeAmount(metric.amount)}</dd>
-            </div>
-          ))}
-        </dl>
+        {!hideMetrics ? (
+          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {metrics.map((metric) => (
+              <div className="flex flex-col gap-1" key={metric.label}>
+                <dt className="text-muted-foreground text-sm">
+                  <Link
+                    className="underline underline-offset-4"
+                    to={
+                      "href" in metric
+                        ? (metric.href ?? "/finances/accounts")
+                        : "/finances/accounts"
+                    }
+                  >
+                    {metric.label}
+                  </Link>
+                </dt>
+                <dd className="text-xl tabular-nums">{financeAmount(metric.amount)}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
         <p className="text-muted-foreground text-sm">
           Balances reflect planning inclusion and your recorded ownership share. Unavailable amounts
           need more evidence in{" "}
@@ -143,7 +149,7 @@ export function FinancePositionMaterial({
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2">
         <Button asChild size="sm" variant="outline">
-          <Link to="/finances/health">Inspect evidence</Link>
+          <Link to="/finances/accounts">Review accounts</Link>
         </Button>
         <span className="text-muted-foreground text-xs">
           {snapshot.ledger.reconciledThrough
@@ -165,10 +171,12 @@ export function FinanceAccountRecord({
   account,
   duplicateNames = [],
   onEdit,
+  attentionAction,
 }: {
   account: FinanceAccount;
   duplicateNames?: string[];
   onEdit?: () => void;
+  attentionAction?: ReactNode;
 }) {
   const balance =
     account.balance === null
@@ -178,11 +186,34 @@ export function FinanceAccountRecord({
             style: "currency",
             currency: account.currencyCode,
           }).format(account.balance)
-        : `${account.balance.toLocaleString()} · currency unavailable`;
+        : account.balance.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
   return (
-    <Item id={`account-${account.id}`} role="listitem">
+    <Item
+      id={`account-${account.id}`}
+      role="listitem"
+      variant="secondary"
+      className="finance-account-record"
+    >
       <ItemContent className="min-w-0">
-        <ItemTitle>{account.name}</ItemTitle>
+        <div className="flex flex-wrap items-center gap-2">
+          {account.kind === "debt" ? (
+            <WalletIcon aria-hidden="true" />
+          ) : account.kind === "investment" ? (
+            <TargetIcon aria-hidden="true" />
+          ) : (
+            <BankIcon aria-hidden="true" />
+          )}
+          <ItemTitle>{account.name}</ItemTitle>
+          {financeAccountNeedsAttention(account, duplicateNames.length > 0) ? (
+            <Badge variant="destructive">
+              <CircleAlertIcon />
+              Needs attention
+            </Badge>
+          ) : null}
+        </div>
         <ItemDescription>
           {account.institution} ·{" "}
           {account.kind === "investment"
@@ -191,19 +222,8 @@ export function FinanceAccountRecord({
               ? "Cash"
               : account.kind === "debt"
                 ? "Debt"
-                : "Other assets"}{" "}
-          · {balance}
+                : "Other assets"}
         </ItemDescription>
-        <p className="text-muted-foreground text-sm">
-          {accountOwnership(account)} ·{" "}
-          {account.includeInPlanning ? "Included in planning" : "Excluded from planning"}
-        </p>
-        <p className="text-muted-foreground text-xs">
-          {account.provider === "manual" ? "Manually tracked" : "Connected source"} ·{" "}
-          {account.lastSyncedAt
-            ? `Last synced ${financeObservedAt(account.lastSyncedAt)}`
-            : "No recorded sync"}
-        </p>
         {account.synchronization.message ? (
           <p className="text-sm">{account.synchronization.message}</p>
         ) : null}
@@ -218,39 +238,84 @@ export function FinanceAccountRecord({
             planning.
           </p>
         ) : null}
+        {attentionAction}
       </ItemContent>
-      <ItemActions className="flex-wrap">
-        <Badge
-          variant={
-            account.status === "needs_reauth" || account.synchronization.state === "blocked"
-              ? "destructive"
-              : "secondary"
+      <div className="finance-account-balance">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className={
+                account.kind === "debt"
+                  ? "font-semibold tabular-nums text-destructive"
+                  : "font-semibold tabular-nums"
+              }
+            >
+              {balance}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {account.currencyCode ?? "The source has not provided a currency code."}
+          </TooltipContent>
+        </Tooltip>
+        <span
+          className={
+            account.kind === "debt" ? "text-xs text-destructive" : "text-xs text-muted-foreground"
           }
         >
-          {account.status === "needs_reauth"
-            ? "Reconnect required"
-            : account.synchronization.state === "current"
-              ? "Current"
-              : account.synchronization.state === "stale"
-                ? "Stale"
-                : account.synchronization.state === "retrying"
-                  ? "Retrying"
-                  : "Blocked"}
-        </Badge>
-        {onEdit ? (
-          <Button aria-label={`Edit ${account.name}`} onClick={onEdit} size="sm" variant="outline">
-            Edit
-          </Button>
-        ) : (
-          <Button asChild size="sm" variant="outline">
-            <Link to={`/finances/accounts#account-${account.id}`}>Inspect account</Link>
-          </Button>
-        )}
-        <Button asChild size="sm" variant="ghost">
-          <Link to={`/finances/transactions?accountId=${encodeURIComponent(account.id)}`}>
-            Transactions
-          </Link>
-        </Button>
+          {account.kind === "debt" ? "Amount owed" : "Current balance"}
+        </span>
+      </div>
+      <ItemActions>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Account options for ${account.name}`}
+            >
+              <MoreHorizontalIcon />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" aria-label={`Details for ${account.name}`}>
+            <p className="font-medium">{account.name}</p>
+            <p className="text-sm text-muted-foreground">
+              {accountOwnership(account)} ·{" "}
+              {account.includeInPlanning ? "Included in planning" : "Excluded from planning"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {account.provider === "manual" ? "Manually tracked" : "Connected source"} ·{" "}
+              {account.lastSyncedAt
+                ? `Last synced ${financeObservedAt(account.lastSyncedAt)}`
+                : "No recorded sync"}
+            </p>
+            <div className="flex items-center gap-2">
+              {onEdit ? (
+                <Button
+                  aria-label={`Edit ${account.name}`}
+                  onClick={onEdit}
+                  size="sm"
+                  variant="ghost"
+                >
+                  <EditIcon /> Edit account
+                </Button>
+              ) : (
+                <Button asChild size="sm" variant="outline">
+                  <Link to={`/finances/accounts#account-${account.id}`}>Inspect account</Link>
+                </Button>
+              )}
+              <Button
+                asChild
+                size="sm"
+                variant="ghost"
+                aria-label={`Transactions for ${account.name}`}
+              >
+                <Link to={`/finances/transactions?accountId=${encodeURIComponent(account.id)}`}>
+                  <ReceiptIcon /> Transactions
+                </Link>
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
       </ItemActions>
     </Item>
   );

@@ -1,0 +1,480 @@
+import { type APIRequestContext, type BrowserContext, expect, request } from "@playwright/test";
+import type {
+  FinanceConfiguration,
+  TaskList,
+  TaskProject,
+  WorkspaceSettings,
+} from "../packages/domain/src/index.js";
+import { test } from "./recovery-fixtures.js";
+import { selectSetting } from "./settings-controls.js";
+import { fixtureWeather } from "./weather-fixtures.js";
+
+import { revealWorkspaceOptions } from "./workspace-header-controls.js";
+
+test("two editors retain attempted workspace values and explicitly recover repeated conflicts", async ({
+  page,
+  cleanup,
+  browser,
+}, info) => {
+  test.setTimeout(90_000);
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
+  const path = "/v1/workspaces/calendar/settings";
+  const origin = new URL(page.url()).origin;
+  const restoreContext = await request.newContext({
+    baseURL: origin,
+    storageState: await page.context().storageState(),
+  });
+  let original: WorkspaceSettings<"calendar"> | undefined;
+  let secondContext: BrowserContext | undefined;
+  cleanup(async () => {
+    try {
+      await secondContext?.close();
+    } finally {
+      await restoreSettings(restoreContext, path, origin, original?.preferences);
+    }
+  });
+  {
+    original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<"calendar">;
+    const seed = await page.request.patch(path, {
+      headers: { origin },
+      data: {
+        expectedRevision: original.revision,
+        preferences: { calendarView: "auto", weekStartsOn: "sunday" },
+      },
+    });
+    expect(seed.ok()).toBeTruthy();
+    secondContext = await browser.newContext({
+      storageState: await page.context().storageState(),
+      baseURL: origin,
+      // Short/narrow drawers must keep both the comparison/Refresh and decisions reachable.
+      ...(info.project.use.isMobile
+        ? { viewport: { width: 320, height: 568 } }
+        : info.project.use.viewport
+          ? { viewport: info.project.use.viewport }
+          : {}),
+      isMobile: info.project.use.isMobile ?? false,
+      hasTouch: info.project.use.hasTouch ?? false,
+    });
+    const second = await secondContext.newPage();
+    await fixtureWeather(second);
+    let secondWrites = 0;
+    second.on("request", (request) => {
+      if (request.method() === "PATCH" && request.url().endsWith(path)) secondWrites++;
+    });
+    await page.goto("/settings?page=calendar");
+    await second.goto("/settings?page=calendar");
+    await expect(page.getByLabel("Preferred view")).toBeEnabled();
+    await expect(second.getByLabel("Preferred view")).toBeEnabled();
+    const firstSave = page.waitForResponse(
+      (response) => response.request().method() === "PATCH" && response.url().endsWith(path),
+    );
+    await selectSetting(page, "Preferred view", "Month");
+    expect((await firstSave).ok()).toBeTruthy();
+    await selectSetting(second, "Preferred view", "Day");
+    await expect(second.getByText("Your change: day")).toBeVisible();
+    await expect(
+      second.getByText(
+        "Another editor changed these settings. Review the latest values before applying your change.",
+      ),
+    ).toBeVisible();
+    await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+    await second.route(`**${path}`, async (route) => {
+      if (route.request().method() === "GET") {
+        await route.abort();
+      } else await route.continue();
+    });
+    const failedRead = second.waitForEvent(
+      "requestfailed",
+      (request) => request.method() === "GET" && request.url().endsWith(path),
+    );
+    await second.getByRole("button", { name: "Refresh latest settings" }).click();
+    await failedRead;
+    const recovery = second.getByRole("dialog", { name: "Let’s reconnect" });
+    await expect(recovery).toBeVisible();
+    // The higher-priority read gate hides the conflict surface, but keeps its source mounted.
+    await expect(second.getByLabel("Preferred view")).toBeAttached();
+    expect(secondWrites).toBe(1);
+    await second.unroute(`**${path}`);
+    await recovery.getByRole("button", { name: "Try again" }).click();
+    await expect(recovery).not.toBeVisible();
+    // Transport recovery does not approve or reapply the rejected edit. Review the latest
+    // conflict snapshot explicitly before the existing reapply flow can become available.
+    await second.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(second.getByText("Latest: month")).toBeVisible();
+    const choices = second.getByRole("dialog", {
+      name: "Workspace preference change has not been confirmed.",
+    });
+    await expect
+      .poll(() => choices.evaluate((element) => element.scrollWidth <= element.clientWidth))
+      .toBe(true);
+    const dialogBounds = await choices.boundingBox();
+    if (!dialogBounds) throw new Error("Recovery choices are not visible");
+    for (const name of ["Use latest settings", "Reapply reviewed change"]) {
+      const button = await choices.getByRole("button", { name }).boundingBox();
+      if (!button) throw new Error(`Missing ${name} button`);
+      expect(button.x).toBeGreaterThanOrEqual(dialogBounds.x);
+      expect(button.x + button.width).toBeLessThanOrEqual(dialogBounds.x + dialogBounds.width);
+    }
+    await second.screenshot({
+      path: info.outputPath("reviewed-conflict.png"),
+      fullPage: false,
+      animations: "disabled",
+      scale: "css",
+    });
+    const firstAgain = page.waitForResponse(
+      (response) => response.request().method() === "PATCH" && response.url().endsWith(path),
+    );
+    await selectSetting(page, "Week starts on", "Monday");
+    expect((await firstAgain).ok()).toBeTruthy();
+    await second.getByRole("button", { name: "Reapply reviewed change" }).click();
+    await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+    await expect.poll(() => secondWrites).toBe(2);
+    await expect(second.getByText("Your change: day")).toBeVisible();
+    await second.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled();
+    await second.getByRole("button", { name: "Reapply reviewed change" }).click();
+    await expect(second.getByLabel("Preferred view")).toHaveText("Day");
+    await expect(second.getByLabel("Preferred view")).toBeEnabled();
+    expect(secondWrites).toBe(3);
+    const current = await (await page.request.get(path)).json();
+    expect(current.preferences.weekStartsOn).toBe("monday");
+    await second.screenshot({
+      path: info.outputPath("recovered-settings.png"),
+      fullPage: false,
+      animations: "disabled",
+      scale: "css",
+    });
+    expect(
+      await second.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBeTruthy();
+  }
+});
+
+for (const workspace of ["calendar", "mail"] as const) {
+  test(`${workspace} contextual failure preserves workspace geometry and reviewed retry controls`, async ({
+    page,
+    cleanup,
+  }, info) => {
+    await page.goto("/login");
+    await page.getByLabel("Email").fill("demo+full@nohmi.test");
+    await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
+    const path = `/v1/workspaces/${workspace}/settings`;
+    const origin = new URL(page.url()).origin;
+    const restoreContext = await request.newContext({
+      baseURL: origin,
+      storageState: await page.context().storageState(),
+    });
+    let original: WorkspaceSettings<typeof workspace> | undefined;
+    cleanup(() => restoreSettings(restoreContext, path, origin, original?.preferences));
+    {
+      original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<
+        typeof workspace
+      >;
+      const preferences =
+        workspace === "calendar" ? { calendarView: "week" } : { mailConversationLayout: "split" };
+      expect(
+        (
+          await page.request.patch(path, {
+            headers: { origin },
+            data: { expectedRevision: original.revision, preferences },
+          })
+        ).ok(),
+      ).toBeTruthy();
+      let writes = 0;
+      page.on("request", (request) => {
+        if (request.method() === "PATCH" && request.url().endsWith(path)) writes++;
+      });
+      await page.goto(`/${workspace}`);
+      await page.route(`**${path}`, async (route) => {
+        if (route.request().method() === "PATCH")
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: {
+                code: "conflict",
+                message: "These preferences changed. Reload and try again.",
+                requestId: "e2e-contextual-save",
+              },
+            }),
+          });
+        else await route.continue();
+      });
+      if (workspace === "calendar") {
+        await page.getByRole("button", { name: /^Calendar view:/ }).click();
+        await page.getByRole("menuitemradio", { name: "Month", exact: true }).click();
+      } else {
+        await revealWorkspaceOptions(page);
+        await page.getByRole("button", { name: "Message list layout" }).click();
+        await page.getByRole("menuitemradio", { name: "Full-width view", exact: true }).click();
+      }
+      const attempted =
+        workspace === "calendar" ? "Your change: month" : "Your change: Full-width view";
+      await expect(page.getByText(attempted)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Refresh latest settings" })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+      const recovery = page.getByRole("dialog", {
+        name: "Workspace preference change has not been confirmed.",
+      });
+      await expect(recovery).toBeVisible();
+      await expect(
+        page
+          .locator("[data-sonner-toast]")
+          .filter({ hasText: /Couldn’t save workspace preferences/ }),
+      ).toHaveCount(0);
+      await expect(
+        page.locator(
+          ".calendar-app-bar__controls [data-slot=alert], .mail-page > [data-slot=alert]",
+        ),
+      ).toHaveCount(0);
+      await page.screenshot({
+        path: info.outputPath(`${workspace}-contextual-recovery.png`),
+        fullPage: false,
+        animations: "disabled",
+        scale: "css",
+      });
+      await page.getByRole("button", { name: "Refresh latest settings" }).click();
+      await expect(page.getByRole("button", { name: "Use latest settings" })).toBeEnabled();
+      expect(writes).toBe(1);
+      await page.screenshot({
+        path: info.outputPath(`${workspace}-contextual-recovery-in-settings.png`),
+        fullPage: false,
+        animations: "disabled",
+        scale: "css",
+      });
+      await page.getByRole("button", { name: "Use latest settings" }).click();
+      await expect(page.getByText(attempted)).toHaveCount(0);
+      expect(writes).toBe(1);
+    }
+  });
+}
+
+test("Finance account selection recovery stays readable after reopening and navigating to Settings", async ({
+  page,
+  cleanup,
+}, info) => {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
+  const path = "/v1/workspaces/finances/settings";
+  const origin = new URL(page.url()).origin;
+  const restoreContext = await request.newContext({
+    baseURL: origin,
+    storageState: await page.context().storageState(),
+  });
+  let original: WorkspaceSettings<"finances"> | undefined;
+  cleanup(() => restoreSettings(restoreContext, path, origin, original?.preferences));
+  {
+    original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<"finances">;
+    const configurationResponse = await page.request.get("/v1/finances/configuration");
+    expect(configurationResponse.ok()).toBeTruthy();
+    const configuration = (await configurationResponse.json()) as FinanceConfiguration;
+    if (configuration.accounts.state !== "loaded")
+      throw new Error("Fixture Finance accounts unavailable");
+    const checking = configuration.accounts.value.accounts.find(
+      (account) => account.name === "Everyday checking",
+    );
+    if (!checking) throw new Error("Fixture checking account unavailable");
+    let writes = 0;
+    page.on("request", (request) => {
+      if (request.method() === "PATCH" && request.url().endsWith(path)) writes++;
+    });
+    const seed = await page.request.patch(path, {
+      headers: { origin },
+      data: {
+        expectedRevision: original.revision,
+        preferences: { spendAccountIds: [checking.id], financeTransactionGroup: "category" },
+      },
+    });
+    expect(seed.ok()).toBeTruthy();
+    const seeded = (await seed.json()) as WorkspaceSettings<"finances">;
+    await page.goto("/finances");
+    await page.route(`**${path}`, async (route) => {
+      if (route.request().method() === "PATCH")
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "conflict",
+              message: "These preferences changed. Reload and try again.",
+              requestId: "e2e-finance-selection",
+            },
+          }),
+        });
+      else await route.continue();
+    });
+    await page.getByRole("button", { name: "Workspace view settings", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Spending account view selections", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Spending account view selections",
+      includeHidden: true,
+    });
+    const choice = dialog.getByLabel(/Everyday checking/);
+    await expect(choice).toBeEnabled();
+    await expect(choice).toBeChecked();
+    await choice.click();
+    const recovery = page.getByRole("dialog", {
+      name: "Workspace preference change has not been confirmed.",
+    });
+    await expect(recovery.getByText("Your change: None selected")).toBeVisible();
+    await expect(choice).toBeDisabled();
+    await recovery.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(recovery.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
+    expect(writes).toBe(1);
+    await page.keyboard.press("Escape");
+    await expect(recovery).toBeVisible();
+    await recovery.getByRole("link", { name: "Open Finance settings" }).click();
+    await expect(page).toHaveURL(/settings\?page=finances/);
+    const preferences = page.getByRole("dialog", {
+      name: "Workspace preference change has not been confirmed.",
+    });
+    await expect(preferences.getByText("Your change: None selected")).toBeVisible();
+    await preferences.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(preferences.getByRole("button", { name: "Use latest settings" })).toBeEnabled();
+    expect(writes).toBe(1);
+    await page.screenshot({
+      path: info.outputPath("finance-contextual-recovery.png"),
+      fullPage: false,
+      animations: "disabled",
+      scale: "css",
+    });
+    await preferences.getByRole("button", { name: "Use latest settings" }).click();
+    await expect(page.getByText("Your change: None selected")).toHaveCount(0);
+    expect(writes).toBe(1);
+    const latest = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;
+    expect(latest.preferences).toEqual(seeded.preferences);
+  }
+});
+
+test("Tasks failed project pin reaches Settings and reapplies only its reviewed revision without losing other pins", async ({
+  page,
+  cleanup,
+}, info) => {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
+  const path = "/v1/workspaces/tasks/settings";
+  const origin = new URL(page.url()).origin;
+  const restoreContext = await request.newContext({
+    baseURL: origin,
+    storageState: await page.context().storageState(),
+  });
+  let original: WorkspaceSettings<"tasks"> | undefined;
+  cleanup(() => restoreSettings(restoreContext, path, origin, original?.preferences));
+  {
+    original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<"tasks">;
+    const listsResponse = await page.request.get("/v1/task-lists?limit=100");
+    const projectsResponse = await page.request.get("/v1/task-projects?limit=100");
+    expect(listsResponse.ok()).toBeTruthy();
+    expect(projectsResponse.ok()).toBeTruthy();
+    const lists = (await listsResponse.json()) as { items: TaskList[] };
+    const projects = (await projectsResponse.json()) as { items: TaskProject[] };
+    const work = lists.items.find((list) => list.name === "Work");
+    const project = projects.items.find((item) => item.name === "Autumn program opening");
+    if (!work || !project) throw new Error("Fixture task containers unavailable");
+    const attempts: Array<{ expectedRevision: number; preferences: unknown }> = [];
+    const seed = await page.request.patch(path, {
+      headers: { origin },
+      data: {
+        expectedRevision: original.revision,
+        preferences: { pinnedListIds: [work.id], pinnedProjectIds: [] },
+      },
+    });
+    expect(seed.ok()).toBeTruthy();
+    const seeded = (await seed.json()) as WorkspaceSettings<"tasks">;
+    await page.goto("/tasks?view=projects");
+    await page.route(`**${path}`, async (route) => {
+      if (route.request().method() !== "PATCH") {
+        await route.continue();
+        return;
+      }
+      attempts.push(route.request().postDataJSON());
+      if (attempts.length === 1)
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "conflict",
+              message: "These preferences changed. Reload and try again.",
+              requestId: "e2e-task-pin",
+            },
+          }),
+        });
+      else await route.continue();
+    });
+    const pin = page.getByRole("button", { name: "Pin Autumn program opening", exact: true });
+    await expect(pin).toBeEnabled();
+    await pin.click();
+    await expect(
+      page.getByRole("link", { name: "Review unsaved pin preferences" }).first(),
+    ).toBeVisible();
+    await page
+      .getByRole("link", { name: "Review unsaved pin preferences", exact: true })
+      .first()
+      .click();
+    await expect(page).toHaveURL(/settings\?page=tasks/);
+    await expect(
+      page.getByText("Your change: Autumn program opening", { exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(page.getByText("Latest: None pinned", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled();
+    expect(attempts).toHaveLength(1);
+    const reviewed = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
+    await page.screenshot({
+      path: info.outputPath("tasks-contextual-recovery.png"),
+      fullPage: false,
+      animations: "disabled",
+      scale: "css",
+    });
+    const replay = page.waitForResponse(
+      (response) => response.request().method() === "PATCH" && response.url().endsWith(path),
+    );
+    await page.getByRole("button", { name: "Reapply reviewed change" }).click();
+    expect((await replay).ok()).toBeTruthy();
+    await expect(
+      page.getByText("Your change: Autumn program opening", { exact: true }),
+    ).toHaveCount(0);
+    expect(attempts).toEqual([
+      { expectedRevision: seeded.revision, preferences: { pinnedProjectIds: [project.id] } },
+      { expectedRevision: reviewed.revision, preferences: { pinnedProjectIds: [project.id] } },
+    ]);
+    const saved = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
+    expect(saved.preferences).toEqual({ ...seeded.preferences, pinnedProjectIds: [project.id] });
+  }
+});
+
+async function restoreSettings(
+  context: APIRequestContext,
+  path: string,
+  origin: string,
+  preferences: unknown,
+) {
+  try {
+    if (preferences === undefined) return;
+    const latestResponse = await context.get(path);
+    expect(latestResponse.ok()).toBeTruthy();
+    const latest = await latestResponse.json();
+    const restored = await context.patch(path, {
+      headers: { origin },
+      data: { expectedRevision: latest.revision, preferences },
+    });
+    expect(restored.ok()).toBeTruthy();
+  } finally {
+    await context.dispose();
+  }
+}

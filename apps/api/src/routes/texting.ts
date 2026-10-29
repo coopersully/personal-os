@@ -15,6 +15,7 @@ const TWILIO_WEBHOOK_BODY_LIMIT_BYTES = 16_384;
 /** Register account texting and signed, payload-bounded Twilio webhook routes. */
 export function registerTextingRoutes(options: {
   app: Hono<AppEnv>;
+  apiBaseUrl: string;
   texting: ReturnType<typeof createTextingService>;
   validateWebhook?: (signature: string, url: string, parameters: Record<string, string>) => boolean;
 }) {
@@ -45,8 +46,12 @@ export function registerTextingRoutes(options: {
       ),
     }),
   );
-  app.delete("/v1/texting", requireHuman, async (context) => {
-    await texting.disconnect(context.get("principal").userId);
+  app.delete("/v1/texting", async (context) => {
+    await texting.disconnect(
+      context.get("principal").userId,
+      context.get("principal"),
+      context.get("requestId"),
+    );
     return context.body(null, 204);
   });
   app.get("/v1/texting/conversation", async (context) =>
@@ -79,7 +84,13 @@ export function registerTextingRoutes(options: {
     if (raw === null) return context.text("Payload too large", 413);
     const parameters = Object.fromEntries(new URLSearchParams(raw));
     const signature = context.req.header("x-twilio-signature") ?? "";
-    if (!options.validateWebhook?.(signature, context.req.url, parameters))
+    // TLS terminates at the gateway. Only deployment configuration supplies the
+    // public origin; forwarding headers cannot choose the signed authority.
+    const requestUrl = new URL(context.req.url);
+    const queryStart = context.req.url.indexOf("?");
+    const rawQuery = queryStart === -1 ? "" : context.req.url.slice(queryStart);
+    const publicUrl = new URL(options.apiBaseUrl).origin + requestUrl.pathname + rawQuery;
+    if (!options.validateWebhook?.(signature, publicUrl, parameters))
       return context.text("Invalid signature", 403);
     await handler(parameters);
     return context.body(null, 204);

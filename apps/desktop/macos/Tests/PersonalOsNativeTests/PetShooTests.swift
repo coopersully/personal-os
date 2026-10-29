@@ -1,7 +1,7 @@
 import AppKit
 import QuartzCore
 import XCTest
-@testable import IloNative
+@testable import PersonalOsNative
 
 final class PetShooTests: XCTestCase {
   let region = CGRect(x: 0, y: 0, width: 100, height: 100)

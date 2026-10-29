@@ -105,7 +105,7 @@ import {
   PasswordFields,
   TextField,
 } from "@/components/auth-fields";
-import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/components/brand-marks";
+import { BrandMark, brandTitle, hasBrandMark, PersonalOsBrandMark } from "@/components/brand-marks";
 import { BrandPattern } from "@/components/brand-pattern";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import { ConnectionCard } from "@/components/connection-card";
@@ -1088,9 +1088,9 @@ function AuthLayout({ children }: { children: ReactNode }) {
         <header className="auth-header">
           <Link to="/" aria-label="nohmi home" className="auth-header__brand">
             <span aria-hidden="true" className="auth-header__symbol">
-              <NohmiBrandMark symbol />
+              <PersonalOsBrandMark symbol />
             </span>
-            <NohmiBrandMark />
+            <PersonalOsBrandMark />
           </Link>
         </header>
         <section className="auth-form-wrap">{children}</section>

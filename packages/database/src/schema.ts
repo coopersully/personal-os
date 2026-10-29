@@ -5733,7 +5733,7 @@ export const financeOnboardingLegacyAccess = pgTable(
   ],
 );
 
-/** Host cadence remains outside nohmi; only explicit tenant-bound references are stored. */
+/** Host cadence remains outside Personal OS; only explicit tenant-bound references are stored. */
 export const automationHostSchedules = pgTable(
   "automation_host_schedules",
   {

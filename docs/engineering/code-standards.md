@@ -1,4 +1,4 @@
-# nohmi code standards
+# Personal OS code standards
 
 - Status: Accepted policy
 - Policy revision: 4
@@ -55,6 +55,30 @@ where it already exists; semantic conformance still requires review.
 The [research rationale](standards-research.md) links primary engineering guidance and explains
 its adaptation to nohmi. These standards are enforceable review criteria, not a claim that every
 enterprise principle is mechanically detectable.
+
+## Product identity (CS-15)
+
+Apply the [naming contract](../product/naming.md) in every implementation and review:
+
+- Internal engineering prose calls the application **Personal OS**. Repository, package and
+  infrastructure identifiers use `personal-os`; code uses `PersonalOs` / `personalOs` when an
+  application-specific name is needed, and constants/environment variables use `PERSONAL_OS`.
+  Neutral domain names remain appropriate; do not add a product prefix to every symbol.
+- All product-facing text uses **nohmi**, lowercase, including signed-in screens, accessibility
+  labels, browser/PWA/native display names, notifications, exports, downloads, public pages,
+  provider consent and agent-facing instructions. The signed-in app is a user-facing surface.
+- Keep implementation names separate from displayed values: a `PersonalOsBrandMark` component
+  displays `nohmi`; a Finance download is named `nohmi-finances-…csv`.
+- Inspect both definitions and consumers after a rename, including generated metadata, native
+  targets/bridge symbols, build scripts, query keys and tests. Verify displayed names through
+  the relevant existing behavior tests and build checks.
+- Persisted keys, serialized values and deployed integration identifiers require the explicit
+  migration described in the naming contract. Preserve existing state and reachability while
+  that migration is pending; do not silently reset data, rewrite historical evidence, or invent
+  compatibility aliases to make a source-only rename appear complete.
+
+This makes the existing accepted naming contract explicit under CS-15; it adds no new standard ID
+and does not claim the documented runtime migration is complete.
 
 ## Introducing and changing patterns
 

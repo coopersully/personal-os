@@ -21,6 +21,7 @@ select the next required step without replaying completed work. Use this map for
 | Decision | Authority |
 | --- | --- |
 | Product promise, users, invariants, target behavior | [Master design](../product/master-design.md) |
+| Internal Personal OS identity and user-facing nohmi spelling | [Naming contract](../product/naming.md), [CS-15 Product identity](code-standards.md#product-identity-cs-15) |
 | Workspace purpose and interfaces | [Workspaces](../product/workspaces.md) |
 | What stewardship means and who owns execution | [Workspace stewardship](../product/workspace-stewardship.md) |
 | Shared personal context, learning, and consent | [User Knowledge](../product/user-knowledge.md) |

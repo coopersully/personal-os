@@ -1,8 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import { type AccessScope, accessScopeSchema, localDayRange } from "@personal-os/domain";
-import { registerIloContextTool, registerIloDiscovery } from "./discovery.js";
-import { createIloToolSurface } from "./tool-surface.js";
+import { registerPersonalOsContextTool, registerPersonalOsDiscovery } from "./discovery.js";
+import { createPersonalOsToolSurface } from "./tool-surface.js";
 import { registerActivityTools } from "./tools/activity.js";
 import { registerAgentAccountTools } from "./tools/agent-account.js";
 import { registerAssistantTools } from "./tools/assistant.js";
@@ -36,7 +36,7 @@ export type ServerOptions = {
   timeZone: string;
 };
 
-/** Thin composition root for nohmi's feature-owned, scope-aware MCP surface. */
+/** Thin composition root for Personal OS's feature-owned, scope-aware MCP surface. */
 export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   const appBaseUrl = (options.appBaseUrl ?? "http://localhost").replace(/\/$/, "");
   const readOnly = options.readOnly ?? false;
@@ -55,7 +55,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
         "Call get_ilo_context first. Inspect authoritative state before proposing changes, use preview tools before consequential commits, and verify mutations from returned state or activity. nohmi's API remains the authority for access and policy.",
     },
   );
-  const tools = createIloToolSurface(server, {
+  const tools = createPersonalOsToolSurface(server, {
     appBaseUrl,
     includeCompatibility,
     readOnly,
@@ -71,7 +71,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
     timeZone: options.timeZone,
   };
 
-  registerIloContextTool(tools, discovery);
+  registerPersonalOsContextTool(tools, discovery);
   registerAgentAccountTools(tools, options.api);
   registerAssistantTools(tools, options.api);
   registerPlanningTools(tools, options.api);
@@ -97,7 +97,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   registerActivityTools(tools, options.api);
 
   registerCompatibilityResources(server, options, scopes);
-  registerIloDiscovery(server, discovery);
+  registerPersonalOsDiscovery(server, discovery);
   return server;
 }
 

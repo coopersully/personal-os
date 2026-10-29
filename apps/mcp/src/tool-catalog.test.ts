@@ -1,8 +1,8 @@
-import { availableToolNames, iloToolCatalog } from "./tool-catalog.js";
+import { availableToolNames, personalOsToolCatalog } from "./tool-catalog.js";
 
 describe("Finance maintenance MCP catalog", () => {
   it("declares the complete-workspace Finance intents with least-privilege metadata", () => {
-    expect(iloToolCatalog.get_finance_status).toMatchObject({
+    expect(personalOsToolCatalog.get_finance_status).toMatchObject({
       domain: "finances",
       idempotent: true,
       openWorld: false,
@@ -11,7 +11,7 @@ describe("Finance maintenance MCP catalog", () => {
       requiredScopes: ["finances:read"],
       stage: "inspect",
     });
-    expect(iloToolCatalog.maintain_finances).toMatchObject({
+    expect(personalOsToolCatalog.maintain_finances).toMatchObject({
       domain: "finances",
       idempotent: false,
       openWorld: false,
@@ -20,14 +20,14 @@ describe("Finance maintenance MCP catalog", () => {
       requiredScopes: ["finances:maintain"],
       stage: "commit",
     });
-    expect(iloToolCatalog.answer_finance_question).toMatchObject({
+    expect(personalOsToolCatalog.answer_finance_question).toMatchObject({
       destructive: true,
       policy: "approve_each",
       readOnly: false,
       requiredScopes: ["finances:write"],
       stage: "commit",
     });
-    expect(iloToolCatalog.resolve_finance_review).toMatchObject({
+    expect(personalOsToolCatalog.resolve_finance_review).toMatchObject({
       destructive: true,
       policy: "approve_each",
     });
@@ -55,7 +55,7 @@ describe("Finance maintenance MCP catalog", () => {
 
 describe("exact Finance SMS reply status MCP catalog", () => {
   it("requires both read scopes for discovery, including read-only connections", () => {
-    expect(iloToolCatalog.get_texting_finance_reply_status).toMatchObject({
+    expect(personalOsToolCatalog.get_texting_finance_reply_status).toMatchObject({
       domain: "texting",
       policy: "read_only",
       readOnly: true,

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { semanticVersionSchema } from "./common.js";
 import releaseManifest from "./personal-os-setup-release.json" with { type: "json" };
 
-const iloSetupReleaseSchema = z.object({
+const personalOsSetupReleaseSchema = z.object({
   legacySourcePaths: z.array(z.string().startsWith("/")).min(1),
   legacySourceUrls: z.array(z.url()).min(1),
   legacyRevisions: z.array(z.string().trim().min(1).max(128)),
@@ -13,5 +13,5 @@ const iloSetupReleaseSchema = z.object({
 });
 
 /** The single repository-owned identity for the official guided-setup artifact. */
-export const iloSetupRelease = iloSetupReleaseSchema.parse(releaseManifest);
-export type IloSetupRelease = z.infer<typeof iloSetupReleaseSchema>;
+export const personalOsSetupRelease = personalOsSetupReleaseSchema.parse(releaseManifest);
+export type PersonalOsSetupRelease = z.infer<typeof personalOsSetupReleaseSchema>;

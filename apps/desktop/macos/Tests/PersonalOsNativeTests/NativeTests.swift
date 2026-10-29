@@ -1,7 +1,7 @@
 import UserNotifications
 import XCTest
 
-@testable import IloNative
+@testable import PersonalOsNative
 
 final class NativeTests: XCTestCase {
   let now = parseDate("2026-09-08T16:00:00Z")!

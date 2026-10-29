@@ -878,7 +878,7 @@ Archive one loaded List. This is destructive organization lifecycle behavior; th
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -913,7 +913,7 @@ Archive one loaded Project. Archive is destructive visibility and organization l
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -1238,7 +1238,7 @@ Cancel one loaded Task as an explicit lifecycle outcome. Use reopen_task if the 
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -1273,7 +1273,7 @@ Cancel one loaded Project as an explicit finite-outcome lifecycle decision. Pass
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -1716,7 +1716,7 @@ Complete one loaded Task as an explicit lifecycle transition. To undo completion
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -1770,7 +1770,7 @@ Complete one loaded finite-outcome Project. The API reports open-Task conflicts 
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -6970,7 +6970,7 @@ Start or continue nohmi setup. Call this immediately after connecting and again 
 - Domain: assistant; stage: context; policy: read_only.
 - Grants (any): orientation only.
 - Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
-- [Adapter source](../../apps/mcp/src/tools/assistant.ts); typed API methods: `getIloSetup`.
+- [Adapter source](../../apps/mcp/src/tools/assistant.ts); typed API methods: `getPersonalOsSetup`.
 
 ```json
 {
@@ -7246,7 +7246,7 @@ Read one executable Task by ID, including lifecycle, List and Project organizati
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -7273,7 +7273,7 @@ Read one List by ID, including availability and revision. Read the source List b
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -7300,7 +7300,7 @@ Read one Project by ID, including its finite-outcome lifecycle, containing List,
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -9868,7 +9868,7 @@ Commit a previously previewed Task move using the preview token and current expe
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -9915,7 +9915,7 @@ Commit a previously previewed Project move using its preview token and current e
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -11402,7 +11402,7 @@ Prepare a read-only preview of moving one loaded executable Task to a List and o
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -11443,7 +11443,7 @@ Prepare a read-only preview of moving one loaded Project to another List. The pr
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -12579,7 +12579,7 @@ Reopen one loaded completed or cancelled Task. This canonical transition returns
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -13234,7 +13234,7 @@ Restore one Task from recoverable Trash using its current deleted revision. Conc
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -15809,7 +15809,7 @@ Move one loaded Task to recoverable Trash. This is destructive host UX behavior,
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -17160,7 +17160,7 @@ Update a goal's title, context, progress, target date, or lifecycle status.
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     },
     "description": {
       "anyOf": [
@@ -18063,7 +18063,7 @@ Update one loaded Task's executable content or timing. Lifecycle changes use com
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -18139,7 +18139,7 @@ Update one loaded List's organization fields. Pass its current expectedRevision 
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [
@@ -18213,7 +18213,7 @@ Update one loaded Project's outcome, context, or target timing. Lifecycle transi
       "type": "string",
       "format": "uuid",
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-      "description": "ilo object identifier"
+      "description": "nohmi object identifier"
     }
   },
   "required": [

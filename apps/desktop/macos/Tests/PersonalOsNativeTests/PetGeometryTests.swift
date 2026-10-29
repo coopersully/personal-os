@@ -1,7 +1,7 @@
 import AppKit
 import XCTest
 
-@testable import IloNative
+@testable import PersonalOsNative
 
 final class PetGeometryTests: XCTestCase {
   let area = CGRect(x: -1000, y: 0, width: 1000, height: 700)

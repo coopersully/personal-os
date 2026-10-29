@@ -6,7 +6,7 @@ import WidgetKit
 enum SessionKeychain {
   static let service = "app.personal-os.desktop.session"
   static var accessGroup: String? {
-    Bundle.main.object(forInfoDictionaryKey: "IloKeychainAccessGroup") as? String
+    Bundle.main.object(forInfoDictionaryKey: "PersonalOsKeychainAccessGroup") as? String
   }
   static func query(_ server: String) throws -> [String: Any] {
     var q: [String: Any] = [
@@ -65,7 +65,7 @@ enum SessionKeychain {
 }
 enum SharedSnapshotStore {
   static var group: String {
-    Bundle.main.object(forInfoDictionaryKey: "IloAppGroup") as? String
+    Bundle.main.object(forInfoDictionaryKey: "PersonalOsAppGroup") as? String
       ?? "group.app.personal-os.desktop"
   }
   static var container: URL? {

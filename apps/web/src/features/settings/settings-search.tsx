@@ -28,6 +28,7 @@ export const settingsDescriptions = {
   desktop: "Install and manage nohmi on your computer.",
   pet: "Choose your desktop companion and how it appears.",
   notifications: "Control alerts and interruptions on this device.",
+  "active-cards": "Make room for what needs doing. Shape your cards and try them here.",
   activity: "See what changed, when, and who made it happen.",
   sessions: "Manage devices signed in to your account.",
   invitations: "Invite people and manage account invitations.",
@@ -56,6 +57,8 @@ const searchTerms: Record<keyof typeof settingsDescriptions, string> = {
   desktop: "download mac windows install updates",
   pet: "companion animation",
   notifications: "alerts sound badge interruptions",
+  "active-cards":
+    "active reminders tasks cards shake snap grouping earshot sound preview placement",
   activity: "audit history log search",
   sessions: "security devices revoke sign out",
   invitations: "invite people access",

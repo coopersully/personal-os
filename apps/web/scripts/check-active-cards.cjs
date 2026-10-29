@@ -341,6 +341,131 @@ const origin = new Promise((resolve, reject) => {
   );
   console.log("PASS mixed-size shared corners and footprint-based anchor capture");
   await page.screenshot({ path: require("node:os").tmpdir() + "/nohmi-active-cards-check.png" });
+  await page.goto((await origin) + "?embedded=1");
+  await page.setViewportSize({ width: 390, height: 320 });
+  const previewPrefs = {
+    enabled: true,
+    defaultTasks: false,
+    defaultReminders: true,
+    returnCards: true,
+    shake: true,
+    sensitivity: "medium",
+    snap: true,
+    guides: true,
+    autoLock: false,
+    anchor: "top-right",
+    monitor: "primary",
+    dock: "bottom",
+    spacing: 12,
+    magnet: "eager",
+    remember: true,
+    sounds: false,
+    volume: 35,
+    arrivalVolume: 100,
+    completionVolume: 100,
+    interactionVolume: 45,
+    reduced: true,
+    textScale: "large",
+    titleLines: "two",
+    countdown: "seconds",
+    focus: "hide",
+    sharing: "hide",
+  };
+  const updatePreview = async (prefs, presence = "active") => {
+    await page.evaluate(
+      ({ prefs, presence }) =>
+        window.postMessage(
+          { type: "nohmi:active-cards-preview", command: "preferences", prefs, presence },
+          location.origin,
+        ),
+      { prefs, presence },
+    );
+    await page.waitForTimeout(60);
+  };
+  await updatePreview(previewPrefs);
+  assert.equal(await page.locator(".item").count(), 2);
+  assert.equal(
+    await card(0).evaluate((el) => getComputedStyle(el.querySelector(".title")).fontSize),
+    "17px",
+  );
+  await page.evaluate(() =>
+    window.postMessage({ type: "nohmi:active-cards-preview", command: "gather" }, location.origin),
+  );
+  await page.waitForTimeout(90);
+  assert.equal(await page.locator('.join[aria-pressed="true"]').count(), 1);
+  await updatePreview({ ...previewPrefs, dock: "left", anchor: "bottom-right", spacing: 40 });
+  assert.equal(
+    await page.locator('.join[aria-pressed="true"]').count(),
+    1,
+    "placement changes retain pair locks",
+  );
+  for (let i = 0; i < 2; i++) {
+    const frame = await box(i);
+    assert(
+      frame.x >= 0 &&
+        frame.y >= 0 &&
+        frame.x + frame.width <= 390.5 &&
+        frame.y + frame.height <= 320.5,
+      "small preview keeps readable cards inside display",
+    );
+  }
+  await updatePreview(previewPrefs, "sharing");
+  assert.equal(await page.locator("#cards").isVisible(), false);
+  assert.match(await page.locator("#presence-note").innerText(), /sharing/);
+  await updatePreview(previewPrefs, "focus");
+  assert.equal(await page.locator("#cards").isVisible(), false);
+  await updatePreview(previewPrefs);
+  assert.equal(await page.locator("#cards").isVisible(), true);
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://untrusted.test",
+        source: window,
+        data: {
+          type: "nohmi:active-cards-preview",
+          command: "preferences",
+          prefs: { enabled: false },
+        },
+      }),
+    ),
+  );
+  assert.equal(
+    await page.locator("#cards").isVisible(),
+    true,
+    "foreign origins cannot change the preview",
+  );
+  await updatePreview({ ...previewPrefs, returnCards: false }, "away");
+  await updatePreview({ ...previewPrefs, returnCards: false });
+  assert.equal(await page.locator(".item:visible").count(), 0);
+  await updatePreview(previewPrefs);
+  assert.equal(
+    await page.locator(".item:visible").count(),
+    2,
+    "re-enabling returns recovers deferred samples",
+  );
+  await page.evaluate(() => {
+    const c = cards[0];
+    c.el.querySelector(".title").textContent = "Review the complete afternoon project plan";
+    c.h = 120;
+    layout();
+  });
+  await updatePreview({ ...previewPrefs, titleLines: "one" });
+  assert.equal(
+    await card(0)
+      .locator(".title")
+      .evaluate((el) => getComputedStyle(el).whiteSpace),
+    "nowrap",
+  );
+  await updatePreview({ ...previewPrefs, titleLines: "two" });
+  assert.equal(
+    await card(0)
+      .locator(".title")
+      .evaluate((el) => getComputedStyle(el).whiteSpace),
+    "normal",
+  );
+  console.log(
+    "PASS embedded settings bridge, appearance, group refit, presence and origin fencing",
+  );
   assert.deepEqual(failures, []);
   await browser.close();
   server.kill();

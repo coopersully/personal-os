@@ -216,3 +216,29 @@ queries, native actions, updates, and routine recovery. Keep inline field guidan
 controls where useful, preserve edits, and do not automatically retry uncertain writes.
 Repeated polling of the same unresolved failure must not repeatedly announce it; recovery
 clears its toast. Quiet-hour From and Until controls share a row on larger screens.
+
+## Active cards — browser refinement
+
+Active cards has a dedicated Settings destination. Its target groups are Defaults,
+On this Mac, Placement, Grouping, Sound & motion, and Appearance. Defaults distinguish
+new Tasks from new Reminders and preserve existing item overrides. Device preferences
+use a positive “Show active cards on this Mac” switch. All cards start at minimum size,
+remain until completed, and retain exact due times alongside configurable countdown detail.
+There is no automatic dismissal, visible-card cap, or per-card active-off shortcut.
+
+The interactive preview stays beside the controls on wide surfaces and precedes them
+on phones. Reuse the approved card interaction engine for dragging, resizing, snapping,
+pair locks, Shift group actions and shake gathering. Show full-size card slots, preserve
+joined groups when refitting, and use the shared Earshot family with overall and per-action
+levels. Placement includes display/anchor, edge spacing, snap strength, position memory,
+and a simulated Dock. Appearance offers text scale, title wrapping after resizing, and
+countdown precision. Focus/screen-sharing behavior is an explicit preference with a
+preview situation selector.
+
+Current refinement is intentionally browser-only: the development Settings destination
+and `pnpm --filter @personal-os/web preview:active-cards` render the same component with
+sample cards. Changes remain in memory, make no account/native writes, and reset on reload.
+The standalone preview does not require a login or API. Native delivery, stored account
+creation defaults and existing device settings retain their current implementation until
+browser refinement is accepted and the integration is explicitly implemented. External
+displays and presence are simulations here, not a capability check of the actual Mac.

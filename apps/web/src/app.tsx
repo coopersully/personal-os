@@ -7,6 +7,7 @@ import {
   type TodayTimelineDensity,
 } from "./features/calendar/day-timeline.js";
 import { calendarEventColorStyle } from "./features/calendar/event-color.js";
+import { ActiveCardsSettingsPreview } from "./features/active-cards/settings-preview.js";
 import { ActiveReminderSettings } from "./features/notifications/active-reminder-settings.js";
 import { ReminderDialog } from "./features/reminders/reminder-dialog.js";
 
@@ -5960,6 +5961,7 @@ type SettingsSectionId =
   | "desktop"
   | "pet"
   | "notifications"
+  | "active-cards"
   | "rituals"
   | "workspace-access";
 
@@ -6010,6 +6012,9 @@ const settingsNavigation: Array<{
     items: [
       { icon: PaintBrushIcon, id: "appearance", label: "Appearance" },
       { icon: PulseIcon, id: "notifications", label: "Notifications" },
+      ...(import.meta.env.DEV
+        ? [{ icon: ListChecksIcon, id: "active-cards" as const, label: "Active cards" }]
+        : []),
       { ...textingSettingsNavigationItem, id: "texting", label: "Texting" },
       { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
       { icon: MonitorIcon, id: "desktop", label: "Desktop app" },
@@ -6352,6 +6357,7 @@ function SettingsPageContent({
       {section === "tasks" || section === "notifications" ? (
         <ActiveReminderSettings ownerId={user.id} />
       ) : null}
+      {section === "active-cards" && import.meta.env.DEV ? <ActiveCardsSettingsPreview /> : null}
       {section === "texting" ? <TextingSettings /> : null}
       {section === "desktop" && !isTauri() ? <DesktopDownloads /> : null}
       {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}

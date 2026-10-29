@@ -675,3 +675,58 @@ it("clears repaired reminders in memory when storage stops accepting writes", as
   await act(async () => client.setQueryData(["connectors"], [account()]));
   expect(await screen.findByRole("dialog", { name: "Check your connections" })).toBeVisible();
 });
+
+it.each([
+  "finance_account_disconnected",
+  "finance_account_legacy_disconnected",
+])("keeps deliberately stopped Finance accounts out of automatic recovery (%s)", async (failureCode) => {
+  const stopped = {
+    id: "stopped-bank",
+    name: "Stopped duplicate",
+    provider: "plaid" as const,
+    status: "needs_reauth" as const,
+    synchronization: {
+      state: "blocked" as const,
+      recovery: "reconnect" as const,
+      failureCode,
+      failureCount: 0,
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      message: null,
+      nextRetryAt: null,
+    },
+  };
+  expect(financeConnectionProblems([stopped])).toEqual([]);
+  mocks.finance.mockResolvedValue({ accounts: [stopped] });
+  const { client } = setup();
+  await waitFor(() => expect(client.getQueryState(["finance-accounts"])?.status).toBe("success"));
+  expect(screen.queryByRole("dialog", { name: "Check your connections" })).not.toBeInTheDocument();
+
+  const expired = {
+    ...stopped,
+    id: "active-bank",
+    name: "Active bank needing consent",
+    synchronization: { ...stopped.synchronization, failureCode: "ITEM_LOGIN_REQUIRED" },
+  };
+  await act(async () =>
+    client.setQueryData(["finance-accounts"], { accounts: [stopped, expired] }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "Check your connections" });
+  expect(dialog).toHaveTextContent("Active bank needing consent");
+  expect(dialog).toHaveTextContent("Reconnect this account");
+  expect(dialog).not.toHaveTextContent("Stopped duplicate");
+
+  await act(async () =>
+    client.setQueryData(["finance-accounts"], {
+      accounts: [
+        stopped,
+        { ...expired, synchronization: { ...expired.synchronization, failureCode } },
+      ],
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "Check your connections" }),
+    ).not.toBeInTheDocument(),
+  );
+});

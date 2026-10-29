@@ -145,7 +145,12 @@ describe.sequential("Finance maintenance lineage migration", () => {
             contextual_revision: 1,
             ...(table === "finance_transactions"
               ? { reimbursement_relationship_revision: 1, reimbursement_relationship_state: [] }
-              : {}),
+              : {
+                  provider_institution_id: null,
+                  provider_account_mask: null,
+                  provider_persistent_account_id: null,
+                  provider_account_name: null,
+                }),
           },
         }));
       }

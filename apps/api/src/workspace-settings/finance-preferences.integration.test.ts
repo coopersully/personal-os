@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
-  financeAccounts,
   financeBudgetPlans,
   financeGoals,
   financeOnboardingLegacyAccess,
@@ -82,9 +81,11 @@ describe.sequential("Finance preferences and migration-time access", () => {
       if (!row) throw new Error("Missing source fixture owner");
       return row.id;
     };
-    await database.db
-      .insert(financeAccounts)
-      .values({ userId: owner(0), provider: "manual", institution: "Fixture", name: "Cash" });
+    // This fixture is still on 0117; current account inserts include later columns.
+    await database.pool.query(
+      "INSERT INTO finance_accounts (user_id,provider,institution,name) VALUES ($1,'manual','Fixture','Cash')",
+      [owner(0)],
+    );
     await database.db.insert(financeBudgetPlans).values({ userId: owner(1), name: "Plan" });
     await database.db
       .insert(financeGoals)

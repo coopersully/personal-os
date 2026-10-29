@@ -2755,6 +2755,7 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.exchangePlaidToken).toHaveBeenCalledWith({
         institution: null,
+        metadata: { institutionId: null, accounts: [] },
         publicToken: "setup-public-token",
       }),
     );
@@ -5741,6 +5742,7 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.exchangePlaidToken).toHaveBeenCalledWith({
         institution: null,
+        metadata: { institutionId: null, accounts: [] },
         publicToken: "public-token",
       }),
     );

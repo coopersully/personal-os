@@ -523,6 +523,7 @@ describe("database schema contracts", () => {
       "0127_finance_spending_week_default",
       "0128_shared_agent_accounts",
       "0129_finance_review_batches",
+      "0130_finance_provider_account_identity",
     ]);
   });
 

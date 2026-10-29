@@ -271,7 +271,7 @@ inventory and one bounded recollection for a changing PR/attempt. API read failu
 within that same budget. A trusted retargeted metadata event fails immediately until a genuine new candidate event;
 run-association mismatches are negative stale hints, never positive provenance. The `ci:full`
 decision comes from the original receipt event; editing the live label affects future events only.
-The existing 40-minute polling deadline remains; pending source runs
+The existing 55-minute polling deadline remains; pending source runs
 only use lightweight identity/status reads, without repeatedly downloading artifacts.
 
 The classification job uploads `source-candidate-<run-id>-<attempt>` under existing artifact runtime

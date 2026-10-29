@@ -84,6 +84,15 @@ export const financeConversationMessageSchema = z
     recordRefs: z.array(financeConversationRecordReferenceSchema).max(100),
     runId: idSchema.nullable(),
     sourceMessageIds: z.array(idSchema).max(100),
+    smsProvenance: z
+      .object({
+        claimId: idSchema,
+        inboundMessageId: idSchema,
+        contextId: idSchema,
+        contextRevision: z.string().regex(/^[1-9][0-9]*$/u),
+      })
+      .strict()
+      .optional(),
     createdAt: isoDateTimeSchema,
   })
   .strict();

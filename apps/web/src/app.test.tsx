@@ -8451,11 +8451,195 @@ describe("Personal OS web app", () => {
 
   it("returns from actual Connected agents settings to the original Finance question", async () => {
     const target = "/finances/chat?question=question-a&message=message-a";
+    const rootsBeforeSetup = document.body.children.length;
     const view = setup(
       `/settings?section=agent-connections&returnTo=${encodeURIComponent(target)}`,
     );
     const browser = userEvent.setup();
-    const back = await screen.findByRole("link", { name: "Return to conversation" });
+    const back = await screen
+      .findByRole("link", { name: "Return to conversation" })
+      .catch((originalError: unknown) => {
+        // Failure-only fixed-scenario capture: never serialize arbitrary DOM, URL, error or mock data.
+        const marker = "FINANCE_RETURN_LINK_FAILURE_V1";
+        const minimal = (captureStatus: "unavailable" | "envelope-limit") => ({
+          schemaVersion: 1,
+          sourceInputHead: "d31ea7bd224b5c7c863311a1a6b25e3ddfd2cca4",
+          sourceInputBase: "148c43cb0b340ad2dc84411e942f22feefc8cca0",
+          captureStatus,
+        });
+        try {
+          const classify = (value: unknown, allowed: readonly string[]) =>
+            typeof value === "string" && allowed.includes(value) ? value : "other";
+          const count = (value: number) => Math.min(Math.max(value, 0), 100_000);
+          const dom = (element: Element | null) => {
+            if (!element) return { present: false };
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT);
+            const nodes = [];
+            let current: Element | null = element;
+            while (current && nodes.length < 48) {
+              const node: Element = current;
+              nodes.push({
+                tag: classify(node.tagName, [
+                  "MAIN",
+                  "SECTION",
+                  "DIV",
+                  "NAV",
+                  "HEADER",
+                  "H1",
+                  "H2",
+                  "H3",
+                  "A",
+                  "BUTTON",
+                  "P",
+                  "SPAN",
+                  "FORM",
+                  "INPUT",
+                  "LABEL",
+                  "UL",
+                  "LI",
+                  "ASIDE",
+                ]),
+                role: classify(node.getAttribute("role"), [
+                  "main",
+                  "region",
+                  "navigation",
+                  "heading",
+                  "link",
+                  "button",
+                  "status",
+                  "alert",
+                ]),
+                mainContent: node.id === "main-content",
+                settingsTitle: node.id === "settings-page-title",
+                settingsPanel: node.classList.contains("settings-panel"),
+                hiddenAncestor: node.closest('[hidden], [aria-hidden="true"]') !== null,
+                busy: node.getAttribute("aria-busy") === "true",
+                returnLabel: node.textContent?.trim() === "Return to conversation",
+                returnHref: node.getAttribute("href") === target,
+                childElements: count(node.children.length),
+              });
+              current = walker.nextNode() as Element | null;
+            }
+            return { present: true, nodes, truncated: current !== null };
+          };
+          const actual = new URL(view.location.value, "https://diagnostic.invalid");
+          const actualReturn = actual.searchParams.get("returnTo");
+          const queryNames = [
+            "me",
+            "agent-connection-guide",
+            "assistant-setup-status",
+            "personal-os-setup-plan",
+            "tokens",
+            "oauth-clients",
+            "connectors",
+            "workspace-settings",
+          ];
+          const queries = view.queryClient
+            .getQueryCache()
+            .getAll()
+            .filter(
+              (query) =>
+                typeof query.queryKey[0] === "string" && queryNames.includes(query.queryKey[0]),
+            )
+            .slice(0, 16)
+            .map((query) => ({
+              name: classify(query.queryKey[0], queryNames),
+              status: classify(query.state.status, ["pending", "error", "success"]),
+              fetchStatus: classify(query.state.fetchStatus, ["fetching", "paused", "idle"]),
+              observers: count(query.getObserversCount()),
+              hasData: query.state.data !== undefined,
+              hasError: query.state.error !== null,
+            }));
+          const me = view.queryClient.getQueryData<User>(["me"]);
+          const mockState = [
+            ["getMe", mocks.getMe],
+            ["getAgentConnectionGuide", mocks.getAgentConnectionGuide],
+            ["getAssistantSetupStatus", mocks.getAssistantSetupStatus],
+            ["listAccessTokens", mocks.listAccessTokens],
+            ["listOAuthClients", mocks.listOAuthClients],
+          ] as const;
+          const snapshot = {
+            ...minimal("envelope-limit"),
+            captureStatus: "captured",
+            sourceBinding:
+              "Input tuple only; bind diagnostic successor through its hosted source receipt",
+            failureKind: originalError instanceof Error ? "Error" : "non-Error",
+            router: {
+              pathname: classify(actual.pathname, [
+                "/settings",
+                "/finances/chat",
+                "/login",
+                "/today",
+              ]),
+              section: classify(actual.searchParams.get("section"), ["agent-connections"]),
+              page: classify(actual.searchParams.get("page"), ["connections", "agent-connections"]),
+              subpage: classify(actual.searchParams.get("subpage"), ["agent-connections"]),
+              parameterCount: count(actual.searchParams.size),
+              returnToPresent: actualReturn !== null,
+              returnToMatchesExpected: actualReturn === target,
+              unexpectedParameterPresent: [...actual.searchParams.keys()].some(
+                (key) => !["section", "page", "subpage", "returnTo"].includes(key),
+              ),
+            },
+            auth: {
+              meQueryStatus: classify(view.queryClient.getQueryState(["me"])?.status, [
+                "pending",
+                "error",
+                "success",
+              ]),
+              fixtureOwnerMatches: me?.id === user.id,
+              hasUserData: me !== undefined,
+            },
+            mocks: mockState.map(([name, mock]) => ({
+              name,
+              callCount: count(mock.mock.calls.length),
+              resultKinds: mock.mock.results
+                .slice(-8)
+                .map((result) => classify(result.type, ["return", "throw", "incomplete"])),
+            })),
+            queries,
+            mainDom: dom(view.container.querySelector("#main-content")),
+            settingsDom: dom(view.container.querySelector(".settings-panel")),
+            settingsHeadingPresent: view.container.querySelector("#settings-page-title") !== null,
+            roots: {
+              beforeSetup: count(rootsBeforeSetup),
+              atFailure: count(document.body.children.length),
+              currentContainerConnected: view.container.isConnected,
+              currentContainerInBody: document.body.contains(view.container),
+              shellsInCurrentContainer: count(view.container.querySelectorAll(".app-shell").length),
+              shellsInBody: count(document.querySelectorAll(".app-shell").length),
+              settingsPanelsInCurrentContainer: count(
+                view.container.querySelectorAll(".settings-panel").length,
+              ),
+              settingsPanelsInBody: count(document.querySelectorAll(".settings-panel").length),
+            },
+            returnLinks: [...view.container.querySelectorAll("a")]
+              .filter((link) => link.textContent?.trim() === "Return to conversation")
+              .slice(0, 8)
+              .map((link) => ({
+                hrefMatchesExpected: link.getAttribute("href") === target,
+                hiddenAncestor: link.closest('[hidden], [aria-hidden="true"]') !== null,
+              })),
+            limits: { domNodesEach: 48, outputBytes: 32 * 1024, queries: 16, mockResultsEach: 8 },
+            omitted:
+              "All raw text/attributes, URL keys/values, Error names/messages, query data/errors, mock arguments/results, environment and network",
+          };
+          const serialized = JSON.stringify(snapshot);
+          const output = `${marker} ${serialized}`;
+          console.error(
+            Buffer.byteLength(output, "utf8") <= 32 * 1024
+              ? output
+              : `${marker} ${JSON.stringify(minimal("envelope-limit"))}`,
+          );
+        } catch {
+          try {
+            console.error(`${marker} ${JSON.stringify(minimal("unavailable"))}`);
+          } catch {
+            // Even an unavailable stderr transport must preserve the original failure.
+          }
+        }
+        throw originalError;
+      });
     expect(back).toHaveAttribute("href", target);
     expect(await screen.findByDisplayValue("https://mcp.example.com/mcp")).toBeInTheDocument();
     await browser.click(back);

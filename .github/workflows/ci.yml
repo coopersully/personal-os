@@ -180,7 +180,7 @@ jobs:
     if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'browser') }}
     runs-on: ubuntu-latest
     # Leave setup/download headroom outside the bounded test execution.
-    timeout-minutes: 45
+    timeout-minutes: 50
     env:
       BROWSER_PROJECT: ${{ matrix.project }}
       BROWSER_SHARD: ${{ matrix.shard }}
@@ -227,6 +227,19 @@ jobs:
         with:
           name: browser-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.project }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/browser-diagnostics/artifact/
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Retain synthetic duplicate review screenshots
+        if: ${{ always() && hashFiles('test-results/**/duplicate-counts.png', 'test-results/**/duplicate-comparison.png') != '' }}
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v7
+        with:
+          name: duplicate-review-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.project }}-${{ matrix.shard }}
+          path: |
+            test-results/**/duplicate-counts.png
+            test-results/**/duplicate-comparison.png
           if-no-files-found: error
           include-hidden-files: false
           retention-days: 7

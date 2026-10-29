@@ -140,7 +140,7 @@ export function AccountDuplicateDialog({
             {account.name}.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-5">
+        <DialogBody className="min-w-0 w-full max-w-full space-y-5 [&>*]:min-w-0 [&>*]:max-w-full">
           <Field>
             <FieldLabel htmlFor="duplicate-keep-account">Account to keep tracking</FieldLabel>
             <NativeSelect

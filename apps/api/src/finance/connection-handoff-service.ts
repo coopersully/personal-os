@@ -107,6 +107,54 @@ export function createFinanceConnectionHandoffService(options: {
     };
   }
   return {
+    async retainExchange(
+      item: { accessToken: string; itemId: string; institution?: string | undefined },
+      context: FinanceMutationContext,
+    ) {
+      // The caller authorized the provider exchange already. Retain its known
+      // external result even if policy changes now; complete reauthorizes before
+      // reading the provider or committing any account projection.
+      if (!options.encryptionKey)
+        throw new AppError("service_unavailable", "Bank credential storage is unavailable.");
+      const id = crypto.randomUUID();
+      const encryptedHandoffState = encryptJson(
+        { phase: "exchanged", ...item },
+        options.encryptionKey,
+      );
+      const startedAt = Date.now();
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await db
+            .insert(financeAccountConnections)
+            .values({
+              id,
+              userId: context.userId,
+              provider: "plaid",
+              encryptedHandoffState,
+            })
+            .onConflictDoNothing({ target: financeAccountConnections.id });
+          return id;
+        } catch {
+          if (attempt < 2) continue;
+          options.log?.({
+            event: "connector_handoff_failed",
+            code: "exchange_persistence_failed",
+            provider: "plaid",
+            category: "unexpected",
+            durationMs: Date.now() - startedAt,
+            method: "POST",
+            path: "/v1/finances/plaid/exchange",
+            requestId: context.requestId,
+            status: 503,
+          });
+          throw new AppError(
+            "service_unavailable",
+            "Bank authorization completed, but its credentials could not be retained after bounded retries. Do not repeat the consumed token.",
+          );
+        }
+      }
+      throw new AppError("internal_error", "Bank exchange retention did not settle.");
+    },
     async start(
       input: { provider: "plaid"; idempotencyKey: string },
       context: FinanceMutationContext,
@@ -218,7 +266,10 @@ export function createFinanceConnectionHandoffService(options: {
       await requireFinanceExecution(db, context, now());
       let row = await owned(id, context.userId);
       if (row.status === "connected") return options.accounts.getConnection(context.userId, id);
-      const { plaid, getHostedLinkResult, key } = provider();
+      const plaid = options.plaid;
+      const key = options.encryptionKey;
+      if (!plaid || !key)
+        throw new AppError("service_unavailable", "Bank authorization recovery is unavailable.");
       if (!row.encryptedHandoffState)
         throw new AppError(
           "conflict",
@@ -226,6 +277,7 @@ export function createFinanceConnectionHandoffService(options: {
         );
       let state = stateSchema.parse(decryptJson(row.encryptedHandoffState, key));
       if (state.phase === "waiting") {
+        const { getHostedLinkResult } = provider();
         const result = await getHostedLinkResult(state.linkToken);
         if (result.publicTokens.length === 0) {
           if (row.externalHandoffExpiresAt && row.externalHandoffExpiresAt <= now()) {

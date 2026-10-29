@@ -140,6 +140,7 @@ import { createFinanceConnectionHandoffService } from "./finance/connection-hand
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
+  loadFinanceAuthorization,
   requireFinanceExecution,
 } from "./finance/context.js";
 import { mirrorNewMaintenanceReviewQuestion } from "./finance/conversation-review-mirror.js";
@@ -5109,18 +5110,44 @@ export function createFinanceService({
             },
           );
       }
+      const authorization = await loadFinanceAuthorization({ db, ...context });
+      await requireFinanceExecution(db, authorization, now());
+      if (!encryptionKey)
+        throw new AppError("service_unavailable", "Bank credential storage is unavailable.");
       const { accessToken, itemId } = await plaid.exchangePublicToken(input.publicToken);
-      const accounts = await plaid.getAccounts(accessToken);
-      return providerItems.upsertConnection({
-        accessToken,
-        accounts,
-        context,
-        institution: input.institution ?? "Plaid",
-        itemId,
-        prepareTransaction: async (transaction) => {
-          await ensureCategories(context.principal.userId, transaction);
-        },
-      });
+      const connectionId = await accountHandoff.retainExchange(
+        { accessToken, itemId, institution: input.institution ?? "Plaid" },
+        authorization,
+      );
+      try {
+        const completed = await accountHandoff.complete(connectionId, authorization);
+        const rows = await db
+          .select()
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, context.principal.userId),
+              inArray(financeAccounts.id, completed.data.accountIds),
+            ),
+          );
+        return serializeAccounts(rows);
+      } catch (error) {
+        throw new AppError(
+          error instanceof AppError ? error.code : "service_unavailable",
+          error instanceof AppError
+            ? error.message
+            : "Bank authorization was retained securely. Retry completion to save its accounts.",
+          {
+            ...(error instanceof AppError &&
+            typeof error.details === "object" &&
+            error.details !== null
+              ? error.details
+              : {}),
+            connectionId,
+            recovery: "complete_connection",
+          },
+        );
+      }
     },
     async syncPlaidAccount(
       id: string,

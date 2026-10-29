@@ -63,7 +63,12 @@ transactional owner topology lock repeats the check against provider-returned id
 saving new account IDs; exact-ID relinks retain their ledger. Intentionally stopped records do not
 block new consent. Missing hints and concurrent new authorizations can still reach provider exchange
 before another local commit; this guard prevents duplicate local projections, not every provider
-charge. No automatic Item removal or provider consent revocation is implemented.
+charge. Both direct Link and hosted completion retain an encrypted exchanged-Item receipt before
+account reads and projection. A direct post-exchange failure returns its safe connection ID for
+canonical completion; retry reuses that receipt rather than exchanging a consumed public token.
+Only successful atomic projection attaches account IDs and clears the receipt. A total credential
+storage outage can still prevent retention after the bounded retries; its redacted failure is
+reported explicitly. No automatic Item removal or provider consent revocation is implemented.
 
 The account-list duplicate groups combine display-name warnings with retained provider evidence,
 so a user rename cannot hide matching provider identities. Groups remain owner-scoped and qualify

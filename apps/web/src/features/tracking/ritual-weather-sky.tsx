@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api.js";
 import { paintRitualAtmosphere } from "./ritual-atmosphere.js";
 import { RitualClouds } from "./ritual-clouds.js";
+import { useSecondaryRitualSky } from "./ritual-secondary-sky.js";
 import { type RitualSkyAppearance, resolveRitualSky } from "./ritual-sky.js";
 
 /** Reuse a granted device location; a decorative sky must never open a permission prompt. */
@@ -102,7 +103,7 @@ function AtmosphereCanvas({ sky }: { sky: RitualSkyAppearance }) {
       image = context.createImageData(width, height);
       paint();
     };
-    const animated = () => ["rain", "snow", "storm"].includes(latest.current.condition);
+    const animated = () => ["rain", "snow", "storm", "fog"].includes(latest.current.condition);
     const tick = (instant: number) => {
       if (!document.hidden && instant - last >= 100) {
         elapsed += last ? Math.min(instant - last, 150) : 0;
@@ -135,10 +136,12 @@ export function RitualWeatherSky({
   kind,
   timeZone = "UTC",
   thumbnail = false,
+  occurrenceId,
 }: {
   kind: "morning" | "night";
   timeZone?: string;
   thumbnail?: boolean;
+  occurrenceId?: string;
 }) {
   const weather = useRitualWeather(!thumbnail);
   const [now, setNow] = useState(Date.now);
@@ -153,8 +156,11 @@ export function RitualWeatherSky({
     () => resolveRitualSky({ now: instant, timeZone: thumbnail ? "UTC" : timeZone, weather }),
     [instant, thumbnail, timeZone, weather],
   );
+  const scene = useRef<HTMLDivElement>(null);
+  useSecondaryRitualSky(scene, sky, occurrenceId);
   return (
     <div
+      ref={scene}
       className="ritual-scene"
       aria-hidden="true"
       data-sky-phase={sky.phase}

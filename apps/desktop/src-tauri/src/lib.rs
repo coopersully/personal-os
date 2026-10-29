@@ -59,6 +59,7 @@ pub fn run() {
             updates::desktop_update_restart,
             ritual::ritual_state,
             ritual::ritual_ready,
+            ritual::ritual_sky_frame,
             ritual::ritual_preferences,
             ritual::ritual_open,
             ritual::ritual_preview,

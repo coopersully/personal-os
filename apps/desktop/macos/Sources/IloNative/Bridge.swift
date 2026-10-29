@@ -128,6 +128,10 @@ final class NativeCompanion {
       try RitualStore.write(string("identity"),value);return ["ok":true]
     case "ritual_style_checklist":
       let prepared = RitualBackdrop.shared.styleChecklist(windowAddress: (object["windowAddress"] as? NSNumber)?.uint64Value, prepare: object["prepare"] as? Bool == true, animate: object["animate"] as? Bool == true, kind: object["kind"] as? String ?? "morning"); return ["ok":true,"prepared":prepared]
+    case "ritual_background_frame":
+      guard let width = object["width"] as? Int, let height = object["height"] as? Int,
+        let pixels = object["pixels"] as? String, let dark = object["dark"] as? Bool else { throw NativeError.message("Invalid ritual sky frame") }
+      return ["ok": true, "accepted": RitualBackdrop.shared.updateSky(width: width, height: height, pixels: pixels, dark: dark)]
     case "ritual_fade_out":
       return ["ok":true,"durationMs":RitualBackdrop.shared.fadeOut()]
     case "ritual_backdrop":

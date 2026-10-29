@@ -176,7 +176,11 @@ it("honors reduced motion while allowing manual scrubbing and releases a capture
     addEventListener: vi.fn((_type: string, listener: () => void) => listeners.add(listener)),
     removeEventListener: vi.fn((_type: string, listener: () => void) => listeners.delete(listener)),
   };
-  vi.stubGlobal("matchMedia", () => motion);
+  vi.stubGlobal("matchMedia", (query: string) =>
+    query.includes("resolution")
+      ? { matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }
+      : motion,
+  );
   const frames = new Map<number, FrameRequestCallback>();
   let sequence = 0;
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -337,4 +341,56 @@ it("updates lighting without rebuilding the cloud field or resetting its animati
   expect(paint).toHaveBeenCalledTimes(2);
   view.unmount();
   expect(disconnect).toHaveBeenCalledOnce();
+});
+
+it("updates its backing canvas when monitor pixel density changes without a CSS resize", () => {
+  vi.stubGlobal("CanvasRenderingContext2D", class {});
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const queries: {
+    query: string;
+    listener: (() => void) | undefined;
+    remove: ReturnType<typeof vi.fn>;
+  }[] = [];
+  vi.stubGlobal("devicePixelRatio", 1);
+  vi.stubGlobal("matchMedia", (query: string) => {
+    const entry = { query, listener: undefined as (() => void) | undefined, remove: vi.fn() };
+    queries.push(entry);
+    return {
+      matches: false,
+      addEventListener: (_event: string, listener: () => void) => {
+        entry.listener = listener;
+      },
+      removeEventListener: entry.remove,
+    };
+  });
+  vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+    width: 200,
+    height: 100,
+  } as DOMRect);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    putImageData: vi.fn(),
+    createPattern: () => ({}),
+    setTransform: vi.fn(),
+    fillRect: vi.fn(),
+    clearRect: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  const view = render(<RitualClouds kind="morning" />);
+  const canvas = view.container.querySelector("canvas")!;
+  expect(canvas.width).toBe(200);
+  const original = queries.find(({ query }) => query === "(resolution: 1dppx)")!;
+  vi.stubGlobal("devicePixelRatio", 2);
+  original.listener?.();
+  expect(canvas.width).toBe(400);
+  expect(canvas.height).toBe(200);
+  expect(original.remove).toHaveBeenCalled();
+  const next = queries.find(({ query }) => query === "(resolution: 2dppx)")!;
+  view.unmount();
+  expect(next.remove).toHaveBeenCalled();
 });

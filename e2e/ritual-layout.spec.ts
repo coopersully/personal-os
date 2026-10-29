@@ -90,7 +90,10 @@ test("native ritual surface and clouds fill the whole window after resize", asyn
     title: "Good morning",
     time: "06:00",
     timeZone: "UTC",
-    steps: [{ id: "water", kind: "checkbox", label: "Drink water" }],
+    steps: [
+      { id: "water", kind: "checkbox", label: "Drink water" },
+      { id: "reflection", kind: "short_text", label: "Reflection", optional: true },
+    ],
   };
   const state = {
     definitions: [definition],
@@ -115,25 +118,69 @@ test("native ritual surface and clouds fill the whole window after resize", asyn
     },
   };
   await page.addInitScript((snapshot) => {
+    let responses: { stepId: string; value: string; submitted: boolean; observedAt: string }[] = [];
+    let revision = 1;
+    const projected = () => ({
+      ...snapshot,
+      current: { ...snapshot.current, responses, revision },
+    });
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       value: {
-        invoke: async (command: string) => (command === "ritual_state" ? snapshot : undefined),
+        invoke: async (command: string, args?: { body?: { value?: string } }) => {
+          if (command === "ritual_state") return projected();
+          if (command === "ritual_mutate") {
+            responses = [
+              {
+                stepId: "reflection",
+                value: args?.body?.value ?? "",
+                submitted: true,
+                observedAt: new Date().toISOString(),
+              },
+            ];
+            revision++;
+            return projected();
+          }
+          return undefined;
+        },
       },
     });
   }, state);
   await page.goto("/index.html#ritual");
   const surface = page.locator(".ritual-surface");
   await expect(surface).toHaveAttribute("data-ready", "true");
+  const draft = page.getByLabel("Reflection", { exact: true });
+  await draft.fill("An unfinished thought across displays");
+  await draft.evaluate((el) => {
+    el.setAttribute("data-resize-marker", "retained");
+  });
   for (const size of [
     { width: 648, height: 828 },
     { width: 1440, height: 1000 },
     { width: 1280, height: 600 },
+    { width: 900, height: 1440 },
+    { width: 1920, height: 1080 },
   ]) {
     await page.setViewportSize(size);
     await fillsViewport(page, surface);
     await fillsViewport(page, page.locator(".ritual-clouds"));
     await cloudsPainted(page.locator(".ritual-clouds"));
     await expect(page.getByRole("checkbox", { name: "Drink water" })).toBeVisible();
+    await expect(draft).toHaveValue("An unfinished thought across displays");
+    await expect(draft).toHaveAttribute("data-resize-marker", "retained");
+    await expect
+      .poll(() =>
+        page.locator(".ritual-presentation").evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const insets = getComputedStyle(el.closest(".ritual-surface")!);
+          const center =
+            (innerHeight + parseFloat(insets.paddingTop) - parseFloat(insets.paddingBottom)) / 2;
+          return (
+            Math.abs(box.x + box.width / 2 - innerWidth / 2) < 1 &&
+            Math.abs(box.y + box.height / 2 - center) < 2
+          );
+        }),
+      )
+      .toBe(true);
     await page.screenshot({
       path: info.outputPath(`native-${size.width}x${size.height}.png`),
       animations: "disabled",
@@ -142,7 +189,7 @@ test("native ritual surface and clouds fill the whole window after resize", asyn
   }
 });
 
-test("weather skies show the six approved combinations and degrade without blocking routines", async ({
+test("weather skies show the approved combinations and degrade without blocking routines", async ({
   page,
 }, info) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -253,6 +300,26 @@ test("weather skies show the six approved combinations and degrade without block
       kind: "Evening",
     },
     {
+      name: "fog-morning",
+      code: 45,
+      cover: 65,
+      rise: -2,
+      set: 9,
+      phase: "day",
+      condition: "fog",
+      kind: "Morning",
+    },
+    {
+      name: "storm-afternoon",
+      code: 95,
+      cover: 90,
+      rise: -7,
+      set: 4,
+      phase: "day",
+      condition: "storm",
+      kind: "Morning",
+    },
+    {
       name: "snow-night",
       code: 73,
       cover: 70,
@@ -287,6 +354,18 @@ test("weather skies show the six approved combinations and degrade without block
       () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
     );
     expect(await canvas.evaluate((el) => (el as HTMLCanvasElement).toDataURL())).toBe(first);
+    if (["fog", "storm", "snow"].includes(sample.condition)) {
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await expect
+        .poll(() => canvas.evaluate((el) => (el as HTMLCanvasElement).toDataURL()))
+        .not.toBe(first);
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      const paused = await canvas.evaluate((el) => (el as HTMLCanvasElement).toDataURL());
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      expect(await canvas.evaluate((el) => (el as HTMLCanvasElement).toDataURL())).toBe(paused);
+    }
     await expect
       .poll(() =>
         preview.locator(".ritual-card").evaluate((card) => {

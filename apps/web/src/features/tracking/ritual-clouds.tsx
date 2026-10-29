@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import type { RitualSkyAppearance } from "./ritual-sky.js";
+import { ritualCloudRim } from "./ritual-atmosphere.js";
+import { mixSkyColor, type RitualSkyAppearance } from "./ritual-sky.js";
 
 // One timeline drives cloud motion, shape, and ordered dithering.
 const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
@@ -75,6 +76,20 @@ export function RitualClouds({
       const thresholds = bayer.map(
         (value, index) => (value + 0.5) / 16 + Math.sin(elapsed / 28000 + index * 0.7) * 0.025,
       );
+      const offset = (((timeline / 450) % width) + width) % width;
+      const base = appearance
+        ? mixSkyColor(
+            appearance.cloud,
+            appearance.top,
+            appearance.celestial === "moon" ? 0.42 : 0.22,
+          )
+        : undefined;
+      const highlight =
+        appearance?.celestial === "moon"
+          ? ([216, 230, 255] as const)
+          : appearance?.phase === "sunset" || appearance?.phase === "dawn"
+            ? ([255, 207, 156] as const)
+            : ([255, 245, 215] as const);
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const pixel = y * width + x;
@@ -91,14 +106,45 @@ export function RitualClouds({
             ),
           );
           const index = pixel * 4;
-          image.data[index] = appearance?.cloud[0] ?? (kind === "night" ? 170 : 255);
-          image.data[index + 1] = appearance?.cloud[1] ?? (kind === "night" ? 185 : 255);
-          image.data[index + 2] = appearance?.cloud[2] ?? (kind === "night" ? 210 : 255);
+          if (density <= (thresholds[(y % 4) * 4 + (x % 4)] ?? 0)) {
+            image.data[index + 3] = 0;
+            continue;
+          }
+          const left = field[y * width + ((x - 1 + width) % width)] ?? cloud;
+          const right = field[y * width + ((x + 1) % width)] ?? cloud;
+          const above = field[Math.max(0, y - 1) * width + x] ?? cloud;
+          const below = field[Math.min(height - 1, y + 1) * width + x] ?? cloud;
+          const rim = appearance
+            ? ritualCloudRim(
+                appearance,
+                ((x - offset + width) % width) / width,
+                y / height,
+                density,
+                (right - left) * width,
+                (below - above) * height,
+              )
+            : 0;
+          const light = rim * 0.7;
+          image.data[index] = base
+            ? base[0] + (highlight[0] - base[0]) * light
+            : kind === "night"
+              ? 170
+              : 255;
+          image.data[index + 1] = base
+            ? base[1] + (highlight[1] - base[1]) * light
+            : kind === "night"
+              ? 185
+              : 255;
+          image.data[index + 2] = base
+            ? base[2] + (highlight[2] - base[2]) * light
+            : kind === "night"
+              ? 210
+              : 255;
           image.data[index + 3] =
             density > (thresholds[(y % 4) * 4 + (x % 4)] ?? 0)
               ? appearance
                 ? appearance.celestial === "moon"
-                  ? 115
+                  ? Math.round(165 + density * 90)
                   : 240
                 : kind === "night"
                   ? 34
@@ -121,6 +167,7 @@ export function RitualClouds({
       context.setTransform(scaleX, 0, 0, scaleY, -offset * scaleX, 0);
       context.fillStyle = pattern;
       context.fillRect(offset, 0, width, height);
+      element.dataset.skyFrame = String(timeline);
     };
     const resize = () => {
       const bounds = element.getBoundingClientRect();
@@ -148,6 +195,7 @@ export function RitualClouds({
       clearTimeout(buildTimer);
       const build = ++generation;
       ready = false;
+      delete element.dataset.skyFrame;
       pattern = null;
       image = context.createImageData(width, height);
       field = new Float32Array(width * height);
@@ -274,6 +322,18 @@ export function RitualClouds({
     motion?.addEventListener?.("change", updateMotion);
     const observer = new ResizeObserver(resize);
     observer.observe(element);
+    window.addEventListener("resize", resize);
+    let resolution: MediaQueryList | undefined;
+    const watchResolution = () => {
+      resolution?.removeEventListener?.("change", resolutionChanged);
+      resolution = window.matchMedia?.(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+      resolution?.addEventListener?.("change", resolutionChanged);
+    };
+    const resolutionChanged = () => {
+      resize();
+      watchResolution();
+    };
+    watchResolution();
     return () => {
       repaint.current = () => {};
       generation++;
@@ -287,7 +347,10 @@ export function RitualClouds({
       surface?.removeEventListener("pointercancel", release);
       window.removeEventListener("blur", release);
       observer.disconnect();
+      delete element.dataset.skyFrame;
       motion?.removeEventListener?.("change", updateMotion);
+      window.removeEventListener("resize", resize);
+      resolution?.removeEventListener?.("change", resolutionChanged);
     };
   }, [kind]);
   return <canvas ref={canvas} className="ritual-clouds" aria-hidden="true" tabIndex={-1} />;

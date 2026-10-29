@@ -560,3 +560,81 @@ it("keeps failed answers retryable and permits discarding only local drafts to r
   await waitFor(() => expect(screen.getByRole("button", { name: "Snooze" })).toBeEnabled());
   expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("");
 });
+
+it("uses shared cards for snooze and skip while preserving the sky, logo, and saved answers", async () => {
+  const answered = {
+    ...state,
+    current: {
+      ...state.current!,
+      responses: [{ stepId: "journal", value: "Keep this answer", submitted: true }],
+    },
+  } as RitualState;
+  const action = vi
+    .fn()
+    .mockResolvedValueOnce({
+      outcome: "confirmation_required",
+      count: 2,
+      challengeId: "cards",
+      state: answered,
+    })
+    .mockResolvedValueOnce({ outcome: "applied", state: answered });
+  const view = render(<RitualChecklist state={answered} saveResponse={vi.fn()} act={action} />);
+  const logo = view.container.querySelector(".ritual-logo");
+  const sky = view.container.querySelector("canvas");
+  const questions = screen.getByRole("region", { name: "Ritual questions" });
+  expect(questions).toHaveClass("ritual-card", "ritual-screen");
+  fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
+  const snooze = await screen.findByRole("region", { name: "Confirm snooze" });
+  expect(snooze).toHaveAttribute("data-slot", "card");
+  expect(snooze).toHaveClass("ritual-card", "ritual-screen");
+  expect(snooze.querySelector('[data-slot="card-content"]')).toContainElement(
+    screen.getByRole("button", { name: "Snooze 10 minutes" }),
+  );
+  expect(view.container.querySelector(".ritual-logo")).toBe(logo);
+  expect(view.container.querySelector("canvas")).toBe(sky);
+  fireEvent.click(screen.getByRole("button", { name: "Go back" }));
+  await screen.findByRole("region", { name: "Ritual questions" });
+  expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("Keep this answer");
+  fireEvent.click(screen.getByRole("button", { name: "Skip for Today" }));
+  const skip = screen.getByRole("region", { name: "Confirm skip" });
+  expect(skip).toHaveAttribute("data-slot", "card");
+  expect(skip).toHaveClass("ritual-card", "ritual-screen");
+  expect(skip.querySelector('[data-slot="card-content"]')).toContainElement(
+    screen.getByRole("button", { name: "Hold to skip today" }),
+  );
+  expect(view.container.querySelector(".ritual-logo")).toBe(logo);
+  expect(view.container.querySelector("canvas")).toBe(sky);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("Keep this answer");
+  expect(action).toHaveBeenCalledTimes(2);
+});
+
+it("preserves an active skip hold through authoritative revision and history updates", async () => {
+  const action = vi.fn().mockResolvedValue({ outcome: "applied", state });
+  const response = vi.fn();
+  const view = render(<RitualChecklist state={state} saveResponse={response} act={action} />);
+  fireEvent.click(screen.getByRole("button", { name: "Skip for Today" }));
+  vi.useFakeTimers();
+  try {
+    const hold = screen.getByRole("button", { name: "Hold to skip today" });
+    fireEvent.keyDown(hold, { key: " " });
+    act(() => vi.advanceTimersByTime(15000));
+    view.rerender(
+      <RitualChecklist
+        state={{ ...state, current: { ...state.current!, revision: 2 }, skipCount: 3 }}
+        saveResponse={response}
+        act={action}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Hold to skip today" })).toBe(hold);
+    expect(screen.getByText("Hold to skip · 15s")).toBeInTheDocument();
+    expect(screen.getByText(/3 times in the last 3 days/)).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(15000));
+    expect(action).toHaveBeenCalledTimes(1);
+    expect(action).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "skip", expectedRevision: 2 }),
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});

@@ -44,7 +44,7 @@ FULL_COVERAGE = {
                 for project in ("desktop-chromium", "mobile-chromium") for shard in range(1, 5)],
 }
 FULL_SOURCE_JOBS = ["Classify changes", "Terraform", "Source verification",
-                    "Desktop (macos-14)", "Desktop (windows-latest)",
+                    "Desktop (macos-15)", "Desktop (windows-latest)",
                     *(name for group in FULL_COVERAGE.values() for name in group)]
 
 

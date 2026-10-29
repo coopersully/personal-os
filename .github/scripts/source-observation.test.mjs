@@ -650,6 +650,10 @@ test("ci:full label edits affect future events, not the authenticated receipt sc
   const result = observeSource(client);
   assert.equal(result.state, "success");
   assert.equal(result.forceFull, true);
+  const desktopJob = client.jobs.find((job) => job.name === "Desktop (macos-15)");
+  assert.ok(desktopJob);
+  desktopJob.name = "Desktop (macos-14)";
+  assert.throws(() => observeSource(client), /Selected source job/);
 });
 
 test("pending old-base source is stale, and retarget event cannot wait on an old run", () => {

@@ -297,7 +297,7 @@ test("full opt-in preserves PR events, provenance and all existing job gates", (
   );
   assertFullScopeJobGates(workflow);
   assert.match(workflow, /project: \[desktop-chromium, mobile-chromium\]/);
-  assert.match(workflow, /os: \[macos-14, windows-latest\]/);
+  assert.match(workflow, /os: \[macos-15, windows-latest\]/);
   assert.doesNotMatch(workflow, / {8}with:\n {10}ref:/);
 });
 
@@ -814,7 +814,7 @@ test("readiness full-source inventory matches workflow names and both complete m
               .replace(/\$\{\{ matrix\.shard \}\}/u, shard),
           );
     } else if (block.startsWith("  desktop:\n")) {
-      for (const os of ["macos-14", "windows-latest"])
+      for (const os of ["macos-15", "windows-latest"])
         names.push(match[1].replace(/\$\{\{ matrix\.os \}\}/u, os));
     } else names.push(match[1]);
   }

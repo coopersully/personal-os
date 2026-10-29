@@ -21,7 +21,7 @@ export function selectedJobNames(scope) {
     browser: ["desktop-chromium", "mobile-chromium"].flatMap((project) =>
       [1, 2, 3, 4].map((shard) => `Browser acceptance (${project}, ${shard}/4)`),
     ),
-    desktop: ["Desktop (macos-14)", "Desktop (windows-latest)"],
+    desktop: ["Desktop (macos-15)", "Desktop (windows-latest)"],
   };
   return [...ids.flatMap((id) => names[id]), "Source verification"];
 }

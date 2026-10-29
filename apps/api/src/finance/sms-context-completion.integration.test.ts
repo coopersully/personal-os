@@ -10,6 +10,8 @@ import {
   financeCategoryRules,
   financeContextRevisions,
   financeContexts,
+  financeConversationBatchMessages,
+  financeConversationMessages,
   financeMutationRecords,
   financeSmsCompletions,
   financeTransactions,
@@ -20,6 +22,7 @@ import {
   textMessages,
   textReplyBindings,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { defaultNotificationPreferences } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -35,6 +38,11 @@ import { createTextingService } from "../texting-service.js";
 import { createSmsAdmission, createSmsApprovalAdmission } from "../texting-sms-admission.js";
 import type { Principal } from "../types.js";
 import { createFinanceContextService } from "./context-service.js";
+import { createFinanceConversationService } from "./conversation-persistence.js";
+import {
+  captureFinanceConversationBatch,
+  postgresConversationBatchStore,
+} from "./conversation-service.js";
 import { createFinanceSmsPort } from "./sms-answer-port.js";
 import {
   createFinanceSmsApprovalService,
@@ -59,6 +67,7 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
     await container?.stop();
   });
   beforeEach(async () => {
+    await database.db.delete(financeConversationBatchMessages);
     await database.db.delete(users);
   });
   async function fixture(
@@ -186,6 +195,25 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
         transactionIds: [],
       },
     ]);
+    expect(await database.db.select().from(financeConversationMessages)).toMatchObject([
+      {
+        userId: f.userId,
+        authorKind: "user",
+        text: "Sam will reimburse my concert ticket next month",
+        sourceOperationId: f.claim.id,
+        idempotencyKey: `sms-context:${f.claim.id}`,
+        sequence: 1n,
+      },
+    ]);
+    const history = await createFinanceConversationService({ db: database.db, now }).history(
+      f.userId,
+    );
+    expect(history.messages[0]?.smsProvenance).toMatchObject({
+      claimId: f.claim.id,
+      inboundMessageId: f.message.id,
+      contextId: expect.any(String),
+      contextRevision: "1",
+    });
     expect(await database.db.select().from(financeTransactions)).toHaveLength(0);
     expect(await database.db.select().from(financeSmsCompletions)).toMatchObject([
       { disposition: "context_captured", contextId: expect.any(String) },
@@ -195,6 +223,11 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
     await ack.run();
     await acknowledge(ack.send).run();
     expect(ack.send).toHaveBeenCalledTimes(1);
+    expect(ack.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining("Queued in Finance Chat for the next eligible host run"),
+      }),
+    );
     const messages = await database.db.select().from(textMessages);
     expect(messages.find((item) => item.direction === "outbound")?.body).toContain(
       "No transaction, amount or bookkeeping change was assumed",
@@ -203,6 +236,87 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
       (await database.db.select().from(financeSmsCompletions))[0]?.acknowledgementMessageId,
     ).toBeTruthy();
   });
+  it("serializes concurrent dispatchers and preserves immutable Chat provenance on replay", async () => {
+    const f = await fixture();
+    await Promise.allSettled([dispatch()(), dispatch()()]);
+    await dispatch()();
+    expect(await database.db.select().from(financeContexts)).toHaveLength(1);
+    expect(await database.db.select().from(financeSmsCompletions)).toHaveLength(1);
+    const messages = await database.db.select().from(financeConversationMessages);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.sourceOperationId).toBe(f.claim.id);
+    await expect(
+      database.db.update(financeConversationMessages).set({ text: "forged" }),
+    ).rejects.toThrow();
+  });
+
+  it("rolls context, receipt and completion back when the canonical Chat write fails", async () => {
+    await fixture();
+    await database.db.execute(
+      sql`CREATE FUNCTION reject_test_sms_chat() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test Chat unavailable'; END; $$`,
+    );
+    await database.db.execute(
+      sql`CREATE TRIGGER reject_test_sms_chat BEFORE INSERT ON finance_conversation_messages FOR EACH ROW EXECUTE FUNCTION reject_test_sms_chat()`,
+    );
+    try {
+      await expect(dispatch()()).rejects.toThrow("reconciliation failed");
+      expect(await database.db.select().from(financeContexts)).toEqual([]);
+      expect(await database.db.select().from(financeContextRevisions)).toEqual([]);
+      expect(await database.db.select().from(financeMutationRecords)).toEqual([]);
+      expect(await database.db.select().from(financeSmsCompletions)).toEqual([]);
+    } finally {
+      await database.db.execute(
+        sql`DROP TRIGGER reject_test_sms_chat ON finance_conversation_messages`,
+      );
+      await database.db.execute(sql`DROP FUNCTION reject_test_sms_chat()`);
+    }
+    await dispatch()();
+    expect(await database.db.select().from(financeConversationMessages)).toHaveLength(1);
+  });
+
+  it("keeps a late SMS outside the saved cutoff and includes it only in the next batch", async () => {
+    const f = await fixture();
+    const newRun = async () => {
+      const [run] = await database.db
+        .insert(workspaceMaintenanceRuns)
+        .values({
+          userId: f.userId,
+          domain: "finances",
+          scope: { type: "all_outstanding" },
+          status: "completed",
+          rulebookVersion: "test",
+        })
+        .returning();
+      if (!run) throw new Error("run");
+      return run;
+    };
+    const first = await newRun();
+    const capture = (runId: string) =>
+      database.db.transaction((tx) =>
+        captureFinanceConversationBatch({
+          tx,
+          store: postgresConversationBatchStore,
+          userId: f.userId,
+          runId,
+          automationScheduleId: null,
+          authorizationConnectionId: null,
+          now: now(),
+        }),
+      );
+    expect((await capture(first.id)).cutoffSequence).toBe("0");
+    await dispatch()();
+    expect((await capture(first.id)).cutoffSequence).toBe("0");
+    expect(await database.db.select().from(financeConversationBatchMessages)).toEqual([]);
+    const second = await newRun();
+    expect((await capture(second.id)).cutoffSequence).toBe("1");
+    const [message] = await database.db.select().from(financeConversationMessages);
+    expect(await database.db.select().from(financeConversationBatchMessages)).toMatchObject([
+      { userId: f.userId, runId: second.id, messageId: message?.id },
+    ]);
+    await capture(second.id);
+    expect(await database.db.select().from(financeConversationBatchMessages)).toHaveLength(1);
+  });
+
   it.each([
     "disabled",
     "revoked",
@@ -222,6 +336,7 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
     if (mode === "disabled") await dispatch(() => false)();
     else await dispatch()();
     expect(await database.db.select().from(financeContexts)).toHaveLength(0);
+    expect(await database.db.select().from(financeConversationMessages)).toHaveLength(0);
     expect(await database.db.select().from(financeContextRevisions)).toHaveLength(0);
     expect(await database.db.select().from(financeSmsCompletions)).toHaveLength(0);
     const ack = acknowledge();

@@ -7,12 +7,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
-import {
-  ResponsiveDialog as Dialog,
-  ResponsiveDialogContent as DialogContent,
-  ResponsiveDialogDescription as DialogDescription,
-  ResponsiveDialogTitle as DialogTitle,
-} from "@/components/responsive-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "../../api.js";
 import { classifyMutationError } from "../../lib/feedback.js";
 import { RitualChecklist } from "./ritual-overlay.js";
@@ -130,10 +125,10 @@ export function BrowserRitual({ userId }: { userId: string }) {
   )
     return null;
   return (
-    <Dialog open dismissible={false}>
+    <Dialog open>
       <DialogContent
         showCloseButton={false}
-        className="browser-ritual gap-0 sm:max-w-xl"
+        className="ritual-fullscreen browser-ritual"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onKeyDown={(event) => {
           // Keep app-wide shortcuts from opening a second editor above the ritual.

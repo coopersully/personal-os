@@ -2,7 +2,7 @@
 import type { RitualDefinition, RitualState } from "@personal-os/domain";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { nearestPreviewWeekday } from "./ritual-card-header.js";
-import { makeRitualPreview, RitualPreviewChecklist } from "./ritual-preview.js";
+import { makeRitualPreview, RitualPreview, RitualPreviewChecklist } from "./ritual-preview.js";
 
 const mocks = vi.hoisted(() => ({ history: vi.fn(), desktop: vi.fn(), close: vi.fn() }));
 vi.mock("../../api.js", () => ({
@@ -127,4 +127,23 @@ it("chooses the nearest weekday using the ritual time zone across month boundari
   expect(nearestPreviewWeekday(5, "America/New_York", instant)).toBe("2026-10-30");
   expect(nearestPreviewWeekday(6, "America/New_York", instant)).toBe("2026-10-31");
   expect(nearestPreviewWeekday(3, "America/New_York", instant)).toBe("2026-10-28");
+});
+
+it("opens the full preview without a drawer and keeps its close action available", async () => {
+  const state = await makeRitualPreview(definition);
+  const close = vi.fn();
+  const view = render(<button type="button">Preview routine</button>);
+  const trigger = screen.getByRole("button", { name: "Preview routine" });
+  trigger.focus();
+  view.rerender(
+    <>
+      <button type="button">Preview routine</button>
+      <RitualPreview state={state} onClose={close} />
+    </>,
+  );
+  const preview = await screen.findByRole("dialog", { name: "Ritual preview" });
+  expect(preview).not.toHaveAttribute("data-vaul-drawer");
+  expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Close Preview" }));
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
 });

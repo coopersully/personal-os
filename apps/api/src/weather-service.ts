@@ -1,6 +1,7 @@
 import { providerFetch } from "@personal-os/connectors";
 import type {
   HomeLocation,
+  WeatherAtmosphere,
   WeatherCoordinates,
   WeatherLocationDetails,
   WeatherLocationOption,
@@ -15,12 +16,17 @@ type WeatherServiceOptions = {
 
 type ForecastResponse = {
   current?: {
+    cloud_cover?: unknown;
+    wind_speed_10m?: unknown;
+    is_day?: unknown;
+    time?: unknown;
     precipitation?: number;
     rain?: number;
     showers?: number;
     temperature_2m?: number;
     weather_code?: number;
   };
+  daily?: { time?: unknown; sunrise?: unknown; sunset?: unknown };
 };
 
 type AirQualityResponse = {
@@ -99,6 +105,58 @@ function serviceUnavailable() {
 
 function numberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+// Limit Unix seconds to the ISO datetime range used by the public domain contract.
+function unixSeconds(value: unknown): number | null {
+  const seconds = numberValue(value);
+  return seconds !== null && Number.isInteger(seconds) && seconds >= 0 && seconds <= 253_402_300_799
+    ? seconds
+    : null;
+}
+
+function atmosphereSnapshot(
+  forecast: ForecastResponse,
+  weatherCode: number,
+  observedNow: Date,
+): WeatherAtmosphere | undefined {
+  const current = forecast.current;
+  const observedSeconds = unixSeconds(current?.time);
+  if (observedSeconds === null || !Number.isSafeInteger(weatherCode)) return undefined;
+
+  const cloudCover = numberValue(current?.cloud_cover);
+  const windSpeed = numberValue(current?.wind_speed_10m);
+  const daily = forecast.daily;
+  const boundaries = Array.isArray(daily?.time) ? daily.time : [];
+  const nowSeconds = observedNow.getTime() / 1_000;
+  let sunriseAt: string | null = null;
+  let sunsetAt: string | null = null;
+  // Provider day boundaries already represent local midnight as Unix instants.
+  // Adjacent boundaries avoid UTC-date assumptions and handle non-24-hour days.
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const start = unixSeconds(boundaries[index]);
+    const end = unixSeconds(boundaries[index + 1]);
+    if (start === null || end === null || nowSeconds < start || nowSeconds >= end) continue;
+    const eventTime = (values: unknown): string | null => {
+      const value = unixSeconds(Array.isArray(values) ? values[index] : undefined);
+      return value !== null && value >= start && value < end
+        ? new Date(value * 1_000).toISOString()
+        : null;
+    };
+    sunriseAt = eventTime(daily?.sunrise);
+    sunsetAt = eventTime(daily?.sunset);
+    break;
+  }
+  return {
+    weatherCode,
+    cloudCoverPercent:
+      cloudCover !== null && cloudCover >= 0 && cloudCover <= 100 ? cloudCover : null,
+    windSpeedKmh: windSpeed !== null && windSpeed >= 0 ? windSpeed : null,
+    isDay: current?.is_day === 1 ? true : current?.is_day === 0 ? false : null,
+    sunriseAt,
+    sunsetAt,
+    observedAt: new Date(observedSeconds * 1_000).toISOString(),
+  };
 }
 
 function roundedCoordinates(coordinates: WeatherCoordinates): WeatherCoordinates {
@@ -312,10 +370,16 @@ export function createWeatherService({ fetch = globalThis.fetch, now }: WeatherS
       const forecastUrl = new URL("https://api.open-meteo.com/v1/forecast");
       forecastUrl.searchParams.set(
         "current",
-        "temperature_2m,precipitation,rain,showers,weather_code",
+        "temperature_2m,precipitation,rain,showers,weather_code,cloud_cover,wind_speed_10m,is_day",
       );
       forecastUrl.searchParams.set("latitude", String(location.coordinates.latitude));
       forecastUrl.searchParams.set("longitude", String(location.coordinates.longitude));
+      forecastUrl.searchParams.set("daily", "sunrise,sunset");
+      forecastUrl.searchParams.set("timeformat", "unixtime");
+      forecastUrl.searchParams.set("timezone", "auto");
+      forecastUrl.searchParams.set("past_days", "1");
+      forecastUrl.searchParams.set("forecast_days", "2");
+      forecastUrl.searchParams.set("wind_speed_unit", "kmh");
       forecastUrl.searchParams.set("temperature_unit", "fahrenheit");
       forecastUrl.searchParams.set("precipitation_unit", "inch");
       const airQualityUrl = new URL("https://air-quality-api.open-meteo.com/v1/air-quality");
@@ -338,7 +402,13 @@ export function createWeatherService({ fetch = globalThis.fetch, now }: WeatherS
       const current = forecast?.current;
       const temperatureF = numberValue(current?.temperature_2m);
       const weatherCode = numberValue(current?.weather_code);
-      if (!forecastResponse.ok || !current || temperatureF === null || weatherCode === null) {
+      if (
+        !forecastResponse.ok ||
+        !forecast ||
+        !current ||
+        temperatureF === null ||
+        weatherCode === null
+      ) {
         throw serviceUnavailable();
       }
       const precipitation = Math.max(
@@ -352,11 +422,14 @@ export function createWeatherService({ fetch = globalThis.fetch, now }: WeatherS
         ...(precipitation > 0 ? [{ kind: "rain" as const, label: "Rain now" }] : []),
         ...(airQualityAlert ? [{ kind: "air_quality" as const, label: airQualityAlert }] : []),
       ];
+      const observedNow = now();
+      const atmosphere = atmosphereSnapshot(forecast, weatherCode, observedNow);
       return {
+        ...(atmosphere ? { atmosphere } : {}),
         alerts,
         condition: weatherLabels[weatherCode] ?? "Current conditions",
         location: location.details,
-        observedAt: now().toISOString(),
+        observedAt: observedNow.toISOString(),
         temperatureF,
         usAqi: usAqi === null ? null : Math.round(usAqi),
       };

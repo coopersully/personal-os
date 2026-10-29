@@ -44,8 +44,8 @@ export function AccountIdentity({ user }: { user: User }) {
 export function AccountOverview() {
   const setup = useQueries({
     queries: workspaceIds.map((domain) => ({
-      queryKey: ["ilo-setup-plan", domain],
-      queryFn: () => api.getIloSetup({ domain }),
+      queryKey: ["personal-os-setup-plan", domain],
+      queryFn: () => api.getPersonalOsSetup({ domain }),
       staleTime: 30_000,
     })),
   });

@@ -55,9 +55,9 @@ pnpm --filter @personal-os/desktop exec tauri build --debug --bundles app --ci
 
 - `APPLE_CERTIFICATE` (base64 Developer ID Application certificate), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`.
 - `APPLE_ID`, `APPLE_PASSWORD` (app-specific notarization credential), `APPLE_TEAM_ID`.
-- `ILO_HOST_PROFILE_BASE64` and `ILO_WIDGET_PROFILE_BASE64`: matching distribution profiles for `app.personal-os.desktop` and `app.personal-os.desktop.widgets`.
-- `ILO_KEYCHAIN_ACCESS_GROUP`: the exact provisioned shared group, typically `TEAMID.app.personal-os.desktop`.
-- Both profiles must authorize `group.app.personal-os.desktop` (or an explicitly configured `ILO_APP_GROUP`).
+- `PERSONAL_OS_HOST_PROFILE_BASE64` and `PERSONAL_OS_WIDGET_PROFILE_BASE64`: matching distribution profiles for `app.personal-os.desktop` and `app.personal-os.desktop.widgets`.
+- `PERSONAL_OS_KEYCHAIN_ACCESS_GROUP`: the exact provisioned shared group, typically `TEAMID.app.personal-os.desktop`.
+- Both profiles must authorize `group.app.personal-os.desktop` (or an explicitly configured `PERSONAL_OS_APP_GROUP`).
 
 The script imports the certificate into a temporary keychain, builds an initial app bundle, builds/signs the extension, embeds both profiles and the extension, validates profile expiry/identity/group permissions, signs the outer app, notarizes/staples the app, then creates/signs/notarizes/staples the DMG. It preserves host entitlements and rejects debug profiles. It never modifies an already notarized bundle.
 

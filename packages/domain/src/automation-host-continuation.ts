@@ -457,7 +457,7 @@ export function observeAutomationHostScheduleHealth(
   });
 }
 
-/** An immutable snapshot of instructions nohmi issued; not proof of host adoption. */
+/** An immutable snapshot of instructions Personal OS issued; not proof of host adoption. */
 export const automationHostPromptIssueSchema = z
   .object({
     scheduleId: idSchema,

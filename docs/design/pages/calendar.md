@@ -153,7 +153,7 @@ and verify matching computed backgrounds and column alignment in both themes.
 - Conferencing follows the selected calendar's real capabilities. Writable Google calendars can
   request a unique Google Meet conference from Google; every calendar can attach an existing Zoom,
   Teams, Webex, or other meeting URL. Provider-generated options are never shown as available when
-  Ilo does not hold that provider's host authority. Provider acceptance is not treated as link
+  nohmi does not hold that provider's host authority. Provider acceptance is not treated as link
   completion: pending generation and provider failure remain explicit in the returned event and
   produce visible, non-blocking feedback.
 
@@ -212,7 +212,7 @@ immutable review, but neither the page nor its typed API changes events, invitat
 state, or user policy. Calendar judgment and versioned playbook policy remain in the domain/API.
 There is no MCP change and no external client automation; MCP remains a stateless intent surface.
 
-This is not the complete Calendar Ilo target. Durable maintenance runs and recovery,
+This is not the complete Calendar nohmi target. Durable maintenance runs and recovery,
 `maintain_calendar`, MCP wiring, bounded questions and one-off decisions, explicitly approved
 reusable rules, rule-authorized Calendar actions, collaboration stewardship, and travel routing
 remain deferred. Live travel feasibility stays unknown until a separately approved routing

@@ -5,12 +5,12 @@ import ServiceManagement
 
 private var hostCallback: (@convention(c) (UnsafePointer<CChar>?) -> Void)?
 func petShouldBeVisible(enabled: Bool, hasSnapshot _: Bool) -> Bool { enabled }
-@_cdecl("ilo_native_set_callback")
-public func iloNativeSetCallback(
+@_cdecl("personal_os_native_set_callback")
+public func personalOsNativeSetCallback(
   _ callback: @escaping @convention(c) (UnsafePointer<CChar>?) -> Void
 ) { hostCallback = callback }
-@_cdecl("ilo_native_dispatch")
-public func iloNativeDispatch(_ request: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>? {
+@_cdecl("personal_os_native_dispatch")
+public func personalOsNativeDispatch(_ request: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>? {
   guard Thread.isMainThread else {
     return strdup("{\"ok\":false,\"error\":\"Native dispatch requires the main thread\"}")
   }

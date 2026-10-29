@@ -32,9 +32,9 @@ add another alias or describe them as the product's permanent vocabulary.
 
 The HTTP server uses the MCP TypeScript v2 per-request factory. Modern July 2026 requests and the
 stateless 2025 compatibility path are built from the same server definition. Before constructing
-that definition, the adapter validates the audience-bound Ilo token through
+that definition, the adapter validates the audience-bound nohmi token through
 `GET /v1/assistant/context`. The returned user identity, scopes, planning time zone, setup
-readiness, and Ilo links determine the request's discovery surface. Provider credentials never
+readiness, and nohmi links determine the request's discovery surface. Provider credentials never
 enter the MCP process.
 
 `APP_BASE_URL` is required in deployed API and MCP containers. The MCP container uses it for
@@ -172,7 +172,7 @@ Discovery follows these rules:
    it migrates.
 2. A domain tool is advertised only when the token satisfies its catalog scope match. Multi-scope workspace tools require every listed grant; shared orientation tools may explicitly accept any listed read scope.
 3. A read-only server never advertises mutation tools, even when the token itself has write scopes.
-4. Every advertised tool has all four annotation hints, a shared output schema, an Ilo icon, and
+4. Every advertised tool has all four annotation hints, a shared output schema, a nohmi icon, and
    metadata identifying its domain, policy, and workflow stage.
 5. The API rechecks scope, ownership, policy, revisions, and provider capability. Discovery and
    annotations improve agent behavior but never grant authority.
@@ -224,7 +224,7 @@ resources. New clients should begin with `get_ilo_context` or `ilo://context/sel
 The server publishes task-oriented prompts for setup, daily planning, Mail triage, Calendar
 commitment preparation, overdue Reminder review, Finance review, and a weekly review. Prompts
 compose existing tools and approval boundaries; they do not embed new authority or business
-rules. MCP protocol Tasks are long-running operation handles and are unrelated to Ilo's user-owned
+rules. MCP protocol Tasks are long-running operation handles and are unrelated to nohmi's user-owned
 Lists, Projects, and Tasks. Protocol Tasks remain unadvertised: current long-lived Mail and Finance
 work has durable API-owned lifecycle state, but no shared MCP operation-handle contract. Exposing
 protocol Tasks before that contract exists would create a misleading in-memory completion surface.
@@ -562,7 +562,7 @@ current local day with that day's selected-calendar events.
 
 | Concern | MCP answer |
 | --- | --- |
-| Capability and owner | MCP translates protocol operations to the authenticated Ilo API. Domain services and the API own behavior and authorization. |
+| Capability and owner | MCP translates protocol operations to the authenticated nohmi API. Domain services and the API own behavior and authorization. |
 | Configuration and authority | `MCP_PUBLIC_URL`, `APP_BASE_URL`, `PERSONAL_OS_API_URL`, `MCP_INTERNAL_SECRET`, the bearer token audience, and returned scopes must agree. |
 | Transport | Public HTTPS Streamable HTTP terminates at `/mcp`; local hosts use stdio. The MCP-to-API hop is HTTPS in production and carries no provider credential. |
 | Time and capacity | Requests use the existing API/provider deadlines and MCP fixed-window rate limit. Large or delayed provider work must already cross an API-owned durable handoff. |
@@ -615,7 +615,7 @@ do not replay the request, not that nohmi can reconcile a missing audit record.
 Open **Settings → Connected agents** for the current deployment's MCP URL. A new
 account can go directly there from the Ready step. The person completes that
 one unavoidable connection handoff; after authentication, the host calls
-`get_ilo_setup` and Ilo supplies the current domain context and next work. A
+`get_ilo_setup` and nohmi supplies the current domain context and next work. A
 separate skill install or copied procedural prompt is not required.
 
 For compatibility with skill-aware hosts, the connection guide also reports one
@@ -635,9 +635,9 @@ profile-only fallback, and hosts must not infer executable behavior from a
 different domain's support level.
 
 Remote MCP OAuth is the recommended connection. The host dynamically registers,
-the user signs in to Ilo, and the consent page lists the requested permissions
+the user signs in to nohmi, and the consent page lists the requested permissions
 before issuing audience-bound access and rotating refresh tokens. Provider
-credentials remain inside Ilo. Local or manual hosts that cannot complete OAuth
+credentials remain inside nohmi. Local or manual hosts that cannot complete OAuth
 can use an explicitly scoped personal access token from the advanced section.
 
 Grant only the scopes the host needs:

@@ -38,7 +38,7 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
       }),
       title: "Start or continue nohmi setup",
     },
-    async (input) => apiResult(() => api.getIloSetup(input)),
+    async (input) => apiResult(() => api.getPersonalOsSetup(input)),
   );
 
   server.registerTool(

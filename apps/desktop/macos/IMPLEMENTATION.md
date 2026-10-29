@@ -1,6 +1,6 @@
 # Native macOS companion
 
-Implemented under `apps/desktop/macos` for macOS 14 or newer. The static Swift Package product is `IloNative`; it has no third-party package dependencies. Rust owns application lifecycle, transport, authentication, synchronization and validated action routing.
+Implemented under `apps/desktop/macos` for macOS 14 or newer. The static Swift Package product is `PersonalOsNative`; it has no third-party package dependencies. Rust owns application lifecycle, transport, authentication, synchronization and validated action routing.
 
 ## Implemented behavior
 
@@ -23,11 +23,11 @@ The contract remains `docs/superpowers/plans/2026-09-08-macos-native-bridge.md`,
 - `mail.userId` is required and must equal the current snapshot's logged-in `accountId`. `mail.accountId` is the selected connector/mail account ID. Both server and user identity are checked before arrival delivery.
 - `status` additionally returns `notificationAlertsAvailable` and `notificationSoundsAvailable`. `request_notification_permission` returns `requestPending: true`; authorization is asynchronous, so subsequent `status` calls report the OS result. A `status.error` describes login/notification/widget service limitations without making up availability.
 - Widget routes: `ilo://open?path=/today` (and other app-relative workspace paths), and `ilo://join?url=<encoded URL>&serverUrl=<origin>&accountId=<user ID>`. Rust validates these routes and current identity.
-- `ilo_native_set_callback` accepts a non-null C callback. Copy callback JSON during the call. Free every non-null `ilo_native_dispatch` return using `libc::free`. Dispatch is main-thread-only; permission/scheduling completion occurs asynchronously.
+- `personal_os_native_set_callback` accepts a non-null C callback. Copy callback JSON during the call. Free every non-null `personal_os_native_dispatch` return using `libc::free`. Dispatch is main-thread-only; permission/scheduling completion occurs asynchronously.
 
 The native library does not introduce new callback action kinds. Server-owned recurrence occurrences are represented by distinct material/occurrence times; no local recurrence expansion changes server data. All-day calendar notification delivery stays off; the current settings contract has no all-day alert-time field. Animation respects the OS Reduce Motion preference; the current settings contract has no separate animation toggle.
 
-## Verification performed
+## Historical verification performed
 
 On September 8, 2026 with Xcode 26.6 / Swift 6.3.3:
 
@@ -39,12 +39,16 @@ On September 8, 2026 with Xcode 26.6 / Swift 6.3.3:
 - `nm -g .../libIloNative.a` confirms `_ilo_native_dispatch` and `_ilo_native_set_callback` exports.
 - `bash -n apps/desktop/macos/scripts/{build-widgets,embed-widgets}.sh`: passed.
 
+These are the original September receipts, before the Personal OS source rename. Current
+build commands use `PERSONAL_OS_*`, `PersonalOsNative`, and `personal_os_native_*`;
+the naming change requires fresh candidate-bound native verification.
+
 ## Release provisioning and installed acceptance
 
 Compilation does not prove system authorization, widget registration or signed identity. No signing identity or provisioning profile was invented, and the real user's notification/login preferences were not changed as a test.
 
-Register the app and widget identifiers under the same Apple team. Provision `group.app.personal-os.desktop` (override `ILO_APP_GROUP` if necessary) and a shared Keychain access group such as `TEAMID.app.personal-os.desktop` for both targets. Both Info.plists must include the resolved `IloAppGroup` and `IloKeychainAccessGroup` values; entitlements and provisioning profiles must permit those exact groups. Existing sessions stored before shared-Keychain provisioning may require a fresh sign-in.
+Register the app and widget identifiers under the same Apple team. Provision `group.app.personal-os.desktop` (override `PERSONAL_OS_APP_GROUP` if necessary) and a shared Keychain access group such as `TEAMID.app.personal-os.desktop` for both targets. Both Info.plists must include the resolved `PersonalOsAppGroup` and `PersonalOsKeychainAccessGroup` values; entitlements and provisioning profiles must permit those exact groups. Existing sessions stored before shared-Keychain provisioning may require a fresh sign-in.
 
-After the Tauri bundle exists, call `scripts/embed-widgets.sh /absolute/path/nohmi.app` with `ILO_SIGNING_IDENTITY`, `ILO_KEYCHAIN_ACCESS_GROUP`, `ILO_HOST_ENTITLEMENTS`, `ILO_WIDGET_PROVISIONING_PROFILE`, and `ILO_HOST_PROVISIONING_PROFILE`. The script preserves supplied host entitlements, embeds the extension in `Contents/PlugIns`, signs nested content before the outer app, and validates the complete signature. Set `ILO_WIDGET_ARCH` to match the host architecture; for a universal host build and combine both extension architectures before final signing. Notarize/staple afterward using the existing release process.
+After the Tauri bundle exists, call `scripts/embed-widgets.sh /absolute/path/nohmi.app` with `PERSONAL_OS_SIGNING_IDENTITY`, `PERSONAL_OS_KEYCHAIN_ACCESS_GROUP`, `PERSONAL_OS_HOST_ENTITLEMENTS`, `PERSONAL_OS_WIDGET_PROVISIONING_PROFILE`, and `PERSONAL_OS_HOST_PROVISIONING_PROFILE`. The script preserves supplied host entitlements, embeds the extension in `Contents/PlugIns`, signs nested content before the outer app, and validates the complete signature. Set `PERSONAL_OS_WIDGET_ARCH` to match the host architecture; for a universal host build and combine both extension architectures before final signing. Notarize/staple afterward using the existing release process.
 
 Still requires a signed installed-app acceptance pass: actual Keychain sharing and user isolation; login approval/reopen; notification denial/re-enable, Focus/sound/previews, delivery with the main window closed or app quit, snooze/completion/join and sleep/restart recovery; actual new-mail feed replay; multi-display/Spaces/fullscreen reachability; VoiceOver/keyboard behavior; widget discovery/configuration and authenticated completion in Edit Widgets; stale/offline clearing; hosted/custom-server sign-in; and idle CPU/energy measurement. macOS controls banner presentation and WidgetKit refresh timing. Delivery remains best-effort across OS and app stores, not exactly-once.

@@ -271,7 +271,7 @@ const brief: DailyBrief = {
 
 function mockApi() {
   return {
-    getIloSetup: vi.fn(async () => ({
+    getPersonalOsSetup: vi.fn(async () => ({
       access: { canRead: true, canWrite: true },
       connection: { lastObservedAt: now, observed: true },
       currentStepId: "learn_preferences" as const,
@@ -304,7 +304,7 @@ function mockApi() {
         },
       ],
     })),
-    getIloContext: vi.fn(async () => ({
+    getPersonalOsContext: vi.fn(async () => ({
       access: { grantedScopes: ["tasks:read", "tasks:write"] },
       generatedAt: now,
       identity: { actorType: "agent" as const, displayName: "nohmi test", userId: id },
@@ -929,7 +929,7 @@ function mockApi() {
   };
 }
 
-describe("ilo MCP server", () => {
+describe("Personal OS MCP server", () => {
   it("preserves qualified minute timestamps through public tool validation", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({
@@ -2499,7 +2499,7 @@ describe("ilo MCP server", () => {
     }
   });
 
-  it("filters task discovery by scopes and read-only posture while keeping typed Ilo metadata", async () => {
+  it("filters task discovery by scopes and read-only posture while keeping typed nohmi metadata", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({
       api: api as unknown as PersonalOsApiClient,

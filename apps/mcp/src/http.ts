@@ -2,9 +2,9 @@ import { hostHeaderValidation } from "@modelcontextprotocol/express";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import { type AuthInfo, createMcpHandler } from "@modelcontextprotocol/server";
 import { ApiClientError, createApiClient } from "@personal-os/api-client";
-import type { IloAgentContext } from "@personal-os/domain";
+import type { PersonalOsAgentContext } from "@personal-os/domain";
 import express, { type Request, type Response } from "express";
-import { createIloAppLinks, resolveAppBaseUrl } from "./app-links.js";
+import { createPersonalOsAppLinks, resolveAppBaseUrl } from "./app-links.js";
 import {
   createFixedWindowRateLimiter,
   isAllowedOrigin,
@@ -18,7 +18,7 @@ const apiUrl = process.env.PERSONAL_OS_API_URL ?? "http://127.0.0.1:8788";
 const appBaseUrl = resolveAppBaseUrl(process.env, {
   production: process.env.NODE_ENV === "production",
 });
-const appLinks = createIloAppLinks(appBaseUrl, "assistant");
+const appLinks = createPersonalOsAppLinks(appBaseUrl, "assistant");
 const host = process.env.HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 8789);
 const publicUrl = (process.env.MCP_PUBLIC_URL ?? `http://${host}:${port}`).replace(/\/$/, "");
@@ -35,8 +35,8 @@ const rateLimiter = createFixedWindowRateLimiter({
   windowMs: security.rateLimitWindowMs,
 });
 
-type IloAuthExtra = {
-  context: IloAgentContext;
+type PersonalOsAuthExtra = {
+  context: PersonalOsAgentContext;
   readOnly: boolean;
   timeZone: string;
 };
@@ -44,8 +44,8 @@ type IloAuthExtra = {
 const handler = createMcpHandler(
   ({ authInfo }) => {
     if (!authInfo) throw new Error("Authenticated MCP context is required.");
-    const extra = authInfo.extra as IloAuthExtra | undefined;
-    if (!extra?.context) throw new Error("Validated nohmi context is required.");
+    const extra = authInfo.extra as PersonalOsAuthExtra | undefined;
+    if (!extra?.context) throw new Error("Validated Personal OS context is required.");
     return createPersonalOsMcpServer({
       api: apiClient(authInfo.token),
       appBaseUrl,
@@ -58,13 +58,13 @@ const handler = createMcpHandler(
   {
     legacy: "stateless",
     onerror(error) {
-      process.stderr.write(`[ilo-mcp] ${error.name}: ${error.message}\n`);
+      process.stderr.write(`[personal-os-mcp] ${error.name}: ${error.message}\n`);
     },
   },
 );
 const nodeHandler = toNodeHandler(handler, {
   onerror(error) {
-    process.stderr.write(`[ilo-mcp] adapter ${error.name}: ${error.message}\n`);
+    process.stderr.write(`[personal-os-mcp] adapter ${error.name}: ${error.message}\n`);
   },
 });
 
@@ -120,7 +120,7 @@ app.post("/mcp", (request, response) => serveMcp(request, response, false));
 app.post("/mcp/readonly", (request, response) => serveMcp(request, response, true));
 
 const listener = app.listen(port, host, () => {
-  process.stderr.write(`nohmi MCP listening at http://${host}:${port}/mcp\n`);
+  process.stderr.write(`Personal OS MCP listening at http://${host}:${port}/mcp\n`);
 });
 
 async function serveMcp(request: Request, response: Response, readOnly: boolean): Promise<void> {
@@ -158,11 +158,11 @@ async function serveMcp(request: Request, response: Response, readOnly: boolean)
   }
 
   try {
-    const context = await apiClient(token).getIloContext();
+    const context = await apiClient(token).getPersonalOsContext();
     const timeZone = request.header("x-personal-os-timezone") ?? context.time.timezone ?? "UTC";
     const auth: AuthInfo = {
-      clientId: "ilo-mcp-client",
-      extra: { context, readOnly, timeZone } satisfies IloAuthExtra,
+      clientId: "personal-os-mcp-client",
+      extra: { context, readOnly, timeZone } satisfies PersonalOsAuthExtra,
       resource: resourceUrl,
       scopes: context.access.grantedScopes,
       token,
@@ -180,7 +180,7 @@ async function serveMcp(request: Request, response: Response, readOnly: boolean)
       return;
     }
     process.stderr.write(
-      `[ilo-mcp] request failed: ${error instanceof Error ? error.name : "unknown error"}\n`,
+      `[personal-os-mcp] request failed: ${error instanceof Error ? error.name : "unknown error"}\n`,
     );
     if (!response.headersSent) {
       response.status(500).json({

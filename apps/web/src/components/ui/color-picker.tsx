@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 
 // Installed from shadcn.io/color-picker. Controlled state and keyboard support are
-// adapted to nohmi; changes are emitted only from user input, never on mount.
+// adapted to Personal OS; changes are emitted only from user input, never on mount.
 import Color from "color";
 import { Slider } from "radix-ui";
 import {

@@ -1,7 +1,7 @@
 import AppKit
 import XCTest
 
-@testable import IloNative
+@testable import PersonalOsNative
 
 final class WallpaperTests: XCTestCase {
   func options(_ fit: String = "preserve", layout: String = "grid") -> WallpaperOptions {

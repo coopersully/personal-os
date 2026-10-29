@@ -1,5 +1,5 @@
 import type { FinancePlaybookResponse } from "@personal-os/domain";
-import { assessFinancePlaybook, NOHMI_FINANCE_PLAYBOOK } from "@personal-os/domain";
+import { assessFinancePlaybook, PERSONAL_OS_FINANCE_PLAYBOOK } from "@personal-os/domain";
 import type { createFinanceService } from "./finance-service.js";
 
 export function createFinancePlaybookService({
@@ -22,7 +22,7 @@ export function createFinancePlaybookService({
               }
             : null,
         }),
-        playbook: NOHMI_FINANCE_PLAYBOOK,
+        playbook: PERSONAL_OS_FINANCE_PLAYBOOK,
       };
     },
   };

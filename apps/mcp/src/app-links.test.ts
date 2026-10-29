@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createIloAppLinks, resolveAppBaseUrl } from "./app-links.js";
+import { createPersonalOsAppLinks, resolveAppBaseUrl } from "./app-links.js";
 
 describe("nohmi application links", () => {
   it("requires an explicit secure production origin", () => {
@@ -31,23 +31,23 @@ describe("nohmi application links", () => {
   });
 
   it("maps approvals to the workspace that owns the decision", () => {
-    expect(createIloAppLinks("https://app.example.com", "finances")).toEqual({
+    expect(createPersonalOsAppLinks("https://app.example.com", "finances")).toEqual({
       activity: "https://app.example.com/activity",
       agentAccess: "https://app.example.com/settings?section=workspace-access",
       approvals: "https://app.example.com/finances/review",
       recovery: "https://app.example.com/settings?section=connections",
       today: "https://app.example.com/today",
     });
-    expect(createIloAppLinks("https://app.example.com", "mail").approvals).toBe(
+    expect(createPersonalOsAppLinks("https://app.example.com", "mail").approvals).toBe(
       "https://app.example.com/mail",
     );
-    expect(createIloAppLinks("https://app.example.com", "calendar").approvals).toBe(
+    expect(createPersonalOsAppLinks("https://app.example.com", "calendar").approvals).toBe(
       "https://app.example.com/calendar",
     );
-    expect(createIloAppLinks("https://app.example.com", "reminders").approvals).toBe(
+    expect(createPersonalOsAppLinks("https://app.example.com", "reminders").approvals).toBe(
       "https://app.example.com/tasks",
     );
-    expect(createIloAppLinks("https://app.example.com", "assistant").approvals).toBe(
+    expect(createPersonalOsAppLinks("https://app.example.com", "assistant").approvals).toBe(
       "https://app.example.com/reviews",
     );
   });

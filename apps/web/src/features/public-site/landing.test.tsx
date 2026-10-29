@@ -28,17 +28,14 @@ it("lets the visitor pause and resume scenery with a clearly named toggle", () =
   const hero = container.querySelector(".public-hero");
   const pause = screen.getByRole("button", { name: "pause scenery" });
   expect(pause).toBeVisible();
-  expect(pause).toHaveAttribute("aria-pressed", "false");
+  expect(pause).not.toHaveAttribute("aria-pressed");
   expect(hero).toHaveAttribute("data-motion-ready", "true");
   fireEvent.click(pause);
   const resume = screen.getByRole("button", { name: "resume scenery" });
-  expect(resume).toHaveAttribute("aria-pressed", "true");
+  expect(resume).not.toHaveAttribute("aria-pressed");
   expect(resume).toHaveAttribute("title", "resume scenery");
   expect(hero).toHaveAttribute("data-scenery-paused", "true");
   fireEvent.click(resume);
-  expect(screen.getByRole("button", { name: "pause scenery" })).toHaveAttribute(
-    "aria-pressed",
-    "false",
-  );
+  expect(screen.getByRole("button", { name: "pause scenery" })).not.toHaveAttribute("aria-pressed");
   expect(hero).toHaveAttribute("data-scenery-paused", "false");
 });

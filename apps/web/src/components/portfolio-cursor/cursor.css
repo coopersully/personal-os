@@ -5,7 +5,7 @@
   width: 0;
   height: 0;
   pointer-events: none;
-  z-index: 100;
+  z-index: 2147483647;
   visibility: hidden;
   mix-blend-mode: difference;
   color: white;

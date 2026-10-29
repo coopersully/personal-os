@@ -7,7 +7,7 @@ Status: required public access; shared shadcn public layout.
 A visitor or messaging reviewer must understand what nohmi does, who operates it, how information
 is handled, and what optional texting consent means before creating an account or giving consent.
 Every page uses one shared product header and tonal footer. The landing page uses workspace
-cards; documents use a navigation card and one reading card with a heading, summary, and prose sections.
+cards. Editorial articles and workspace guides use a campaign hero and open reading layout; guides add a responsive sidebar and inline visual walkthroughs. Legal documents retain the plain navigation and reading cards.
 
 ## Access and rendering
 
@@ -29,7 +29,8 @@ that shell with a responsive navigation/reading layout and a consistent prose rh
 
 `apps/web/content/public/*.html` owns reviewed document content. `public:generate` renders that
 content through `PublicDocument` and the shared shadcn components into complete
-`apps/web/public/{about,docs,privacy,terms,data-use,sms,support}/index.html` documents. Both web dev
+seven legacy `apps/web/public/{about,docs,privacy,terms,data-use,sms,support}/index.html` documents
+and six nested `apps/web/public/docs/{today,mail,tasks,calendar,finances,agents}/index.html` guides. Both web dev
 and build regenerate them. Do not edit generated document shells. Policies remain readable without
 JavaScript, session state, API availability, or application setup. Vite serves the shared stylesheet
 in development and publishes its compiled asset link in production. Static pages derive their

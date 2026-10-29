@@ -1,7 +1,7 @@
 # Public documentation and Twilio submission
 
 Status: merged repository implementation; production publication and provider verification require evidence.
-Last reviewed: October 12, 2026.
+Last reviewed: October 29, 2026.
 
 ## Public contract
 
@@ -20,6 +20,7 @@ entry remains the application. Public page headers link home and to `/login`.
 | --- | --- |
 | `/about/` | Product identity, mission, workspaces, operator |
 | `/docs/` | Getting started, connections, delegation, help |
+| `/docs/{today,mail,tasks,calendar,finances,agents}/` | Individual visual workspace and agent-permission walkthroughs |
 | `/privacy/` | Collection, use, sharing, SMS consent, retention, rights requests |
 | `/terms/` | Service agreement, acceptable use, agents, SMS, limitations |
 | `/data-use/` | Plain-language data and agent-access explanation |
@@ -28,12 +29,12 @@ entry remains the application. Public page headers link home and to `/login`.
 
 Use the **actual deployed APP_BASE_URL** plus these paths for submission; do not substitute an API
 origin, localhost, or an unverified product domain. The documentation has no JavaScript or account
-requirement. Edit reviewed content in `apps/web/content/public`; `public:generate` renders all seven
-through the shared shadcn public layout before dev/build. Vite publishes compiled stylesheet links
+requirement. Edit reviewed content in `apps/web/content/public`; `public:generate` renders seven legacy documents and six nested guides
+through the shared public shell, editorial guide navigation and plain legal layout before dev/build. Vite publishes compiled stylesheet links
 for these documents; nginx serves directory indexes before the app
 fallback. Extensionless public URLs redirect to a relative trailing-slash path, preserving the
 visitor's HTTPS origin behind the gateway rather than exposing the container's HTTP port.
-`deploy/mac-mini/public-nginx.test.mjs` exercises all seven redirects and directory indexes using
+`deploy/mac-mini/public-nginx.test.mjs` exercises all thirteen document redirects and directory indexes using
 the production nginx image and configuration. The PWA navigation fallback excludes these paths. Full document links intentionally use
 anchors, not client-side routing. The sign-in footer and SMS enrollment link to the same documents.
 
@@ -41,7 +42,7 @@ The root product page is also rendered from `ProductLanding` during `public:gene
 embeds that shared markup in the root HTML before loading the client app, so the product page and
 its policy links remain readable without JavaScript. The generated fragment is ignored; edit the
 React component rather than maintaining a second copy of the landing text. Browser acceptance
-covers the root and all seven documents with JavaScript disabled on desktop and mobile.
+covers the root and all thirteen documents with JavaScript disabled on desktop and mobile.
 
 The external category is **“a personal harness.”** The landing page, about page, guide, and
 authentication brand panel explain context, tools, and controls in lowercase source copy.

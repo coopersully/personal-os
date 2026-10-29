@@ -176,7 +176,7 @@ function installCursor() {
     () => {
       if (cursor.hasAttribute("data-visible")) schedule();
     },
-    { passive: true, signal },
+    { passive: true, capture: true, signal },
   );
   finePointer.addEventListener("change", hide, { signal });
   accessibleCursor.addEventListener("change", hide, { signal });

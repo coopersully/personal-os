@@ -105,7 +105,6 @@ export function ProductLanding() {
             size="icon"
             aria-label={sceneryPaused ? "resume scenery" : "pause scenery"}
             title={sceneryPaused ? "resume scenery" : "pause scenery"}
-            aria-pressed={sceneryPaused}
             onClick={() => setSceneryPaused(!sceneryPaused)}
           >
             {sceneryPaused ? <PlayIcon aria-hidden="true" /> : <PauseIcon aria-hidden="true" />}

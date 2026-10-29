@@ -3,7 +3,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import { accessScopeSchema } from "@personal-os/domain";
 import { createPersonalOsMcpServer } from "../../apps/mcp/src/server.js";
-import { type IloToolName, iloToolCatalog } from "../../apps/mcp/src/tool-catalog.js";
+import { type PersonalOsToolName, personalOsToolCatalog } from "../../apps/mcp/src/tool-catalog.js";
 
 /** Discovery only. This deliberately cannot execute domain operations or count as runtime proof. */
 export async function discoverToolDictionary() {
@@ -20,7 +20,10 @@ export async function discoverToolDictionary() {
     const tools = (await client.listTools()).tools;
     return tools
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((tool) => ({ tool, definition: iloToolCatalog[tool.name as IloToolName] }));
+      .map((tool) => ({
+        tool,
+        definition: personalOsToolCatalog[tool.name as PersonalOsToolName],
+      }));
   } finally {
     await Promise.allSettled([client.close(), server.close()]);
   }

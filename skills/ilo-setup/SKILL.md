@@ -1,11 +1,11 @@
 ---
 name: ilo-setup
-description: Configure a user's Ilo domain preferences, source meanings, categories, rules, and attention workflow through a short adaptive interview. Use when a user connects Ilo to an agent, asks to set up or refine mail/calendar/reminder/task/finance behavior, wants the agent to learn what signal and noise mean to them, or wants to preview and install an Ilo automation rule.
+description: Configure a user's nohmi domain preferences, source meanings, categories, rules, and attention workflow through a short adaptive interview. Use when a user connects nohmi to an agent, asks to set up or refine mail/calendar/reminder/task/finance behavior, wants the agent to learn what signal and noise mean to them, or wants to preview and install a nohmi automation rule.
 ---
 
-# Ilo guided setup reference
+# nohmi guided setup reference
 
-Create durable preferences in Ilo so they remain consistent across agent hosts. Do not store the
+Create durable preferences in nohmi so they remain consistent across agent hosts. Do not store the
 user's personal preferences in this skill or rely on conversation memory as their source of truth.
 
 This skill is an optional compatibility reference. The authenticated `get_ilo_context` response
@@ -22,24 +22,24 @@ does not need to install this skill when it can call those tools.
    person or host requests context for a specific semantic step, pass its stable ID back as
    `stepId`; `selectedStepId` then identifies the requested view, but it does not advance the
    actual current step. Never infer completion from step order or conversation history.
-4. Work only with the scopes reported by Ilo. Explain missing capability instead of requesting
+4. Work only with the scopes reported by nohmi. Explain missing capability instead of requesting
    broader access automatically.
 5. Read the selected domain reference only when it adds detail needed by the current plan. Inspect
    a small, representative material sample and read full sensitive content only when summaries
    cannot answer the setup question.
-6. Ask the smallest useful set of questions after exhausting safe Ilo evidence. Prefer choices
+6. Ask the smallest useful set of questions after exhausting safe nohmi evidence. Prefer choices
    grounded in examples over abstract configuration, and ask one question at a time when the host
    supports conversation.
 7. Save a `draft` profile first and use `expectedVersion` when revising it. Summarize the inferred
    objective, source meanings, categories, instructions, and exceptions.
 8. Preview every executable rule against its documented bounded window before creating it. Recheck
    the saved rule immediately before activation.
-9. Preserve the approval boundary returned by Ilo. State what will happen automatically, what will
+9. Preserve the approval boundary returned by nohmi. State what will happen automatically, what will
    remain in review, and what will never happen.
-10. Call `get_ilo_setup` again after saving, approval, or any capability change. Finish only when Ilo
+10. Call `get_ilo_setup` again after saving, approval, or any capability change. Finish only when nohmi
    reports `complete`, or clearly explain the current blocked or human-owned action.
 
-Never treat an installed skill, broad token, or confident inference as user approval. Ilo's API
+Never treat an installed skill, broad token, or confident inference as user approval. nohmi's API
 policy, setup plan, profile approval, and rule state are authoritative. Use
 `get_agent_setup_status` only as an explicitly enabled compatibility status view when the
 orientation and setup-plan tools are absent.
@@ -47,7 +47,7 @@ orientation and setup-plan tools are absent.
 ## Use the shared object pattern
 
 - A **domain profile** records durable preferences and source context.
-- A **rule** records a domain-owned condition and action inside Ilo's common versioned envelope.
+- A **rule** records a domain-owned condition and action inside nohmi's common versioned envelope.
 - An **attention item** records an important, upcoming, follow-up, or post-run summary item.
 - An **audit event** is evidence of what actually happened.
 
@@ -78,4 +78,4 @@ Return:
 - The previewed candidate count.
 - Which behavior is active versus draft.
 - Any open attention items or approvals.
-- The Ilo action needed to pause, revise, or recover the setup.
+- The nohmi action needed to pause, revise, or recover the setup.

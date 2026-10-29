@@ -113,7 +113,7 @@ function CompletionConflict({
           <DialogTitle>Choose what happens to open Tasks</DialogTitle>
           <DialogDescription>
             The Project has {conflict.openContentCounts.tasks} open Tasks. Choose one of the
-            outcomes returned by ilo.
+            outcomes returned by nohmi.
           </DialogDescription>
         </DialogHeader>
         <MutationFeedback feedback={feedback ?? null} />

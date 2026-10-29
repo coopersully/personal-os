@@ -14,7 +14,7 @@ import {
 } from "@personal-os/domain";
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
-import { NohmiBrandMark } from "../../components/brand-marks.js";
+import { PersonalOsBrandMark } from "../../components/brand-marks.js";
 import {
   AlertTriangleIcon,
   CheckIcon,
@@ -528,7 +528,7 @@ export function RitualChecklist({
   const presentation = (
     <div className="ritual-presentation">
       <div className="ritual-logo">
-        <NohmiBrandMark symbol />
+        <PersonalOsBrandMark symbol />
       </div>
       <h1 className="sr-only">{occurrence.definition.title}</h1>
       {!preview && mainScreen ? (

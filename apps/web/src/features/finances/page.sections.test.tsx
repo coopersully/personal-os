@@ -1176,6 +1176,11 @@ describe("Finance section states", () => {
     expect(createObjectUrl).toHaveBeenCalledTimes(4);
     expect(revokeObjectUrl).toHaveBeenCalledTimes(4);
     expect(linkClick).toHaveBeenCalledTimes(4);
+    expect(linkClick.mock.contexts.map((link) => (link as HTMLAnchorElement).download)).toEqual(
+      ["transactions", "accounts", "budgets", "categories"].map((kind) =>
+        expect.stringMatching(new RegExp(`^nohmi-finances-${kind}-\\d{4}-\\d{2}-\\d{2}\\.csv$`)),
+      ),
+    );
   });
 
   it.each([

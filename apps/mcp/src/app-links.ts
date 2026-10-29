@@ -1,6 +1,6 @@
-import type { IloToolDefinition } from "./tool-catalog.js";
+import type { PersonalOsToolDefinition } from "./tool-catalog.js";
 
-export type IloAppLinks = {
+export type PersonalOsAppLinks = {
   activity: string;
   agentAccess: string;
   approvals: string;
@@ -42,10 +42,10 @@ export function resolveAppBaseUrl(
   return url.origin;
 }
 
-export function createIloAppLinks(
+export function createPersonalOsAppLinks(
   appBaseUrl: string,
-  domain: IloToolDefinition["domain"],
-): IloAppLinks {
+  domain: PersonalOsToolDefinition["domain"],
+): PersonalOsAppLinks {
   const approvalPath =
     {
       activity: "/activity",

@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import IloNative
+@testable import PersonalOsNative
 
 final class PetSilhouetteTests: XCTestCase {
   func testSettledPeekDoesNotKeepADisplayClockRunning() {

@@ -1,5 +1,5 @@
 import XCTest
-@testable import IloNative
+@testable import PersonalOsNative
 
 final class PetAppearanceTests: XCTestCase {
   func testSaveBeforeFinalPreviewPreventsLateRepaint() {

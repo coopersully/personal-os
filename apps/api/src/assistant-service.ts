@@ -20,7 +20,7 @@ import {
   type CreateAttentionItemInput,
   type DomainProfile,
   featureAccessPolicies,
-  type IloAgentContext,
+  type PersonalOsAgentContext,
   type UpdateAttentionItemInput,
   type UpsertDomainProfileInput,
 } from "@personal-os/domain";
@@ -274,7 +274,7 @@ export function createAssistantService({
   }
 
   return {
-    async getContext(principal: Principal): Promise<IloAgentContext> {
+    async getContext(principal: Principal): Promise<PersonalOsAgentContext> {
       const [user, readiness] = await Promise.all([
         db
           .select({ displayName: users.displayName, planningTimezone: users.planningTimezone })

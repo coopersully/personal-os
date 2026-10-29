@@ -82,7 +82,7 @@ pub fn run() {
             desktop_preview_environment
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build nohmi")
+        .expect("failed to build Personal OS")
         .run(|app, event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {

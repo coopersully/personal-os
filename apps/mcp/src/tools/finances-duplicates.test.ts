@@ -2,7 +2,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { createApiClient } from "@personal-os/api-client";
 import type { AccessScope } from "@personal-os/domain";
-import { createIloToolSurface } from "../tool-surface.js";
+import { createPersonalOsToolSurface } from "../tool-surface.js";
 import { registerFinanceManagementTools } from "./finances-management.js";
 
 const redundantAccountId = "11111111-1111-4111-8111-111111111111";
@@ -19,7 +19,7 @@ async function connect(scopes: AccessScope[] = fullScopes, readOnly = false) {
     fetch,
   });
   const server = new McpServer({ name: "duplicate-test", version: "1" });
-  const surface = createIloToolSurface(server, {
+  const surface = createPersonalOsToolSurface(server, {
     appBaseUrl: "https://example.test",
     includeCompatibility: false,
     readOnly,

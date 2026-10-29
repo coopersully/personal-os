@@ -9,11 +9,11 @@ vi.mock("../desktop/bridge.js", () => ({ isDesktop: mocks.desktop }));
 vi.mock("../desktop/ritual-bridge.js", () => ({ publishRitualSkyFrame: mocks.publish }));
 const sky = resolveRitualSky({ now: Date.parse("2026-10-29T12:00:00Z"), timeZone: "UTC" });
 const motion = { matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() };
-function Scene() {
+function Scene({ attached = true }: { attached?: boolean }) {
   const scene = useRef<HTMLDivElement>(null);
   useSecondaryRitualSky(scene, sky, "occurrence");
   return (
-    <div ref={scene}>
+    <div ref={attached ? scene : undefined}>
       <canvas className="ritual-clouds" data-sky-frame="0" width={10} height={10} />
     </div>
   );
@@ -98,4 +98,108 @@ it("keeps reduced-motion artwork still but republishes a manually moved cloud fr
     await vi.advanceTimersByTimeAsync(500);
   });
   expect(mocks.publish).toHaveBeenCalledTimes(2);
+});
+
+it("stays usable when the decorative projection has no canvas context", async () => {
+  vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(null);
+  const view = render(<Scene />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1500);
+  });
+  expect(view.container.querySelector(".ritual-clouds")).toBeInTheDocument();
+  expect(mocks.publish).not.toHaveBeenCalled();
+  expect(motion.addEventListener).not.toHaveBeenCalled();
+});
+
+it("waits for a painted cloud frame and visible geometry before sharing artwork", async () => {
+  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+  const view = render(<Scene />);
+  const cloud = view.container.querySelector<HTMLCanvasElement>("canvas")!;
+  delete cloud.dataset.skyFrame;
+  hidden.mockReturnValue(false);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(mocks.publish).not.toHaveBeenCalled();
+  cloud.dataset.skyFrame = "painted";
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+    width: 0,
+    height: 0,
+  } as DOMRect);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(mocks.publish).not.toHaveBeenCalled();
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+    width: 3840,
+    height: 2160,
+  } as DOMRect);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(mocks.publish).toHaveBeenCalledOnce();
+  expect(mocks.publish).toHaveBeenCalledWith(
+    "occurrence",
+    400,
+    240,
+    expect.any(Uint8ClampedArray),
+    sky.dark,
+  );
+  expect(mocks.publish.mock.calls[0]![3]).toHaveLength(400 * 240 * 4);
+});
+
+it("retries a rejected or failed native frame without freezing reduced-motion recovery", async () => {
+  motion.matches = true;
+  mocks.publish.mockRejectedValueOnce(new Error("bridge temporarily unavailable"));
+  mocks.publish.mockResolvedValueOnce(false);
+  render(<Scene />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(mocks.publish).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(mocks.publish).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(mocks.publish).toHaveBeenCalledTimes(3);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1500);
+  });
+  expect(mocks.publish).toHaveBeenCalledTimes(3);
+});
+
+it("refreshes a reduced-motion still on resize and removes that listener on close", async () => {
+  motion.matches = true;
+  const view = render(<Scene />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(mocks.publish).toHaveBeenCalledTimes(1);
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue({
+    width: 800,
+    height: 400,
+  } as DOMRect);
+  await act(async () => {
+    window.dispatchEvent(new Event("resize"));
+  });
+  expect(mocks.publish).toHaveBeenCalledTimes(2);
+  expect(mocks.publish.mock.calls[1]!.slice(1, 3)).toEqual([200, 100]);
+  view.unmount();
+  await act(async () => {
+    window.dispatchEvent(new Event("resize"));
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(mocks.publish).toHaveBeenCalledTimes(2);
+});
+
+it("does not start a projection until the illustrated surface is attached", async () => {
+  render(<Scene attached={false} />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1500);
+  });
+  expect(mocks.publish).not.toHaveBeenCalled();
+  expect(motion.addEventListener).not.toHaveBeenCalled();
 });

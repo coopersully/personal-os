@@ -200,7 +200,7 @@ for (const path of ["/", "/docs/mail/"]) {
     await expect
       .poll(() => nav.evaluate((node) => getComputedStyle(node).backdropFilter))
       .toBe("blur(24px) saturate(1.4)");
-    expect((await page.locator("header").boundingBox())?.y).toBe(0);
+    expect((await page.locator(".public-header").boundingBox())?.y).toBe(0);
     await page.screenshot({ path: test.info().outputPath("scrolled-nav.png") });
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect(nav).toHaveCSS("border-radius", "9999px");

@@ -12,7 +12,6 @@ import { PortfolioCursor } from "./components/portfolio-cursor/portfolio-cursor.
 import { queryWindowFocusPolicy } from "./features/desktop/query-policy.js";
 import { DesktopStartupGate } from "./features/desktop/updates.js";
 import { createAppQueryClient } from "./lib/query-client.js";
-import "./styles.css";
 
 const desktop = "__TAURI_INTERNALS__" in window;
 document.documentElement.classList.toggle("desktop", desktop);

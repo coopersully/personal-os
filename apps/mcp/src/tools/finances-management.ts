@@ -173,7 +173,7 @@ export function registerFinanceManagementTools(server: McpServer, api: PersonalO
     {
       title: "Create finance category",
       description:
-        "Create a named financial category; inspect get_finance_categories first to avoid duplicates. Requires finances:write, finances:execute and enabled review bypass for agents.",
+        "Create a named financial category; inspect get_finance_categories first to avoid duplicates. Category icons are assigned automatically from meaning; do not ask about or narrate cosmetic icon choices unless the user requests them. Requires finances:write, finances:execute and enabled review bypass for agents.",
       inputSchema: createFinanceCategoryInputSchema,
     },
     async (input) => apiResult(() => api.createFinanceCategory(input)),

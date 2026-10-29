@@ -35,16 +35,17 @@ import {
   SunIcon,
   XIcon,
 } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
@@ -149,8 +150,11 @@ export function RitualHistory() {
   const history = useQuery({
     queryKey: ["ritual-history", filters, cursors[page]],
     queryFn: () => api.listRitualHistory(cursors[page], filters),
+    // A browser-zone request can select a different week before the profile arrives.
+    enabled: profile.data !== undefined,
   });
-  const visible = history.data?.items ?? [];
+  const availability = profile.data === undefined ? profile : history;
+  const visible = profile.data === undefined ? [] : (history.data?.items ?? []);
   const total = history.data?.total;
   const hasRows = visible.length > 0;
   const constrained = Boolean(search.trim() || kind || status);
@@ -409,9 +413,9 @@ export function RitualHistory() {
       </search>
       <section aria-label="History results" className="flex min-w-0 flex-col gap-3">
         {!hasRows ? <div className="text-xs text-muted-foreground">{periodNavigation}</div> : null}
-        {history.isPending ? <DataViewLoading label="Loading ritual history" /> : null}
+        {availability.isPending ? <DataViewLoading label="Loading ritual history" /> : null}
         <DataViewRecovery
-          query={history}
+          query={availability}
           title="Couldn’t load ritual history."
           unavailableLabel="History unavailable"
         />
@@ -430,7 +434,7 @@ export function RitualHistory() {
             caption={periodNavigation}
           />
         ) : null}
-        {!history.isPending && !history.isError && !visible.length ? (
+        {!availability.isPending && !availability.isError && !visible.length ? (
           <DataViewEmpty
             title={
               constrained
@@ -541,7 +545,9 @@ export function RitualHistory() {
                 {statusLabel(selected.status)}
               </DialogDescription>
             </DialogHeader>
-            <HistoryDetails o={selected} />
+            <ResponsiveDialogBody>
+              <HistoryDetails o={selected} />
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button onClick={() => setSelected(null)}>Close</Button>
             </DialogFooter>

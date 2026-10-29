@@ -8,10 +8,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
+import { QueryFeedback } from "@/components/async-state";
 import { CurrencyInput } from "@/components/currency-input";
+import { FloatingActionRegion, FloatingActions } from "@/components/floating-actions";
 import { HistoryIcon } from "@/components/icons";
 import { MutationFeedback } from "@/components/mutation-feedback";
 import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
@@ -27,16 +35,6 @@ import {
   FieldLabel,
   FieldSet,
 } from "@/components/settings-field";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
@@ -48,6 +46,7 @@ import { FeedbackForm } from "../../components/feedback-form.js";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { financeAccountNeedsConnectionAttention } from "./attention";
+import { FinanceSection } from "./finance-section";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
@@ -87,8 +86,13 @@ export function FinanceAccountsPage() {
   const [editing, setEditing] = useState<FinanceAccount | null>(null);
   return (
     <div className="flex flex-col gap-5">
-      {canImport ? (
-        <WorkspaceHeaderControls label="Account controls">
+      <FloatingActionRegion align="end">
+        <FloatingActions aria-label="Account actions">
+          <FinanceCreateButton kind="account" />
+        </FloatingActions>
+      </FloatingActionRegion>
+      <WorkspaceHeaderControls label="Account controls">
+        {canImport ? (
           <Button
             asChild
             size="icon"
@@ -100,37 +104,22 @@ export function FinanceAccountsPage() {
               <HistoryIcon />
             </Link>
           </Button>
-        </WorkspaceHeaderControls>
-      ) : null}
-      <Card>
-        <CardHeader>
-          <CardTitle>Accounts</CardTitle>
-          <CardAction>
-            <FinanceCreateButton kind="account" />
-          </CardAction>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+        ) : null}
+      </WorkspaceHeaderControls>
+      <FinanceSection
+        title="Accounts"
+        description={
+          health.data
+            ? `${health.data.balanceOnlyAccounts} balance-only ${health.data.balanceOnlyAccounts === 1 ? "account" : "accounts"} · Balances are tracked without transaction history.`
+            : undefined
+        }
+      >
+        <div className="flex min-w-0 flex-col gap-4">
           <FinanceSourceState label="Accounts" query={accounts} />
           {accounts.data ? (
             <>
               <MutationFeedback feedback={sync.feedback} />
-              {health.isError ? (
-                <Alert variant="warning">
-                  <AlertTitle>Account coverage could not load</AlertTitle>
-                  <AlertDescription>
-                    <Button variant="outline" onClick={() => void health.refetch()}>
-                      Retry account coverage
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              ) : null}
-              {health.data ? (
-                <p className="text-sm text-muted-foreground">
-                  {health.data.balanceOnlyAccounts} balance-only{" "}
-                  {health.data.balanceOnlyAccounts === 1 ? "account" : "accounts"} · Balances are
-                  tracked without transaction history.
-                </p>
-              ) : null}
+              <QueryFeedback query={health} title="Couldn’t load account coverage." />
               {accounts.data.accounts.length ? (
                 <ItemGroup aria-label="Financial accounts" className="finance-account-grid">
                   {accounts.data.accounts.map((account) => {
@@ -185,8 +174,8 @@ export function FinanceAccountsPage() {
               )}
             </>
           ) : null}
-        </CardContent>
-      </Card>
+        </div>
+      </FinanceSection>
       {editing ? (
         <AccountEditor
           account={editing}
@@ -324,176 +313,176 @@ function AccountEditor({
         if (!open && !save.isPending && !disconnect.isPending) onClose();
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent data-finance-dialog data-finance-size="default">
         <DialogHeader>
           <DialogTitle>Edit account</DialogTitle>
           <DialogDescription>
             Correct how {account.name} contributes to your financial position.
           </DialogDescription>
         </DialogHeader>
-        <FeedbackForm
-          feedback={save.feedback}
-          className="flex flex-col gap-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (validShare && hasChanges) save.mutate();
-          }}
-        >
-          <FieldSet disabled={save.isPending}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="account-name">Account name</FieldLabel>
-                <Input
-                  name="name"
-                  id="account-name"
-                  maxLength={160}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                  value={name}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="account-institution">Institution</FieldLabel>
-                <Input
-                  name="institution"
-                  id="account-institution"
-                  maxLength={160}
-                  onChange={(event) => setInstitution(event.target.value)}
-                  required
-                  value={institution}
-                />
-              </Field>
-              <AccountKindField onChange={setKind} value={kind} />
-              <Field>
-                <FieldLabel htmlFor="account-ownership">Ownership</FieldLabel>
-                <NativeSelect
-                  name="ownershipType"
-                  id="account-ownership"
-                  onChange={(event) =>
-                    setOwnership(event.target.value as FinanceAccountOwnershipType)
-                  }
-                  value={ownership}
-                >
-                  <NativeSelectOption value="unknown">Needs confirmation</NativeSelectOption>
-                  <NativeSelectOption value="individual">Individual</NativeSelectOption>
-                  <NativeSelectOption value="joint">Joint</NativeSelectOption>
-                </NativeSelect>
-              </Field>
-              {ownership === "joint" ? (
-                <Field>
-                  <FieldLabel htmlFor="account-share">Your ownership share (%)</FieldLabel>
-                  <Input
-                    name="ownershipShare"
-                    id="account-share"
-                    min="0.01"
-                    max="100"
-                    step="0.01"
-                    type="number"
-                    required
-                    value={share}
-                    onChange={(event) => setShare(event.target.value)}
-                  />
-                  <FieldDescription>
-                    Only this share contributes to your personal position.
-                  </FieldDescription>
-                </Field>
-              ) : null}
-              <Field orientation="horizontal">
-                <Switch
-                  checked={included}
-                  id="account-included"
-                  onCheckedChange={(checked) => setIncluded(checked === true)}
-                />
-                <FieldLabel htmlFor="account-included">Include in planning</FieldLabel>
-              </Field>
-              {account.provider === "manual" ? (
-                <Field>
-                  <FieldLabel htmlFor="account-balance">Balance</FieldLabel>
-                  <CurrencyInput
-                    name="balance"
-                    id="account-balance"
-                    currencyCode={account.currencyCode}
-                    min={Number.NEGATIVE_INFINITY}
-                    value={balance}
-                    onValueChange={setBalance}
-                  />
-                  <FieldDescription>Leave blank when the balance is unavailable.</FieldDescription>
-                </Field>
-              ) : null}
-            </FieldGroup>
-          </FieldSet>
+        <div data-responsive-slot="layout">
+          <FeedbackForm
+            feedback={save.feedback}
+            className="flex flex-col gap-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (validShare && hasChanges) save.mutate();
+            }}
+          >
+            <ResponsiveDialogBody>
+              <FieldSet disabled={save.isPending}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="account-name">Account name</FieldLabel>
+                    <Input
+                      name="name"
+                      id="account-name"
+                      maxLength={160}
+                      onChange={(event) => setName(event.target.value)}
+                      required
+                      value={name}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="account-institution">Institution</FieldLabel>
+                    <Input
+                      name="institution"
+                      id="account-institution"
+                      maxLength={160}
+                      onChange={(event) => setInstitution(event.target.value)}
+                      required
+                      value={institution}
+                    />
+                  </Field>
+                  <AccountKindField onChange={setKind} value={kind} />
+                  <Field>
+                    <FieldLabel htmlFor="account-ownership">Ownership</FieldLabel>
+                    <NativeSelect
+                      name="ownershipType"
+                      id="account-ownership"
+                      onChange={(event) =>
+                        setOwnership(event.target.value as FinanceAccountOwnershipType)
+                      }
+                      value={ownership}
+                    >
+                      <NativeSelectOption value="unknown">Needs confirmation</NativeSelectOption>
+                      <NativeSelectOption value="individual">Individual</NativeSelectOption>
+                      <NativeSelectOption value="joint">Joint</NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                  {ownership === "joint" ? (
+                    <Field>
+                      <FieldLabel htmlFor="account-share">Your ownership share (%)</FieldLabel>
+                      <Input
+                        name="ownershipShare"
+                        id="account-share"
+                        min="0.01"
+                        max="100"
+                        step="0.01"
+                        type="number"
+                        required
+                        value={share}
+                        onChange={(event) => setShare(event.target.value)}
+                      />
+                      <FieldDescription>
+                        Only this share contributes to your personal position.
+                      </FieldDescription>
+                    </Field>
+                  ) : null}
+                  <Field orientation="horizontal">
+                    <Switch
+                      checked={included}
+                      id="account-included"
+                      onCheckedChange={(checked) => setIncluded(checked === true)}
+                    />
+                    <FieldLabel htmlFor="account-included">Include in planning</FieldLabel>
+                  </Field>
+                  {account.provider === "manual" ? (
+                    <Field>
+                      <FieldLabel htmlFor="account-balance">Balance</FieldLabel>
+                      <CurrencyInput
+                        name="balance"
+                        id="account-balance"
+                        currencyCode={account.currencyCode}
+                        min={Number.NEGATIVE_INFINITY}
+                        value={balance}
+                        onValueChange={setBalance}
+                      />
+                      <FieldDescription>
+                        Leave blank when the balance is unavailable.
+                      </FieldDescription>
+                    </Field>
+                  ) : null}
+                </FieldGroup>
+              </FieldSet>
 
-          {save.feedback?.kind === "conflict" ? (
-            <Button onClick={() => void onReload()} size="sm" type="button" variant="outline">
-              Reload account
-            </Button>
-          ) : null}
-          <DialogFooter>
-            {canDisconnect ? (
+              {save.feedback?.kind === "conflict" ? (
+                <Button onClick={() => void onReload()} size="sm" type="button" variant="outline">
+                  Reload account
+                </Button>
+              ) : null}
+            </ResponsiveDialogBody>
+            <DialogFooter>
+              {canDisconnect ? (
+                <Button
+                  disabled={save.isPending || disconnect.isPending}
+                  onClick={() => setConfirmingDisconnect(true)}
+                  type="button"
+                  variant="destructive"
+                >
+                  Stop tracking account
+                </Button>
+              ) : null}
               <Button
                 disabled={save.isPending || disconnect.isPending}
-                onClick={() => setConfirmingDisconnect(true)}
-                type="button"
-                variant="destructive"
-              >
-                Stop tracking account
-              </Button>
-            ) : null}
-            <Button
-              disabled={save.isPending || disconnect.isPending}
-              onClick={onClose}
-              type="button"
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button disabled={save.isPending || !hasChanges} type="submit">
-              {save.isPending ? "Saving account…" : "Save account"}
-            </Button>
-          </DialogFooter>
-        </FeedbackForm>
-        <Dialog
-          open={confirmingDisconnect}
-          onOpenChange={(open) => {
-            if (!disconnect.isPending) setConfirmingDisconnect(open);
-          }}
-        >
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Stop tracking {account.name}?</DialogTitle>
-              <DialogDescription>
-                nohmi will stop using this account locally and keep its ledger history. Other
-                accounts at this institution stay connected, so Plaid may continue sending this
-                account's data through their shared connection. This does not revoke access at your
-                institution. Reconnecting later requires your consent.
-              </DialogDescription>
-            </DialogHeader>
-            {disconnect.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>Account is still tracked</AlertTitle>
-                <AlertDescription>{disconnect.feedback?.message}</AlertDescription>
-              </Alert>
-            ) : null}
-            <DialogFooter>
-              <Button
-                disabled={disconnect.isPending}
-                onClick={() => setConfirmingDisconnect(false)}
+                onClick={onClose}
                 type="button"
                 variant="outline"
               >
-                Keep connected
+                Cancel
               </Button>
-              <Button
-                disabled={disconnect.isPending}
-                onClick={() => disconnect.mutate()}
-                type="button"
-                variant="destructive"
-              >
-                {disconnect.isPending ? "Stopping…" : "Stop tracking account"}
+              <Button disabled={save.isPending || !hasChanges} type="submit">
+                {save.isPending ? "Saving account…" : "Save account"}
               </Button>
             </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          </FeedbackForm>
+          <Dialog
+            open={confirmingDisconnect}
+            onOpenChange={(open) => {
+              if (!disconnect.isPending) setConfirmingDisconnect(open);
+            }}
+          >
+            <DialogContent data-finance-dialog data-finance-size="default">
+              <DialogHeader>
+                <DialogTitle>Stop tracking {account.name}?</DialogTitle>
+                <DialogDescription>
+                  nohmi will stop using this account locally and keep its ledger history. Other
+                  accounts at this institution stay connected, so Plaid may continue sending this
+                  account's data through their shared connection. This does not revoke access at
+                  your institution. Reconnecting later requires your consent.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  disabled={disconnect.isPending}
+                  onClick={() => setConfirmingDisconnect(false)}
+                  type="button"
+                  variant="outline"
+                >
+                  Keep connected
+                </Button>
+                <Button
+                  disabled={disconnect.isPending}
+                  onClick={() => disconnect.mutate()}
+                  type="button"
+                  variant="destructive"
+                >
+                  {disconnect.isPending ? "Stopping…" : "Stop tracking account"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -543,7 +532,7 @@ function ManualAccountForm({ onClose }: { onClose: () => void }) {
         if (!open && !create.isPending) onClose();
       }}
     >
-      <ResponsiveDialogContent>
+      <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle>Track account manually</ResponsiveDialogTitle>
           <ResponsiveDialogDescription>

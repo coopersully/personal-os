@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { automationHostTriggerSchema } from "../automation-host-continuation.js";
 import { idSchema, isoDateTimeSchema } from "../common.js";
+import { maintenanceRunStatusSchema } from "../maintenance.js";
 
 /** Decimal strings preserve PostgreSQL bigint sequences across JSON clients. */
 export const financeConversationSequenceSchema = z
@@ -20,6 +22,26 @@ export const financeConversationReadinessSchema = z
     messageProtocolVersion: z.string().min(1).max(100),
     messageCapability: z.enum(["unverified", "verified", "expired", "protocol_upgrade_required"]),
     canSend: z.boolean(),
+    /** The server-selected host; older clients may omit this additive projection. */
+    host: z
+      .object({
+        scheduleId: idSchema,
+        connectionId: idSchema,
+        label: z.string().min(1).max(100),
+        trigger: automationHostTriggerSchema,
+        nextExpectedAt: isoDateTimeSchema.nullable(),
+        latestRun: z
+          .object({
+            id: idSchema,
+            status: maintenanceRunStatusSchema,
+            updatedAt: isoDateTimeSchema,
+            failureMessage: z.string().max(1000).nullable().optional(),
+          })
+          .strict()
+          .nullable(),
+      })
+      .strict()
+      .optional(),
     reason: z.enum([
       "ready",
       "registration_missing",
@@ -163,14 +185,23 @@ export const financeConversationProofOperationSchema = z.discriminatedUnion("kin
     .object({
       kind: z.literal("acknowledge"),
       challengeId: idSchema,
-      nonce: z.string().min(1).max(256),
+      nonce: z
+        .string()
+        .min(1)
+        .max(256)
+        .refine((value) => value.length <= 256, "Nonce exceeds the length limit."),
     })
     .strict(),
   z
     .object({
       kind: z.literal("respond"),
       challengeId: idSchema,
-      response: z.string().trim().min(1).max(1000),
+      response: z
+        .string()
+        .trim()
+        .min(1)
+        .max(1000)
+        .refine((value) => value.length <= 1000, "Response exceeds the length limit."),
     })
     .strict(),
 ]);
@@ -180,7 +211,11 @@ export type FinanceConversationProofOperation = z.infer<
 export const financeConversationChallengeSchema = z
   .object({
     challengeId: idSchema,
-    nonce: z.string().min(1).max(256),
+    nonce: z
+      .string()
+      .min(1)
+      .max(256)
+      .refine((value) => value.length <= 256, "Nonce exceeds the length limit."),
     protocolVersion: z.string().min(1).max(100),
     expiresAt: isoDateTimeSchema,
   })
@@ -191,7 +226,11 @@ export const financeConversationProofResultSchema = z
     challengeId: idSchema,
     protocolVersion: z.string().min(1).max(100),
     verified: z.boolean(),
-    nonce: z.string().max(256).optional(),
+    nonce: z
+      .string()
+      .max(256)
+      .refine((value) => value.length <= 256, "Nonce exceeds the length limit.")
+      .optional(),
   })
   .strict();
 export type FinanceConversationProofResult = z.infer<typeof financeConversationProofResultSchema>;

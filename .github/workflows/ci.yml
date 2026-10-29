@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      required_jobs: ${{ steps.scope.outputs.required_jobs }}
       full: ${{ steps.scope.outputs.full }}
       repo: ${{ steps.scope.outputs.repo }}
       terraform: ${{ steps.scope.outputs.terraform }}
@@ -43,31 +44,37 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          changed_files="$RUNNER_TEMP/changed-files.txt"
           scope_json="$RUNNER_TEMP/ci-scope.json"
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            if ! git diff --name-only --diff-filter=ACMRD "$BASE_SHA...$HEAD_SHA" > "$changed_files"; then
-              echo "Unable to calculate the pull-request diff; selecting full CI." >&2
-              : > "$changed_files"
-            fi
-          else
-            : > "$changed_files"
+          scope_args=(--base "$BASE_SHA" --head "$HEAD_SHA")
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            scope_args=(--github-push)
           fi
           node .github/scripts/ci-scope.mjs \
-            --files "$changed_files" \
-            --json \
-            --github-output "$GITHUB_OUTPUT" | tee "$scope_json"
+            "${scope_args[@]}" \
+            --json --github-output "$GITHUB_OUTPUT" | tee "$scope_json"
           {
-            echo "## CI scope (shadow mode)"
+            echo "## CI scope"
             echo '```json'
             cat "$scope_json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Record source event and canonical scope
+        if: github.event_name == 'pull_request'
+        run: node .github/scripts/source-receipt.mjs "$RUNNER_TEMP/source-candidate.json"
+      - name: Retain attempt-specific source receipt
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/source-candidate.json
+          if-no-files-found: error
+          retention-days: 7
+
   infrastructure:
     name: Terraform
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.terraform == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'infrastructure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -84,7 +91,7 @@ jobs:
   repository:
     name: Repository contracts
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.repo == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'repository') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -100,7 +107,7 @@ jobs:
   lint-and-format:
     name: Lint and format
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'lint-and-format') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -118,7 +125,7 @@ jobs:
   quality:
     name: Node quality
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true' || needs.changes.outputs.database == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'quality') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -131,13 +138,13 @@ jobs:
           cache: pnpm
           node-version: 22
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check:node
       - run: pnpm audit --prod
+      - run: pnpm check:node
 
   browser:
-    name: Browser acceptance (${{ matrix.project }})
+    name: Browser acceptance (${{ matrix.project }}, ${{ matrix.shard }}/4)
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.browser == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'browser') }}
     runs-on: ubuntu-latest
     # Leave setup/download headroom outside the bounded test execution.
     timeout-minutes: 45
@@ -145,6 +152,7 @@ jobs:
       fail-fast: false
       matrix:
         project: [desktop-chromium, mobile-chromium]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -160,12 +168,12 @@ jobs:
           grep -rl "dl.google.com/linux/chrome" /etc/apt/sources.list.d 2>/dev/null \
             | xargs -r sudo rm -f
           pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e --project=${{ matrix.project }}
+      - run: pnpm test:e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/4
         timeout-minutes: 30
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report-${{ matrix.project }}
+          name: playwright-report-${{ matrix.project }}-${{ matrix.shard }}
           path: |
             playwright-report
             test-results
@@ -173,7 +181,7 @@ jobs:
   desktop:
     name: Desktop (${{ matrix.os }})
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.desktop == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'desktop') }}
     strategy:
       fail-fast: false
       matrix:
@@ -253,8 +261,8 @@ jobs:
               "",
             ].join("\n"),
           );
-          if (!requiredGate(results)) {
-            console.error("One or more required CI dependencies did not succeed or skip.", results);
+          if (!requiredGate(results, JSON.parse(scope))) {
+            console.error("One or more required CI dependencies are missing or did not satisfy the selected scope.", results);
             process.exit(1);
           }
           NODE

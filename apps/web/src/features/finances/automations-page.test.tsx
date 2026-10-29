@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -65,8 +65,11 @@ function OwnerReadiness() {
   });
   return <p>{query.data?.canSend ? "Owner Chat available" : "Owner Chat locked"}</p>;
 }
-function open(extra?: ReactNode, route = "/finances/automations") {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function open(
+  extra?: ReactNode,
+  route = "/finances/automations",
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   client.setQueryData(["me"], { id: "owner-a" });
   const user = userEvent.setup();
   render(
@@ -91,12 +94,15 @@ beforeEach(() => {
 });
 it("separates server schedule health, observed evidence, and aggregate Chat readiness", async () => {
   api.getFinanceConversationReadiness.mockResolvedValue({ ...readiness, canSend: true });
-  open();
+  const user = open();
   expect(await screen.findByText(/Chat is available/)).toBeInTheDocument();
   expect(await screen.findByText(/missed its expected check-in/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Review host setup" }));
   expect(screen.getByText(/Grace: 60 minutes/)).toBeInTheDocument();
   expect(screen.getByText(/Successful maintenance is not established/)).toBeInTheDocument();
-  expect(screen.getByText(/Message access for this host: unverified/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/Message access for this host: unverified/, { selector: "p" }),
+  ).toBeInTheDocument();
 });
 it("does not invent an event countdown", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([status("active", true)]);
@@ -156,10 +162,32 @@ it("registers only existing authorized connections and retains a failed draft wi
     }),
   );
 });
-it("binds setup with the original registration revision and expected state", async () => {
-  api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending", true)]);
+it.each([
+  "event",
+  "scheduled",
+])("binds %s setup with the original registration revision and expected state", async (type) => {
+  const pending = status("setup_pending", true);
+  api.listAutomationHostSchedules.mockResolvedValue([
+    {
+      ...pending,
+      schedule: {
+        ...pending.schedule,
+        trigger:
+          type === "scheduled"
+            ? { type, localTimes: ["08:00", "20:00"], timeZone: "America/New_York" }
+            : pending.schedule.trigger,
+      },
+    },
+  ]);
   const user = open();
   await user.click(await screen.findByRole("button", { name: "Finish setup" }));
+  if (type === "scheduled") {
+    expect(
+      screen.getByText(/Create the Claude schedule at 08:00 and 20:00 in America\/New_York/),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Next run in your local time")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
+  }
   await user.type(screen.getByLabelText("Host automation identifier"), "real-host-id");
   await user.click(screen.getByRole("button", { name: "Bind existing host job" }));
   await waitFor(() =>
@@ -173,7 +201,8 @@ it("binds setup with the original registration revision and expected state", asy
 });
 it("requires removal confirmation and fences the original state/version", async () => {
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Remove registration" }));
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
+  await user.click(screen.getByRole("button", { name: "Remove registration" }));
   expect(api.revokeAutomationHostSchedule).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Confirm removal" }));
   await waitFor(() =>
@@ -307,6 +336,7 @@ it("keeps saved instructions neutral when the actual host is already verified", 
   });
   const user = open();
   await screen.findByText(/Message access for this host: verified/);
+  await user.click(screen.getByRole("button", { name: "Review host setup" }));
   await user.click(screen.getByRole("button", { name: "Instructions" }));
   expect(screen.getByRole("dialog", { name: "Finance host instructions" })).toBeInTheDocument();
   expect(screen.getByText(/Installation status is unknown/)).toBeInTheDocument();
@@ -348,7 +378,8 @@ it("refreshes actual onboarding projection only after a confirmed host mutation"
   api.revokeAutomationHostSchedule.mockRejectedValueOnce(new Error("Not removed"));
   const user = open(<ManualControlsReadiness />);
   await screen.findByText("Manual capture hidden");
-  await user.click(await screen.findByRole("button", { name: "Remove registration" }));
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
+  await user.click(screen.getByRole("button", { name: "Remove registration" }));
   await user.click(screen.getByRole("button", { name: "Confirm removal" }));
   await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Not removed", { id: "notice" }));
   expect(api.getFinanceOnboarding).toHaveBeenCalledTimes(1);
@@ -370,7 +401,8 @@ it("shows an honest empty registration list", async () => {
 it("cancels pending setup with the original version and closes after confirmation", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending")]);
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Cancel setup" }));
+  await user.click(await screen.findByRole("button", { name: "Finish setup" }));
+  await user.click(screen.getByRole("button", { name: "Cancel setup" }));
   await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
   await waitFor(() =>
     expect(api.cancelAutomationHostSchedule).toHaveBeenCalledWith("schedule-a", {
@@ -378,7 +410,9 @@ it("cancels pending setup with the original version and closes after confirmatio
       expectedState: "setup_pending",
     }),
   );
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Cancel this setup?" })).not.toBeInTheDocument(),
+  );
 });
 it("saves a renamed paused registration and preserves revision fencing", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([status("paused")]);
@@ -399,7 +433,8 @@ it("uses safe fallback feedback for a non-Error failure and retains cancellation
   api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending")]);
   api.cancelAutomationHostSchedule.mockRejectedValue({ secret: "must not render" });
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Cancel setup" }));
+  await user.click(await screen.findByRole("button", { name: "Finish setup" }));
+  await user.click(screen.getByRole("button", { name: "Cancel setup" }));
   await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
   await waitFor(() =>
     expect(toast.error).toHaveBeenCalledWith(
@@ -436,11 +471,12 @@ it("reports missing observations and disables verification for an unavailable co
       },
     },
   ]);
-  open();
+  const user = open();
   expect(await screen.findByText(/original host connection is unavailable/)).toBeInTheDocument();
   expect(screen.getByText(/Next expected start: Not reported/)).toBeInTheDocument();
-  expect(screen.getByText(/Host observation: Not reported/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Verify message access" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Review host setup" }));
+  expect(screen.getByText(/Host observation: Not reported/)).toBeInTheDocument();
   expect(screen.queryByText(/Grace:/)).not.toBeInTheDocument();
 });
 it.each([
@@ -459,6 +495,11 @@ it.each([
 
 it("routes an unavailable original connection to reconnection without offering verification", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([{ ...status(), connectionAvailable: false }]);
+  api.getFinanceConversationHostReadiness.mockResolvedValue({
+    ...readiness,
+    reason: "connection_disconnected",
+    recovery: "reconnect",
+  });
   open();
   const reconnect = await screen.findByRole("link", { name: "Reconnect host" });
   expect(reconnect).toHaveAttribute("href", "/settings?section=agent-connections");
@@ -477,6 +518,11 @@ it.each([
     reason: "connection_disconnected",
   });
   api.listAutomationHostSchedules.mockResolvedValue([{ ...status(), connectionAvailable: false }]);
+  api.getFinanceConversationHostReadiness.mockResolvedValue({
+    ...readiness,
+    reason: "connection_disconnected",
+    recovery: "reconnect",
+  });
   open(
     undefined,
     `/finances/automations${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`,
@@ -550,4 +596,287 @@ it("uses the actual registration control when no host is registered", async () =
   await user.click(screen.getByRole("button", { name: "Register automation" }));
   expect(screen.getByRole("dialog", { name: "Register Finance automation" })).toBeInTheDocument();
   expect(api.createAutomationHostSchedule).not.toHaveBeenCalled();
+});
+
+it("shows the shared agent identity without replacing automation or host state", async () => {
+  const { agentAccountFixture } = await import("../../test-fixtures/agent-account");
+  api.listAutomationHostSchedules.mockResolvedValue([
+    { ...status(), agentAccount: agentAccountFixture },
+  ]);
+  open();
+  expect(await screen.findByText("Cedar Fox")).toBeVisible();
+  expect(screen.getByText("Codex · Personal")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Finance host" })).toBeVisible();
+  expect(screen.getByText(/This host missed its expected check-in/)).toBeVisible();
+});
+
+it.each([
+  { localTimes: ["08:00", "20:00"] },
+  { localTimes: ["07:30", "19:45"] },
+])("registers daily Claude wall times $localTimes without interval or API credentials", async ({
+  localTimes,
+}) => {
+  api.createAutomationHostSchedule.mockResolvedValue({});
+  const user = open();
+  await user.click(screen.getByRole("button", { name: "Register automation" }));
+  await user.selectOptions(screen.getByLabelText("Host"), "claude_scheduled");
+  await user.selectOptions(
+    await screen.findByLabelText("Authorized connection"),
+    "connection-original",
+  );
+  await user.clear(screen.getByLabelText("Timezone"));
+  await user.type(screen.getByLabelText("Timezone"), "America/New_York");
+  await user.clear(screen.getByLabelText("Daily local times (HH:mm, comma-separated)"));
+  await user.type(
+    screen.getByLabelText("Daily local times (HH:mm, comma-separated)"),
+    localTimes.join(", "),
+  );
+  expect(screen.queryByLabelText("Interval in minutes")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Maximum event latency in minutes")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Register expected schedule" }));
+  await waitFor(() =>
+    expect(api.createAutomationHostSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostSurface: "claude_code_routine",
+        tenantAuthorizationConnectionId: "connection-original",
+        trigger: {
+          type: "scheduled",
+          localTimes,
+          timeZone: "America/New_York",
+        },
+      }),
+    ),
+  );
+  expect(toast.success).toHaveBeenCalledWith(
+    "Automation registered. Set it up in your host.",
+    expect.anything(),
+  );
+  expect(
+    screen.queryByText("Automation registered. Set it up in your host."),
+  ).not.toBeInTheDocument();
+});
+it("shows scheduled cadence and delayed continuation without an API token form", async () => {
+  const scheduled = status("active", true);
+  api.listAutomationHostSchedules.mockResolvedValue([
+    {
+      ...scheduled,
+      schedule: {
+        ...scheduled.schedule,
+        trigger: {
+          type: "scheduled",
+          localTimes: ["08:00", "20:00"],
+          timeZone: "America/New_York",
+        },
+      },
+    },
+  ]);
+  const user = open();
+  expect(await screen.findByText(/Daily at 08:00 and 20:00/)).toBeInTheDocument();
+  expect(screen.getByText(/Projected next start/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Review host setup" }));
+  expect(
+    screen.getByText(/Saved answers wait for the next scheduled invocation/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Finance host" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
+});
+
+it("shows the API token control for an event routine inside its setup dialog", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([status("active", true)]);
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
+  expect(screen.getByRole("dialog", { name: "Finance host" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Routine API trigger token")).toBeInTheDocument();
+});
+it("formats projected starts and grace deadlines in the declared zone instead of the browser zone", async () => {
+  // Model a Los Angeles browser even when the test runner's host uses another timezone.
+  const format = Date.prototype.toLocaleString;
+  const browser = vi.spyOn(Date.prototype, "toLocaleString").mockImplementation(function (
+    this: Date,
+    locales,
+    options,
+  ) {
+    return format.call(this, locales, { timeZone: "America/Los_Angeles", ...options });
+  });
+  try {
+    const scheduled = status("active", true);
+    api.listAutomationHostSchedules.mockResolvedValue([
+      {
+        ...scheduled,
+        schedule: {
+          ...scheduled.schedule,
+          trigger: {
+            type: "scheduled",
+            localTimes: ["08:00", "20:00"],
+            timeZone: "America/New_York",
+          },
+        },
+        health: {
+          ...scheduled.health,
+          nextExpectedAt: "2026-10-18T12:00:00Z",
+          overdueAt: "2026-10-18T12:15:00Z",
+          graceMilliseconds: 900000,
+        },
+      },
+    ]);
+    const user = open();
+    const projected = await screen.findByText(/Projected next start/);
+    expect(projected).toHaveTextContent("8:00:00 AM EDT (America/New_York)");
+    await user.click(screen.getByRole("button", { name: "Review host setup" }));
+    expect(screen.getByText(/Overdue threshold/)).toHaveTextContent(
+      "8:15:00 AM EDT (America/New_York)",
+    );
+    expect(projected).not.toHaveTextContent("5:00:00 AM");
+  } finally {
+    browser.mockRestore();
+  }
+});
+
+it("retains event registration with a chosen maximum latency", async () => {
+  api.createAutomationHostSchedule.mockResolvedValue({});
+  const user = open();
+  await user.click(screen.getByRole("button", { name: "Register automation" }));
+  await user.selectOptions(screen.getByLabelText("Host"), "claude_code_routine");
+  await user.selectOptions(
+    await screen.findByLabelText("Authorized connection"),
+    "connection-original",
+  );
+  await user.clear(screen.getByLabelText("Maximum event latency in minutes"));
+  await user.type(screen.getByLabelText("Maximum event latency in minutes"), "10");
+  expect(
+    screen.queryByLabelText("Daily local times (HH:mm, comma-separated)"),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Timezone")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Register expected schedule" }));
+  await waitFor(() =>
+    expect(api.createAutomationHostSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostSurface: "claude_code_routine",
+        trigger: { type: "event", expectedMaximumLatencyMinutes: 10 },
+      }),
+    ),
+  );
+});
+
+it("leads with blocked effective readiness when messaging alone is verified", async () => {
+  const blocked = {
+    ...readiness,
+    reason: "execution_not_authorized",
+    recovery: "authorize_execution",
+    messageCapability: "verified",
+  };
+  api.getFinanceConversationReadiness.mockResolvedValue(blocked);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(blocked);
+  open();
+  const host = await screen.findByRole("region", { name: "Finance host" });
+  expect(await screen.findByText("Chat sending is locked.")).toBeInTheDocument();
+  expect(host).toHaveTextContent("Not ready for Chat");
+  expect(host.querySelector('a[href*="workspace-access"]')).toHaveTextContent(
+    "Review host permissions",
+  );
+  expect(host).not.toHaveTextContent("Ready for Chat");
+});
+
+it("refreshes both projections without replacing proof and removes stale success when the reads fail", async () => {
+  const ready = {
+    ...readiness,
+    canSend: true,
+    reason: "ready",
+    recovery: "none",
+    messageCapability: "verified",
+  };
+  api.getFinanceConversationReadiness.mockResolvedValue(ready);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(ready);
+  const user = open();
+  await screen.findByText("Ready for Chat");
+  api.getFinanceConversationReadiness.mockRejectedValue(new Error("Readiness offline"));
+  api.getFinanceConversationHostReadiness.mockRejectedValue(new Error("Readiness offline"));
+  await user.click(screen.getByRole("button", { name: "Refresh readiness" }));
+  expect(await screen.findByText("Readiness unavailable")).toBeInTheDocument();
+  expect(screen.queryByText("Ready for Chat")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Chat is available/)).not.toBeInTheDocument();
+  expect(api.getFinanceConversationReadiness).toHaveBeenCalledTimes(2);
+  expect(api.getFinanceConversationHostReadiness).toHaveBeenCalledTimes(2);
+  expect(api.issueFinanceConversationChallenge).not.toHaveBeenCalled();
+  expect(api.exchangeFinanceConversationChallenge).not.toHaveBeenCalled();
+  expect(screen.queryByText("Readiness offline")).not.toBeInTheDocument();
+});
+
+it.each([
+  "ready",
+  "error",
+] as const)("dismisses stale %s refresh feedback after an account switch while a host read is pending", async (outcome) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const user = open(undefined, "/finances/automations", client);
+  await screen.findByText("Not ready for Chat");
+  let finishHost!: (value: typeof readiness) => void;
+  const hostRead = new Promise<typeof readiness>((resolve) => {
+    finishHost = resolve;
+  });
+  api.getFinanceConversationHostReadiness.mockReturnValueOnce(hostRead);
+  if (outcome === "ready")
+    api.getFinanceConversationReadiness.mockResolvedValueOnce({
+      ...readiness,
+      canSend: true,
+      reason: "ready",
+      recovery: "none",
+    });
+  else
+    api.getFinanceConversationReadiness.mockRejectedValueOnce(new Error("Old account read failed"));
+  vi.mocked(toast.loading).mockReturnValueOnce("refresh-owner-a");
+  await user.click(screen.getByRole("button", { name: "Refresh readiness" }));
+  await waitFor(() => {
+    expect(api.getFinanceConversationHostReadiness).toHaveBeenCalledTimes(2);
+    expect(
+      client.getQueryState(["finance-conversation-readiness", "owner-a", 0])?.fetchStatus,
+    ).toBe("idle");
+  });
+  expect(toast.dismiss).not.toHaveBeenCalledWith("refresh-owner-a");
+  act(() => {
+    client.setQueryData(["me"], { id: "owner-b" });
+  });
+  await act(async () => {
+    finishHost(readiness);
+    await hostRead;
+  });
+  await waitFor(() => expect(toast.dismiss).toHaveBeenCalledWith("refresh-owner-a"));
+  expect(toast.success).not.toHaveBeenCalledWith("Chat is ready for the next eligible run.", {
+    id: "refresh-owner-a",
+  });
+  expect(toast.error).not.toHaveBeenCalledWith("Readiness could not be checked. Try again.", {
+    id: "refresh-owner-a",
+  });
+  expect(screen.queryByText("Old account read failed")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["ready", "Chat is ready for the next eligible run."],
+  ["blocked", "Readiness checked. Review the next step."],
+  ["error", "Readiness could not be checked. Try again."],
+] as const)("announces the ordinary %s refresh outcome through its original Sonner toast only", async (outcome, message) => {
+  const user = open();
+  await screen.findByText("Not ready for Chat");
+  if (outcome === "error")
+    api.getFinanceConversationReadiness.mockRejectedValueOnce(new Error("Read unavailable"));
+  else
+    api.getFinanceConversationReadiness.mockResolvedValueOnce(
+      outcome === "ready"
+        ? { ...readiness, canSend: true, reason: "ready", recovery: "none" }
+        : readiness,
+    );
+  vi.mocked(toast.loading).mockReturnValueOnce("ordinary-refresh");
+  await user.click(screen.getByRole("button", { name: "Refresh readiness" }));
+  await waitFor(() =>
+    expect(outcome === "error" ? toast.error : toast.success).toHaveBeenCalledWith(message, {
+      id: "ordinary-refresh",
+    }),
+  );
+  expect(toast.loading).toHaveBeenCalledWith("Checking readiness…");
+  expect(
+    vi
+      .mocked(outcome === "error" ? toast.success : toast.error)
+      .mock.calls.filter(([, options]) => options?.id === "ordinary-refresh"),
+  ).toHaveLength(0);
+  expect(toast.dismiss).not.toHaveBeenCalledWith("ordinary-refresh");
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
 });

@@ -81,6 +81,10 @@ export const financeRecurringScheduleSchema = statementSchema
     sourceRevision: z.number().int().positive(),
     supersedesId: idSchema.nullable(),
     actorUserId: idSchema,
+    approvalActor: z
+      .object({ type: z.literal("agent"), id: idSchema })
+      .strict()
+      .optional(),
     recordedAt: isoDateTimeSchema,
   })
   .superRefine(validateStatement);

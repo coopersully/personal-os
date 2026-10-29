@@ -274,6 +274,15 @@ Twilio STOP/START state is authoritative. STOP immediately marks the account opt
 inbound START restores it. Provider error 21610 also marks the account opted out. Website
 verification records consent but cannot clear a retained provider STOP event.
 
+Twilio inbound and message-status signatures use the configured `API_BASE_URL` origin with the
+request path and unchanged query string. The production gateway terminates TLS before its HTTP API
+hop, so the internal request scheme is not the provider's signed public scheme. Host and forwarding
+headers never select the signature authority. Provider callback URLs must match the configured
+public origin and route exactly. A valid signature still passes through the existing consent,
+provider-time ordering and delivery-state checks; this repair does not enable notification delivery.
+After rollout, verify a fresh inbound message and delivery callback through the public edge. Local
+signature regressions do not establish carrier delivery or recover previously rejected messages.
+
 Inbound webhook bodies are capped before parsing. For each signed inbound message, nohmi fetches
 Twilio's provider creation time and orders consent events by that time rather than webhook arrival
 time. Delayed START cannot override newer STOP, and STOP wins when provider times tie. Consent

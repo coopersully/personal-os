@@ -36,7 +36,7 @@ export function FinanceTransactionItem({
 }) {
   return (
     <Item
-      variant={status === "expected" ? "muted" : "outline"}
+      variant="outline"
       role={presentation ? "presentation" : "listitem"}
       className="min-w-0 flex-nowrap items-center"
     >

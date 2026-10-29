@@ -10,7 +10,7 @@ export function WorkspaceHeaderControls({
 }: {
   children: ReactNode;
   label: string;
-  placement?: "leading" | "actions";
+  placement?: "title" | "leading" | "actions" | "workspace";
 }) {
   const slot = useContext(WorkspaceHeaderSlotContext);
   const controls = (
@@ -19,25 +19,48 @@ export function WorkspaceHeaderControls({
     </fieldset>
   );
   if (slot === undefined) return controls;
-  const target = placement === "leading" ? slot.leadingTarget : slot.target;
+  const target =
+    placement === "workspace"
+      ? slot.workspaceTarget
+      : placement === "title"
+        ? slot.titleTarget
+        : placement === "leading"
+          ? slot.leadingTarget
+          : slot.target;
   return target ? createPortal(controls, target) : null;
 }
 
 export function WorkspaceHeaderControlsSlot({
   placement = "actions",
 }: {
-  placement?: "leading" | "actions";
+  placement?: "title" | "leading" | "actions" | "workspace";
 }) {
   const slot = useContext(WorkspaceHeaderSlotContext);
   return (
     <div
       className={
-        placement === "leading"
-          ? "workspace-header-controls-slot workspace-header-controls-slot--leading"
-          : "workspace-header-controls-slot"
+        placement === "title"
+          ? "workspace-header-title-context"
+          : placement === "leading"
+            ? "workspace-header-controls-slot workspace-header-controls-slot--leading flex flex-wrap items-center gap-1.5"
+            : "workspace-header-controls-slot flex flex-wrap items-center gap-1.5"
       }
+      data-placement={placement}
       data-slot="workspace-header-controls"
-      ref={placement === "leading" ? slot?.setLeadingTarget : slot?.setTarget}
+      ref={
+        placement === "workspace"
+          ? slot?.setWorkspaceTarget
+          : placement === "title"
+            ? slot?.setTitleTarget
+            : placement === "leading"
+              ? slot?.setLeadingTarget
+              : slot?.setTarget
+      }
     />
   );
+}
+
+/** A page title completed by selectable phrases; action controls belong outside it. */
+export function WorkspaceTitleSentence({ children }: { children: ReactNode }) {
+  return <div data-slot="workspace-title-sentence">{children}</div>;
 }

@@ -37,6 +37,11 @@ export type FinanceMaintenanceRecovery = z.infer<typeof financeMaintenanceRecove
 
 export const financeMaintenanceNextActionSchema = z.discriminatedUnion("tool", [
   z.object({
+    tool: z.literal("get_finance_status"),
+    arguments: z.object({ scope: maintenanceScopeSchema }),
+    reason: z.string().min(1).max(1000),
+  }),
+  z.object({
     tool: z.literal("get_finance_ledger_challenge"),
     arguments: z.object({ challengeId: idSchema }),
     reason: z.string().min(1).max(1000),
@@ -75,7 +80,7 @@ export const financeSetupInputSchema = z.discriminatedUnion("operation", [
     sessionId: idSchema,
   }),
   z.object({
-    approvalSource: z.literal("user_instruction"),
+    approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
     budgetVersionId: idSchema,
     expectedProfileVersionId: idSchema.nullable().optional(),
     expectedVersion: z.number().int().positive(),

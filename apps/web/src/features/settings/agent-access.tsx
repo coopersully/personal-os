@@ -3,6 +3,8 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { QueryFeedback } from "@/components/async-state";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { DataViewEmpty, DataViewRecovery } from "@/components/data-view-state";
 import {
   ApprovalHandIcon,
@@ -17,6 +19,14 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@/components/responsive-dialog";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
@@ -47,14 +57,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import {
   InputGroup,
@@ -98,6 +100,7 @@ import {
 import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/agent-access.js";
 import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
 import { scopeLabels, selectableScopes } from "./access-scopes.js";
+import { AgentAccountsSettings } from "./agent-accounts";
 import { ExecutionPolicySettingsCard } from "./execution-policy.js";
 import { MailConfiguration } from "./mail-configuration.js";
 import { RelatedSettings } from "./related-settings.js";
@@ -158,7 +161,12 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
 ];
 
 export function ConnectedAgentsSettings() {
-  return <AgentAccessSettings view="connections" />;
+  return (
+    <div className="settings-stack">
+      <AgentAccountsSettings />
+      <AgentAccessSettings view="connections" />
+    </div>
+  );
 }
 
 export function WorkspaceAccessSettings() {
@@ -338,7 +346,6 @@ function AgentAccessSettings({
           : selectedDomain === "tasks"
             ? tasks.isPending
             : financeSetup.isPending));
-  const blockingError = guide.error;
   const readinessError =
     setup.error ??
     tokens.error ??
@@ -374,18 +381,7 @@ function AgentAccessSettings({
           </CardHeader>
           <CardContent className="settings-section__body agent-access__body">
             <MutationFeedback feedback={revokeOAuthClient.feedback} />
-            {blockingError ? (
-              <Alert variant="destructive">
-                <XIcon />
-                <AlertTitle>Workspace access could not be loaded</AlertTitle>
-                <AlertDescription>
-                  Couldn’t load the connection guide. Try again to check available access.
-                </AlertDescription>
-                <Button variant="outline" onClick={() => void guide.refetch()}>
-                  Retry connection guide
-                </Button>
-              </Alert>
-            ) : null}
+            <QueryFeedback query={guide} title="Couldn’t load the connection guide." />
 
             <FieldSet>
               <FieldLegend className="sr-only" variant="label">
@@ -473,7 +469,9 @@ function AgentAccessSettings({
                 title="Couldn’t load Mail rules."
                 unavailableLabel="Mail rules unavailable"
               />
-              {mailSetup.isPending || rules.isPending ? <p>Loading Mail settings…</p> : null}
+              {mailSetup.isPending || rules.isPending ? (
+                <ContentSkeleton label="Loading Mail settings…" shape="settings" rows={3} />
+              ) : null}
               {mailSetup.data || rules.data ? (
                 <MailConfiguration
                   {...(mailSetup.data && (mailSetup.isSuccess || mailSources.length > 0)
@@ -517,18 +515,7 @@ function AgentAccessSettings({
               </CardDescription>
             </CardHeader>
             <CardContent className="settings-section__body agent-access__body">
-              {blockingError ? (
-                <Alert variant="destructive">
-                  <XIcon />
-                  <AlertTitle>Agent connection details could not be loaded</AlertTitle>
-                  <AlertDescription>
-                    Couldn’t load the connection guide. Try again to check available access.
-                  </AlertDescription>
-                  <Button variant="outline" onClick={() => void guide.refetch()}>
-                    Retry connection guide
-                  </Button>
-                </Alert>
-              ) : null}
+              <QueryFeedback query={guide} title="Couldn’t load the connection guide." />
 
               <WorkspaceSettingsStatus
                 error={setupPlan.error}
@@ -588,7 +575,7 @@ function AgentAccessSettings({
                       ? "Checking connections"
                       : connectionCountUnavailable
                         ? "Connections unavailable"
-                        : `${connectedAgentCount} connected`}
+                        : `${connectedAgentCount} connections`}
                   </Badge>
                 </CardAction>
               ) : null}

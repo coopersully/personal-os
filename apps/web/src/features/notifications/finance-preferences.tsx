@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { MutationFeedback } from "@/components/mutation-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -103,7 +104,9 @@ function SessionFinanceNotificationPreferences({
       description="Reset removes the Finance override and uses global preferences, or product defaults when global is unconfigured. The global message-detail limit still applies. Delivery depends on Texting consent and readiness."
     >
       <QueryFeedback query={query} title="Couldn’t load Finance notification preferences." />
-      {query.isPending ? <p>Loading notification preferences…</p> : null}
+      {query.isPending ? (
+        <ContentSkeleton label="Loading notification preferences…" shape="settings" rows={3} />
+      ) : null}
       {query.data && !recovery?.reviewed ? (
         <FinanceNotificationPreferenceSummary status={query.data} />
       ) : null}
@@ -114,6 +117,7 @@ function SessionFinanceNotificationPreferences({
             <FinanceNotificationPreferenceSummary status={recovery.reviewed} />
           ) : null}
           <SettingsSaveRecovery
+            toastId={reset.feedback?.toastId}
             outcome={recovery.outcome}
             title="Finance notification reset has not been confirmed."
             pending={query.isFetching || reset.isPending || !canEdit}

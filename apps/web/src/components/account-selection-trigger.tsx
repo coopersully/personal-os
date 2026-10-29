@@ -1,7 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import type { ActionButton as Button } from "@/components/action-button";
-import { CheckIcon, XIcon } from "@/components/icons";
-import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
+import { ActionButton as Button } from "@/components/action-button";
 import {
   PopoverContent,
   PopoverDescription,
@@ -9,20 +7,14 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { FilterTrigger } from "./data-view-controls";
-
-export interface AccountSelectionIdentity {
-  avatarUrl?: string | null | undefined;
-  fallback: string;
-  id: string;
-}
+import { LayersIcon, UsersIcon } from "./icons";
+import { Badge } from "./ui/badge";
 
 type AccountSelectionTriggerProps = Omit<
   ComponentProps<typeof Button>,
   "aria-label" | "children"
 > & {
   ariaLabel: string;
-  identities: AccountSelectionIdentity[];
   needsAttention?: boolean;
   allSynced?: boolean;
   selectedCount: number;
@@ -33,7 +25,6 @@ export function AccountSelectionTrigger({
   ariaLabel,
   className,
   disabled,
-  identities,
   needsAttention = false,
   allSynced = false,
   selectedCount,
@@ -43,45 +34,30 @@ export function AccountSelectionTrigger({
   ...buttonProps
 }: AccountSelectionTriggerProps) {
   return (
-    <FilterTrigger
+    <Button
       {...buttonProps}
       aria-label={ariaLabel}
       tooltip={
         tooltip ??
         `${ariaLabel}${allSynced && !needsAttention ? ", all accounts connected and syncing" : ""}`
       }
-      className={cn("account-selection-trigger", className)}
+      className={cn("account-selection-trigger relative", className)}
       disabled={disabled}
-      size="sm"
-      active={selectedCount !== totalCount}
-      label={
-        <span className="inline-flex items-center gap-2">
-          <span className="account-selection-trigger__identity">
-            <AvatarGroup className="account-selection-trigger__avatars">
-              {identities.slice(0, 1).map((identity) => (
-                <Avatar key={identity.id} size="sm">
-                  {identity.avatarUrl ? <AvatarImage alt="" src={identity.avatarUrl} /> : null}
-                  <AvatarFallback>{identity.fallback}</AvatarFallback>
-                </Avatar>
-              ))}
-            </AvatarGroup>
-            <span
-              className="account-selection-trigger__status"
-              data-healthy={allSynced && !needsAttention}
-            >
-              {allSynced && !needsAttention ? (
-                <CheckIcon aria-hidden="true" className="size-2" />
-              ) : (
-                <XIcon aria-hidden="true" className="account-selection-trigger__warning size-2" />
-              )}
-            </span>
-          </span>
-          <span aria-hidden="true" className="account-selection-trigger__count">
-            {selectedCount}/{totalCount}
-          </span>
-        </span>
-      }
-    />
+      size="icon"
+      variant="ghost"
+      badgeCount={selectedCount === totalCount ? 0 : selectedCount}
+    >
+      {selectedCount === totalCount ? (
+        <LayersIcon aria-hidden="true" />
+      ) : (
+        <UsersIcon aria-hidden="true" />
+      )}
+      {selectedCount === 0 && totalCount > 0 ? (
+        <Badge className="action-count-badge" aria-hidden="true">
+          0
+        </Badge>
+      ) : null}
+    </Button>
   );
 }
 

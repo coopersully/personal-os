@@ -109,9 +109,32 @@ Other historical financial actions without this evidence are explicitly outside 
 coverage; neither an agent reply nor a proposed or failed action is inferred to be applied.
 
 Routine actions may group by the exact run and single action family. Mixed-family actions and
-budget decisions remain individually inspectable, preserving explicit human-approval provenance.
+budget decisions remain individually inspectable, preserving actual approval provenance, including agent execution under review bypass.
 Unknown record kinds remain readable raw evidence and receive no invented routes. Per-action human
 `/v1/finances/activity/:id/evidence` reads at most 100 audit/change/reference items per page, with
 explicit completeness and an owner/receipt/revision-bound signed continuation. The list never
 silently truncates evidence or duplicates actions to represent overflow. PostgreSQL source-binding,
 browser and complete candidate verification are separate required evidence.
+
+### Effective readiness across Automations and Chat
+
+Both surfaces use the same owner/session-bound readiness projection. The server identifies the
+selected original schedule and connection, its declared cadence, next expected start and latest
+recorded run. A host-specific lookup never borrows another registration's proof or run. Generic
+readiness selects an eligible host; if none is eligible it reports the most recently updated
+registration's blocker. Capability verification is supporting evidence, never overall readiness.
+
+Connection readiness follows an unrevoked access token or its matching, unexpired, unreplaced OAuth
+refresh grant. Bearer expiry alone does not remove standing connection authority. The Finance
+projection still checks current maintenance/write/execute scopes and owner review bypass. Actual
+incoming host calls continue to require a current bearer; a refresh grant cannot authenticate a
+request. Revocation, refresh-grant loss, scope loss, bypass loss and replacement proof all lock the
+app's send path without changing history or saved drafts. Issuing a replacement challenge clears
+current capability until the original host completes it; rotating a credential does not mint proof.
+
+Automations leads with effective Chat readiness and a contextual recovery action. Schedule details,
+observation/grace diagnostics, instructions and removal live in the existing responsive setup dialog.
+Explicit readiness refresh rechecks the aggregate and individual hosts. Chat names the same selected
+host, preserves drafts through recovery navigation and shows recorded run evidence separately from
+messages. A recorded run or SMS acknowledgment is not a Claude reply. Messages wait for the next
+eligible scheduled invocation; neither surface promises an immediate response or triggers a job.

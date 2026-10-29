@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -63,6 +63,15 @@ function mount() {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  // JSDOM does not measure carousel intersection; verify its geometry in browser QA.
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-20T01:00:00Z"));
   api.getMe.mockResolvedValue({ id: "owner-a", planningTimezone: "America/New_York" });
@@ -96,9 +105,10 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
-it("summarizes decisions without copying the first review question or authorizing it", async () => {
+it("omits the duplicate decision summary while keeping supporting navigation", async () => {
   api.getFinanceInbox.mockResolvedValue(envelope([]));
   api.listAgentAccessWorkItems.mockResolvedValue({
     summary: { byDomain: { finances: 3 } },
@@ -107,25 +117,14 @@ it("summarizes decisions without copying the first review question or authorizin
     nextCursor: null,
   });
   mount();
-  expect(await screen.findByText("3 items need review")).toBeVisible();
+  await screen.findByRole("region", { name: "Coming next" });
+  expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument();
   expect(screen.queryByText("Private first review question")).not.toBeInTheDocument();
   expect(api.getFinanceInbox).not.toHaveBeenCalled();
-  expect(api.listAgentAccessWorkItems).toHaveBeenCalledWith({ domain: "finances", limit: 10 });
-  expect(screen.getByRole("link", { name: "Open Reviews" })).toHaveAttribute(
-    "href",
-    "/finances?review=open",
-  );
-  expect(screen.getByRole("link", { name: "Discuss in Chat" })).toHaveAttribute(
-    "href",
-    "/finances/chat",
-  );
+  expect(api.listAgentAccessWorkItems).not.toHaveBeenCalled();
   expect(screen.getByRole("link", { name: "Open Activity" })).toHaveAttribute(
     "href",
     "/finances/activity",
-  );
-  expect(screen.getByRole("link", { name: "Explore Spending" })).toHaveAttribute(
-    "href",
-    "/finances/spending",
   );
 });
 
@@ -146,8 +145,8 @@ it("uses the owner's local dates and preserves remaining amounts, currencies and
     unavailableSources: [],
   });
   const client = mount();
-  const next = await screen.findByRole("region", { name: "Coming next" });
-  await within(next).findByText("Partial bill");
+  await screen.findByText("Partial bill");
+  const next = screen.getByRole("region", { name: "Coming next" });
   expect(api.listFinanceRecurringOccurrences).toHaveBeenCalledWith({
     from: "2026-10-19",
     to: "2026-11-17",
@@ -160,7 +159,7 @@ it("uses the owner's local dates and preserves remaining amounts, currencies and
       { from: "2026-10-19", to: "2026-11-17" },
     ]),
   ).toBeDefined();
-  expect(within(next).getByText("€12.50 · EUR")).toBeVisible();
+  expect(within(next).getByText("−€12.50")).toBeVisible();
   expect(within(next).getByText(/Remaining after partial match/)).toBeVisible();
   expect(
     within(next).queryByText(/Already matched|Invalidated|Historical/),
@@ -184,8 +183,8 @@ it("distinguishes empty schedules, incomplete evidence and variable amounts", as
     unavailableSources: [{ reason: "unconfirmed_schedule" }],
   });
   mount();
-  expect(await screen.findByText("Amount varies · GBP")).toBeVisible();
-  expect(screen.getByText(/1 sources need schedule or amount confirmation/)).toBeVisible();
+  expect(await screen.findByText("Amount varies")).toBeVisible();
+  expect(screen.getByText(/1 recurring item is not included yet/)).toBeVisible();
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
   ).not.toBeInTheDocument();
@@ -196,7 +195,7 @@ it("does not claim an empty schedule or all-clear decisions on failed reads", as
   api.listFinanceRecurringOccurrences.mockRejectedValue(new Error("offline"));
   mount();
   expect(await screen.findByText("Upcoming money unavailable")).toBeVisible();
-  expect(screen.getByText("Decisions unavailable")).toBeVisible();
+  expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
   expect(screen.queryByText("No items need review")).not.toBeInTheDocument();
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
@@ -259,76 +258,6 @@ it("waits for a planning timezone without guessing upcoming dates", async () => 
   ).not.toBeInTheDocument();
 });
 
-it("withholds an all-clear and next-step advice when canonical review coverage is unavailable", async () => {
-  api.listAgentAccessWorkItems.mockResolvedValue({
-    summary: { byDomain: { finances: 0 } },
-    unavailableDomains: ["finances"],
-    items: [],
-    nextCursor: null,
-  });
-  mount();
-  expect(await screen.findByText(/Some Finance decisions could not be checked/)).toBeVisible();
-  expect(screen.queryByText("No items need review")).not.toBeInTheDocument();
-  expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
-});
-
-it("hides a cached decision count after denied access", async () => {
-  api.listAgentAccessWorkItems.mockResolvedValue({
-    summary: { byDomain: { finances: 3 } },
-    unavailableDomains: [],
-    items: [],
-    nextCursor: null,
-  });
-  const client = mount();
-  await screen.findByText("3 items need review");
-  api.listAgentAccessWorkItems.mockRejectedValue(
-    new ApiClientError({ status: 403, code: "forbidden", message: "Forbidden" }),
-  );
-  await client.invalidateQueries({ queryKey: ["agent-access-work-items"] });
-  expect(await screen.findByText("Review access unavailable.")).toBeVisible();
-  expect(screen.queryByText("3 items need review")).not.toBeInTheDocument();
-});
-
-it("does not reuse a previous owner's cached or late review count", async () => {
-  let finishOld: ((value: unknown) => void) | undefined;
-  api.listAgentAccessWorkItems.mockResolvedValueOnce({
-    summary: { byDomain: { finances: 3 } },
-    unavailableDomains: [],
-    items: [],
-    nextCursor: null,
-  });
-  const client = mount();
-  await screen.findByText("3 items need review");
-  api.listAgentAccessWorkItems.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finishOld = resolve;
-      }),
-  );
-  const oldRefresh = client.invalidateQueries({ queryKey: ["agent-access-work-items"] });
-  await waitFor(() => expect(api.listAgentAccessWorkItems).toHaveBeenCalledTimes(2));
-  api.listAgentAccessWorkItems.mockResolvedValue({
-    summary: { byDomain: { finances: 1 } },
-    unavailableDomains: [],
-    items: [],
-    nextCursor: null,
-  });
-  act(() => client.setQueryData(["me"], { id: "owner-b", planningTimezone: "America/New_York" }));
-  await screen.findByText("1 item needs review");
-  await act(async () => {
-    finishOld?.({
-      summary: { byDomain: { finances: 4 } },
-      unavailableDomains: [],
-      items: [],
-      nextCursor: null,
-    });
-    await oldRefresh;
-  });
-  expect(screen.queryByText("3 items need review")).not.toBeInTheDocument();
-  expect(screen.queryByText("4 items need review")).not.toBeInTheDocument();
-  expect(screen.getByText("1 item needs review")).toBeVisible();
-});
-
 it.each([
   "unconfirmed_schedule",
   "source_changed",
@@ -342,17 +271,182 @@ it.each([
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
   ).not.toBeInTheDocument();
-  expect(screen.getByText(/This list is incomplete/)).toBeVisible();
+  expect(screen.getByText(/not included yet/)).toBeVisible();
   expect(screen.getByRole("link", { name: "Open upcoming money" })).toBeVisible();
 });
 
 it("reports no unmatched scheduled money only after all source schedules are available", async () => {
   mount();
   expect(await screen.findByText("No unmatched scheduled money in this date range.")).toBeVisible();
-  expect(screen.queryByText(/This list is incomplete/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/not included yet/)).not.toBeInTheDocument();
   expect(
     screen.queryByText("Upcoming money cannot be fully determined yet."),
   ).not.toBeInTheDocument();
 });
 
 vi.spyOn(toast, "error");
+
+it("links compact position metrics to their owning views and explains Spending scope", async () => {
+  mount();
+  const metrics = await screen.findByRole("region", { name: "Finance key metrics" });
+  expect(within(metrics).getAllByRole("link")[0]).toHaveAccessibleName(/^Spent this month/);
+  expect(within(metrics).getByRole("link", { name: /^Cash/ })).toHaveAttribute(
+    "href",
+    "/finances/accounts",
+  );
+  expect(within(metrics).getByRole("link", { name: /^Spent this month/ })).toHaveAttribute(
+    "href",
+    "/finances/spending?period=month&pending=0",
+  );
+  expect(within(metrics).getByRole("link", { name: /^Net worth/ })).toHaveAttribute(
+    "href",
+    "/finances/wealth",
+  );
+  expect(
+    within(metrics).getByText(/Posted personal expenses · no pending or transfers/),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: /About these totals/ }));
+  expect(screen.getByText(/Its total can differ with account or date filters/)).toBeVisible();
+});
+
+it("shows six upcoming items together and paginates larger schedules with standard controls", async () => {
+  api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: Array.from({ length: 6 }, (_, i) =>
+      occurrence(`Item ${String(i).padStart(2, "0")}`),
+    ),
+    unavailableSources: [],
+  });
+  const client = mount();
+  const table = await screen.findByRole("table", { name: "Upcoming expected money" });
+  await within(table).findByText("Item 05");
+  expect(within(table).getAllByRole("row")).toHaveLength(7);
+  expect(screen.queryByText(/Next 30 days/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+  api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: Array.from({ length: 12 }, (_, i) =>
+      occurrence(`Item ${String(i).padStart(2, "0")}`),
+    ),
+    unavailableSources: [],
+  });
+  await client.invalidateQueries({ queryKey: ["finance-recurring-occurrences"] });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled());
+  expect(within(table).getAllByRole("row")).toHaveLength(11);
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  expect(within(table).getByText("Item 11")).toBeVisible();
+  expect(within(table).queryByText("Item 00")).not.toBeInTheDocument();
+  expect(screen.getByText("11–12 of 12")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+  expect(within(table).getByText("Item 00")).toBeVisible();
+  fireEvent.change(screen.getByRole("combobox", { name: "Rows per page" }), {
+    target: { value: "25" },
+  });
+  expect(within(table).getAllByRole("row")).toHaveLength(13);
+  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+});
+
+it("links upcoming income and outflows to Cash flow and shows signed amounts without currency codes", async () => {
+  api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [
+      occurrence("Salary", { source: { kind: "income", id: "salary / one" } }),
+      occurrence("Rent", { source: { kind: "obligation", id: "rent / one" } }),
+    ],
+    unavailableSources: [],
+  });
+  mount();
+  const table = await screen.findByRole("table", { name: "Upcoming expected money" });
+  expect(await within(table).findByRole("link", { name: "Salary" })).toHaveAttribute(
+    "href",
+    "/finances/cashflow?view=income&record=salary%20%2F%20one",
+  );
+  expect(within(table).getByRole("link", { name: "Rent" })).toHaveAttribute(
+    "href",
+    "/finances/cashflow?view=subscriptions&record=rent%20%2F%20one",
+  );
+  expect(within(table).getByText("+$20.00")).toHaveClass("text-success");
+  expect(within(table).getByText("−$20.00")).toHaveClass("text-destructive");
+  expect(within(table).queryByText("Type")).not.toBeInTheDocument();
+  expect(within(table).queryByText(/USD/)).not.toBeInTheDocument();
+});
+
+it("keeps financial evidence in a compact disclosure near totals", async () => {
+  api.getFinanceSnapshot.mockResolvedValue({
+    ...envelope({
+      asOf: "2026-10-19T12:00:00Z",
+      cash: 100,
+      netWorth: 100,
+      budget: { spent: 0 },
+      ledger: { trustworthy: false, reconciledThrough: "2026-10-18" },
+    }),
+    communication: { requiredDisclosures: [{ message: "One account needs confirmation." }] },
+  });
+  mount();
+  const disclosure = await screen.findByRole("button", {
+    name: /About these totals/,
+  });
+  const summary = screen.getByRole("region", { name: "At a glance" });
+  expect(within(summary).getByRole("heading", { name: "At a glance" })).toBeVisible();
+  expect(within(summary).getByRole("button", { name: "About these totals" })).toBe(disclosure);
+  expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("region", { name: "Financial position" })).not.toBeInTheDocument();
+  expect(screen.queryByText("One account needs confirmation.")).not.toBeInTheDocument();
+  fireEvent.click(disclosure);
+  expect(screen.getByText("One account needs confirmation.")).toBeVisible();
+  expect(screen.getByText(/Reconciled through 2026-10-18/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Review accounts" })).toHaveAttribute(
+    "href",
+    "/finances/accounts",
+  );
+});
+
+it("keeps plan and change summaries compact and omits duplicate Finance prompts", async () => {
+  api.getFinanceBudget.mockResolvedValue(
+    envelope({
+      effectiveFrom: "2026-10",
+      status: "active",
+      allocatedTotal: 8000,
+      expectedResources: 8250,
+      rationale: "Detailed budget rationale",
+      version: 1,
+      allocations: [],
+    }),
+  );
+  mount();
+  expect(await screen.findByText("$8,000.00 allocated · $250.00 unassigned")).toBeVisible();
+  expect(screen.getByRole("link", { name: "View budget" })).toHaveAttribute(
+    "href",
+    "/finances/plan",
+  );
+  expect(await screen.findByText("No recorded changes yet.")).toBeVisible();
+  expect(screen.queryByText("Detailed budget rationale")).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Near-term context" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Outstanding reimbursements")).not.toBeInTheDocument();
+  expect(api.getFinancePlaybook).not.toHaveBeenCalled();
+});
+
+it("shows positive reimbursements and only the latest recorded maintenance summary", async () => {
+  api.getFinanceStatus.mockResolvedValue({
+    details: {
+      latestReview: { id: "review-1", completedAt: "2026-10-18T12:00:00Z", status: "completed" },
+      reimbursements: { outstanding: 125 },
+    },
+  });
+  api.getFinanceMaintenanceHistory.mockResolvedValue({
+    items: [
+      { run: { id: "latest", status: "completed" } },
+      { run: { id: "older", status: "failed_terminal" } },
+    ],
+  });
+  mount();
+  expect(await screen.findByText("$125.00 expected back")).toBeVisible();
+  expect(screen.getByRole("link", { name: "View reimbursements" })).toHaveAttribute(
+    "href",
+    "/finances/cashflow?view=reimbursements",
+  );
+  expect(await screen.findByText("Maintenance complete")).toBeVisible();
+  expect(screen.queryByText("Maintenance failed")).not.toBeInTheDocument();
+  expect(screen.queryByText("No recorded changes yet.")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /Oct 18/ })).toHaveAttribute(
+    "href",
+    "/finances/reviews/review-1",
+  );
+});

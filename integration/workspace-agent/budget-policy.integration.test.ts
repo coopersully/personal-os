@@ -46,6 +46,7 @@ describe("Finance policy definitions through MCP", () => {
       expectedProfileVersionId: profile.id,
       idempotencyKey: crypto.randomUUID(),
     };
+    await f.setBypass(false);
     for (const approvalSource of ["agent_self_approval", "user_instruction"]) {
       expect(
         (
@@ -66,6 +67,7 @@ describe("Finance policy definitions through MCP", () => {
       )
     ).data as unknown as Record<string, unknown>;
     expect(budget).toMatchObject({ status: "active", approvedAt: expect.any(String) });
+    await f.setBypass(true);
     const profileRef = { id: profile.id, revision: String(profile.version) },
       budgetRef = { id: budget.id, revision: String(budget.version) };
     const period = { from: "2026-10-01", through: "2026-10-31", timezone: "America/New_York" };

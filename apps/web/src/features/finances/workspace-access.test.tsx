@@ -49,6 +49,8 @@ it("does not infer new access or redirect from loading or failure", async () => 
   const mounted = show("/finances/spending");
   expect(screen.queryByText("Setup route")).toBeNull();
   expect(screen.queryByText("Domain task")).toBeNull();
+  expect(screen.getByRole("status", { name: "Loading finances" })).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Open setup" })).toBeNull();
   mounted.unmount();
   mocks.state.isPending = false;
   mocks.state.isError = true;

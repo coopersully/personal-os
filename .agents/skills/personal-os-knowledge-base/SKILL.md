@@ -37,7 +37,7 @@ assignment, also read `docs/engineering/autonomous-development.md` and preserve 
 | Feature ownership and composition seams | `docs/engineering/feature-ownership.md` |
 | Database rollout | `docs/engineering/database-migrations.md` |
 | Settings UI (shared across all Settings routes) | `docs/engineering/settings-ui-standards.md`; control decision table in `docs/design/pages/settings.md`; native reference observations in `docs/design/references/system-settings/README.md` |
-| Epic planning, oversight and network launch | `docs/engineering/epic-delivery.md`, repository `oversight` skill |
+| Epic planning, oversight and network launch | User-installed `nohmi-orchestrator` (`~/.codex/skills/nohmi-orchestrator/SKILL.md`), `docs/engineering/epic-delivery.md`, repository `oversight` compatibility constraints |
 | PR author/reviewer rules | `docs/engineering/pr-rubric.md` |
 | Code placement and verification efficiency | `docs/engineering/code-placement.md`, `docs/engineering/verification-efficiency.md` |
 | Acceptance gates, code standards and migration exceptions | `docs/engineering/acceptance-contract.md`, `docs/engineering/code-standards.md` |

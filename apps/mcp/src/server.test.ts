@@ -796,6 +796,14 @@ function mockApi() {
     })),
     listCalendars: vi.fn(async () => [calendar]),
     listMailboxes: vi.fn(async () => [mailbox]),
+    getMailNavigationCounts: vi.fn(async () => ({
+      all: 1,
+      unread: 1,
+      starred: 0,
+      snoozed: 0,
+      sent: 0,
+      drafts: 0,
+    })),
     getMailSetupContext: vi.fn(async () => ({
       accounts: [],
       automation: {
@@ -922,6 +930,45 @@ function mockApi() {
 }
 
 describe("ilo MCP server", () => {
+  it("preserves qualified minute timestamps through public tool validation", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "timestamp-compatibility-test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      for (const until of ["2026-10-24T12:34Z", "2026-10-24T12:34+02:00"]) {
+        const result = await client.callTool({ name: "snooze_mail", arguments: { id, until } });
+        expect(result.isError).not.toBe(true);
+      }
+      const input = {
+        calendarId: id,
+        title: "Minute precision",
+        startsAt: "2026-10-24T12:34Z",
+        endsAt: "2026-10-24T15:34+02:00",
+        timezone: "UTC",
+      };
+      const result = await client.callTool({ name: "create_event", arguments: input });
+      expect(result.isError).not.toBe(true);
+      expect(api.createEvent).toHaveBeenCalledWith(expect.objectContaining(input));
+      api.createEvent.mockClear();
+      for (const startsAt of ["2026-02-30T12:34Z", "2026-10-24T12:34"]) {
+        const invalid = await client.callTool({
+          name: "create_event",
+          arguments: { ...input, startsAt },
+        });
+        expect(invalid.isError).toBe(true);
+      }
+      expect(api.createEvent).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("rejects excessive tool input elements before validation or API work", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({
@@ -1606,6 +1653,7 @@ describe("ilo MCP server", () => {
       [
         "list_mailboxes",
         "get_mail_setup_context",
+        "get_mail_navigation_counts",
         "list_mail",
         "read_mail",
         "update_mail",
@@ -2053,6 +2101,12 @@ describe("ilo MCP server", () => {
     await client.callTool({ name: "list_calendars", arguments: {} });
     await client.callTool({ name: "list_mailboxes", arguments: {} });
     await client.callTool({ name: "get_mail_setup_context", arguments: {} });
+    const counts = await client.callTool({
+      name: "get_mail_navigation_counts",
+      arguments: { accountIds: [accountId] },
+    });
+    expect(counts.structuredContent).toMatchObject({ result: { all: 1, unread: 1, drafts: 0 } });
+    expect(api.getMailNavigationCounts).toHaveBeenCalledWith([accountId]);
     await client.callTool({
       name: "list_mail",
       arguments: { accountIds: [accountId], mailboxId: id, query: "Test", unread: true },

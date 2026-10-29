@@ -7,6 +7,14 @@ four complete workspaces: Mail, Tasks, Calendar, and Finances. People and author
 the same domain-owned material. A workspace steward supplies expertise, maintains its ledger,
 asks questions that need human judgment, and produces an evidence-backed review.
 
+All nohmi skills and installed role/context entrypoints apply the
+[mandatory tracking lifecycle](work-context.md#mandatory-tracking-lifecycle) to assigned durable work.
+Use the user-installed `nohmi-orchestrator` (`~/.codex/skills/nohmi-orchestrator/SKILL.md`)
+as the canonical coordination entrypoint. The repository oversight path is a compatibility route
+and retains repository-specific constraints. Oversight wakes also apply the [per-heartbeat setup check](../../.agents/skills/oversight/SKILL.md#every-oversight-heartbeat-tracking-and-presentation).
+Read these current repository owners even when an installed wrapper contains older examples; preserve
+role boundaries and explicit user limits. Read-only discussion alone creates no tracking work.
+
 Read the root `AGENTS.md`, then use the [development handbook](development-handbook.md) to
 select the next required step without replaying completed work. Use this map for relevant context. Read the relevant sections, not the entire archive.
 
@@ -24,7 +32,7 @@ select the next required step without replaying completed work. Use this map for
 | Delivery identity and verification | [Work context](work-context.md), [PR rubric](pr-rubric.md) |
 | Engineering acceptance and adoption | [Acceptance contract](acceptance-contract.md), [code standards](code-standards.md), [code placement](code-placement.md) |
 | Fast verification and delivery ownership | [Verification efficiency](verification-efficiency.md), [handoff skill](../../.agents/skills/handoff/SKILL.md), [deep-review skill](../../.agents/skills/deep-review/SKILL.md) |
-| Epic planning, admission and launch | [Epic delivery](epic-delivery.md), [oversight skill](../../.agents/skills/oversight/SKILL.md) |
+| Outcome coordination, lifecycle, monitoring and epic launch | User-installed `nohmi-orchestrator`, [epic delivery](epic-delivery.md), [repository compatibility constraints](../../.agents/skills/oversight/SKILL.md) |
 | Development network roles and merge ownership | [Autonomous development](autonomous-development.md) |
 | Dispatch, checkpoints, and acceptance evidence | [Agent handoffs](agent-handoffs.md) |
 

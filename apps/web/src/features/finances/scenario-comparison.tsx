@@ -6,6 +6,7 @@ import {
 } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { QueryFeedback } from "@/components/async-state";
 import { CurrencyInput } from "@/components/currency-input";
 import {
   Field,
@@ -469,17 +470,7 @@ export function FinanceScenarioComparison() {
               />
             </Field>
           </FieldGroup>
-          {categories.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Spending categories unavailable</AlertTitle>
-              <AlertDescription>
-                {"Couldn’t refresh this information. Try again."}
-                <Button type="button" variant="outline" onClick={() => void categories.refetch()}>
-                  Retry categories
-                </Button>
-              </AlertDescription>
-            </Alert>
-          ) : null}
+          <QueryFeedback query={categories} title="Couldn’t load spending categories." />
           {drafts.map((draft, index) => (
             <ScenarioFields
               key={draft.id}

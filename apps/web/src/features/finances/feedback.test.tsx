@@ -48,6 +48,7 @@ describe("Finance form feedback", () => {
     });
     vi.spyOn(api, "getFinanceCategories").mockResolvedValue([]);
     vi.spyOn(api, "getPlaidStatus").mockResolvedValue({ available: false });
+    vi.spyOn(toast, "error");
     vi.spyOn(api, "createFinanceAccount").mockRejectedValue(new Error("private database failure"));
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -68,7 +69,13 @@ describe("Finance form feedback", () => {
     await userEvent.type(screen.getByLabelText("Account name"), "Checking");
     await userEvent.click(screen.getByRole("button", { name: "Add account" }));
     await waitFor(() => expect(api.createFinanceAccount).toHaveBeenCalledOnce());
-    expect(await screen.findByText(/Couldn’t confirm/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringMatching(/Couldn’t confirm/),
+        expect.anything(),
+      ),
+    );
+    expect(screen.queryByText(/Couldn’t confirm/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Institution")).toHaveValue("My bank");
     expect(screen.getByLabelText("Account name")).toHaveValue("Checking");
     expect(screen.queryByText("private database failure")).not.toBeInTheDocument();
@@ -154,6 +161,7 @@ const queryCases = [
       null,
       { sortBy: "date", sortDirection: "desc" },
       { review: "all" },
+      50,
     ],
   },
   {

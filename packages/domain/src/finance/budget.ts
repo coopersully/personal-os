@@ -11,7 +11,12 @@ export const financeMonthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 export const financeBudgetResourceSchema = z.object({
   amount: financePositiveMoneySchema,
   description: z.string().trim().min(1).max(500).optional(),
-  key: z.string().trim().min(1).max(120),
+  key: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .refine((value) => value.length <= 120, "Use at most 120 characters."),
   kind: z.enum(["income", "reserve_draw", "borrowing", "other"]),
   sourceId: idSchema.optional(),
 });
@@ -20,7 +25,12 @@ export type FinanceBudgetResource = z.infer<typeof financeBudgetResourceSchema>;
 const allocationBase = z.object({
   amount: financePositiveMoneySchema,
   description: z.string().trim().min(1).max(500).optional(),
-  key: z.string().trim().min(1).max(120),
+  key: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .refine((value) => value.length <= 120, "Use at most 120 characters."),
 });
 
 export const financeBudgetAllocationSchema = z.discriminatedUnion("kind", [
@@ -112,7 +122,7 @@ export type ReviseFinanceBudgetInput = z.infer<typeof reviseFinanceBudgetInputSc
 
 export const approveFinanceBudgetInputSchema = financeMutationMetaSchema.and(
   z.object({
-    approvalSource: z.literal("user_instruction"),
+    approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
     budgetVersionId: idSchema,
     expectedProfileVersionId: idSchema.nullable().optional(),
     expectedVersion: z.number().int().positive(),

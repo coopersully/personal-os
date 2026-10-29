@@ -1,8 +1,8 @@
 import type { FinanceAnswer, FinanceContextualQuestion } from "@personal-os/domain";
-import { Spinner } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Field, FieldLabel } from "@/components/settings-field";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -62,7 +62,7 @@ export function FinanceContextualQuestionPage({
   });
   return (
     <section aria-label="Transaction context" className="grid gap-4">
-      {query.isPending ? <Spinner label="Loading transaction context" /> : null}
+      {query.isPending ? <ContentSkeleton label="Loading transaction context" rows={3} /> : null}
       {query.error ? (
         <>
           <InlineError
@@ -134,9 +134,7 @@ function ContextAnswer({
         </p>
       </div>
       {saved ? (
-        <Alert>
-          <AlertDescription>Context saved. The financial review remains open.</AlertDescription>
-        </Alert>
+        <p className="text-sm text-muted-foreground">Answered · financial review open</p>
       ) : stale ? (
         <Alert>
           <AlertDescription>

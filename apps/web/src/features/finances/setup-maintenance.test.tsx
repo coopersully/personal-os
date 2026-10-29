@@ -1,8 +1,9 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinanceMaintenancePayload, FinanceToolResult } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -156,6 +157,6 @@ it("prevents duplicate starts and preserves the start action after failure", asy
   expect(await screen.findByRole("button", { name: "Checking maintenance…" })).toBeDisabled();
   await act(async () => reject(new Error("Connection interrupted")));
   expect(await screen.findByRole("button", { name: "Start initial maintenance" })).toBeEnabled();
-  expect(screen.getByRole("status")).toHaveTextContent(/Couldn’t/);
+  expect(await screen.findByText(/Couldn’t confirm/)).toBeVisible();
   expect(api.maintainFinances).toHaveBeenCalledTimes(1);
 });

@@ -22,7 +22,7 @@ test("saved manual context survives reload without changing the ledger and stays
   );
   await page.getByRole("button", { name: "Log in" }).click();
   const { sessionToken } = await (await login).json();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const headers = { authorization: `Session ${sessionToken}` };
   const accountResponse = await page.request.post("/v1/finances/accounts", {
     headers,
@@ -71,7 +71,7 @@ test("saved manual context survives reload without changing the ledger and stays
     const command = saved.request().postDataJSON() as FinanceAnswer;
     await expect(page.getByText(/1 completed · \d+ left · \d+ total/)).toBeVisible();
     await page.reload();
-    await expect(page.getByText("Context saved. The financial review remains open.")).toBeVisible();
+    await expect(page.getByText("Answered · financial review open")).toBeVisible();
     const replay = await page.request.post("/v1/finances/contextual-questions/answer", {
       headers,
       data: command,

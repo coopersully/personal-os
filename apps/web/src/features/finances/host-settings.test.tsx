@@ -31,7 +31,17 @@ function schedule(
   state = "setup_pending",
 ) {
   return {
-    schedule: { id, label: "My Finance host", hostSurface: surface, state, version: 3 },
+    schedule: {
+      id,
+      label: "My Finance host",
+      hostSurface: surface,
+      state,
+      version: 3,
+      trigger:
+        surface === "claude_code_routine"
+          ? { type: "event", expectedMaximumLatencyMinutes: 5 }
+          : { type: "recurring", recurrence: { everyMinutes: 5, timeZone: "America/New_York" } },
+    },
     health: { state },
   };
 }
@@ -248,14 +258,34 @@ it("keeps uncertain delivery fenced until human inspection and shows a stale-rec
   expect(mocks.bindFinanceAnswerContinuation).not.toHaveBeenCalled();
 });
 
-it("binds Claude setup without inventing a next scheduled slot", async () => {
-  mocks.listAutomationHostSchedules.mockResolvedValue([schedule("claude_code_routine")]);
+it.each([
+  "event",
+  "scheduled",
+])("binds Claude %s setup without inventing a next scheduled slot", async (type) => {
+  const pending = schedule("claude_code_routine");
+  mocks.listAutomationHostSchedules.mockResolvedValue([
+    {
+      ...pending,
+      schedule: {
+        ...pending.schedule,
+        trigger:
+          type === "scheduled"
+            ? { type, localTimes: ["08:00", "20:00"], timeZone: "America/New_York" }
+            : pending.schedule.trigger,
+      },
+    },
+  ]);
   const user = userEvent.setup();
   show();
   await user.type(
     await screen.findByLabelText("Host automation identifier"),
     "trig_abcdefghijklmno",
   );
+  if (type === "scheduled")
+    expect(
+      screen.getByText(/Create a Claude schedule at 08:00 and 20:00 in America\/New_York/),
+    ).toBeInTheDocument();
+  expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Next host run")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Bind host" }));
   await waitFor(() =>
@@ -327,4 +357,56 @@ it("preserves a safe visible failure when a host write rejects without an Error 
     expectedVersion: 3,
     expectedState: "paused",
   });
+});
+
+it("prepares a scheduled-only host with explicit timezone and daily times", async () => {
+  const user = userEvent.setup();
+  show();
+  await user.selectOptions(await screen.findByLabelText("Authorized host connection"), id);
+  await user.selectOptions(screen.getByLabelText("Host"), "claude_code_routine");
+  await user.selectOptions(screen.getByLabelText("Trigger"), "scheduled");
+  await user.clear(screen.getByLabelText("Timezone"));
+  await user.type(screen.getByLabelText("Timezone"), "America/New_York");
+  await user.clear(screen.getByLabelText("Daily local times (HH:mm, comma-separated)"));
+  await user.type(
+    screen.getByLabelText("Daily local times (HH:mm, comma-separated)"),
+    "07:30, 19:45",
+  );
+  await user.click(screen.getByRole("button", { name: "Prepare host setup" }));
+  await waitFor(() =>
+    expect(mocks.createAutomationHostSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostSurface: "claude_code_routine",
+        trigger: {
+          type: "scheduled",
+          localTimes: ["07:30", "19:45"],
+          timeZone: "America/New_York",
+        },
+      }),
+    ),
+  );
+});
+
+it.each([
+  "scheduled",
+  "event",
+] as const)("shows API credentials only for an active event host (%s)", async (type) => {
+  const active = schedule("claude_code_routine", "active");
+  mocks.listAutomationHostSchedules.mockResolvedValue([
+    {
+      ...active,
+      schedule: {
+        ...active.schedule,
+        trigger:
+          type === "scheduled"
+            ? { type, localTimes: ["08:00", "20:00"], timeZone: "America/New_York" }
+            : { type, expectedMaximumLatencyMinutes: 5 },
+      },
+    },
+  ]);
+  show();
+  expect(await screen.findByRole("region", { name: "My Finance host" })).toBeInTheDocument();
+  if (type === "event")
+    expect(screen.getByLabelText("Routine API trigger token")).toBeInTheDocument();
+  else expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
 });

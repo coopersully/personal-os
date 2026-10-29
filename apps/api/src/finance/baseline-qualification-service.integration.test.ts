@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
 import {
+  accessTokens,
   auditEvents,
   createDatabaseClient,
+  executionPolicySettings,
   financeAccounts,
   financeBudgetBaselineQualifications,
   financeBudgetVersions,
@@ -385,5 +387,49 @@ describe.sequential("immutable monthly budget qualification", () => {
         where: eq(financeBudgetVersions.id, f.proposal.data.id),
       }),
     ).toMatchObject({ approvedByActorType: "agent", approvedByActorId: "historical-agent" });
+  });
+  it("confirms a qualified baseline with bypass execution authority and records the actual agent", async () => {
+    const f = await fixture();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.owner.id,
+        name: "Baseline approval",
+        tokenHash: crypto.randomUUID(),
+        scopes: ["finances:write", "finances:execute"],
+      })
+      .returning();
+    if (!token) throw new Error("Missing token");
+    await database.db
+      .insert(executionPolicySettings)
+      .values({ userId: f.owner.id, reviewBypassEnabled: true })
+      .onConflictDoUpdate({
+        target: executionPolicySettings.userId,
+        set: { reviewBypassEnabled: true },
+      });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: token.id,
+        actorType: "agent",
+        userId: f.owner.id,
+        scopes: new Set(token.scopes),
+      },
+      requestId: "agent-baseline",
+    });
+    const review = await f.service.prepare(f.input, context);
+    await expect(
+      f.service.confirm(
+        {
+          reviewId: review.id,
+          expectedFingerprint: review.fingerprint,
+          idempotencyKey: crypto.randomUUID(),
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      state: "qualified",
+      qualification: { confirmedByActorType: "agent", confirmedByActorId: token.id },
+    });
   });
 });

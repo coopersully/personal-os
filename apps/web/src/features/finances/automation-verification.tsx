@@ -1,41 +1,82 @@
 import type { FinanceConversationChallenge } from "@personal-os/domain";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
+import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
+import { sameSession, usePreferenceSession } from "../workspace-settings/account-save-session.js";
 import { financeConversationRecovery, financeRecoveryHref } from "./automation-recovery.js";
+import { FinanceHostRunSummary } from "./conversation-host-summary.js";
+import { useFinanceConversationReadiness } from "./use-finance-conversation-readiness.js";
 
 export function FinanceConversationReadiness({ returnTo }: { returnTo?: string | null }) {
-  const query = useQuery({
-    queryKey: ["finance-conversation-readiness"],
-    queryFn: api.getFinanceConversationReadiness,
-  });
+  const query = useFinanceConversationReadiness();
+  const client = useQueryClient();
+  const session = usePreferenceSession(client);
   return (
-    <section aria-label="Finance Chat readiness" className="flex flex-col gap-2">
-      <h2>Finance Chat</h2>
+    <section aria-label="Finance Chat readiness" className="flex min-w-0 flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2>Finance Chat</h2>
+        <Button
+          variant="outline"
+          className="min-h-11"
+          disabled={query.isFetching}
+          onClick={() => {
+            void (async () => {
+              const notice = toast.loading("Checking readiness…");
+              const [result] = await Promise.all([
+                query.refetch(),
+                client.invalidateQueries({ queryKey: ["finance-conversation-host-readiness"] }),
+              ]);
+              if (!sameSession(client, session)) {
+                toast.dismiss(notice);
+                return;
+              }
+              toast[result.isError ? "error" : "success"](
+                result.isError
+                  ? "Readiness could not be checked. Try again."
+                  : result.data?.canSend
+                    ? "Chat is ready for the next eligible run."
+                    : "Readiness checked. Review the next step.",
+                { id: notice },
+              );
+            })();
+          }}
+        >
+          Refresh readiness
+        </Button>
+      </div>
       <QueryFeedback query={query} title="Chat readiness could not be loaded" />
-      {query.data ? (
+      {query.data && !query.isError ? (
         query.data.canSend ? (
-          <p>Chat is available through an eligible verified automation.</p>
+          <p>Chat is available. Messages wait for the next eligible host run.</p>
+        ) : query.data.host ? (
+          <p>
+            <strong>Chat sending is locked.</strong> Review the next step for{" "}
+            {query.data.host.label} below.
+          </p>
         ) : (
           <>
-            <p>{financeConversationRecovery[query.data.reason].cause}</p>
+            <p>
+              <strong>Chat sending is locked.</strong>{" "}
+              {financeConversationRecovery[query.data.reason]?.cause}
+            </p>
             {query.data.reason !== "registration_missing" &&
             query.data.reason !== "registration_revoked" ? (
-              <Button asChild variant="secondary" className="self-start">
+              <Button asChild variant="secondary" className="min-h-11 self-start">
                 {financeConversationRecovery[query.data.reason].href === "/finances/automations" ? (
                   <a href="#finance-automation-list">
                     {financeConversationRecovery[query.data.reason].action}
@@ -59,32 +100,65 @@ export function FinanceConversationReadiness({ returnTo }: { returnTo?: string |
           </>
         )
       ) : null}
+      {!query.isError && query.data?.host ? (
+        <p className="text-sm text-muted-foreground break-words">
+          Chat host: {query.data.host.label}
+        </p>
+      ) : null}
+      {query.isError ? (
+        <p className="text-sm text-muted-foreground">
+          Readiness unavailable. Refresh to check again.
+        </p>
+      ) : null}
     </section>
   );
 }
 
-export function AutomationHostReadiness({ scheduleId }: { scheduleId: string }) {
-  const query = useQuery({
-    queryKey: ["finance-conversation-host-readiness", scheduleId],
-    queryFn: () => api.getFinanceConversationHostReadiness(scheduleId),
-  });
+export function AutomationHostReadiness({
+  scheduleId,
+  returnTo,
+}: {
+  scheduleId: string;
+  returnTo?: string | null;
+}) {
+  const query = useFinanceConversationReadiness(scheduleId);
+  const state = query.isError ? undefined : query.data;
+  const recovery = state ? financeConversationRecovery[state.reason] : undefined;
   return (
-    <>
+    <div className="grid min-w-0 gap-2">
       <QueryFeedback query={query} title="Host message access could not be loaded" />
-      <p>
-        Message access for this host:{" "}
-        {query.data?.messageCapability === "verified"
-          ? "verified"
-          : query.data
-            ? query.data.messageCapability.replaceAll("_", " ")
-            : "unknown"}
-        {query.data?.recovery === "authorize_execution"
-          ? " · Authorize Finance execution."
-          : query.data?.recovery === "reconnect"
-            ? " · Reconnect the original host."
-            : ""}
+      <p className="font-medium">
+        {state
+          ? state.canSend
+            ? "Ready for Chat"
+            : "Not ready for Chat"
+          : query.isPending
+            ? "Checking host…"
+            : "Readiness unavailable"}
       </p>
-    </>
+      {state && !state.canSend && recovery ? (
+        <p className="text-sm text-muted-foreground">{recovery.cause}</p>
+      ) : null}
+      {state &&
+      !state.canSend &&
+      recovery &&
+      state.recovery !== "verify_message_protocol" &&
+      state.recovery !== "register_host" &&
+      state.recovery !== "resume_registration" ? (
+        <Button asChild variant="secondary" className="min-h-11 justify-self-start">
+          <Link to={returnTo ? financeRecoveryHref(recovery.href, returnTo) : recovery.href}>
+            {recovery.action}
+          </Link>
+        </Button>
+      ) : null}
+      {state ? (
+        <p className="text-sm text-muted-foreground">
+          Message access for this host: {state.messageCapability.replaceAll("_", " ")}. Messaging
+          proof alone does not authorize Finance actions.
+        </p>
+      ) : null}
+      {state?.host ? <FinanceHostRunSummary run={state.host.latestRun} /> : null}
+    </div>
   );
 }
 
@@ -96,6 +170,7 @@ export function AutomationVerification({
   disabled: boolean;
 }) {
   const client = useQueryClient();
+  const session = usePreferenceSession(client);
   const [challenge, setChallenge] = useState<FinanceConversationChallenge | null>(null);
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
@@ -116,7 +191,12 @@ export function AutomationVerification({
     let issued = false;
     try {
       if (kind === "issue") {
-        setChallenge(await api.issueFinanceConversationChallenge(scheduleId));
+        const next = await api.issueFinanceConversationChallenge(scheduleId);
+        if (!sameSession(client, session)) {
+          toast.dismiss(notice);
+          return;
+        }
+        setChallenge(next);
         issued = true;
         // A replacement challenge supersedes proof. Clear stale verified projections
         // before refetching, including owner-qualified Chat readiness queries.
@@ -140,8 +220,19 @@ export function AutomationVerification({
           api.getFinanceConversationReadiness(),
           api.getFinanceConversationHostReadiness(scheduleId),
         ]);
-        client.setQueryData(["finance-conversation-host-readiness", scheduleId], hostReadiness);
-        client.setQueryData(["finance-conversation-readiness"], readiness);
+        if (!sameSession(client, session)) {
+          toast.dismiss(notice);
+          return;
+        }
+        client.setQueryData(
+          ["finance-conversation-host-readiness", scheduleId, session.owner, session.epoch],
+          hostReadiness,
+        );
+        client.setQueryData(
+          ["finance-conversation-readiness", session.owner, session.epoch],
+          readiness,
+        );
+        await client.invalidateQueries({ queryKey: ["finance-conversation-readiness"] });
         await client.invalidateQueries({ queryKey: ["finance-onboarding"] });
         toast.success(
           hostReadiness.canSend
@@ -151,6 +242,10 @@ export function AutomationVerification({
         );
       }
     } catch (error) {
+      if (!sameSession(client, session)) {
+        toast.dismiss(notice);
+        return;
+      }
       toast.error(
         issued
           ? "Challenge prepared, but readiness could not be refreshed. Check Chat readiness again."
@@ -167,11 +262,11 @@ export function AutomationVerification({
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" disabled={disabled}>
+        <Button variant="outline" className="min-h-11" disabled={disabled}>
           Verify message access
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto">
+      <DialogContent data-finance-dialog data-finance-size="default">
         <DialogHeader>
           <DialogTitle>Verify message access</DialogTitle>
           <DialogDescription>
@@ -179,30 +274,32 @@ export function AutomationVerification({
             Registration alone does not unlock Chat.
           </DialogDescription>
         </DialogHeader>
-        <Button disabled={pending || disabled} onClick={() => void act("issue")}>
-          {challenge ? "Prepare a new challenge" : "Prepare verification challenge"}
-        </Button>
-        {challenge ? (
-          <>
-            <Field>
-              <FieldLabel htmlFor={`verification-${scheduleId}`}>
-                Instructions for your original host
-              </FieldLabel>
-              <Textarea
-                id={`verification-${scheduleId}`}
-                readOnly
-                value={instructions}
-                className="min-h-64"
-              />
-            </Field>
-            <Button disabled={pending} onClick={() => void act("copy")}>
-              Copy verification instructions
-            </Button>
-          </>
-        ) : null}
-        <Button variant="outline" disabled={pending} onClick={() => void act("check")}>
-          Check Chat readiness
-        </Button>
+        <ResponsiveDialogBody>
+          <Button disabled={pending || disabled} onClick={() => void act("issue")}>
+            {challenge ? "Prepare a new challenge" : "Prepare verification challenge"}
+          </Button>
+          {challenge ? (
+            <>
+              <Field>
+                <FieldLabel htmlFor={`verification-${scheduleId}`}>
+                  Instructions for your original host
+                </FieldLabel>
+                <Textarea
+                  id={`verification-${scheduleId}`}
+                  readOnly
+                  value={instructions}
+                  className="min-h-64"
+                />
+              </Field>
+              <Button disabled={pending} onClick={() => void act("copy")}>
+                Copy verification instructions
+              </Button>
+            </>
+          ) : null}
+          <Button variant="outline" disabled={pending} onClick={() => void act("check")}>
+            Check Chat readiness
+          </Button>
+        </ResponsiveDialogBody>
       </DialogContent>
     </Dialog>
   );

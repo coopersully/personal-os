@@ -1,21 +1,24 @@
 import { localDateToIso, type SearchableWorkspace } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/api";
 import { ActionButton as Button } from "@/components/action-button";
-import { DataChoice, FilterTrigger } from "@/components/data-view-controls";
-import { SearchIcon } from "@/components/icons";
+import { FilterTrigger } from "@/components/data-view-controls";
 import {
-  ResponsiveDialog,
-  ResponsiveDialogBody,
-  ResponsiveDialogContent,
-  ResponsiveDialogHeader,
-  ResponsiveDialogTitle,
-} from "@/components/responsive-dialog";
+  ApprovalHandIcon,
+  ArrowRightIcon,
+  CalendarIcon,
+  FileTextIcon,
+  FilterIcon,
+  PlusIcon,
+  SearchIcon,
+  SettingsIcon,
+} from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import {
   Combobox,
+  ComboboxContent,
   ComboboxGroup,
   ComboboxGroupLabel,
   ComboboxInput,
@@ -23,8 +26,6 @@ import {
   ComboboxList,
 } from "@/components/ui/combobox";
 import { InputGroupAddon } from "@/components/ui/input-group";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { parseCalendarDateQuery } from "../calendar/search-date";
 import { useWorkspacePreferences } from "../workspace-settings/preferences";
 import { type SearchAction, type SearchOption, workspaceCatalog } from "./catalog";
@@ -39,63 +40,24 @@ export function WorkspaceFinder({
   onAction?: (action: SearchAction) => void;
   timeZone?: string;
 }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const isMobile = useIsMobile();
+  const [activation, setActivation] = useState(0);
   useEffect(() => {
-    const focusSearch = () => setMobileOpen(true);
+    const focusSearch = () => {
+      setActivation((current) => current + 1);
+    };
     window.addEventListener("nohmi:workspace-search", focusSearch);
     return () => window.removeEventListener("nohmi:workspace-search", focusSearch);
   }, []);
   const label = `Search ${workspace[0]?.toUpperCase()}${workspace.slice(1)}`;
   return (
     <div className="workspace-finder" data-search-workspace={workspace}>
-      {isMobile ? (
-        <>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={label}
-            onClick={() => setMobileOpen(true)}
-          >
-            <SearchIcon />
-          </Button>
-          <ResponsiveDialog open={mobileOpen} onOpenChange={setMobileOpen}>
-            <ResponsiveDialogContent className="workspace-finder-dialog">
-              <ResponsiveDialogHeader>
-                <ResponsiveDialogTitle>{label}</ResponsiveDialogTitle>
-              </ResponsiveDialogHeader>
-              <ResponsiveDialogBody>
-                <FinderInput
-                  workspace={workspace}
-                  label={label}
-                  timeZone={timeZone}
-                  {...(onAction ? { onAction } : {})}
-                  onSelected={() => setMobileOpen(false)}
-                  mobile
-                />
-              </ResponsiveDialogBody>
-            </ResponsiveDialogContent>
-          </ResponsiveDialog>
-        </>
-      ) : (
-        <Popover open={mobileOpen} onOpenChange={setMobileOpen}>
-          <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label={label}>
-              <SearchIcon />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="workspace-finder-results" aria-label={label}>
-            <FinderInput
-              workspace={workspace}
-              label={label}
-              timeZone={timeZone}
-              {...(onAction ? { onAction } : {})}
-              onSelected={() => setMobileOpen(false)}
-              mobile
-            />
-          </PopoverContent>
-        </Popover>
-      )}
+      <FinderInput
+        workspace={workspace}
+        label={label}
+        timeZone={timeZone}
+        {...(onAction ? { onAction } : {})}
+        activation={activation}
+      />
     </div>
   );
 }
@@ -104,24 +66,31 @@ function FinderInput({
   label,
   timeZone,
   onAction,
-  onSelected,
-  mobile = false,
+  activation = 0,
 }: {
   workspace: SearchableWorkspace;
   label: string;
   timeZone: string;
   onAction?: (action: SearchAction) => void;
-  onSelected?: () => void;
-  mobile?: boolean;
+  activation?: number;
 }) {
   const navigate = useNavigate();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (activation) {
+      inputRef.current?.focus();
+      setOpen(true);
+    }
+  }, [activation]);
   const [query, setQuery] = useState("");
   const [settled, setSettled] = useState("");
   const [offset, setOffset] = useState(0);
   const [filter, setFilter] = useState("all");
+  const [choosingType, setChoosingType] = useState(false);
   const needsRecords = ["all", "content", "reviews"].includes(filter);
   const recordKind = filter === "content" ? "content" : filter === "reviews" ? "reviews" : "all";
-  const [open, setOpen] = useState(mobile);
+  const [open, setOpen] = useState(false);
   const preferences = useWorkspacePreferences(workspace);
   const [archiveOverride, setArchiveOverride] = useState<boolean | null>(null);
   const includeArchived =
@@ -179,19 +148,36 @@ function FinderInput({
   const select = (option: SearchOption) => {
     setOpen(false);
     setQuery("");
-    onSelected?.();
     if (option.action) onAction?.(option.action);
     else navigate(option.href);
   };
   const results = (
     <>
-      <div className="flex items-center justify-between gap-2 px-2 py-1">
-        <span className="text-xs text-muted-foreground">
-          Entire workspace · Available synced content
-        </span>
+      <div className="workspace-finder-toolbar">
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label="Search result type"
+          aria-expanded={choosingType}
+          onClick={() => setChoosingType(!choosingType)}
+        >
+          <FilterIcon aria-hidden="true" />
+          {
+            {
+              all: "All results",
+              content: "Content",
+              settings: "Settings",
+              actions: "Navigation and actions",
+              reviews: "Reviews",
+            }[filter as "all"]
+          }
+        </Button>
         <FilterTrigger
-          label={includeArchived ? "Including archive" : "Excluding archive"}
-          active={!includeArchived}
+          compact
+          label="Include archive"
+          aria-label="Include archive"
+          active={includeArchived}
+          count={includeArchived ? 1 : 0}
           aria-pressed={includeArchived}
           onClick={() => {
             setArchiveOverride(!includeArchived);
@@ -199,23 +185,32 @@ function FinderInput({
           }}
         />
       </div>
-      <DataChoice
-        label="Result type"
-        ariaLabel="Search result type"
-        value={filter}
-        active={filter !== "all"}
-        choices={[
-          ["all", "All results"],
-          ["content", "Content"],
-          ["settings", "Settings"],
-          ["actions", "Navigation and actions"],
-          ["reviews", "Reviews"],
-        ]}
-        onChange={(value) => {
-          setFilter(value);
-          setOffset(0);
-        }}
-      />
+      {choosingType ? (
+        <fieldset className="workspace-finder-types" aria-label="Result type">
+          {[
+            ["all", "All results"],
+            ["content", "Content"],
+            ["settings", "Settings"],
+            ["actions", "Navigation and actions"],
+            ["reviews", "Reviews"],
+          ].map(([value, title]) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={filter === value ? "secondary" : "ghost"}
+              aria-pressed={filter === value}
+              onClick={() => {
+                if (!value) return;
+                setFilter(value);
+                setOffset(0);
+                setChoosingType(false);
+              }}
+            >
+              {title}
+            </Button>
+          ))}
+        </fieldset>
+      ) : null}
       <div role="status" className="px-2 text-xs text-muted-foreground">
         {query.trim() && needsRecords && (!current || records.isPending)
           ? "Searching…"
@@ -234,22 +229,45 @@ function FinderInput({
       ) : null}
       <ComboboxList aria-label={`${label} results`}>
         {groups.map((group) => (
-          <ComboboxGroup key={group.label}>
+          <ComboboxGroup key={group.label} className="workspace-finder-group">
             <ComboboxGroupLabel className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
               {group.label}
             </ComboboxGroupLabel>
             {group.items.map((option) => (
               <ComboboxItem value={option} key={`${option.kind}:${option.id}`}>
+                {(() => {
+                  const Icon =
+                    option.kind === "Settings"
+                      ? SettingsIcon
+                      : option.kind === "Review"
+                        ? ApprovalHandIcon
+                        : option.kind === "Action"
+                          ? PlusIcon
+                          : option.kind === "Navigation"
+                            ? ArrowRightIcon
+                            : option.kind === "Date"
+                              ? CalendarIcon
+                              : FileTextIcon;
+                  return <Icon aria-hidden="true" />;
+                })()}
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-medium">{option.title}</span>
+                    <span
+                      data-user-content={
+                        !["Settings", "Review", "Action", "Navigation", "Date"].includes(
+                          option.kind,
+                        ) || undefined
+                      }
+                      className="truncate font-medium"
+                    >
+                      {option.title}
+                    </span>
                     {option.state ? <Badge variant="secondary">{option.state}</Badge> : null}
                   </div>
-                  <span className="line-clamp-2 text-xs text-muted-foreground">
+                  <span data-user-content className="line-clamp-2 text-xs text-muted-foreground">
                     {option.preview}
                   </span>
                 </div>
-                <span className="shrink-0 text-xs text-muted-foreground">{option.kind}</span>
               </ComboboxItem>
             ))}
           </ComboboxGroup>
@@ -281,7 +299,7 @@ function FinderInput({
     </>
   );
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" ref={anchorRef}>
       <Combobox<SearchOption>
         items={orderedOptions}
         filter={null}
@@ -296,25 +314,31 @@ function FinderInput({
         onValueChange={(item) => {
           if (item) select(item);
         }}
-        inline={mobile}
-        open={mobile || open}
+        open={open}
         onOpenChange={setOpen}
         autoHighlight
       >
         <ComboboxInput
+          ref={inputRef}
           aria-label={label}
-          placeholder={label}
+          placeholder=""
           showTrigger={false}
-          className="w-full"
+          className="workspace-finder-input w-full rounded-full"
           onClick={() => setOpen(true)}
-          autoFocus={mobile}
           maxLength={200}
         >
           <InputGroupAddon align="inline-start">
             <SearchIcon />
           </InputGroupAddon>
         </ComboboxInput>
-        <div className="pt-3">{results}</div>
+        <ComboboxContent
+          anchor={anchorRef}
+          collisionPadding={16}
+          align="center"
+          className="workspace-finder-results max-h-[65dvh] overflow-y-auto"
+        >
+          {results}
+        </ComboboxContent>
       </Combobox>
     </div>
   );

@@ -5,6 +5,9 @@ description: Build and refine accessible, domain-owned nohmi React PWA experienc
 
 # nohmi frontend
 
+Apply the repository [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+to assigned durable work; pure read-only use of this skill creates no tracking work.
+
 Follow `docs/design/foundations.md`, `docs/design/governance.md`,
 `docs/design/system.md`, the relevant page specification in
 `docs/design/pages`, `apps/web/src/features/README.md`, and
@@ -38,6 +41,22 @@ their viewport; independently verify card/footer bounds after entrance animation
   of comprehension, visual quality, or user validation.
 
 ## Structure feature work
+
+App-wide recovery uses the shared `RecoverySurface` (desktop dialog/mobile drawer), owned by the
+session shell. Follow `docs/design/feedback.md`: account recovery precedes failed reads, which
+precede snoozable connection-health reminders. Keep existing content mounted; no error banners
+in navigation, sidebars, or bento layouts. Retry safe reads only, never uncertain writes. Use
+authoritative connector health, not renderer-invented staleness. Connection reminders can only be
+reviewed or temporarily snoozed, with owner-scoped session expiry and recurrence after 15 minutes.
+Test persistence, expiry, identity isolation, automatic recovery, focus, and mobile drawer behavior.
+Action feedback uses Sonner everywhere, including non-settings records and toolbars. Use
+`RecoveryRequest` for domain-owned conflict/batch recovery; preserve drafts and reviewed retry
+controls without inserting banners. Include companion lookup/configuration retries in the recovery
+surface so they are usable while the page is blocked. Secondary reads use `QueryFeedback` so the read gate owns
+them. Reserve geometry for conditional navigation attention controls and visually compare the
+layout before, during, and after failures on desktop/mobile.
+Use the shared modal-priority contract: defer late-opening page dialogs during recovery, preserve
+already-open editors and drafts, and allow nested repair dialogs inside the recovery surface.
 
 - Place a vertical feature under `apps/web/src/features/<domain>`.
 - Keep its page composition, query hooks, local state, and feature-only
@@ -568,9 +587,10 @@ in Sonner; initial unavailability retains bounded recovery in its own content ar
 refresh errors never insert rows/banners into workspace chrome, sidebars, navigation, or bento
 layout. Initial navigation/sidebar failures also use `toastOnly`; an initial Empty recovery
 region belongs to data content. Retry the missing blocking read when other sources have stale
-retained data. Use toast retry plus existing refresh controls. Only account-wide non-authentication
-verification failure gates the app with the shared non-dismissible recovery dialog, through
-pending retry until confirmed query success. Keep 401/private-cache and public/auth flows intact.
+retained data. Use the shared recovery queue for signed-in read failures. Account verification has priority;
+active dataset failures share its responsive surface and remain gated through pending retry until
+confirmed success. Non-retryable access/correction responses keep their own flows. Keep
+401/private-cache and public/auth flows intact.
 Never duplicate failure prose or turn recovery into a record mutation.
 
 Exercise empty → broaden → populated → default-scope round trips for data pages.

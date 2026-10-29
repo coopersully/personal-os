@@ -25,7 +25,7 @@ function mount(pending = false) {
 }
 it("creates a named balanced proposal from blank amounts and retains the last rows", () => {
   const { onSave } = mount();
-  expect(screen.getByRole("dialog", { name: "Create a complete plan" })).toBeVisible();
+  expect(screen.getByRole("dialog", { name: "Create budget" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Remove resource 1" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Remove allocation 1" })).toBeDisabled();
   fireEvent.blur(screen.getByLabelText("Resource 1 amount"));

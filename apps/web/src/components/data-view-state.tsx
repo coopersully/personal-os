@@ -1,24 +1,36 @@
 import type { ReactNode } from "react";
 import { SettingsFeedbackContext } from "@/lib/settings-feedback";
 import { QueryFeedback } from "./async-state";
-import { CircleAlertIcon } from "./icons";
+import { ContentSkeleton } from "./content-skeleton";
+import { CircleAlertIcon, type Icon, InboxIcon } from "./icons";
 import { Button } from "./ui/button";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
-import { Skeleton } from "./ui/skeleton";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "./ui/empty";
 
 /** Domain copy explains the scope; actions change only the view, never its records. */
 export function DataViewEmpty({
   title,
+  icon: IconComponent = InboxIcon,
   description,
   children,
 }: {
   title: string;
+  icon?: Icon;
   description?: string;
   children?: ReactNode;
 }) {
   return (
     <Empty>
       <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <IconComponent aria-hidden="true" />
+        </EmptyMedia>
         <EmptyTitle>{title}</EmptyTitle>
         {description ? <EmptyDescription>{description}</EmptyDescription> : null}
       </EmptyHeader>
@@ -28,14 +40,7 @@ export function DataViewEmpty({
 }
 
 export function DataViewLoading({ label }: { label: string }) {
-  return (
-    <div role="status" aria-label={label} aria-busy="true" className="flex flex-col gap-3 py-4">
-      {[0, 1, 2].map((row) => (
-        <Skeleton key={row} className="h-10 w-full" />
-      ))}
-      <span className="sr-only">{label}</span>
-    </div>
-  );
+  return <ContentSkeleton label={label} />;
 }
 
 /** Availability/recovery stays discoverable; the error itself has one Sonner owner. */

@@ -152,7 +152,7 @@ import { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identi
 import { createFinanceMerchantService } from "./finance/merchant-service.js";
 import {
   createFinancePlanningEvidenceService,
-  requireExplicitUser,
+  requirePlanningConfirmation,
 } from "./finance/planning-evidence-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
@@ -203,6 +203,13 @@ type MaintenanceMutationAttribution = {
   runId: string;
 };
 type MutationContext = {
+  /** Internal exact-case scope, constructed only by the validated batch service. */
+  financeReviewBatchScope?: {
+    transactionId: string;
+    reviewId: string | null;
+    transferReview?: boolean;
+    transferCounterpart?: { transactionId: string; revision: string };
+  };
   financeExecution?: FinanceExecutionFence;
   financeBudgetApproval?: FinanceBudgetApproval;
   /** Internal action-service capability; never derived from a token or MCP input. */
@@ -2739,10 +2746,26 @@ export function createFinanceService({
     } = {},
     executor?: FinanceActionWriteExecutor,
   ) {
+    const batchScope = context.financeReviewBatchScope;
+    if (
+      batchScope &&
+      (!executor ||
+        batchScope.transactionId !== decision.transactionId ||
+        batchScope.reviewId !== (options.requiredReviewId ?? null))
+    )
+      throw new AppError(
+        "invalid_request",
+        "The internal Finance batch scope does not match the writer.",
+      );
     const readExecutor = executor ?? db;
     // Direct ledger editing has its own prepared-action contract. Resolving a
     // categorization review must still match current server-owned evidence.
+    const exactTransferReviewExecution =
+      options.reviewedExecution === true &&
+      batchScope?.transferReview === true &&
+      !!options.requiredReviewId;
     const directLedgerExecution = options.reviewedExecution === true && !options.requiredReviewId;
+    const explicitExecution = directLedgerExecution || exactTransferReviewExecution;
     if (options.reviewedExecution)
       await requireWorkspaceExecution(readExecutor, context.principal, "finances", now());
     const before = await ownedTransaction(
@@ -2773,7 +2796,7 @@ export function createFinanceService({
     );
     let confidence = decision.confidence;
     let agentProposal: FinanceCategorizationProposal | null = null;
-    if (!directLedgerExecution && (source === "agent" || source === "rule")) {
+    if (!explicitExecution && (source === "agent" || source === "rule")) {
       const proposal = await categorizationProposal(
         context.principal.userId,
         beforeValue,
@@ -2796,7 +2819,11 @@ export function createFinanceService({
       if (source === "agent") agentProposal = proposal;
     }
     const canApply =
-      directLedgerExecution || source !== "agent" || agentProposal?.meetsPolicyThreshold === true;
+      explicitExecution || source !== "agent" || agentProposal?.meetsPolicyThreshold === true;
+    // A batch cannot rewrite an unrelated question into a categorization question.
+    // Its durable item receipt carries the policy-required follow-up instead.
+    if (!canApply && batchScope)
+      return { applied: false, replayed: false, threshold, transaction: beforeValue };
     if (!canApply) {
       const defer = async (tx: FinanceActionWriteExecutor) => {
         await assertMaintenanceClaim(tx, context);
@@ -3033,7 +3060,7 @@ export function createFinanceService({
         .where(eq(financeCategories.userId, context.principal.userId))
         .orderBy(financeCategories.id)
         .for("update");
-      if (!directLedgerExecution && (source === "agent" || source === "rule")) {
+      if (!explicitExecution && (source === "agent" || source === "rule")) {
         const currentProposal = await categorizationProposal(
           context.principal.userId,
           transaction(current),
@@ -3056,7 +3083,7 @@ export function createFinanceService({
         threshold = currentProposal.threshold;
       }
       const mustProtectAmbiguousTransfer =
-        !directLedgerExecution && (source === "rule" || source === "agent");
+        !explicitExecution && (source === "rule" || source === "agent");
       const [protectedReview] = mustProtectAmbiguousTransfer
         ? await tx
             .select({ id: financeReviewCases.id })
@@ -3089,6 +3116,23 @@ export function createFinanceService({
       if (!current.pending) {
         await assertAllocationsMayBeReplaced(tx, context.principal.userId, current.id);
       }
+      const outstandingReviews = batchScope
+        ? await tx
+            .select({ id: financeReviewCases.id })
+            .from(financeReviewCases)
+            .where(
+              and(
+                eq(financeReviewCases.userId, context.principal.userId),
+                eq(financeReviewCases.transactionId, before.id),
+                inArray(financeReviewCases.status, ["deferred", "open"]),
+              ),
+            )
+            .orderBy(financeReviewCases.id)
+            .for("update")
+        : [];
+      const preserveReviewFlag = outstandingReviews.some(
+        (review) => review.id !== batchScope?.reviewId,
+      );
       const [updated] = await tx
         .update(financeTransactions)
         .set({
@@ -3099,7 +3143,7 @@ export function createFinanceService({
           categoryRationale: decision.rationale,
           categorySource: source,
           direction: options.direction,
-          needsReview: false,
+          needsReview: preserveReviewFlag,
           reconciliationStatus: options.reconciliationStatus,
           transferGroupId: options.reconciliationStatus === "not_applicable" ? null : undefined,
           updatedAt: now(),
@@ -3120,6 +3164,7 @@ export function createFinanceService({
           .where(
             and(
               eq(financeTransactionAllocations.transactionId, updated.id),
+              eq(financeTransactionAllocations.userId, context.principal.userId),
               eq(financeTransactionAllocations.state, "active"),
             ),
           );
@@ -3152,6 +3197,12 @@ export function createFinanceService({
         .where(
           and(
             eq(financeReviewCases.transactionId, before.id),
+            eq(financeReviewCases.userId, context.principal.userId),
+            batchScope
+              ? batchScope.reviewId
+                ? eq(financeReviewCases.id, batchScope.reviewId)
+                : sql`false`
+              : undefined,
             inArray(financeReviewCases.status, ["deferred", "open"]),
           ),
         );
@@ -3174,6 +3225,15 @@ export function createFinanceService({
           action: options.auditAction ?? "finance.transaction_categorized",
           after: {
             ...transactionAuditSnapshot(after),
+            ...(exactTransferReviewExecution && batchScope?.transferCounterpart
+              ? {
+                  confirmedTransferPair: {
+                    transactionRevision: updated.contextualRevision.toString(),
+                    counterpartTransactionId: batchScope.transferCounterpart.transactionId,
+                    counterpartRevision: batchScope.transferCounterpart.revision,
+                  },
+                }
+              : {}),
             ...(maintenanceSource ? maintenanceAuditAttribution(context, maintenanceSource) : {}),
           },
           before: transactionAuditSnapshot(beforeValue),
@@ -5593,7 +5653,7 @@ export function createFinanceService({
       input: ManageFinanceRecurringItemInput,
       context: FinanceMutationContext,
     ) {
-      if (input.operation === "confirm_cost") requireExplicitUser(context);
+      if (input.operation === "confirm_cost") requirePlanningConfirmation(context);
       return executeFinanceIdempotently(
         db,
         context,
@@ -7366,12 +7426,18 @@ export function createFinanceService({
         total: scopedReviews.length,
       };
     },
-    async resolveReview(id: string, input: FinanceReviewDecisionInput, context: MutationContext) {
+    async resolveReview(
+      id: string,
+      input: FinanceReviewDecisionInput,
+      context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
+    ) {
+      const readExecutor = executor ?? db;
       const reviewedExecution =
         context.principal.actorType === "agent" && context.principal.scopes.has("finances:execute");
       if (reviewedExecution)
-        await requireWorkspaceExecution(db, context.principal, "finances", now());
-      const [review] = await db
+        await requireWorkspaceExecution(readExecutor, context.principal, "finances", now());
+      const [review] = await readExecutor
         .select()
         .from(financeReviewCases)
         .where(
@@ -7427,7 +7493,7 @@ export function createFinanceService({
       }
       if (input.action === "defer") {
         if (review.status === "deferred") return { deferred: true };
-        await db.transaction(async (tx) => {
+        const defer = async (tx: FinanceActionWriteExecutor) => {
           if (reviewedExecution)
             await requireWorkspaceExecution(tx, context.principal, "finances", now());
           const [updated] = await tx
@@ -7457,7 +7523,9 @@ export function createFinanceService({
               ...context,
             }),
           );
-        });
+        };
+        if (executor) await defer(executor);
+        else await db.transaction(defer);
         return { deferred: true };
       }
       if (input.expectedTransactionUpdatedAt === undefined) {
@@ -7466,7 +7534,11 @@ export function createFinanceService({
           "Resolving a Finance review requires the displayed transaction revision.",
         );
       }
-      const current = await ownedTransaction(context.principal.userId, review.transactionId);
+      const current = await ownedTransaction(
+        context.principal.userId,
+        review.transactionId,
+        readExecutor,
+      );
       // Signed provider direction is authoritative when available; the user
       // choice is only the fallback for legacy/manual rows without provenance.
       const nonTransferDirection =
@@ -7487,7 +7559,7 @@ export function createFinanceService({
         input.action === "approve"
           ? (current.categoryId ?? review.suggestedCategoryId)
           : input.action === "confirm_transfer"
-            ? (await categoryForName(context.principal.userId, "Transfers")).id
+            ? (await categoryForName(context.principal.userId, "Transfers", readExecutor)).id
             : input.categoryId;
       if (!categoryId)
         throw new AppError("invalid_request", "Choose a category before resolving this review.");
@@ -7525,6 +7597,7 @@ export function createFinanceService({
                 reviewedExecution,
               }
             : { requiredReviewId: review.id, reviewedExecution },
+        executor,
       );
       return result;
     },
@@ -7614,11 +7687,11 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ) {
-      const approval = requireActiveBudgetAuthority(input, context);
-      if (!context.financeBudgetApproval || !executor) {
+      const approval = await requireActiveBudgetAuthority(input, context, executor);
+      if (!executor) {
         throw new AppError(
           "forbidden",
-          "Submit this budget allocation for revision-bound human review before applying it.",
+          "Submit this budget allocation as an exact prepared action before applying it.",
         );
       }
       const write = async (tx: FinanceActionWriteExecutor) => {
@@ -7712,11 +7785,11 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ): Promise<FinanceBudgetPlan> {
-      const approval = requireActiveBudgetAuthority(input, context);
-      if (!context.financeBudgetApproval || !executor) {
+      const approval = await requireActiveBudgetAuthority(input, context, executor);
+      if (!executor) {
         throw new AppError(
           "forbidden",
-          "Submit this budget plan for revision-bound human review before applying it.",
+          "Submit this budget plan as an exact prepared action before applying it.",
         );
       }
       const write = async (tx: FinanceActionWriteExecutor) => {

@@ -5,18 +5,22 @@ packages:
 # Keep transitive runtime dependencies on patched releases until their parents
 # publish dependency ranges that include the fixes.
 overrides:
-  "@modelcontextprotocol/node@2.0.0>@hono/node-server": "2.0.11"
+  "@modelcontextprotocol/node@2.1.0>@hono/node-server": "2.0.11"
   "@modelcontextprotocol/sdk@1.29.0>@hono/node-server": "2.0.11"
   "ajv@8.20.0>fast-uri": "3.1.4"
+  "body-parser@>=2.0.0 <2.4.0": "2.4.0"
   "brace-expansion@5.0.7": "5.0.8"
   "follow-redirects@<1.16.1": "1.16.1"
   "hono@<4.13.13": "4.13.13"
   "html-to-text@10.0.0>deepmerge-ts": "8.0.1"
   "ip-address@>=10.0.0 <10.7.4": "10.7.4"
-  "nodemailer@<10.0.9": "10.0.12"
+  "nodemailer@<10.1.4": "10.1.4"
   "postcss@8.5.17": "8.5.23"
   "proxy-addr@<2.0.8": "2.0.8"
-  "qs": "6.16.0"
+  "qs": "6.16.1"
+  "@modelcontextprotocol/client>zod": "4.6.6"
+  "@modelcontextprotocol/core>zod": "4.6.6"
+  "@modelcontextprotocol/server>zod": "4.6.6"
 
 allowBuilds:
   '@biomejs/biome': true

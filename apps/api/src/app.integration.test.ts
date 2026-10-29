@@ -217,6 +217,86 @@ describe.sequential("ilo API", () => {
     return response.status === 204 ? null : response.json();
   }
 
+  it("composes shared agent identity routes with authentication and owner-only linking", async () => {
+    expect((await app.request("/v1/agent-accounts")).status).toBe(401);
+    expect((await app.request("/v1/agent-accounts/current")).status).toBe(401);
+    const registration = await request("/v1/auth/register", {
+      auth: "none",
+      body: {
+        displayName: "Agent identity owner",
+        email: "agent-identity-owner@example.test",
+        password: "LocalTestOnly123!",
+        planningTimezone: "UTC",
+      },
+    });
+    const owner = await payload(registration);
+    const headers = {
+      authorization: `Session ${owner.sessionToken}`,
+      "content-type": "application/json",
+    };
+    const created = await payload(
+      await app.request("/v1/access-tokens", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "Claude Code", scopes: ["finances:read"] }),
+      }),
+    );
+    const agentHeaders = {
+      authorization: `Bearer ${created.token.token}`,
+      "content-type": "application/json",
+    };
+    const currentResponse = await app.request("/v1/agent-accounts/current", {
+      headers: agentHeaders,
+    });
+    expect(currentResponse.status).toBe(200);
+    const current = await payload(currentResponse);
+    expect(current).toMatchObject({ platform: "unknown", identitySource: "connection" });
+    const declared = await payload(
+      await app.request("/v1/agent-accounts/current", {
+        method: "POST",
+        headers: agentHeaders,
+        body: JSON.stringify({ platform: "claude" }),
+      }),
+    );
+    expect(declared).toMatchObject({ id: current.id, platform: "claude" });
+    const directoryResponse = await app.request("/v1/agent-accounts", { headers });
+    expect(directoryResponse.status).toBe(200);
+    const directory = await payload(directoryResponse);
+    expect(directory.accounts).toHaveLength(1);
+    expect(directory.connections[0].agentAccountId).toBe(current.id);
+    expect((await app.request("/v1/agent-accounts", { headers: agentHeaders })).status).toBe(403);
+    expect(
+      (
+        await app.request(`/v1/agent-accounts/${current.id}`, {
+          method: "PATCH",
+          headers: agentHeaders,
+          body: JSON.stringify({ displayName: "Impersonation" }),
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await app.request(`/v1/agent-accounts/connections/${directory.connections[0].id}`, {
+          method: "PUT",
+          headers: agentHeaders,
+          body: JSON.stringify({ agentAccountId: current.id }),
+        })
+      ).status,
+    ).toBe(403);
+    const renamed = await payload(
+      await app.request(`/v1/agent-accounts/${current.id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ displayName: "Amber Finch", accountLabel: "Personal" }),
+      }),
+    );
+    expect(renamed).toMatchObject({
+      id: current.id,
+      displayName: "Amber Finch",
+      avatarSeed: current.avatarSeed,
+    });
+  });
+
   it("composes authenticated notification status and human preferences without publication authority", async () => {
     const registration = await request("/v1/auth/register", {
       auth: "none",
@@ -5179,9 +5259,39 @@ describe.sequential("ilo API", () => {
         .from(reminders)
         .where(and(eq(reminders.userId, demo?.id ?? ""), eq(reminders.kind, "task"))),
     ]);
-    expect(events).toHaveLength(12);
+    // Twelve baseline events plus four stable demo evening/next-week agenda records.
+    expect(events).toHaveLength(16);
+    const agendaIds = [2100, 2102, 2103, 2105].map(
+      (record) => `f1000000-0000-4000-8000-${record.toString(16).padStart(12, "0")}`,
+    );
+    expect(events.filter((event) => agendaIds.includes(event.id))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: agendaIds[0],
+          title: "Read and plan tomorrow",
+          startsAt: new Date("2026-07-29T01:00:00.000Z"),
+          endsAt: new Date("2026-07-29T01:30:00.000Z"),
+        }),
+        expect.objectContaining({
+          id: agendaIds[1],
+          title: "Autumn workshop volunteer briefing",
+          startsAt: new Date("2026-07-30T21:00:00.000Z"),
+        }),
+        expect.objectContaining({
+          id: agendaIds[2],
+          title: "River loop with Priya",
+          startsAt: new Date("2026-07-31T21:00:00.000Z"),
+        }),
+        expect.objectContaining({
+          id: agendaIds[3],
+          title: "Friday money check-in",
+          startsAt: new Date("2026-08-02T21:00:00.000Z"),
+        }),
+      ]),
+    );
     expect(messages).toHaveLength(5);
-    expect(transactions).toHaveLength(9);
+    // Nine current records plus 159 transactions across the four completed history months.
+    expect(transactions).toHaveLength(168);
     expect(profiles).toContainEqual(expect.objectContaining({ domain: "mail", status: "active" }));
     expect(emptyTasks).toEqual([]);
     expect(degradedAccounts).toContainEqual(
@@ -5267,6 +5377,18 @@ describe.sequential("ilo API", () => {
     expect(sameListProjects).toHaveLength(2);
 
     await loadQaFixtures(database.db, { now: new Date("2026-07-29T14:00:00.000Z") });
+    const reloadedEvents = await database.db
+      .select()
+      .from(calendarEvents)
+      .where(eq(calendarEvents.userId, demo?.id ?? ""));
+    expect(reloadedEvents).toHaveLength(16);
+    expect(reloadedEvents.map((event) => event.id).sort()).toEqual(
+      events.map((event) => event.id).sort(),
+    );
+    expect(reloadedEvents.find((event) => event.id === agendaIds[0])).toMatchObject({
+      startsAt: new Date("2026-07-30T01:00:00.000Z"),
+      endsAt: new Date("2026-07-30T01:30:00.000Z"),
+    });
     expect(
       await database.db.select().from(users).where(inArray(users.email, fixtureEmails)),
     ).toHaveLength(qaFixtureAccounts.length);

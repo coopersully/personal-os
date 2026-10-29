@@ -5,15 +5,16 @@ import {
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
+import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -137,7 +138,7 @@ export function BalanceBasisForm(props: BalanceBasisFormProps) {
         if (!open && !save.isPending) onClose();
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
+      <DialogContent data-finance-dialog data-finance-size="default">
         <DialogHeader>
           <DialogTitle>Confirm balance basis for {account.name}</DialogTitle>
           <DialogDescription>
@@ -146,132 +147,136 @@ export function BalanceBasisForm(props: BalanceBasisFormProps) {
             movement's date or posting status.
           </DialogDescription>
         </DialogHeader>
-        {coverage.complete !== true || coverage.truncated ? (
-          <p>
-            Source transaction coverage is incomplete. Reload the complete account-history review
-            before confirming.
-          </p>
-        ) : null}
-        <FeedbackForm
-          feedback={correctionFeedback}
-          fieldNames={{ amountCents: "amount", protectedFloorCents: "floor" }}
-          className="flex flex-col gap-4"
-          validate={() => {
-            const parsed = statement();
-            const errors: Record<string, string> = {};
-            if (!parsed.success)
-              for (const issue of parsed.error.issues) {
-                const key = String(issue.path[0]);
-                errors[
-                  key === "amountCents" ? "amount" : key === "protectedFloorCents" ? "floor" : key
-                ] = issue.message;
-              }
-            transactions.forEach((transaction) => {
-              if (!reflections[transaction.id])
-                errors[`reflection-${transaction.id}`] =
-                  "Explicitly state whether this movement is included.";
-              if (transaction.accountId !== account.id)
-                errors.amount = "Reload transactions for this account before confirming.";
-            });
-            if (coverage.complete !== true || coverage.truncated)
-              errors.amount =
-                "Load a complete account-history review before confirming reflections.";
-            if (previousBasis && previousBasis.accountId !== account.id)
-              errors.amount = "Reload the prior balance basis for this account.";
-            if (draft.floor.trim() && cents(draft.floor) === null)
-              errors.floor =
-                "Enter an exact non-negative amount or leave the optional floor blank.";
-            return errors;
-          }}
-          onSubmit={(event) => {
-            event.preventDefault();
-            save.mutate();
-          }}
-        >
-          <FieldSet disabled={save.isPending}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor={`${id}-kind`}>Balance kind you confirm</FieldLabel>
-                <NativeSelect
-                  id={`${id}-kind`}
-                  name="kind"
-                  required
-                  value={draft.kind}
-                  onChange={(event) =>
-                    setDraft((value) => ({ ...value, kind: event.target.value }))
-                  }
-                >
-                  <NativeSelectOption value="">Choose current or available</NativeSelectOption>
-                  <NativeSelectOption value="current">Current</NativeSelectOption>
-                  <NativeSelectOption value="available">Available</NativeSelectOption>
-                </NativeSelect>
-              </Field>
-              {(
-                [
-                  ["amount", "Balance amount"],
-                  ["currencyCode", "Balance currency code"],
-                  ["asOf", "Balance as-of instant (ISO with offset)"],
-                  ["validUntil", "Valid-until instant (ISO with offset)"],
-                  ["floor", "Optional protected floor (blank means unknown)"],
-                ] as const
-              ).map(([key, label]) => (
-                <Field key={key}>
-                  <FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel>
-                  <Input
-                    id={`${id}-${key}`}
-                    name={key}
-                    required={key !== "floor"}
-                    value={draft[key]}
-                    onChange={(event) =>
-                      setDraft((value) => ({ ...value, [key]: event.target.value }))
-                    }
-                  />
-                </Field>
-              ))}
-              {transactions.map((transaction) => (
-                <Field key={transaction.id}>
-                  <FieldLabel htmlFor={`${id}-reflection-${transaction.id}`}>
-                    Balance reflection for {transaction.merchant} · {transaction.date} · revision{" "}
-                    {transaction.transactionRevision}
-                  </FieldLabel>
-                  <NativeSelect
-                    id={`${id}-reflection-${transaction.id}`}
-                    name={`reflection-${transaction.id}`}
-                    required
-                    value={reflections[transaction.id] ?? ""}
-                    onChange={(event) =>
-                      setReflections((value) => ({
-                        ...value,
-                        [transaction.id]: event.target.value,
-                      }))
-                    }
-                  >
-                    <NativeSelectOption value="">Choose explicitly</NativeSelectOption>
-                    <NativeSelectOption value="included">
-                      Already included in this balance
-                    </NativeSelectOption>
-                    <NativeSelectOption value="not_included">
-                      Not included in this balance
-                    </NativeSelectOption>
-                  </NativeSelect>
-                </Field>
-              ))}
-            </FieldGroup>
-          </FieldSet>
-          <p className="text-sm text-muted-foreground">
-            Account revision {expectedAccountRevision}; previous basis revision{" "}
-            {previousBasis?.basisRevision ?? 0}. A zero protected floor is an explicit choice;
-            leaving it blank does not mean zero.
-          </p>
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={save.isPending} onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={save.isPending}>
-              Confirm my balance statement
-            </Button>
-          </DialogFooter>
-        </FeedbackForm>
+        <div data-responsive-slot="layout">
+          {coverage.complete !== true || coverage.truncated ? (
+            <p>
+              Source transaction coverage is incomplete. Reload the complete account-history review
+              before confirming.
+            </p>
+          ) : null}
+          <FeedbackForm
+            feedback={correctionFeedback}
+            fieldNames={{ amountCents: "amount", protectedFloorCents: "floor" }}
+            className="flex flex-col gap-4"
+            validate={() => {
+              const parsed = statement();
+              const errors: Record<string, string> = {};
+              if (!parsed.success)
+                for (const issue of parsed.error.issues) {
+                  const key = String(issue.path[0]);
+                  errors[
+                    key === "amountCents" ? "amount" : key === "protectedFloorCents" ? "floor" : key
+                  ] = issue.message;
+                }
+              transactions.forEach((transaction) => {
+                if (!reflections[transaction.id])
+                  errors[`reflection-${transaction.id}`] =
+                    "Explicitly state whether this movement is included.";
+                if (transaction.accountId !== account.id)
+                  errors.amount = "Reload transactions for this account before confirming.";
+              });
+              if (coverage.complete !== true || coverage.truncated)
+                errors.amount =
+                  "Load a complete account-history review before confirming reflections.";
+              if (previousBasis && previousBasis.accountId !== account.id)
+                errors.amount = "Reload the prior balance basis for this account.";
+              if (draft.floor.trim() && cents(draft.floor) === null)
+                errors.floor =
+                  "Enter an exact non-negative amount or leave the optional floor blank.";
+              return errors;
+            }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              save.mutate();
+            }}
+          >
+            <ResponsiveDialogBody>
+              <FieldSet disabled={save.isPending}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-kind`}>Balance kind you confirm</FieldLabel>
+                    <NativeSelect
+                      id={`${id}-kind`}
+                      name="kind"
+                      required
+                      value={draft.kind}
+                      onChange={(event) =>
+                        setDraft((value) => ({ ...value, kind: event.target.value }))
+                      }
+                    >
+                      <NativeSelectOption value="">Choose current or available</NativeSelectOption>
+                      <NativeSelectOption value="current">Current</NativeSelectOption>
+                      <NativeSelectOption value="available">Available</NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                  {(
+                    [
+                      ["amount", "Balance amount"],
+                      ["currencyCode", "Balance currency code"],
+                      ["asOf", "Balance as-of instant (ISO with offset)"],
+                      ["validUntil", "Valid-until instant (ISO with offset)"],
+                      ["floor", "Optional protected floor (blank means unknown)"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <Field key={key}>
+                      <FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel>
+                      <Input
+                        id={`${id}-${key}`}
+                        name={key}
+                        required={key !== "floor"}
+                        value={draft[key]}
+                        onChange={(event) =>
+                          setDraft((value) => ({ ...value, [key]: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  ))}
+                  {transactions.map((transaction) => (
+                    <Field key={transaction.id}>
+                      <FieldLabel htmlFor={`${id}-reflection-${transaction.id}`}>
+                        Balance reflection for {transaction.merchant} · {transaction.date} ·
+                        revision {transaction.transactionRevision}
+                      </FieldLabel>
+                      <NativeSelect
+                        id={`${id}-reflection-${transaction.id}`}
+                        name={`reflection-${transaction.id}`}
+                        required
+                        value={reflections[transaction.id] ?? ""}
+                        onChange={(event) =>
+                          setReflections((value) => ({
+                            ...value,
+                            [transaction.id]: event.target.value,
+                          }))
+                        }
+                      >
+                        <NativeSelectOption value="">Choose explicitly</NativeSelectOption>
+                        <NativeSelectOption value="included">
+                          Already included in this balance
+                        </NativeSelectOption>
+                        <NativeSelectOption value="not_included">
+                          Not included in this balance
+                        </NativeSelectOption>
+                      </NativeSelect>
+                    </Field>
+                  ))}
+                </FieldGroup>
+              </FieldSet>
+              <p className="text-sm text-muted-foreground">
+                Account revision {expectedAccountRevision}; previous basis revision{" "}
+                {previousBasis?.basisRevision ?? 0}. A zero protected floor is an explicit choice;
+                leaving it blank does not mean zero.
+              </p>
+            </ResponsiveDialogBody>
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={save.isPending} onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={save.isPending}>
+                Confirm my balance statement
+              </Button>
+            </DialogFooter>
+          </FeedbackForm>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -3,6 +3,7 @@ import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { QueryFeedback } from "@/components/async-state";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -19,20 +20,32 @@ import { Progress } from "@/components/ui/progress";
 import { workspaceIdentities } from "@/components/workspace-identity";
 import { api } from "../../api.js";
 import { FinanceContextualQuestionPage } from "../finances/contextual-question.js";
+import { FinanceReviewBacklog } from "../finances/review-backlog.js";
 import { FinanceReviewHistory } from "../finances/review-page.js";
 import { ReviewActions } from "./review-actions.js";
 
 function FinanceHistoryDisclosure() {
   const [open, setOpen] = useState(false);
+  const [backlogOpen, setBacklogOpen] = useState(false);
   return (
-    <Collapsible onOpenChange={setOpen} open={open}>
-      <CollapsibleTrigger asChild>
-        <Button variant="ghost">Finance review history</Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent className="pt-4">
-        {open ? <FinanceReviewHistory /> : null}
-      </CollapsibleContent>
-    </Collapsible>
+    <div className="grid gap-3">
+      <Collapsible open={backlogOpen} onOpenChange={setBacklogOpen}>
+        <CollapsibleTrigger asChild>
+          <Button variant="outline">Review backlog and saved batches</Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-4">
+          {backlogOpen ? <FinanceReviewBacklog /> : null}
+        </CollapsibleContent>
+      </Collapsible>
+      <Collapsible onOpenChange={setOpen} open={open}>
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost">Finance review history</Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-4">
+          {open ? <FinanceReviewHistory /> : null}
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
   );
 }
 
@@ -104,7 +117,10 @@ function ReviewFlow({
         if (!open && !busy) onClose();
       }}
     >
-      <ResponsiveDialogContent className="sm:max-w-2xl" showCloseButton={!busy}>
+      <ResponsiveDialogContent
+        className="flex min-h-0 flex-col sm:max-w-2xl"
+        showCloseButton={!busy}
+      >
         <ResponsiveDialogHeader className="sr-only">
           <ResponsiveDialogTitle>
             {workspaceIdentities[workspace].label} reviews
@@ -113,17 +129,17 @@ function ReviewFlow({
             One decision at a time. Leave anything you’re unsure about for later.
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
-        {query.isPending ? <p role="status">Loading your decisions…</p> : null}
+        {query.isPending ? <ContentSkeleton label="Loading your decisions…" rows={3} /> : null}
         <QueryFeedback query={query} title="Couldn’t load your review session." />
         {workspace === "finances" && query.isError && !query.data ? (
-          <ResponsiveDialogBody>
+          <ResponsiveDialogBody className="flex-1">
             <FinanceHistoryDisclosure />
           </ResponsiveDialogBody>
         ) : null}
         {query.data &&
         initialId !== "open" &&
         !query.data.items.some((item) => item.id === initialId) ? (
-          <ResponsiveDialogBody className="pb-4 pr-12">
+          <ResponsiveDialogBody className="flex-1 pb-4 pr-12">
             {workspace === "finances" && initialId.startsWith("finance-contextual:") ? (
               <FinanceContextualQuestionPage id={initialId.slice("finance-contextual:".length)} />
             ) : (
@@ -226,7 +242,10 @@ function ReviewSession({
   }
   return (
     <>
-      <div className="grid gap-2 px-4 pt-4 pb-3 md:px-0 md:pt-0 md:pb-0 pr-10" aria-live="polite">
+      <div
+        className="grid shrink-0 gap-2 px-4 pt-4 pb-3 md:px-0 md:pt-0 md:pb-0 pr-10"
+        aria-live="polite"
+      >
         <p className="text-sm text-muted-foreground">
           {completed.length} completed · {remaining} left · {total} total
           {unavailable ? " (available items)" : ""}
@@ -236,7 +255,7 @@ function ReviewSession({
           value={total ? (completed.length / total) * 100 : 0}
         />
       </div>
-      <ResponsiveDialogBody>
+      <ResponsiveDialogBody className="flex-1">
         {unavailable ? (
           <p role="status">
             Some review sources couldn’t be checked. This session may be incomplete.
@@ -290,7 +309,9 @@ function ReviewSession({
             <p className="text-sm text-muted-foreground">
               {remaining
                 ? `${remaining} items left for later. They’ll be here when you’re ready.`
-                : `${completed.length} decisions completed.`}
+                : workspace === "finances"
+                  ? `${completed.length} decisions completed in this session. Check the review backlog for other flagged transactions and review cases.`
+                  : `${completed.length} decisions completed.`}
             </p>
           </div>
         )}
@@ -301,7 +322,7 @@ function ReviewSession({
         ) : null}
         {workspace === "finances" ? <FinanceHistoryDisclosure /> : null}
       </ResponsiveDialogBody>
-      <ResponsiveDialogFooter className="flex-row justify-end">
+      <ResponsiveDialogFooter className="shrink-0 flex-row justify-end">
         {current ? (
           <>
             <Button

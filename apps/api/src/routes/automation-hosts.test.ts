@@ -26,6 +26,7 @@ function fixture(scopes: Principal["scopes"]) {
   ) as unknown as ReturnType<typeof createAutomationHostService>;
   app.use("*", async (c, next) => {
     c.set("principal", { userId: id, actorId: id, actorType: "agent", scopes });
+    c.set("requestId", "host-create-request");
     await next();
   });
   app.onError((error, c) => errorResponse(error, c));
@@ -61,6 +62,14 @@ it("rejects malformed identifiers and JSON before host mutation and forwards exp
   );
   expect(hosts.cancel).not.toHaveBeenCalled();
   expect(hosts.create).not.toHaveBeenCalled();
+  expect((await app.request("/v1/automation-hosts", { method: "POST", body: "{}" })).status).toBe(
+    200,
+  );
+  expect(hosts.create).toHaveBeenCalledWith(
+    expect.objectContaining({ userId: id, actorId: id, actorType: "agent" }),
+    {},
+    "host-create-request",
+  );
   const input = { expectedVersion: 2, expectedState: "setup_pending" };
   expect(
     (

@@ -8471,8 +8471,76 @@ describe("Personal OS web app", () => {
           const classify = (value: unknown, allowed: readonly string[]) =>
             typeof value === "string" && allowed.includes(value) ? value : "other";
           const count = (value: number) => Math.min(Math.max(value, 0), 100_000);
+          const returnLabel = (element: Element) => {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
+            let node = walker.nextNode();
+            let text = "";
+            let visited = 0;
+            while (node && visited < 8 && text.length <= 80) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                text += (node.nodeValue ?? "").slice(0, 81 - text.length);
+              }
+              visited += 1;
+              node = walker.nextNode();
+            }
+            return node === null && text.length <= 80 && text.trim() === "Return to conversation";
+          };
+          const hiddenHint = (element: Element) => {
+            let node: Element | null = element;
+            let visited = 0;
+            while (node && visited < 32) {
+              if (node.hasAttribute("hidden") || node.getAttribute("aria-hidden") === "true") {
+                return { hiddenAncestorHint: true, ancestorScanTruncated: false };
+              }
+              visited += 1;
+              node = node.parentElement;
+            }
+            return { hiddenAncestorHint: false, ancestorScanTruncated: node !== null };
+          };
+          const childCount = (element: Element) => {
+            let child = element.firstElementChild;
+            let visited = 0;
+            while (child && visited < 64) {
+              visited += 1;
+              child = child.nextElementSibling;
+            }
+            return { count: visited, truncated: child !== null };
+          };
+          const scan = (element: Element) => {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT);
+            const found: { main: Element | null; settings: Element | null; title: boolean } = {
+              main: null,
+              settings: null,
+              title: false,
+            };
+            const links = [];
+            let shells = 0;
+            let panels = 0;
+            let visited = 0;
+            let node: Element | null = element;
+            while (node && visited < 1_024) {
+              if (node.id === "main-content") found.main ??= node;
+              if (node.id === "settings-page-title") found.title = true;
+              if (node.classList.contains("app-shell")) shells += 1;
+              if (node.classList.contains("settings-panel")) {
+                panels += 1;
+                found.settings ??= node;
+              }
+              if (node.tagName === "A" && links.length < 8 && returnLabel(node)) {
+                links.push({
+                  hrefMatchesExpected: node.getAttribute("href") === target,
+                  ...hiddenHint(node),
+                });
+              }
+              visited += 1;
+              node = walker.nextNode() as Element | null;
+            }
+            return { found, links, shells, panels, visited, truncated: node !== null };
+          };
+          const own = scan(view.container);
+          const global = scan(document.body);
           const dom = (element: Element | null) => {
-            if (!element) return { present: false };
+            if (!element) return { present: false, searchTruncated: own.truncated };
             const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT);
             const nodes = [];
             let current: Element | null = element;
@@ -8512,16 +8580,17 @@ describe("Personal OS web app", () => {
                 mainContent: node.id === "main-content",
                 settingsTitle: node.id === "settings-page-title",
                 settingsPanel: node.classList.contains("settings-panel"),
-                hiddenAncestor: node.closest('[hidden], [aria-hidden="true"]') !== null,
+                ...hiddenHint(node),
                 busy: node.getAttribute("aria-busy") === "true",
-                returnLabel: node.textContent?.trim() === "Return to conversation",
+                returnLabel: node.tagName === "A" && returnLabel(node),
                 returnHref: node.getAttribute("href") === target,
-                childElements: count(node.children.length),
+                childElements: childCount(node),
               });
               current = walker.nextNode() as Element | null;
             }
             return { present: true, nodes, truncated: current !== null };
           };
+          if (view.location.value.length > 4_096) throw new Error("Capture input limit");
           const actual = new URL(view.location.value, "https://diagnostic.invalid");
           const actualReturn = actual.searchParams.get("returnTo");
           const queryNames = [
@@ -8534,9 +8603,9 @@ describe("Personal OS web app", () => {
             "connectors",
             "workspace-settings",
           ];
-          const queries = view.queryClient
-            .getQueryCache()
-            .getAll()
+          const allQueries = view.queryClient.getQueryCache().getAll();
+          const queries = allQueries
+            .slice(0, 64)
             .filter(
               (query) =>
                 typeof query.queryKey[0] === "string" && queryNames.includes(query.queryKey[0]),
@@ -8598,31 +8667,41 @@ describe("Personal OS web app", () => {
                 .map((result) => classify(result.type, ["return", "throw", "incomplete"])),
             })),
             queries,
-            mainDom: dom(view.container.querySelector("#main-content")),
-            settingsDom: dom(view.container.querySelector(".settings-panel")),
-            settingsHeadingPresent: view.container.querySelector("#settings-page-title") !== null,
+            queryScanTruncated: allQueries.length > 64,
+            mainDom: dom(own.found.main),
+            settingsDom: dom(own.found.settings),
+            settingsHeadingPresent: own.found.title,
             roots: {
               beforeSetup: count(rootsBeforeSetup),
-              atFailure: count(document.body.children.length),
+              atFailure: childCount(document.body),
               currentContainerConnected: view.container.isConnected,
               currentContainerInBody: document.body.contains(view.container),
-              shellsInCurrentContainer: count(view.container.querySelectorAll(".app-shell").length),
-              shellsInBody: count(document.querySelectorAll(".app-shell").length),
-              settingsPanelsInCurrentContainer: count(
-                view.container.querySelectorAll(".settings-panel").length,
-              ),
-              settingsPanelsInBody: count(document.querySelectorAll(".settings-panel").length),
+              shellsInCurrentContainer: own.shells,
+              shellsInBody: global.shells,
+              settingsPanelsInCurrentContainer: own.panels,
+              settingsPanelsInBody: global.panels,
+              ownScanVisited: own.visited,
+              globalScanVisited: global.visited,
+              ownScanTruncated: own.truncated,
+              globalScanTruncated: global.truncated,
             },
-            returnLinks: [...view.container.querySelectorAll("a")]
-              .filter((link) => link.textContent?.trim() === "Return to conversation")
-              .slice(0, 8)
-              .map((link) => ({
-                hrefMatchesExpected: link.getAttribute("href") === target,
-                hiddenAncestor: link.closest('[hidden], [aria-hidden="true"]') !== null,
-              })),
-            limits: { domNodesEach: 48, outputBytes: 32 * 1024, queries: 16, mockResultsEach: 8 },
+            returnLinks: own.links,
+            globalReturnLinkCount: global.links.length,
+            limits: {
+              domNodesEach: 48,
+              rootScanNodesEach: 1_024,
+              textTraversalNodesEach: 8,
+              routerInputCharacters: 4_096,
+              textCharactersEach: 80,
+              ancestorsEach: 32,
+              childrenEach: 64,
+              outputBytes: 32 * 1024,
+              queriesInspected: 64,
+              queries: 16,
+              mockResultsEach: 8,
+            },
             omitted:
-              "All raw text/attributes, URL keys/values, Error names/messages, query data/errors, mock arguments/results, environment and network",
+              "All raw text/attributes, URL keys/values, Error names/messages, query data/errors, mock arguments/results, environment and network. Hidden flags are hints, not accessibility proof; mock return kinds do not settle Promises.",
           };
           const serialized = JSON.stringify(snapshot);
           const output = `${marker} ${serialized}`;

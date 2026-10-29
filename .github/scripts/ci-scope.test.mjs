@@ -334,7 +334,7 @@ test("browser shards retain both complete matrices and the original coverage com
   assert.match(browser, /--project=\$\{\{ matrix.project \}\} --shard=\$\{\{ matrix.shard \}\}\/4/);
   assert.match(
     browser,
-    /name: playwright-report-\$\{\{ matrix.project \}\}-\$\{\{ matrix.shard \}\}/,
+    /name: browser-diagnostics-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}-\$\{\{ matrix.project \}\}-\$\{\{ matrix.shard \}\}/,
   );
   assert.match(browser, /fail-fast: false/);
   assert.doesNotMatch(browser, /continue-on-error/);

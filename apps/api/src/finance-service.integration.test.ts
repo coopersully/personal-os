@@ -3788,10 +3788,10 @@ describe.sequential("finance service", () => {
       },
     });
     const context = { principal: financePrincipal(ownerId), requestId: "direct-recovery" };
-    await service.exchangePlaidToken({ publicToken: "first" }, context);
+    await service.exchangePlaidToken({ institution: null, publicToken: "first" }, context);
     remoteId = "duplicate-account";
     const duplicate = await service
-      .exchangePlaidToken({ publicToken: "duplicate" }, context)
+      .exchangePlaidToken({ institution: null, publicToken: "duplicate" }, context)
       .catch((error: unknown) => error);
     expect(duplicate).toMatchObject({
       code: "conflict",
@@ -3840,7 +3840,7 @@ describe.sequential("finance service", () => {
       throw new Error("provider-read-canary access-secret");
     });
     const failed = await service
-      .exchangePlaidToken({ publicToken: "read-failure" }, context)
+      .exchangePlaidToken({ institution: null, publicToken: "read-failure" }, context)
       .catch((error: unknown) => error);
     expect(failed).toMatchObject({
       code: "service_unavailable",
@@ -3893,7 +3893,10 @@ describe.sequential("finance service", () => {
     const readsBeforeOutage = getAccounts.mock.calls.length;
     try {
       await expect(
-        service.exchangePlaidToken({ publicToken: "persistence-outage" }, context),
+        service.exchangePlaidToken(
+          { institution: null, publicToken: "persistence-outage" },
+          context,
+        ),
       ).rejects.toMatchObject({ code: "service_unavailable" });
       const attempts = await database.pool.query("SELECT last_value FROM direct_receipt_failures");
       expect(Number(attempts.rows[0]?.last_value)).toBe(3);

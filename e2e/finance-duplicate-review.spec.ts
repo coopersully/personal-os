@@ -91,6 +91,10 @@ test("duplicate confirmation keeps counts and consequences inside the scrolling 
         .map((child) => child.textContent);
     }),
   ).toEqual([]);
+  await body.getByText(/This does not revoke provider access/).scrollIntoViewIfNeeded();
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: "Account comparison ready." }),
+  ).toBeHidden({ timeout: 10_000 });
   await expect(dialog.getByRole("button", { name: "Stop tracking duplicate" })).toBeInViewport();
   await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeInViewport();
   await dialog.screenshot({ path: test.info().outputPath("duplicate-comparison.png") });

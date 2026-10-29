@@ -163,3 +163,7 @@ keep it noninteractive, and preserve the distinction from product screenshots. K
 in the shared identity component. The generator and production/dev route lists share guide metadata.
 
 Guide prose uses explicit build-time placement markers for screenshots and examples. Preserve the reading sequence: purpose, manual instructions and screenshot, manual example, agent instructions and example, then rationale. Do not collect all visuals above the guide.
+
+### October 29 integration scope
+
+The campaign and guide source integrates with current session routing, account controls and authentication forms. Earlier auth-form restyling is superseded by the current Account presentation owner. The optional premiere fixture overlay is retained only in historical commit `b397f08f`; it is excluded from this integration because current Finance fixtures expanded beyond its original assumptions. Campaign screenshots remain checked-in captures of the earlier disposable UI, not proof of current live provider behavior.

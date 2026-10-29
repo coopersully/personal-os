@@ -64,7 +64,6 @@ import { financeActivityFixture } from "./qa-finance-activity.js";
 import { financeHistoryFixture } from "./qa-finance-history.js";
 import { financePlanningFixture } from "./qa-finance-planning.js";
 import { demoPlanningStory } from "./qa-planning-story.js";
-import { applyPremiereStory } from "./qa-premiere-story.js";
 import { hashPassword } from "./security.js";
 
 export const QA_PASSWORD = ["Testing", "12345", "!"].join("");
@@ -189,7 +188,7 @@ export const qaFixtureAccounts = [
   },
 ] as const satisfies readonly QaFixtureAccount[];
 
-export type FixtureData = {
+type FixtureData = {
   attentionItems: Array<typeof attentionItems.$inferInsert>;
   auditEvents: Array<typeof auditEvents.$inferInsert>;
   financeMutationRecords: (typeof financeMutationRecords.$inferInsert)[];
@@ -2013,7 +2012,6 @@ function seedMailStewardshipFixtures({
 }
 
 export type LoadQaFixturesOptions = {
-  premiereStory?: boolean;
   accounts?: readonly QaFixtureAccount[];
   now?: Date;
 };
@@ -2239,10 +2237,6 @@ export async function loadQaFixtures(
         Object.assign(data, { [key]: [...rows, ...story[key]] });
       }
     }
-  }
-  if (options.premiereStory) {
-    const demo = accounts.find((account) => account.key === "demo-full");
-    if (demo) applyPremiereStory(data, demo.id, now);
   }
   const emails = accounts.map((account) => account.email);
   const ids = accounts.map((account) => account.id);

@@ -1186,3 +1186,10 @@ value rather than a false zero. A recovered ritual-settings conflict dispatches 
 with the latest authoritative revision, including when refreshed fields are unchanged;
 server compare-and-swap and local draft rebasing remain in force. Added regression cases
 cover failed refresh recovery, reduced-motion clouds, data-view controls and form editors.
+
+## 2026-10-29 — Public campaign integration candidate
+
+- Reconciled the figure-led company landing page, independent workspace guide routes, screenshot walkthroughs and static product UI examples with current app/session routing. Existing account controls, auth forms and signed-in workspace behavior remain owned by their current implementations.
+- Retained the adapted cursor and vivid solid workspace identity treatment. Campaign nature scenes, figure silhouettes and device screenshots are locally hosted.
+- Excluded the historical optional premiere capture fixture: current Finance demo enrichment invalidates its fixed category assumptions. The original source remains in `b397f08f`; campaign captures do not certify live actions or provider behavior.
+- This is a review candidate, not a claim of merge or production deployment. Current-candidate independent review, verification and release evidence remain required.

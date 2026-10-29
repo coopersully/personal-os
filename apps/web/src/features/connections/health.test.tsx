@@ -6,7 +6,6 @@ import {
   ConnectionCapabilityHealth,
   ConnectionHealthBadge,
   ConnectionHealthDescription,
-  ConnectionRecoveryAlert,
   connectionHealth,
   visibleConnectorRefreshInterval,
 } from "./health.js";
@@ -93,31 +92,6 @@ describe("connection health presentation", () => {
     expect(screen.getByText(/Synced 5 minutes ago/u)).toBeInTheDocument();
   });
 
-  it("links reconnecting accounts directly to Connections without raw provider material", () => {
-    render(
-      <ConnectionRecoveryAlert
-        accounts={[
-          {
-            health: {
-              message: "Google authorization is no longer valid. Reconnect to resume syncing.",
-              nextSyncAt: null,
-              recovery: "reconnect",
-              state: "reconnect",
-            },
-            id: "account-1",
-            label: "Personal Google",
-          },
-        ]}
-      />,
-    );
-    expect(screen.getByRole("alert")).toHaveTextContent("Personal Google");
-    expect(screen.getByRole("link", { name: "Review connections" })).toHaveAttribute(
-      "href",
-      "/settings?section=connections",
-    );
-    expect(screen.queryByText(/raw-provider-canary/u)).not.toBeInTheDocument();
-  });
-
   it("uses safe descriptions for every incomplete health payload", () => {
     const { rerender } = render(
       <ConnectionHealthDescription
@@ -153,24 +127,6 @@ describe("connection health presentation", () => {
 
     rerender(<ConnectionHealthDescription health={baseHealth} lastSyncedAt={null} />);
     expect(screen.getByText("Ready to sync")).toBeInTheDocument();
-  });
-
-  it("summarizes multiple reconnects and omits the alert when none need authorization", () => {
-    const reconnect = {
-      health: { ...baseHealth, recovery: "reconnect" as const, state: "reconnect" as const },
-      id: "account-1",
-      label: "Personal Google",
-    };
-    const { rerender } = render(
-      <ConnectionRecoveryAlert
-        accounts={[reconnect, { ...reconnect, id: "account-2", label: "Work Google" }]}
-      />,
-    );
-    expect(screen.getByText("Reconnect accounts")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Personal Google, Work Google");
-
-    rerender(<ConnectionRecoveryAlert accounts={[]} />);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("projects legacy account states without exposing legacy error details", () => {

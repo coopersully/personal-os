@@ -23,8 +23,12 @@ import {
   baselineQualificationKind,
   prepareBaselineEvidence,
 } from "./baseline-qualification-evidence.js";
-import { requireHumanBudgetApproval } from "./budget-authority.js";
-import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
+import { requireBudgetApproval } from "./budget-authority.js";
+import {
+  executeFinanceIdempotently,
+  type FinanceMutationContext,
+  requireFinanceExecution,
+} from "./context.js";
 
 function project(row: typeof financeBudgetBaselineQualifications.$inferSelect) {
   return financeBudgetBaselineQualificationSchema.parse({
@@ -33,6 +37,7 @@ function project(row: typeof financeBudgetBaselineQualifications.$inferSelect) {
     revision: 1,
     confirmedAt: row.confirmedAt.toISOString(),
     confirmedByActorId: row.confirmedByActorId,
+    ...(row.confirmedByActorType === "agent" ? { confirmedByActorType: "agent" } : {}),
     qualificationKind: row.qualificationKind,
   });
 }
@@ -49,7 +54,7 @@ const unavailable = (
   candidates: [],
 });
 
-/** Exact human qualification of a comparison baseline. It never changes an active allocation. */
+/** Exact qualification of a comparison baseline. It never changes an active allocation. */
 export function createFinanceBudgetBaselineQualificationService({
   db,
   now,
@@ -201,11 +206,18 @@ export function createFinanceBudgetBaselineQualificationService({
       value: unknown,
       context: FinanceMutationContext,
     ): Promise<FinanceBudgetBaselineQualificationRead> {
-      requireHumanBudgetApproval({
-        ...context,
-        scopes: new Set(context.canMutate ? ["finances:write"] : []),
-      });
+      requireBudgetApproval(
+        {
+          ...context,
+          scopes:
+            context.actorType === "agent"
+              ? (context.executionPrincipal?.scopes ?? new Set())
+              : new Set(context.canMutate ? ["finances:write"] : []),
+        },
+        context.bypassEnabled,
+      );
       const input = confirmFinanceBudgetBaselineQualificationInputSchema.parse(value);
+      if (context.actorType === "agent") context.requiresApprovalBypass = true;
       return executeFinanceIdempotently(
         db,
         context,
@@ -217,6 +229,7 @@ export function createFinanceBudgetBaselineQualificationService({
           lockIdentities: [`finance-profile:${context.userId}`],
         },
         async (tx) => {
+          await requireFinanceExecution(tx, context, now());
           const [review] = await tx
             .select()
             .from(financeBudgetBaselineReviews)
@@ -270,6 +283,7 @@ export function createFinanceBudgetBaselineQualificationService({
               snapshot,
               fingerprint: review.fingerprint,
               confirmedByActorId: context.actorId,
+              confirmedByActorType: context.actorType === "agent" ? "agent" : "user",
               confirmedAt,
               qualificationKind: baselineQualificationKind(snapshot, confirmedAt, context.userId),
             })

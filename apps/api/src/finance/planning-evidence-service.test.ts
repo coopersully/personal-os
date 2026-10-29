@@ -335,6 +335,7 @@ it("lists only owner evidence and serializes immutable user provenance", async (
     id: accountId,
     userId,
     actorUserId: userId,
+    approvalActor: null,
     goalId: sourceId,
     obligationId: null,
     sourceRevision: 5,

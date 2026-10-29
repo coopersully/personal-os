@@ -13,12 +13,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/api";
 import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
 import { WorkspacePreferenceRecovery } from "./save-recovery";
 import { WorkspacePreferencesSection } from "./section";
 
 beforeEach(() => {
+  vi.spyOn(toast, "error");
   let preferences: Record<string, unknown> = {};
   let revision = 0;
   vi.spyOn(api, "listTaskLists").mockResolvedValue({ items: [], nextCursor: null });
@@ -117,15 +119,15 @@ it("saves Task sorting and toggles individual row details without losing sibling
   await select(user, "Sort by", "priority", { taskSort: "priority" });
   await select(user, "Group by", "project", { taskGroup: "project" });
   await select(user, "List and project sorting", "name", { taskContainerSort: "name" });
-  await user.click(screen.getByRole("checkbox", { name: "Notes" }));
+  await user.click(screen.getByRole("switch", { name: "Notes" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "tasks",
       expect.objectContaining({ preferences: { taskRowDetails: ["estimate", "notes"] } }),
     ),
   );
-  await waitFor(() => expect(screen.getByRole("checkbox", { name: "Estimates" })).toBeEnabled());
-  await user.click(screen.getByRole("checkbox", { name: "Estimates" }));
+  await waitFor(() => expect(screen.getByRole("switch", { name: "Estimates" })).toBeEnabled());
+  await user.click(screen.getByRole("switch", { name: "Estimates" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "tasks",
@@ -295,7 +297,12 @@ it("keeps pinned-project recovery readable through failed name loading and exact
   expect(screen.getByLabelText("Sort by")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
   await act(async () => rejectNames(new Error("Project names offline")));
-  await screen.findByText("Couldn’t load pinned project names.");
+  await screen.findByRole("region", { name: "Pinned projects unavailable" });
+  expect(screen.queryByText("Couldn’t load pinned project names.")).not.toBeInTheDocument();
+  expect(toast.error).toHaveBeenCalledWith(
+    "Couldn’t load pinned project names.",
+    expect.anything(),
+  );
   expect(update).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   await screen.findByText("Your change: Launch");

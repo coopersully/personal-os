@@ -2,6 +2,8 @@
 
 import argparse
 import json
+import os
+import hashlib
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -33,6 +35,22 @@ class GitHub:
         except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as error:
             raise CollectionError(type(error).__name__) from error
 
+    def observe_source(self, repository, number, head, base, base_ref):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise CollectionError("collection_deadline")
+        script = Path(__file__).resolve().parents[4] / ".github/scripts/wait-source-ci.mjs"
+        try:
+            value = subprocess.run(["node", str(script), "--collect"], capture_output=True,
+                                   text=True, timeout=min(120, remaining), check=False,
+                                   env={**os.environ, "GH_REPO": repository, "PR_NUMBER": str(number),
+                                        "PR_HEAD_SHA": head, "PR_BASE_SHA": base, "PR_BASE_REF": base_ref})
+            if value.returncode:
+                raise CollectionError("source_observation_failed")
+            return json.loads(value.stdout)
+        except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as error:
+            raise CollectionError("source_observation_unavailable") from error
+
     def pages(self, endpoint, field=None):
         items = []
         for page in range(1, 101):
@@ -53,9 +71,12 @@ def pick(value, names):
 
 def collect(client, repository, number):
     prefix = f"repos/{repository}"
-    fields = "number,url,state,isDraft,headRefOid,baseRefName,mergeable,mergeStateStatus,reviewDecision"
+    fields = "number,url,state,isDraft,headRefOid,baseRefName,mergeable,mergeStateStatus,reviewDecision,body"
     def pr():
-        return client.call("pr", "view", str(number), "--repo", repository, "--json", fields)
+        value = client.call("pr", "view", str(number), "--repo", repository, "--json", fields)
+        body = value.pop("body", "") or ""
+        value["bodySha256"] = hashlib.sha256(body.encode()).hexdigest()
+        return value
 
     first = pr()
     head = first["headRefOid"]
@@ -94,6 +115,8 @@ def collect(client, repository, number):
                                    for pr in (row.get("pull_requests") or [])]}
                 for row in rows]
     source("runs", runs)
+    source("sourceObservation", lambda: client.observe_source(
+        repository, number, head, base, first["baseRefName"]))
     source("reviews", lambda: [{**pick(row, "id state commit_id submitted_at html_url"),
                                 "author": pick(row.get("user") or {}, "id login type")}
                                for row in client.pages(f"{prefix}/pulls/{number}/reviews")])

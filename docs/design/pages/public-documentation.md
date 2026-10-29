@@ -11,10 +11,11 @@ cards; documents use a navigation card and one reading card with a heading, summ
 
 ## Access and rendering
 
-The browser root `/` is the public product landing page, including for signed-in visitors. It
-introduces the workspaces, user control, mission, and public documents without loading a session.
+The browser root `/` checks the session: visitors see the product landing page, while signed-in
+users redirect to `/today`. The landing page introduces the workspaces, user control, mission,
+and public documents. Public document pages remain readable with or without authentication.
 `/login`, `/signup`, and `/forgot-password` are separate, directly addressable authentication
-pages. Protected deep links preserve a safe local return destination through authentication;
+pages; existing authenticated sessions redirect from these routes to `/today`. Protected deep links preserve a safe local return destination through authentication;
 ordinary login opens `/today`. Existing emailed verification and reset URLs remain supported.
 The installed PWA starts at `/today`; the native desktop root retains its application entry point.
 Landing and authentication use the shared React design system; the static documents below do not

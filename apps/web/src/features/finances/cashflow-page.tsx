@@ -8,8 +8,8 @@ import { formatDateOnly, idSchema } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
+import { QueryFeedback } from "@/components/async-state";
 import { ChevronDownIcon, DollarIcon, PauseIcon, PlayIcon } from "@/components/icons";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -142,13 +142,13 @@ export function FinanceCashflowPage() {
   return (
     <div className="wide-page flex min-w-0 w-full max-w-6xl flex-col gap-6 pb-8">
       <div className="flex flex-col gap-4">
-        <WorkspaceHeaderControls label="Cash flow views" placement="leading">
+        <WorkspaceHeaderControls label="Cash flow views" placement="title">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" aria-label="Cash flow view" className="max-w-48">
                 <DollarIcon data-icon="inline-start" />
-                <span className="truncate">
-                  {cashflowViews.find((item) => item.value === view)?.label}
+                <span className="truncate text-xs font-normal text-muted-foreground sm:text-sm">
+                  {cashflowViews.find((item) => item.value === view)?.label.toLowerCase()}
                 </span>
                 <ChevronDownIcon data-icon="inline-end" />
               </Button>
@@ -173,21 +173,7 @@ export function FinanceCashflowPage() {
           </DropdownMenu>
         </WorkspaceHeaderControls>
         {update.isError ? <MutationFeedback feedback={update.feedback} /> : null}
-        {recurring.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>
-              {recurring.data
-                ? "Recurring activity may be out of date"
-                : "Recurring activity unavailable"}
-            </AlertTitle>
-            <AlertDescription>
-              <p>{"Couldn’t refresh this information. Try again."}</p>
-              <Button size="sm" variant="outline" onClick={() => void recurring.refetch()}>
-                Retry recurring activity
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        <QueryFeedback query={recurring} title="Couldn’t load recurring activity." />
         {view === "scenarios" ? (
           <Card aria-label="Scenarios">
             <CardHeader>

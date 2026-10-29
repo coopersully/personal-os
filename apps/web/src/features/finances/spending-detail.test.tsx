@@ -6,7 +6,7 @@ import {
   type FinanceSpendingMonthlyBudget,
   financeSpendingReferenceFilterSchema,
 } from "@personal-os/domain";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { SpendingDetail, spendingTransactionsDestination } from "./spending-detail";
@@ -245,6 +245,8 @@ it("distinguishes explicit zero monthly targets from null and absent comparisons
     </MemoryRouter>
   );
   const { rerender } = render(node(budget));
+  expect(screen.getByText("Monthly usage: $2.50 of $0.00 · Over budget $2.50")).not.toBeVisible();
+  fireEvent.click(screen.getByText("Monthly budget comparison", { exact: true }));
   expect(screen.getByText("Monthly usage: $2.50 of $0.00 · Over budget $2.50")).toBeVisible();
   expect(screen.queryByText(/Infinity|NaN/)).not.toBeInTheDocument();
   for (const usedCents of [0, -100]) {

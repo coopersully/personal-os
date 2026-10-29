@@ -235,10 +235,22 @@ design book.
 
 ## Ritual presentation exception
 
-Morning and evening ritual presentations use explicitly approved sky colors and sunrise/moonlight
-radial gradients to isolate the checklist from the desktop. Browser previews mirror those two
-backdrops; the theme check permits only their exact selectors and colors. Standard cards remain
+Morning and evening ritual presentations use solid sky colors: pastel blue for morning and near-black
+blue for evening. Browser delivery, previews, and native backdrops share these colors with a
+transparent dithered cloud layer. A scoped radial sun/moon glow behind the card fades in over
+30 seconds; all other decorative gradients remain prohibited. Standard cards remain
 flat and shadow-free. This is a ritual presentation treatment, not a shared component default.
+
+The approved real browser ritual retains the person's page underneath a full-viewport attention
+layer. A bounded 24 px backdrop blur is permitted only on `.browser-ritual`, with a theme-tinted
+background and readable secondary controls. The theme check permits that exact selector and
+radius; other blur utilities, other radii/selectors, and glass cards remain prohibited. Tracking
+owns this presentation exception; shared Dialog/Card defaults do not inherit it.
+
+
+Ritual skies also permit a transparent procedural cloud canvas behind the content. Ordered
+dithering replaces blur, remains static with no animation loop, and uses lower opacity at night.
+This exception is confined to the shared ritual presentation; ordinary cards remain opaque.
 
 ## Research-backed refinement
 

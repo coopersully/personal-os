@@ -14,7 +14,7 @@ mail, tasks, calendar, and finances so the person can work directly and choose w
 to agents. The target is ownership of their data, workflows, knowledge, and agent authority;
 current implementation is documented separately below.
 
-The internal repository and infrastructure name is `personal-os`; `nohmi` is the user-facing product
+The internal application name is Personal OS (`personal-os` in repository and infrastructure identifiers); `nohmi` is the user-facing product
 name and is always lowercase.
 
 ## Product model

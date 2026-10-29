@@ -20,10 +20,10 @@ const agentSkillPublicDirectory = dirname(agentSkillRelease.sourcePath).replace(
 
 function agentSkillSitePlugin(): Plugin {
   return {
-    name: "publish-ilo-agent-skill",
+    name: "publish-personal-os-agent-skill",
     configureServer(server) {
       server.middlewares.use(async (request, response, next) => {
-        const pathname = new URL(request.url ?? "/", "http://ilo.local").pathname;
+        const pathname = new URL(request.url ?? "/", "http://personal-os.local").pathname;
         const prefix = `/${agentSkillPublicDirectory}/`;
         if (!pathname.startsWith(prefix)) {
           next();

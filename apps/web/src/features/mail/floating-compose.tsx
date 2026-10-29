@@ -355,7 +355,7 @@ export function FloatingMailComposer({
     try {
       if (dirty && accountId) await persist();
       else await persistQueueRef.current;
-      navigate("/settings?section=connections");
+      navigate("/settings?page=connections");
     } catch (caught) {
       setOperationFeedback(classifyMutationError(caught, { action: "save the draft", form: true }));
       setSaveState("idle");

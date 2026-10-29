@@ -12,6 +12,7 @@ import {
   financeCategories,
   financeIncomeStreams,
   financeProfiles,
+  financeProfileVersions,
   financeProviderItems,
   financeRecurringObligations,
   financeReimbursements,
@@ -23,8 +24,10 @@ import {
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
+import { applyFinanceCategorizationsInputSchema, financeQuestionSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, inArray } from "drizzle-orm";
+import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
 
 const now = new Date("2026-08-15T12:00:00.000Z");
@@ -120,6 +123,132 @@ describe.sequential("Finance status service", () => {
     return created;
   }
 
+  it.each([
+    "owned",
+    "foreign_transaction",
+    "foreign_account",
+    "missing",
+    "all_missing",
+    "malformed",
+    "empty",
+    "null",
+  ])("projects legacy question %s input consistently through list and status without leaking partial targets", async (kind) => {
+    const userId = await makeUser(`Projection ${kind}`);
+    const foreignUserId = await makeUser(`Foreign projection ${kind}`);
+    const ownedAccount = await account(userId, "current");
+    const foreignAccount = await account(foreignUserId, "current");
+    const [ownedTransaction, target] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          userId,
+          accountId: ownedAccount.id,
+          merchant: "Owned purchase",
+          direction: "expense" as const,
+          amount: 100,
+          transactionDate: "2026-08-10",
+        },
+        // These deliberately inconsistent historical rows isolate the transaction-owner
+        // predicate from the account-owner predicate. Both shapes are permitted by storage.
+        {
+          userId: kind === "foreign_transaction" ? foreignUserId : userId,
+          accountId: kind === "foreign_account" ? foreignAccount.id : ownedAccount.id,
+          merchant: "Private target marker",
+          direction: "expense" as const,
+          amount: 200,
+          transactionDate: "2026-08-10",
+        },
+      ])
+      .returning();
+    if (!ownedTransaction || !target) throw new Error("Missing projection fixture");
+    const decision = (transactionId: string) => ({
+      transactionId,
+      categoryId: crypto.randomUUID(),
+      confidence: 0.5,
+      rationale: "Unverified historical proposal",
+      learnMerchant: "suggest",
+      expectedTransactionUpdatedAt: ownedTransaction.updatedAt.toISOString(),
+    });
+    const validInput = {
+      decisions:
+        kind === "all_missing"
+          ? [decision(crypto.randomUUID())]
+          : [
+              decision(ownedTransaction.id),
+              decision(kind === "missing" ? crypto.randomUUID() : target.id),
+            ],
+    };
+    applyFinanceCategorizationsInputSchema.parse(validInput);
+    const input =
+      kind === "malformed"
+        ? { decisions: [decision(ownedTransaction.id), { transactionId: "invalid" }] }
+        : kind === "empty"
+          ? { decisions: [] }
+          : kind === "null"
+            ? null
+            : validInput;
+    const id = crypto.randomUUID();
+    const question = financeQuestionSchema.parse({
+      id,
+      actionKind: "categorization",
+      sourceRefs: [],
+      choices: [],
+      prompt: "Please provide the missing Finance evidence before this change is applied.",
+      why: "The categorization evidence is incomplete, low-confidence, or protected as an ambiguous transfer.",
+      expectedAnswer: [
+        {
+          name: "decisions",
+          type: "object_array",
+          required: true,
+          nullable: false,
+          example: "[...]",
+        },
+      ],
+    });
+    const [saved] = await database.db
+      .insert(financeAgentActionReviews)
+      .values({
+        id,
+        userId,
+        actionKind: "question",
+        requestingAgentId: "legacy-agent",
+        fingerprint: crypto.randomUUID(),
+        sourceRefs: [],
+        privatePayload: { question, original: { actionKind: "categorization", input } },
+      })
+      .returning();
+    const actions = createFinanceActionService({
+      db: database.db,
+      finances: {} as never,
+      now: () => now,
+    });
+    const listed = await actions.listQuestions(userId, 50, id);
+    const statusQuestion = (
+      await service().getFinanceStatus(userId, { type: "all_outstanding" })
+    ).details.questions.find((item) => item.id === id);
+    expect(listed).toHaveLength(1);
+    expect(statusQuestion).toEqual(listed[0]);
+    if (kind === "owned") {
+      expect(listed[0]?.sourceRefs).toHaveLength(2);
+      expect(listed[0]?.sourceRefs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ accountId: ownedAccount.id, remoteId: ownedTransaction.id }),
+          expect.objectContaining({ accountId: ownedAccount.id, remoteId: target.id }),
+        ]),
+      );
+    } else {
+      // Exact equality also rejects partial references, changed prompts, and foreign metadata.
+      expect(listed).toEqual([question]);
+      expect(statusQuestion).toEqual(question);
+    }
+    expect(
+      await database.db
+        .select()
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, id)),
+    ).toEqual([saved]);
+  });
+
   it("reports current account and current-month evidence without manufacturing stale zeros", async () => {
     const userId = await makeUser("Current Finance");
     const source = await account(userId, "current");
@@ -199,6 +328,171 @@ describe.sequential("Finance status service", () => {
     expect(status.details.cashFlow.net).toBe(600);
     expect(status.details.health.confidence).toBe("reliable");
     expect(status.state).toBe("clean");
+  });
+
+  it("includes historical flags without review rows and keeps monthly evidence isolated", async () => {
+    const userId = await makeUser("Historical backlog");
+    const source = await account(userId, "current");
+    const otherUser = await makeUser("Other historical backlog");
+    const otherSource = await account(otherUser, "current");
+    const insert = async (
+      date: string,
+      needsReview: boolean,
+      amount: number,
+      direction: "expense" | "income" = "expense",
+      owner = userId,
+      accountId = source.id,
+    ) => {
+      const [row] = await database.db
+        .insert(financeTransactions)
+        .values({
+          accountId,
+          userId: owner,
+          amount,
+          direction,
+          transactionDate: date,
+          merchant: `${date}-${amount}`,
+          category: "Food",
+          categorySource: "user",
+          needsReview,
+        })
+        .returning();
+      if (!row) throw new Error("Missing transaction fixture");
+      return row;
+    };
+    await insert("2026-08-01", false, 40_000);
+    await insert("2026-08-15", false, 100_000, "income");
+    const before = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    const historical = await insert("2024-12-31", true, 900_000);
+    const orphan = await insert("2025-01-01", true, 800_000);
+    await insert("2025-01-03", true, 750_000);
+    await insert("2025-01-02", false, 700_000, "income");
+    await insert("2026-09-01", false, 600_000);
+    await insert("2024-01-01", true, 500_000, "expense", otherUser, otherSource.id);
+    await database.db.insert(financeReviewCases).values([
+      { userId, transactionId: historical.id, reason: "unknown_merchant", status: "open" },
+      { userId, transactionId: historical.id, reason: "low_confidence", status: "deferred" },
+      { userId, transactionId: orphan.id, reason: "unknown_merchant", status: "resolved" },
+    ]);
+    const all = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(all.details.review).toMatchObject({
+      total: 2,
+      byReason: { unknown_merchant: 1, low_confidence: 1 },
+    });
+    expect(all.details.review.coverage).toEqual({
+      scope: { type: "all_outstanding" },
+      complete: true,
+      flaggedTransactions: 3,
+      outstandingReviewRows: 2,
+      transactionsWithOutstandingReviews: 1,
+    });
+    expect(all.work.actionable).toBe(4);
+    expect(all.details.closeReadiness.ready).toBe(false);
+    expect(all.details.month).toEqual(before.details.month);
+    expect(all.details.income).toEqual(before.details.income);
+    expect(all.details.health).toEqual(before.details.health);
+    expect(all.details.cashFlow).toEqual(before.details.cashFlow);
+    const window = await service().getFinanceStatus(userId, {
+      type: "window",
+      start: "2025-01-01",
+      end: "2025-01-01",
+    });
+    expect(window.details.review.total).toBe(0);
+    expect(window.details.review.coverage).toEqual({
+      scope: { type: "window", start: "2025-01-01", end: "2025-01-01" },
+      complete: true,
+      flaggedTransactions: 1,
+      outstandingReviewRows: 0,
+      transactionsWithOutstandingReviews: 0,
+    });
+    expect(window.work.actionable).toBe(1);
+    expect(window.details.closeReadiness.ready).toBe(false);
+    const targeted = await service().getFinanceStatus(userId, {
+      type: "target",
+      entityType: "finance_account",
+      id: source.id,
+    });
+    expect(targeted.work.actionable).toBe(4);
+    expect(targeted.details.month).toEqual(before.details.month);
+    const transaction = await service().getFinanceStatus(userId, {
+      type: "target",
+      entityType: "finance_transaction",
+      id: orphan.id,
+    });
+    expect(transaction.work.actionable).toBe(1);
+    expect(transaction.details.closeReadiness.ready).toBe(false);
+  });
+
+  it.each([
+    false,
+    true,
+  ])("uses canonical income with a missing legacy income source (legacy row: %s)", async (legacyRow) => {
+    const userId = await makeUser(`Canonical only ${legacyRow}`);
+    await account(userId, "current");
+    if (legacyRow)
+      await database.db.insert(financeProfiles).values({ userId, effectiveDate: "2026-08-01" });
+    await database.db.insert(financeProfileVersions).values({
+      userId,
+      version: 1,
+      expectedMonthlyTakeHome: 425_050,
+      householdSize: 2,
+    });
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(status.details.income.monthly).toBe(4250.5);
+    expect(status.details.income.stated.value).toBe(4250.5);
+    expect(status.details.plan.capacity).toBe(4250.5);
+    expect(status.details.missingFacts).not.toContain("reliable_monthly_income");
+    expect(status.details.missingFacts).not.toContain("household_size");
+  });
+
+  it.each([
+    null,
+    0,
+    420_000,
+  ])("uses canonical profile income %s without reviving stale legacy facts", async (income) => {
+    const userId = await makeUser(`Canonical profile ${income}`);
+    await account(userId, "current");
+    await database.db.insert(financeProfiles).values({
+      userId,
+      effectiveDate: "2026-08-01",
+      grossAnnualIncome: 12_000_000,
+      expectedNetPay: 500_000,
+      payFrequency: "monthly",
+      householdSize: 8,
+    });
+    await database.db.insert(financeProfileVersions).values({
+      userId,
+      version: 1,
+      expectedMonthlyTakeHome: 999_900,
+      householdSize: 6,
+    });
+    const [canonical] = await database.db
+      .insert(financeProfileVersions)
+      .values({
+        userId,
+        version: 2,
+        expectedMonthlyTakeHome: income,
+        householdSize: null,
+      })
+      .returning();
+    if (!canonical) throw new Error("Missing canonical profile");
+    const otherUser = await makeUser(`Other canonical ${income}`);
+    await database.db.insert(financeProfileVersions).values({
+      userId: otherUser,
+      version: 100,
+      expectedMonthlyTakeHome: 999_900,
+    });
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    const expected = income === null ? null : income / 100;
+    expect(status.details.income.monthly).toBe(expected);
+    expect(status.details.income.stated.value).toBe(expected);
+    expect(status.details.income.stated.sourceRefs[0]?.remoteId).toBe(canonical.id);
+    expect(status.details.plan.capacity).toBe(expected);
+    expect(status.details.missingFacts.includes("reliable_monthly_income")).toBe(income === null);
+    expect(status.details.questions.some((question) => question.prompt.includes("take-home"))).toBe(
+      income === null,
+    );
+    expect(status.details.missingFacts).toContain("household_size");
   });
 
   it("uses planning inclusion and ownership shares for wealth totals", async () => {
@@ -1089,7 +1383,7 @@ describe.sequential("Finance status service", () => {
       end: "2026-07-31",
     });
 
-    expect(status.details.review).toEqual({ byReason: { unknown_merchant: 1 }, total: 1 });
+    expect(status.details.review).toMatchObject({ byReason: { unknown_merchant: 1 }, total: 1 });
     expect(status.work.actionable).toBe(1);
     expect(status.work.oldestOutstandingAt).toBe("2026-06-02T00:00:00.000Z");
     expect(status.details.budget).toEqual({ approved: true, month: "2026-08", total: 1_000 });
@@ -1324,7 +1618,7 @@ describe.sequential("Finance status service", () => {
       candidateTransfers: 1,
       pendingTransactions: 0,
     });
-    expect(transactionStatus.details.review).toEqual({
+    expect(transactionStatus.details.review).toMatchObject({
       byReason: { low_confidence: 1 },
       total: 1,
     });
@@ -1332,11 +1626,14 @@ describe.sequential("Finance status service", () => {
       candidateTransfers: 2,
       pendingTransactions: 1,
     });
-    expect(accountStatus.details.review).toEqual({
+    expect(accountStatus.details.review).toMatchObject({
       byReason: { low_confidence: 1, unknown_merchant: 1 },
       total: 2,
     });
-    expect(reviewStatus.details.review).toEqual({ byReason: { low_confidence: 1 }, total: 1 });
+    expect(reviewStatus.details.review).toMatchObject({
+      byReason: { low_confidence: 1 },
+      total: 1,
+    });
     expect(transactionStatus.activeRun).toMatchObject({ id: run.id, status: "awaiting_approval" });
     expect(transactionStatus.work.awaitingApproval).toBe(1);
     await database.db

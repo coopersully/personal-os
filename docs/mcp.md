@@ -32,9 +32,9 @@ add another alias or describe them as the product's permanent vocabulary.
 
 The HTTP server uses the MCP TypeScript v2 per-request factory. Modern July 2026 requests and the
 stateless 2025 compatibility path are built from the same server definition. Before constructing
-that definition, the adapter validates the audience-bound Ilo token through
+that definition, the adapter validates the audience-bound nohmi token through
 `GET /v1/assistant/context`. The returned user identity, scopes, planning time zone, setup
-readiness, and Ilo links determine the request's discovery surface. Provider credentials never
+readiness, and nohmi links determine the request's discovery surface. Provider credentials never
 enter the MCP process.
 
 `APP_BASE_URL` is required in deployed API and MCP containers. The MCP container uses it for
@@ -172,7 +172,7 @@ Discovery follows these rules:
    it migrates.
 2. A domain tool is advertised only when the token satisfies its catalog scope match. Multi-scope workspace tools require every listed grant; shared orientation tools may explicitly accept any listed read scope.
 3. A read-only server never advertises mutation tools, even when the token itself has write scopes.
-4. Every advertised tool has all four annotation hints, a shared output schema, an Ilo icon, and
+4. Every advertised tool has all four annotation hints, a shared output schema, a nohmi icon, and
    metadata identifying its domain, policy, and workflow stage.
 5. The API rechecks scope, ownership, policy, revisions, and provider capability. Discovery and
    annotations improve agent behavior but never grant authority.
@@ -224,7 +224,7 @@ resources. New clients should begin with `get_ilo_context` or `ilo://context/sel
 The server publishes task-oriented prompts for setup, daily planning, Mail triage, Calendar
 commitment preparation, overdue Reminder review, Finance review, and a weekly review. Prompts
 compose existing tools and approval boundaries; they do not embed new authority or business
-rules. MCP protocol Tasks are long-running operation handles and are unrelated to Ilo's user-owned
+rules. MCP protocol Tasks are long-running operation handles and are unrelated to nohmi's user-owned
 Lists, Projects, and Tasks. Protocol Tasks remain unadvertised: current long-lived Mail and Finance
 work has durable API-owned lifecycle state, but no shared MCP operation-handle contract. Exposing
 protocol Tasks before that contract exists would create a misleading in-memory completion surface.
@@ -406,9 +406,10 @@ uncertain income, exceptional resources, and liquid reserves do not silently fun
 Bookkeeping remains available during setup. When setup requests budget approval, the host reads
 `get_finance_budget` and presents the exact proposal, including all resources, allocations,
 rationale, and assumptions. `approve_finance_budget` binds the displayed budget version and
-`expectedProfileVersionId`. Every activation requires authenticated human `user_instruction`
-approval in nohmi. Agents may create and revise proposals but cannot activate them with execution
-scope, review bypass, a prior policy, or conversation text. Setup approval additionally binds
+`expectedProfileVersionId`. With review bypass disabled, activation requires authenticated owner `user_instruction`
+approval in nohmi. With persisted review bypass enabled, an agent with `finances:write` and
+`finances:execute` may activate the exact proposal using `agent_self_approval`. The same standing
+approval applies to every Finance application approval gate; agent provenance is never relabeled as a human decision. Setup approval additionally binds
 the setup session version. Changed profiles and superseding proposals require fresh inspection.
 
 `get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
@@ -480,17 +481,18 @@ create/match an internal reimbursement case; they never initiate a payment or
 any other external financial activity. The deprecated `resolve_finance_review`
 compatibility alias only translates legacy categorization answers. Legacy action-review
 approval/dismissal is available to the signed-in owner or explicitly authorized Finance execution
-agents with enabled review bypass and exact current work references, except active budget changes:
-those always require the authenticated owner. Legacy category allocations and complete plan writes
-have the same human boundary. Legacy `PUT /v1/finances/budget-plan` and `POST /v1/finances/budgets` submissions from humans
-also return a pending review; only approval of that durable review applies the plan. Approval
+agents with enabled review bypass and exact current work references, including active budget changes.
+Legacy category allocations and complete plan writes follow the same policy: with bypass disabled,
+`PUT /v1/finances/budget-plan` and `POST /v1/finances/budgets` submissions queue a durable review;
+with bypass enabled the exact prepared change applies directly. Approval
 revalidates the monthly plan and full allocation revision, including proposals for absent categories,
 and replaying an applied review returns its recorded result
 without replacing newer allocations. Bucket organization remains ordinary bookkeeping. Answering a budget
-evidence question queues the completed proposal; it does not approve it. Maintenance retains the
+evidence question follows the same persisted review policy for the completed proposal. Reimbursement expectation corrections and credit unmatching also follow that policy, retaining bounded evidence, current revisions and actual actor attribution. Maintenance retains the
 exact reviewed candidate and human approval identity separately from its executing agent, and
-revalidates all item fingerprints and source revisions before writing. New monthly baselines accept
-only human-approved versions; existing historical actor provenance remains readable. Canonical connection,
+revalidates all item fingerprints and source revisions before writing. Monthly baseline and planning confirmations accept the owner or an execution agent under persisted
+bypass. Confirmation records preserve the actual agent identity separately from the owner; existing
+human and historical approval provenance remains readable. Canonical connection,
 import, account correction, and typed transaction-relationship tools have their own scoped API
 contracts and are available to authorized MCP callers; no relationship operation moves money.
 
@@ -560,7 +562,7 @@ current local day with that day's selected-calendar events.
 
 | Concern | MCP answer |
 | --- | --- |
-| Capability and owner | MCP translates protocol operations to the authenticated Ilo API. Domain services and the API own behavior and authorization. |
+| Capability and owner | MCP translates protocol operations to the authenticated nohmi API. Domain services and the API own behavior and authorization. |
 | Configuration and authority | `MCP_PUBLIC_URL`, `APP_BASE_URL`, `PERSONAL_OS_API_URL`, `MCP_INTERNAL_SECRET`, the bearer token audience, and returned scopes must agree. |
 | Transport | Public HTTPS Streamable HTTP terminates at `/mcp`; local hosts use stdio. The MCP-to-API hop is HTTPS in production and carries no provider credential. |
 | Time and capacity | Requests use the existing API/provider deadlines and MCP fixed-window rate limit. Large or delayed provider work must already cross an API-owned durable handoff. |
@@ -613,7 +615,7 @@ do not replay the request, not that nohmi can reconcile a missing audit record.
 Open **Settings → Connected agents** for the current deployment's MCP URL. A new
 account can go directly there from the Ready step. The person completes that
 one unavoidable connection handoff; after authentication, the host calls
-`get_ilo_setup` and Ilo supplies the current domain context and next work. A
+`get_ilo_setup` and nohmi supplies the current domain context and next work. A
 separate skill install or copied procedural prompt is not required.
 
 For compatibility with skill-aware hosts, the connection guide also reports one
@@ -633,9 +635,9 @@ profile-only fallback, and hosts must not infer executable behavior from a
 different domain's support level.
 
 Remote MCP OAuth is the recommended connection. The host dynamically registers,
-the user signs in to Ilo, and the consent page lists the requested permissions
+the user signs in to nohmi, and the consent page lists the requested permissions
 before issuing audience-bound access and rotating refresh tokens. Provider
-credentials remain inside Ilo. Local or manual hosts that cannot complete OAuth
+credentials remain inside nohmi. Local or manual hosts that cannot complete OAuth
 can use an explicitly scoped personal access token from the advanced section.
 
 Grant only the scopes the host needs:
@@ -695,3 +697,42 @@ Users can instead choose a category or link an exact related transaction immedia
 use the same authenticated, idempotent API and conditional case mutation. Failed saves retain the
 user's input and retry key. A saved note remains visibly outstanding until actually resolved, but is excluded from the next unanswered question. An Inbox containing only saved notes reports work remaining, not completion.
 An empty Inbox or a completed maintenance run does not establish budget balance or source completeness.
+
+
+Finance category and planning-bucket icons are presentation metadata inferred automatically by
+the domain from record meaning. Creating a category or bucket requires no icon decision. Agents
+should not ask users about or narrate cosmetic icon choices unless users explicitly request them.
+
+### Shared agent identity
+
+`get_agent_account` reads the authenticated connection's account-level profile.
+`register_agent_account` idempotently registers/reuses that identity and accepts only an optional
+unverified platform label. The orientation context also includes `agentAccount` for authenticated
+agents. These tools do not require Finance access and never expand credential scopes.
+
+One account identity may span several surfaces after its owner links their connections in shared
+Connected agents settings. Agents cannot enumerate other profiles or supply an account ID to select
+or impersonate one. Platform account IDs and email addresses are not inferred or requested from the
+model. See [Shared agent accounts](product/agent-accounts.md) for ownership, attribution and recovery.
+
+### Historical Finance backlog and bounded batches
+
+`get_finance_review_backlog` assesses all owned flagged transactions and open/deferred cases,
+including prior years. It reports these counting units separately; overlapping flags and cases
+are not a count of independent user decisions. `list_finance_review_backlog_items` pages exact
+records with evidence, saved answers, revisions and a snapshot-bound cursor. Restart pagination
+when the snapshot changes. A group such as possible roundups is an investigation hint, not a
+verified transfer classification.
+
+After investigating, `preview_finance_review_batch` durably stores up to 100 explicit decisions
+with an idempotency key, exact revisions, rationale and evidence. It applies no financial changes.
+`execute_finance_review_batch` processes at most ten items per call. Each financial write and its
+outcome commit together. Retrieve or list saved batches to recover after interruption, then resume
+pending items. Completed exceptions require corrected evidence and a new preview; never silently
+retry an applied item or treat an unresolved exception as a resolution. Merchant learning is not
+part of these batches.
+
+The owner can inspect and explicitly apply prepared batches in Finance review. An agent can only
+resume its own originating authorization and needs current read/write/execute grants and the
+owner's execution policy. Revocation and current evidence are checked during execution. Saved
+answers remain available for agent follow-through; ask only for missing facts, not repeated answers.

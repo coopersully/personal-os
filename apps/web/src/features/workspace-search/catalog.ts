@@ -1,5 +1,6 @@
 import type { SearchableWorkspace, WorkspaceSearchResult } from "@personal-os/domain";
 import { isTauri } from "@tauri-apps/api/core";
+import { settingsPath } from "@/features/settings/settings-routes";
 import { settingMatchScore, settingsFieldId, settingsFields } from "../settings/settings-fields";
 
 export type SearchAction =
@@ -89,7 +90,7 @@ export function workspaceCatalog(workspace: SearchableWorkspace, query: string):
       id: "settings",
       kind: "Settings",
       title: `${label} settings`,
-      href: `/settings?section=${workspace}`,
+      href: settingsPath(workspace),
       preview: "Workspace preferences",
       state: null,
       aliases: "preferences configuration",
@@ -107,7 +108,7 @@ export function workspaceCatalog(workspace: SearchableWorkspace, query: string):
         id: settingsFieldId(field),
         kind: "Settings",
         title: field.label,
-        href: `/settings?section=${field.section}&field=${encodeURIComponent(settingsFieldId(field))}`,
+        href: `${settingsPath(field.section)}&field=${encodeURIComponent(settingsFieldId(field))}`,
         preview: `${label} settings`,
         state: null,
         aliases: field.aliases ?? "",

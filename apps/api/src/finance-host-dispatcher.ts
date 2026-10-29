@@ -55,6 +55,7 @@ export function createFinanceHostDispatcher(options: {
             eq(financeAnswerContinuations.state, "pending"),
             eq(financeAnswerContinuations.fireState, "pending"),
             sql`${automationHostSchedules.schedule}->>'hostSurface' = 'claude_code_routine'`,
+            sql`${automationHostSchedules.schedule}->'trigger'->>'type' = 'event'`,
             sql`${automationHostSchedules.schedule}->>'state' = 'active'`,
             sql`${automationHostSchedules.encryptedFireCredentials} IS NOT NULL`,
             sql`EXISTS (SELECT 1 FROM access_tokens WHERE access_tokens.user_id = ${automationHostSchedules.userId} AND access_tokens.authorization_connection_id = ${automationHostSchedules.authorizationConnectionId} AND ${activeHostConnectionGrant(now())} AND access_tokens.scopes @> '["finances:maintain"]'::jsonb)`,
@@ -123,6 +124,7 @@ export function createFinanceHostDispatcher(options: {
         if (
           schedule?.schedule.state !== "active" ||
           schedule.schedule.hostSurface !== "claude_code_routine" ||
+          schedule.schedule.trigger.type !== "event" ||
           !schedule.encryptedFireCredentials ||
           !/^trig_[A-Za-z0-9]{10,100}$/.test(schedule.schedule.hostAutomationId)
         )

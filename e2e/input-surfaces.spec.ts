@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 for (const width of [390, 1100]) {
-  test(`auth branding stays separate from the form and field spacing matches at ${width}px`, async ({
+  test(`auth decoration stays separate from the form and field spacing matches at ${width}px`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 588 });
     await page.goto("/login");
-    await expect(page.getByRole("heading", { name: "sign in", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Login", exact: true })).toBeVisible();
     const formBox = await page.locator(".auth-form").boundingBox();
     if (!formBox) throw new Error("Missing auth form");
     const panel = page.locator(".auth-brand-panel");
@@ -40,18 +40,22 @@ for (const width of [390, 1100]) {
       expect(panelBox.x).toBeGreaterThanOrEqual(width / 2);
       expect(headerBox.x).toBe(width - panelBox.x - panelBox.width);
       expect(headerBox.y).toBe(panelBox.y);
-      await expect(panel.getByRole("heading", { name: "a personal harness." })).toBeVisible();
-      await expect(panel.locator(".brand-pattern__tile")).toHaveCount(0);
-      await expect(panel).toHaveCSS("animation-name", "none");
+      const tiles = panel.locator(".brand-pattern__tile");
+      expect(await tiles.count()).toBeGreaterThan(1);
+      await expect(panel.locator(".auth-brand-graphic__orbit")).toHaveCount(0);
+      const durations = await tiles.evaluateAll((elements) =>
+        elements.map((element) => getComputedStyle(element).animationDuration),
+      );
+      expect(new Set(durations).size).toBeGreaterThan(1);
       await page.emulateMedia({ reducedMotion: "reduce" });
-      await expect(panel).toHaveCSS("animation-name", "none");
+      await expect(tiles.first()).toHaveCSS("animation-name", "none");
     } else {
       await expect(panel).toBeHidden();
       expect(Math.abs(formBox.x + formBox.width / 2 - width / 2)).toBeLessThanOrEqual(1);
       expect(Math.abs(headerBox.x + headerBox.width / 2 - width / 2)).toBeLessThanOrEqual(1);
     }
     const labelGaps = await page.evaluate(() => {
-      return ["email", "password"].map((name) => {
+      return ["Email", "Password"].map((name) => {
         const label = [...document.querySelectorAll("label")].find(
           (item) => item.textContent === name,
         );
@@ -67,7 +71,7 @@ for (const width of [390, 1100]) {
     const inviteLink = page.getByRole("button", { name: "Have an invite? Create an account" });
     await expect(inviteLink.locator("svg")).toHaveCount(0);
     await inviteLink.click();
-    const title = page.getByRole("heading", { name: "create account" });
+    const title = page.getByRole("heading", { name: "Redeem Invite Code" });
     await expect(title).toBeVisible();
     const titleBox = await title.boundingBox();
     expect(titleBox).not.toBeNull();
@@ -103,7 +107,7 @@ for (const width of [390, 1100]) {
 for (const theme of ["light", "dark"]) {
   test(`autofilled login inputs retain their tonal surface in ${theme} mode`, async ({ page }) => {
     await page.goto("/login");
-    const email = page.getByRole("textbox", { name: "email", exact: true });
+    const email = page.getByRole("textbox", { name: "Email", exact: true });
     await expect(email).toBeVisible();
     await page.evaluate((mode) => {
       document.documentElement.classList.toggle("dark", mode === "dark");
@@ -116,11 +120,11 @@ for (const theme of ["light", "dark"]) {
     );
     const labelColor = await page
       .locator("label")
-      .filter({ hasText: /^email$/ })
+      .filter({ hasText: /^Email$/ })
       .evaluate((element) => getComputedStyle(element).color);
     expect(placeholderColor).not.toBe(labelColor);
     await email.fill("sam@example.com");
-    const password = page.getByLabel("password", { exact: true });
+    const password = page.getByLabel("Password", { exact: true });
     const group = page.locator('[data-slot="input-group"]').filter({ has: password });
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("DOM.enable");
@@ -159,7 +163,7 @@ for (const theme of ["light", "dark"]) {
     await password.fill("Example-password-123!");
     await password.hover();
     await expect(password).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-    await page.getByRole("button", { name: "show password", exact: true }).click();
+    await page.getByRole("button", { name: "Show password", exact: true }).click();
     await expect(password).toHaveAttribute("type", "text");
   });
 }

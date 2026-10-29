@@ -36,8 +36,10 @@ export function serializeFinancePlanningEvidence(row: StoredEvidence): FinancePl
   const common = {
     evidenceId: row.id,
     ownerUserId: row.userId,
-    actor: { type: "user", userId: row.actorUserId },
-    provenance: "explicit_user",
+    actor: row.approvalActor
+      ? { ...row.approvalActor, userId: row.userId }
+      : { type: "user", userId: row.actorUserId },
+    provenance: row.approvalActor ? "agent_self_approval" : "explicit_user",
     currencyCode: row.currencyCode,
     asOf: row.asOf,
     recordedAt: row.recordedAt.toISOString(),
@@ -64,13 +66,22 @@ export function serializeFinancePlanningEvidence(row: StoredEvidence): FinancePl
   );
 }
 
-export function requireExplicitUser(context: FinanceMutationContext) {
+export function requirePlanningConfirmation(context: FinanceMutationContext) {
   requireFinanceMutation(context);
-  if (context.actorType !== "user" || context.actorId !== context.userId)
+  if (
+    !(context.actorType === "user" && context.actorId === context.userId) &&
+    !(
+      context.actorType === "agent" &&
+      context.bypassEnabled &&
+      context.canSelfApprove &&
+      context.executionPrincipal?.scopes.has("finances:execute")
+    )
+  )
     throw new AppError(
       "forbidden",
-      "Planning evidence requires the authenticated user's explicit statement.",
+      "Planning confirmation requires the owner or an execution agent with review bypass enabled.",
     );
+  if (context.actorType === "agent") context.requiresApprovalBypass = true;
 }
 function requireCurrentDate(asOf: string, today: string) {
   const current = z.iso.date().parse(today);
@@ -119,6 +130,8 @@ export function createFinancePlanningEvidenceService({
         id: randomUUID(),
         userId: context.userId,
         actorUserId: context.userId,
+        approvalActor:
+          context.actorType === "agent" ? { type: "agent", id: context.actorId } : null,
         recordedAt: now(),
       })
       .returning();
@@ -132,7 +145,7 @@ export function createFinancePlanningEvidenceService({
           evidenceId: saved.id,
           revision: saved.sourceRevision,
           asOf: saved.asOf,
-          provenance: "explicit_user",
+          provenance: context.actorType === "agent" ? "agent_self_approval" : "explicit_user",
         },
         entityId: (saved.goalId ?? saved.obligationId) as string,
         entityType: saved.goalId ? "finance_goal" : "finance_recurring_obligation",
@@ -148,7 +161,7 @@ export function createFinancePlanningEvidenceService({
       context,
       input: raw,
     }: Mutation<ConfirmFinanceObligationEvidenceInput>) {
-      requireExplicitUser(context);
+      requirePlanningConfirmation(context);
       const input = obligationInputSchema.parse(raw);
       requireCurrentDate(input.asOf, await todayForOwner(tx, context.userId));
       const [before] = await tx
@@ -230,7 +243,7 @@ export function createFinancePlanningEvidenceService({
       return { source, evidence };
     },
     async confirmGoal({ tx, context, input: raw }: Mutation<ConfirmFinanceGoalEvidenceInput>) {
-      requireExplicitUser(context);
+      requirePlanningConfirmation(context);
       const input = goalInputSchema.parse(raw);
       requireCurrentDate(input.asOf, await todayForOwner(tx, context.userId));
       const [before] = await tx

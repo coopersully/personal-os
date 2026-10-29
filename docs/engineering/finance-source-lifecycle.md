@@ -61,3 +61,47 @@ Deleting an account is a separate data-control operation with its existing ledge
 
 Venmo wallet feasibility remains separate. Institution availability alone does not establish
 personal-wallet activity access; no Venmo connector or production consent test is enabled here.
+
+## Blocked preflight recovery
+
+A Finance `start` for the same scope returns the existing blocked run and a scoped
+`get_finance_status` next action instead of obscuring its blockers with a rulebook conflict.
+`start` and `resume` may update an obsolete rulebook only when the run has exactly one completed
+preflight step, its checkpoint agrees, and it has no source snapshot, candidate, execution binding,
+non-question action review, recorded transaction revision/relationship effect, or conversation batch.
+Recovery is serialized under the owner/run locks and records `finance.maintenance_preflight_recovered`
+with the previous rulebook and actual resulting status. It retains the preflight step and every
+question. When current blockers remain, the run stays blocked and retains its saved result; only
+an unblocked run is queued for synchronization and current candidate preparation.
+
+A validated routine may bind that eligible, previously unbound preflight run to its own active
+schedule when it becomes runnable. Existing host bindings retain their original connection and
+schedule authority. Recovery neither adopts another host's work nor reinterprets prepared/effected
+work under new policy. Later-stage recovery continues through its existing owning workflow.
+
+Planning exclusion is not maintenance exclusion: `includeInPlanning=false` changes planning totals,
+not provider authorization or ledger evidence requirements. A replacement connected account does
+not repair an older account's authorization. Legacy unverified financial effects still require
+explicit financial decisions; review bypass does not establish evidence or resolve these blockers.
+A recovered rulebook, queued run, or candidate awaiting challenge is not completed maintenance.
+
+## Legacy action questions and contextual questions
+
+Legacy action questions are stored in `finance_agent_action_reviews` and answered through
+`answer_finance_question`. Contextual questions have their own producer, persisted identity, and
+answer contract. Passing a legacy action-question ID to the contextual endpoint can return
+`producer_not_registered`; that response does not diagnose an unavailable legacy question producer.
+
+New low-confidence categorization questions retain their validated transaction source references.
+For older categorization questions with no references, question-list and Finance-status reads may
+reconstruct navigation references from the saved, schema-valid input only when every transaction
+and account belongs to that question's owner. Missing/foreign targets remain unprojected. This read
+repair does not rewrite the question, accept its proposed category, grant another agent answer
+authority, or mark it answered. Reconstructed references describe current records, not proof that
+old categorization evidence remains valid. Ambiguous transfers and insufficient evidence still
+require the existing explicit financial decision and action-policy paths.
+
+Synthetic coverage exercises scheduled start followed by its returned resume action through the
+real dispatcher to candidate challenge, with no semantic categorization effects. Production
+acceptance separately requires current blocker inspection, authorized source/effect repair, and
+observation beyond preflight; these tests do not establish real provider recovery or final settlement.

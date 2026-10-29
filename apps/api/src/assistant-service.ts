@@ -20,11 +20,12 @@ import {
   type CreateAttentionItemInput,
   type DomainProfile,
   featureAccessPolicies,
-  type IloAgentContext,
+  type PersonalOsAgentContext,
   type UpdateAttentionItemInput,
   type UpsertDomainProfileInput,
 } from "@personal-os/domain";
 import { and, desc, eq, gt, isNotNull, isNull, or } from "drizzle-orm";
+import { findAgentAccount } from "./agent-account-service.js";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
@@ -273,7 +274,7 @@ export function createAssistantService({
   }
 
   return {
-    async getContext(principal: Principal): Promise<IloAgentContext> {
+    async getContext(principal: Principal): Promise<PersonalOsAgentContext> {
       const [user, readiness] = await Promise.all([
         db
           .select({ displayName: users.displayName, planningTimezone: users.planningTimezone })
@@ -287,6 +288,10 @@ export function createAssistantService({
       const link = (path: string) => new URL(path, appBaseUrl).href;
       const timestamp = now().toISOString();
       return {
+        agentAccount:
+          principal.actorType === "agent" && principal.authorizationConnectionId
+            ? await findAgentAccount(db, principal.userId, principal.authorizationConnectionId)
+            : null,
         access: { grantedScopes: [...principal.scopes].toSorted() },
         generatedAt: timestamp,
         identity: {

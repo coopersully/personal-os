@@ -32,9 +32,11 @@ export function baselineQualificationKind(
     month: "2-digit",
   }).formatToParts(now);
   const currentMonth = `${parts.find((part) => part.type === "year")?.value}-${parts.find((part) => part.type === "month")?.value}`;
-  return snapshot.month < currentMonth ||
-    snapshot.originalApproval.actorType !== "user" ||
-    snapshot.originalApproval.actorId !== ownerId
+  const approval = snapshot.originalApproval;
+  const currentAuthority =
+    approval.actorType === "agent" ||
+    (approval.actorType === "user" && approval.actorId === ownerId);
+  return snapshot.month < currentMonth || !currentAuthority
     ? ("retrospective" as const)
     : ("current" as const);
 }

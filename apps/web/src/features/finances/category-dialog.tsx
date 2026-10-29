@@ -7,11 +7,12 @@ import {
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
+  ResponsiveDialogDescription,
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldLabel } from "@/components/settings-field";
 import { Input } from "@/components/ui/input";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 
@@ -28,9 +29,12 @@ export function FinanceCategoryDialog({ onClose }: { onClose: () => void }) {
   });
   return (
     <ResponsiveDialog open onOpenChange={(open) => !open && onClose()}>
-      <ResponsiveDialogContent>
+      <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle>Add category</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
+            Create a category to organize your transactions.
+          </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
         <FeedbackForm
           feedback={save.feedback}

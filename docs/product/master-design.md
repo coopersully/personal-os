@@ -323,6 +323,70 @@ two 2026-08-12 Tasks and Tracking specifications. Cross-workspace goals, priorit
 relationships, circumstances, preferences, constraints, and inferred patterns belong to User
 Knowledge rather than a separate top-level workspace.
 
+#### Morning and evening rituals
+
+Enabled rituals also present automatically inside the signed-in browser application. A due,
+unexpired, unsnoozed occurrence opens the shared checklist in a modal over the existing page,
+with the page visible through a blurred backdrop. Keep the page mounted and restore its focus
+when the ritual is completed, snoozed, skipped, or settled by another client. Escape and outside
+clicks do not bypass the ritual. Authentication and standalone setup flows remain unobstructed;
+the desktop shell keeps its native presentation without a duplicate browser modal.
+
+The browser and desktop use the same account occurrence, revisions, answers, streaks, weekly
+progress, optional follow-ups, and snooze/skip policy. Browser writes require API acceptance and
+never claim to be queued offline. Refresh while visible and on focus/reconnection; recheck snooze
+and expiry using server time plus elapsed monotonic time. Read access denials and session expiry clear private state;
+read outages use deduplicated Sonner feedback and retry. Browser presentation covers only the
+open nohmi tab, with no screen capture or control over other tabs/apps. Use the shared browser
+interface for rapid visual iteration, then smoke-test native presentation on macOS.
+
+Ritual steps support required or optional participation and everyday, weekday, weekend, or custom
+weekday inclusion. Existing steps remain required every day. Resolve inclusion using the ritual's
+scheduled local date and profile planning time zone, then preserve the daily snapshot even if settings change. Morning and evening schedules share the profile time zone; they do not expose a separate ritual time-zone preference.
+Only scheduled required steps gate explicit completion. A day with no scheduled steps settles
+without opening the checklist; an all-optional day still permits voluntary participation.
+
+Each ritual has a configurable default follow-up time (initially noon for morning and 22:00 for
+evening). When unfinished optional steps remain, offer an unchecked “Remind me about these later”
+checkbox with an editable time. Show Today or Tomorrow explicitly when the chosen time rolls over.
+Checking it requests one standalone Reminder per unfinished optional step on completion; leaving
+it unchecked records those steps as optional and not done. Completed optional steps never generate
+follow-ups. These reminders remain independently editable and completable in Reminders; completing
+them does not rewrite the settled ritual's original answers. Deleting ritual history does not
+remove independently created reminders.
+
+Reminder creation and completion must be atomic, owner-scoped, and safe to retry. Offline desktop
+completion retains the reminder request in its durable queue and does not claim a scheduled
+reminder until the API accepts it. If an otherwise valid completion syncs after its requested time,
+make the reminder due shortly after acceptance. Expired/conflicting completions retain the existing
+explicit recovery flow. Delivery follows the person's existing reminder notification settings and
+OS permissions; accepting a reminder is not evidence of a displayed notification.
+
+Show the current ritual's streak at the top of its main checklist. Morning and evening have
+separate streaks of consecutive completed scheduled days. Today's pending ritual leaves the
+streak intact; skipped or missed scheduled days break it. Optional answers never gate a streak,
+and days with no scheduled steps neither add to nor break it. Streaks use retained history;
+an unrecorded scheduled day interrupts continuity. For unrecorded dates, use the current weekday
+schedule; recorded daily snapshots remain authoritative. Deleting history can reduce a streak.
+
+Keep the streak alongside a compact rolling seven-day completion strip at the top of the main
+ritual. Each morning/evening strip ends on that occurrence's scheduled local date, including
+night rituals that continue after midnight. Preserve visible completed days across streak breaks;
+show a completion count, dated days, and accessible completed, skipped, missed, pending,
+not-scheduled, and no-record states. Unscheduled days are neutral, and absent/deleted records
+must not be presented as verified misses or completions. Preview has no personal progress strip.
+Queued local completions update the current day and remain labeled as waiting to sync; clear
+cached weekly progress when offline advancement changes the current occurrence.
+
+
+“Skip for Today” first shows this ritual's applied skip count over the last 72 hours and warns
+when a streak will end. Require a continuous 30-second pointer or keyboard hold, with a visible
+countdown and progress fill, before submitting the skip. Release, pointer exit/cancellation,
+focus loss, tab visibility changes, or leaving confirmation resets the hold. The hold is an
+interaction safeguard in the shared web/desktop checklist, not an API authorization boundary.
+Offline skip history is explicitly unavailable; cached streaks are labeled as last synchronized
+and are cleared when advancing to another occurrence.
+
 ### 6.7 Finances
 
 Finances should turn the person's authorized financial data and context into visual understanding,

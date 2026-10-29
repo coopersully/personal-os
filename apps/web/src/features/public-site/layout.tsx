@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { BRAND_PROMISE } from "../../brand.js";
-import { NohmiBrandMark } from "../../components/brand-marks.js";
+import { PersonalOsBrandMark } from "../../components/brand-marks.js";
 import { Button } from "../../components/ui/button.js";
 import {
   NavigationMenu,
@@ -65,7 +65,7 @@ export function PublicSiteLayout({
         <div className={publicContainer}>
           <div className="public-nav">
             <a href="/" aria-label="nohmi home">
-              <NohmiBrandMark />
+              <PersonalOsBrandMark />
             </a>
             <NavigationMenu aria-label="product navigation" viewport={false}>
               <NavigationMenuList className="flex-wrap gap-1">
@@ -91,7 +91,7 @@ export function PublicSiteLayout({
           <div className="grid gap-8 lg:grid-cols-[1fr_1.5fr]">
             <div className="flex flex-col items-start gap-4">
               <a href="/" aria-label="nohmi home">
-                <NohmiBrandMark />
+                <PersonalOsBrandMark />
               </a>
               <p className="max-w-sm text-sm leading-relaxed">{BRAND_PROMISE}</p>
             </div>

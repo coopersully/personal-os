@@ -4,6 +4,11 @@ import { useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { QueryFeedback } from "@/components/async-state";
 import {
+  FloatingActionButton,
+  FloatingActionRegion,
+  FloatingActions,
+} from "@/components/floating-actions";
+import {
   ChevronRightIcon,
   ClockIcon,
   ListChecksIcon,
@@ -32,21 +37,33 @@ export type TaskCreationPlacement = { listId: string; projectId: string | null }
 export function TasksCreateButton({
   onCreate,
   onCreateReminder,
+  floating = false,
 }: {
   onCreate: (placement?: TaskCreationPlacement) => void;
   onCreateReminder?: () => void;
+  floating?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button
-        aria-label="Create in Tasks"
-        title="Create in Tasks"
-        size="icon"
-        onClick={() => setOpen(true)}
-      >
-        <PlusIcon aria-hidden="true" />
-      </Button>
+      {floating ? (
+        <FloatingActionRegion align="end" className="tasks-floating-create">
+          <FloatingActions aria-label="Tasks actions">
+            <FloatingActionButton label="Create in Tasks" onClick={() => setOpen(true)}>
+              <PlusIcon aria-hidden="true" />
+            </FloatingActionButton>
+          </FloatingActions>
+        </FloatingActionRegion>
+      ) : (
+        <Button
+          aria-label="Create in Tasks"
+          title="Create in Tasks"
+          size="icon"
+          onClick={() => setOpen(true)}
+        >
+          <PlusIcon aria-hidden="true" />
+        </Button>
+      )}
       {open ? (
         <CreationFlow
           close={() => setOpen(false)}

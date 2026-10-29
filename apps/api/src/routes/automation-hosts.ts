@@ -95,7 +95,9 @@ export function registerAutomationHostRoutes({
   );
   app.get("/v1/automation-hosts", async (c) => c.json(await hosts.list(c.get("principal"))));
   app.post("/v1/automation-hosts", async (c) =>
-    c.json(await hosts.create(c.get("principal"), await parseBody(c, z.unknown()))),
+    c.json(
+      await hosts.create(c.get("principal"), await parseBody(c, z.unknown()), c.get("requestId")),
+    ),
   );
   app.post("/v1/automation-hosts/:id/bind", async (c) =>
     c.json(

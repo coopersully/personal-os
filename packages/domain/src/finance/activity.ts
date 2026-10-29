@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { agentAccountSchema } from "../agent-account.js";
 import { actorTypeSchema, idSchema, isoDateTimeSchema } from "../common.js";
 import { financeConversationSequenceSchema } from "./conversation.js";
 
@@ -91,6 +92,7 @@ export const financeActivityChangeSchema = z
   .strict();
 export const financeActivityEntrySchema = z
   .object({
+    agentAccount: agentAccountSchema.nullable().optional(),
     id: idSchema,
     occurredAt: isoDateTimeSchema,
     kind: financeActivityKindSchema,

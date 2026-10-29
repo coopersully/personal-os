@@ -3862,6 +3862,7 @@ export const financePlanningEvidence = pgTable(
     currencyCode: text("currency_code").notNull(),
     fixedness: text("fixedness").$type<"fixed" | "variable">(),
     asOf: text("as_of").notNull(),
+    approvalActor: jsonb("approval_actor").$type<{ type: "agent"; id: string }>(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
     actorUserId: uuid("actor_user_id")
       .notNull()
@@ -3873,6 +3874,10 @@ export const financePlanningEvidence = pgTable(
     >(),
   },
   (table) => [
+    check(
+      "finance_planning_evidence_approval_actor_check",
+      sql`${table.approvalActor} IS NULL OR (jsonb_typeof(${table.approvalActor}) = 'object' AND ${table.approvalActor}->>'type' = 'agent' AND length(${table.approvalActor}->>'id') > 0) IS TRUE`,
+    ),
     check(
       "finance_planning_evidence_source_check",
       sql`(${table.goalId} IS NOT NULL) <> (${table.obligationId} IS NOT NULL)`,
@@ -3922,6 +3927,7 @@ export const financeRecurringScheduleVersions = pgTable(
     actorUserId: uuid("actor_user_id")
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
+    approvalActor: jsonb("approval_actor").$type<{ type: "agent"; id: string }>(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
     incomeStreamId: uuid("income_stream_id"),
     obligationId: uuid("obligation_id"),
@@ -3938,6 +3944,10 @@ export const financeRecurringScheduleVersions = pgTable(
     supersedesId: uuid("supersedes_id"),
   },
   (table) => [
+    check(
+      "finance_recurring_schedule_versions_approval_actor_check",
+      sql`${table.approvalActor} IS NULL OR (jsonb_typeof(${table.approvalActor}) = 'object' AND ${table.approvalActor}->>'type' = 'agent' AND length(${table.approvalActor}->>'id') > 0) IS TRUE`,
+    ),
     check(
       "fin_schedule_source_check",
       sql`(${table.incomeStreamId} IS NOT NULL) <> (${table.obligationId} IS NOT NULL)`,
@@ -4062,6 +4072,7 @@ export const financeOccurrenceMatchEvents = pgTable(
     actorUserId: uuid("actor_user_id")
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
+    approvalActor: jsonb("approval_actor").$type<{ type: "agent"; id: string }>(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
     occurrenceId: uuid("occurrence_id").notNull(),
     kind: text("kind").notNull(),
@@ -4076,6 +4087,10 @@ export const financeOccurrenceMatchEvents = pgTable(
     reversesMatchId: uuid("reverses_match_id"),
   },
   (table) => [
+    check(
+      "finance_occurrence_match_events_approval_actor_check",
+      sql`${table.approvalActor} IS NULL OR (jsonb_typeof(${table.approvalActor}) = 'object' AND ${table.approvalActor}->>'type' = 'agent' AND length(${table.approvalActor}->>'id') > 0) IS TRUE`,
+    ),
     check("fin_occ_match_kind_check", sql`${table.kind} IN ('match','reverse')`),
     check(
       "fin_occ_match_source_check",
@@ -4129,6 +4144,7 @@ export const financeCashBalanceBases = pgTable(
     actorUserId: uuid("actor_user_id")
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
+    approvalActor: jsonb("approval_actor").$type<{ type: "agent"; id: string }>(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
     accountId: uuid("account_id").notNull(),
     basisRevision: integer("basis_revision").notNull(),
@@ -4141,6 +4157,10 @@ export const financeCashBalanceBases = pgTable(
     protectedFloorCents: bigint("protected_floor_cents", { mode: "number" }),
   },
   (table) => [
+    check(
+      "finance_cash_balance_bases_approval_actor_check",
+      sql`${table.approvalActor} IS NULL OR (jsonb_typeof(${table.approvalActor}) = 'object' AND ${table.approvalActor}->>'type' = 'agent' AND length(${table.approvalActor}->>'id') > 0) IS TRUE`,
+    ),
     check(
       "fin_balance_basis_revision_check",
       sql`${table.basisRevision} > 0 AND ${table.accountContextualRevision} > 0`,
@@ -5641,7 +5661,7 @@ export const financesWorkspaceSettings = pgTable(
     financeTransactionView: text("finance_transaction_view").notNull().default("table"),
     financeTransactionGroup: text("finance_transaction_group").notNull().default("none"),
     financeManualVisibility: text("finance_manual_visibility").notNull().default("auto"),
-    financeSpendingView: text("finance_spending_view").notNull().default("bubbles"),
+    financeSpendingView: text("finance_spending_view").notNull().default("list"),
     financeSpendingGrouping: text("finance_spending_grouping").notNull().default("auto"),
     financeSpendingIncludePending: boolean("finance_spending_include_pending")
       .notNull()
@@ -5653,7 +5673,7 @@ export const financesWorkspaceSettings = pgTable(
     financeSpendingSubtractRefunds: boolean("finance_spending_subtract_refunds")
       .notNull()
       .default(true),
-    financeSpendingPeriod: text("finance_spending_period").notNull().default("month"),
+    financeSpendingPeriod: text("finance_spending_period").notNull().default("week"),
   },
   (table) => [
     check("finances_workspace_settings_revision_check", sql`${table.revision} > 0`),
@@ -5709,7 +5729,7 @@ export const financeOnboardingLegacyAccess = pgTable(
   ],
 );
 
-/** Host cadence remains outside nohmi; only explicit tenant-bound references are stored. */
+/** Host cadence remains outside Personal OS; only explicit tenant-bound references are stored. */
 export const automationHostSchedules = pgTable(
   "automation_host_schedules",
   {
@@ -5817,6 +5837,10 @@ export const financeBudgetBaselineQualifications = pgTable(
     reviewId: uuid("review_id").notNull(),
     snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
     fingerprint: text("fingerprint").notNull(),
+    confirmedByActorType: text("confirmed_by_actor_type")
+      .$type<"user" | "agent">()
+      .notNull()
+      .default("user"),
     confirmedByActorId: text("confirmed_by_actor_id").notNull(),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull(),
     qualificationKind: text("qualification_kind").$type<"current" | "retrospective">().notNull(),
@@ -5848,8 +5872,8 @@ export const financeBudgetBaselineQualifications = pgTable(
       sql`${table.qualificationKind} IN ('current', 'retrospective')`,
     ),
     check(
-      "finance_budget_baseline_qualifications_human_check",
-      sql`${table.confirmedByActorId} = ${table.userId}::text`,
+      "finance_budget_baseline_qualifications_actor_check",
+      sql`(${table.confirmedByActorType} = 'user' AND ${table.confirmedByActorId} = ${table.userId}::text) OR (${table.confirmedByActorType} = 'agent' AND length(${table.confirmedByActorId}) > 0)`,
     ),
   ],
 );
@@ -6272,6 +6296,136 @@ export const financeMaintenanceExecutionReceipts = pgTable(
     check(
       "finance_execution_receipt_revision_check",
       sql`${table.fromRevision}>0 AND ${table.toRevision}=${table.fromRevision}+1`,
+    ),
+  ],
+);
+
+/** Explicit complete transaction intervals, supplied by a statement/import writer. */
+export const financeTransactionCoverage = pgTable(
+  "finance_transaction_coverage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id").notNull(),
+    fromDate: date("from_date").notNull(),
+    throughDate: date("through_date").notNull(),
+    timezone: text("timezone").notNull(),
+    currencyCode: text("currency_code").notNull(),
+    evidenceRef: text("evidence_ref").notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "finance_transaction_coverage_account_fk",
+      columns: [table.userId, table.accountId],
+      foreignColumns: [financeAccounts.userId, financeAccounts.id],
+    }).onDelete("cascade"),
+    index("finance_transaction_coverage_owner_account_idx").on(table.userId, table.accountId),
+    check(
+      "finance_transaction_coverage_period_check",
+      sql`${table.fromDate} <= ${table.throughDate}`,
+    ),
+    check("finance_transaction_coverage_currency_check", sql`${table.currencyCode} ~ '^[A-Z]{3}$'`),
+    check(
+      "finance_transaction_coverage_evidence_check",
+      sql`length(trim(${table.evidenceRef})) > 0 AND length(trim(${table.timezone})) > 0`,
+    ),
+  ],
+);
+
+/** Shared display identity; connection grouping never grants execution authority. */
+export const agentAccounts = pgTable(
+  "agent_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    platform: text("platform")
+      .$type<import("@personal-os/domain").AgentPlatform>()
+      .notNull()
+      .default("unknown"),
+    displayName: text("display_name").notNull(),
+    accountLabel: text("account_label"),
+    avatarSeed: uuid("avatar_seed").notNull().defaultRandom(),
+    avatarVersion: integer("avatar_version").$type<1>().notNull().default(1),
+    identitySource: text("identity_source")
+      .$type<"connection" | "user_confirmed">()
+      .notNull()
+      .default("connection"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("agent_accounts_owner_unique").on(table.userId, table.id),
+    check(
+      "agent_accounts_platform_check",
+      sql`${table.platform} IN ('claude', 'codex', 'other', 'unknown')`,
+    ),
+    check(
+      "agent_accounts_source_check",
+      sql`${table.identitySource} IN ('connection', 'user_confirmed')`,
+    ),
+    check("agent_accounts_avatar_version_check", sql`${table.avatarVersion} = 1`),
+  ],
+);
+export const agentAccountConnections = pgTable(
+  "agent_account_connections",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    agentAccountId: uuid("agent_account_id").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.authorizationConnectionId] }),
+    foreignKey({
+      columns: [table.userId, table.agentAccountId],
+      foreignColumns: [agentAccounts.userId, agentAccounts.id],
+      name: "agent_account_connections_owner_fk",
+    }).onDelete("cascade"),
+    index("agent_account_connections_account_idx").on(table.userId, table.agentAccountId),
+  ],
+);
+
+/** Exact accepted manifests and atomic per-item receipts for bounded Finance review work. */
+export const financeReviewBatchRuns = pgTable(
+  "finance_review_batch_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    actorId: text("actor_id").notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    manifest: jsonb("manifest").$type<unknown[]>().notNull(),
+    outcomes: jsonb("outcomes").$type<unknown[]>().notNull().default([]),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_review_batch_runs_owner_key_unique").on(
+      table.userId,
+      table.idempotencyKey,
+    ),
+    index("finance_review_batch_runs_owner_created_idx").on(
+      table.userId,
+      table.createdAt,
+      table.id,
+    ),
+    check("finance_review_batch_runs_actor_check", sql`${table.actorType} IN ('user', 'agent')`),
+    check(
+      "finance_review_batch_runs_manifest_check",
+      sql`jsonb_typeof(${table.manifest}) = 'array' AND jsonb_array_length(${table.manifest}) BETWEEN 1 AND 100`,
+    ),
+    check(
+      "finance_review_batch_runs_outcomes_check",
+      sql`jsonb_typeof(${table.outcomes}) = 'array' AND jsonb_array_length(${table.outcomes}) <= jsonb_array_length(${table.manifest})`,
     ),
   ],
 );

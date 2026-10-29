@@ -64,5 +64,7 @@ grep -Fq 'types: [edited, opened, ready_for_review, reopened, synchronize]' .git
   exit 1
 }
 
-node --test .github/scripts/wait-source-ci.test.mjs scripts/verification-plan.test.mjs scripts/development-plan.test.mjs
+node --test .github/scripts/collect-node-coverage.test.mjs
+node --test .github/scripts/collect-browser-diagnostics.test.mjs
+node --test .github/scripts/source-observation.test.mjs .github/scripts/wait-source-ci.test.mjs scripts/verification-plan.test.mjs scripts/development-plan.test.mjs
 echo "Codex repository check passed."

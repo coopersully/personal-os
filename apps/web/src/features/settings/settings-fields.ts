@@ -10,7 +10,7 @@ export type SettingsField = {
   aliases?: string;
   reveal?: string[];
   desktopOnly?: boolean;
-  fallbackTarget?: string;
+  fallbackTarget?: string | string[];
 };
 const fields = (
   section: string,
@@ -131,7 +131,7 @@ export const settingsFields: SettingsField[] = [
     { reveal: ["Add goal"] },
   ),
   ...fields(
-    "motives",
+    "goals",
     [
       ["Motive", "motive-title", "values purpose"],
       ["Context", "motive-detail", "motivation details"],
@@ -158,14 +158,19 @@ export const settingsFields: SettingsField[] = [
     ["Day end", "profile-workday-end", "working hours workday end time"],
     ["Home Location", "profile-home-location", "city weather address"],
     ["Time zone", "profile-timezone", "timezone local time"],
-  ]),
+  ]).map((field) => ({
+    ...field,
+    reveal: ["First name", "Last name", "Email"].includes(field.label)
+      ? [`Edit ${field.label}`]
+      : [],
+  })),
   ...fields(
     "profile",
     [
       ["Phone number", "texting-phone", "mobile verified texting contact"],
       ["Phone country", "texting-country", "country code"],
     ],
-    { reveal: ["Add phone number", "Change number"] },
+    { reveal: ["Edit Phone"] },
   ),
   ...fields("security", [["Change password", "Send link", "reset password security"]]),
   ...fields("setup", [
@@ -176,40 +181,29 @@ export const settingsFields: SettingsField[] = [
     ["Guided setup experience", "View setup experience", "onboarding welcome tour"],
   ]),
   ...fields("appearance", [["Color mode", "Color mode", "theme light dark system appearance"]]),
-  ...["morning", "night"].flatMap((kind) =>
-    fields(
-      "rituals",
-      [
+  ...["morning", "night"].flatMap((kind) => {
+    const title = kind === "morning" ? "Morning" : "Evening";
+    return [
+      ...fields("rituals", [
+        [`${title} ritual enabled`, `${kind}-enabled`, "enable routine"],
+        [`${title} available from`, `${kind}-time`, "schedule start time"],
+        [`${title} reminder time`, `${kind}-reminder-time`, "optional steps follow up"],
+      ]),
+      ...fields(
+        kind === "morning" ? "ritual-morning" : "ritual-evening",
         [
-          `${kind === "morning" ? "Morning" : "Evening"} ritual enabled`,
-          `${kind}-enabled`,
-          "enable routine",
+          [`${title} step prompt`, "Prompt", "steps routine question checklist"],
+          [
+            `${title} response type`,
+            "Response type",
+            "checkbox short entry date number multiple choice",
+          ],
+          [`${title} answer choices`, "Choices", "multiple choice options"],
         ],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} available from`,
-          `${kind}-time`,
-          "schedule start time",
-        ],
-        [`${kind === "morning" ? "Morning" : "Evening"} time zone`, `${kind}-zone`, "timezone"],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} checklist prompt`,
-          "Prompt",
-          "steps routine question",
-        ],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} response type`,
-          "Response type",
-          "checkbox short entry date number multiple choice",
-        ],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} answer choices`,
-          "Choices",
-          "multiple choice options",
-        ],
-      ],
-      { reveal: [kind === "morning" ? "Morning" : "Evening"], fallbackTarget: "Response type" },
-    ),
-  ),
+        { reveal: ["Edit step 1"], fallbackTarget: ["Response type", "Steps"] },
+      ),
+    ];
+  }),
   ...fields(
     "wallpaper",
     [
@@ -296,15 +290,27 @@ export const settingsFields: SettingsField[] = [
     ],
     { desktopOnly: true },
   ),
-  ...fields("invitations", [["Expires after", "invite-expiry", "invitation expiry duration"]]),
-  ...fields("texting", [
-    ["Country", "Country", "phone dialing code"],
-    ["Mobile number", "Mobile number", "phone sms"],
+  ...fields(
+    "invitations",
+    [
+      ["Expires after", "invite-expiry", "invitation expiry duration"],
+      ["Recipient", "invite-email", "invitation email"],
+    ],
+    { reveal: ["New invitation"] },
+  ),
+  ...fields(
+    "texting",
+    [
+      ["Country", "texting-country", "phone dialing code"],
+      ["Mobile number", "texting-phone", "phone sms"],
 
-    ["Allow agent text messages", "texting-consent", "consent sms opt in"],
-  ]),
+      ["Allow agent text messages", "texting-consent", "consent sms opt in"],
+    ],
+    { reveal: ["Edit Phone"] },
+  ),
   ...fields("texting", [["Verification code", "texting-code", "otp sms"]], {
-    fallbackTarget: "Mobile number",
+    reveal: ["Edit Phone"],
+    fallbackTarget: "texting-phone",
   }),
   ...fields("agent-connections", [["nohmi MCP URL", "nohmi MCP URL", "endpoint server assistant"]]),
   ...fields(

@@ -8,6 +8,7 @@ import { type QueryClient, skipToken, useQuery, useQueryClient } from "@tanstack
 import { useCallback, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Button } from "@/components/ui/button";
 import { api } from "../../api.js";
 import {
@@ -18,7 +19,9 @@ import {
 } from "../workspace-settings/account-save-session.js";
 import { financeConversationRecovery, financeRecoveryHref } from "./automation-recovery.js";
 import { FinanceConversationComposer } from "./conversation-composer.js";
+import { FinanceConversationHostSummary } from "./conversation-host-summary.js";
 import { FinanceConversationThread } from "./conversation-thread.js";
+import { useFinanceConversationReadiness } from "./use-finance-conversation-readiness.js";
 
 const draftCleanupClients = new WeakSet<QueryClient>();
 
@@ -128,11 +131,7 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
     },
     [client, ownerId],
   );
-  const readiness = useQuery({
-    queryKey: ["finance-conversation-readiness", ownerId],
-    queryFn: () => api.getFinanceConversationReadiness(),
-    refetchInterval: 30000,
-  });
+  const readiness = useFinanceConversationReadiness();
   const question = useQuery({
     queryKey: ["finance-conversation-question", ownerId, questionId],
     queryFn: () => api.getFinanceContextualQuestion(questionId ?? ""),
@@ -370,7 +369,10 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
   const recovery = readiness.data ? financeConversationRecovery[readiness.data.reason] : null;
   const returnTo = `/finances/chat${params.size ? `?${params.toString()}` : ""}`;
   return (
-    <section aria-label="Finance chat" className="mx-auto grid w-full min-w-0 max-w-3xl gap-6 p-4">
+    <section
+      aria-label="Finance chat"
+      className="mx-auto grid w-full min-w-0 max-w-3xl gap-4 p-4 sm:gap-6"
+    >
       {accessDenied || !readiness.data?.canSend || readiness.isError ? (
         <div className="grid gap-2">
           <p className="text-sm text-muted-foreground">
@@ -386,7 +388,7 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
                     : "Check automation access."}
           </p>
           {!accessDenied && !readiness.isPending && !readiness.isError && recovery ? (
-            <Button asChild variant="secondary" className="justify-self-start">
+            <Button asChild variant="secondary" className="min-h-11 justify-self-start">
               <Link to={financeRecoveryHref(recovery.href, returnTo)}>{recovery.action}</Link>
             </Button>
           ) : null}
@@ -395,9 +397,13 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
           </p>
         </div>
       ) : null}
-      {initial.isPending ? <p>Loading conversation…</p> : null}
+      {!readiness.isError && !accessDenied ? (
+        <FinanceConversationHostSummary host={readiness.data?.host} />
+      ) : null}
+      {initial.isPending ? <ContentSkeleton label="Loading conversation…" rows={3} /> : null}
       <Button
         variant="outline"
+        className="min-h-11 justify-self-start"
         disabled={initial.isFetching || loadingHistory}
         onClick={() => {
           void (async () => {

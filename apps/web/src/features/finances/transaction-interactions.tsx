@@ -8,17 +8,18 @@ import {
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
+  ResponsiveDialogDescription,
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
+import { Field, FieldLabel } from "@/components/settings-field";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 
@@ -94,11 +95,14 @@ export function TransactionContextEditor({
   });
   return (
     <ResponsiveDialog open onOpenChange={(open) => !open && onClose()}>
-      <ResponsiveDialogContent>
+      <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle>
             {transaction.notes ? "Edit context" : "Add context"}
           </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
+            Save a note to explain this transaction.
+          </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
         <FeedbackForm
           feedback={save.feedback}

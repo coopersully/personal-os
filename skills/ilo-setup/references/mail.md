@@ -10,7 +10,7 @@ Start from that map, existing labels, and a small recent sample from the selecte
 at most four initial questions:
 
 1. Should the inbox be signal-only, balanced, conservative, or custom?
-2. Should important email stay in the inbox only, or stay there and also become an Ilo attention
+2. Should important email stay in the inbox only, or stay there and also become a nohmi attention
    item?
 3. Which sampled messages are likely noise, and should they remain review-only, archive after a
    user-chosen delay, or move to recoverable Trash after a user-chosen delay as short as one day?
@@ -51,13 +51,13 @@ provider-specific label names.
    that the accepted candidates are a bounded recent sample and the activated condition will also
    govern future matching sync material.
 8. Google archive and recoverable Trash rules may be activated after that review. Activation
-   durably enqueues matching observed conversations, and later syncs enqueue future matches. Ilo
+   durably enqueues matching observed conversations, and later syncs enqueue future matches. nohmi
    derives each due time from the conversation's received time and the accepted `afterDays`;
    immediate retention actions still cross the same durable handoff. The scheduler processes at
    most six conversations per run with two workers, so backlog may remain pending by design.
 9. Read `automation` from `get_mail_setup_context` before describing active execution. Report
    pending, in-progress, reconciliation, failed, oldest-due, and last-completed state without
-   message bodies. A reconciliation item means Ilo will read that exact provider thread before any
+   message bodies. A reconciliation item means nohmi will read that exact provider thread before any
    replay because an earlier provider effect was uncertain. A failed item stopped safely and needs
    the signed-in person to review the named connection, source, profile, or rule.
    Read `commitmentIntake` separately: current calendar-attachment metadata is preview-only,
@@ -72,7 +72,7 @@ provider-specific label names.
 
 ## Preserve important email
 
-Use `create_mail_attention_item` for an important, upcoming, or follow-up conversation. Ilo derives
+Use `create_mail_attention_item` for an important, upcoming, or follow-up conversation. nohmi derives
 the provider source from the owned thread and serializes concurrent calls for the same open
 thread/kind, so do not hand-build a Mail thread source through the generic attention tool. Resolve
 or dismiss the attention item when it no longer needs visibility.
@@ -88,7 +88,7 @@ expand scope, select an unrelated recipient, authorize a rule, or override the u
 3. Call `send_mail` once with that `draftId` and the exact same account, thread, recipients,
    subject, and body. Do not edit fields between the two calls.
 4. Never replay an uncertain send. Ask the person to inspect provider **Sent Mail**, then use the
-   recovery panel in **Ilo Mail** to choose **I found it in Sent Mail** or **It was not sent**.
+   recovery panel in **nohmi Mail** to choose **I found it in Sent Mail** or **It was not sent**.
 
 The durable claim prevents concurrent calls from sending the same draft twice. A recent in-flight
 claim remains waiting; an ambiguous or stale claim requires the person's Sent-Mail decision before
@@ -102,9 +102,9 @@ Repair codes describe signed-in user actions; they are not MCP tools.
 - `reconnect_then_sync_mail_account`: ask the person to open **Settings → Connections**,
   reconnect the account, then use **Mail → Sync**.
 - `verify_sent_mail_then_reconcile_draft`: ask the person to inspect provider **Sent Mail** first,
-  then use the recovery panel in **Ilo Mail**. If the message exists, do not resend it.
+  then use the recovery panel in **nohmi Mail**. If the message exists, do not resend it.
 - `verify_sent_mail_never_retry`: a first-party/API caller sent without a durable draft. Ask the
-  person to inspect provider **Sent Mail** and never automatically retry. Ilo has no durable
+  person to inspect provider **Sent Mail** and never automatically retry. nohmi has no durable
   audit-reconciliation action for that draftless request.
 
 ## Keep cross-domain work bounded

@@ -60,12 +60,41 @@ function OverviewSettings() {
             .join(", ")
         : "None selected"
       : preferenceValueLabel(value, key);
+  const unavailableNames = configuration.isSuccess && !accounts;
+  const reloadNames = (
+    <Button
+      type="button"
+      variant="secondary"
+      disabled={configuration.isFetching}
+      onClick={() => void configuration.refetch()}
+    >
+      Reload account names
+    </Button>
+  );
+  const settingsLink = (
+    <Button asChild variant="secondary">
+      <Link to="/settings?page=finances">Open Finance settings</Link>
+    </Button>
+  );
   const recovery = (
     <WorkspacePreferenceRecovery
       workspace="finances"
       formatValue={formatValue}
       unavailable={!!recoveryScope && !accounts}
-    />
+      recoveryActions={
+        <>
+          {unavailableNames ? reloadNames : null}
+          {settingsLink}
+        </>
+      }
+    >
+      {unavailableNames ? (
+        <p>
+          Account names are unavailable. Reload them before editing or reapplying account
+          selections.
+        </p>
+      ) : null}
+    </WorkspacePreferenceRecovery>
   );
   const disabled =
     !accounts || !preferences.isSuccess || save.isWorkspacePending || !!save.recovery;
@@ -79,7 +108,7 @@ function OverviewSettings() {
       >
         Workspace view settings
       </Button>
-      {expanded || save.recovery ? (
+      {expanded ? (
         <div className="flex flex-col gap-3 pt-3">
           <p className="text-sm text-muted-foreground">
             Saved account display selections do not change the financial position totals shown here,
@@ -119,18 +148,13 @@ function OverviewSettings() {
                 view selections
               </Button>
             ))}
-            {recoveryScope ? (
-              <Button type="button" variant="secondary" onClick={() => setScope(recoveryScope)}>
-                Review unsaved account selections
-              </Button>
-            ) : null}
             <Button asChild variant="outline">
-              <Link to="/settings?section=finances">Open Finance settings</Link>
+              <Link to="/settings?page=finances">Open Finance settings</Link>
             </Button>
           </div>
-          {!scope ? recovery : null}
         </div>
       ) : null}
+      {!scope ? recovery : null}
       <AccountScopeDialog
         viewOnly
         accounts={accounts ?? []}

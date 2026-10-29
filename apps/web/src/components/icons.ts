@@ -1,6 +1,7 @@
 import type { ForwardRefExoticComponent, RefAttributes } from "react";
 import type { IconProps } from "reicon-react";
 import ActivitySource from "reicon-react/icons/Activity";
+import TravelSource from "reicon-react/icons/Airplane";
 import CircleAlertSource from "reicon-react/icons/AlertCircle";
 import AlertTriangleSource from "reicon-react/icons/AlertTriangle";
 import ArchiveSource from "reicon-react/icons/Archive";
@@ -11,9 +12,15 @@ import ArrowUpSource from "reicon-react/icons/ArrowUp";
 import ExternalLinkSource from "reicon-react/icons/ArrowUpRightSquare";
 import BankSource from "reicon-react/icons/Bank";
 import BanknoteSource from "reicon-react/icons/Banknote";
+import EducationSource from "reicon-react/icons/BookOpen";
 import ProjectSource from "reicon-react/icons/Box";
+import BubblesSource from "reicon-react/icons/Bubble";
 import CalendarSource from "reicon-react/icons/Calendar";
 import CalendarPlusSource from "reicon-react/icons/CalendarAdd";
+import RhythmCalendarSource from "reicon-react/icons/CalendarDays";
+import TransportSource from "reicon-react/icons/Car";
+import GroceryCartSource from "reicon-react/icons/CartShopping";
+import TrendChartSource from "reicon-react/icons/ChartLine";
 import CheckSource from "reicon-react/icons/Check";
 import CircleCheckSource from "reicon-react/icons/CheckCircle";
 import CheckSquareSource from "reicon-react/icons/CheckSquare";
@@ -37,11 +44,16 @@ import MailSource from "reicon-react/icons/Envelope";
 import EyeSource from "reicon-react/icons/Eye";
 import EyeOffSource from "reicon-react/icons/EyeSlash";
 import FileTextSource from "reicon-react/icons/FileText";
+import FilterSource from "reicon-react/icons/Filter";
+import FireSource from "reicon-react/icons/Fire";
+import DiningSource from "reicon-react/icons/ForkKnife";
 import ForwardSource from "reicon-react/icons/Forward";
+import GiftSource from "reicon-react/icons/Gift";
 import LocationFixedSource from "reicon-react/icons/Gps";
 import GridSource from "reicon-react/icons/Grid";
 import ColumnsSource from "reicon-react/icons/Grid3";
 import ApprovalHandSource from "reicon-react/icons/Hand";
+import HealthSource from "reicon-react/icons/HeartPulse";
 import CircleHelpSource from "reicon-react/icons/HelpCircle";
 import HistorySource from "reicon-react/icons/History";
 import HouseSource from "reicon-react/icons/Home";
@@ -51,6 +63,7 @@ import InfoSource from "reicon-react/icons/InfoCircle";
 import KeySource from "reicon-react/icons/Key";
 import LayersSource from "reicon-react/icons/Layers";
 import LinkOffSource from "reicon-react/icons/LinkOff";
+import SpendingListSource from "reicon-react/icons/List";
 import ListChecksSource from "reicon-react/icons/ListCheck";
 import LoaderSource from "reicon-react/icons/Loader";
 import MapPinSource from "reicon-react/icons/Location";
@@ -62,6 +75,7 @@ import MinusSource from "reicon-react/icons/Minus";
 import MonitorSource from "reicon-react/icons/Monitor";
 import MoonSource from "reicon-react/icons/Moon";
 import MoreHorizontalSource from "reicon-react/icons/MoreH";
+import EntertainmentSource from "reicon-react/icons/Music";
 import PaintBrushSource from "reicon-react/icons/Paintbrush";
 import PauseSource from "reicon-react/icons/Pause";
 import PinSource from "reicon-react/icons/PinTack";
@@ -103,7 +117,7 @@ import ErrorSource from "reicon-react/icons/XCircle";
 /**
  * The single icon vocabulary for the web application.
  *
- * Every glyph in nohmi comes from reicon-react and is reached through this module. Importing an icon
+ * Every glyph in Personal OS comes from reicon-react and is reached through this module. Importing an icon
  * package directly, or importing `reicon-react` anywhere else, fails `scripts/check-icon-contract.mjs`.
  * See `docs/design/system.md` for the icon contract.
  *
@@ -127,6 +141,7 @@ export type Icon = ForwardRefExoticComponent<
     RefAttributes<SVGSVGElement>
 >;
 
+export const FireIcon: Icon = FireSource;
 export const ActivityIcon: Icon = ActivitySource;
 export const CircleAlertIcon: Icon = CircleAlertSource;
 export const AlertTriangleIcon: Icon = AlertTriangleSource;
@@ -192,6 +207,7 @@ export const PaintBrushIcon: Icon = PaintBrushSource;
 export const PinIcon: Icon = PinSource;
 export const ResizeIcon: Icon = ResizeSource;
 export const PlugIcon: Icon = PlugSource;
+export const FilterIcon: Icon = FilterSource;
 export const PlusIcon: Icon = PlusSource;
 export const PulseIcon: Icon = PulseSource;
 export const ReceiptIcon: Icon = ReceiptSource;
@@ -230,3 +246,17 @@ export const ProjectIcon: Icon = ProjectSource;
 export const UploadIcon: Icon = UploadSource;
 
 export const MerchantIcon: Icon = MerchantSource;
+
+export const BubblesIcon: Icon = BubblesSource;
+export const TrendChartIcon: Icon = TrendChartSource;
+export const SpendingListIcon: Icon = SpendingListSource;
+export const RhythmCalendarIcon: Icon = RhythmCalendarSource;
+
+export const GroceryCartIcon: Icon = GroceryCartSource;
+export const DiningIcon: Icon = DiningSource;
+export const TransportIcon: Icon = TransportSource;
+export const TravelIcon: Icon = TravelSource;
+export const EducationIcon: Icon = EducationSource;
+export const GiftIcon: Icon = GiftSource;
+export const HealthIcon: Icon = HealthSource;
+export const EntertainmentIcon: Icon = EntertainmentSource;

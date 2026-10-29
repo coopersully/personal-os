@@ -1,12 +1,14 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 import { FinanceCreateButton } from "./workspace-header";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
+import { resolveWorkspaceSettings } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { toast } from "sonner";
+import { type Action, toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FinanceAccountsPage } from "./accounts-page.js";
 import { FinanceOverviewPage } from "./overview-page.js";
@@ -19,6 +21,13 @@ import {
   requireFinanceResult,
 } from "./position-material.js";
 import { FinanceWealthPage } from "./wealth-page.js";
+
+async function selectGoalAction(operation: string, name: string) {
+  fireEvent.keyDown(await screen.findByRole("button", { name: `Actions for ${name}` }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: `${operation} ${name}` }));
+}
 
 vi.spyOn(toast, "loading");
 vi.spyOn(toast, "success");
@@ -137,6 +146,10 @@ beforeEach(() => {
     id: "11111111-1111-4111-8111-111111111111",
     planningTimezone: "America/New_York",
   });
+  api.getWorkspaceSettings.mockResolvedValue(resolveWorkspaceSettings("finances", {}));
+  api.getFinanceConfiguration.mockResolvedValue({
+    accounts: { state: "loaded", value: { accounts: [account] } },
+  });
   api.listFinanceRecurringOccurrences.mockResolvedValue({
     occurrences: [],
     unavailableSources: [],
@@ -232,6 +245,9 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Account name"), {
       target: { value: "Household checking" },
@@ -254,6 +270,9 @@ describe("Finance position pages", () => {
         <FinanceCreateButton />
         <FinanceAccountsPage />
       </>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Account name"), {
@@ -310,9 +329,9 @@ describe("Finance position pages", () => {
       api.manageFinanceGoal.mockResolvedValueOnce({ ...envelope(goal), outcome: "failed" });
     else api.manageFinanceGoal.mockRejectedValueOnce(new Error("Network response lost"));
     mount(<FinanceWealthPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Pause Emergency reserve" }));
-    await screen.findByText("Goal was not changed");
-    fireEvent.click(screen.getByRole("button", { name: "Pause Emergency reserve" }));
+    await selectGoalAction("Pause", "Emergency reserve");
+    await screen.findByText(/Couldn’t .*update this goal/);
+    await selectGoalAction("Pause", "Emergency reserve");
     await waitFor(() => expect(api.manageFinanceGoal).toHaveBeenCalledTimes(2));
     const first = api.manageFinanceGoal.mock.calls[0]?.[0];
     const second = api.manageFinanceGoal.mock.calls[1]?.[0];
@@ -321,7 +340,7 @@ describe("Finance position pages", () => {
     else expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
   });
 
-  it("keeps unknown amounts unavailable and exposes the complete proposed plan", async () => {
+  it("keeps unknown amounts unavailable and summarizes the proposed plan without duplicate context", async () => {
     api.getFinanceStatus.mockResolvedValue({
       details: {
         latestReview: null,
@@ -330,42 +349,53 @@ describe("Finance position pages", () => {
       },
     });
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByRole("link", { name: "Inspect forecast" })).toHaveAttribute(
-      "href",
-      "/finances/cashflow",
-    );
-    expect(screen.queryByText(/98,765/)).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Inspect reimbursements" })).toHaveAttribute(
-      "href",
-      "/finances/cashflow?view=reimbursements",
-    );
-    const position = await screen.findByRole("region", { name: "Finance key metrics" });
-    expect(within(position).getAllByText("Unavailable")).toHaveLength(3);
-    expect(await screen.findByText("Proposed · Version 3")).toBeInTheDocument();
-    expect(screen.getByText("Keep a reserve while income settles.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Inspect complete plan" })).toHaveAttribute(
+    const metrics = await screen.findByRole("region", { name: "Finance key metrics" });
+    expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
+    const plan = await screen.findByRole("region", { name: "Complete plan" });
+    expect(await within(plan).findByText("proposed")).toBeVisible();
+    expect(within(plan).getByText("2026-09")).toBeVisible();
+    expect(within(plan).getByText("$1,000.00 allocated · $0.00 unassigned")).toBeVisible();
+    expect(within(plan).getByRole("link", { name: "View budget" })).toHaveAttribute(
       "href",
       "/finances/plan",
     );
+    expect(screen.queryByText(/98,765/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Outstanding reimbursements")).not.toBeInTheDocument();
+    expect(screen.queryByText("Keep a reserve while income settles.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Version 3/)).not.toBeInTheDocument();
   });
 
-  it("keeps a failed source local while displaying the successful snapshot", async () => {
-    api.getFinancePlaybook.mockRejectedValue(new Error("Priorities source offline"));
+  it("keeps a failed budget source local while displaying the successful snapshot", async () => {
+    api.getFinanceBudget.mockRejectedValue(new Error("private budget source failure"));
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByText("Wealth-building priorities unavailable")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Financial position" })).toBeInTheDocument();
-    expect(screen.getByText("Proposed · Version 3")).toBeInTheDocument();
+    const failure = await screen.findByRole("region", { name: "Complete plan unavailable" });
+    expect(within(failure).getByRole("button", { name: "Try again" })).toBeVisible();
+    const metrics = screen.getByRole("region", { name: "Finance key metrics" });
+    expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
+    expect(await screen.findByText("No recorded changes yet.")).toBeVisible();
+    expect(screen.queryByText("private budget source failure")).not.toBeInTheDocument();
+    expect(screen.queryByText("No plan yet.")).not.toBeInTheDocument();
+    expect(api.getFinancePlaybook).not.toHaveBeenCalled();
+    api.getFinanceBudget.mockResolvedValue(envelope(null));
+    fireEvent.click(within(failure).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("link", { name: "Create plan" })).toBeVisible();
+    expect(api.getFinanceBudget).toHaveBeenCalledTimes(2);
+    expect(api.getFinanceSnapshot).toHaveBeenCalledTimes(1);
   });
 
-  it("waits for a successfully checked empty canonical Reviews queue before showing next-step guidance", async () => {
+  it("does not fetch or imply an all-clear Reviews queue in the compact Overview", async () => {
     api.listAgentAccessWorkItems.mockRejectedValue(new Error("Review service unavailable"));
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByRole("region", { name: "Financial position" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Finance key metrics" })).toBeVisible();
+    expect(await screen.findByText("proposed")).toBeVisible();
     expect(screen.queryByText("Review inbox unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText("No items need review")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
+    expect(api.listAgentAccessWorkItems).not.toHaveBeenCalled();
+    expect(api.getFinanceInbox).not.toHaveBeenCalled();
   });
 
-  it("routes an open review question and exposes recent review and maintenance evidence", async () => {
+  it("links the latest recorded review and maintenance summary without duplicating their histories", async () => {
     api.getFinanceSnapshot.mockResolvedValue(
       envelope({
         asOf: account.createdAt,
@@ -444,20 +474,37 @@ describe("Finance position pages", () => {
       nextCursor: null,
     });
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByText("Active · Version 4")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Review item" })).not.toBeInTheDocument();
-    expect(screen.getByText("Automate savings")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Open review" })).toHaveAttribute(
+    const plan = await screen.findByRole("region", { name: "Complete plan" });
+    expect(await within(plan).findByText("active")).toBeVisible();
+    expect(within(plan).getByText("$1,000.00 allocated · $0.00 unassigned")).toBeVisible();
+    const changes = screen.getByRole("region", { name: "What changed" });
+    expect(await within(changes).findByText("Period review · completed with notes")).toBeVisible();
+    expect(within(changes).getByRole("link", { name: /Sep 3, 2026/ })).toHaveAttribute(
       "href",
       "/finances/reviews/review-1",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Recent maintenance (3)" }));
-    expect(screen.getByText("The recorded maintenance run completed.")).toBeVisible();
-    expect(screen.getByText("This run needs recovery.")).toBeVisible();
-    expect(screen.getByText("Check merchant")).toBeVisible();
+    expect(within(changes).getByText("Maintenance complete")).toBeVisible();
+    expect(within(changes).getByRole("link", { name: "Open Activity" })).toHaveAttribute(
+      "href",
+      "/finances/activity",
+    );
+    expect(screen.getByText("$25.00 expected back")).toBeVisible();
+    expect(screen.getByRole("link", { name: "View reimbursements" })).toHaveAttribute(
+      "href",
+      "/finances/cashflow?view=reimbursements",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Recent maintenance (3)" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("This run needs recovery.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Check merchant")).not.toBeInTheDocument();
+    expect(screen.queryByText("Automate savings")).not.toBeInTheDocument();
+    expect(api.getFinanceInbox).not.toHaveBeenCalled();
+    expect(api.getFinancePlaybook).not.toHaveBeenCalled();
+    expect(api.getFinanceMaintenanceHistory).toHaveBeenCalledWith({ limit: 3 });
   });
 
-  it("offers setup and empty-plan recovery when saved finance context is current", async () => {
+  it("offers empty-plan recovery without duplicating financial-profile navigation", async () => {
     api.getFinanceSnapshot.mockResolvedValue(
       envelope({
         asOf: account.createdAt,
@@ -477,11 +524,18 @@ describe("Finance position pages", () => {
       playbook: { version: "2.0.0", steps: [] },
     });
     mount(<FinanceOverviewPage />);
-    expect(await screen.findByRole("link", { name: "Update financial profile" })).toHaveAttribute(
+    const plan = await screen.findByRole("region", { name: "Complete plan" });
+    expect(await within(plan).findByText("No plan yet.")).toBeVisible();
+    expect(within(plan).getByRole("link", { name: "Create plan" })).toHaveAttribute(
       "href",
-      "/finances/setup",
+      "/finances/plan",
     );
-    expect(await screen.findByRole("link", { name: "Create plan" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Finance key metrics" })).toBeVisible();
+    expect(
+      screen.queryByRole("link", { name: "Update financial profile" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
+    expect(api.getFinancePlaybook).not.toHaveBeenCalled();
   });
 
   it("saves joint ownership with the exact account revision and an idempotency key", async () => {
@@ -497,6 +551,9 @@ describe("Finance position pages", () => {
         <FinanceCreateButton />
         <FinanceAccountsPage />
       </>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Ownership"), { target: { value: "joint" } });
@@ -538,6 +595,9 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     expect(screen.getByLabelText("Your ownership share (%)")).toHaveValue(50);
   });
@@ -576,6 +636,9 @@ describe("Finance position pages", () => {
         <FinanceCreateButton />
         <FinanceAccountsPage />
       </>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
@@ -631,6 +694,9 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     expect(screen.queryByRole("button", { name: "Stop tracking account" })).not.toBeInTheDocument();
   });
@@ -656,6 +722,9 @@ describe("Finance position pages", () => {
         <FinanceCreateButton />
         <FinanceAccountsPage />
       </>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     expect(screen.queryByRole("button", { name: "Stop tracking account" })).not.toBeInTheDocument();
@@ -692,10 +761,13 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
-    expect(await screen.findByText("Account is still tracked")).toBeVisible();
+    expect(await screen.findByText(/Couldn’t .*disconnect this account/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
     await waitFor(() => expect(api.disconnectFinanceAccount).toHaveBeenCalledTimes(2));
     const firstKey = api.disconnectFinanceAccount.mock.calls[0]?.[1].idempotencyKey;
@@ -718,6 +790,9 @@ describe("Finance position pages", () => {
         <FinanceCreateButton />
         <FinanceAccountsPage />
       </>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Account name"), {
@@ -793,7 +868,7 @@ describe("Finance position pages", () => {
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith("Account added", { id: pendingNotice }),
     );
-    expect(screen.queryByText("Account added")).not.toBeInTheDocument();
+    expect(screen.getByText("Account added").closest("[data-sonner-toast]")).not.toBeNull();
   });
 
   it("edits manual account semantics and keeps failed account creation recoverable", async () => {
@@ -824,6 +899,7 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
+    fireEvent.click(await screen.findByRole("button", { name: "Account options for Cash box" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit Cash box" }));
     fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Home safe" } });
     fireEvent.change(screen.getByLabelText("Account kind"), { target: { value: "other" } });
@@ -857,8 +933,10 @@ describe("Finance position pages", () => {
       ),
     );
     expect(
-      screen.queryByText(/Couldn’t confirm whether we could create this account/),
-    ).not.toBeInTheDocument();
+      screen
+        .getByText(/Couldn’t confirm whether we could create this account/)
+        .closest("[data-sonner-toast]"),
+    ).not.toBeNull();
     expect(api.createFinanceAccount).toHaveBeenCalledWith(expect.objectContaining({ balance: 42 }));
   });
 
@@ -867,7 +945,7 @@ describe("Finance position pages", () => {
     const position = await screen.findByRole("region", { name: "Wealth key metrics" });
     expect(within(position).getAllByText("Unavailable")).toHaveLength(3);
     expect(within(position).queryByText("$1,000.00")).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("button", { name: "Pause Emergency reserve" }));
+    await selectGoalAction("Pause", "Emergency reserve");
     await waitFor(() =>
       expect(api.manageFinanceGoal).toHaveBeenCalledWith({
         operation: "pause",
@@ -943,6 +1021,9 @@ describe("Finance position pages", () => {
       </>,
     );
     expect(await screen.findByText(/Possible duplicate of Imported checking/)).toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Account options for Shared checking" }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Edit Shared checking" }));
     fireEvent.click(screen.getByLabelText("Include in planning"));
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
@@ -998,16 +1079,16 @@ describe("Finance position pages", () => {
     expect(screen.getByText(/Low priority · No deadline/)).toBeVisible();
     expect(screen.queryByText("Removed goal")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Manage accounts" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Resume Paused goal" }));
+    await selectGoalAction("Resume", "Paused goal");
     await waitFor(() =>
       expect(api.manageFinanceGoal).toHaveBeenCalledWith(
         expect.objectContaining({ operation: "resume" }),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Remove Done goal" }));
+    await selectGoalAction("Remove", "Done goal");
     expect(screen.getByRole("dialog", { name: "Remove goal" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Complete Paused goal" }));
+    await selectGoalAction("Complete", "Paused goal");
     expect(screen.getByRole("dialog", { name: "Complete goal" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Confirm completion" }));
     await waitFor(() =>
@@ -1106,8 +1187,9 @@ describe("Finance position pages", () => {
         />
       </>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Retry accounts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(refetch).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Account options for Cash manual" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit Cash manual" }));
     expect(onEdit).toHaveBeenCalled();
     expect(screen.getByText("One balance is estimated.")).toBeInTheDocument();
@@ -1135,7 +1217,7 @@ describe("Finance position pages", () => {
 it.each([
   "proposed",
   "active",
-])("shows the next action for a %s plan when evidence is trustworthy", async (status) => {
+])("summarizes a %s plan and keeps trustworthy evidence in the totals disclosure", async (status) => {
   const snapshot = await api.getFinanceSnapshot();
   const plan = await api.getFinanceBudget();
   api.getFinanceSnapshot.mockResolvedValue({
@@ -1144,29 +1226,31 @@ it.each([
   });
   api.getFinanceBudget.mockResolvedValue({ ...plan, data: { ...plan.data, status } });
   mount(<FinanceOverviewPage />);
-  const next = await screen.findByRole("region", { name: "Next step" });
-  if (status === "proposed") {
-    expect(
-      within(next).getByText("Your proposed version is waiting for a decision."),
-    ).toBeVisible();
-    expect(within(next).getByRole("link", { name: "Review proposal" })).toHaveAttribute(
-      "href",
-      "/finances/plan",
-    );
-  } else {
-    expect(within(next).getByText("Configure your financial profile and accounts.")).toBeVisible();
-    expect(within(next).getByRole("link", { name: "Update financial profile" })).toHaveAttribute(
-      "href",
-      "/finances/setup",
-    );
-    expect(screen.getByText("Active · Version 3")).toBeVisible();
-  }
+  const summary = await screen.findByRole("region", { name: "Complete plan" });
+  expect(await within(summary).findByText(status)).toBeVisible();
+  expect(within(summary).getByText("$1,000.00 allocated · $0.00 unassigned")).toBeVisible();
+  expect(within(summary).getByRole("link", { name: "View budget" })).toHaveAttribute(
+    "href",
+    "/finances/plan",
+  );
+  expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Current evidence")).not.toBeInTheDocument();
+  const totals = screen.getByRole("button", { name: "About these totals" });
+  expect(totals).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(totals);
+  expect(totals).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByText("Current evidence")).toBeVisible();
+  expect(screen.getByRole("link", { name: "Review accounts" })).toHaveAttribute(
+    "href",
+    "/finances/accounts",
+  );
 });
 
 it("keeps account evidence visible when its refresh fails and allows source-specific recovery", async () => {
   const snapshot = await api.getFinanceSnapshot();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["finance-snapshot"], snapshot);
+  api.getFinanceSnapshot.mockClear();
   api.getFinanceSnapshot
     .mockRejectedValueOnce(new Error("private snapshot refresh failure"))
     .mockResolvedValue(snapshot);
@@ -1179,11 +1263,22 @@ it("keeps account evidence visible when its refresh fails and allows source-spec
       </TooltipProvider>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText(/Showing the last available update/)).toBeVisible();
-  expect(screen.getByRole("region", { name: "Financial position" })).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Retry financial position" }));
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument();
+  const metrics = screen.getByRole("region", { name: "Finance key metrics" });
+  expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
+  fireEvent.click(screen.getByRole("button", { name: "About these totals" }));
+  expect(screen.getByText("Partial evidence")).toBeVisible();
+  expect(client.getQueryData(["finance-snapshot"])).toEqual(snapshot);
+  expect(api.getFinanceSnapshot).toHaveBeenCalledTimes(1);
+  const retryAction = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action as Action;
+  await act(async () => retryAction.onClick({} as Parameters<Action["onClick"]>[0]));
+  await waitFor(() => expect(api.getFinanceSnapshot).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(client.getQueryState(["finance-snapshot"])?.status).toBe("success"));
+  expect(client.getQueryData(["finance-snapshot"])).toEqual(snapshot);
+  expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
   await waitFor(() =>
-    expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
+    expect(screen.queryByText("Financial position unavailable")).not.toBeInTheDocument(),
   );
 });
 
@@ -1198,7 +1293,7 @@ it("retries account coverage and syncs an account with blocked evidence", async 
   });
   api.syncFinanceAccount.mockResolvedValue({});
   mount(<FinanceAccountsPage />);
-  fireEvent.click(await screen.findByRole("button", { name: "Retry account coverage" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
   expect(await screen.findByText(/1 balance-only account/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Sync account" }));
   await waitFor(() => expect(api.syncFinanceAccount).toHaveBeenCalledWith(account.id));
@@ -1209,6 +1304,9 @@ it("reloads the latest account after a conflict before another edit", async () =
     new ApiClientError({ code: "conflict", message: "Changed", status: 409 }),
   );
   mount(<FinanceAccountsPage />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Account options for Shared checking" }),
+  );
   fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
   fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "My draft" } });
   fireEvent.click(screen.getByRole("button", { name: "Save account" }));
@@ -1238,10 +1336,12 @@ it.each([
   expect(screen.getByText(/Saved account display selections do not change/)).toBeVisible();
   expect(screen.getByRole("link", { name: "Open Finance settings" })).toHaveAttribute(
     "href",
-    "/settings?section=finances",
+    "/settings?page=finances",
   );
   if (state === "failed") {
-    expect(await screen.findByText("Financial position unavailable")).toBeVisible();
+    expect(
+      await screen.findByRole("region", { name: "Financial position unavailable" }),
+    ).toBeVisible();
   } else {
     const metrics = await screen.findByRole("region", { name: "Finance key metrics" });
     expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
@@ -1258,8 +1358,13 @@ it("retains account correction and bank linking while manual capture and imports
     reload: vi.fn(),
   });
   mount(<FinanceAccountsPage />);
-  expect(await screen.findByRole("button", { name: "Edit Shared checking" })).toBeVisible();
+  expect(
+    await screen.findByRole("button", { name: "Account options for Shared checking" }),
+  ).toBeVisible();
   expect(screen.queryByRole("button", { name: "Import records" })).not.toBeInTheDocument();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Account options for Shared checking" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Edit Shared checking" }));
   expect(screen.getByLabelText("Ownership")).toBeEnabled();
 });
@@ -1508,7 +1613,7 @@ it("waits for initial owner identity before exposing Overview view settings", as
     accounts: { state: "loaded", value: { accounts: [account] } },
   });
   mount(<FinanceOverviewPage />);
-  await screen.findByRole("region", { name: "Financial position" });
+  await screen.findByRole("region", { name: "Finance key metrics" });
   expect(screen.queryByRole("button", { name: "Workspace view settings" })).not.toBeInTheDocument();
   await act(async () => finishMe?.({ id: "owner-a", planningTimezone: "America/New_York" }));
   const entry = await screen.findByRole("button", { name: "Workspace view settings" });
@@ -1518,4 +1623,18 @@ it("waits for initial owner identity before exposing Overview view settings", as
   await waitFor(() => expect(api.getFinanceConfiguration).toHaveBeenCalled());
   expect(entry).toBeVisible();
   expect(screen.getByRole("link", { name: "Open Finance settings" })).toBeVisible();
+});
+
+it("keeps account details tucked away and labels debt as an amount owed", async () => {
+  const response = await api.listFinanceAccounts();
+  api.listFinanceAccounts.mockResolvedValue({
+    ...response,
+    accounts: [{ ...account, kind: "debt" }],
+  });
+  mount(<FinanceAccountsPage />);
+  expect(await screen.findByText("Amount owed")).toHaveClass("text-destructive");
+  expect(screen.queryByRole("button", { name: "Edit Shared checking" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Account options for Shared checking" }));
+  expect(screen.getByRole("button", { name: "Edit Shared checking" })).toBeVisible();
+  expect(screen.getByText(/Included in planning/)).toBeVisible();
 });

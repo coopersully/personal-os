@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { classifyChanges } from "../.github/scripts/ci-scope.mjs";
+import { classifyChanges, isDocumentation } from "../.github/scripts/ci-scope.mjs";
 
 // Planning only: never runs a compiler, installs dependencies or grants acceptance.
 export function planVerification(paths) {
@@ -28,7 +28,10 @@ export function planVerification(paths) {
   const scriptDirs = new Set();
   const remaining = [];
   for (const path of paths) {
-    if (/^\.agents\/skills\/[^/]+\/.*\.md$/u.test(path)) continue;
+    if (isDocumentation(path)) {
+      remaining.push(path);
+      continue;
+    }
     const match = path.match(/^(\.agents\/skills\/[^/]+\/scripts)\/[^/]+\.py$/u);
     if (match) scriptDirs.add(match[1]);
     else remaining.push(path);
@@ -68,7 +71,7 @@ export function planVerification(paths) {
     notes: [
       "Iteration plan only. Inspect changed behavior and choose its focused tests, lint/contract checks and platform checks.",
       "Documentation needs link/content review; Python discovery with zero tests is not verification.",
-      "Reuse valid receipts. This plan never replaces complete final verification or live merge gates.",
+      "Reuse valid receipts. Final verification follows delivery policy; Git proof is required for prose scope, never this path-only plan.",
     ],
   };
 }

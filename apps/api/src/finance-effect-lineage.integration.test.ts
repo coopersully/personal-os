@@ -459,7 +459,7 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
     );
     expect(receipt.humanApproval).toEqual({ actorId: setup.owner.id, reviewId: queued.review.id });
   });
-  it("retains exact human budget denial even with agent execution authority and an empty chat source set", async () => {
+  it("does not let bypass apply a stale budget candidate or invent an approval", async () => {
     const setup = await fixture();
     const context = await effectContext(setup);
     await database.db
@@ -473,23 +473,12 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
         privatePayload: { actionKind: "budget_plan", input: { operation: "activate" } },
       })
       .where(eq(financeMaintenanceCandidateItems.id, setup.item.id));
-    const queued = await setup.actions.settleFinanceMaintenanceCandidate(
-      setup.candidate.id,
-      revision(setup),
-      context,
-    );
-    if (queued.status !== "pending_review") throw new Error("budget review");
-    await expect(setup.actions.approve(queued.review.id, context)).rejects.toThrow(
-      "Every active budget change requires exact authenticated human approval",
-    );
+    await expect(
+      setup.actions.settleFinanceMaintenanceCandidate(setup.candidate.id, revision(setup), context),
+    ).resolves.toMatchObject({ status: "superseded" });
     expect(await receipts(setup.owner.id)).toHaveLength(0);
-    expect(
-      await database.db
-        .select()
-        .from(financeProfileVersions)
-        .where(eq(financeProfileVersions.userId, setup.owner.id)),
-    ).toHaveLength(0);
   });
+
   async function boundReview() {
     const setup = await fixture(true);
     if (!setup.agent) throw new Error("Missing bound agent.");

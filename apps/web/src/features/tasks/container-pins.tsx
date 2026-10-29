@@ -25,7 +25,19 @@ export function TaskContainerPin({
   const pinRecovery =
     !!save.recovery &&
     ("pinnedListIds" in save.recovery.attempted || "pinnedProjectIds" in save.recovery.attempted);
-  if (unpinOnly && !pinned && !pinRecovery) return null;
+  if (unpinOnly && !pinned) return null;
+  if (pinRecovery)
+    return (
+      <Button asChild size="icon-sm" variant={pinned ? "secondary" : "ghost"}>
+        <Link
+          to="/settings?page=tasks"
+          aria-label="Review unsaved pin preferences"
+          title="Review unsaved pin preferences"
+        >
+          <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
+        </Link>
+      </Button>
+    );
   return (
     <>
       <Button
@@ -49,11 +61,6 @@ export function TaskContainerPin({
       >
         <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
       </Button>
-      {pinRecovery ? (
-        <Button asChild variant="secondary">
-          <Link to="/settings?section=tasks">Review unsaved pin preferences</Link>
-        </Button>
-      ) : null}
     </>
   );
 }

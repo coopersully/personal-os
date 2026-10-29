@@ -1,11 +1,25 @@
 import { createContext, useContext, useEffect, useId, useRef } from "react";
 import { toast } from "sonner";
+import { ReadRecoveryContext } from "./read-recovery";
 
 /** Settings keep correction hints inline and announce failures through Sonner. */
 export const SettingsFeedbackContext = createContext(false);
 
 export function useSettingsError(error: unknown, message: string, retry?: () => unknown) {
   const enabled = useContext(SettingsFeedbackContext);
+  useErrorToast(error, message, retry, enabled);
+  return enabled;
+}
+
+/** Read failures use a stable toast rather than changing the surrounding layout. */
+export function useErrorToast(
+  error: unknown,
+  message: string,
+  retry?: () => unknown,
+  enabled = true,
+) {
+  const handledByRecovery = useContext(ReadRecoveryContext)(error);
+  const announce = enabled && !handledByRecovery;
   const id = useId();
   const retryRef = useRef(retry);
   retryRef.current = retry;
@@ -18,7 +32,7 @@ export function useSettingsError(error: unknown, message: string, retry?: () => 
     [id],
   );
   useEffect(() => {
-    if (!enabled) {
+    if (!announce) {
       if (previous.current) toast.dismiss(id);
       previous.current = null;
       return;
@@ -26,7 +40,7 @@ export function useSettingsError(error: unknown, message: string, retry?: () => 
     const key = error
       ? `${message}:${error instanceof Error ? error.message : String(error)}`
       : null;
-    if (enabled && key && key !== previous.current)
+    if (announce && key && key !== previous.current)
       toast.error(message, {
         id,
         duration: Number.POSITIVE_INFINITY,
@@ -43,6 +57,5 @@ export function useSettingsError(error: unknown, message: string, retry?: () => 
       });
     if (!key && previous.current) toast.dismiss(id);
     previous.current = key;
-  }, [enabled, error, id, message]);
-  return enabled;
+  }, [announce, error, id, message]);
 }

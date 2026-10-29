@@ -41,7 +41,7 @@ export function FinanceConversationComposer({
       </p>
       <Button
         type="submit"
-        className="justify-self-start"
+        className="min-h-11 justify-self-start"
         disabled={disabled || pending || !text.trim()}
       >
         {pending ? "Saving…" : label === "Message" ? "Send message" : "Save answer"}

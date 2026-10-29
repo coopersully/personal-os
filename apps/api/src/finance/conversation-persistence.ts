@@ -5,6 +5,7 @@ import {
   automationHostSchedules,
   type Database,
   financeAccounts,
+  financeContextRevisions,
   financeContextualQuestions,
   financeConversationBatches,
   financeConversationBatchMessages,
@@ -24,6 +25,7 @@ import {
   financeConversationSendInputSchema,
   financeConversationSequenceSchema,
   idSchema,
+  observeAutomationHostScheduleHealth,
   projectFinanceConversationReadiness,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
@@ -68,6 +70,54 @@ function messageValue(
     createdAt: row.createdAt.toISOString(),
   };
 }
+/** Reuse immutable context provenance rather than copying inbound evidence to a new ledger. */
+async function messageValues(
+  db: Pick<Database, "select">,
+  rows: Array<typeof financeConversationMessages.$inferSelect>,
+): Promise<FinanceConversationMessage[]> {
+  const smsRows = rows.filter(
+    (row) =>
+      row.authorKind === "user" &&
+      row.sourceOperationId &&
+      row.idempotencyKey === `sms-context:${row.sourceOperationId}`,
+  );
+  const ownerId = smsRows[0]?.userId;
+  if (!ownerId) return rows.map(messageValue);
+  const sources = await db
+    .select()
+    .from(financeContextRevisions)
+    .where(
+      and(
+        eq(financeContextRevisions.userId, ownerId),
+        eq(financeContextRevisions.sourceKind, "sms"),
+        inArray(
+          financeContextRevisions.operationId,
+          smsRows.flatMap((row) => (row.sourceOperationId ? [row.sourceOperationId] : [])),
+        ),
+      ),
+    );
+  return rows.map((row) => {
+    const value = messageValue(row);
+    const source = sources.find(
+      (source) =>
+        source.userId === row.userId &&
+        source.operationId === row.sourceOperationId &&
+        source.text === row.text,
+    );
+    return source?.operationId
+      ? {
+          ...value,
+          smsProvenance: {
+            claimId: source.operationId,
+            inboundMessageId: source.requestId,
+            contextId: source.contextId,
+            contextRevision: source.revision.toString(),
+          },
+        }
+      : value;
+  });
+}
+
 async function lockOwner(tx: Transaction, userId: string) {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`finance-maintenance:${userId}`}, 0))`,
@@ -135,16 +185,67 @@ export function createFinanceConversationService({
           scheduleId ? eq(automationHostSchedules.id, scheduleId) : undefined,
         ),
       )
-      .orderBy(desc(automationHostSchedules.updatedAt));
+      .orderBy(desc(automationHostSchedules.updatedAt), desc(automationHostSchedules.id));
     if (scheduleId && !schedules.length)
       throw new AppError("not_found", "The Finance host registration was not found.");
-    let fallback: FinanceConversationReadiness | null = null;
+    async function withHost(
+      result: FinanceConversationReadiness,
+      selected: (typeof schedules)[number],
+    ) {
+      const [latestRun] = await tx
+        .select({
+          id: workspaceMaintenanceRuns.id,
+          status: workspaceMaintenanceRuns.status,
+          updatedAt: workspaceMaintenanceRuns.updatedAt,
+          lastSafeError: workspaceMaintenanceRuns.lastSafeError,
+        })
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.userId, userId),
+            eq(workspaceMaintenanceRuns.domain, "finances"),
+            eq(workspaceMaintenanceRuns.automationScheduleId, selected.id),
+            eq(
+              workspaceMaintenanceRuns.authorizationConnectionId,
+              selected.authorizationConnectionId,
+            ),
+          ),
+        )
+        .orderBy(desc(workspaceMaintenanceRuns.createdAt), desc(workspaceMaintenanceRuns.id))
+        .limit(1);
+      return {
+        ...result,
+        host: {
+          scheduleId: selected.id,
+          connectionId: selected.authorizationConnectionId,
+          label: selected.schedule.label,
+          trigger: selected.schedule.trigger,
+          nextExpectedAt: observeAutomationHostScheduleHealth(selected.schedule, now())
+            .nextExpectedAt,
+          latestRun: latestRun
+            ? {
+                id: latestRun.id,
+                status: latestRun.status,
+                updatedAt: latestRun.updatedAt.toISOString(),
+                failureMessage: latestRun.lastSafeError?.message ?? null,
+              }
+            : null,
+        },
+      };
+    }
+    let fallback: {
+      result: FinanceConversationReadiness;
+      schedule: (typeof schedules)[number];
+    } | null = null;
     for (const candidate of schedules) {
       const { schedule, liveGrant, tokens } = await liveSchedule(tx, userId, candidate.id);
       let executionAuthorized = false;
       for (const token of tokens) {
         if (!token.scopes.includes("finances:maintain")) continue;
         try {
+          // liveSchedule already requires an unrevoked bearer or its matching live
+          // refresh grant. Project standing connection authority, then check current
+          // scopes and bypass; incoming requests still enforce bearer expiry.
           await requireWorkspaceExecution(
             tx,
             {
@@ -155,7 +256,6 @@ export function createFinanceConversationService({
               scopes: new Set(token.scopes),
             },
             "finances",
-            now(),
           );
           executionAuthorized = true;
           break;
@@ -213,11 +313,11 @@ export function createFinanceConversationService({
                 ? "expired"
                 : "unverified",
       });
-      if (result.canSend) return result;
-      fallback ??= result;
+      if (result.canSend) return withHost(result, candidate);
+      fallback ??= { result, schedule: candidate };
     }
     return (
-      fallback ??
+      (fallback ? await withHost(fallback.result, fallback.schedule) : null) ??
       projectFinanceConversationReadiness({
         registrationState: "missing",
         executionAuthorized: false,
@@ -380,7 +480,7 @@ export function createFinanceConversationService({
         )
         .orderBy(asc(financeConversationMessages.sequence))
         .limit(limit + 1);
-      const messages = rows.slice(0, limit).map(messageValue);
+      const messages = await messageValues(db, rows.slice(0, limit));
       return {
         messages,
         nextCursor: rows.length > limit ? (messages.at(-1)?.sequence ?? null) : null,
@@ -425,7 +525,7 @@ export function createFinanceConversationService({
           .limit(10);
         return {
           targetMessageId: target.id,
-          messages: [...before.reverse(), target, ...after].map(messageValue),
+          messages: await messageValues(tx, [...before.reverse(), target, ...after]),
         };
       });
     },
@@ -513,7 +613,10 @@ export function createFinanceConversationService({
           )
           .orderBy(asc(financeConversationMessages.sequence))
           .limit(limit + 1);
-        const messages = rows.slice(0, limit).map(({ message }) => messageValue(message));
+        const messages = await messageValues(
+          tx,
+          rows.slice(0, limit).map(({ message }) => message),
+        );
         if (messages.length)
           await tx
             .update(financeConversationBatchMessages)

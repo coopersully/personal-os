@@ -1,0 +1,401 @@
+import type {
+  financeBudgetAllocations,
+  financeBudgetPlans,
+  financeBudgetVersions,
+  financeGoals,
+  financeOnboardingStates,
+  financePlanningEvidence,
+  financeProfileVersions,
+  financeRecurringObligations,
+  financeRecurringScheduleVersions,
+} from "@personal-os/database";
+import { addLocalDays, localDateAt, localDateToIso } from "@personal-os/domain";
+
+/** Local-only, fictional planning records. Storage amounts use cents, except profile debts and preferences, which use dollars. */
+export function financePlanningFixture(userId: string, now: Date, completeBudget: boolean) {
+  const id = (record: number) =>
+    `${userId.slice(0, 8)}-0000-4000-8000-${record.toString(16).padStart(12, "0")}`;
+  const today = localDateAt(now, "America/New_York");
+  const date = (days: number) => localDateToIso(addLocalDays(today, days));
+  const month = date(0).slice(0, 7);
+  const provenance = {
+    actorId: userId,
+    actorType: "user" as const,
+    confidence: 1,
+    evidence: { fixture: "Fictional local QA planning story" },
+    maintenanceRunId: null,
+    observedAt: now.toISOString(),
+    requestId: "qa-finance-planning",
+    sourceId: null,
+  };
+  const goals: Array<typeof financeGoals.$inferInsert> = (
+    [
+      {
+        id: id(601),
+        name: "Six-month emergency fund",
+        targetAmount: 2_400_000,
+        currentAmount: 1_520_000,
+        priority: "high",
+        status: "active",
+        deadline: date(365),
+      },
+      {
+        id: id(602),
+        name: "Hiking trip",
+        targetAmount: 300_000,
+        currentAmount: 120_000,
+        priority: "medium",
+        status: "active",
+        deadline: date(180),
+      },
+      {
+        id: id(603),
+        name: "Photography equipment",
+        targetAmount: 250_000,
+        currentAmount: 65_000,
+        priority: "low",
+        status: "paused",
+        deadline: null,
+      },
+      {
+        id: id(604),
+        name: "Apartment move",
+        targetAmount: 180_000,
+        currentAmount: 180_000,
+        priority: "medium",
+        status: "completed",
+        deadline: date(-30),
+      },
+    ] satisfies Array<Omit<typeof financeGoals.$inferInsert, "userId">>
+  ).map((goal) => ({ ...goal, userId, version: 1, createdAt: now, updatedAt: now }));
+  const bills = [
+    { name: "Apartment rent", amount: 280_000, offset: 3, merchant: "HARBOR HOMES" },
+    { name: "Electricity", amount: 12_500, offset: 10, merchant: "CITY ENERGY" },
+    { name: "Internet", amount: 7_500, offset: 14, merchant: "NEIGHBORHOOD FIBER" },
+  ];
+  const obligations: Array<typeof financeRecurringObligations.$inferInsert> = bills.map(
+    (bill, index) => ({
+      id: id(610 + index),
+      userId,
+      accountId: id(400),
+      merchant: bill.merchant,
+      displayName: bill.name,
+      kind: "bill",
+      cadence: "monthly",
+      expectedAmount: bill.amount,
+      amountTolerance: 0,
+      nextExpectedDate: date(bill.offset),
+      lastObservedDate: date(bill.offset - 30),
+      confidence: 10_000,
+      source: "user",
+      status: "active",
+      revision: 1,
+      createdAt: now,
+      updatedAt: now,
+    }),
+  );
+  const profile: typeof financeProfileVersions.$inferInsert = {
+    id: id(600),
+    userId,
+    version: 1,
+    jurisdiction: "US-NY",
+    householdSize: 1,
+    dependents: 0,
+    expectedMonthlyTakeHome: 825_000,
+    incomeStability: "stable",
+    liquidReserves: 2_362_534,
+    debts: [
+      {
+        accountId: id(403),
+        balance: 1247.5,
+        interestRate: 22.9,
+        minimumMonthlyPayment: 75,
+        name: "Travel card",
+      },
+    ],
+    insurance: [
+      {
+        kind: "property",
+        name: "Renters insurance",
+        status: "active",
+        annualPremium: 240,
+        coverageAmount: 30000,
+      },
+    ],
+    preferences: {
+      bufferTarget: 500,
+      debtPriority: "avalanche",
+      emergencyReserveMonths: 6,
+      notes: ["Protect the emergency fund while paying down the travel card."],
+    },
+    planning: {
+      recurringIncome: { amountCents: 825_000, nextDate: date(7), provenance },
+      uncertainIncome: [],
+      exceptionalResources: [],
+      obligations: [
+        ...bills.map((bill, index) => ({
+          id: id(630 + index),
+          name: bill.name,
+          amountCents: bill.amount,
+          dueDay: addLocalDays(today, bill.offset).day,
+          debtAccountId: null,
+          provenance,
+        })),
+        {
+          id: id(633),
+          name: "Travel card minimum",
+          amountCents: 7_500,
+          dueDay: addLocalDays(today, 18).day,
+          debtAccountId: id(403),
+          provenance,
+        },
+      ],
+      contributions: [
+        {
+          id: id(634),
+          name: "Emergency fund",
+          amountCents: 100_000,
+          dueDay: 15,
+          goalId: id(601),
+          provenance,
+        },
+        {
+          id: id(635),
+          name: "Hiking trip",
+          amountCents: 30_000,
+          dueDay: 15,
+          goalId: id(602),
+          provenance,
+        },
+      ],
+      priorities: [
+        {
+          id: id(636),
+          name: "Groceries",
+          amountCents: 80_000,
+          dueDay: 1,
+          categoryId: id(421),
+          protected: true,
+          provenance,
+        },
+      ],
+    },
+    provenance: Object.fromEntries(
+      [
+        "jurisdiction",
+        "householdSize",
+        "dependents",
+        "expectedMonthlyTakeHome",
+        "incomeStability",
+        "liquidReserves",
+        "debts",
+        "insurance",
+        "preferences",
+        "planning",
+      ].map((key) => [key, provenance]),
+    ),
+    sourceLegacyProfileId: id(466),
+    createdAt: now,
+    updatedAt: now,
+  };
+  const plan: typeof financeBudgetPlans.$inferInsert = {
+    id: id(650),
+    userId,
+    month,
+    goalIds: [id(601), id(602)],
+    name: "Everyday life and a stronger buffer",
+    rationale:
+      "Cover monthly essentials, reduce card debt, and fund savings before discretionary spending.",
+    status: "active",
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const allocationInputs = [
+    {
+      allocationKey: "housing",
+      kind: "spending" as const,
+      amount: 300_000,
+      categoryId: id(422),
+      legacyCategory: "Housing",
+      description: "Rent and utilities",
+    },
+    {
+      allocationKey: "groceries",
+      kind: "spending" as const,
+      amount: 80_000,
+      categoryId: id(421),
+      legacyCategory: "Groceries",
+    },
+    {
+      allocationKey: "dining",
+      kind: "spending" as const,
+      amount: 60_000,
+      categoryId: id(420),
+      legacyCategory: "Dining",
+    },
+    {
+      allocationKey: "subscriptions",
+      kind: "spending" as const,
+      amount: 15_000,
+      categoryId: id(424),
+      legacyCategory: "Subscriptions",
+    },
+    {
+      allocationKey: "card",
+      kind: "debt" as const,
+      amount: 50_000,
+      accountId: id(403),
+      description: "Pay more than the minimum",
+    },
+    { allocationKey: "emergency", kind: "goal" as const, amount: 100_000, goalId: id(601) },
+    { allocationKey: "trip", kind: "goal" as const, amount: 30_000, goalId: id(602) },
+    {
+      allocationKey: "investing",
+      kind: "savings" as const,
+      amount: 120_000,
+      description: "Long-term investing",
+    },
+    {
+      allocationKey: "travel",
+      kind: "spending" as const,
+      amount: 20_000,
+      categoryId: id(776),
+      legacyCategory: "Travel",
+    },
+    { allocationKey: "buffer", kind: "buffer" as const, amount: completeBudget ? 50_000 : 0 },
+  ];
+  const allocations: Array<typeof financeBudgetAllocations.$inferInsert> = allocationInputs.map(
+    (allocation, index) => ({
+      ...allocation,
+      id: id(660 + index),
+      userId,
+      budgetVersionId: id(651),
+      createdAt: now,
+      updatedAt: now,
+    }),
+  );
+  const budget: typeof financeBudgetVersions.$inferInsert = {
+    id: id(651),
+    planId: id(650),
+    userId,
+    version: 1,
+    profileVersionId: id(600),
+    status: completeBudget ? "active" : "incomplete",
+    effectiveFrom: month,
+    expectedResources: 825_000,
+    allocatedTotal: completeBudget ? 825_000 : 775_000,
+    balanceDelta: completeBudget ? 0 : 50_000,
+    resources: [
+      {
+        key: "payroll",
+        description: "Two regular take-home paychecks",
+        kind: "income",
+        amount: 825_000,
+        sourceId: id(470),
+      },
+    ],
+    assumptions: ["Plan around two paychecks; save the extra paycheck in three-paycheck months."],
+    rationale: plan.rationale ?? "Monthly household plan",
+    createdByActorType: "user",
+    createdByActorId: userId,
+    approvedByActorType: completeBudget ? "user" : null,
+    approvedByActorId: completeBudget ? userId : null,
+    approvedAt: completeBudget ? now : null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const schedules: Array<typeof financeRecurringScheduleVersions.$inferInsert> = [
+    {
+      incomeStreamId: id(470),
+      obligationId: null,
+      accountId: id(400),
+      cadence: "biweekly",
+      anchorLocalDate: date(7),
+      amountCents: 412_500,
+    },
+    {
+      incomeStreamId: null,
+      obligationId: id(471),
+      accountId: id(403),
+      cadence: "monthly",
+      anchorLocalDate: date(26),
+      amountCents: 1_999,
+    },
+    ...bills.map((bill, index) => ({
+      incomeStreamId: null,
+      obligationId: id(610 + index),
+      accountId: id(400),
+      cadence: "monthly",
+      anchorLocalDate: date(bill.offset),
+      amountCents: bill.amount,
+    })),
+  ].map((schedule, index) => ({
+    ...schedule,
+    id: id(680 + index),
+    userId,
+    actorUserId: userId,
+    sourceRevision: 1,
+    timezone: "America/New_York",
+    effectiveFrom: date(0),
+    amountBasis: "fixed",
+    currencyCode: "USD",
+    recordedAt: now,
+  }));
+  const evidence: Array<typeof financePlanningEvidence.$inferInsert> = [
+    ...goals.map((goal, index) => ({
+      id: id(690 + index),
+      userId,
+      actorUserId: userId,
+      goalId: goal.id,
+      sourceRevision: 1,
+      amountCents: goal.currentAmount ?? 0,
+      currencyCode: "USD",
+      asOf: date(0),
+      recordedAt: now,
+    })),
+    ...obligations.map((obligation, index) => ({
+      id: id(700 + index),
+      userId,
+      actorUserId: userId,
+      obligationId: obligation.id,
+      sourceRevision: 1,
+      amountCents: obligation.expectedAmount,
+      currencyCode: "USD",
+      fixedness: "fixed" as const,
+      boundAccountId: id(400),
+      boundCadence: "monthly" as const,
+      asOf: date(0),
+      recordedAt: now,
+    })),
+  ];
+  const onboarding: typeof financeOnboardingStates.$inferInsert = {
+    userId,
+    revision: 2,
+    completedAt: now,
+    displayPreferencesReviewed: true,
+    automationChoice: "later",
+    updatedAt: now,
+    answers: [
+      "profile:location",
+      "profile:household_size",
+      "profile:monthly_take_home",
+      "profile:liquid_reserves",
+      "profile:income_stability",
+      "profile:debts",
+      "planning:obligations",
+      "profile:goals",
+    ].map((questionId) => ({ questionId, disposition: "answered" })),
+  };
+  return {
+    profile,
+    plan,
+    budget,
+    allocations,
+    goals,
+    obligations,
+    schedules,
+    evidence,
+    onboarding,
+  };
+}

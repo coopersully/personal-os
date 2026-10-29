@@ -8,9 +8,10 @@ Last reviewed: October 12, 2026.
 John Cooper Sullivan operates nohmi. The user-confirmed support and privacy contact is
 `coopersully02@gmail.com`. Public documents are generated as complete HTML in `apps/web/public`:
 
-The browser root `/` now presents the product landing page. Authentication has dedicated `/login`,
-`/signup`, and `/forgot-password` routes. Authenticated visitors can still read the landing page;
-normal login opens `/today`, while protected links return to their validated local destination.
+The browser root `/` checks the session and presents the product landing page to visitors.
+Authenticated visitors to `/`, `/login`, `/signup`, or `/forgot-password` redirect to `/today`.
+Normal login opens `/today`, while a newly authenticated protected-link flow returns to its
+validated local destination. Public document pages remain accessible with or without a session.
 Email verification/reset links remain compatible; empty token parameters are ignored. Password reset clears cached account and
 workspace data after session revocation, including for a signed-in visitor. The PWA starts at `/today` and the native desktop
 entry remains the application. Public page headers link home and to `/login`.

@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { NohmiBrandMark as BrandMark } from "./brand-marks.js";
+import { PersonalOsBrandMark as BrandMark } from "./brand-marks.js";
 
 describe("BrandMark", () => {
   it("renders the neutral wordmark", () => {
@@ -30,7 +30,7 @@ describe("BrandMark", () => {
     expect(orbitCopy).toHaveAttribute("href", "#auth-brand-graphic-orbit-circle");
     expect(orbitCopy).toHaveAttribute("lengthAdjust", "spacing");
     expect(orbitCopy).toHaveAttribute("textLength", "282.743");
-    expect(orbitCopy?.textContent?.match(/a personal harness/g)).toHaveLength(2);
+    expect(orbitCopy?.textContent?.match(/know what matters/g)).toHaveLength(2);
     expect(orbitCopy?.textContent?.match(/✦/g)).toHaveLength(2);
     expect(mark.querySelector(".auth-brand-graphic__frame")).toBeInTheDocument();
   });

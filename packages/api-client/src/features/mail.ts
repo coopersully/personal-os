@@ -9,6 +9,7 @@ import type {
   MailDraft,
   MailListQuery,
   MailMessage,
+  MailNavigationCounts,
   MailRule,
   MailRulePreview,
   MailSetupContext,
@@ -30,6 +31,7 @@ export type MailAttachmentContent = {
 };
 
 export type MailApiClient = {
+  getMailNavigationCounts(accountIds?: string[]): Promise<MailNavigationCounts>;
   downloadMailAttachment(
     messageId: string,
     attachmentId: string,
@@ -72,6 +74,12 @@ export function createMailApiClient(
   toQuery: (query: object) => string,
 ): MailApiClient {
   return {
+    async getMailNavigationCounts(accountIds) {
+      const result = await request<{ counts: MailNavigationCounts }>(
+        `/v1/mail/counts?${toQuery(accountIds?.length ? { accountIds: accountIds.join(",") } : {})}`,
+      );
+      return result.counts;
+    },
     async downloadMailAttachment(messageId, attachmentId, signal) {
       const result = await request<{ attachment: MailAttachmentContent }>(
         `/v1/mail/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,

@@ -2,44 +2,17 @@
 
 - Status: Working foundation
 - Audience: Product, design, engineering, and agents contributing to nohmi
-- Scope: Brand expression and the product experience, with distinct color roles
-
-## Accepted direction — October 21, 2026
-
-Cooper's direction is a hyper-minimal, independent technology brand with the
-confidence and renegade character of rabbit r1. Product structure takes its
-precision from a considered instrument: repeated component proportions, useful
-density, soft geometry, and deliberate spacing. This establishes the target;
-it does not claim the application-wide migration has shipped.
-
-- **Company and external brand:** light blue is the brand color. Use it in
-  company communications, marketing, and external brand assets.
-- **Signed-in product:** neutral chrome with no favored hue. Actions, focus,
-  navigation, selection, checked controls, and glass use the neutral ink scale.
-  Do not import light blue into these roles because it is the brand color.
-- **Meaningful color:** preserve colors belonging to real content, provider
-  identities, workspace identities, user choices, charts, and semantic states.
-  Their meaning owns their color; no hue becomes the general UI default.
-- **Copy:** nohmi-authored labels, headings, navigation, actions, help, and brand
-  copy are lowercase and use the fewest words that retain meaning. Preserve
-  user-authored content, external identities, code, identifiers, and quoted
-  source material as supplied. Do not apply a global CSS text transform.
-- **Personality:** confident, independent, direct, and quietly unconventional.
-  Let the product's utility and precision carry its character.
-- **Material:** flat opaque surfaces by default; rare, neutral liquid glass
-  may identify transient contextual controls. Glass must not become the default
-  material for data or forms; follow the system's bounded exception.
+- Scope: The product experience and its expression; not company or campaign branding
 
 ## Brand idea
 
-**a personal harness.** nohmi connects a person's context, tools, and controls.
-Agents use harnesses to work with context and act through tools; nohmi builds that
-structure around a person. They work directly in familiar workspaces and choose
-what to delegate. Their permissions and judgment remain central.
+**Calm agency.** nohmi is an autonomous exoskeleton that makes a person's real
+commitments, communication, time, money, and priorities tangible while keeping
+the person in clear control of work they perform or delegate.
 
-Use this category in public positioning and the planning lens in
-[`master design`](../product/master-design.md#personal-harness-as-a-planning-lens).
-This is the product direction; shipped capabilities still require implementation evidence.
+This is a working articulation of the existing product promise, not a claim
+validated by brand research. Keep it only while it continues to explain the
+product better than the alternatives.
 
 ## Product promise
 
@@ -108,8 +81,7 @@ person, hide uncertainty, or narrate ordinary interface mechanics.
 
 ### Voice rules
 
-- Use lowercase for nohmi-authored copy, direct verbs, concrete nouns, and short
-  clauses. This supersedes older sentence-case and title-case guidance.
+- Use lowercase interface copy, direct verbs, concrete nouns, and short clauses. Preserve the spelling of user content and editable values.
 - Address the person as “you” only when it makes the consequence clearer. Avoid
   repeated second-person phrasing in labels and navigation.
 - Name the object and outcome: **Save budget**, **Reconnect calendar**, **Move 3
@@ -152,23 +124,19 @@ unrelated tools.
   or interaction feedback. A border must communicate a control, ordered row,
   modal/sheet edge, or semantic state boundary; adjoining regions do not earn
   a border merely because they meet.
-- Empty states are the deliberate absence-boundary exception: their container
-  has no background fill and uses one quiet, widely spaced dashed semantic border. The dashed
-  treatment belongs only to absent material, including reflective empty-state
-  quotes, and never decorates populated cards or ordinary page sections.
+- Empty states use the shared centered icon and concise copy on a transparent,
+  borderless surface. Absence never needs a dashed box nested inside a card;
+  loading and failed reads remain distinct states.
 - Icons come from one pack, reicon, reached through the shared registry. Its
   Outline and Filled weights are the vocabulary for active state; a second pack
   is never the answer to a glyph that is missing or reads wrong.
 - Use the monochrome ink scale for hierarchy, selection, and primary action.
   Status color is reserved for danger, warning, success, and information with a
   stable semantic meaning.
-- Keep company light blue outside signed-in chrome. It is not a primary-action,
-  selection, focus, switch, or checkbox color. Meaningful content and status
-  colors remain available without a favored hue.
 - Light and dark themes carry the same roles and reading hierarchy. A feature
   consumes semantic roles and never chooses a raw color for one theme.
 - Calendar, Tasks, Mail, and Finances are first-class workspaces with clear,
-  vivid, fully saturated identity palettes. Their color is confined to the shared solid workspace
+  high-chroma identity palettes. Their color is confined to the shared solid workspace
   icon and related identity marks; it does not recolor a page, replace status,
   or compete with content hierarchy. Other features do not invent accents.
 
@@ -176,8 +144,7 @@ unrelated tools.
 
 - Treat Calendar, Tasks, Mail, and Finances as sub-apps inside nohmi. Each has one
   established glyph, label, route, and light/dark palette in the shared
-  workspace identity registry. White glyphs sit on a solid vivid, fully saturated fill with no border,
-  inset frame, or shadow; the fill and glyph stay consistent across themes.
+  workspace identity registry.
 - Use the solid `WorkspaceIcon` whenever the whole workspace is represented:
   the workspace switcher, primary navigation, onboarding workspace choice, and
   Agent Access product setup. Use ordinary unframed icons for actions, views,
@@ -198,8 +165,10 @@ unrelated tools.
 
 ### Typography
 
-- Geist is the existing product typeface, including compact metadata. Keep it
-  readable at application density; precision does not require a decorative face.
+- Plus Jakarta Sans is the interface voice. Its approachable geometry should
+  remain readable and quiet at application density.
+- DM Mono is functional notation for compact time, date, count, identifier, or
+  source metadata. It is not a decorative display face.
 - Hierarchy comes from role, size, weight, line height, and space together. Do
   not compensate for weak information structure with oversized headings.
 - Use tabular numerals when values must compare vertically or update in place.
@@ -274,3 +243,5 @@ Before approving a visible change, ask:
   supports platform-agnostic, named design decisions and aliases. nohmi currently
   implements semantic CSS variables; adopting a token interchange file is a
   future tooling decision, not a prerequisite for sound token ownership.
+
+Workspace identity icons use white glyphs on fully saturated solid fills, without a border or extra frame. Selection remains owned by the surrounding control.

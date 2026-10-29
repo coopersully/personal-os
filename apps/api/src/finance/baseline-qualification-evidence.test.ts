@@ -36,7 +36,7 @@ describe("baseline qualification evidence", () => {
         now,
         "owner",
       ),
-    ).toBe("retrospective");
+    ).toBe("current");
   });
   it.each([
     { actorType: "agent", actorId: "agent" },

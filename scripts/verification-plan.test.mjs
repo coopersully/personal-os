@@ -4,7 +4,7 @@ import { planVerification } from "./verification-plan.mjs";
 
 test("documentation edits do not launch TypeScript or application suites", () => {
   const plan = planVerification(["docs/engineering/code-standards.md"]);
-  assert.equal(plan.commands.length, 0);
+  assert.deepEqual(plan.commands, [["pnpm", "check:repo"]]);
   assert.equal(plan.finalAcceptance, false);
 });
 test("domain change includes consumers and integration type checks", () => {

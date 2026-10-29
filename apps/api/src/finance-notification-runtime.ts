@@ -1,10 +1,13 @@
-import { type Database, financeReviewCases } from "@personal-os/database";
-import type { FinanceHumanWorkRef } from "@personal-os/domain";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { type Database, financeReviewCases, workspaceMaintenanceRuns } from "@personal-os/database";
+import { type FinanceHumanWorkRef, idSchema } from "@personal-os/domain";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { contextualTransaction } from "./finance/contextual-question-store.js";
-import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
+import {
+  guardFinanceExecutionTransaction,
+  lockFinanceExecutionOwner,
+} from "./finance/execution-owner-guard.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
-import { resolveFinanceWorks } from "./finance/work-resolver.js";
+import { loadFinanceRunAttentionWork, resolveFinanceWorks } from "./finance/work-resolver.js";
 import {
   FinanceClaimReconciliationError,
   FinanceReconciliationError,
@@ -55,16 +58,20 @@ export function createFinanceNotificationDispatcher(options: {
       id: string;
       revision: string;
       actionRevision: string;
-      kind: "question" | "approval";
+      kind: "question" | "approval" | "repair";
     }>(sql`
      WITH work AS (
        SELECT user_id,id,human_action->'request'->'work'->>'revision' AS revision,human_action->'request'->'work'->>'actionRevision' AS action_revision,'question'::text AS kind,0 AS source FROM finance_review_cases WHERE status='open' AND human_action->>'state'='open'
        UNION ALL
        SELECT user_id,id,work_revision::text AS revision,action_revision::text AS action_revision,'question'::text AS kind,1 AS source FROM finance_contextual_questions WHERE state='open'
        UNION ALL
-       SELECT user_id,work_id AS id,work->>'revision' AS revision,work->>'actionRevision' AS action_revision,work->>'kind' AS kind,2 AS source FROM notification_intents WHERE state='pending' AND work->>'kind' IN ('question','approval') AND work->>'revision' ~ '^[1-9][0-9]{0,18}$' AND work->>'actionRevision' ~ '^[1-9][0-9]{0,18}$'
+       SELECT user_id,work_id AS id,work->>'revision' AS revision,work->>'actionRevision' AS action_revision,work->>'kind' AS kind,2 AS source FROM notification_intents WHERE state IN ('pending','deferred','blocked') AND work->>'kind' IN ('question','approval','repair') AND (work->>'kind'='repair' OR (work->>'revision' ~ '^[1-9][0-9]{0,18}$' AND work->>'actionRevision' ~ '^[1-9][0-9]{0,18}$'))
        UNION ALL
        SELECT user_id,id,floor(extract(epoch FROM updated_at)*1000)::bigint::text AS revision,floor(extract(epoch FROM updated_at)*1000)::bigint::text AS action_revision,'approval'::text AS kind,0 AS source FROM finance_agent_action_reviews WHERE status='pending'
+       UNION ALL
+       SELECT user_id,id,id::text AS revision,'1' AS action_revision,'repair'::text AS kind,0 AS source FROM workspace_maintenance_runs r
+       WHERE domain='finances' AND status IN ('blocked','failed_terminal')
+       AND NOT EXISTS (SELECT 1 FROM workspace_maintenance_runs newer WHERE newer.user_id=r.user_id AND newer.domain=r.domain AND (newer.created_at,newer.id)>(r.created_at,r.id))
      ), exact AS (SELECT DISTINCT ON (user_id,id) * FROM work ORDER BY user_id,id,source)
      SELECT user_id::text AS "userId",id::text,revision::text,"action_revision"::text AS "actionRevision",kind FROM exact
      WHERE ${after ? sql`(user_id,id)>(${after.userId}::uuid,${after.id}::uuid)` : sql`true`}
@@ -120,18 +127,60 @@ export function createFinanceNotificationDispatcher(options: {
         userId,
         scopes: new Set(["finances:read", "texting:read", "texting:write"]),
       };
-      const refs: FinanceHumanWorkRef[] = group.map((row) => ({
-        id: row.id,
-        domain: "finances",
-        kind: row.kind,
-        revision: row.revision,
-        actionRevision: row.actionRevision,
-      }));
       try {
-        const results = await contextualTransaction(options.db, undefined, (tx) =>
-          resolveFinanceWorks(userId, refs, tx),
-        );
-        const current = refs.filter((_ref, i) => results[i]?.state === "current");
+        const repairRunIds = group
+          .filter((row) => row.kind === "repair")
+          .map((row) => row.revision)
+          .filter((value) => idSchema.safeParse(value).success);
+        const runs = repairRunIds.length
+          ? await options.db
+              .select()
+              .from(workspaceMaintenanceRuns)
+              .where(
+                and(
+                  eq(workspaceMaintenanceRuns.userId, userId),
+                  inArray(workspaceMaintenanceRuns.id, repairRunIds),
+                ),
+              )
+          : [];
+        const current = await contextualTransaction(options.db, undefined, async (tx) => {
+          await lockFinanceExecutionOwner(tx, userId);
+          const candidates: FinanceHumanWorkRef[] = [];
+          for (const row of group) {
+            const run = row.kind === "repair" ? runs.find((run) => run.id === row.revision) : null;
+            candidates.push(
+              run
+                ? await loadFinanceRunAttentionWork(tx, run)
+                : {
+                    id: row.id,
+                    domain: "finances",
+                    kind: row.kind,
+                    revision: row.revision,
+                    actionRevision: row.actionRevision,
+                  },
+            );
+          }
+          // A source run and its existing stable intent can share a discovery page. Prefer the
+          // latest run reference, never publish duplicate work IDs or rewrite attempt membership.
+          const byId = new Map<string, FinanceHumanWorkRef>();
+          for (const candidate of candidates) {
+            const previous = byId.get(candidate.id);
+            const run = runs.find((run) => run.id === candidate.revision);
+            const priorRun = runs.find((run) => run.id === previous?.revision);
+            if (
+              !previous ||
+              (run &&
+                (!priorRun ||
+                  run.createdAt > priorRun.createdAt ||
+                  (run.createdAt.getTime() === priorRun.createdAt.getTime() &&
+                    run.id > priorRun.id)))
+            )
+              byId.set(candidate.id, candidate);
+          }
+          const refs = [...byId.values()];
+          const results = await resolveFinanceWorks(userId, refs, tx);
+          return refs.filter((_ref, i) => results[i]?.state === "current");
+        });
         if (current.length) await options.notifications.publish(principal, { work: current });
         if (options.enabled() && shouldContinue()) await options.notifications.drain(principal);
       } catch {

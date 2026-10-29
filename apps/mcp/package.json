@@ -16,14 +16,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@modelcontextprotocol/express": "^2.0.0",
-    "@modelcontextprotocol/node": "^2.0.0",
-    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/express": "^2.0.2",
+    "@modelcontextprotocol/node": "2.1.0",
+    "@modelcontextprotocol/server": "^2.3.0",
     "@personal-os/api-client": "workspace:*",
     "@personal-os/domain": "workspace:*",
     "express": "^5.1.0",
-    "hono": "^4.13.7",
-    "zod": "^4.0.5"
+    "hono": "^4.13.13",
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.0.0",

@@ -57,6 +57,16 @@ function mount(props: Parameters<typeof DesktopSettingsPanel>[0] = {}) {
     fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
   return { ...rendered, cache };
 }
+async function openPetColor() {
+  if (!screen.queryByLabelText("Pet color")) {
+    await userEvent.click(await screen.findByRole("button", { name: "Edit Pet color" }));
+  }
+  return screen.findByLabelText("Pet color");
+}
+async function openNotificationPermissions() {
+  await userEvent.click(await screen.findByRole("button", { name: /^macOS permissions/ }));
+  return screen.findByRole("dialog", { name: "Set up notifications" });
+}
 async function save() {
   const connect = screen.queryByRole("button", { name: "Connect to server" });
   if (connect && !connect.hasAttribute("disabled")) await userEvent.click(connect);
@@ -203,13 +213,11 @@ describe("desktop preferences", () => {
     expect(screen.getByRole("button", { name: "Server settings" })).toHaveFocus();
   });
 
-  it("promotes hosted nohmi and keeps custom server controls in an advanced disclosure", async () => {
+  it("keeps hosted and custom server choices in flat rows with an explicit connect action", async () => {
     mount({ connectionOnly: true });
     expect(await screen.findByText("Recommended")).toBeInTheDocument();
     expect(screen.getByText("nohmi-api.coopersully.me")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Custom API server")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Advanced server settings" }));
     expect(screen.getByLabelText("Custom API server")).toHaveValue("");
   });
 
@@ -256,7 +264,6 @@ describe("desktop preferences", () => {
   it("allows custom server testing and switching before login without authenticated queries", async () => {
     const { cache } = mount({ connectionOnly: true });
     await screen.findByText("Recommended");
-    await userEvent.click(screen.getByRole("button", { name: "Advanced server settings" }));
     const server = screen.getByLabelText("Custom API server");
     cache.setQueryData(["private"], "previous account");
     expect(screen.queryByRole("switch", { name: "Open at login" })).not.toBeInTheDocument();
@@ -280,7 +287,6 @@ describe("desktop preferences", () => {
   it("invalidates the connection test when the address changes or Hosted nohmi is selected", async () => {
     mount({ connectionOnly: true });
     await screen.findByText("Recommended");
-    await userEvent.click(screen.getByRole("button", { name: "Advanced server settings" }));
     const server = screen.getByLabelText("Custom API server");
     fireEvent.change(server, { target: { value: "https://custom.example.com" } });
     await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
@@ -353,9 +359,9 @@ describe("desktop preferences", () => {
     mount({ section: "pet" });
     await screen.findByRole("switch", { name: "Show desktop pet" });
     await userEvent.click(screen.getByRole("switch", { name: "Show desktop pet" }));
-    fireEvent.change(screen.getByLabelText("Pet color"), { target: { value: "#123456" } });
-    await userEvent.click(screen.getByRole("checkbox", { name: "Tasks" }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "Finances" }));
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
+    await userEvent.click(screen.getByRole("switch", { name: "Tasks" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Finances" }));
     await userEvent.click(screen.getByRole("button", { name: "Reset pet position" }));
     expect(mocks.invoke).toHaveBeenCalledWith("desktop_native_action", {
       action: "reset_pet_position",
@@ -372,9 +378,20 @@ describe("desktop preferences", () => {
     expect(saved.notifications).toEqual(settings.notifications);
   });
 
+  it("keeps color compact until opened and returns focus when dismissed", async () => {
+    mount({ section: "pet" });
+    const trigger = await screen.findByRole("button", { name: "Edit Pet color" });
+    expect(screen.queryByLabelText("Pet color")).not.toBeInTheDocument();
+    expect(trigger).toHaveTextContent(settings.petColor.toUpperCase());
+    expect(await openPetColor()).toHaveValue(settings.petColor.toUpperCase());
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByLabelText("Pet color")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("previews a burst of colors without replaying each value to disk", async () => {
     mount({ section: "pet" });
-    const input = await screen.findByLabelText("Pet color");
+    const input = await openPetColor();
     for (let index = 1; index <= 30; index++) {
       fireEvent.change(input, { target: { value: `#${index.toString(16).padStart(6, "0")}` } });
     }
@@ -396,15 +413,56 @@ describe("desktop preferences", () => {
     expect(status.settings.petColor).toBe(settings.petColor);
   });
 
+  it("opens permission setup from the first row and restores focus on close", async () => {
+    status.native.notificationPermission = "notDetermined";
+    mount({ section: "notifications" });
+    const trigger = await screen.findByRole("button", { name: /^macOS permissions/ });
+    const section = screen
+      .getByRole("heading", { name: "Desktop notifications" })
+      .closest("section");
+    expect(section?.querySelector("button")).toBe(trigger);
+    expect(screen.queryByRole("button", { name: "Allow notifications" })).not.toBeInTheDocument();
+    const dialog = await openNotificationPermissions();
+    expect(dialog).toContainElement(screen.getByText("macOS permission: Not requested"));
+    expect(dialog).not.toContainElement(
+      screen.getByRole("switch", { name: "Enable notifications", hidden: true }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("rechecks permissions and refreshes setup when returning from macOS", async () => {
+    status.native.notificationPermission = "notDetermined";
+    mount({ section: "notifications" });
+    await openNotificationPermissions();
+    status = { ...status, native: { ...status.native, notificationPermission: "authorized" } };
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(await screen.findByText("macOS permission: Allowed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Test notification" })).toBeEnabled();
+    expect(toast.success).toHaveBeenCalledWith(
+      "macOS permission status checked",
+      expect.anything(),
+    );
+    expect(screen.queryByText("macOS permission status checked")).not.toBeInTheDocument();
+    status = { ...status, native: { ...status.native, notificationPermission: "denied" } };
+    fireEvent.focus(window);
+    expect(await screen.findByText("macOS permission: Blocked")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
+  });
+
   it("keeps draft notification choices when requesting permission refreshes native status", async () => {
     status.native.notificationPermission = "notDetermined";
     mount({ section: "notifications" });
     await screen.findByRole("switch", { name: "Enable notifications" });
     await userEvent.click(screen.getByRole("switch", { name: "Enable notifications" }));
+    await openNotificationPermissions();
     status = { ...status, native: { ...status.native, notificationPermission: "authorized" } };
     await userEvent.click(screen.getByRole("button", { name: "Allow notifications" }));
-    expect(await screen.findByText("macOS permission: authorized")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Enable notifications" })).toBeChecked();
+    expect(await screen.findByText("macOS permission: Allowed")).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "Enable notifications", hidden: true }),
+    ).toBeChecked();
     expect(mocks.invoke).toHaveBeenCalledWith("desktop_native_action", {
       action: "request_notification_permission",
     });
@@ -420,6 +478,7 @@ describe("desktop preferences", () => {
   it("reports notification tests through Sonner without adding inline result text", async () => {
     status.native.notificationPermission = "authorized";
     mount({ section: "notifications" });
+    await openNotificationPermissions();
     const button = await screen.findByRole("button", { name: "Test notification" });
     expect(toast.success).not.toHaveBeenCalled(); // Cached status is not a new action.
     await userEvent.click(button);
@@ -441,6 +500,7 @@ describe("desktop preferences", () => {
     status.native.notificationPermission = "authorized";
     status.native.testNotificationStatus = "failed";
     const { cache } = mount({ section: "notifications" });
+    await openNotificationPermissions();
     await userEvent.click(await screen.findByRole("button", { name: "Test notification" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.id).toBe(
@@ -458,19 +518,21 @@ describe("desktop preferences", () => {
 
   it("opens macOS settings after denial and prevents tests until authorized", async () => {
     mount({ section: "notifications" });
+    await openNotificationPermissions();
     await userEvent.click(await screen.findByRole("button", { name: "Allow in macOS settings" }));
     expect(mocks.invoke).toHaveBeenCalledWith("desktop_native_action", {
       action: "open_notification_settings",
     });
-    expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
   });
 
   it("keeps permission requests pending until the native result arrives", async () => {
     status.native.notificationPermission = "notDetermined";
     status.native.notificationPermissionPending = true;
     mount({ section: "notifications" });
+    await openNotificationPermissions();
     expect(await screen.findByRole("button", { name: "Waiting for macOS…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
   });
 
   it("autosaves workspace choices independently and keeps global controls separate", async () => {
@@ -480,9 +542,10 @@ describe("desktop preferences", () => {
     expect(screen.queryByRole("button", { name: "Save preferences" })).not.toBeInTheDocument();
     for (const workspace of ["Calendar", "Tasks", "Mail", "Finances"]) {
       const id = workspace.toLowerCase();
-      expect(
-        screen.getByRole("link", { name: `${workspace} Notification settings` }),
-      ).toHaveAttribute("href", `/settings?section=${id}&field=${id}:notifications`);
+      expect(screen.getByRole("link", { name: workspace })).toHaveAttribute(
+        "href",
+        `/settings?page=${id}&field=${id}:notifications`,
+      );
     }
     for (const label of [
       "Enable notifications",
@@ -490,8 +553,8 @@ describe("desktop preferences", () => {
       "Show message previews",
     ])
       await userEvent.click(screen.getByRole("switch", { name: label }));
-    fireEvent.change(screen.getByLabelText("From"), { target: { value: "22:00" } });
-    fireEvent.change(screen.getByLabelText("Until"), { target: { value: "07:00" } });
+    fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "22:00" } });
+    fireEvent.change(screen.getByLabelText("Quiet hours end"), { target: { value: "07:00" } });
     await waitFor(() => expect(status.settings.notifications.quietEnd).toBe("07:00"));
     view.unmount();
     view = mount({ section: "tasks" });
@@ -501,13 +564,13 @@ describe("desktop preferences", () => {
     view.unmount();
     view = mount({ section: "calendar" });
     await userEvent.click(await screen.findByRole("switch", { name: "Upcoming events" }));
-    await userEvent.click(await screen.findByRole("checkbox", { name: "Personal" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "Personal" }));
     fireEvent.change(screen.getByLabelText("Minutes before an event"), { target: { value: "30" } });
     await waitFor(() => expect(status.settings.notifications.advanceMinutes).toBe(30));
     view.unmount();
     mount({ section: "mail" });
     await userEvent.click(await screen.findByRole("switch", { name: "New mail" }));
-    await userEvent.click(await screen.findByRole("checkbox", { name: "cooper@example.com" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "cooper@example.com" }));
     await waitFor(() =>
       expect(status.settings.notifications.mailAccountIds).toEqual(["account-1"]),
     );
@@ -529,14 +592,14 @@ describe("desktop preferences", () => {
 
   it("preserves an unsaved appearance and delivers retry through Sonner only", async () => {
     mount({ section: "pet" });
-    await screen.findByLabelText("Pet color");
+    await openPetColor();
     const original = mocks.invoke.getMockImplementation()!;
     let fail = true;
     mocks.invoke.mockImplementation(async (command, args) => {
       if (command === "desktop_save_pet_appearance" && fail) throw new Error("Could not write");
       return original(command, args);
     });
-    fireEvent.change(screen.getByLabelText("Pet color"), { target: { value: "#123456" } });
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByLabelText("Pet color")).toHaveValue("#123456"));
     expect(mocks.success).not.toHaveBeenCalled();
@@ -600,9 +663,16 @@ describe("desktop preferences", () => {
     mount({ connectionOnly: true });
     await screen.findByText("Recommended");
     const test = deferred<never>();
-    mocks.invoke.mockReturnValueOnce(test.promise);
+    const invoke = mocks.invoke.getMockImplementation();
+    mocks.invoke.mockImplementation((command, args) =>
+      command === "desktop_test_connection" ? test.promise : invoke?.(command, args),
+    );
     await userEvent.click(screen.getByRole("button", { name: "Test hosted connection" }));
-    expect(screen.getByRole("button", { name: "Testing hosted…" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Testing hosted…" })).toBeDisabled();
+    expect(mocks.invoke).toHaveBeenCalledWith("desktop_test_connection", {
+      serverUrl: hostedServer,
+    });
+    expect(toast.loading).toHaveBeenCalledWith("Testing connection…", expect.any(Object));
     await act(async () => test.reject(new Error("This is a website, not a nohmi API")));
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
@@ -611,6 +681,11 @@ describe("desktop preferences", () => {
       ),
     );
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.queryByText("Testing connection…")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Couldn’t test the desktop connection. Try again."),
+    ).not.toBeInTheDocument();
     expect(mocks.invoke).not.toHaveBeenCalledWith("desktop_save_settings", expect.anything());
   });
 
@@ -733,7 +808,7 @@ describe("desktop preferences", () => {
       ),
     ).toHaveAttribute("role", "status");
     expect(screen.queryByText(/healthy@example\.com:/)).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "healthy@example.com" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "healthy@example.com" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Save preferences" })).not.toBeInTheDocument();
   });
 
@@ -741,9 +816,9 @@ describe("desktop preferences", () => {
     settings.notifications.quietStart = "22:00";
     settings.notifications.quietEnd = "07:00";
     mount({ section: "notifications" });
-    await screen.findByLabelText("From");
-    fireEvent.change(screen.getByLabelText("From"), { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText("Until"), { target: { value: "" } });
+    await screen.findByLabelText("Quiet hours start");
+    fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Quiet hours end"), { target: { value: "" } });
     const saved = await save();
     expect(saved.notifications.quietStart).toBeNull();
     expect(saved.notifications.quietEnd).toBeNull();
@@ -813,7 +888,7 @@ describe("background setup", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Set up notifications" })).toHaveAttribute(
       "href",
-      "/settings?section=notifications",
+      "/settings?page=notifications",
     );
   });
 
@@ -850,7 +925,7 @@ describe("background setup", () => {
 
   it("enables startup without discarding automatically saved pet preferences", async () => {
     mount({ section: "pet" });
-    fireEvent.change(await screen.findByLabelText("Pet color"), { target: { value: "#123456" } });
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
     await waitFor(() => expect(status.settings.petColor).toBe("#123456"));
     await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
     await userEvent.click(screen.getByRole("button", { name: "Enable launch at login" }));
@@ -858,19 +933,19 @@ describe("background setup", () => {
       expect(status.settings).toMatchObject({ petColor: "#123456", launchAtLogin: true }),
     );
     await userEvent.keyboard("{Escape}");
-    expect(screen.getByLabelText("Pet color")).toHaveValue("#123456");
+    expect(await openPetColor()).toHaveValue("#123456");
   });
 
   it("refreshes OS status on return without resetting an edited preference", async () => {
     mount({ section: "pet" });
-    fireEvent.change(await screen.findByLabelText("Pet color"), { target: { value: "#123456" } });
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
     status = {
       ...status,
       native: { ...status.native, loginStatus: "enabled", launchAtLogin: true },
     };
     fireEvent.focus(window);
     await waitFor(() => expect(screen.getByText("1 of 4 complete")).toBeInTheDocument());
-    expect(screen.getByLabelText("Pet color")).toHaveValue("#123456");
+    expect(await openPetColor()).toHaveValue("#123456");
   });
 
   it("does not report a morning routine ready when automatic delivery is paused", async () => {
@@ -882,7 +957,7 @@ describe("background setup", () => {
     expect(await screen.findByText(/Enable automatic rituals on this Mac/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Routine settings" })).toHaveAttribute(
       "href",
-      "/settings?section=rituals",
+      "/settings?page=rituals",
     );
   });
 
@@ -948,12 +1023,12 @@ describe("background setup", () => {
 
   it("allows setup navigation after preferences are automatically saved", async () => {
     mount({ section: "pet" });
-    fireEvent.change(await screen.findByLabelText("Pet color"), { target: { value: "#123456" } });
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
     await waitFor(() => expect(status.settings.petColor).toBe("#123456"));
     await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
     expect(screen.getByRole("link", { name: "Routine settings" })).toHaveAttribute(
       "href",
-      "/settings?section=rituals",
+      "/settings?page=rituals",
     );
   });
 
@@ -1064,12 +1139,14 @@ it("keeps ritual cards opt-in and autosaves the preference", async () => {
 
 it("retains half-entered quiet hours across an unrelated autosave", async () => {
   mount({ section: "notifications" });
-  fireEvent.change(await screen.findByLabelText("From"), { target: { value: "22:00" } });
+  fireEvent.change(await screen.findByLabelText("Quiet hours start"), {
+    target: { value: "22:00" },
+  });
   await userEvent.click(screen.getByRole("switch", { name: "Show message previews" }));
   await waitFor(() => expect(status.settings.notifications.preview).toBe(true));
-  expect(screen.getByLabelText("From")).toHaveValue("22:00");
+  expect(screen.getByLabelText("Quiet hours start")).toHaveValue("22:00");
   expect(status.settings.notifications.quietStart).toBeNull();
-  fireEvent.change(screen.getByLabelText("Until"), { target: { value: "07:00" } });
+  fireEvent.change(screen.getByLabelText("Quiet hours end"), { target: { value: "07:00" } });
   await waitFor(() =>
     expect(status.settings.notifications).toMatchObject({ quietStart: "22:00", quietEnd: "07:00" }),
   );
@@ -1128,17 +1205,19 @@ it("distinguishes disabled macOS alerts and sounds from granted permission", asy
   status.native.notificationAlertsAvailable = false;
   status.native.notificationSoundsAvailable = false;
   mount({ section: "notifications" });
-  expect(await screen.findByText(/macOS alerts are off. Enable banners/)).toBeInTheDocument();
+  await openNotificationPermissions();
+  expect(await screen.findByText(/macOS alerts are off. Choose banners/)).toBeInTheDocument();
   expect(screen.getByText(/Sounds are disabled in macOS/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Notifications allowed" })).toBeDisabled();
+  expect(screen.getByText("macOS permission: Allowed")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "macOS notification settings" })).toBeEnabled();
 });
 
 it("offers permission setup when native permission is unavailable", async () => {
   delete status.native.notificationPermission;
   mount({ section: "notifications" });
-  expect(await screen.findByText("macOS permission: unavailable")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+  await openNotificationPermissions();
+  expect(await screen.findByText("macOS permission: Unavailable")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Allow notifications" })).toBeEnabled();
 });
 

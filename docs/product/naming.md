@@ -1,12 +1,15 @@
 # nohmi naming contract
 
 - Status: Accepted target contract; repository-wide migration pending
-- Last reconciled: 2026-09-10
+- Last reconciled: 2026-10-26
 
 ## Names
 
-The internal repository, package, and infrastructure name is `personal-os`. The user-facing product
-name is `nohmi`, always lowercase, including at the start of a sentence.
+The internal application name is **Personal OS**. The repository, package, and infrastructure
+identifier is `personal-os`. Use `PersonalOs` / `personalOs` for implementation types, functions,
+and components, and `PERSONAL_OS` for constants and environment variables. The user-facing product
+name is `nohmi`, always lowercase, including at the start of a sentence. This includes the signed-in
+application as well as public pages; Personal OS is not an alternative name shown inside the app.
 
 Former product names are not compatibility identifiers in the target. They must not remain in
 current prose, paths, package or skill names, protocol and resource identifiers, metadata, headers,
@@ -16,7 +19,38 @@ Use `personal-os` for implementation-owned identifiers such as the repository, p
 environment variables, database and runtime names, deployment resources, internal labels, and
 service diagnostics. Use `nohmi` for anything a person or agent host sees as the product, including
 application copy, public endpoints, MCP server identity and resource namespaces, published skills,
-documentation, and support language.
+product documentation, and support language. Engineering prose may use Personal OS to describe the
+implementation. Product descriptions in engineering documents still call the product nohmi.
+
+## Current application audit
+
+The October 26 source cleanup aligns implementation types, the API client, MCP composition and
+catalog, web brand components, native Swift package/widget targets and Rust bridge symbols with
+Personal OS. Developer diagnostics, transient workspace-search events, setup query-cache keys and
+desktop build environment variables use the internal identity. Finance CSV exports and remaining
+product copy use nohmi. The optional setup reference advances to v0.2.1 so changed public copy
+does not reuse its prior immutable artifact identity. Desktop display names, PWA metadata, public
+pages, notifications, and published installer filenames retain the user-facing brand.
+
+Existing state and external contracts still require a coordinated migration. This source cleanup
+does not claim the repository-wide migration below is complete. In particular:
+
+- MCP orientation/setup tool names, resource URIs and metadata keys still use their existing
+  protocol identities; callers and published setup references must move together.
+- Existing browser storage keys, native preferences, widget cache files and notification category
+  identifiers retain their stored names to preserve device identity, preferences and pending work.
+- Finance playbook IDs and Texting provenance values are serialized domain values, distinct from
+  implementation constant/type names.
+- The installed desktop deep-link scheme, deployment drain header, production account, Compose and
+  launch-agent identities, monitoring labels, DNS names and cloud resources need runtime migration
+  and production evidence before their identifiers change.
+- GitHub release jobs map existing account-level signing secrets and updater variables to
+  `PERSONAL_OS_*` process variables. Those external bindings retain their configured names.
+- Historical migrations, plans, release metadata and legacy recovery values remain evidence of
+  existing state. They must not be rewritten to imply that a runtime cutover has already happened.
+
+New implementation identifiers follow the internal name; new product copy follows nohmi. Do not
+copy an existing compatibility identifier into a new surface.
 
 ## Migration rule
 

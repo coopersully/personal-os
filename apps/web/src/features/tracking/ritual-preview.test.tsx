@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import type { RitualDefinition, RitualState } from "@personal-os/domain";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { nearestPreviewWeekday } from "./ritual-card-header.js";
 import { makeRitualPreview, RitualPreviewChecklist } from "./ritual-preview.js";
 
 const mocks = vi.hoisted(() => ({ history: vi.fn(), desktop: vi.fn(), close: vi.fn() }));
 vi.mock("../../api.js", () => ({
-  api: { listRitualHistory: mocks.history },
+  api: { getMe: async () => ({ displayName: "Alex Morgan" }), listRitualHistory: mocks.history },
   errorMessage: (e: Error) => e.message,
 }));
 vi.mock("../desktop/bridge.js", () => ({ isDesktop: mocks.desktop }));
@@ -56,32 +57,30 @@ it("prefills only today's matching definition without writing account data", asy
     dateTo: date,
   });
 });
-it("supports all six responses locally and closes native completion with its exit animation", async () => {
+it("supports all six responses locally and keeps the preview close action available", async () => {
   mocks.desktop.mockReturnValue(true);
   const state = await makeRitualPreview(definition);
-  render(<RitualPreviewChecklist initialState={state} onClose={vi.fn()} />);
-  expect(screen.getByText("Preview only")).toBeInTheDocument();
+  const close = vi.fn();
+  render(<RitualPreviewChecklist initialState={state} onClose={close} />);
+  expect(screen.queryByText("Preview only")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("checkbox", { name: "Teeth" }));
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "1 of 6 tasks completed" })).toBeDisabled(),
-  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Close Preview" })).toBeEnabled());
   for (const [label, value] of [
     ["Reflection", "A good day"],
     ["Bedtime", "22:30"],
     ["Day", "2026-09-29"],
     ["Minutes", "10"],
   ]) {
-    fireEvent.change(screen.getByLabelText(label!), { target: { value } });
+    fireEvent.change(screen.getByLabelText(new RegExp(label!)), { target: { value } });
     await waitFor(() => expect(screen.getByRole("radio", { name: "Good" })).toBeEnabled());
   }
-  await waitFor(
-    () => expect(screen.getByRole("button", { name: "5 of 6 tasks completed" })).toBeDisabled(),
-    { timeout: 2500 },
-  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Close Preview" })).toBeEnabled(), {
+    timeout: 2500,
+  });
   fireEvent.click(screen.getByRole("radio", { name: "Good" }));
-  const complete = await screen.findByRole("button", { name: "Complete Evening Ritual" });
+  const complete = await screen.findByRole("button", { name: "Close Preview" });
   fireEvent.click(complete);
-  await waitFor(() => expect(mocks.close).toHaveBeenCalledWith(null, true));
+  await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
   expect(mocks.history).toHaveBeenCalledTimes(1);
 });
 it("closes a preview through its escape or close control", async () => {
@@ -90,6 +89,42 @@ it("closes a preview through its escape or close control", async () => {
   render(<RitualPreviewChecklist initialState={state} onClose={close} />);
   fireEvent.keyDown(window, { key: "Escape" });
   expect(close).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close Preview" }));
   await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+});
+
+it("previews another weekday with its scheduled steps and resets local answers", async () => {
+  const state = await makeRitualPreview({
+    ...definition,
+    steps: [
+      { id: "daily", kind: "checkbox", label: "Daily" },
+      { id: "monday", kind: "checkbox", label: "Monday only", days: [1], optional: true },
+    ],
+  });
+  state.current!.scheduledLocalDate = "2026-10-18";
+  state.current!.definition = {
+    ...state.current!.definition,
+    steps: [{ id: "daily", kind: "checkbox", label: "Daily" }],
+  };
+  render(<RitualPreviewChecklist initialState={state} onClose={vi.fn()} />);
+  expect(await screen.findByText("Good evening, Alex")).toBeInTheDocument();
+  expect(screen.getByText("0/1 done")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("checkbox", { name: "Daily" })).toHaveFocus());
+  fireEvent.click(screen.getByRole("checkbox", { name: "Daily" }));
+  await waitFor(() => expect(screen.getByText("1/1 done")).toBeInTheDocument());
+  fireEvent.keyDown(screen.getByRole("button", { name: /Preview weekday/ }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitemradio", { name: /^Monday$/ }));
+  await waitFor(() =>
+    expect(screen.getByRole("checkbox", { name: "Monday only" })).toBeInTheDocument(),
+  );
+  expect(screen.getByText("0/2 done")).toBeInTheDocument();
+  expect(mocks.history).toHaveBeenCalledTimes(1);
+});
+
+it("chooses the nearest weekday using the ritual time zone across month boundaries", () => {
+  const instant = new Date("2026-11-01T01:00:00Z");
+  expect(nearestPreviewWeekday(0, "America/New_York", instant)).toBe("2026-11-01");
+  expect(nearestPreviewWeekday(5, "America/New_York", instant)).toBe("2026-10-30");
+  expect(nearestPreviewWeekday(6, "America/New_York", instant)).toBe("2026-10-31");
+  expect(nearestPreviewWeekday(3, "America/New_York", instant)).toBe("2026-10-28");
 });

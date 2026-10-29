@@ -266,6 +266,7 @@ export function createMailService({
         truncated: scannedWindow.length > 200,
       },
     };
+
     return {
       ...preview,
       fingerprint: previewFingerprint(preview),
@@ -434,6 +435,61 @@ export function createMailService({
         threadId: before.id,
       });
     }
+  }
+
+  async function threadConditions(userId: string, query: MailListQuery) {
+    const conditions = [eq(mailThreads.userId, userId), isNull(mailThreads.deletedAt)];
+    const activeSnooze = sql`exists (
+        select 1 from ${mailSnoozes}
+        where ${mailSnoozes.threadId} = ${mailThreads.id}
+          and ${mailSnoozes.until} > ${now()}
+      )`;
+    conditions.push(query.snoozed ? activeSnooze : sql`not ${activeSnooze}`);
+    if (query.accountIds?.length) conditions.push(inArray(mailThreads.accountId, query.accountIds));
+    if (query.starred !== undefined) conditions.push(eq(mailThreads.starred, query.starred));
+    if (query.unread !== undefined) conditions.push(eq(mailThreads.unread, query.unread));
+    if (query.query) {
+      const pattern = `%${query.query}%`;
+      const search = or(
+        ilike(mailThreads.subject, pattern),
+        ilike(mailThreads.snippet, pattern),
+        sql`${mailThreads.from}->>'address' ilike ${pattern}`,
+        sql`${mailThreads.from}->>'name' ilike ${pattern}`,
+      );
+      if (search) conditions.push(search);
+    }
+    if (query.mailboxId) {
+      const [mailbox] = await db
+        .select()
+        .from(mailboxes)
+        .where(
+          and(
+            eq(mailboxes.id, query.mailboxId),
+            eq(mailboxes.userId, userId),
+            isNull(mailboxes.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!mailbox) throw new AppError("not_found", "The mailbox was not found.");
+      conditions.push(eq(mailThreads.accountId, mailbox.accountId));
+      conditions.push(
+        sql`${mailThreads.remoteMailboxIds} @> ${JSON.stringify([mailbox.remoteMailboxId])}::jsonb`,
+      );
+    }
+    if (query.mailboxRole) {
+      conditions.push(sql`exists (
+          select 1 from ${mailboxes}
+          inner join ${calendarAccounts}
+            on ${calendarAccounts.id} = ${mailboxes.accountId}
+           and ${calendarAccounts.mailEnabled} = true
+          where ${mailboxes.userId} = ${userId}
+            and ${mailboxes.accountId} = ${mailThreads.accountId}
+            and ${mailboxes.role} = ${query.mailboxRole}
+            and ${mailboxes.deletedAt} is null
+            and ${mailThreads.remoteMailboxIds} @> jsonb_build_array(${mailboxes.remoteMailboxId})
+        )`);
+    }
+    return conditions;
   }
 
   return {
@@ -1860,59 +1916,40 @@ export function createMailService({
       return records.map(({ mailbox }) => serializeMailbox(mailbox));
     },
 
+    async navigationCounts(userId: string, accountIds?: string[]) {
+      const scopes = {
+        all: { mailboxRole: "inbox" },
+        unread: { unread: true },
+        starred: { starred: true },
+        snoozed: { snoozed: true },
+        sent: { mailboxRole: "sent" },
+      } as const;
+      const entries = await Promise.all(
+        Object.entries(scopes).map(async ([scope, filter]) => {
+          const conditions = await threadConditions(userId, {
+            ...filter,
+            ...(accountIds?.length ? { accountIds } : {}),
+            limit: 1,
+          });
+          const [result] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(mailThreads)
+            .where(and(...conditions));
+          return [scope, result?.count ?? 0] as const;
+        }),
+      );
+      const [drafts] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(mailDrafts)
+        .where(and(eq(mailDrafts.userId, userId), sql`${mailDrafts.sendStatus} <> 'sent'`));
+      return {
+        ...Object.fromEntries(entries),
+        drafts: drafts?.count ?? 0,
+      } as import("@personal-os/domain").MailNavigationCounts;
+    },
+
     async listThreads(userId: string, query: MailListQuery): Promise<MailThread[]> {
-      const conditions = [eq(mailThreads.userId, userId), isNull(mailThreads.deletedAt)];
-      const activeSnooze = sql`exists (
-        select 1 from ${mailSnoozes}
-        where ${mailSnoozes.threadId} = ${mailThreads.id}
-          and ${mailSnoozes.until} > ${now()}
-      )`;
-      conditions.push(query.snoozed ? activeSnooze : sql`not ${activeSnooze}`);
-      if (query.accountIds?.length)
-        conditions.push(inArray(mailThreads.accountId, query.accountIds));
-      if (query.starred !== undefined) conditions.push(eq(mailThreads.starred, query.starred));
-      if (query.unread !== undefined) conditions.push(eq(mailThreads.unread, query.unread));
-      if (query.query) {
-        const pattern = `%${query.query}%`;
-        const search = or(
-          ilike(mailThreads.subject, pattern),
-          ilike(mailThreads.snippet, pattern),
-          sql`${mailThreads.from}->>'address' ilike ${pattern}`,
-          sql`${mailThreads.from}->>'name' ilike ${pattern}`,
-        );
-        if (search) conditions.push(search);
-      }
-      if (query.mailboxId) {
-        const [mailbox] = await db
-          .select()
-          .from(mailboxes)
-          .where(
-            and(
-              eq(mailboxes.id, query.mailboxId),
-              eq(mailboxes.userId, userId),
-              isNull(mailboxes.deletedAt),
-            ),
-          )
-          .limit(1);
-        if (!mailbox) throw new AppError("not_found", "The mailbox was not found.");
-        conditions.push(eq(mailThreads.accountId, mailbox.accountId));
-        conditions.push(
-          sql`${mailThreads.remoteMailboxIds} @> ${JSON.stringify([mailbox.remoteMailboxId])}::jsonb`,
-        );
-      }
-      if (query.mailboxRole) {
-        conditions.push(sql`exists (
-          select 1 from ${mailboxes}
-          inner join ${calendarAccounts}
-            on ${calendarAccounts.id} = ${mailboxes.accountId}
-           and ${calendarAccounts.mailEnabled} = true
-          where ${mailboxes.userId} = ${userId}
-            and ${mailboxes.accountId} = ${mailThreads.accountId}
-            and ${mailboxes.role} = ${query.mailboxRole}
-            and ${mailboxes.deletedAt} is null
-            and ${mailThreads.remoteMailboxIds} @> jsonb_build_array(${mailboxes.remoteMailboxId})
-        )`);
-      }
+      const conditions = await threadConditions(userId, query);
       const records = await db
         .select()
         .from(mailThreads)

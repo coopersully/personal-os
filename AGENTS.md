@@ -7,8 +7,13 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 
 ## Product Spelling
 
-- The internal repository, package, and infrastructure name is `personal-os`.
+- The internal application name is `Personal OS`. Use `personal-os` for repository, package,
+  infrastructure and machine identifiers, `PersonalOs` / `personalOs` in code, and `PERSONAL_OS`
+  for constants and environment variables.
 - The user-facing product name is `nohmi`, always lowercase, including at the start of a sentence.
+- This applies to signed-in screens, accessibility labels, notifications, exports, native/PWA
+  display names and agent-facing copy. Follow `docs/product/naming.md` and the CS-15 Product
+  identity section in `docs/engineering/code-standards.md` when implementing or reviewing names.
 - Do not introduce former product names in paths, prose, protocol identifiers, examples, fixtures,
   or agent guidance. The target contains none; remaining current runtime identifiers require an
   explicit hard-cutover migration rather than new compatibility aliases.
@@ -27,16 +32,28 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 
 ## Merge authority
 
-Merge only when Cooper explicitly authorizes merging the identified work, for example “get this
-merged,” “merge it when safe,” or “ship it.” Record that scope and continue through the gates without
-asking again later. Implementing, tracking, publishing a PR, or handing off context alone does not
-authorize merge. Without merge authority, stop at the requested reviewed/published state and report
-readiness. A later pause/revocation or changed scope supersedes the grant. Assigned workers still
-never merge; their authorized orchestrator owns it. Ordinary contribution owners may merge their
-own scoped work only with this explicit grant and independent review. No bypass or deferred auto-merge.
+Cooper grants standing authority to the assigned nohmi oversight outcome owner to carry assigned
+work and its necessary bounded prerequisites through review, verification and normal protected
+merge. Record that source and scope once; do not request separate per-PR or prerequisite merge
+permission. Review your own work and delegated implementation before accepting it. Self-review
+never substitutes for applicable independent review, eligible approvals or live branch protections.
+
+Honor a read-only, plan-only, draft-only or no-merge instruction, later pause/revocation, and genuine
+scope limits. Ordinary contribution owners outside an oversight assignment still need explicit merge
+intent such as “get this merged” or “ship it”; preserve an existing grant without asking again.
+Assigned workers never merge; their outcome orchestrator owns acceptance and merge. The automation
+head never merges. No bypass or deferred auto-merge.
+
+Choose reasonable scope-consistent defaults and continue authorized work without routine
+clarification. Ask only when indispensable information cannot be obtained from context or an
+explicit platform approval is required; identify the specific missing fact or approval. A necessary
+bounded prerequisite is part of the assigned outcome, not a reason to ask for merge permission again.
 
 ## Linear Routing
 
+- All skills and installed nohmi role/context wrappers follow the canonical lifecycle in
+  `docs/engineering/work-context.md`; it covers implementation, documentation, prerequisite repair
+  and review fixes. Helper invocation does not exempt assigned durable work.
 - Implementation and durable repository changes MUST be tracked in Linear from intake through
   completion. Match/create the direct Nohmi issue before implementation when possible; reconcile
   already-started work immediately. Update material scope, progress, blockers, PR links and final
@@ -94,8 +111,9 @@ require explicit approval, bounded scope, an owner and an exit condition. These 
 policy, not proof that all gates are already automated. Preserve existing role and merge boundaries.
 
 Use `docs/engineering/development-handbook.md` to select the next required step and reuse valid
-evidence. Run complete verification on the frozen candidate after review convergence and before
-merge; draft publication and early review use focused checks:
+evidence. Run policy-complete verification on the frozen candidate after review convergence and before
+merge; only the Git-verified prose exception in `delivery-verification.md` may omit full stages.
+Draft publication and early review use focused checks. The complete local command remains:
 
 ```bash
 pnpm verify

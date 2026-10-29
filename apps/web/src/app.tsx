@@ -1,12 +1,20 @@
+import { settingsPath } from "@/features/settings/settings-routes";
 import {
   DayTimeline,
+  formatTimelineClock,
   localDateTimeAt,
   positionTimelineEvents,
+  TimelineAxis,
   type TimelineEventLayout,
   type TimelinePositionable,
   type TodayTimelineDensity,
+  timelineLaneStyle,
 } from "./features/calendar/day-timeline.js";
 import { calendarEventColorStyle } from "./features/calendar/event-color.js";
+import { LoginDestination } from "./features/public-site/login-destination";
+import { GoalProgressEditor } from "./features/settings/goal-progress-editor.js";
+import { RecordDateEditor } from "./features/settings/record-date-editor";
+import { settingsParents, settingsRoute } from "./features/settings/settings-routes";
 
 export {
   positionTimelineEvents,
@@ -49,10 +57,11 @@ import {
   parseLocalDate,
   sameLocalDate,
 } from "@personal-os/domain";
-import { Badge, Button, EmptyState, Input, Label, Spinner } from "@personal-os/ui";
+import { Badge, Button, Input, Label, Spinner } from "@personal-os/ui";
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import {
+  type ComponentProps,
   type CSSProperties,
   createContext,
   type FormEvent,
@@ -96,9 +105,11 @@ import {
   PasswordFields,
   TextField,
 } from "@/components/auth-fields";
-import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/components/brand-marks";
+import { BrandMark, brandTitle, hasBrandMark, PersonalOsBrandMark } from "@/components/brand-marks";
+import { BrandPattern } from "@/components/brand-pattern";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import { ConnectionCard } from "@/components/connection-card";
+import { DataViewEmpty, DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import { DateInput } from "@/components/date-input";
 import { ErrorPage } from "@/components/error-page";
 import {
@@ -113,6 +124,7 @@ import {
 import {
   ActivityIcon,
   AlertTriangleIcon,
+  ArrowRightIcon,
   BankIcon,
   CalendarIcon,
   CalendarPlusIcon,
@@ -134,12 +146,10 @@ import {
   HouseIcon,
   type Icon,
   ImageIcon,
-  KeyIcon,
   LayersIcon,
   ListChecksIcon,
   ListTodoIcon,
   LockIcon,
-  LogOutIcon,
   MailIcon,
   MapPinIcon,
   MonitorIcon,
@@ -166,10 +176,17 @@ import {
   XIcon,
 } from "@/components/icons";
 import { LogoMark } from "@/components/logo-mark";
+import { NavigationHighlight } from "@/components/navigation-highlight";
 import { OccasionCard } from "@/components/occasion-card";
 import { OfflineState } from "@/components/offline-state";
-import { QuoteCard } from "@/components/quote-card";
 import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
@@ -178,6 +195,15 @@ import {
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
+import {
+  Field as ShadcnField,
+  FieldContent as ShadcnFieldContent,
+  FieldDescription as ShadcnFieldDescription,
+  FieldGroup as ShadcnFieldGroup,
+  FieldLabel as ShadcnFieldLabel,
+  FieldLegend as ShadcnFieldLegend,
+  FieldSet as ShadcnFieldSet,
+} from "@/components/settings-field";
 import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { TodayWorkspaceIcon, todayWeatherIcon } from "@/components/today-workspace-icon";
 import {
@@ -194,15 +220,7 @@ import {
 } from "@/components/ui/avatar";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton } from "@/components/ui/button";
-import {
-  Card as ShadcnCard,
-  CardAction as ShadcnCardAction,
-  CardContent as ShadcnCardContent,
-  CardDescription as ShadcnCardDescription,
-  CardHeader as ShadcnCardHeader,
-  CardTitle as ShadcnCardTitle,
-} from "@/components/ui/card";
-import { Checkbox as ShadcnCheckbox } from "@/components/ui/checkbox";
+import { Card as ShadcnCard, CardContent as ShadcnCardContent } from "@/components/ui/card";
 import {
   Collapsible as ShadcnCollapsible,
   CollapsibleContent as ShadcnCollapsibleContent,
@@ -228,14 +246,6 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -244,15 +254,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Field as ShadcnField,
-  FieldContent as ShadcnFieldContent,
-  FieldDescription as ShadcnFieldDescription,
-  FieldGroup as ShadcnFieldGroup,
-  FieldLabel as ShadcnFieldLabel,
-  FieldLegend as ShadcnFieldLegend,
-  FieldSet as ShadcnFieldSet,
-} from "@/components/ui/field";
 import { Input as ShadcnInput } from "@/components/ui/input";
 import {
   InputGroup,
@@ -312,17 +313,26 @@ import { WorkspaceLayout } from "@/components/workspace-layout";
 import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
 import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
-import { BRAND_PROMISE } from "./brand.js";
-import { scrollTimelineToMinute } from "./calendar-timeline.js";
+import { minuteToTimelinePixels, scrollTimelineToMinute } from "./calendar-timeline.js";
+import { AccountRecoveryDialog } from "./components/account-recovery-dialog.js";
+import { AppRecovery } from "./components/app-recovery";
 import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
+import { AuthFooter } from "./components/auth-footer.js";
 import { useConfirmAction } from "./components/confirm-action.js";
 import { FeedbackForm } from "./components/feedback-form.js";
 import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { MutationFeedback } from "./components/mutation-feedback.js";
 import { SettingsRecord, SettingsRecordAction } from "./components/settings-record.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
-import { WorkspaceHeaderControlsSlot } from "./components/workspace-header-controls.js";
+import {
+  WorkspaceHeaderControlsSlot,
+  WorkspaceTitleSentence,
+} from "./components/workspace-header-controls.js";
 import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
+import {
+  useNavigationSection,
+  WorkspaceNavigationPage,
+} from "./components/workspace-navigation-page";
 import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarContent,
@@ -362,13 +372,13 @@ import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
 } from "./features/mail/mail.js";
-import { MailAppBarControls } from "./features/mail/workspace-header.js";
+import { MailAppBarControls, MailAppBarTitle } from "./features/mail/workspace-header.js";
 import {
   authenticationDestination,
   isAuthenticationPath,
 } from "./features/public-site/auth-navigation.js";
 import { ProductLanding } from "./features/public-site/landing.js";
-import { ReminderRow, RemindersCreateButton } from "./features/reminders/page.js";
+import { RemindersCreateButton } from "./features/reminders/page.js";
 import { ReviewFlowHost } from "./features/reviews/flow.js";
 import { ReviewNavigation } from "./features/reviews/navigation.js";
 import { AccountIdentity, AccountOverview } from "./features/settings/account-overview.js";
@@ -379,22 +389,32 @@ import {
   WorkspaceSettings,
   type WorkspaceSettingsActions,
 } from "./features/settings/agent-access.js";
+import { ProfileChoice } from "./features/settings/profile-choice.js";
+import { ProfileInlineField } from "./features/settings/profile-inline-field.js";
+import { ProfileRow, ProfileSection } from "./features/settings/profile-rows.js";
+import { RecordSummaryTrial } from "./features/settings/record-summary-trial.js";
 import { RelatedSettings } from "./features/settings/related-settings.js";
-import {
-  SettingsBento,
-  SettingsPageLayout,
-  SettingsSection,
-} from "./features/settings/settings-layout.js";
+import { SettingsPageLayout, SettingsSection } from "./features/settings/settings-layout.js";
 import { SettingsSearch, settingsDescriptions } from "./features/settings/settings-search.js";
 import { SetupSettings } from "./features/settings/setup-settings.js";
 import { useSettingsSidebarCounts } from "./features/settings/sidebar-counts.js";
 import { WorkspaceGuidance } from "./features/settings/workspace-guidance";
-import { TaskRow, TasksCreateButton, TasksSidebar } from "./features/tasks/page.js";
+import { TasksCreateButton, TasksSidebar } from "./features/tasks/page.js";
 import { TaskDialog } from "./features/tasks/task-dialog.js";
+import { TodayCommitmentRow } from "./features/tasks/today-row";
 import { TasksAppBarControls } from "./features/tasks/workspace-header.js";
 import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
+import { CommitmentControls } from "./features/today/commitment-controls";
+import {
+  allCommitmentPages,
+  type CommitmentPeriod,
+  commitmentDate,
+  commitmentRange,
+  scopedCommitments,
+} from "./features/today/commitment-scope";
+import { BrowserRitual } from "./features/tracking/browser-ritual.js";
 import { RitualSettings } from "./features/tracking/ritual-settings.js";
 import type { SearchAction } from "./features/workspace-search/catalog.js";
 import { WorkspaceFinder } from "./features/workspace-search/search.js";
@@ -410,7 +430,6 @@ import { invalidateMaterial } from "./lib/material-queries.js";
 import { SettingsFeedbackContext } from "./lib/settings-feedback.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import { useFeedbackMutation } from "./lib/use-feedback-mutation.js";
-import { cn } from "./lib/utils.js";
 import {
   navigationOwnerForLocation,
   rendersApplicationShell,
@@ -418,7 +437,7 @@ import {
   workspaceDefinitions,
   workspaceForLocation,
 } from "./navigation/manifest.js";
-import type { MobileWorkspacePage } from "./navigation/mobile-workspace-dock.js";
+import { activeWorkspaceSection, workspaceSectionPages } from "./navigation/workspace-sections";
 import { timeToMinute } from "./time.js";
 
 type Editor =
@@ -466,10 +485,8 @@ const SetupPage = lazy(() =>
   import("./features/setup/page.js").then((module) => ({ default: module.SetupPage })),
 );
 
-const calendarHourHeight = 48;
 const calendarMinutesPerDay = 24 * 60;
-const calendarTimelineHeight = 24 * calendarHourHeight;
-const calendarTimeMarks = Array.from({ length: 48 }, (_, index) => index * 30);
+const calendarTimelineHeight = minuteToTimelinePixels(1440);
 const calendarDragType = "application/x-personal-os-calendar-event";
 const calendarDragOffsetType = "application/x-personal-os-calendar-grab-offset-y";
 const calendarDragOffsets = new Map<string, number>();
@@ -534,15 +551,6 @@ export function selectTodayTasks(
 }
 export function App() {
   const location = useLocation();
-  const tokenQuery = new URLSearchParams(location.search);
-  if (
-    location.pathname === "/" &&
-    !isTauri() &&
-    !tokenQuery.get("verifyEmail") &&
-    !tokenQuery.get("resetPassword")
-  ) {
-    return <ProductLanding />;
-  }
   if (location.pathname === "/downloads") {
     return (
       <>
@@ -568,13 +576,31 @@ export function App() {
 }
 
 function SessionApp() {
+  const location = useLocation();
+  const tokens = new URLSearchParams(location.search);
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
   return (
     <>
-      <AppContent me={me} />
       <Toaster
         theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
       />
+      <AppRecovery
+        owner={tokens.get("verifyEmail") || tokens.get("resetPassword") ? undefined : me.data?.id}
+        accountBlocked={!me.isSuccess}
+      >
+        <AppContent me={me} />
+      </AppRecovery>
+      <AccountRecoveryDialog
+        query={me}
+        enabled={
+          !isUnauthorized(me.error) &&
+          !tokens.get("verifyEmail") &&
+          !tokens.get("resetPassword") &&
+          (location.pathname !== "/" || isTauri() || Boolean(me.data))
+        }
+      >
+        {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
+      </AccountRecoveryDialog>
     </>
   );
 }
@@ -591,6 +617,9 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
       </main>
     );
   }
+  if (location.pathname === "/" && !isTauri()) {
+    return me.data ? <Navigate replace to="/today" /> : <ProductLanding />;
+  }
   if (me.isError && isUnauthorized(me.error)) {
     if (isAuthenticationPath(location.pathname)) return <AuthScreen />;
     return (
@@ -605,14 +634,12 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
   }
   if (me.isError && !me.data)
     return (
-      <>
-        <FatalState error={me.error} />
-        {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
-      </>
+      <main className="center-screen">
+        <Spinner label="Waiting for account connection" />
+      </main>
     );
   return (
     <TooltipProvider>
-      <QueryFeedback query={me} title="Couldn’t refresh your account." staleOnly />
       <AuthenticatedExperience user={me.data as User} />
     </TooltipProvider>
   );
@@ -640,7 +667,12 @@ function AuthenticatedExperience({ user }: { user: User }) {
   if (user.setup.status === "not_started" || user.setup.status === "in_progress") {
     return <Navigate replace to="/setup" />;
   }
-  return <AuthenticatedApp user={user} />;
+  return (
+    <>
+      <AuthenticatedApp user={user} />
+      {!isTauri() ? <BrowserRitual key={user.id} userId={user.id} /> : null}
+    </>
+  );
 }
 
 type DeviceWeatherLocation = {
@@ -653,8 +685,14 @@ function useDeviceWeatherLocation(enabled: boolean): DeviceWeatherLocation {
     coordinates: null,
     status: "pending",
   });
+  // Route changes must not restart a permission request or discard its result.
+  // This latch resets with the authenticated shell, never persists coordinates.
+  const [requested, setRequested] = useState(false);
   useEffect(() => {
-    if (!enabled) return;
+    if (enabled) setRequested(true);
+  }, [enabled]);
+  useEffect(() => {
+    if (!requested) return;
     setLocation({ coordinates: null, status: "pending" });
     if (!("geolocation" in navigator)) {
       setLocation({ coordinates: null, status: "unavailable" });
@@ -680,7 +718,7 @@ function useDeviceWeatherLocation(enabled: boolean): DeviceWeatherLocation {
     return () => {
       active = false;
     };
-  }, [enabled]);
+  }, [requested]);
   return location;
 }
 
@@ -759,13 +797,13 @@ function CredentialsScreen() {
   const invitationError = !inviteBlurred
     ? undefined
     : credentials.inviteCode.length !== 8
-      ? "enter all eight characters from your invitation."
+      ? "Enter all eight characters from your invitation."
       : invitationResultIsCurrent && invitationValidation.isError
-        ? "couldn’t check this invitation. try again."
+        ? "Couldn’t check this invitation. Try again."
         : invitationResultIsCurrent &&
             invitationValidation.isSuccess &&
             invitationValidation.data === false
-          ? "this invitation is invalid or expired."
+          ? "This invitation is invalid or expired."
           : undefined;
   const invitationStatus =
     invitationResultIsCurrent && invitationValidation.isPending
@@ -822,14 +860,14 @@ function CredentialsScreen() {
         onSubmit={submit}
         validate={() => {
           const errors: Record<string, string> = {};
-          if (!emailValid) errors.email = "enter an email address in the format name@example.com.";
+          if (!emailValid) errors.email = "Enter an email address in the format name@example.com.";
           if (mode === "register") {
-            if (!credentials.displayName.trim()) errors.displayName = "enter your name.";
+            if (!credentials.displayName.trim()) errors.displayName = "Enter your name.";
             if (!invitationValid && invitationStatus !== "checking")
               errors.inviteCode =
-                invitationError ?? "enter a valid invitation and wait for it to be checked.";
-            if (!passwordValid) errors.password = "meet each password requirement shown below.";
-            if (!passwordsMatch) errors.confirmPassword = "passwords must match.";
+                invitationError ?? "Enter a valid invitation and wait for it to be checked.";
+            if (!passwordValid) errors.password = "Meet each password requirement shown below.";
+            if (!passwordsMatch) errors.confirmPassword = "Passwords must match.";
           }
           return errors;
         }}
@@ -837,19 +875,20 @@ function CredentialsScreen() {
         <div className="auth-form__heading">
           <h2>
             {mode === "login"
-              ? "sign in"
+              ? "Login"
               : mode === "recovery"
-                ? "reset your password"
-                : "create account"}
+                ? "Reset your password"
+                : "Redeem Invite Code"}
           </h2>
           {mode !== "login" ? (
             <p>
               {mode === "recovery"
-                ? "we’ll send a reset link if this address has an account."
-                : "you’ll need an invitation. nohmi is in alpha; expect rough edges."}
+                ? "We’ll send a reset link if this address has an account."
+                : "Welcome to the closed alpha. Thanks for trying nohmi—it’s early, experimental, and a little buggy."}
             </p>
           ) : null}
         </div>
+        {mode === "login" ? <LoginDestination /> : null}
         {mode === "register" && (
           <>
             <InviteCodeField
@@ -872,7 +911,7 @@ function CredentialsScreen() {
             />
             <TextField
               autoComplete="name"
-              label="name"
+              label="Name"
               name="displayName"
               onChange={(event) =>
                 setCredentials((current) => ({ ...current, displayName: event.target.value }))
@@ -903,7 +942,7 @@ function CredentialsScreen() {
                   onClick={() => selectMode("recovery")}
                   type="button"
                 >
-                  forgot?
+                  Forgot?
                 </button>
               ) : undefined
             }
@@ -918,32 +957,32 @@ function CredentialsScreen() {
 
         {mutation.isSuccess && mode === "recovery" ? (
           <p className="form-success" role="status">
-            if an account exists for that email, a password-reset link is on its way.
+            If an account exists for that email, a password-reset link is on its way.
           </p>
         ) : null}
         <ShadcnButton className="button--wide" disabled={mutation.isPending} type="submit">
           {mutation.isPending ? (
-            <Spinner label="signing in" />
+            <Spinner label="Signing in" />
           ) : mode === "login" ? (
-            "sign in"
+            "Log in"
           ) : mode === "recovery" ? (
-            "send reset link"
+            "Send reset link"
           ) : (
-            "create account"
+            "Create account"
           )}
         </ShadcnButton>
         {mode === "login" ? (
           <button
-            aria-label="have an invite? create an account"
+            aria-label="Have an invite? Create an account"
             className="text-button"
             type="button"
             onClick={() => selectMode("register")}
           >
-            have an invite? create an account
+            Have an invite? Create an account
           </button>
         ) : (
           <button className="text-button" type="button" onClick={() => selectMode("login")}>
-            {mode === "register" ? "already have an account? sign in" : "back to sign in"}
+            {mode === "register" ? "Already have an account? Sign in" : "Back to sign in"}
           </button>
         )}
       </FeedbackForm>
@@ -965,12 +1004,12 @@ function EmailVerificationScreen({ token }: { token: string }) {
   });
   return (
     <AuthActionShell
-      description="confirm the email address for this nohmi account."
-      title="confirm your email"
+      description="Confirm the email address for this nohmi account."
+      title="Confirm your email"
     >
       {verification.isSuccess ? (
         <p className="form-success" role="status">
-          your email is confirmed. you can close this page or continue using nohmi.
+          Your email is confirmed. You can close this page or continue using nohmi.
         </p>
       ) : (
         <Button
@@ -978,7 +1017,7 @@ function EmailVerificationScreen({ token }: { token: string }) {
           onClick={() => verification.mutate()}
           tone="accent"
         >
-          {verification.isPending ? <Spinner label="confirming email" /> : "confirm email"}
+          {verification.isPending ? <Spinner label="Confirming email" /> : "Confirm email"}
         </Button>
       )}
       <MutationFeedback feedback={verification.feedback} />
@@ -1002,10 +1041,10 @@ function PasswordResetScreen({ token }: { token: string }) {
   });
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
   return (
-    <AuthActionShell title="choose a new password">
+    <AuthActionShell title="Choose a new password">
       {complete ? (
         <p className="form-success" role="status">
-          your password has been reset. <Link to="/login">return to sign in.</Link>
+          Your password has been reset. <Link to="/login">Return to sign in.</Link>
         </p>
       ) : (
         <FeedbackForm
@@ -1013,8 +1052,8 @@ function PasswordResetScreen({ token }: { token: string }) {
           validate={() => {
             const errors: Record<string, string> = {};
             if (!isValidPassword(password))
-              errors.password = "meet each password requirement shown below.";
-            if (!passwordsMatch) errors.confirmPassword = "passwords must match.";
+              errors.password = "Meet each password requirement shown below.";
+            if (!passwordsMatch) errors.confirmPassword = "Passwords must match.";
             return errors;
           }}
           className="auth-form"
@@ -1026,7 +1065,7 @@ function PasswordResetScreen({ token }: { token: string }) {
           <PasswordFields
             autoComplete="new-password"
             confirmValue={confirmPassword}
-            label="new password"
+            label="New password"
             onConfirmValueChange={setConfirmPassword}
             onValueChange={setPassword}
             showRequirements
@@ -1034,7 +1073,7 @@ function PasswordResetScreen({ token }: { token: string }) {
           />
 
           <Button disabled={reset.isPending} tone="accent" type="submit">
-            {reset.isPending ? <Spinner label="resetting password" /> : "reset password"}
+            {reset.isPending ? <Spinner label="Resetting password" /> : "Reset password"}
           </Button>
         </FeedbackForm>
       )}
@@ -1049,30 +1088,17 @@ function AuthLayout({ children }: { children: ReactNode }) {
         <header className="auth-header">
           <Link to="/" aria-label="nohmi home" className="auth-header__brand">
             <span aria-hidden="true" className="auth-header__symbol">
-              <NohmiBrandMark symbol />
+              <PersonalOsBrandMark symbol />
             </span>
-            <NohmiBrandMark />
+            <PersonalOsBrandMark />
           </Link>
         </header>
         <section className="auth-form-wrap">{children}</section>
-        <nav
-          aria-label="about nohmi and policies"
-          className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground"
-        >
-          <a href="/about/">about nohmi</a>
-          <a href="/docs/">guide</a>
-          <a href="/privacy/">privacy</a>
-          <a href="/terms/">terms</a>
-          <a href="/data-use/">data use</a>
-          <a href="/sms/">texting terms</a>
-          <a href="/support/">support</a>
-        </nav>
+        <AuthFooter />
       </div>
-      <ShadcnCard className="auth-brand-panel">
-        <ShadcnCardContent className="auth-brand-panel__copy">
-          <span>nohmi / built around you</span>
-          <h2>{BRAND_PROMISE}</h2>
-          <p>your context, tools, and controls. connected for you and the agents you choose.</p>
+      <ShadcnCard aria-hidden="true" className="auth-brand-panel">
+        <ShadcnCardContent>
+          <BrandPattern />
         </ShadcnCardContent>
       </ShadcnCard>
     </main>
@@ -1219,6 +1245,7 @@ function SidebarCollapseHandle({
 function AuthenticatedApp({ user }: { user: User }) {
   const [financeUnreadSessionKey] = useState(() => crypto.randomUUID());
   const [editor, setEditor] = useState<Editor>(null);
+  const handleWorkspaceSearchAction = useWorkspaceSearchAction(setEditor);
   const desktopCapture = useCallback(
     (kind: "task" | "reminder" | "event") => setEditor({ kind }),
     [],
@@ -1273,6 +1300,24 @@ function AuthenticatedApp({ user }: { user: User }) {
   const shellPathname = normalizeShellPathname(location.pathname);
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
   const activeWorkspace = workspaceForPath(location.pathname);
+  const sectionOwner = activeWorkspace?.id ?? "settings";
+  const sectionPages = workspaceSectionPages(sectionOwner, location.search);
+  const navigationSection = sectionPages.find(
+    (page) =>
+      page.kind === "section" && page.id === new URLSearchParams(location.search).get("navigation"),
+  );
+  const hasMobileAppBar = isMobileWorkspaceDock && sectionPages.length > 0;
+  const activeSection =
+    navigationSection?.id ??
+    (sectionOwner === "settings"
+      ? (visibleSettingsNavigation(user.canManageInvitations === true)
+          .find((group) =>
+            group.items.some(
+              (item) => item.id === settingsParent(settingsSectionFromSearch(location.search)),
+            ),
+          )
+          ?.label.toLowerCase() ?? "account")
+      : activeWorkspaceSection(sectionOwner, location.pathname, location.search));
   const isCalendarWorkspace = activeWorkspace?.id === "calendar";
   const isSpatialCalendar = shellPathname === "/calendar";
   const navigationOwner = navigationOwnerForLocation(location.pathname);
@@ -1384,6 +1429,8 @@ function AuthenticatedApp({ user }: { user: User }) {
     >
       <div
         className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
+        data-workspace={sectionOwner}
+        data-mobile-app-bar={hasMobileAppBar || undefined}
         data-rail-collapsed={!isMobileWorkspaceDock && railCollapsed ? "true" : undefined}
         data-sidebar-state={!isMobileWorkspaceDock && sidebarMode ? sidebarState : undefined}
         style={
@@ -1444,22 +1491,20 @@ function AuthenticatedApp({ user }: { user: User }) {
             }
             className={`sidebar${sidebarMode ? " sidebar--context" : ""}`}
             data-state={sidebarState}
+            data-workspace={sidebarMode}
             id="app-sidebar"
           >
             <ShadcnSidebarHeader className="workspace-sidebar__header">
               <span className="truncate text-sm font-semibold">
                 {sidebarMode === "settings" ? "Settings" : activeWorkspace?.label}
               </span>
-              {sidebarMode === "settings" ? (
-                <SettingsSearch
-                  groups={searchableSettingsNavigation(user.canManageInvitations === true)}
-                />
-              ) : null}
             </ShadcnSidebarHeader>
             <ShadcnSidebarContent
               className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}`}
               key={sidebarMode ?? "application-navigation"}
+              data-direction={routeDirection}
             >
+              <NavigationHighlight selector='[data-sidebar="menu-button"][data-active="true"]' />
               {sidebarMode === "settings" ? (
                 <SettingsSidebarNavigation
                   canManageInvitations={user.canManageInvitations === true}
@@ -1482,53 +1527,16 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
               ) : null}
             </ShadcnSidebarContent>
-            {sidebarMode === "mail" || sidebarMode === "tasks" || sidebarMode === "finances" ? (
-              <ReviewNavigation workspace={sidebarMode} footer />
-            ) : null}
           </ShadcnSidebar>
         ) : null}
         {!isMobileWorkspaceDock && sidebarMode ? (
           <SidebarCollapseHandle onResize={updateSidebarWidth} width={sidebarWidth} />
         ) : null}
-        {isMobileWorkspaceDock && !isCalendarWorkspace ? (
+        {hasMobileAppBar ? (
           <MobileWorkspaceDock
-            title={
-              activeWorkspace?.id === "today" ? "Today" : (activeWorkspace?.label ?? "Settings")
-            }
-            pages={
-              activeWorkspace
-                ? [{ icon: HouseIcon, label: "Today", path: "/today" }]
-                : settingsSectionPages(
-                    user.canManageInvitations === true,
-                    workspaceSettingsActions,
-                    settingsCounts,
-                  )
-            }
-            {...(sidebarMode === "tasks"
-              ? {
-                  renderWorkspaceNavigation: (onNavigate: () => void) => (
-                    <TasksSidebar onNavigate={onNavigate} />
-                  ),
-                }
-              : sidebarMode === "mail"
-                ? {
-                    renderWorkspaceNavigation: (onNavigate: () => void) => (
-                      <MailFeatureSidebar onNavigate={onNavigate} />
-                    ),
-                  }
-                : sidebarMode === "finances"
-                  ? {
-                      renderWorkspaceNavigation: (onNavigate: () => void) => (
-                        <FinanceSidebarNavigation
-                          ownerId={user.id}
-                          sessionKey={financeUnreadSessionKey}
-                          onNavigate={onNavigate}
-                          reviewCount={financeInbox.data?.remainingWork.count ?? 0}
-                          section={activeFinanceSection}
-                        />
-                      ),
-                    }
-                  : {})}
+            pages={sectionPages}
+            activeSection={activeSection}
+            workspace={sectionOwner}
           />
         ) : null}
         <ReviewFlowHost
@@ -1543,7 +1551,9 @@ function AuthenticatedApp({ user }: { user: User }) {
           }
         />
         <WorkspaceLayout
-          contentMode={isCalendarWorkspace || sidebarMode === "mail" ? "panes" : "page"}
+          contentMode={
+            !navigationSection && (isCalendarWorkspace || sidebarMode === "mail") ? "panes" : "page"
+          }
           banner={
             !online && (
               <div className="offline-banner">
@@ -1553,11 +1563,11 @@ function AuthenticatedApp({ user }: { user: User }) {
             )
           }
           primaryNavigation={
-            shellPathname === "/settings" ? (
-              isMobileWorkspaceDock ? (
-                <WorkspaceAppBar
-                  workspace="account"
-                  identity={
+            navigationSection ? (
+              <WorkspaceAppBar
+                workspace={activeWorkspace?.id ?? "account"}
+                identity={
+                  isMobileWorkspaceDock ? (
                     <WorkspaceSwitcher
                       compact
                       onNavigate={closeMobileMenu}
@@ -1565,14 +1575,54 @@ function AuthenticatedApp({ user }: { user: User }) {
                       user={user}
                       weather={weather.data}
                     />
-                  }
-                />
-              ) : null
+                  ) : null
+                }
+                title={
+                  <WorkspaceTitleSentence>
+                    <h1>{navigationSection.label}</h1>
+                  </WorkspaceTitleSentence>
+                }
+                context={
+                  activeWorkspace && activeWorkspace.id !== "today" ? (
+                    <WorkspaceFinder
+                      workspace={activeWorkspace.id}
+                      timeZone={user.planningTimezone}
+                      onAction={handleWorkspaceSearchAction}
+                    />
+                  ) : (
+                    <SettingsSearch
+                      groups={searchableSettingsNavigation(user.canManageInvitations === true)}
+                    />
+                  )
+                }
+                attention={
+                  activeWorkspace && activeWorkspace.id !== "today" ? (
+                    <ReviewNavigation workspace={activeWorkspace.id} />
+                  ) : null
+                }
+              />
+            ) : shellPathname === "/settings" ? (
+              <WorkspaceAppBar
+                workspace="account"
+                identity={
+                  isMobileWorkspaceDock ? (
+                    <WorkspaceSwitcher
+                      compact
+                      onNavigate={closeMobileMenu}
+                      pathname={location.pathname}
+                      user={user}
+                      weather={weather.data}
+                    />
+                  ) : null
+                }
+                title={
+                  <WorkspaceTitleSentence>
+                    <WorkspaceHeaderControlsSlot placement="title" />
+                  </WorkspaceTitleSentence>
+                }
+              />
             ) : (
               <WorkspaceAppBarForRoute
-                sidebarOwnsTitle={
-                  !isMobileWorkspaceDock && !!sidebarMode && sidebarMode !== "settings"
-                }
                 workspaceSwitcher={
                   isMobileWorkspaceDock ? (
                     <WorkspaceSwitcher
@@ -1598,7 +1648,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           }
         >
           <main
-            className={`content${isSpatialCalendar ? " content--calendar" : shellPathname === "/mail" ? " content--mail" : ""}`}
+            className={`content${!navigationSection && isSpatialCalendar ? " content--calendar" : !navigationSection && shellPathname === "/mail" ? " content--mail" : ""}`}
             id="main-content"
           >
             <div className="workspace-stage">
@@ -1607,18 +1657,53 @@ function AuthenticatedApp({ user }: { user: User }) {
                 data-direction={routeDirection}
                 key={activeWorkspace?.path ?? location.pathname}
               >
-                {pageTitle && navigationOwner.kind !== "account-utility" ? (
+                {!navigationSection && pageTitle && navigationOwner.kind !== "account-utility" ? (
                   <h1 className="sr-only">{pageTitle}</h1>
                 ) : null}
-                <WorkspaceRoutes
-                  calendarTodaySnap={calendarTodaySnap}
-                  calendars={calendars.data ?? []}
-                  deviceWeatherLocation={deviceWeatherLocation}
-                  setEditor={setEditor}
-                  todayBrief={todayBrief}
-                  user={user}
-                  weather={weather}
-                />
+                {navigationSection ? (
+                  <WorkspaceNavigationPage
+                    section={navigationSection.id}
+                    shortcuts={
+                      hasMobileAppBar
+                        ? sectionPages
+                            .filter((page) => page.kind === "destination")
+                            .map((page) => page.id)
+                        : []
+                    }
+                  >
+                    {sectionOwner === "tasks" ? (
+                      <TasksSidebar onNavigate={closeMobileMenu} />
+                    ) : sectionOwner === "mail" ? (
+                      <MailFeatureSidebar onNavigate={closeMobileMenu} />
+                    ) : sectionOwner === "finances" ? (
+                      <FinanceSidebarNavigation
+                        ownerId={user.id}
+                        sessionKey={financeUnreadSessionKey}
+                        onNavigate={closeMobileMenu}
+                        reviewCount={financeInbox.data?.remainingWork.count ?? 0}
+                        section={activeFinanceSection}
+                      />
+                    ) : (
+                      <SettingsSidebarNavigation
+                        canManageInvitations={user.canManageInvitations === true}
+                        onNavigate={closeMobileMenu}
+                        section={activeSettingsSection}
+                        workspaceActions={workspaceSettingsActions}
+                        counts={settingsCounts}
+                      />
+                    )}
+                  </WorkspaceNavigationPage>
+                ) : (
+                  <WorkspaceRoutes
+                    calendarTodaySnap={calendarTodaySnap}
+                    calendars={calendars.data ?? []}
+                    deviceWeatherLocation={deviceWeatherLocation}
+                    setEditor={setEditor}
+                    todayBrief={todayBrief}
+                    user={user}
+                    weather={weather}
+                  />
+                )}
               </div>
             </div>
           </main>
@@ -1755,16 +1840,16 @@ function WorkspaceRoutes({
       <Route path="/mail/review" element={<LegacyReviewRedirect workspace="mail" />} />
       <Route
         path="/automations"
-        element={<Navigate replace to="/settings?section=workspace-access" />}
+        element={<Navigate replace to="/settings?page=security&subpage=workspace-access" />}
       />
       <Route path="/activity" element={<LegacySettingsRedirect section="activity" />} />
-      <Route path="/reviews" element={<Navigate replace to="/settings?section=profile" />} />
+      <Route path="/reviews" element={<Navigate replace to="/settings?page=profile" />} />
       <Route path="/goals" element={<LegacySettingsRedirect section="goals" />} />
       <Route path="/motives" element={<LegacySettingsRedirect section="motives" />} />
       <Route path="/finances/review/*" element={<LegacyReviewRedirect workspace="finances" />} />
       <Route
         path="/finances/profile"
-        element={<Navigate replace to="/settings?section=finances#guidance" />}
+        element={<Navigate replace to="/settings?page=finances#guidance" />}
       />
       <Route
         path="/finances/*"
@@ -1788,6 +1873,7 @@ function LegacySettingsRedirect({ section }: { section: SettingsSectionId }) {
 }
 
 function SidebarNavigationItem({
+  contextMenu,
   badge,
   count,
   icon: Icon,
@@ -1795,11 +1881,15 @@ function SidebarNavigationItem({
   label,
   onNavigate,
   path,
-}: NavigationItemDefinition & { isActive?: boolean; onNavigate: () => void }) {
+}: NavigationItemDefinition & {
+  isActive?: boolean;
+  onNavigate: () => void;
+  contextMenu?: ReactNode;
+}) {
   const location = useLocation();
   const isActive = explicitIsActive ?? location.pathname === path;
   const workspaceId = workspaceIdForPath(path);
-  return (
+  const row = (
     <ShadcnSidebarMenuItem>
       <ShadcnSidebarMenuButton
         className={badge || count !== undefined ? "sidebar-item-with-meta" : undefined}
@@ -1819,14 +1909,26 @@ function SidebarNavigationItem({
       <SidebarItemMeta attention={Boolean(badge)} count={count} label={label} />
     </ShadcnSidebarMenuItem>
   );
+  return contextMenu ? (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuLabel>{label}</ContextMenuLabel>
+        <ContextMenuSeparator />
+        {contextMenu}
+      </ContextMenuContent>
+    </ContextMenu>
+  ) : (
+    row
+  );
 }
 
 const navigationIcons = {
   Profile: UserCircleIcon,
-  "Security & access": LockIcon,
-  "Activity log": PulseIcon,
+  "Security & Access": LockIcon,
+  "Activity Log": PulseIcon,
   Account: UserCircleIcon,
-  "Connected agents": PlugIcon,
+  "Connected Agents": PlugIcon,
   Appearance: PaintBrushIcon,
   Calendar: CalendarIcon,
   Calendars: CalendarIcon,
@@ -1842,7 +1944,7 @@ const navigationIcons = {
   Tasks: ListChecksIcon,
   Today: HouseIcon,
   Wallpaper: ImageIcon,
-  "Workspace access": ShieldCheckIcon,
+  "Workspace Access": ShieldCheckIcon,
   Activity: PulseIcon,
   Reviews: ShieldCheckIcon,
 } as const;
@@ -1869,11 +1971,29 @@ function NavigationIcon({
       />
     );
   }
-  return <OutlineIcon aria-hidden="true" className={className} />;
+  return (
+    <OutlineIcon
+      aria-hidden="true"
+      className={className}
+      weight={active ? "Filled" : "Outline"}
+      data-navigation-icon-weight={active ? "fill" : "regular"}
+    />
+  );
+}
+
+function useWorkspaceSearchAction(setEditor: (editor: Editor) => void) {
+  const navigateSearch = useNavigate();
+  return (action: SearchAction) => {
+    if (action === "new-task") setEditor({ kind: "task" });
+    if (action === "new-reminder") setEditor({ kind: "reminder" });
+    if (action === "new-event") setEditor({ kind: "event" });
+    if (action === "new-message") navigateSearch("/mail?compose=new");
+    if (action === "new-transaction")
+      navigateSearch("/finances/transactions#finance-add-transaction");
+  };
 }
 
 function WorkspaceAppBarForRoute({
-  sidebarOwnsTitle,
   onCalendarToday,
   pageTitle,
   pathname,
@@ -1885,7 +2005,6 @@ function WorkspaceAppBarForRoute({
   weather,
   workspaceSwitcher,
 }: {
-  sidebarOwnsTitle: boolean;
   onCalendarToday: () => void;
   pageTitle: string | null;
   pathname: string;
@@ -1897,27 +2016,16 @@ function WorkspaceAppBarForRoute({
   weather: WeatherSnapshot | undefined;
   workspaceSwitcher: ReactNode;
 }) {
-  const navigateSearch = useNavigate();
-  const handleSearchAction = (action: SearchAction) => {
-    if (action === "new-task") setEditor({ kind: "task" });
-    if (action === "new-reminder") setEditor({ kind: "reminder" });
-    if (action === "new-event") setEditor({ kind: "event" });
-    if (action === "new-message") navigateSearch("/mail?compose=new");
-    if (action === "new-transaction")
-      navigateSearch("/finances/transactions#finance-add-transaction");
-  };
+  const handleSearchAction = useWorkspaceSearchAction(setEditor);
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const isSpatialCalendar = pathname === "/calendar";
   const isReviewQueue = pathname.endsWith("/decisions");
   const identity = isReviewQueue ? (
     <span className="workspace-app-bar__title">Needs review</span>
-  ) : workspace === "tasks" ? null : sidebarOwnsTitle ? null : isSpatialCalendar ? (
-    <CalendarAppBarIdentity user={user} workspaceSwitcher={workspaceSwitcher} />
+  ) : pathname === "/tasks" ? null : isSpatialCalendar ? (
+    <CalendarAppBarIdentity user={user} workspaceSwitcher={null} />
   ) : pathname === "/today" ? (
     <div className="calendar-app-bar__identity-cluster">
-      {workspaceSwitcher ? (
-        <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
-      ) : null}
       {todayBrief ? (
         <TodayNavigationTitle
           generatedAt={todayBrief.generatedAt}
@@ -1927,10 +2035,8 @@ function WorkspaceAppBarForRoute({
         <span className="workspace-app-bar__title">Today</span>
       )}
     </div>
-  ) : workspace === "mail" ? (
-    <div className="mail-app-bar__identity-cluster">
-      <span className="workspace-app-bar__title">Mail</span>
-    </div>
+  ) : pathname === "/mail" ? (
+    <MailAppBarTitle />
   ) : (
     <span className="workspace-app-bar__title">
       {/* Account routes always supply a page title, so the workspace registry
@@ -1940,12 +2046,14 @@ function WorkspaceAppBarForRoute({
   );
   const context = isReviewQueue ? null : isSpatialCalendar ? (
     <div className="calendar-header-context">
-      <WorkspaceFinder
-        workspace="calendar"
-        timeZone={user.planningTimezone}
-        onAction={handleSearchAction}
-      />
       <CalendarAppBarControls
+        search={
+          <WorkspaceFinder
+            workspace="calendar"
+            timeZone={user.planningTimezone}
+            onAction={handleSearchAction}
+          />
+        }
         accounts={<CalendarAccountsControl />}
         onToday={onCalendarToday}
         user={user}
@@ -1964,73 +2072,67 @@ function WorkspaceAppBarForRoute({
     />
   ) : workspace === "mail" ? (
     <MailAppBarControls
+      accounts={<MailAccountsControl />}
       sync={<MailSyncButton />}
       search={<WorkspaceFinder workspace="mail" onAction={handleSearchAction} />}
     />
   ) : workspace === "finances" ? (
     <>
-      <WorkspaceHeaderControlsSlot placement="leading" />
       <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
-      <WorkspaceHeaderControlsSlot />
     </>
   ) : null;
 
   return (
-    <WorkspaceAppBar
-      actions={
-        <>
-          {"__TAURI_INTERNALS__" in window && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <ShadcnButton
-                  aria-label="Keep window on top"
-                  aria-pressed={pinned}
-                  onClick={togglePin}
-                  size="icon"
-                  variant={pinned ? "secondary" : "ghost"}
-                >
-                  <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
-                </ShadcnButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Keep window on top</TooltipContent>
-            </Tooltip>
-          )}
-          {workspace === "mail" && !isReviewQueue ? <MailAccountsControl /> : null}
-        </>
-      }
-      primaryActions={
-        isReviewQueue ? null : pathname === "/reminders" ? (
-          <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
-        ) : workspace === "tasks" ? (
-          <TasksCreateButton
-            onCreate={(placement) =>
-              setEditor({ kind: "task", ...(placement ? { placement } : {}) })
-            }
-            onCreateReminder={() => setEditor({ kind: "reminder" })}
-          />
-        ) : workspace === "today" ? (
-          <CreateMenu setEditor={setEditor} />
-        ) : null
-      }
-      attention={
-        isSpatialCalendar ? (
-          <ReviewNavigation workspace="calendar" />
-        ) : workspaceSwitcher &&
-          (workspace === "mail" || workspace === "tasks" || workspace === "finances") ? (
-          <ReviewNavigation workspace={workspace} />
-        ) : null
-      }
-      context={context}
-      identity={
-        <>
-          {workspaceSwitcher && !isSpatialCalendar && pathname !== "/today"
-            ? workspaceSwitcher
-            : null}
-          {identity}
-        </>
-      }
-      workspace={workspace}
-    />
+    <>
+      <WorkspaceAppBar
+        actions={
+          <>
+            {"__TAURI_INTERNALS__" in window && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ShadcnButton
+                    aria-label="Keep window on top"
+                    aria-pressed={pinned}
+                    onClick={togglePin}
+                    size="icon"
+                    variant={pinned ? "secondary" : "ghost"}
+                  >
+                    <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
+                  </ShadcnButton>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Keep window on top</TooltipContent>
+              </Tooltip>
+            )}
+          </>
+        }
+        attention={
+          isSpatialCalendar ? (
+            <ReviewNavigation workspace="calendar" />
+          ) : workspace === "mail" || workspace === "tasks" || workspace === "finances" ? (
+            <ReviewNavigation workspace={workspace} />
+          ) : null
+        }
+        context={context}
+        identity={workspaceSwitcher}
+        title={
+          <WorkspaceTitleSentence>
+            {identity}
+            <WorkspaceHeaderControlsSlot placement="title" />
+          </WorkspaceTitleSentence>
+        }
+        workspace={workspace}
+      />
+      {pathname === "/reminders" && !isReviewQueue ? (
+        <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
+      ) : null}
+      {workspace === "tasks" && pathname !== "/reminders" && !isReviewQueue ? (
+        <TasksCreateButton
+          floating
+          onCreate={(placement) => setEditor({ kind: "task", ...(placement ? { placement } : {}) })}
+          onCreateReminder={() => setEditor({ kind: "reminder" })}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -2046,6 +2148,7 @@ function WorkspaceRail({
   const owner = navigationOwnerForLocation(pathname);
   return (
     <nav aria-label="Workspace navigation" className="workspace-rail" id="workspace-rail">
+      <NavigationHighlight selector='.workspace-rail__link[aria-current="page"]' />
       <div className="workspace-rail__destinations">
         {workspaceDefinitions.map((workspace) => {
           const active = owner.kind === "workspace" && owner.workspace === workspace.id;
@@ -2196,8 +2299,13 @@ function WorkspaceSwitcher({
                   onClick={onNavigate}
                   to="/settings"
                 >
-                  <SettingsIcon aria-hidden="true" />
-                  <span>Settings</span>
+                  <SettingsIcon aria-hidden="true" weight={isSettings ? "Filled" : "Outline"} />
+                  <span className="workspace-navigation-item__label">
+                    <span>Settings</span>
+                    {isSettings ? (
+                      <span className="workspace-navigation-item__current">current workspace</span>
+                    ) : null}
+                  </span>
                   {isSettings ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
                 </Link>
               </DropdownMenuItem>
@@ -2232,120 +2340,40 @@ function WorkspaceMenuItem({
   const Icon = item.id === "today" ? todayWeatherIcon(weather, timeZone) : item.icon;
   const isActive = workspaceForPath(pathname)?.path === path;
   return (
-    <DropdownMenuItem asChild>
-      <Link
-        aria-current={isActive ? "page" : undefined}
-        aria-label={label}
-        className="workspace-navigation-item"
-        data-workspace={item.id}
-        data-active={isActive ? "true" : undefined}
-        onClick={onNavigate}
-        to={path}
-      >
-        <Icon aria-hidden="true" weight={isActive ? "Filled" : "Outline"} />
-        <span>{label}</span>
-      </Link>
-    </DropdownMenuItem>
+    <div className="workspace-picker-row" data-active={isActive || undefined}>
+      <DropdownMenuItem asChild>
+        <Link
+          aria-current={isActive ? "page" : undefined}
+          aria-label={label}
+          className="workspace-navigation-item"
+          data-workspace={item.id}
+          data-active={isActive ? "true" : undefined}
+          onClick={onNavigate}
+          to={path}
+        >
+          <Icon aria-hidden="true" weight={isActive ? "Filled" : "Outline"} />
+          <span className="workspace-navigation-item__label">
+            <span>{label}</span>
+            {isActive ? (
+              <span className="workspace-navigation-item__current">current workspace</span>
+            ) : null}
+          </span>
+        </Link>
+      </DropdownMenuItem>
+      {item.id !== "today" ? (
+        <DropdownMenuItem asChild>
+          <Link
+            className="workspace-picker-settings"
+            aria-label={`${label} settings`}
+            to={settingsPath(item.id)}
+            onClick={onNavigate}
+          >
+            <SettingsIcon aria-hidden="true" />
+          </Link>
+        </DropdownMenuItem>
+      ) : null}
+    </div>
   );
-}
-
-function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <ShadcnButton aria-label="Add" size="sm">
-          <PlusIcon aria-hidden="true" data-icon="inline-start" /> <span>Add</span>
-        </ShadcnButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuGroup>
-          <DropdownMenuItem onSelect={() => setEditor({ kind: "task" })}>
-            <ListChecksIcon aria-hidden="true" /> Task
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setEditor({ kind: "reminder" })}>
-            <ListTodoIcon aria-hidden="true" /> Reminder
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setEditor({ kind: "event" })}>
-            <CalendarIcon aria-hidden="true" /> Event
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-type EmptyDayQuote = { author?: string; source?: string; text: string };
-
-const openDayQuotes: EmptyDayQuote[] = [
-  {
-    author: "Marcus Aurelius",
-    source: "Meditations, VII.67",
-    text: "Very little is needed to make a happy life.",
-  },
-  {
-    author: "Henry David Thoreau",
-    source: "Letter to H.G.O. Blake, November 16, 1857",
-    text: "It is not enough to be industrious; so are the ants. What are you industrious about?",
-  },
-  {
-    author: "Seneca",
-    source: "On the Shortness of Life",
-    text: "It is not that we have a short time to live, but that we waste much of it.",
-  },
-  {
-    author: "Ecclesiastes 3:1",
-    source: "KJV",
-    text: "To every thing there is a season, and a time to every purpose under the heaven.",
-  },
-  {
-    author: "Lao Tzu",
-    source: "Tao Te Ching, chapter 37",
-    text: "The Tao does nothing, and yet nothing is left undone.",
-  },
-  {
-    author: "Ovid",
-    text: "Take rest; a field that has rested gives a bountiful crop.",
-  },
-  {
-    author: "Annie Dillard",
-    source: "The Writing Life",
-    text: "How we spend our days is, of course, how we spend our lives.",
-  },
-  {
-    author: "Wendell Berry",
-    source: "The Real Work",
-    text: "The impeded stream is the one that sings.",
-  },
-  {
-    author: "Kurt Vonnegut",
-    source: "A Man Without a Country",
-    text: "If this isn't nice, I don't know what is.",
-  },
-  {
-    author: "Anne Lamott",
-    text: "Almost everything will work again if you unplug it for a few minutes, including you.",
-  },
-  { text: "Nothing on the calendar. That's not a mistake." },
-  { text: "A day with no shape yet." },
-  { text: "Some days are supposed to look like this." },
-  { text: "Unclaimed hours." },
-];
-
-const finishedDayQuotes: EmptyDayQuote[] = [
-  { text: "That's everything. Go be a person." },
-  { text: "Done. Don't go looking for more." },
-  { text: "You closed the loop. Leave it closed." },
-  { text: "Nothing left. This is what finished feels like." },
-  { text: "All handled. Resist the urge to add something." },
-  { text: "Empty by your own doing." },
-  { text: "The list is done being your problem." },
-  { text: "Rest isn't the reward for finishing. It's just what's next." },
-];
-
-function emptyDayQuote(day: LocalDate, allCommitmentsDone: boolean): EmptyDayQuote {
-  const quotes = allCommitmentsDone ? finishedDayQuotes : openDayQuotes;
-  const index = (day.year * 372 + day.month * 31 + day.day) % quotes.length;
-  return quotes[index] as EmptyDayQuote;
 }
 
 function TodayPage({
@@ -2367,17 +2395,12 @@ function TodayPage({
     isPending: boolean;
   };
 }) {
-  const completedReminders = useQuery({
-    queryFn: () => api.listReminders({ completed: true, limit: 100 }),
-    queryKey: ["reminders", "completed"],
-  });
+  const mobile = useMediaQuery("(max-width: 767px)");
+  const [scheduleExpanded, setScheduleExpanded] = useState<boolean | null>(null);
+  const expanded = scheduleExpanded ?? !mobile;
   if (brief.isError && !brief.data)
     return <InlineError error={brief.error} retry={brief.refetch} />;
-  if (completedReminders.isError && !completedReminders.data)
-    return <InlineError error={completedReminders.error} retry={completedReminders.refetch} />;
-  if (brief.isPending || completedReminders.isPending || !brief.data) {
-    return <PageLoading workspace="today" />;
-  }
+  if (brief.isPending || !brief.data) return <PageLoading workspace="today" />;
   const agenda = brief.data;
   const calendarColorsById = new Map(
     calendars.map((calendar) => [calendar.id, calendar.color] as const),
@@ -2386,12 +2409,6 @@ function TodayPage({
   const today = localDateAt(currentTime, user.planningTimezone);
   const overdueReminders = agenda.overdue.filter((reminder) => reminder.completedAt === null);
   const todayReminders = agenda.today.filter((reminder) => reminder.completedAt === null);
-  const anytimeReminders = agenda.anytime.filter((reminder) => reminder.completedAt === null);
-  const doneToday = completedReminders.data.items.filter(
-    (reminder) =>
-      reminder.completedAt !== null &&
-      sameLocalDate(localDateAt(new Date(reminder.completedAt), user.planningTimezone), today),
-  );
   const openTasks = agenda.tasks.filter(
     (task) => task.lifecycle === "open" && task.deletedAt === null,
   );
@@ -2400,30 +2417,6 @@ function TodayPage({
     currentTime,
     user.planningTimezone,
   );
-  const recommendedTasks = new Map(
-    (agenda.recommendedTasks ?? []).map((recommendation) => [
-      recommendation.task.id,
-      recommendation,
-    ]),
-  );
-  const doneTasksToday = agenda.completedTasks.filter(
-    (task) =>
-      task.completedAt !== null &&
-      sameLocalDate(localDateAt(new Date(task.completedAt), user.planningTimezone), today),
-  );
-  const remainingCount =
-    overdueReminders.length +
-    todayReminders.length +
-    anytimeReminders.length +
-    overdueTasks.length +
-    todayTasks.length;
-  const overdueCommitmentCount = overdueReminders.length + overdueTasks.length;
-  const commitmentCount =
-    overdueCommitmentCount + todayReminders.length + anytimeReminders.length + todayTasks.length;
-  const commitmentSummary =
-    commitmentCount === 0
-      ? "Nothing needs your attention"
-      : `${commitmentCount} ${commitmentCount === 1 ? "thing" : "things"} left${overdueCommitmentCount > 0 ? `, ${overdueCommitmentCount} overdue` : ""}`;
   const remainingTimedEvents = Array.from(
     new Map(
       [...agenda.now, ...(agenda.next ? [agenda.next] : []), ...agenda.laterToday]
@@ -2467,116 +2460,123 @@ function TodayPage({
     timelineItems.length === 0
       ? "Nothing scheduled today"
       : `${timelineItems.length} total ${timelineItems.length === 1 ? "event" : "events"}, ${eventsLeftToday} left today${ongoingEventCount > 0 ? `, ${ongoingEventCount} ongoing` : ""}`;
-  const openDayQuote = emptyDayQuote(today, remainingCount === 0);
+  const nextItem = timelineItems.find((item) => item.material.kind === "event") ?? timelineItems[0];
   return (
     <div className="today-layout" data-page="today">
       <QueryFeedback query={brief} title="Couldn’t refresh today’s plan." staleOnly />
-      <QueryFeedback
-        query={completedReminders}
-        title="Couldn’t refresh completed reminders."
-        staleOnly
-      />
       <section className="day-column">
-        <section aria-label="Today's calendar" className="today-schedule">
-          <div className="section-heading today-section-heading">
-            <div className="today-section-heading__copy">
-              <h2>Your timeline</h2>
-              <p className="today-section-heading__description">{eventSummary}</p>
-            </div>
+        <ShadcnCollapsible
+          open={expanded}
+          onOpenChange={setScheduleExpanded}
+          aria-label="Today's calendar"
+          role="region"
+          className="today-schedule"
+        >
+          <div className="settings-subsection__label today-section-label">
+            <h2>schedule</h2>
+            <ShadcnCollapsibleTrigger asChild>
+              <ShadcnButton
+                variant="ghost"
+                className="today-schedule-toggle"
+                aria-label={expanded ? "Collapse schedule" : "Expand schedule"}
+              >
+                <span>{expanded ? "show less" : "show schedule"}</span>
+              </ShadcnButton>
+            </ShadcnCollapsibleTrigger>
           </div>
-          <TodayConditions
-            deviceWeatherLocation={deviceWeatherLocation}
-            savedLocation={user.homeLocation}
-            weather={weather}
-          />
-          {agenda.allDay.length > 0 ? (
-            <section aria-label="All-day occasions" className="today-all-day-strip">
-              <ShadcnItemGroup className="today-all-day-strip__events">
-                {agenda.allDay.map((event) => (
-                  <TodayAllDayEventCard
-                    calendarColor={calendarColorsById.get(event.calendarId)}
-                    event={event}
-                    key={event.id}
-                    onEdit={() => setEditor({ event, kind: "event" })}
+          <ShadcnCard className="today-section-card">
+            <ShadcnCardContent className="today-section-content">
+              {timelineItems.length > 0 ? (
+                <p className="today-section-summary">{eventSummary}</p>
+              ) : null}
+              {!expanded ? (
+                <>
+                  {agenda.allDay.map((event) => (
+                    <TodayAllDayEventCard
+                      key={event.id}
+                      calendarColor={calendarColorsById.get(event.calendarId)}
+                      event={event}
+                      onEdit={() => setEditor({ event, kind: "event" })}
+                      timeZone={user.planningTimezone}
+                    />
+                  ))}
+                  {nextItem ? (
+                    <TodayTimeline
+                      preview
+                      calendars={calendars}
+                      calendarColorsById={calendarColorsById}
+                      currentTime={currentTime}
+                      items={[nextItem]}
+                      onEditTask={(task) => setEditor({ kind: "task", task })}
+                      timeZone={user.planningTimezone}
+                    />
+                  ) : agenda.allDay.length ? null : (
+                    <DataViewEmpty
+                      icon={CalendarIcon}
+                      title="nothing else scheduled today"
+                      description="your schedule is clear"
+                    />
+                  )}
+                </>
+              ) : null}
+              <ShadcnCollapsibleContent>
+                <TodayConditions
+                  deviceWeatherLocation={deviceWeatherLocation}
+                  savedLocation={user.homeLocation}
+                  weather={weather}
+                />
+                {agenda.allDay.length > 0 ? (
+                  <section aria-label="All-day occasions" className="today-all-day-strip">
+                    <ShadcnItemGroup className="today-all-day-strip__events">
+                      {agenda.allDay.map((event) => (
+                        <TodayAllDayEventCard
+                          calendarColor={calendarColorsById.get(event.calendarId)}
+                          event={event}
+                          key={event.id}
+                          onEdit={() => setEditor({ event, kind: "event" })}
+                          timeZone={user.planningTimezone}
+                        />
+                      ))}
+                    </ShadcnItemGroup>
+                  </section>
+                ) : null}
+                {timelineItems.length > 0 ? (
+                  <TodayTimeline
+                    calendars={calendars}
+                    calendarColorsById={calendarColorsById}
+                    currentTime={currentTime}
+                    items={timelineItems}
+                    onEditTask={(task) => setEditor({ kind: "task", task })}
                     timeZone={user.planningTimezone}
                   />
-                ))}
-              </ShadcnItemGroup>
-            </section>
-          ) : null}
-          {timelineItems.length > 0 ? (
-            <TodayTimeline
-              calendarColorsById={calendarColorsById}
-              currentTime={currentTime}
-              items={timelineItems}
-              onEditTask={(task) => setEditor({ kind: "task", task })}
-              timeZone={user.planningTimezone}
-            />
-          ) : (
-            <QuoteCard
-              {...(openDayQuote.author ? { author: openDayQuote.author } : {})}
-              {...(openDayQuote.source ? { source: openDayQuote.source } : {})}
-              className="today-empty-quote"
-              label="An open calendar"
-              text={openDayQuote.text}
-            />
-          )}
-        </section>
+                ) : (
+                  <DataViewEmpty
+                    icon={CalendarIcon}
+                    title="nothing else scheduled today"
+                    description="your schedule is clear"
+                  />
+                )}
+              </ShadcnCollapsibleContent>
+            </ShadcnCardContent>
+          </ShadcnCard>
+        </ShadcnCollapsible>
       </section>
       <aside aria-labelledby="today-queue-title" className="today-queue">
-        <div className="section-heading today-section-heading">
-          <div className="today-section-heading__copy">
-            <h2 id="today-queue-title">To take care of</h2>
-            <p className="today-section-heading__description">{commitmentSummary}</p>
-          </div>
-          <ShadcnBadge variant="secondary">{commitmentCount}</ShadcnBadge>
-        </div>
         <TodayCommitmentList
-          anytimeReminders={anytimeReminders}
           overdueReminders={overdueReminders}
           overdueTasks={overdueTasks}
-          recommendedTasks={recommendedTasks}
+          now={agenda.generatedAt}
           setEditor={setEditor}
           timeZone={user.planningTimezone}
           todayReminders={todayReminders}
           todayTasks={todayTasks}
         />
-        {doneToday.length > 0 || doneTasksToday.length > 0 ? (
-          <ShadcnCollapsible className="today-history">
-            <ShadcnCollapsibleTrigger className="today-history__trigger" type="button">
-              <CircleCheckIcon aria-hidden="true" />
-              <span>Done today</span>
-              <ShadcnBadge variant="secondary">
-                {doneToday.length + doneTasksToday.length}
-              </ShadcnBadge>
-              <ChevronDownIcon aria-hidden="true" />
-            </ShadcnCollapsibleTrigger>
-            <ShadcnCollapsibleContent className="today-history__content">
-              {doneToday.length > 0 ? (
-                <ReminderGroup
-                  label="Completed reminders"
-                  reminders={doneToday}
-                  setEditor={setEditor}
-                  timeZone={user.planningTimezone}
-                />
-              ) : null}
-              {doneTasksToday.length > 0 ? (
-                <TaskGroup
-                  label="Completed tasks"
-                  setEditor={setEditor}
-                  tasks={doneTasksToday}
-                  timeZone={user.planningTimezone}
-                />
-              ) : null}
-            </ShadcnCollapsibleContent>
-          </ShadcnCollapsible>
-        ) : null}
       </aside>
     </div>
   );
 }
 
-type TodayCommitmentFilter = "all" | "overdue" | "tasks" | "reminders";
+type TodayCommitmentFilter = "all" | "tasks" | "reminders";
 type TodayCommitment =
   | { kind: "task"; overdue: boolean; task: Task }
   | { kind: "reminder"; overdue: boolean; reminder: Reminder };
@@ -2584,19 +2584,17 @@ type TodayCommitment =
 const todayCommitmentsPerPage = 6;
 
 function TodayCommitmentList({
-  anytimeReminders,
+  now,
   overdueReminders,
   overdueTasks,
-  recommendedTasks,
   setEditor,
   timeZone,
   todayReminders,
   todayTasks,
 }: {
-  anytimeReminders: Reminder[];
+  now: string;
   overdueReminders: Reminder[];
   overdueTasks: Task[];
-  recommendedTasks: Map<string, DailyBrief["recommendedTasks"][number]>;
   setEditor: (editor: Editor) => void;
   timeZone: string;
   todayReminders: Reminder[];
@@ -2604,7 +2602,37 @@ function TodayCommitmentList({
 }) {
   const [filter, setFilter] = useState<TodayCommitmentFilter>("all");
   const [requestedPage, setRequestedPage] = useState(1);
-  const commitments: TodayCommitment[] = [
+  const [period, setPeriod] = useState<CommitmentPeriod>("today");
+  const today = commitmentDate(now, timeZone);
+  const [custom, setCustom] = useState({ from: today, through: today });
+  const preferences = useWorkspacePreferences("calendar");
+  const range = commitmentRange(
+    period,
+    today,
+    preferences.data?.preferences.weekStartsOn ?? "monday",
+    custom,
+  );
+  const tasks = useQuery({
+    queryKey: ["tasks", "today-range"],
+    enabled: period !== "today",
+    queryFn: () =>
+      allCommitmentPages((cursor) =>
+        api.listTasks({ lifecycle: "open", limit: 100, ...(cursor ? { cursor } : {}) }),
+      ),
+  });
+  const reminders = useQuery({
+    queryKey: ["reminders", "today-range"],
+    enabled: period !== "today",
+    queryFn: () =>
+      allCommitmentPages((cursor) =>
+        api.listReminders({ completed: false, limit: 100, ...(cursor ? { cursor } : {}) }),
+      ),
+  });
+  const rangePending = period !== "today" && (tasks.isPending || reminders.isPending);
+  const rangeFailed =
+    period !== "today" &&
+    ((tasks.isError && !tasks.data) || (reminders.isError && !reminders.data));
+  const todayCommitments: TodayCommitment[] = [
     ...overdueTasks.map((task) => ({ kind: "task" as const, overdue: true, task })),
     ...overdueReminders.map((reminder) => ({
       kind: "reminder" as const,
@@ -2616,16 +2644,21 @@ function TodayCommitmentList({
       overdue: false,
       reminder,
     })),
-    ...anytimeReminders.map((reminder) => ({
-      kind: "reminder" as const,
-      overdue: false,
-      reminder,
-    })),
     ...todayTasks.map((task) => ({ kind: "task" as const, overdue: false, task })),
   ];
+  const commitments =
+    period === "today"
+      ? todayCommitments
+      : scopedCommitments(
+          tasks.data ?? [],
+          reminders.data ?? [],
+          range,
+          timeZone,
+          now,
+          period !== "custom",
+        );
   const filteredCommitments = commitments.filter((commitment) => {
     if (filter === "all") return true;
-    if (filter === "overdue") return commitment.overdue;
     return filter === "tasks" ? commitment.kind === "task" : commitment.kind === "reminder";
   });
   const pageCount = Math.max(1, Math.ceil(filteredCommitments.length / todayCommitmentsPerPage));
@@ -2644,104 +2677,126 @@ function TodayCommitmentList({
     setRequestedPage(Math.min(Math.max(nextPage, 1), pageCount));
 
   return (
-    <div className="today-commitments">
-      <SegmentedControl aria-label="Commitment filters" onValueChange={selectFilter} value={filter}>
-        <SegmentedControlItem value="all">All</SegmentedControlItem>
-        <SegmentedControlItem value="overdue">Overdue</SegmentedControlItem>
-        <SegmentedControlItem value="tasks">Tasks</SegmentedControlItem>
-        <SegmentedControlItem value="reminders">Reminders</SegmentedControlItem>
-      </SegmentedControl>
-      {visibleCommitments.length > 0 ? (
-        <ShadcnScrollArea aria-label="Commitments" className="today-commitments__scroll">
-          <ShadcnItemGroup aria-label="Commitments" className="today-commitments__list">
-            {visibleCommitments.map((commitment) => {
-              if (commitment.kind === "task") {
-                const recommendation = recommendedTasks.get(commitment.task.id);
-                return (
-                  <TaskRow
-                    compact
-                    className={cn(commitment.overdue && "today-commitment-row--overdue")}
+    <>
+      <CommitmentControls
+        kind={filter}
+        onKind={selectFilter}
+        period={period}
+        range={range}
+        onPeriod={(value) => {
+          setPeriod(value as CommitmentPeriod);
+          setRequestedPage(1);
+        }}
+        onDates={(from, through) => {
+          setCustom({ from, through });
+          setPeriod("custom");
+          setRequestedPage(1);
+        }}
+      />
+      <div className="today-commitments">
+        {period !== "today" ? (
+          <>
+            <QueryFeedback query={tasks} title="Couldn’t refresh tasks." staleOnly />
+            <QueryFeedback query={reminders} title="Couldn’t refresh reminders." staleOnly />
+          </>
+        ) : null}
+        {rangeFailed ? (
+          <InlineError
+            error={tasks.error ?? reminders.error}
+            retry={() => {
+              void tasks.refetch();
+              void reminders.refetch();
+            }}
+          />
+        ) : rangePending ? (
+          <DataViewLoading label="Loading commitments" />
+        ) : visibleCommitments.length > 0 ? (
+          <ShadcnScrollArea aria-label="Commitments" className="today-commitments__scroll">
+            <ShadcnItemGroup aria-label="Commitments" className="today-commitments__list">
+              {visibleCommitments.map((commitment) =>
+                commitment.kind === "task" ? (
+                  <TodayCommitmentRow
                     key={`task:${commitment.task.id}`}
-                    onEdit={() => setEditor({ kind: "task", task: commitment.task })}
-                    {...(recommendation ? { recommendation } : {})}
-                    task={commitment.task}
+                    kind="task"
+                    record={commitment.task}
+                    onOpen={() => setEditor({ kind: "task", task: commitment.task })}
                     timeZone={timeZone}
                   />
-                );
-              }
-              return (
-                <ReminderRow
-                  key={`reminder:${commitment.reminder.id}`}
-                  onEdit={() => setEditor({ kind: "reminder", reminder: commitment.reminder })}
-                  reminder={commitment.reminder}
-                  timeZone={timeZone}
-                />
-              );
-            })}
-          </ShadcnItemGroup>
-        </ShadcnScrollArea>
-      ) : (
-        <EmptyState
-          icon={<CircleCheckIcon />}
-          title={commitments.length === 0 ? "Nothing pulling at you" : "Nothing in this view"}
-        >
-          {commitments.length === 0
-            ? "Add something when it deserves your attention."
-            : "Try another filter."}
-        </EmptyState>
-      )}
-      {filteredCommitments.length > 0 ? (
-        <div className="today-commitments__pagination">
-          <span>
-            {pageStart + 1}–
-            {Math.min(pageStart + todayCommitmentsPerPage, filteredCommitments.length)} of{" "}
-            {filteredCommitments.length}
-          </span>
-          <ShadcnPagination>
-            <ShadcnPaginationContent>
-              <ShadcnPaginationItem>
-                <ShadcnPaginationPrevious
-                  aria-disabled={page === 1}
-                  href="#"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    selectPage(page - 1);
-                  }}
-                  tabIndex={page === 1 ? -1 : undefined}
-                  text="Prev"
-                />
-              </ShadcnPaginationItem>
-              {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => (
-                <ShadcnPaginationItem key={pageNumber}>
-                  <ShadcnPaginationLink
-                    aria-label={`Go to page ${pageNumber}`}
+                ) : (
+                  <TodayCommitmentRow
+                    key={`reminder:${commitment.reminder.id}`}
+                    kind="reminder"
+                    record={commitment.reminder}
+                    onOpen={() => setEditor({ kind: "reminder", reminder: commitment.reminder })}
+                    timeZone={timeZone}
+                  />
+                ),
+              )}
+            </ShadcnItemGroup>
+          </ShadcnScrollArea>
+        ) : (
+          <DataViewEmpty
+            icon={CircleCheckIcon}
+            title="nothing in this range"
+            description="choose another date range or commitment type."
+          />
+        )}
+        {!rangePending && !rangeFailed && filteredCommitments.length > 0 ? (
+          <div className="today-commitments__pagination">
+            <span>
+              {pageStart + 1}–
+              {Math.min(pageStart + todayCommitmentsPerPage, filteredCommitments.length)} of{" "}
+              {filteredCommitments.length}
+            </span>
+            <ShadcnPagination>
+              <ShadcnPaginationContent>
+                <ShadcnPaginationItem>
+                  <ShadcnPaginationPrevious
+                    aria-disabled={page === 1}
                     href="#"
-                    isActive={pageNumber === page}
                     onClick={(event) => {
                       event.preventDefault();
-                      selectPage(pageNumber);
+                      selectPage(page - 1);
                     }}
-                  >
-                    {pageNumber}
-                  </ShadcnPaginationLink>
+                    tabIndex={page === 1 ? -1 : undefined}
+                    text="Prev"
+                  />
                 </ShadcnPaginationItem>
-              ))}
-              <ShadcnPaginationItem>
-                <ShadcnPaginationNext
-                  aria-disabled={page === pageCount}
-                  href="#"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    selectPage(page + 1);
-                  }}
-                  tabIndex={page === pageCount ? -1 : undefined}
-                />
-              </ShadcnPaginationItem>
-            </ShadcnPaginationContent>
-          </ShadcnPagination>
-        </div>
-      ) : null}
-    </div>
+                {Array.from(
+                  { length: Math.min(3, pageCount) },
+                  (_, index) => Math.max(1, Math.min(page - 1, pageCount - 2)) + index,
+                ).map((pageNumber) => (
+                  <ShadcnPaginationItem key={pageNumber}>
+                    <ShadcnPaginationLink
+                      aria-label={`Go to page ${pageNumber}`}
+                      href="#"
+                      isActive={pageNumber === page}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        selectPage(pageNumber);
+                      }}
+                    >
+                      {pageNumber}
+                    </ShadcnPaginationLink>
+                  </ShadcnPaginationItem>
+                ))}
+                <ShadcnPaginationItem>
+                  <ShadcnPaginationNext
+                    aria-disabled={page === pageCount}
+                    href="#"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      selectPage(page + 1);
+                    }}
+                    tabIndex={page === pageCount ? -1 : undefined}
+                  />
+                </ShadcnPaginationItem>
+              </ShadcnPaginationContent>
+            </ShadcnPagination>
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -2836,8 +2891,8 @@ function TodayWeatherTopbar({
       >
         <ShadcnButton
           aria-label={`Weather location: ${weather.location.shortLabel}`}
-          className="workspace-app-bar__weather-location"
-          variant="ghost"
+          className="workspace-app-bar__weather-trigger workspace-app-bar__weather-location"
+          variant="secondary"
         >
           <MapPinIcon aria-hidden="true" />
           <span>{weather.location.shortLabel}</span>
@@ -2967,7 +3022,8 @@ function TodayNavigationTitle({
   return (
     <h1 className="workspace-app-bar__title">
       <time dateTime={localDateToIso(localDateAt(currentTime, timeZone))}>
-        {formatOrdinalDate(currentTime, timeZone)}
+        <span className="today-title-full">{formatOrdinalDate(currentTime, timeZone)}</span>
+        <span className="today-title-short">today</span>
       </time>
     </h1>
   );
@@ -2985,7 +3041,7 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/mail") return "Mail";
   if (pathname === "/goals") return "Goals";
   if (pathname === "/motives") return "Motives";
-  if (pathname === "/finances") return "Finances";
+  if (pathname === "/finances") return "Overview";
   if (pathname === "/finances/chat") return "Chat";
   if (pathname === "/finances/automations") return "Automations";
   if (pathname === "/finances/activity") return "Activity";
@@ -3214,7 +3270,7 @@ function CalendarPage({
     toast.warning(`Reconnect ${reconnectingAccounts.length === 1 ? "an account" : "accounts"}`, {
       action: {
         label: "Review connections",
-        onClick: () => navigate("/settings?section=connections"),
+        onClick: () => navigate("/settings?page=connections"),
       },
       description: `${reconnectingAccountLabels} needs authorization before new information can sync.`,
       id: toastId,
@@ -3285,7 +3341,7 @@ function CalendarPage({
         <QueryFeedback query={connectorAccounts} title="Couldn’t load calendar accounts." />
         <MutationFeedback feedback={moveEvent.feedback} />
         {events.isPending ? (
-          <PageLoading workspace="calendar" />
+          <PageLoading workspace="calendar" calendarView={view} />
         ) : events.isError && !events.data ? (
           <InlineError
             error={events.error}
@@ -3410,11 +3466,6 @@ function CalendarAccountsControl() {
           ariaLabel={triggerLabel}
           className="calendar-accounts-trigger"
           disabled={accounts.isPending || calendars.isPending}
-          identities={enabledAccounts.map((account) => ({
-            avatarUrl: account.avatarUrl,
-            fallback: initials(account.label ?? account.email ?? account.provider),
-            id: account.id,
-          }))}
           needsAttention={needsAttention}
           allSynced={
             enabledAccounts.length > 0 &&
@@ -3445,7 +3496,7 @@ function CalendarAccountsControl() {
             ) : null}
             {attentionCount > 0 ? (
               <ShadcnButton asChild className="w-full">
-                <Link to="/settings?section=connections">
+                <Link to="/settings?page=connections">
                   {reconnectAccountsLabel(attentionCount)}
                 </Link>
               </ShadcnButton>
@@ -3700,7 +3751,12 @@ function DayCalendarView({
           </div>
         </WorkspaceSecondaryAppBarContent>
       </WorkspaceSecondaryAppBar>
-      <div className="calendar-timeline-scroll" onScroll={handleScroll} ref={scrollContainer}>
+      <div
+        data-workspace-scroll=""
+        className="calendar-timeline-scroll"
+        onScroll={handleScroll}
+        ref={scrollContainer}
+      >
         <div className="calendar-time-grid calendar-time-grid--day">
           <TimeAxis />
           <ContextMenu>
@@ -3886,7 +3942,12 @@ function WeekCalendarView({
     onExit: onExitFollow,
   });
   return (
-    <div className="week-calendar" onScroll={handleScroll} ref={scrollContainer}>
+    <div
+      data-workspace-scroll=""
+      className="week-calendar"
+      onScroll={handleScroll}
+      ref={scrollContainer}
+    >
       <div
         className="week-calendar-grid"
         style={{
@@ -4015,49 +4076,8 @@ function WeekCalendarView({
   );
 }
 
-type TimelineEventCluster = {
-  endMinute: number;
-  layouts: TimelineEventLayout[];
-  startMinute: number;
-};
-
-function groupTimelineEventLayouts(layouts: TimelineEventLayout[]): TimelineEventCluster[] {
-  const clusters: TimelineEventCluster[] = [];
-  for (const layout of layouts) {
-    const cluster = clusters.at(-1);
-    if (!cluster || layout.startMinute >= cluster.endMinute) {
-      clusters.push({
-        endMinute: layout.endMinute,
-        layouts: [layout],
-        startMinute: layout.startMinute,
-      });
-      continue;
-    }
-    cluster.layouts.push(layout);
-    cluster.endMinute = Math.max(cluster.endMinute, layout.endMinute);
-  }
-  return clusters;
-}
-
 function TimeAxis() {
-  return (
-    <ol
-      aria-hidden="true"
-      data-calendar-axis="left"
-      className="calendar-time-axis"
-      style={{ height: calendarTimelineHeight }}
-    >
-      {calendarTimeMarks.map((minute) => (
-        <li
-          data-major={minute % 60 === 0}
-          key={minute}
-          style={{ top: minuteToTimelinePixels(minute) }}
-        >
-          {formatMinuteOfDay(minute)}
-        </li>
-      ))}
-    </ol>
-  );
+  return <TimelineAxis />;
 }
 
 function rememberProgrammaticCalendarScroll(
@@ -4238,6 +4258,7 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
     updateSelection(null);
   };
   const keyDown = (event: ReactKeyboardEvent<HTMLElement>, day: LocalDate) => {
+    if ((event.target as Element).closest(".calendar-timeline-event")) return;
     const current = selectionRef.current;
     if (event.key === "Escape" && current) {
       event.preventDefault();
@@ -4382,7 +4403,6 @@ function TimelineEventCollection({
   draggedEventId,
   layouts,
   onDragEnd,
-  orbitHorizontalInset,
   setDraggedEventId,
   setEditor,
   timeZone,
@@ -4397,29 +4417,19 @@ function TimelineEventCollection({
   setEditor: (editor: Editor) => void;
   timeZone: string;
 }) {
-  return groupTimelineEventLayouts(layouts).map((cluster) => {
-    const shared = {
-      calendarsById,
-      compact,
-      draggedEventId,
-      onDragEnd,
-      ...(orbitHorizontalInset ? { orbitHorizontalInset } : {}),
-      setDraggedEventId,
-      setEditor,
-      timeZone,
-    };
-    if (cluster.layouts.length === 1) {
-      const layout = cluster.layouts[0] as TimelineEventLayout;
-      return <TimelineEventItem {...shared} key={layout.event.id} layout={layout} />;
-    }
-    return (
-      <TimelineOverlapCluster
-        {...shared}
-        cluster={cluster}
-        key={cluster.layouts.map((layout) => layout.event.id).join(":")}
-      />
-    );
-  });
+  return layouts.map((layout) => (
+    <TimelineEventItem
+      calendarsById={calendarsById}
+      compact={compact}
+      draggedEventId={draggedEventId}
+      layout={layout}
+      onDragEnd={onDragEnd}
+      setDraggedEventId={setDraggedEventId}
+      setEditor={setEditor}
+      timeZone={timeZone}
+      key={layout.event.id}
+    />
+  ));
 }
 
 function TimelineEventItem({
@@ -4468,144 +4478,9 @@ function TimelineEventItem({
   );
 }
 
-function TimelineOverlapCluster({
-  calendarsById,
-  cluster,
-  compact,
-  draggedEventId,
-  onDragEnd,
-  orbitHorizontalInset,
-  setDraggedEventId,
-  setEditor,
-  timeZone,
-}: {
-  calendarsById: CalendarMap;
-  cluster: TimelineEventCluster;
-  compact: boolean;
-  draggedEventId: string | null;
-  onDragEnd: () => void;
-  orbitHorizontalInset?: "end" | "start";
-  setDraggedEventId: (id: string | null) => void;
-  setEditor: (editor: Editor) => void;
-  timeZone: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const hoverLeaveTimer = useRef<number | null>(null);
-  const toggle = useRef<HTMLButtonElement>(null);
-  const clusterId = useId();
-  const count = cluster.layouts.length;
-  // Keep the hover envelope fixed while cards animate between their resting and
-  // spread positions. Include rotated card bounds and the toggle, not just gaps.
-  const hoverBounds = cluster.layouts.map((layout, index) => {
-    const point = overlapOrbitPoint(index, count, compact, {
-      clusterEndMinute: cluster.endMinute,
-      clusterStartMinute: cluster.startMinute,
-      eventEndMinute: layout.endMinute,
-      eventStartMinute: layout.startMinute,
-      ...(orbitHorizontalInset ? { horizontalInset: orbitHorizontalInset } : {}),
-    });
-    const angle = (Math.abs(point.rotation) * Math.PI) / 180;
-    const height = Math.max(minuteToTimelinePixels(layout.endMinute - layout.startMinute), 18);
-    const width = compact ? 160 : 320;
-    const halfWidth = (width * Math.cos(angle) + height * Math.sin(angle)) / 2 + 12;
-    const halfHeight = (height * Math.cos(angle) + width * Math.sin(angle)) / 2 + 12;
-    return {
-      left: point.x - halfWidth,
-      right: point.x + halfWidth,
-      top: point.y - halfHeight,
-      bottom: point.y + halfHeight,
-    };
-  });
-  useEffect(
-    () => () => {
-      if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
-    },
-    [],
-  );
-  return (
-    <fieldset
-      aria-label={`${count} overlapping events`}
-      className={`calendar-overlap-cluster${expanded ? " is-expanded" : ""}${hovered ? " is-hovered" : ""}`}
-      id={clusterId}
-      onKeyDown={(event) => {
-        const focusedEvent = (event.target as Element).closest(".calendar-timeline-event");
-        if (event.key !== "Escape" || (!expanded && !hovered && !focusedEvent)) return;
-        event.stopPropagation();
-        setExpanded(false);
-        setHovered(false);
-        toggle.current?.focus();
-      }}
-      onPointerEnter={(event) => {
-        if (event.pointerType === "touch") return;
-        if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
-        hoverLeaveTimer.current = null;
-        setHovered(true);
-      }}
-      onPointerLeave={(event) => {
-        if (event.pointerType === "touch") return;
-        if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
-        hoverLeaveTimer.current = window.setTimeout(() => {
-          setHovered(false);
-          hoverLeaveTimer.current = null;
-        }, 160);
-      }}
-      style={
-        {
-          height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
-          top: minuteToTimelinePixels(cluster.startMinute),
-          "--overlap-hit-left": `${Math.min(...hoverBounds.map((bounds) => bounds.left))}px`,
-          "--overlap-hit-right": `${-Math.max(...hoverBounds.map((bounds) => bounds.right))}px`,
-          "--overlap-hit-top": `${Math.min(...hoverBounds.map((bounds) => bounds.top))}px`,
-          "--overlap-hit-bottom": `${-Math.max(...hoverBounds.map((bounds) => bounds.bottom))}px`,
-          "--overlap-pin-y": `${overlapPinOffset(cluster.startMinute, cluster.endMinute)}px`,
-          "--overlap-front-layer": count + 3,
-          "--overlap-control-layer": count + 4,
-        } as CSSProperties
-      }
-    >
-      <button
-        aria-controls={clusterId}
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "Collapse" : "Spread"} ${count} overlapping events`}
-        className="calendar-overlap-cluster__toggle"
-        onClick={(event) => {
-          event.stopPropagation();
-          setExpanded((current) => !current);
-        }}
-        ref={toggle}
-        type="button"
-      >
-        <LayersIcon aria-hidden="true" />
-        <span>{count}</span>
-      </button>
-      {cluster.layouts.map((layout, index) => (
-        <TimelineEventItem
-          calendarsById={calendarsById}
-          compact={compact}
-          draggedEventId={draggedEventId}
-          key={layout.event.id}
-          layout={layout}
-          onDragEnd={onDragEnd}
-          orbit={{
-            clusterEndMinute: cluster.endMinute,
-            clusterStartMinute: cluster.startMinute,
-            index,
-            total: count,
-            ...(orbitHorizontalInset ? { horizontalInset: orbitHorizontalInset } : {}),
-          }}
-          setDraggedEventId={setDraggedEventId}
-          setEditor={setEditor}
-          timeZone={timeZone}
-          topOffsetMinute={cluster.startMinute}
-        />
-      ))}
-    </fieldset>
-  );
-}
-
 function TimelineEvent({
   blockColors,
+  allowDrag = true,
   calendar,
   compact = false,
   layout,
@@ -4616,8 +4491,10 @@ function TimelineEvent({
   isDragging = false,
   timeZone,
   topOffsetMinute = 0,
+  ...buttonProps
 }: {
   blockColors: EventBlockColor[];
+  allowDrag?: boolean;
   calendar: Calendar | undefined;
   compact?: boolean;
   layout: TimelineEventLayout;
@@ -4634,7 +4511,7 @@ function TimelineEvent({
   isDragging?: boolean;
   timeZone: string;
   topOffsetMinute?: number;
-}) {
+} & Omit<ComponentProps<"button">, "onDragEnd">) {
   const { column, endMinute, event, startMinute } = layout;
   const writable = calendar?.isWritable ?? false;
   const [moveBlocked, setMoveBlocked] = useState(false);
@@ -4693,8 +4570,8 @@ function TimelineEvent({
     >
       <button
         aria-label={`${formatTime(event.startsAt, timeZone)} ${event.title}`}
-        className={`calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${blockColors.length > 0 ? " has-blocks" : ""}${writable ? " is-draggable" : " is-readonly"}${isDragging ? " is-dragging" : ""}${moveBlocked ? " is-move-blocked" : ""}`}
-        draggable={writable}
+        className={`calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${blockColors.length > 0 ? " has-blocks" : ""}${writable && allowDrag ? " is-draggable" : " is-readonly"}${isDragging ? " is-dragging" : ""}${moveBlocked ? " is-move-blocked" : ""}`}
+        draggable={writable && allowDrag}
         onDragEnd={onDragEnd}
         onDragStart={(dragEvent) => startCalendarDrag(dragEvent, event, setDraggedEventId)}
         onClick={(clickEvent) => {
@@ -4722,11 +4599,11 @@ function TimelineEvent({
             "--calendar-event-height": `${Math.max(minuteToTimelinePixels(endMinute - startMinute), 18)}px`,
             "--calendar-event-left": orbit
               ? `calc(${(column / laneCount) * 100}% + ${2 + stackInset}px)`
-              : `${3 + column * 12}px`,
+              : timelineLaneStyle(column, layout.columns).left,
             "--calendar-event-top": `${minuteToTimelinePixels(startMinute - topOffsetMinute)}px`,
             "--calendar-event-width": orbit
               ? `calc(${100 / laneCount}% - ${4 + stackInset}px)`
-              : `calc(100% - ${6 + column * 12}px)`,
+              : timelineLaneStyle(column, layout.columns).width,
             "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
             "--overlap-orbit-width": compact
               ? `clamp(88px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px), 160px)`
@@ -4736,8 +4613,11 @@ function TimelineEvent({
             zIndex: 2 + (orbit?.index ?? column),
           } as CSSProperties
         }
-        title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
+        title={
+          writable && allowDrag ? "Drag to reschedule · Open for precise editing" : "Open event"
+        }
         type="button"
+        {...buttonProps}
       >
         {blockColors.length > 0 ? (
           <span aria-hidden="true" className="calendar-timeline-event__block-rails">
@@ -4750,7 +4630,7 @@ function TimelineEvent({
             ))}
           </span>
         ) : null}
-        <strong>
+        <strong data-user-content>
           {event.title}
           {event.blocks.length > 0 ? (
             <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
@@ -5122,7 +5002,7 @@ function CalendarAllDayEvents({
             }
             type="button"
           >
-            <span>{layout.event.title}</span>
+            <span data-user-content>{layout.event.title}</span>
             {layout.event.blocks.length > 0 ? (
               <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
             ) : null}
@@ -5186,7 +5066,7 @@ function MonthCalendarView({
     );
   }, [todaySnap]);
   return (
-    <div className="month-calendar" ref={scrollContainer}>
+    <div data-workspace-scroll="" className="month-calendar" ref={scrollContainer}>
       <WorkspaceSecondaryAppBar
         aria-label="Calendar month navigation"
         placement="inline"
@@ -5257,7 +5137,7 @@ function MonthCalendarView({
                     <span className="month-event__time">
                       {event.allDay ? "All day" : formatTime(event.startsAt, timeZone)}
                     </span>
-                    <span>{event.title}</span>
+                    <span data-user-content>{event.title}</span>
                     {event.blocks.length > 0 ? (
                       <LockIcon
                         aria-label="Blocks another calendar"
@@ -5278,7 +5158,7 @@ function MonthCalendarView({
   );
 }
 
-function GoalsPage() {
+function GoalsPage({ completedOnly = false }: { completedOnly?: boolean }) {
   const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const goals = useQuery({ queryFn: api.listGoals, queryKey: ["goals"] });
@@ -5315,35 +5195,101 @@ function GoalsPage() {
     mutationFn: (id: string) => api.deleteGoal(id),
     onSuccess: refresh,
   });
-  if (goals.isPending) return <PageLoading />;
+  if (goals.isPending) return <DataViewLoading label="Loading goals" />;
   if (goals.isError && !goals.data)
-    return <InlineError error={goals.error} retry={goals.refetch} />;
+    return (
+      <DataViewRecovery
+        query={goals}
+        title="Couldn’t load goals."
+        unavailableLabel="Goals unavailable"
+      />
+    );
   return (
     <div className="settings-stack">
-      <QueryFeedback query={goals} title="Couldn’t refresh goals." staleOnly />
+      {!completedOnly ? (
+        <h2 className="px-1 text-xs font-medium text-muted-foreground">Goals</h2>
+      ) : null}
+      <DataViewRecovery
+        query={goals}
+        title="Couldn’t refresh goals."
+        unavailableLabel="Goals unavailable"
+      />
       <Dialog open={creating} onOpenChange={setCreating}>
-        <ShadcnCard>
-          <ShadcnCardHeader>
-            <ShadcnCardTitle>Active outcomes</ShadcnCardTitle>
-            <ShadcnCardAction>
-              <DialogTrigger asChild>
-                <SettingsRecordAction label="Add goal">
-                  <PlusIcon />
-                </SettingsRecordAction>
-              </DialogTrigger>
-            </ShadcnCardAction>
-            <ShadcnCardDescription>
-              Keep the list short enough to make tradeoffs clear.
-            </ShadcnCardDescription>
-          </ShadcnCardHeader>
-          <ShadcnCardContent>
-            {goals.data.length === 0 ? (
-              <EmptyState icon={<TargetIcon />} title="Set a direction">
-                Create one outcome you want your daily decisions to support.
-              </EmptyState>
+        {!completedOnly ? (
+          <SettingsSection
+            layout="rows"
+            title="Active Outcomes"
+            icon={<TargetIcon />}
+            description="Outcomes you’re working toward. Share them as context with authorized agents to help connect daily decisions to what matters to you."
+            action={
+              goals.data.some((goal) => goal.status !== "completed") ? (
+                <DialogTrigger asChild>
+                  <SettingsRecordAction label="Add goal">
+                    <PlusIcon />
+                  </SettingsRecordAction>
+                </DialogTrigger>
+              ) : undefined
+            }
+          >
+            {goals.isError && goals.data.length === 0 ? null : goals.data.filter(
+                (goal) => goal.status !== "completed",
+              ).length === 0 ? (
+              <DataViewEmpty
+                title="No active outcomes"
+                description="Add a goal to give your daily decisions a direction."
+              >
+                <ShadcnButton onClick={() => setCreating(true)}>Add goal</ShadcnButton>
+              </DataViewEmpty>
             ) : (
-              <ShadcnItemGroup>
-                {goals.data.map((goal) => (
+              <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
+                {goals.data
+                  .filter((goal) => goal.status !== "completed")
+                  .map((goal) => (
+                    <GoalItem
+                      goal={goal}
+                      key={goal.id}
+                      onDelete={() =>
+                        confirm({
+                          title: "Delete goal?",
+                          description: "This permanently deletes the goal.",
+                          actionLabel: "Delete goal",
+                          onConfirm: () => remove.mutate(goal.id),
+                        })
+                      }
+                      onUpdate={(input) => update.mutateAsync({ id: goal.id, input })}
+                      pending={update.isPending || remove.isPending}
+                    />
+                  ))}
+              </ShadcnItemGroup>
+            )}
+          </SettingsSection>
+        ) : null}
+        {!completedOnly ? (
+          <div className="flex justify-end">
+            <ShadcnButton asChild variant="secondary" size="sm">
+              <Link to={settingsSectionPath("completed-outcomes")}>
+                Completed Outcomes <ArrowRightIcon aria-hidden="true" />
+              </Link>
+            </ShadcnButton>
+          </div>
+        ) : null}
+        {completedOnly ? (
+          <SettingsSection
+            layout="rows"
+            title="Completed Outcomes"
+            icon={<CheckIcon />}
+            description="Outcomes you’ve finished. Keep them as a record of progress and context you can share with agents, separate from your current priorities."
+          >
+            <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
+              {!goals.isError && !goals.data.some((goal) => goal.status === "completed") ? (
+                <DataViewEmpty
+                  title="No completed outcomes yet"
+                  description="Goals you finish will appear here."
+                />
+              ) : null}
+              {goals.data
+                .filter((goal) => goal.status === "completed")
+                .map((goal) => (
                   <GoalItem
                     goal={goal}
                     key={goal.id}
@@ -5355,14 +5301,13 @@ function GoalsPage() {
                         onConfirm: () => remove.mutate(goal.id),
                       })
                     }
-                    onUpdate={(input) => update.mutate({ id: goal.id, input })}
+                    onUpdate={(input) => update.mutateAsync({ id: goal.id, input })}
                     pending={update.isPending || remove.isPending}
                   />
                 ))}
-              </ShadcnItemGroup>
-            )}
-          </ShadcnCardContent>
-        </ShadcnCard>
+            </ShadcnItemGroup>
+          </SettingsSection>
+        ) : null}
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New goal</DialogTitle>
@@ -5433,57 +5378,85 @@ function GoalItem({
 }: {
   goal: Goal;
   onDelete: () => void;
-  onUpdate: (input: Parameters<typeof api.updateGoal>[1]) => void;
+  onUpdate: (input: Parameters<typeof api.updateGoal>[1]) => Promise<unknown>;
   pending: boolean;
 }) {
   return (
-    <SettingsRecord
+    <RecordSummaryTrial
+      editing={{
+        pending,
+        description: goal.description ?? "",
+        saveTitle: (title) => onUpdate({ title }),
+        saveDescription: (description) => onUpdate({ description: description || null }),
+      }}
+      kind="Goal"
       title={goal.title}
+      progress={goal.progress}
+      inactive={goal.status === "paused"}
+      completed={goal.status === "completed"}
+      value={null}
+      summary={[
+        goal.status === "paused" ? "Paused" : null,
+        goal.targetDate ? `Target ${formatCalendarDate(goal.targetDate)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+      details={
+        <div className="space-y-5">
+          <dl className="space-y-2 text-sm">
+            <dt className="settings-detail-heading">Target date</dt>
+            <dd className="text-muted-foreground">
+              <RecordDateEditor
+                value={goal.targetDate ?? ""}
+                pending={pending}
+                onSave={(targetDate) => onUpdate({ targetDate: targetDate || null })}
+              />
+            </dd>
+          </dl>
+          <GoalProgressEditor
+            value={goal.progress}
+            pending={pending}
+            onSave={(progress) => {
+              return onUpdate({
+                progress,
+                ...(progress === 100
+                  ? { status: "completed" }
+                  : goal.status === "completed"
+                    ? { status: "active" }
+                    : {}),
+              });
+            }}
+          />
+        </div>
+      }
       description={goal.description ?? "No supporting context yet."}
       actions={
         <>
-          {goal.status === "active" || goal.status === "paused" ? (
-            <SettingsRecordAction
-              label={goal.status === "paused" ? "Resume" : "Pause"}
-              disabled={pending}
-              onClick={() => onUpdate({ status: goal.status === "paused" ? "active" : "paused" })}
-            >
-              {goal.status === "paused" ? <PlayIcon /> : <PauseIcon />}
-            </SettingsRecordAction>
-          ) : null}
-          <SettingsRecordAction
-            label={`Remove ${goal.title}`}
+          <ShadcnButton
+            variant="destructive"
+            aria-label={`Remove ${goal.title}`}
             disabled={pending}
             onClick={onDelete}
           >
-            <TrashIcon />
-          </SettingsRecordAction>
-        </>
-      }
-      metadata={
-        <>
-          <ShadcnBadge variant="secondary">
-            {goal.status.charAt(0).toUpperCase() + goal.status.slice(1)}
-          </ShadcnBadge>
-          <ShadcnBadge asChild variant="secondary">
-            <button
-              type="button"
-              title="Advance progress by 10%"
+            Delete
+          </ShadcnButton>
+          {goal.status === "active" || goal.status === "paused" ? (
+            <ShadcnButton
+              variant="secondary"
               disabled={pending}
-              onClick={() =>
-                onUpdate({
-                  progress: Math.min(100, goal.progress + 10),
-                  ...(goal.progress >= 90 ? { status: "completed" } : {}),
-                })
-              }
+              onClick={() => {
+                void onUpdate({ status: goal.status === "paused" ? "active" : "paused" }).catch(
+                  () => {},
+                );
+              }}
             >
-              {goal.progress}%
-            </button>
-          </ShadcnBadge>
-          {goal.targetDate ? (
-            <span>
-              Target <time dateTime={goal.targetDate}>{formatCalendarDate(goal.targetDate)}</time>
-            </span>
+              {goal.status === "paused" ? (
+                <PlayIcon aria-hidden="true" />
+              ) : (
+                <PauseIcon aria-hidden="true" />
+              )}
+              {goal.status === "paused" ? "Resume" : "Pause"}
+            </ShadcnButton>
           ) : null}
         </>
       }
@@ -5520,77 +5493,102 @@ function MotivesPage() {
     mutationFn: (id: string) => api.deleteMotive(id),
     onSuccess: refresh,
   });
-  if (motives.isPending) return <PageLoading />;
+  if (motives.isPending) return <DataViewLoading label="Loading motives" />;
   if (motives.isError && !motives.data)
-    return <InlineError error={motives.error} retry={motives.refetch} />;
+    return (
+      <DataViewRecovery
+        query={motives}
+        title="Couldn’t load motives."
+        unavailableLabel="Motives unavailable"
+      />
+    );
   return (
     <div className="settings-stack">
-      <QueryFeedback query={motives} title="Couldn’t refresh motives." staleOnly />
+      <h2 className="px-1 text-xs font-medium text-muted-foreground">Motives</h2>
+      <DataViewRecovery
+        query={motives}
+        title="Couldn’t refresh motives."
+        unavailableLabel="Motives unavailable"
+      />
       <Dialog open={creating} onOpenChange={setCreating}>
-        <ShadcnCard>
-          <ShadcnCardHeader>
-            <ShadcnCardTitle>Decision context</ShadcnCardTitle>
-            <ShadcnCardAction>
+        <SettingsSection
+          layout="rows"
+          title="Decision Context"
+          icon={<CompassIcon />}
+          description="Values and reasons behind your priorities. Share this context with authorized agents to help them understand what matters to you."
+          action={
+            motives.data.length ? (
               <DialogTrigger asChild>
                 <SettingsRecordAction label="Add motive">
                   <PlusIcon />
                 </SettingsRecordAction>
               </DialogTrigger>
-            </ShadcnCardAction>
-            <ShadcnCardDescription>
-              Keep only the principles you want surfaced during planning.
-            </ShadcnCardDescription>
-          </ShadcnCardHeader>
-          <ShadcnCardContent>
-            {motives.data.length === 0 ? (
-              <EmptyState icon={<CompassIcon />} title="Name what matters">
-                Add a value or reason that should inform your priorities.
-              </EmptyState>
-            ) : (
-              <ShadcnItemGroup>
-                {motives.data.map((motive) => (
-                  <SettingsRecord
-                    key={motive.id}
-                    title={motive.title}
-                    description={motive.detail ?? "No additional context."}
-                    metadata={
-                      <ShadcnBadge variant="secondary">
-                        {motive.isActive ? "Active" : "Paused"}
-                      </ShadcnBadge>
-                    }
-                    actions={
-                      <>
-                        <SettingsRecordAction
-                          label={motive.isActive ? "Pause" : "Resume"}
-                          disabled={update.isPending}
-                          onClick={() =>
-                            update.mutate({ id: motive.id, input: { isActive: !motive.isActive } })
-                          }
-                        >
-                          {motive.isActive ? <PauseIcon /> : <PlayIcon />}
-                        </SettingsRecordAction>
-                        <SettingsRecordAction
-                          label={`Remove ${motive.title}`}
-                          disabled={remove.isPending}
-                          onClick={() =>
-                            confirm({
-                              title: "Delete motive?",
-                              description: "This permanently deletes the motive.",
-                              actionLabel: "Delete motive",
-                              onConfirm: () => remove.mutate(motive.id),
-                            })
-                          }
-                        >
-                          <TrashIcon />
-                        </SettingsRecordAction>
-                      </>
-                    }
-                  />
-                ))}
-              </ShadcnItemGroup>
-            )}
-          </ShadcnCardContent>
-        </ShadcnCard>
+            ) : undefined
+          }
+        >
+          {motives.isError && motives.data.length === 0 ? null : motives.data.length === 0 ? (
+            <DataViewEmpty
+              title="No motives yet"
+              description="Add a value or reason behind your priorities."
+            >
+              <ShadcnButton onClick={() => setCreating(true)}>Add motive</ShadcnButton>
+            </DataViewEmpty>
+          ) : (
+            <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
+              {motives.data.map((motive) => (
+                <RecordSummaryTrial
+                  editing={{
+                    pending: update.isPending,
+                    description: motive.detail ?? "",
+                    saveTitle: (title) => update.mutateAsync({ id: motive.id, input: { title } }),
+                    saveDescription: (detail) =>
+                      update.mutateAsync({ id: motive.id, input: { detail: detail || null } }),
+                  }}
+                  inactive={!motive.isActive}
+                  kind="Motive"
+                  key={motive.id}
+                  title={motive.title}
+                  summary={motive.detail}
+                  value={motive.isActive ? null : "Paused"}
+                  description={motive.detail ?? "No additional context."}
+                  actions={
+                    <>
+                      <ShadcnButton
+                        variant="destructive"
+                        aria-label={`Remove ${motive.title}`}
+                        disabled={remove.isPending}
+                        onClick={() =>
+                          confirm({
+                            title: "Delete motive?",
+                            description: "This permanently deletes the motive.",
+                            actionLabel: "Delete motive",
+                            onConfirm: () => remove.mutate(motive.id),
+                          })
+                        }
+                      >
+                        Delete
+                      </ShadcnButton>
+                      <ShadcnButton
+                        variant="secondary"
+                        disabled={update.isPending}
+                        onClick={() =>
+                          update.mutate({ id: motive.id, input: { isActive: !motive.isActive } })
+                        }
+                      >
+                        {motive.isActive ? (
+                          <PauseIcon aria-hidden="true" />
+                        ) : (
+                          <PlayIcon aria-hidden="true" />
+                        )}
+                        {motive.isActive ? "Pause" : "Resume"}
+                      </ShadcnButton>
+                    </>
+                  }
+                />
+              ))}
+            </ShadcnItemGroup>
+          )}
+        </SettingsSection>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New motive</DialogTitle>
@@ -5688,11 +5686,6 @@ function MailAccountsControl() {
           ariaLabel={triggerLabel}
           className="mail-accounts-trigger"
           disabled={accounts.isPending}
-          identities={enabledAccounts.map((account) => ({
-            avatarUrl: account.avatarUrl,
-            fallback: initials(account.label || account.email || account.provider),
-            id: account.id,
-          }))}
           needsAttention={needsAttention}
           allSynced={
             enabledAccounts.length > 0 &&
@@ -5720,7 +5713,7 @@ function MailAccountsControl() {
             ) : null}
             {attentionCount > 0 ? (
               <ShadcnButton asChild className="w-full">
-                <Link to="/settings?section=connections">
+                <Link to="/settings?page=connections">
                   {reconnectAccountsLabel(attentionCount)}
                 </Link>
               </ShadcnButton>
@@ -5740,7 +5733,7 @@ function MailAccountsControl() {
                 key={account.id}
                 orientation="horizontal"
               >
-                <ShadcnCheckbox
+                <ShadcnSwitch
                   aria-label={`${selected ? "Hide" : "Show"} ${accountLabel}`}
                   checked={selected}
                   disabled={selected && selectedIds.size === 1}
@@ -5888,29 +5881,32 @@ function MailSyncButton({
 
   return (
     <div className="mail-sync-control">
-      {hasSyncDetails ? (
-        <ShadcnPopover open={detailsOpen} onOpenChange={setDetailsOpen}>
-          <ShadcnPopoverTrigger asChild>
-            <ActionButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
-              <AlertTriangleIcon aria-hidden="true" />
-            </ActionButton>
-          </ShadcnPopoverTrigger>
-          <ShadcnPopoverContent className="space-y-3" align="end">
-            <ShadcnPopoverHeader>
-              <ShadcnPopoverTitle>Mail sync needs attention</ShadcnPopoverTitle>
-            </ShadcnPopoverHeader>
-            <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
-            <MutationFeedback feedback={sync.feedback} />
-            {partialOutcome ? (
-              <p className="text-sm text-muted-foreground" role="status">
-                {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
-                {failedAccountIds.length}{" "}
-                {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another attempt.
-              </p>
-            ) : null}
-          </ShadcnPopoverContent>
-        </ShadcnPopover>
-      ) : null}
+      <span className="inline-flex size-7 shrink-0">
+        {hasSyncDetails ? (
+          <ShadcnPopover open={detailsOpen} onOpenChange={setDetailsOpen}>
+            <ShadcnPopoverTrigger asChild>
+              <ActionButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
+                <AlertTriangleIcon aria-hidden="true" />
+              </ActionButton>
+            </ShadcnPopoverTrigger>
+            <ShadcnPopoverContent className="space-y-3" align="end">
+              <ShadcnPopoverHeader>
+                <ShadcnPopoverTitle>Mail sync needs attention</ShadcnPopoverTitle>
+              </ShadcnPopoverHeader>
+              <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
+              <MutationFeedback feedback={sync.feedback} />
+              {partialOutcome ? (
+                <p className="text-sm text-muted-foreground" role="status">
+                  {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
+                  {failedAccountIds.length}{" "}
+                  {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another
+                  attempt.
+                </p>
+              ) : null}
+            </ShadcnPopoverContent>
+          </ShadcnPopover>
+        ) : null}
+      </span>
       <Tooltip>
         <TooltipTrigger asChild>
           <ShadcnButton
@@ -5923,11 +5919,10 @@ function MailSyncButton({
               onSelect?.();
               sync.mutate();
             }}
-            size="sm"
+            size="icon-sm"
             variant={variant}
           >
             <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
-            <span>{sync.isPending ? "Syncing…" : failedAccountIds.length ? "Retry" : "Sync"}</span>
           </ShadcnButton>
         </TooltipTrigger>
         <TooltipContent>
@@ -5940,6 +5935,10 @@ function MailSyncButton({
 }
 
 type SettingsSectionId =
+  | "ritual-morning"
+  | "ritual-evening"
+  | "ritual-history"
+  | "completed-outcomes"
   | "security"
   | "setup"
   | "activity"
@@ -5970,10 +5969,14 @@ const secondarySettings: Array<{
   label: string;
   parent: SettingsSectionId;
 }> = [
+  { icon: SunIcon, id: "ritual-morning", label: "Morning", parent: "rituals" },
+  { icon: MoonIcon, id: "ritual-evening", label: "Evening", parent: "rituals" },
+  { icon: ActivityIcon, id: "ritual-history", label: "History", parent: "rituals" },
+  { icon: CheckIcon, id: "completed-outcomes", label: "Completed Outcomes", parent: "goals" },
   { icon: SparklesIcon, id: "setup", label: "Setup", parent: "profile" },
-  { icon: PlugIcon, id: "agent-connections", label: "Connected agents", parent: "connections" },
-  { icon: ShieldCheckIcon, id: "workspace-access", label: "Workspace access", parent: "security" },
-  { icon: LockIcon, id: "sessions", label: "Signed-in devices", parent: "security" },
+  { icon: PlugIcon, id: "agent-connections", label: "Connected Agents", parent: "connections" },
+  { icon: ShieldCheckIcon, id: "workspace-access", label: "Workspace Access", parent: "security" },
+  { icon: LockIcon, id: "sessions", label: "Signed-In Devices", parent: "security" },
   { icon: UserIcon, id: "invitations", label: "Invitations", parent: "security" },
 ];
 const settingsNavigation: Array<{
@@ -5985,15 +5988,14 @@ const settingsNavigation: Array<{
     items: [
       { icon: UserIcon, id: "profile", label: "Profile" },
       { icon: CloudIcon, id: "connections", label: "Connections" },
-      { icon: LockIcon, id: "security", label: "Security & access" },
-      { icon: ActivityIcon, id: "activity", label: "Activity log" },
+      { icon: LockIcon, id: "security", label: "Security & Access" },
+      { icon: ActivityIcon, id: "activity", label: "Activity Log" },
     ],
   },
   {
     label: "Personal",
     items: [
-      { icon: TargetIcon, id: "goals", label: "Goals" },
-      { icon: CompassIcon, id: "motives", label: "Motives" },
+      { icon: TargetIcon, id: "goals", label: "Goals & Motives" },
       { icon: SparklesIcon, id: "rituals", label: "Rituals" },
     ],
   },
@@ -6013,8 +6015,8 @@ const settingsNavigation: Array<{
       { icon: PulseIcon, id: "notifications", label: "Notifications" },
       { ...textingSettingsNavigationItem, id: "texting", label: "Texting" },
       { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
-      { icon: MonitorIcon, id: "desktop", label: "Desktop app" },
-      { icon: SparklesIcon, id: "pet", label: "Desktop pet" },
+      { icon: MonitorIcon, id: "desktop", label: "Desktop App" },
+      { icon: SparklesIcon, id: "pet", label: "Desktop Pet" },
     ],
   },
 ];
@@ -6024,7 +6026,7 @@ const settingsSectionIds = new Set<SettingsSectionId>([
   "reviews",
 ]);
 function settingsParent(section: SettingsSectionId): SettingsSectionId {
-  return secondarySettings.find((item) => item.id === section)?.parent ?? section;
+  return (settingsParents[section] as SettingsSectionId | undefined) ?? section;
 }
 function searchableSettingsNavigation(canManageInvitations: boolean) {
   return [
@@ -6041,7 +6043,7 @@ function searchableSettingsNavigation(canManageInvitations: boolean) {
 }
 
 function settingsSectionFromSearch(search: string): SettingsSectionId {
-  const requestedSection = new URLSearchParams(search).get("section");
+  const requestedSection = settingsRoute(search);
   return requestedSection === "account"
     ? "profile"
     : requestedSection === "calendars"
@@ -6054,7 +6056,7 @@ function settingsSectionFromSearch(search: string): SettingsSectionId {
 }
 
 export function settingsSectionPath(section: SettingsSectionId): string {
-  return `/settings?section=${section}`;
+  return settingsPath(section);
 }
 
 function settingsSectionLabel(section: SettingsSectionId): string {
@@ -6080,26 +6082,6 @@ function visibleSettingsNavigation(canManageInvitations: boolean) {
     .filter((group) => group.items.length > 0);
 }
 
-/** The narrow-layout dock lists the same sections as the sidebar, flattened. */
-function settingsSectionPages(
-  canManageInvitations: boolean,
-  workspaceActions: WorkspaceSettingsActions,
-  counts: ReturnType<typeof useSettingsSidebarCounts>,
-): MobileWorkspacePage[] {
-  return visibleSettingsNavigation(canManageInvitations).flatMap((group) =>
-    group.items.map(({ icon, id, label }) => {
-      const badge = workspaceActionBadge(id, workspaceActions);
-      return {
-        ...(badge ? { badge } : {}),
-        count: id === "connections" || id === "agent-connections" ? counts[id] : undefined,
-        icon,
-        label,
-        path: settingsSectionPath(id),
-      };
-    }),
-  );
-}
-
 function workspaceActionBadge(
   id: SettingsSectionId,
   workspaceActions: WorkspaceSettingsActions,
@@ -6123,36 +6105,66 @@ function SettingsSidebarNavigation({
   workspaceActions: WorkspaceSettingsActions;
   counts: ReturnType<typeof useSettingsSidebarCounts>;
 }) {
+  const navigationSection = useNavigationSection();
   return (
     <>
-      {visibleSettingsNavigation(canManageInvitations).map((group) => (
-        <ShadcnSidebarGroup key={group.label}>
-          <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
-          <ShadcnSidebarGroupContent>
-            <nav aria-label={group.label}>
-              <ShadcnSidebarMenu>
-                {group.items.map(({ icon, id, label }) => {
-                  const badge = workspaceActionBadge(id, workspaceActions);
-                  return (
-                    <SidebarNavigationItem
-                      {...(badge ? { badge } : {})}
-                      count={
-                        id === "connections" || id === "agent-connections" ? counts[id] : undefined
-                      }
-                      icon={icon}
-                      isActive={settingsParent(section) === id}
-                      key={id}
-                      label={label}
-                      onNavigate={onNavigate}
-                      path={settingsSectionPath(id)}
-                    />
-                  );
-                })}
-              </ShadcnSidebarMenu>
-            </nav>
-          </ShadcnSidebarGroupContent>
-        </ShadcnSidebarGroup>
-      ))}
+      {visibleSettingsNavigation(canManageInvitations)
+        .filter((group) => !navigationSection || group.label.toLowerCase() === navigationSection)
+        .map((group) => (
+          <ShadcnSidebarGroup key={group.label}>
+            <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
+            <ShadcnSidebarGroupContent>
+              <nav aria-label={group.label}>
+                <ShadcnSidebarMenu>
+                  {group.items.map(({ icon, id, label }) => {
+                    const badge = workspaceActionBadge(id, workspaceActions);
+                    return (
+                      <SidebarNavigationItem
+                        {...(badge ? { badge } : {})}
+                        count={
+                          id === "connections" ||
+                          id === "agent-connections" ||
+                          id === "goals" ||
+                          id === "motives"
+                            ? counts[id]
+                            : undefined
+                        }
+                        contextMenu={
+                          secondarySettings.some(
+                            (child) =>
+                              child.parent === id &&
+                              (child.id !== "invitations" || canManageInvitations),
+                          )
+                            ? secondarySettings
+                                .filter(
+                                  (child) =>
+                                    child.parent === id &&
+                                    (child.id !== "invitations" || canManageInvitations),
+                                )
+                                .map(({ id: childId, label: childLabel, icon: ChildIcon }) => (
+                                  <ContextMenuItem key={childId} asChild>
+                                    <Link to={settingsSectionPath(childId)} onClick={onNavigate}>
+                                      <ChildIcon aria-hidden="true" />
+                                      {childLabel}
+                                    </Link>
+                                  </ContextMenuItem>
+                                ))
+                            : undefined
+                        }
+                        icon={icon}
+                        isActive={settingsParent(section) === id}
+                        key={id}
+                        label={label}
+                        onNavigate={onNavigate}
+                        path={settingsSectionPath(id)}
+                      />
+                    );
+                  })}
+                </ShadcnSidebarMenu>
+              </nav>
+            </ShadcnSidebarGroupContent>
+          </ShadcnSidebarGroup>
+        ))}
     </>
   );
 }
@@ -6173,43 +6185,52 @@ function SettingsPageContent({
   user: User;
 }) {
   const location = useLocation();
-  const requestedSection = new URLSearchParams(location.search).get("section");
-  if (requestedSection === "agents" || requestedSection === "automations") {
-    const next = new URLSearchParams(location.search);
-    next.set("section", "workspace-access");
-    return <Navigate replace to={`/settings?${next.toString()}`} />;
-  }
-  if (requestedSection === "calendars") {
-    const next = new URLSearchParams(location.search);
-    next.set("section", "calendar");
-    return <Navigate replace to={`/settings?${next.toString()}`} />;
-  }
   const section = settingsSectionFromSearch(location.search);
+  const canonical = new URLSearchParams(location.search);
+  const destination = new URLSearchParams(settingsSectionPath(section).split("?")[1]);
+  canonical.delete("section");
+  canonical.delete("page");
+  canonical.delete("subpage");
+  for (const [key, value] of canonical) destination.append(key, value);
+  if (location.search !== `?${destination}`) {
+    return <Navigate replace to={`/settings?${destination}${location.hash}`} />;
+  }
   const legacyRule = new URLSearchParams(location.search).get("reviewRule");
   if (section === "mail" && legacyRule)
     return (
       <Navigate
         replace
-        to={`/settings?section=mail&review=${encodeURIComponent(`mail-rule:${legacyRule}`)}`}
+        to={`/settings?page=mail&review=${encodeURIComponent(`mail-rule:${legacyRule}`)}`}
       />
     );
   if (section === "reviews") {
     const next = new URLSearchParams(location.search);
     next.delete("section");
+    next.delete("page");
+    next.delete("subpage");
     return <Navigate replace to={`/reviews${next.size ? `?${next}` : ""}`} />;
   }
   if (section === "wallpaper" && !isTauri()) {
-    return <Navigate replace to="/settings?section=appearance" />;
+    return <Navigate replace to="/settings?page=appearance" />;
   }
   if (["pet", "notifications"].includes(section) && !isTauri()) {
-    return <Navigate replace to="/settings?section=desktop" />;
+    return <Navigate replace to="/settings?page=desktop" />;
   }
   if (section === "invitations" && user.canManageInvitations !== true) {
-    return <Navigate replace to="/settings?section=profile" />;
+    return <Navigate replace to="/settings?page=profile" />;
   }
   return (
     <SettingsPageLayout
       key={section}
+      back={
+        settingsParent(section) !== section
+          ? {
+              to: settingsSectionPath(settingsParent(section)),
+              label: `Back to ${settingsSectionLabel(settingsParent(section))}`,
+            }
+          : undefined
+      }
+      section={section}
       actions={
         section === "calendar" ||
         section === "tasks" ||
@@ -6225,13 +6246,6 @@ function SettingsPageContent({
       }
     >
       <FinanceRecoveryReturn />
-      {settingsParent(section) !== section ? (
-        <ShadcnButton asChild variant="ghost" size="sm">
-          <Link to={settingsSectionPath(settingsParent(section))}>
-            Back to {settingsSectionLabel(settingsParent(section))}
-          </Link>
-        </ShadcnButton>
-      ) : null}
       {section === "mail" ? (
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="mail" />
@@ -6270,7 +6284,7 @@ function SettingsPageContent({
             title="Assistants"
             items={[
               {
-                label: "Connected agents",
+                label: "Connected Agents",
                 description: "Manage assistant connections, credentials, and granted permissions.",
                 section: "agent-connections",
               },
@@ -6285,12 +6299,12 @@ function SettingsPageContent({
             title="Access"
             items={[
               {
-                label: "Signed-in devices",
+                label: "Signed-In Devices",
                 description: "Review active sessions and revoke devices you no longer use.",
                 section: "sessions",
               },
               {
-                label: "Workspace access",
+                label: "Workspace Access",
                 description: "Inspect permissions by workspace and manage approval policy.",
                 section: "workspace-access",
               },
@@ -6309,45 +6323,32 @@ function SettingsPageContent({
       ) : null}
       {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
       {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
-      {section === "activity" ? (
-        <SettingsSection
-          title="Activity history"
-          description="Search changes made by you, agents, and connected services."
-        >
-          <div>
-            <ActivityTopbarControls />
-          </div>
-          <ActivityPage />
-        </SettingsSection>
-      ) : null}
+      {section === "activity" ? <ActivityPage /> : null}
       {section === "appearance" ? (
         <div className="settings-stack">
           <ThemeSettings user={user} />
         </div>
       ) : null}
-      {section === "rituals" ? <RitualSettings timeZone={user.planningTimezone} /> : null}
-      {section === "goals" ? <GoalsPage /> : null}
-      {section === "motives" ? <MotivesPage /> : null}
-      {section === "profile" ? (
+      {section === "rituals" ? (
+        <RitualSettings view="overview" timeZone={user.planningTimezone} />
+      ) : null}
+      {section === "ritual-morning" ? (
+        <RitualSettings view="morning" content="checklist" timeZone={user.planningTimezone} />
+      ) : null}
+      {section === "ritual-evening" ? (
+        <RitualSettings view="night" content="checklist" timeZone={user.planningTimezone} />
+      ) : null}
+      {section === "ritual-history" ? (
+        <RitualSettings view="history" timeZone={user.planningTimezone} />
+      ) : null}
+      {section === "completed-outcomes" ? <GoalsPage completedOnly /> : null}
+      {section === "goals" ? (
         <div className="settings-stack">
-          <ProfileSettings user={user} />
-          <RelatedSettings
-            title="Account preferences"
-            items={[
-              {
-                label: "Setup",
-                description: "Change setup preferences or revisit the guided experience.",
-                section: "setup",
-              },
-              {
-                label: "Security & access",
-                description: "Manage your password, devices, and permissions.",
-                section: "security",
-              },
-            ]}
-          />
+          <GoalsPage />
+          <MotivesPage />
         </div>
       ) : null}
+      {section === "profile" ? <ProfileSettings user={user} /> : null}
       {section === "setup" ? <SetupSettings user={user} /> : null}
       {section === "invitations" ? <InvitationsSettings /> : null}
       {section === "sessions" ? <SessionsSettings /> : null}
@@ -6378,9 +6379,15 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
     onSuccess: () => invalidateMaterial(queryClient),
   });
   const calendarGroups = groupCalendarsByAccount(accounts.data ?? [], query.data ?? []);
-  if (query.isPending) return <PageLoading />;
+  if (query.isPending) return <DataViewLoading label="Loading calendar sources" />;
   if (query.isError && !query.data)
-    return <InlineError error={query.error} retry={query.refetch} />;
+    return (
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load calendars."
+        unavailableLabel="Calendar sources unavailable"
+      />
+    );
   return (
     <SettingsSection
       action={
@@ -6390,85 +6397,60 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
       }
       description="Choose what appears in your unified view."
       title="Calendar sources"
+      layout="rows"
     >
-      <QueryFeedback query={query} title="Couldn’t load calendars." />
-      <QueryFeedback query={accounts} title="Couldn’t load connected accounts." />
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load calendars."
+        unavailableLabel="Calendar sources unavailable"
+      />
+      <DataViewRecovery
+        query={accounts}
+        title="Couldn’t load connected accounts."
+        unavailableLabel="Connected accounts unavailable"
+      />
       {calendarGroups.length ? (
-        <ShadcnItemGroup className="calendar-settings__groups">
+        <div>
           {calendarGroups.map((group) => (
-            <section className="calendar-settings__group" key={group.accountId}>
-              <ShadcnItem className="calendar-settings__account" size="sm">
-                <ShadcnItemMedia variant="default">
+            <section
+              key={group.accountId}
+              className="border-b border-(--settings-divider-color) last:border-b-0"
+            >
+              <div className="settings-subsection__header flex min-w-0 items-center gap-3 p-4">
+                <span className="settings-icon-slot">
                   <ConnectedAccountIdentity
                     avatarUrl={group.account?.avatarUrl}
                     label={group.label}
                     provider={group.provider}
                     size="default"
                   />
-                </ShadcnItemMedia>
-                <ShadcnItemContent>
-                  <ShadcnItemTitle>{group.label}</ShadcnItemTitle>
-                  <ShadcnItemDescription>
-                    {group.account?.email && group.account.email !== group.label
-                      ? group.account.email
-                      : `${group.calendars.length} calendar${group.calendars.length === 1 ? "" : "s"}`}
-                  </ShadcnItemDescription>
-                </ShadcnItemContent>
-                <ShadcnItemActions>
-                  <span className="calendar-settings__count">
-                    {group.calendars.filter((calendar) => calendar.isSelected).length}/
-                    {group.calendars.length}
-                  </span>
-                </ShadcnItemActions>
-              </ShadcnItem>
-              <ShadcnItemGroup className="calendar-settings__calendars">
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{group.label}</p>
+                  {group.account?.email ? (
+                    <p className="truncate text-xs text-muted-foreground">{group.account.email}</p>
+                  ) : null}
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {group.calendars.filter((calendar) => calendar.isSelected).length} /{" "}
+                  {group.calendars.length}
+                </span>
+              </div>
+              <ShadcnFieldGroup>
                 {group.calendars.map((calendar) => (
-                  <ShadcnItem
-                    variant="secondary"
-                    className="calendar-settings__calendar"
-                    key={calendar.id}
-                    size="sm"
-                  >
-                    <ShadcnItemMedia variant="default">
-                      <ShadcnCheckbox
-                        aria-label={
-                          calendar.isSelected ? `Hide ${calendar.name}` : `Show ${calendar.name}`
-                        }
-                        checked={calendar.isSelected}
-                        className="calendar-settings__checkbox data-checked:border-(--calendar-color) data-checked:bg-(--calendar-color)"
-                        disabled={selected.isPending}
-                        onCheckedChange={(checked) =>
-                          selected.mutate({ id: calendar.id, value: checked === true })
-                        }
-                        style={
-                          {
-                            "--calendar-color": calendar.color ?? "var(--primary)",
-                          } as CSSProperties
-                        }
-                      />
-                    </ShadcnItemMedia>
-                    <ShadcnItemContent>
-                      <ShadcnItemTitle>
-                        {calendar.name}
-                        {!calendar.isWritable ? (
-                          <ExternalLinkIcon
-                            aria-label="Subscribed calendar"
-                            className="calendar-settings__calendar-external"
-                            role="img"
-                          />
-                        ) : null}
-                      </ShadcnItemTitle>
-                      <ShadcnItemDescription>
-                        {calendar.provider === "local"
-                          ? "nohmi calendar"
-                          : calendar.provider === "icloud"
-                            ? "iCloud Calendar"
-                            : "Google Calendar"}{" "}
-                        · {calendar.isWritable ? "Writable" : "Subscribed"}
-                      </ShadcnItemDescription>
-                    </ShadcnItemContent>
-                    {calendar.provider === "local" ? (
-                      <ShadcnItemActions>
+                  <ShadcnField key={calendar.id} orientation="horizontal">
+                    <ShadcnFieldLabel htmlFor={`calendar-visible-${calendar.id}`}>
+                      {calendar.name}
+                      {!calendar.isWritable ? (
+                        <ExternalLinkIcon
+                          aria-label="Subscribed calendar"
+                          className="size-4 text-muted-foreground"
+                          role="img"
+                        />
+                      ) : null}
+                    </ShadcnFieldLabel>
+                    <div data-settings-row-actions="" className="flex shrink-0 items-center gap-3">
+                      {calendar.provider === "local" ? (
                         <ActionButton
                           aria-label={`Delete ${calendar.name}`}
                           disabled={remove.isPending}
@@ -6487,17 +6469,31 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                         >
                           <TrashIcon />
                         </ActionButton>
-                      </ShadcnItemActions>
-                    ) : null}
-                  </ShadcnItem>
+                      ) : null}
+                      <ShadcnSwitch
+                        id={`calendar-visible-${calendar.id}`}
+                        aria-label={
+                          calendar.isSelected ? `Hide ${calendar.name}` : `Show ${calendar.name}`
+                        }
+                        checked={calendar.isSelected}
+                        disabled={selected.isPending}
+                        onCheckedChange={(checked) =>
+                          selected.mutate({ id: calendar.id, value: checked === true })
+                        }
+                      />
+                    </div>
+                  </ShadcnField>
                 ))}
-              </ShadcnItemGroup>
+              </ShadcnFieldGroup>
             </section>
           ))}
-        </ShadcnItemGroup>
-      ) : (
-        <p className="settings-empty">No calendars are available.</p>
-      )}
+        </div>
+      ) : !query.isError ? (
+        <DataViewEmpty
+          title="No calendar sources"
+          description="Add a local calendar or connect an account to choose what appears."
+        />
+      ) : null}
 
       <MutationFeedback feedback={selected.feedback} />
       <MutationFeedback feedback={remove.feedback} />
@@ -6524,6 +6520,7 @@ function ConnectorsSettings() {
     queryKey: ["x-bookmarks", "folders"],
   });
   const [showICloud, setShowICloud] = useState(false);
+  const [icloudStep, setICloudStep] = useState<1 | 2>(1);
   const [connectMenuOpen, setConnectMenuOpen] = useState(false);
   const [icloudReconnectAccount, setICloudReconnectAccount] = useState<CalendarAccount | null>(
     null,
@@ -6613,9 +6610,15 @@ function ConnectorsSettings() {
         invalidateMaterial(queryClient),
       ]),
   });
-  if (query.isPending) return <PageLoading />;
+  if (query.isPending) return <DataViewLoading label="Loading connections" />;
   if (query.isError && !query.data)
-    return <InlineError error={query.error} retry={query.refetch} />;
+    return (
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load connections."
+        unavailableLabel="Connections unavailable"
+      />
+    );
   return (
     <SettingsSection
       action={
@@ -6639,6 +6642,7 @@ function ConnectorsSettings() {
               <DropdownMenuItem
                 onSelect={() => {
                   setICloudReconnectAccount(null);
+                  setICloudStep(1);
                   setShowICloud(true);
                 }}
               >
@@ -6672,98 +6676,141 @@ function ConnectorsSettings() {
           else setConnectMenuOpen(true);
         }}
       />
-      <QueryFeedback query={query} title="Couldn’t load connected accounts." />
-      <QueryFeedback query={xAccount} title="Couldn’t load X bookmarks account." />
-      <QueryFeedback query={xFolders} title="Couldn’t load bookmark folders." />
-      {showICloud ? (
-        <FeedbackForm
-          feedback={icloudConnect.feedback}
-          className="icloud-connect-panel"
-          onSubmit={(event) => {
-            event.preventDefault();
-            icloudConnect.mutate(new FormData(event.currentTarget));
-          }}
-        >
-          <ShadcnAlert>
-            <CloudIcon />
-            <ShadcnAlertTitle>Add iCloud</ShadcnAlertTitle>
-            <ShadcnAlertDescription>
-              Use an app-specific password—not your Apple Account password. It is encrypted and can
-              be revoked from Apple at any time.
-            </ShadcnAlertDescription>
-          </ShadcnAlert>
-          <ShadcnFieldGroup className="icloud-connect-panel__fields">
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="icloud-email">Apple Account email</ShadcnFieldLabel>
-              <ShadcnInput
-                autoComplete="email"
-                id="icloud-email"
-                name="email"
-                placeholder="name@icloud.com"
-                defaultValue={icloudReconnectAccount?.email ?? ""}
-                required
-                type="email"
-              />
-            </ShadcnField>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="icloud-app-password">
-                App-specific password
-              </ShadcnFieldLabel>
-              <ShadcnInput
-                autoComplete="off"
-                id="icloud-app-password"
-                name="appSpecificPassword"
-                placeholder="xxxx-xxxx-xxxx-xxxx"
-                required
-                type="password"
-              />
-            </ShadcnField>
-          </ShadcnFieldGroup>
-          <ShadcnFieldSet>
-            <ShadcnFieldLegend variant="label">Services to connect</ShadcnFieldLegend>
-            <ShadcnFieldGroup className="icloud-service-options">
-              <ShadcnField orientation="horizontal">
-                <ShadcnCheckbox defaultChecked id="icloud-mail" name="mail" />
-                <ShadcnFieldContent>
-                  <ShadcnFieldLabel htmlFor="icloud-mail">Mail</ShadcnFieldLabel>
-                  <ShadcnFieldDescription>
-                    Read mailboxes and message content through IMAP.
-                  </ShadcnFieldDescription>
-                </ShadcnFieldContent>
-              </ShadcnField>
-              <ShadcnField orientation="horizontal">
-                <ShadcnCheckbox defaultChecked id="icloud-calendar" name="calendar" />
-                <ShadcnFieldContent>
-                  <ShadcnFieldLabel htmlFor="icloud-calendar">Calendar</ShadcnFieldLabel>
-                  <ShadcnFieldDescription>
-                    Read and edit calendars through CalDAV.
-                  </ShadcnFieldDescription>
-                </ShadcnFieldContent>
-              </ShadcnField>
-            </ShadcnFieldGroup>
-          </ShadcnFieldSet>
-          <div className="icloud-connect-panel__footer">
-            <a href="https://account.apple.com/account/manage" rel="noreferrer" target="_blank">
-              Create an app-specific password <ExternalLinkIcon className="size-[13px]" />
-            </a>
-            <div>
-              <ShadcnButton
-                onClick={() => {
-                  setShowICloud(false);
-                  setICloudReconnectAccount(null);
-                }}
-                type="button"
-                variant="ghost"
-              >
-                Cancel
-              </ShadcnButton>
-              <ShadcnButton disabled={icloudConnect.isPending} type="submit">
-                {icloudConnect.isPending ? "Connecting iCloud" : "Add iCloud"}
-              </ShadcnButton>
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load connected accounts."
+        unavailableLabel="Connections unavailable"
+      />
+      <DataViewRecovery
+        query={xAccount}
+        title="Couldn’t load X bookmarks account."
+        unavailableLabel="X bookmarks unavailable"
+      />
+      <DataViewRecovery
+        query={xFolders}
+        title="Couldn’t load bookmark folders."
+        unavailableLabel="Bookmark folders unavailable"
+      />
+      <Dialog
+        open={showICloud}
+        onOpenChange={(open) => {
+          if (!icloudConnect.isPending) setShowICloud(open);
+        }}
+      >
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add iCloud</DialogTitle>
+            <DialogDescription>
+              {icloudStep === 1
+                ? "Step 1 of 2 · Enter your Apple Account credentials."
+                : "Step 2 of 2 · Choose services to connect."}
+            </DialogDescription>
+          </DialogHeader>
+          <FeedbackForm
+            feedback={icloudConnect.feedback}
+            className="icloud-connect-panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (icloudStep === 1) setICloudStep(2);
+              else icloudConnect.mutate(new FormData(event.currentTarget));
+            }}
+          >
+            <ShadcnAlert>
+              <CloudIcon />
+              <ShadcnAlertDescription>
+                Use an app-specific password—not your Apple Account password. It is encrypted and
+                can be revoked from Apple at any time.
+              </ShadcnAlertDescription>
+            </ShadcnAlert>
+            <fieldset hidden={icloudStep !== 1}>
+              <ShadcnFieldGroup className="icloud-connect-panel__fields">
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="icloud-email">Apple Account email</ShadcnFieldLabel>
+                  <ShadcnInput
+                    autoComplete="email"
+                    id="icloud-email"
+                    name="email"
+                    placeholder="name@icloud.com"
+                    defaultValue={icloudReconnectAccount?.email ?? ""}
+                    required
+                    type="email"
+                  />
+                </ShadcnField>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="icloud-app-password">
+                    App-specific password
+                  </ShadcnFieldLabel>
+                  <ShadcnInput
+                    autoComplete="off"
+                    id="icloud-app-password"
+                    name="appSpecificPassword"
+                    placeholder="xxxx-xxxx-xxxx-xxxx"
+                    required
+                    type="password"
+                  />
+                </ShadcnField>
+              </ShadcnFieldGroup>
+            </fieldset>
+            <ShadcnFieldSet hidden={icloudStep !== 2}>
+              <ShadcnFieldLegend variant="label">Services to connect</ShadcnFieldLegend>
+              <ShadcnFieldGroup className="icloud-service-options">
+                <ShadcnField orientation="horizontal">
+                  <ShadcnSwitch defaultChecked id="icloud-mail" name="mail" />
+                  <ShadcnFieldContent>
+                    <ShadcnFieldLabel htmlFor="icloud-mail">Mail</ShadcnFieldLabel>
+                    <ShadcnFieldDescription>
+                      Read mailboxes and message content through IMAP.
+                    </ShadcnFieldDescription>
+                  </ShadcnFieldContent>
+                </ShadcnField>
+                <ShadcnField orientation="horizontal">
+                  <ShadcnSwitch defaultChecked id="icloud-calendar" name="calendar" />
+                  <ShadcnFieldContent>
+                    <ShadcnFieldLabel htmlFor="icloud-calendar">Calendar</ShadcnFieldLabel>
+                    <ShadcnFieldDescription>
+                      Read and edit calendars through CalDAV.
+                    </ShadcnFieldDescription>
+                  </ShadcnFieldContent>
+                </ShadcnField>
+              </ShadcnFieldGroup>
+            </ShadcnFieldSet>
+            <div className="icloud-connect-panel__footer">
+              <a href="https://account.apple.com/account/manage" rel="noreferrer" target="_blank">
+                Create an app-specific password <ExternalLinkIcon className="size-[13px]" />
+              </a>
+              <div>
+                <ShadcnButton
+                  onClick={() => {
+                    setShowICloud(false);
+                    setICloudReconnectAccount(null);
+                  }}
+                  type="button"
+                  variant="ghost"
+                >
+                  Cancel
+                </ShadcnButton>
+                {icloudStep === 2 ? (
+                  <ShadcnButton
+                    type="button"
+                    variant="secondary"
+                    disabled={icloudConnect.isPending}
+                    onClick={() => setICloudStep(1)}
+                  >
+                    Back
+                  </ShadcnButton>
+                ) : null}
+                <ShadcnButton disabled={icloudConnect.isPending} type="submit">
+                  {icloudConnect.isPending
+                    ? "Connecting iCloud"
+                    : icloudStep === 1
+                      ? "Continue"
+                      : "Add iCloud"}
+                </ShadcnButton>
+              </div>
             </div>
-          </div>
-        </FeedbackForm>
-      ) : null}
+          </FeedbackForm>
+        </DialogContent>
+      </Dialog>
       {xAccount.data ? (
         <XBookmarksConnectorRow
           account={xAccount.data}
@@ -6805,6 +6852,7 @@ function ConnectorsSettings() {
                         googleConnect.mutate({ accountId: account.id });
                       } else {
                         setICloudReconnectAccount(account);
+                        setICloudStep(1);
                         setShowICloud(true);
                       }
                     },
@@ -6815,11 +6863,12 @@ function ConnectorsSettings() {
             />
           ))}
         </ShadcnItemGroup>
-      ) : (
-        <p className="settings-empty">
-          No external calendars connected. Your local calendar already works.
-        </p>
-      )}
+      ) : !query.isError && xAccount.isSuccess && !xAccount.data ? (
+        <DataViewEmpty
+          title="No connected accounts"
+          description="Your local calendar works without a connection. Use Connect when you want to add an account."
+        />
+      ) : null}
 
       <MutationFeedback feedback={googleConnect.feedback} />
       <MutationFeedback feedback={xConnect.feedback} />
@@ -7159,9 +7208,14 @@ function PinterestWallpaperDesktopSettingsPanel() {
   });
   const adjustments = (
     <>
-      <SettingsSection title="Layout">
-        <ShadcnField>
-          <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
+      <SettingsSection layout="rows" title="Layout">
+        <ShadcnField className="wallpaper-choice-row">
+          <ShadcnFieldContent>
+            <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
+            <ShadcnFieldDescription>
+              Grid tiles the frame. Stack overlaps repeated photos across the frame.
+            </ShadcnFieldDescription>
+          </ShadcnFieldContent>
           <SegmentedControl
             aria-label="Wallpaper layout"
             onValueChange={(next) => {
@@ -7176,15 +7230,18 @@ function PinterestWallpaperDesktopSettingsPanel() {
               <LayersIcon data-icon="inline-start" className="size-[15px]" /> Stack
             </SegmentedControlItem>
           </SegmentedControl>
-          <ShadcnFieldDescription>
-            Grid tiles the frame. Stack overlaps repeated photos across the frame.
-          </ShadcnFieldDescription>
         </ShadcnField>
       </SettingsSection>
-      <SettingsSection title="Appearance">
+      <SettingsSection layout="rows" title="Appearance">
         <ShadcnFieldGroup className="pinterest-wallpaper__controls">
-          <ShadcnField>
-            <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
+          <ShadcnField className="wallpaper-choice-row">
+            <ShadcnFieldContent>
+              <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
+              <ShadcnFieldDescription>
+                Preserve keeps image proportions, trimming photos at the frame edges. Fill crops
+                each photo into an even grid. Both repeat your Pins to fill the available space.
+              </ShadcnFieldDescription>
+            </ShadcnFieldContent>
             <SegmentedControl
               aria-label="Mosaic fit"
               onValueChange={(next) => {
@@ -7199,13 +7256,14 @@ function PinterestWallpaperDesktopSettingsPanel() {
                 Fill frame
               </SegmentedControlItem>
             </SegmentedControl>
-            <ShadcnFieldDescription>
-              Preserve keeps image proportions, trimming photos at the frame edges. Fill crops each
-              photo into an even grid. Both repeat your Pins to fill the available space.
-            </ShadcnFieldDescription>
           </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel>Backdrop</ShadcnFieldLabel>
+          <ShadcnField className="wallpaper-choice-row">
+            <ShadcnFieldContent>
+              <ShadcnFieldLabel>Backdrop</ShadcnFieldLabel>
+              <ShadcnFieldDescription>
+                Matched samples your images. Daily uses one color from a fixed palette each day.
+              </ShadcnFieldDescription>
+            </ShadcnFieldContent>
             <SegmentedControl
               aria-label="Wallpaper backdrop"
               onValueChange={(next) => {
@@ -7243,9 +7301,6 @@ function PinterestWallpaperDesktopSettingsPanel() {
                 value={backgroundColor}
               />
             ) : null}
-            <ShadcnFieldDescription>
-              Matched samples your images. Daily uses one color from a fixed palette each day.
-            </ShadcnFieldDescription>
           </ShadcnField>
           <ShadcnField>
             <ShadcnFieldLabel htmlFor="pinterest-tile-size">
@@ -7323,10 +7378,10 @@ function PinterestWallpaperDesktopSettingsPanel() {
           </ShadcnField>
         </ShadcnFieldGroup>
       </SettingsSection>
-      <SettingsSection title="Framing">
+      <SettingsSection layout="rows" title="Framing">
         <ShadcnFieldGroup className="pinterest-wallpaper__controls">
           <ShadcnField orientation="horizontal">
-            <ShadcnCheckbox
+            <ShadcnSwitch
               checked={paddingLinked}
               id="pinterest-padding-linked"
               onCheckedChange={(checked) => {
@@ -7423,7 +7478,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
           )}
           {desktopEnvironment.data ? (
             <ShadcnField orientation="horizontal">
-              <ShadcnCheckbox
+              <ShadcnSwitch
                 checked={showDesktopOverlay}
                 id="pinterest-desktop-overlay"
                 onCheckedChange={(checked) => setShowDesktopOverlay(checked === true)}
@@ -7512,6 +7567,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
       </div>
       <div className="wallpaper-editor__settings settings-stack">
         <SettingsSection
+          layout="rows"
           description="Paste a public board URL and nohmi will compose a fresh tiled collage from its Pins each day."
           title="Pinterest wallpaper"
         >
@@ -7566,7 +7622,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
               </ShadcnField>
             </FeedbackForm>
             <ShadcnField orientation="horizontal">
-              <ShadcnCheckbox
+              <ShadcnSwitch
                 checked={value?.enabled ?? false}
                 disabled={!value?.boardUrl || update.isPending}
                 id="pinterest-daily"
@@ -7761,14 +7817,7 @@ function ConnectorRow({
           </div>
         </>
       }
-      identity={
-        <ConnectedAccountIdentity
-          avatarUrl={account.avatarUrl}
-          label={account.label}
-          provider={account.provider}
-          size="default"
-        />
-      }
+      identity={<BrandMark brand={account.provider} className="size-5" />}
       state={health.state}
       status={<ConnectionHealthBadge health={health} />}
       subtitle={account.email ?? "Connected account"}
@@ -7855,33 +7904,39 @@ function ConnectorCapabilityBadge({
 }
 
 function ProfileSettings({ user }: { user: User }) {
-  const formRef = useRef<HTMLFormElement>(null);
-  const [editRevision, setEditRevision] = useState(0);
-  const attempted = useRef("");
-  const saving = useRef(false);
-  const revisionRef = useRef(0);
   const queryClient = useQueryClient();
-  const [homeLocation, setHomeLocation] = useState<HomeLocation | null>(user.homeLocation);
-  const [homeLocationValid, setHomeLocationValid] = useState(true);
-  const [planningTimezone, setPlanningTimezone] = useState(user.planningTimezone);
+  const [firstName, lastName] = splitProfileName(user.displayName);
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const save = (
+    input:
+      | Parameters<typeof api.updateUser>[0]
+      | ((current: User) => Parameters<typeof api.updateUser>[0]),
+  ) => {
+    const saving = saveQueue.current
+      .catch(() => {})
+      .then(async () => {
+        const current = queryClient.getQueryData<User>(["me"]) ?? user;
+        const nextUser = await api.updateUser(typeof input === "function" ? input(current) : input);
+        queryClient.setQueryData(["me"], nextUser);
+        return nextUser;
+      });
+    saveQueue.current = saving;
+    return saving;
+  };
+  const saveName = (part: 0 | 1, value: string) =>
+    save((current) => {
+      const names = splitProfileName(current.displayName);
+      names[part] = value;
+      return { displayName: names.filter(Boolean).join(" ") };
+    });
   const update = useFeedbackMutation({
     feedback: { action: "save your profile", form: true },
-    mutationFn: (input: {
-      displayName: string;
-      email?: string;
-      planningTimezone: string;
-      homeLocation: HomeLocation | null;
-      workdayEndMinute: number;
-      workdayStartMinute: number;
-    }) => api.updateUser(input),
+    mutationFn: (input: Parameters<typeof api.updateUser>[0]) => save(input),
     onSuccess: (nextUser) => {
       queryClient.setQueryData(["me"], nextUser);
     },
-    onSettled: () => {
-      saving.current = false;
-    },
   });
-  const resendVerification = useFeedbackMutation({
+  const resend = useFeedbackMutation({
     feedback: {
       action: "send a confirmation email",
       safeToRetry: true,
@@ -7889,239 +7944,145 @@ function ProfileSettings({ user }: { user: User }) {
     },
     mutationFn: api.resendEmailVerification,
   });
-  const timeZones = Array.from(
-    new Set([
-      planningTimezone,
-      user.planningTimezone,
-      "America/New_York",
-      "America/Chicago",
-      "America/Denver",
-      "America/Los_Angeles",
-      "Europe/London",
-      "UTC",
-    ]),
-  );
-
-  // Keep requests serialized. When one completes, the effect reads the latest
-  // form values rather than replaying an obsolete draft.
-  useEffect(() => {
-    if (!editRevision || update.isPending || !homeLocationValid) return;
-    const timer = window.setTimeout(() => {
-      const form = formRef.current;
-      if (!form || saving.current || document.activeElement === form.elements.namedItem("email"))
-        return;
-      const values = new FormData(form);
-      if (
-        !form.checkValidity() ||
-        String(values.get("workdayEnd")) <= String(values.get("workdayStart"))
-      )
-        return;
-      const signature = JSON.stringify([
-        Array.from(values.entries()),
-        homeLocation,
-        planningTimezone,
-      ]);
-      if (attempted.current === signature) return;
-      form.requestSubmit();
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [editRevision, update.isPending, homeLocationValid, homeLocation, planningTimezone]);
-  const edited = () => {
-    revisionRef.current += 1;
-    setEditRevision(revisionRef.current);
-  };
-  const [firstName, lastName] = splitProfileName(user.displayName);
   return (
-    <div className="flex flex-col gap-4">
-      <AccountIdentity user={user} />
-      <AccountOverview />
-      <div className="flex flex-col gap-6">
-        <FeedbackForm
-          ref={formRef}
-          onChange={edited}
-          feedback={update.feedback}
-          fieldNames={{
-            displayName: "firstName",
-            workdayStartMinute: "workdayStart",
-            workdayEndMinute: "workdayEnd",
-          }}
-          validate={(form) => {
-            const values = new FormData(form);
-            const errors: Record<string, string> = {};
-            if (String(values.get("workdayEnd")) <= String(values.get("workdayStart")))
-              errors.workdayEnd = "Day end must be after day start.";
-            if (!homeLocationValid)
-              errors.homeLocation = "Choose a place from the results, or clear this field.";
-            return errors;
-          }}
-          className="profile-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (saving.current) return;
-            const form = new FormData(event.currentTarget);
-            attempted.current = JSON.stringify([
-              Array.from(form.entries()),
-              homeLocation,
-              planningTimezone,
-            ]);
-            saving.current = true;
-            update.mutate({
-              displayName: [form.get("firstName"), form.get("lastName")]
-                .map((value) => String(value).trim())
-                .filter(Boolean)
-                .join(" "),
-              ...(String(form.get("email")) !== user.email
-                ? { email: String(form.get("email")) }
-                : {}),
-              planningTimezone,
-              homeLocation,
-              workdayEndMinute: timeToMinute(String(form.get("workdayEnd"))),
-              workdayStartMinute: timeToMinute(String(form.get("workdayStart"))),
-            });
-          }}
+    <div className="settings-stack">
+      <ProfileSection title="Profile">
+        <AccountIdentity user={user} />
+        <ProfileInlineField
+          id="profile-first-name"
+          label="First name"
+          value={firstName}
+          autoComplete="given-name"
+          required
+          fieldName="displayName"
+          validate={(value) => (value ? undefined : "Enter your first name.")}
+          save={(value) => saveName(0, value)}
+        />
+        <ProfileInlineField
+          id="profile-last-name"
+          label="Last name"
+          value={lastName}
+          autoComplete="family-name"
+          fieldName="displayName"
+          save={(value) => saveName(1, value)}
+        />
+        <ProfileInlineField
+          id="profile-email"
+          label="Email"
+          value={user.email}
+          type="email"
+          autoComplete="email"
+          required
+          fieldName="email"
+          save={(value) => save({ email: value })}
         >
           {!user.emailVerified ? (
-            <ShadcnAlert role="status" variant="warning">
-              <MailIcon />
-              <ShadcnAlertTitle>Email confirmation needed</ShadcnAlertTitle>
-              <ShadcnAlertDescription>
-                Confirm this address to keep account recovery available and unlock connected
-                accounts.
-              </ShadcnAlertDescription>
-              <ShadcnAlertAction>
-                <ShadcnButton
-                  disabled={resendVerification.isPending}
-                  onClick={() => resendVerification.mutate()}
-                  type="button"
-                  variant="outline"
-                >
-                  {resendVerification.isPending ? "Sending…" : "Resend confirmation"}
-                </ShadcnButton>
-              </ShadcnAlertAction>
-            </ShadcnAlert>
+            <div className="flex items-center justify-end gap-2">
+              <span className="text-xs text-muted-foreground">Confirmation needed</span>
+              <ShadcnButton
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={resend.isPending}
+                onClick={() => resend.mutate()}
+              >
+                Resend confirmation
+              </ShadcnButton>
+            </div>
           ) : null}
-          <SettingsBento>
-            <SettingsSection
-              title="Personal details"
-              description="How you appear in nohmi and where we contact you."
-            >
-              <ShadcnFieldGroup>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-first-name">First name</ShadcnFieldLabel>
-                  <ShadcnInput
-                    autoComplete="given-name"
-                    defaultValue={firstName}
-                    id="profile-first-name"
-                    name="firstName"
-                    required
-                  />
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-last-name">Last name</ShadcnFieldLabel>
-                  <ShadcnInput
-                    autoComplete="family-name"
-                    defaultValue={lastName}
-                    id="profile-last-name"
-                    name="lastName"
-                  />
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-email">Email</ShadcnFieldLabel>
-                  <ShadcnInput
-                    autoComplete="email"
-                    defaultValue={user.email}
-                    id="profile-email"
-                    name="email"
-                    onBlur={edited}
-                    required
-                    type="email"
-                  />
-                </ShadcnField>
-              </ShadcnFieldGroup>
-            </SettingsSection>
-            <SettingsSection
-              title="Daily defaults"
-              description="Anchor your schedule to your local day."
-            >
-              <ShadcnFieldGroup className="form-grid">
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-workday-start">Day start</ShadcnFieldLabel>
-                  <ShadcnInput
-                    defaultValue={minuteToTime(user.workdayStartMinute)}
-                    id="profile-workday-start"
-                    name="workdayStart"
-                    required
-                    type="time"
-                  />
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-workday-end">Day end</ShadcnFieldLabel>
-                  <ShadcnInput
-                    defaultValue={minuteToTime(user.workdayEndMinute)}
-                    id="profile-workday-end"
-                    name="workdayEnd"
-                    required
-                    type="time"
-                  />
-                </ShadcnField>
-                <HomeLocationField
-                  savedLocation={user.homeLocation}
-                  onChange={(location) => {
-                    edited();
-                    setHomeLocation(location);
-                    if (location?.timezone) setPlanningTimezone(location.timezone);
-                  }}
-                  onValidityChange={setHomeLocationValid}
-                />
-                <ShadcnField className="profile-form__full-row">
-                  <ShadcnFieldLabel htmlFor="profile-timezone">Time zone</ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="profile-timezone"
-                    name="planningTimezone"
-                    onChange={(event) => setPlanningTimezone(event.target.value)}
-                    value={planningTimezone}
-                  >
-                    {timeZones.map((timeZone) => (
-                      <NativeSelectOption key={timeZone} value={timeZone}>
-                        {timeZone.replace("_", " ")}
-                      </NativeSelectOption>
-                    ))}
-                  </ShadcnNativeSelect>
-                  <ShadcnFieldDescription>
-                    Home Location supplies this default. Choose a different zone when your day
-                    should stay anchored elsewhere.
-                  </ShadcnFieldDescription>
-                </ShadcnField>
-              </ShadcnFieldGroup>
-            </SettingsSection>
-          </SettingsBento>
-          <MutationFeedback feedback={resendVerification.feedback} />
-          {update.isPending ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              Saving changes…
-            </p>
-          ) : null}
-          {update.isError ? (
-            <ShadcnButton type="submit" variant="secondary">
-              Retry saving
-            </ShadcnButton>
-          ) : null}
-        </FeedbackForm>
-        <TextingSettings profile />
-      </div>
+        </ProfileInlineField>
+        <TextingSettings profile inline />
+      </ProfileSection>
+      <ProfileSection title="Daily defaults">
+        <ProfileChoice
+          id="profile-workday-start"
+          label="Day start"
+          value={minuteToTime(user.workdayStartMinute)}
+          kind="time"
+          validate={(value) =>
+            timeToMinute(value) >= user.workdayEndMinute
+              ? "Day start must be before day end."
+              : undefined
+          }
+          save={(value) => save({ workdayStartMinute: timeToMinute(value) })}
+        />
+        <ProfileChoice
+          id="profile-workday-end"
+          label="Day end"
+          value={minuteToTime(user.workdayEndMinute)}
+          kind="time"
+          validate={(value) =>
+            timeToMinute(value) <= user.workdayStartMinute
+              ? "Day end must be after day start."
+              : undefined
+          }
+          save={(value) => save({ workdayEndMinute: timeToMinute(value) })}
+        />
+        <div className="settings-inline-row px-4 py-0">
+          <HomeLocationField
+            savedLocation={user.homeLocation}
+            onChange={() => {}}
+            onValidityChange={() => {}}
+            onCommit={(location) =>
+              update.mutate({
+                homeLocation: location,
+                ...(location?.timezone ? { planningTimezone: location.timezone } : {}),
+              })
+            }
+          />
+        </div>
+        <ProfileChoice
+          id="profile-timezone"
+          label="Time zone"
+          kind="zone"
+          value={user.planningTimezone}
+          save={(value) => save({ planningTimezone: value })}
+        />
+      </ProfileSection>
+      <AccountOverview />
+      <ProfileSection title="Account">
+        <ProfileRow
+          icon={
+            <span className="profile-destination-icon">
+              <SparklesIcon weight="Filled" />
+            </span>
+          }
+          label="Setup"
+          to="/settings?page=profile&subpage=setup"
+        />
+        <ProfileRow
+          icon={
+            <span className="profile-destination-icon">
+              <LockIcon weight="Filled" />
+            </span>
+          }
+          label="Security & Access"
+          to="/settings?page=security"
+        />
+      </ProfileSection>
     </div>
   );
 }
 
 function ProfileSecurity({ user }: { user: User }) {
+  const [action, setAction] = useState<"password" | null>(null);
   const queryClient = useQueryClient();
+  const { confirm, confirmation } = useConfirmAction();
   const passwordReset = useFeedbackMutation({
     feedback: { action: "send a password reset link", safeToRetry: true },
     mutationFn: () => api.requestPasswordReset({ email: user.email }),
-    onSuccess: () => toast.success(`Password reset link sent to ${user.email}.`),
+    onSuccess: () => {
+      setAction(null);
+      toast.success(`Password reset link sent to ${user.email}.`);
+    },
   });
   const logout = useFeedbackMutation({
-    feedback: { action: "log out", safeToRetry: true },
+    feedback: {
+      action: "log out",
+      safeToRetry: true,
+      pending: "Logging out…",
+      success: "Logged out.",
+    },
     mutationFn: api.logout,
     onSuccess: () => {
       if (isTauri()) {
@@ -8134,52 +8095,48 @@ function ProfileSecurity({ user }: { user: User }) {
   });
   return (
     <div className="settings-stack">
-      <SettingsSection title="Security" description="Manage your password and this session.">
-        <ShadcnItemGroup aria-label="Account actions">
-          <ShadcnItem size="sm" variant="secondary">
-            <ShadcnItemMedia variant="icon">
-              <KeyIcon aria-hidden="true" />
-            </ShadcnItemMedia>
-            <ShadcnItemContent>
-              <ShadcnItemTitle>Change password</ShadcnItemTitle>
-              <ShadcnItemDescription>
-                We’ll email you a secure link to choose a new password.
-              </ShadcnItemDescription>
-            </ShadcnItemContent>
-            <ShadcnItemActions>
-              <ShadcnButton
-                disabled={passwordReset.isPending}
-                onClick={() => passwordReset.mutate()}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                {passwordReset.isPending ? "Sending…" : "Send link"}
-              </ShadcnButton>
-            </ShadcnItemActions>
-          </ShadcnItem>
-          <ShadcnItem size="sm" variant="secondary">
-            <ShadcnItemMedia variant="icon">
-              <LogOutIcon aria-hidden="true" />
-            </ShadcnItemMedia>
-            <ShadcnItemContent>
-              <ShadcnItemTitle>Log out</ShadcnItemTitle>
-              <ShadcnItemDescription>End this session on this device.</ShadcnItemDescription>
-            </ShadcnItemContent>
-            <ShadcnItemActions>
-              <ShadcnButton
-                disabled={logout.isPending}
-                onClick={() => logout.mutate()}
-                size="sm"
-                type="button"
-                variant="destructive"
-              >
-                {logout.isPending ? "Logging out…" : "Log out"}
-              </ShadcnButton>
-            </ShadcnItemActions>
-          </ShadcnItem>
-        </ShadcnItemGroup>
-      </SettingsSection>
+      <ProfileSection title="Security">
+        <ProfileRow label="Password" value="Change" onClick={() => setAction("password")} />
+        <ProfileRow
+          label={logout.isPending ? "Logging out…" : "Log out"}
+          ariaLabel="Log out"
+          variant="danger"
+          disabled={logout.isPending}
+          onClick={() =>
+            confirm({
+              title: "Log out?",
+              description:
+                "You’ll be logged out on this device. You can sign in again at any time.",
+              actionLabel: "Log out",
+              onConfirm: () => logout.mutate(),
+            })
+          }
+        />
+      </ProfileSection>
+      <Dialog
+        open={action !== null}
+        onOpenChange={(open) => {
+          if (!open) setAction(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change password</DialogTitle>
+            <DialogDescription>
+              {`We’ll send a secure password reset link to ${user.email}.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <ShadcnButton variant="secondary" onClick={() => setAction(null)}>
+              Cancel
+            </ShadcnButton>
+            <ShadcnButton disabled={passwordReset.isPending} onClick={() => passwordReset.mutate()}>
+              {passwordReset.isPending ? "Sending…" : "Send link"}
+            </ShadcnButton>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {confirmation}
       <MutationFeedback feedback={passwordReset.feedback} />
       <MutationFeedback feedback={logout.feedback} />
     </div>
@@ -8192,10 +8149,12 @@ function splitProfileName(displayName: string): [firstName: string, lastName: st
 }
 
 function HomeLocationField({
+  onCommit,
   onChange,
   onValidityChange,
   savedLocation,
 }: {
+  onCommit: (location: WeatherLocationOption | null) => void;
   onChange: (location: WeatherLocationOption | null) => void;
   onValidityChange: (valid: boolean) => void;
   savedLocation: HomeLocation | null;
@@ -8227,8 +8186,8 @@ function HomeLocationField({
   }, [locations.data, selectedLocation]);
   const query = searchValue.trim();
   return (
-    <ShadcnField>
-      <ShadcnFieldLabel htmlFor="profile-home-location">Home Location</ShadcnFieldLabel>
+    <ShadcnField orientation="horizontal" className="justify-between">
+      <ShadcnFieldLabel htmlFor="profile-home-location">Home</ShadcnFieldLabel>
       <Combobox
         autoHighlight
         filter={null}
@@ -8273,6 +8232,7 @@ function HomeLocationField({
             setOpen(false);
           }
           onChange(nextValue);
+          if (reason === "item-press" || reason === "clear-press") onCommit(nextValue);
           onValidityChange(
             nextValue !== null || reason === "clear-press" || reason === "input-clear",
           );
@@ -8281,13 +8241,21 @@ function HomeLocationField({
         value={selectedLocation}
       >
         <ComboboxInput
-          aria-describedby="profile-home-location-description"
+          className="settings-value-input"
           name="homeLocation"
           autoComplete="off"
           id="profile-home-location"
           placeholder="Search by city, ZIP, or region"
-          showClear
-        />
+          onBlur={() => {
+            if (!searchValue.trim() && savedLocation) onCommit(null);
+          }}
+          showClear={false}
+          showTrigger={false}
+        >
+          <InputGroupAddon align="inline-start">
+            <MapPinIcon aria-hidden="true" />
+          </InputGroupAddon>
+        </ComboboxInput>
         <ComboboxContent aria-busy={locations.isFetching || undefined}>
           {query.length < 2 ? (
             <p className="px-2 py-2 text-sm text-muted-foreground">Type at least two characters.</p>
@@ -8316,15 +8284,13 @@ function HomeLocationField({
           </ComboboxList>
         </ComboboxContent>
       </Combobox>
-      <ShadcnFieldDescription id="profile-home-location-description">
-        Used when this device cannot share its location.
-      </ShadcnFieldDescription>
     </ShadcnField>
   );
 }
 
 function InvitationsSettings() {
   const queryClient = useQueryClient();
+  const [creating, setCreating] = useState(false);
   const invitations = useQuery({ queryFn: api.listInvitations, queryKey: ["invitations"] });
   const [latestCode, setLatestCode] = useState<string | null>(null);
   const create = useFeedbackMutation({
@@ -8335,6 +8301,7 @@ function InvitationsSettings() {
         expiresInDays: Number(form.get("expiresInDays")),
       }),
     onSuccess: (invitation) => {
+      setCreating(false);
       setLatestCode(invitation.code);
       void queryClient.invalidateQueries({ queryKey: ["invitations"] });
     },
@@ -8354,40 +8321,73 @@ function InvitationsSettings() {
     <SettingsSection
       description="Issue single-use invitation codes for the private beta. The code is shown only once, so copy it before you leave this page."
       title="Invitations"
+      layout="rows"
+      action={
+        <ShadcnButton
+          type="button"
+          disabled={invitations.isPending || (invitations.isError && !invitations.data)}
+          onClick={() => setCreating(true)}
+        >
+          <PlusIcon />
+          New invitation
+        </ShadcnButton>
+      }
     >
-      <QueryFeedback query={invitations} title="Couldn’t load invitations." staleOnly />
-      {invitations.isError && !invitations.data ? (
-        <InlineError
-          error={invitations.error}
-          retry={invitations.refetch}
-          title="Couldn’t load invitations."
-        />
-      ) : (
+      <DataViewRecovery
+        query={invitations}
+        title="Couldn’t load invitations."
+        unavailableLabel="Invitations unavailable"
+      />
+      {!invitations.isError || invitations.data ? (
         <>
-          <FeedbackForm
-            feedback={create.feedback}
-            className="profile-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              create.mutate(new FormData(event.currentTarget));
+          <Dialog
+            open={creating}
+            onOpenChange={(open) => {
+              if (!create.isPending) setCreating(open);
             }}
           >
-            <ShadcnFieldGroup className="form-grid">
-              <EmailField id="invite-email" label="Friend’s email (optional)" name="email" />
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="invite-expiry">Expires after</ShadcnFieldLabel>
-                <ShadcnNativeSelect defaultValue="14" id="invite-expiry" name="expiresInDays">
-                  <NativeSelectOption value="7">7 days</NativeSelectOption>
-                  <NativeSelectOption value="14">14 days</NativeSelectOption>
-                  <NativeSelectOption value="30">30 days</NativeSelectOption>
-                </ShadcnNativeSelect>
-              </ShadcnField>
-            </ShadcnFieldGroup>
-
-            <ShadcnButton disabled={create.isPending} type="submit">
-              {create.isPending ? "Creating invitation…" : "Create invitation"}
-            </ShadcnButton>
-          </FeedbackForm>
+            <DialogContent showCloseButton={false}>
+              <DialogHeader>
+                <DialogTitle>New invitation</DialogTitle>
+                <DialogDescription>Choose a recipient and expiry.</DialogDescription>
+              </DialogHeader>
+              <FeedbackForm
+                feedback={create.feedback}
+                className="profile-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  create.mutate(new FormData(event.currentTarget));
+                }}
+              >
+                <ResponsiveDialogBody>
+                  <ShadcnFieldGroup className="form-grid">
+                    <EmailField id="invite-email" label="Friend’s email (optional)" name="email" />
+                    <ShadcnField>
+                      <ShadcnFieldLabel htmlFor="invite-expiry">Expires after</ShadcnFieldLabel>
+                      <ShadcnNativeSelect defaultValue="14" id="invite-expiry" name="expiresInDays">
+                        <NativeSelectOption value="7">7 days</NativeSelectOption>
+                        <NativeSelectOption value="14">14 days</NativeSelectOption>
+                        <NativeSelectOption value="30">30 days</NativeSelectOption>
+                      </ShadcnNativeSelect>
+                    </ShadcnField>
+                  </ShadcnFieldGroup>
+                </ResponsiveDialogBody>
+                <DialogFooter>
+                  <ShadcnButton
+                    type="button"
+                    variant="secondary"
+                    disabled={create.isPending}
+                    onClick={() => setCreating(false)}
+                  >
+                    Cancel
+                  </ShadcnButton>
+                  <ShadcnButton disabled={create.isPending} type="submit">
+                    {create.isPending ? "Creating invitation…" : "Create invitation"}
+                  </ShadcnButton>
+                </DialogFooter>
+              </FeedbackForm>
+            </DialogContent>
+          </Dialog>
           {latestCode ? (
             <ShadcnAlert>
               <CircleCheckIcon />
@@ -8402,16 +8402,22 @@ function InvitationsSettings() {
               </ShadcnAlertAction>
             </ShadcnAlert>
           ) : null}
-          {invitations.isLoading ? <Spinner label="Loading invitations" /> : null}
+          {invitations.isLoading ? <DataViewLoading label="Loading invitations" /> : null}
+          {invitations.data?.length === 0 && !invitations.isError ? (
+            <DataViewEmpty
+              title="No invitations yet"
+              description="Create an invitation when you’re ready to invite someone."
+            />
+          ) : null}
           {invitations.data?.length ? (
-            <ShadcnItemGroup>
+            <ShadcnFieldGroup>
               {invitations.data.map((invitation) => (
                 <InvitationRow invitation={invitation} key={invitation.id} />
               ))}
-            </ShadcnItemGroup>
+            </ShadcnFieldGroup>
           ) : null}
         </>
-      )}
+      ) : null}
     </SettingsSection>
   );
 }
@@ -8419,18 +8425,18 @@ function InvitationsSettings() {
 function InvitationRow({ invitation }: { invitation: Invitation }) {
   const expired = new Date(invitation.expiresAt).getTime() <= Date.now();
   return (
-    <ShadcnItem variant="secondary">
-      <ShadcnItemContent>
-        <ShadcnItemTitle>{invitation.email ?? "Unassigned invitation"}</ShadcnItemTitle>
-        <ShadcnItemDescription>
-          {invitation.redeemedAt
-            ? `Redeemed ${formatRelative(invitation.redeemedAt)}`
-            : expired
-              ? "Expired"
-              : `Expires ${formatRelative(invitation.expiresAt)}`}
-        </ShadcnItemDescription>
-      </ShadcnItemContent>
-    </ShadcnItem>
+    <div className="settings-navigation-row flex min-w-0 items-center justify-between gap-6 text-sm">
+      <span className="min-w-0 truncate font-medium">
+        {invitation.email ?? "Unassigned invitation"}
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground">
+        {invitation.redeemedAt
+          ? `Redeemed ${formatRelative(invitation.redeemedAt)}`
+          : expired
+            ? "Expired"
+            : `Expires ${formatRelative(invitation.expiresAt)}`}
+      </span>
+    </div>
   );
 }
 
@@ -8443,15 +8449,31 @@ function SessionsSettings() {
     mutationFn: api.revokeSession,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["sessions"] }),
   });
-  if (sessions.isPending) return <PageLoading />;
+  if (sessions.isPending) return <DataViewLoading label="Loading devices" />;
   if (sessions.isError && !sessions.data)
-    return <InlineError error={sessions.error} retry={sessions.refetch} />;
+    return (
+      <DataViewRecovery
+        query={sessions}
+        title="Couldn’t load devices."
+        unavailableLabel="Devices unavailable"
+      />
+    );
   return (
     <SettingsSection
       description="Devices with an active sign-in to your nohmi account. Revoke access you no longer recognize."
       title="Sessions"
     >
-      <QueryFeedback query={sessions} title="Couldn’t load sessions." />
+      <DataViewRecovery
+        query={sessions}
+        title="Couldn’t load devices."
+        unavailableLabel="Devices unavailable"
+      />
+      {!sessions.isError && sessions.data?.length === 0 ? (
+        <DataViewEmpty
+          title="No signed-in devices"
+          description="Devices with an active sign-in will appear here."
+        />
+      ) : null}
       <ShadcnItemGroup>
         {sessions.data?.map((session) => (
           <SessionRow
@@ -8596,76 +8618,6 @@ function SessionRow({ revoke, session }: { revoke: () => void; session: Session 
   );
 }
 
-function ReminderGroup({
-  label,
-  reminders,
-  setEditor,
-  timeZone,
-}: {
-  label: string;
-  reminders: Reminder[];
-  setEditor: (editor: Editor) => void;
-  timeZone: string;
-}) {
-  return (
-    <section className="reminder-group">
-      <h3>
-        {label}
-        <span>{reminders.length}</span>
-      </h3>
-      <ShadcnItemGroup>
-        {reminders.map((reminder) => (
-          <ReminderRow
-            key={reminder.id}
-            onEdit={() => setEditor({ kind: "reminder", reminder })}
-            reminder={reminder}
-            timeZone={timeZone}
-          />
-        ))}
-      </ShadcnItemGroup>
-    </section>
-  );
-}
-
-function TaskGroup({
-  label,
-  overdue = false,
-  recommendations,
-  setEditor,
-  tasks,
-  timeZone,
-}: {
-  label: string;
-  overdue?: boolean;
-  recommendations?: Map<string, DailyBrief["recommendedTasks"][number]>;
-  setEditor: (editor: Editor) => void;
-  tasks: Task[];
-  timeZone: string;
-}) {
-  return (
-    <section className={cn("reminder-group", overdue && "reminder-group--overdue")}>
-      <h3>
-        {label}
-        <span>{tasks.length}</span>
-      </h3>
-      <ShadcnItemGroup>
-        {tasks.map((task) => {
-          const recommendation = recommendations?.get(task.id);
-          return (
-            <TaskRow
-              key={task.id}
-              onEdit={() => setEditor({ kind: "task", task })}
-              {...(recommendation ? { recommendation } : {})}
-              task={task}
-              timeZone={timeZone}
-            />
-          );
-        })}
-      </ShadcnItemGroup>
-    </section>
-  );
-}
-
 export function TodayEventCard({
   calendarColor,
   currentTime,
@@ -8673,6 +8625,9 @@ export function TodayEventCard({
   event,
   layoutStyle,
   timeZone,
+  timelineLayout,
+  timelineStartMinute,
+  calendar,
 }: {
   calendarColor: string | null | undefined;
   currentTime?: Date;
@@ -8680,6 +8635,9 @@ export function TodayEventCard({
   event: CalendarEvent;
   layoutStyle?: CSSProperties;
   timeZone: string;
+  timelineLayout?: TimelineEventLayout;
+  timelineStartMinute?: number;
+  calendar?: Calendar | undefined;
 }) {
   const navigate = useNavigate();
   const eventLabel = `${event.allDay ? "All day" : formatTime(event.startsAt, timeZone)} ${event.title}`;
@@ -8710,44 +8668,61 @@ export function TodayEventCard({
   };
   return (
     <DropdownMenu>
-      <EventCard
-        className="today-timeline__event"
-        data-density={density}
-        role="listitem"
-        style={{ ...calendarEventColorStyle(calendarColor), ...layoutStyle }}
-        tone="calendar"
-      >
-        <EventCardContent>
-          <DropdownMenuTrigger asChild>
-            <EventCardPrimaryAction
-              aria-label={`${eventLabel}. Open quick actions`}
-              className="today-timeline__event-action"
-            >
-              <EventCardBody>
-                <EventCardTitle>
-                  <span className="min-w-0 truncate">{event.title}</span>
-                  {minutesUntilStart !== null || minutesRemaining !== null ? (
-                    <EventCardTitleMeta>
-                      {minutesUntilStart !== null
-                        ? `in ${formatMinutes(minutesUntilStart)}`
-                        : `${formatMinutes(minutesRemaining ?? 0)} left`}
-                    </EventCardTitleMeta>
+      {timelineLayout ? (
+        <DropdownMenuTrigger asChild>
+          <TimelineEvent
+            calendar={calendar}
+            layout={timelineLayout}
+            blockColors={[]}
+            allowDrag={false}
+            onEdit={() => {}}
+            onDragEnd={() => {}}
+            setDraggedEventId={() => {}}
+            timeZone={timeZone}
+            topOffsetMinute={timelineStartMinute ?? 0}
+            aria-label={`${eventLabel}. Open quick actions`}
+          />
+        </DropdownMenuTrigger>
+      ) : (
+        <EventCard
+          className="today-timeline__event"
+          data-density={density}
+          role="listitem"
+          style={{ ...calendarEventColorStyle(calendarColor), ...layoutStyle }}
+          tone="calendar"
+        >
+          <EventCardContent>
+            <DropdownMenuTrigger asChild>
+              <EventCardPrimaryAction
+                aria-label={`${eventLabel}. Open quick actions`}
+                className="today-timeline__event-action"
+              >
+                <EventCardBody>
+                  <EventCardTitle>
+                    <span className="min-w-0 truncate">{event.title}</span>
+                    {minutesUntilStart !== null || minutesRemaining !== null ? (
+                      <EventCardTitleMeta>
+                        {minutesUntilStart !== null
+                          ? `in ${formatMinutes(minutesUntilStart)}`
+                          : `${formatMinutes(minutesRemaining ?? 0)} left`}
+                      </EventCardTitleMeta>
+                    ) : null}
+                    {event.blocks.length > 0 ? (
+                      <LockIcon aria-label="Blocks another calendar" />
+                    ) : null}
+                  </EventCardTitle>
+                  <EventCardDescription>
+                    {formatTimelineTimeRange(event, timeZone)}
+                  </EventCardDescription>
+                  {event.location ? (
+                    <EventCardDescription>{event.location}</EventCardDescription>
                   ) : null}
-                  {event.blocks.length > 0 ? (
-                    <LockIcon aria-label="Blocks another calendar" />
-                  ) : null}
-                </EventCardTitle>
-                <EventCardDescription>
-                  {formatTimelineTimeRange(event, timeZone)}
-                </EventCardDescription>
-                {event.location ? (
-                  <EventCardDescription>{event.location}</EventCardDescription>
-                ) : null}
-              </EventCardBody>
-            </EventCardPrimaryAction>
-          </DropdownMenuTrigger>
-        </EventCardContent>
-      </EventCard>
+                </EventCardBody>
+              </EventCardPrimaryAction>
+            </DropdownMenuTrigger>
+          </EventCardContent>
+        </EventCard>
+      )}
       <DropdownMenuContent className="today-event-menu" align="start">
         <DropdownMenuGroup>
           <DropdownMenuItem onSelect={viewInCalendar}>
@@ -8859,33 +8834,46 @@ export function TodayTaskTimelineCard({
 }
 
 function TodayTimeline({
-  calendarColorsById,
+  calendars,
   currentTime,
   items,
   onEditTask,
   timeZone,
+  preview = false,
 }: {
+  calendars: Calendar[];
   calendarColorsById: Map<string, string | null>;
   currentTime: Date;
   items: TodayTimelineItem[];
   onEditTask: (task: Task) => void;
   timeZone: string;
+  preview?: boolean;
 }) {
   return (
     <DayTimeline
       currentTime={currentTime}
       items={items}
       timeZone={timeZone}
-      renderItem={(item, layoutStyle, density) =>
+      preview={preview}
+      renderItem={(item, layoutStyle, density, layout, startMinute) =>
         item.material.kind === "event" ? (
           <TodayEventCard
             key={item.id}
-            calendarColor={calendarColorsById.get(item.material.event.calendarId)}
-            currentTime={currentTime}
+            calendarColor={
+              calendars.find(
+                (calendar) =>
+                  item.material.kind === "event" && calendar.id === item.material.event.calendarId,
+              )?.color
+            }
+            calendar={calendars.find(
+              (calendar) =>
+                item.material.kind === "event" && calendar.id === item.material.event.calendarId,
+            )}
             density={density}
             event={item.material.event}
-            layoutStyle={layoutStyle}
             timeZone={timeZone}
+            timelineLayout={{ ...layout, event: item.material.event }}
+            timelineStartMinute={startMinute}
           />
         ) : (
           <TodayTaskTimelineCard
@@ -8986,59 +8974,63 @@ function ReminderDialog({
           </ResponsiveDialogTitle>
           {!reminder ? <TaskCreationProgress step={2} total={2} /> : null}
         </ResponsiveDialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           <FeedbackForm feedback={mutation.feedback} onSubmit={submit}>
-            <ShadcnFieldGroup>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="reminder-title">What needs attention?</ShadcnFieldLabel>
-                <ShadcnInput
-                  autoFocus
-                  id="reminder-title"
-                  defaultValue={reminder?.title}
-                  name="title"
-                  required
-                />
-              </ShadcnField>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <ResponsiveDialogBody>
+              <ShadcnFieldGroup>
                 <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="reminder-deadline">Deadline</ShadcnFieldLabel>
+                  <ShadcnFieldLabel htmlFor="reminder-title">
+                    What needs attention?
+                  </ShadcnFieldLabel>
                   <ShadcnInput
-                    id="reminder-deadline"
-                    defaultValue={toDateTimeLocal(reminder?.dueAt, user.planningTimezone)}
-                    name="dueAt"
-                    type="datetime-local"
+                    autoFocus
+                    id="reminder-title"
+                    defaultValue={reminder?.title}
+                    name="title"
+                    required
                   />
                 </ShadcnField>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="reminder-deadline">Deadline</ShadcnFieldLabel>
+                    <ShadcnInput
+                      id="reminder-deadline"
+                      defaultValue={toDateTimeLocal(reminder?.dueAt, user.planningTimezone)}
+                      name="dueAt"
+                      type="datetime-local"
+                    />
+                  </ShadcnField>
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="reminder-priority">Priority</ShadcnFieldLabel>
+                    <ShadcnNativeSelect
+                      id="reminder-priority"
+                      defaultValue={reminder?.priority ?? "medium"}
+                      name="priority"
+                    >
+                      <NativeSelectOption value="low">Low</NativeSelectOption>
+                      <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                      <NativeSelectOption value="high">High</NativeSelectOption>
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                </div>
                 <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="reminder-priority">Priority</ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="reminder-priority"
-                    defaultValue={reminder?.priority ?? "medium"}
-                    name="priority"
-                  >
-                    <NativeSelectOption value="low">Low</NativeSelectOption>
-                    <NativeSelectOption value="medium">Medium</NativeSelectOption>
-                    <NativeSelectOption value="high">High</NativeSelectOption>
-                  </ShadcnNativeSelect>
+                  <ShadcnFieldLabel htmlFor="reminder-notes">Notes</ShadcnFieldLabel>
+                  <ShadcnTextarea
+                    id="reminder-notes"
+                    defaultValue={reminder?.notes ?? ""}
+                    name="notes"
+                    rows={4}
+                  />
                 </ShadcnField>
-              </div>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="reminder-notes">Notes</ShadcnFieldLabel>
-                <ShadcnTextarea
-                  id="reminder-notes"
-                  defaultValue={reminder?.notes ?? ""}
-                  name="notes"
-                  rows={4}
-                />
-              </ShadcnField>
-            </ShadcnFieldGroup>
+              </ShadcnFieldGroup>
+            </ResponsiveDialogBody>
             <ResponsiveDialogFooter className="mt-5">
               <Button disabled={mutation.isPending} type="submit">
                 {mutation.isPending ? "Saving…" : reminder ? "Save changes" : "Create reminder"}
               </Button>
             </ResponsiveDialogFooter>
           </FeedbackForm>
-        </ResponsiveDialogBody>
+        </div>
       </ResponsiveDialogContent>
     </ResponsiveDialog>
   );
@@ -9060,7 +9052,6 @@ function EventInspector({
   user: User;
 }) {
   const queryClient = useQueryClient();
-  const sheetRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [blocks, setBlocks] = useState(event.blocks);
   const [currentTime, setCurrentTime] = useState(() => new Date());
@@ -9146,17 +9137,9 @@ function EventInspector({
     onError: () => invalidateMaterial(queryClient),
   });
   useEffect(() => {
-    const handleEscape = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key === "Escape") close();
-    };
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [close]);
-  useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-  useDialogFocus(sheetRef);
   const content = (
     <>
       <header className="event-sheet__header">
@@ -9169,9 +9152,11 @@ function EventInspector({
           <XIcon aria-hidden="true" className="size-[19px]" />
         </Button>
       </header>
-      <div className="event-sheet__body">
+      <ResponsiveDialogBody className="event-sheet__body">
         <div className="event-sheet__title">
-          <h2 id="event-sheet-title">{event.title}</h2>
+          <h2 data-user-content id="event-sheet-title">
+            {event.title}
+          </h2>
           {presentation === "floating" ? (
             <div className="event-details-card__schedule">
               <span>
@@ -9316,8 +9301,8 @@ function EventInspector({
           </span>
         </div>
         <MutationFeedback feedback={remove.feedback} />
-      </div>
-      <footer className="event-sheet__actions">
+      </ResponsiveDialogBody>
+      <ResponsiveDialogFooter className="event-sheet__actions">
         {confirmDelete ? (
           <div className="event-sheet__confirm">
             <span>Delete this event everywhere?</span>
@@ -9340,42 +9325,21 @@ function EventInspector({
             </Button>
           </>
         )}
-      </footer>
+      </ResponsiveDialogFooter>
     </>
   );
-  if (presentation === "floating") {
-    return (
-      <ShadcnCard
-        aria-labelledby="event-sheet-title"
-        className="calendar-floating-nav__composer is-calendar-colored event-details-card"
-        ref={sheetRef}
-        role="dialog"
-        style={{ "--calendar-color": calendar?.color ?? "#777ce3" } as CSSProperties}
-        tabIndex={-1}
-      >
-        {content}
-      </ShadcnCard>
-    );
-  }
+
   return (
-    <div className="event-sheet-backdrop">
-      <button
-        aria-label="Close event details"
-        className="event-sheet-dismiss"
-        onClick={close}
-        type="button"
-      />
-      <div
-        aria-labelledby="event-sheet-title"
-        aria-modal="true"
-        className="event-sheet"
-        ref={sheetRef}
-        role="dialog"
-        tabIndex={-1}
+    <ResponsiveDialog open onOpenChange={(open) => !open && close()}>
+      <ResponsiveDialogContent
+        className="event-details-dialog sm:max-w-lg"
+        showCloseButton={false}
+        aria-describedby={undefined}
       >
+        <ResponsiveDialogTitle className="sr-only">Event details</ResponsiveDialogTitle>
         {content}
-      </div>
-    </div>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }
 
@@ -9573,68 +9537,70 @@ export function EventDialog({
         className="editor-form"
         onSubmit={submit}
       >
-        <Field autoFocus defaultValue={event?.title} label="Event" name="title" required />
-        <label className="field">
-          <span>Calendar</span>
-          <select
-            value={
-              event?.calendarId ??
-              selectedCalendarId ??
-              writable.find((calendar) => calendar.id === defaultCalendarId)?.id ??
-              writable[0]?.id ??
-              ""
-            }
-            onChange={(changeEvent) => setSelectedCalendarId(changeEvent.target.value)}
-            disabled={Boolean(event)}
-            name="calendarId"
-            required
-          >
-            {writable.map((calendar) => (
-              <option key={calendar.id} value={calendar.id}>
-                {calendar.name} · {calendar.provider}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="form-grid">
-          <Field
-            value={startValue}
-            onChange={(changeEvent) => setStartValue(changeEvent.target.value)}
-            label="Starts"
-            name="startsAt"
-            type="datetime-local"
-            required
-          />
-          <Field
-            value={endValue}
-            onChange={(changeEvent) => {
-              endEdited.current = true;
-              setEndValue(changeEvent.target.value);
-            }}
-            label="Ends"
-            name="endsAt"
-            type="datetime-local"
-            required
-          />
-        </div>
-        <div className="form-grid">
-          <Field defaultValue={event?.location ?? ""} label="Location" name="location" />
-          <label className="check-field">
-            <input defaultChecked={event?.allDay} name="allDay" type="checkbox" /> All day
+        <ResponsiveDialogBody>
+          <Field autoFocus defaultValue={event?.title} label="Event" name="title" required />
+          <label className="field">
+            <span>Calendar</span>
+            <select
+              value={
+                event?.calendarId ??
+                selectedCalendarId ??
+                writable.find((calendar) => calendar.id === defaultCalendarId)?.id ??
+                writable[0]?.id ??
+                ""
+              }
+              onChange={(changeEvent) => setSelectedCalendarId(changeEvent.target.value)}
+              disabled={Boolean(event)}
+              name="calendarId"
+              required
+            >
+              {writable.map((calendar) => (
+                <option key={calendar.id} value={calendar.id}>
+                  {calendar.name} · {calendar.provider}
+                </option>
+              ))}
+            </select>
           </label>
-        </div>
-        <label className="field">
-          <span>Notes</span>
-          <textarea
-            aria-describedby="event-notes-help"
-            defaultValue={event?.notes ?? ""}
-            name="notes"
-            rows={5}
-          />
-          <small className="field-help" id="event-notes-help">
-            Markdown and safe HTML render in event details and stay intact when synced.
-          </small>
-        </label>
+          <div className="form-grid">
+            <Field
+              value={startValue}
+              onChange={(changeEvent) => setStartValue(changeEvent.target.value)}
+              label="Starts"
+              name="startsAt"
+              type="datetime-local"
+              required
+            />
+            <Field
+              value={endValue}
+              onChange={(changeEvent) => {
+                endEdited.current = true;
+                setEndValue(changeEvent.target.value);
+              }}
+              label="Ends"
+              name="endsAt"
+              type="datetime-local"
+              required
+            />
+          </div>
+          <div className="form-grid">
+            <Field defaultValue={event?.location ?? ""} label="Location" name="location" />
+            <label className="check-field">
+              <input defaultChecked={event?.allDay} name="allDay" type="checkbox" /> All day
+            </label>
+          </div>
+          <label className="field">
+            <span>Notes</span>
+            <textarea
+              aria-describedby="event-notes-help"
+              defaultValue={event?.notes ?? ""}
+              name="notes"
+              rows={5}
+            />
+            <small className="field-help" id="event-notes-help">
+              Markdown and safe HTML render in event details and stay intact when synced.
+            </small>
+          </label>
+        </ResponsiveDialogBody>
         <FormActions
           close={close}
           pending={mutation.isPending}
@@ -9670,8 +9636,10 @@ function CalendarDialog({ close, user }: { close: () => void; user: User }) {
           mutation.mutate(new FormData(event.currentTarget));
         }}
       >
-        <Field autoFocus label="Calendar name" name="name" required />
-        <Field defaultValue="#7c8cff" label="Color" name="color" type="color" required />
+        <ResponsiveDialogBody>
+          <Field autoFocus label="Calendar name" name="name" required />
+          <Field defaultValue="#7c8cff" label="Color" name="color" type="color" required />
+        </ResponsiveDialogBody>
         <FormActions close={close} pending={mutation.isPending} submitLabel="Create calendar" />
       </FeedbackForm>
     </Modal>
@@ -9689,48 +9657,17 @@ function Modal({
   eyebrow: string;
   title: string;
 }) {
-  const modalRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [close]);
-  useDialogFocus(modalRef);
   return (
-    <div className="modal-backdrop">
-      <button aria-label="Close dialog" className="modal-dismiss" onClick={close} type="button" />
-      <section
-        aria-labelledby="modal-title"
-        aria-modal="true"
-        className="modal"
-        ref={modalRef}
-        role="dialog"
-        tabIndex={-1}
-      >
-        <header>
-          <div>
-            <p className="eyebrow">{eyebrow}</p>
-            <h2 id="modal-title">{title}</h2>
-          </div>
-          <Button aria-label="Close" onClick={close} tone="ghost">
-            <XIcon className="size-[19px]" />
-          </Button>
-        </header>
+    <ResponsiveDialog open onOpenChange={(open) => !open && close()}>
+      <ResponsiveDialogContent className="sm:max-w-lg" aria-describedby={undefined}>
+        <ResponsiveDialogHeader>
+          <p className="eyebrow">{eyebrow}</p>
+          <ResponsiveDialogTitle>{title}</ResponsiveDialogTitle>
+        </ResponsiveDialogHeader>
         {children}
-      </section>
-    </div>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
-}
-
-function useDialogFocus(container: { current: HTMLElement | null }) {
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement;
-    const dialog = container.current as HTMLElement;
-    dialog.focus();
-    return () => previouslyFocused.focus();
-  }, [container]);
 }
 
 function FormActions({
@@ -9743,12 +9680,14 @@ function FormActions({
   submitLabel: string;
 }) {
   return (
-    <div className="form-actions">
-      <Button onClick={close}>Cancel</Button>
+    <ResponsiveDialogFooter className="form-actions">
+      <Button onClick={close} type="button">
+        Cancel
+      </Button>
       <Button disabled={pending} tone="accent" type="submit">
         {pending ? <Spinner label="Saving" /> : submitLabel}
       </Button>
-    </div>
+    </ResponsiveDialogFooter>
   );
 }
 
@@ -9826,9 +9765,7 @@ export function dateTimeLocalToIso(value: string, timeZone: string): string {
   ).toISOString();
 }
 function formatTime(value: string, timeZone: string) {
-  return new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit", timeZone }).format(
-    new Date(value),
-  );
+  return formatTimelineClock(value, timeZone);
 }
 
 export function formatTimelineTimeRange(event: CalendarEvent, timeZone: string) {
@@ -10124,10 +10061,6 @@ function differenceInLocalDays(from: LocalDate, to: LocalDate): number {
     (Date.UTC(to.year, to.month - 1, to.day) - Date.UTC(from.year, from.month - 1, from.day)) /
       86_400_000,
   );
-}
-
-function minuteToTimelinePixels(minute: number): number {
-  return (minute / 60) * calendarHourHeight;
 }
 
 function formatHour(hour: number): string {

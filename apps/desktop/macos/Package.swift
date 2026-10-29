@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-  name: "IloNative", platforms: [.macOS(.v14)],
-  products: [.library(name: "IloNative", type: .static, targets: ["IloNative"])],
+  name: "PersonalOsNative", platforms: [.macOS(.v14)],
+  products: [.library(name: "PersonalOsNative", type: .static, targets: ["PersonalOsNative"])],
   targets: [
     .target(
-      name: "IloNative",
+      name: "PersonalOsNative",
       linkerSettings: [
         .linkedFramework("AppKit"), .linkedFramework("SwiftUI"),
         .linkedFramework("ServiceManagement"), .linkedFramework("Security"),
         .linkedFramework("UserNotifications"), .linkedFramework("WidgetKit"),
-      ]), .testTarget(name: "IloNativeTests", dependencies: ["IloNative"]),
+      ]), .testTarget(name: "PersonalOsNativeTests", dependencies: ["PersonalOsNative"]),
   ])

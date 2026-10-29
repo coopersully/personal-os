@@ -4,7 +4,7 @@ import {
   type FinancePresentationKind,
 } from "@personal-os/domain";
 
-export const iloToolStages = [
+export const personalOsToolStages = [
   "context",
   "inspect",
   "prepare",
@@ -12,23 +12,28 @@ export const iloToolStages = [
   "verify",
   "recover",
 ] as const;
-export type IloToolStage = (typeof iloToolStages)[number];
+export type PersonalOsToolStage = (typeof personalOsToolStages)[number];
 
-export const iloToolPolicies = ["read_only", "preview", "approve_each", "approved_rule"] as const;
-export type IloToolPolicy = (typeof iloToolPolicies)[number];
+export const personalOsToolPolicies = [
+  "read_only",
+  "preview",
+  "approve_each",
+  "approved_rule",
+] as const;
+export type PersonalOsToolPolicy = (typeof personalOsToolPolicies)[number];
 
-export type IloToolDefinition = {
+export type PersonalOsToolDefinition = {
   compatibility?: boolean;
   destructive?: boolean;
   domain: string;
   idempotent?: boolean;
   openWorld?: boolean;
-  policy: IloToolPolicy;
+  policy: PersonalOsToolPolicy;
   presentation?: FinancePresentationKind;
   readOnly: boolean;
   requiredScopes: readonly AccessScope[];
   scopeMatch?: "any" | "all";
-  stage: IloToolStage;
+  stage: PersonalOsToolStage;
 };
 
 const allScopes = accessScopeSchema.options;
@@ -45,9 +50,9 @@ const domainWriteScopes = allScopes.filter(
 function read(
   domain: string,
   requiredScopes: readonly AccessScope[],
-  stage: IloToolStage = "inspect",
-  options: Pick<IloToolDefinition, "openWorld" | "presentation"> = {},
-): IloToolDefinition {
+  stage: PersonalOsToolStage = "inspect",
+  options: Pick<PersonalOsToolDefinition, "openWorld" | "presentation"> = {},
+): PersonalOsToolDefinition {
   return {
     domain,
     scopeMatch: domain === "assistant" ? "any" : "all",
@@ -62,8 +67,8 @@ function read(
 function preview(
   domain: string,
   requiredScopes: readonly AccessScope[],
-  options: Pick<IloToolDefinition, "openWorld" | "presentation"> = {},
-): IloToolDefinition {
+  options: Pick<PersonalOsToolDefinition, "openWorld" | "presentation"> = {},
+): PersonalOsToolDefinition {
   return {
     domain,
     scopeMatch: domain === "assistant" ? "any" : "all",
@@ -81,11 +86,11 @@ function write(
   requiredScopes: readonly AccessScope[],
   options: Partial<
     Pick<
-      IloToolDefinition,
+      PersonalOsToolDefinition,
       "destructive" | "idempotent" | "openWorld" | "policy" | "presentation" | "stage"
     >
   > = {},
-): IloToolDefinition {
+): PersonalOsToolDefinition {
   return {
     domain,
     scopeMatch: domain === "assistant" ? "any" : "all",
@@ -101,10 +106,12 @@ function write(
 }
 
 /**
- * The single discoverability and safety registry for nohmi's MCP surface.
+ * The single discoverability and safety registry for Personal OS's MCP surface.
  * Feature modules own behavior; this catalog owns how that behavior is exposed.
  */
-export const iloToolCatalog = {
+export const personalOsToolCatalog = {
+  get_agent_account: read("assistant", []),
+  register_agent_account: write("assistant", [], { idempotent: true, openWorld: false }),
   get_finance_profile: read("finances", ["finances:read"]),
   disconnect_texting: write("texting", ["texting:write", "texting:execute"], {
     policy: "approved_rule",
@@ -222,6 +229,23 @@ export const iloToolCatalog = {
     policy: "approved_rule",
   }),
   search_finance: read("finances", ["finances:read"]),
+  get_finance_review_backlog: read("finances", ["finances:read"]),
+  list_finance_review_backlog_items: read("finances", ["finances:read"]),
+  get_finance_review_batch: read("finances", ["finances:read"], "verify"),
+  list_finance_review_batches: read("finances", ["finances:read"], "recover"),
+  preview_finance_review_batch: write("finances", ["finances:read", "finances:write"], {
+    policy: "preview",
+    stage: "prepare",
+    idempotent: true,
+  }),
+  execute_finance_review_batch: write(
+    "finances",
+    ["finances:read", "finances:write", "finances:execute"],
+    {
+      policy: "approved_rule",
+      idempotent: false,
+    },
+  ),
   get_finance_budget_policy: read("finances", ["finances:read"]),
   create_finance_budget_policy: write("finances", ["finances:write", "finances:execute"], {
     policy: "approved_rule",
@@ -364,6 +388,7 @@ export const iloToolCatalog = {
 
   list_mailboxes: read("mail", ["mail:read"]),
   get_mail_setup_context: read("mail", ["mail:read"], "context"),
+  get_mail_navigation_counts: read("mail", ["mail:read"]),
   list_mail: read("mail", ["mail:read"]),
   read_mail: read("mail", ["mail:read"]),
   list_mail_rules: read("mail", ["mail:read"]),
@@ -689,12 +714,12 @@ export const iloToolCatalog = {
     openWorld: true,
     policy: "approved_rule",
   }),
-} satisfies Record<string, IloToolDefinition>;
+} satisfies Record<string, PersonalOsToolDefinition>;
 
-export type IloToolName = keyof typeof iloToolCatalog;
+export type PersonalOsToolName = keyof typeof personalOsToolCatalog;
 
 export function canDiscoverTool(
-  definition: IloToolDefinition,
+  definition: PersonalOsToolDefinition,
   scopes: ReadonlySet<AccessScope>,
   readOnly: boolean,
   includeCompatibility = false,
@@ -711,8 +736,8 @@ export function availableToolNames(
   scopes: ReadonlySet<AccessScope>,
   readOnly: boolean,
   includeCompatibility = false,
-): IloToolName[] {
-  return (Object.entries(iloToolCatalog) as [IloToolName, IloToolDefinition][])
+): PersonalOsToolName[] {
+  return (Object.entries(personalOsToolCatalog) as [PersonalOsToolName, PersonalOsToolDefinition][])
     .filter(([, definition]) => canDiscoverTool(definition, scopes, readOnly, includeCompatibility))
     .map(([name]) => name);
 }

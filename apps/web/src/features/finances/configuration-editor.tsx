@@ -1,5 +1,9 @@
 import { type FinanceProfileVersion, financeSetupPlanningSchema } from "@personal-os/domain";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useId, useRef } from "react";
+import { toast } from "sonner";
+import { QueryFeedback } from "@/components/async-state";
+import { ContentSkeleton } from "@/components/content-skeleton";
+import { RecoveryRequest } from "@/components/recovery-request";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "../settings/settings-layout.js";
 import { FinanceConfigurationCollections } from "./configuration-collections.js";
@@ -16,26 +20,57 @@ import { useFinanceConfiguration } from "./use-finance-configuration.js";
 const text = (value: number | string | null | undefined) => value?.toString() ?? "";
 export function FinanceConfigurationEditor() {
   const query = useFinanceConfiguration();
-  if (query.isPending) return <p role="status">Loading financial settings…</p>;
+  const retryId = useId();
+  const retrying = useRef(false);
+  async function retryProfile() {
+    if (retrying.current) return;
+    retrying.current = true;
+    toast.loading("Trying again…", { id: retryId, position: "top-center" });
+    try {
+      const result = await query.refetch();
+      if (result.isError || result.data?.profile.state !== "loaded")
+        toast.error("Financial settings could not load. Try again.", {
+          id: retryId,
+          position: "top-center",
+        });
+      else toast.dismiss(retryId);
+    } catch {
+      toast.error("Financial settings could not load. Try again.", {
+        id: retryId,
+        position: "top-center",
+      });
+    } finally {
+      retrying.current = false;
+    }
+  }
+  if (query.isPending)
+    return <ContentSkeleton label="Loading financial settings…" shape="settings" rows={3} />;
   if (query.isError || query.data?.profile.state !== "loaded")
     return (
       <>
-        <Alert>
-          <AlertDescription>
-            Financial settings could not load.{" "}
-            <Button variant="secondary" onClick={() => void query.refetch()}>
+        <QueryFeedback query={query} title="Financial settings could not load." toastOnly />
+        <RecoveryRequest
+          open={query.isSuccess && query.data?.profile.state !== "loaded"}
+          title="Financial settings could not load"
+          description="Retry loading your financial profile before editing these settings. Your other saved settings remain available."
+          actions={
+            <Button disabled={query.isFetching} onClick={() => void retryProfile()}>
               Retry
             </Button>
-          </AlertDescription>
-        </Alert>
+          }
+        />
         <FinanceIncomeEditor />
       </>
     );
   const profile = query.data.profile.value;
   return (
     <div className="settings-stack">
-      <SettingsSection title="Household" description="Your financial household and location.">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <SettingsSection
+        layout="rows"
+        title="Household"
+        description="Your financial household and location."
+      >
+        <div className="flex flex-col">
           <Setting
             id="jurisdiction"
             label="Country and state or region"
@@ -58,8 +93,8 @@ export function FinanceConfigurationEditor() {
           />
         </div>
       </SettingsSection>
-      <SettingsSection title="Income">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <SettingsSection layout="rows" title="Income">
+        <div className="flex flex-col">
           <Setting
             id="expectedMonthlyTakeHome"
             label="Expected monthly take-home"
@@ -130,8 +165,8 @@ export function FinanceConfigurationEditor() {
       </SettingsSection>
       <FinanceIncomeEditor />
       <FinanceConfigurationCollections profile={profile} />
-      <SettingsSection title="Reserves and preferences">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <SettingsSection layout="rows" title="Reserves and preferences">
+        <div className="flex flex-col">
           <Setting
             id="liquidReserves"
             label="Liquid reserves"

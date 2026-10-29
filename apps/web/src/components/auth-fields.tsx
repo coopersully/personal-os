@@ -63,7 +63,7 @@ type EmailFieldProps = Omit<TextFieldProps, "label" | "type"> & {
 };
 
 export function EmailField({
-  label = "email",
+  label = "Email",
   placeholder = "sam@example.com",
   ...props
 }: EmailFieldProps) {
@@ -99,7 +99,7 @@ export function InviteCodeField({
   const fieldId = useId();
   return (
     <Field data-invalid={Boolean(error)}>
-      <FieldLabel htmlFor={fieldId}>invite code</FieldLabel>
+      <FieldLabel htmlFor={fieldId}>Invite code</FieldLabel>
       <InputOTP
         aria-invalid={Boolean(error)}
         aria-describedby={error ? `${fieldId}-error` : undefined}
@@ -128,11 +128,11 @@ export function InviteCodeField({
         </InputOTPGroup>
       </InputOTP>
       {status === "checking" ? (
-        <FieldDescription role="status">checking invitation…</FieldDescription>
+        <FieldDescription role="status">Checking invitation…</FieldDescription>
       ) : null}
       {status === "valid" ? (
         <FieldDescription className="text-success" role="status">
-          invitation accepted.
+          Invitation accepted.
         </FieldDescription>
       ) : null}
       {error ? <FieldError id={`${fieldId}-error`}>{error}</FieldError> : null}
@@ -142,15 +142,15 @@ export function InviteCodeField({
 
 const passwordRequirements = [
   { key: "length", label: `${PASSWORD_MIN_LENGTH}–${PASSWORD_MAX_LENGTH} characters` },
-  { key: "mixedCase", label: "uppercase and lowercase letters" },
-  { key: "number", label: "at least one number" },
-  { key: "symbol", label: "at least one symbol" },
+  { key: "mixedCase", label: "Uppercase and lowercase letters" },
+  { key: "number", label: "At least one number" },
+  { key: "symbol", label: "At least one symbol" },
 ] as const;
 
 function PasswordRequirementList({ password }: { password: string }) {
   const state = useMemo(() => passwordRequirementState(password), [password]);
   return (
-    <ul aria-label="password requirements" className="flex flex-col gap-1.5">
+    <ul aria-label="Password requirements" className="flex flex-col gap-1.5">
       {passwordRequirements.map(({ key, label }) => {
         const complete = state[key];
         const Icon = complete ? CircleCheckIcon : CircleIcon;
@@ -189,12 +189,12 @@ type PasswordFieldsProps = {
 
 export function PasswordFields({
   autoComplete = "new-password",
-  confirmLabel = "confirm password",
+  confirmLabel = "Confirm password",
   confirmName = "confirmPassword",
   confirmValue,
   disabled,
   error,
-  label = "password",
+  label = "Password",
   labelAction,
   name = "password",
   onConfirmValueChange,
@@ -208,8 +208,8 @@ export function PasswordFields({
   const [visible, setVisible] = useState(false);
   const hasConfirmation = confirmValue !== undefined && onConfirmValueChange !== undefined;
   const visibilityLabel = visible
-    ? `hide password${hasConfirmation ? "s" : ""}`
-    : `show password${hasConfirmation ? "s" : ""}`;
+    ? `Hide password${hasConfirmation ? "s" : ""}`
+    : `Show password${hasConfirmation ? "s" : ""}`;
 
   const renderVisibilityToggle = () => (
     <InputGroupAddon align="inline-end">
@@ -244,7 +244,7 @@ export function PasswordFields({
             onChange={(event) => onValueChange(event.target.value)}
             placeholder={
               placeholder ??
-              (autoComplete === "current-password" ? "enter your password" : "create a password")
+              (autoComplete === "current-password" ? "Enter your password" : "Create a password")
             }
             required
             type={visible ? "text" : "password"}
@@ -269,7 +269,7 @@ export function PasswordFields({
               minLength={PASSWORD_MIN_LENGTH}
               name={confirmName}
               onChange={(event) => onConfirmValueChange(event.target.value)}
-              placeholder="enter the same password"
+              placeholder="Enter the same password"
               required
               type={visible ? "text" : "password"}
               value={confirmValue}

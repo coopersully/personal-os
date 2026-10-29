@@ -189,6 +189,13 @@ const pairs = [
     min: 4.5,
     name: `${workspace} workspace identity`,
   })),
+  ...["calendar", "tasks", "mail", "finances"].map((workspace) => ({
+    background: `--workspace-${workspace}-fill`,
+    foreground: "--workspace-icon-foreground",
+    maxDelta: 1.5,
+    min: 4.5,
+    name: `${workspace} solid workspace icon`,
+  })),
 ];
 
 for (const workspace of ["calendar", "tasks", "mail", "finances"]) {

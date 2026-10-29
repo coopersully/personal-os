@@ -245,3 +245,5 @@ Before approving a visible change, ask:
   future tooling decision, not a prerequisite for sound token ownership.
 
 Workspace identity icons use white glyphs on fully saturated solid fills, without a border or extra frame. Selection remains owned by the surrounding control.
+
+Solid workspace icons use dedicated fill tokens and a stable near-white foreground. Keep the existing per-theme accent tokens for unframed glyphs on neutral surfaces. Both foreground/background roles retain 4.5:1 minimum contrast in light and dark modes; a fill palette does not replace readable inline accents.

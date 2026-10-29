@@ -947,7 +947,7 @@ export function createConnectorService({
             ...(previous.status === null ? {} : { status: previous.status }),
           });
           capabilityErrors.push(error);
-          if (previous.health.recovery === "reconnect") blockedCapabilityErrors.add(error);
+          blockedCapabilityErrors.add(error);
         }
         return;
       }
@@ -1200,7 +1200,12 @@ export function createConnectorService({
           }),
         );
       }
-      if (capabilityErrors.length) throw capabilityErrors[0];
+      // Prefer a failure from work performed now over a sibling's saved recovery state.
+      if (capabilityErrors.length)
+        throw (
+          capabilityErrors.find((error) => !blockedCapabilityErrors.has(error)) ??
+          capabilityErrors[0]
+        );
       throwIfQuiescing();
       const completedAt = now();
       const [completedAccount] = await db
@@ -1266,7 +1271,8 @@ export function createConnectorService({
       return { changed };
     } catch (error) {
       const interrupted = shutdown?.signal.aborted === true;
-      const failureCount = claimedAccount.syncFailureCount + 1;
+      const waitingForRecovery = !interrupted && blockedCapabilityErrors.has(error);
+      const failureCount = claimedAccount.syncFailureCount + (waitingForRecovery ? 0 : 1);
       const provider = claimedAccount.provider === "icloud" ? "icloud" : "google";
       const failure: ConnectorSyncFailure = interrupted
         ? {
@@ -1325,30 +1331,32 @@ export function createConnectorService({
           )
           .returning({ id: calendarAccounts.id });
         if (settledAccount) {
-          log?.({
-            accountId: claimedAccount.id,
-            category: failure.category,
-            code: failure.code,
-            transportCode: failure.transportCode,
-            transportPhase: failure.transportPhase,
-            disposition: failure.recovery,
-            durationMs: Date.now() - startedAt,
-            event: "connector_sync_failed",
-            syncSource: options.triggered
-              ? "triggered"
-              : options.automatic
-                ? "scheduled"
-                : "manual",
-            failureCount,
-            method: "CONNECTOR",
-            nextSyncAt: nextSyncAt?.toISOString() ?? null,
-            path: `/internal/connectors/${claimedAccount.id}/sync`,
-            provider,
-            requestId,
-            status: failure.status ?? 503,
-          });
+          if (!waitingForRecovery)
+            log?.({
+              accountId: claimedAccount.id,
+              category: failure.category,
+              code: failure.code,
+              transportCode: failure.transportCode,
+              transportPhase: failure.transportPhase,
+              disposition: failure.recovery,
+              durationMs: Date.now() - startedAt,
+              event: "connector_sync_failed",
+              syncSource: options.triggered
+                ? "triggered"
+                : options.automatic
+                  ? "scheduled"
+                  : "manual",
+              failureCount,
+              method: "CONNECTOR",
+              nextSyncAt: nextSyncAt?.toISOString() ?? null,
+              path: `/internal/connectors/${claimedAccount.id}/sync`,
+              provider,
+              requestId,
+              status: failure.status ?? 503,
+            });
           // A notification is consumed once every runnable capability succeeds. Keep
-          // reconnect health, but do not replay the same signal for a blocked sibling.
+          // failure health and scheduled recovery, but do not replay a signal while
+          // a sibling is blocked by reconnect or retry backoff.
           if (
             options.triggered &&
             !interrupted &&

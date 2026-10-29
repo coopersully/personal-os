@@ -113,8 +113,12 @@ provider response bodies and unknown exception messages never populate it.
 - Initial connections and low-latency change signals coalesce by account in
   `connector_sync_triggers`. The scheduler drains claimed triggers through the same fenced sync
   engine before ordinary due-account reconciliation. A trigger arriving during a sync survives
-  completion; failed work is released for retry. The five-minute schedule remains authoritative if
-  every change signal is delayed or absent.
+  completion; newly failed work is released for retry. When every runnable capability succeeds,
+  consume the notification even if a sibling is waiting for reconnect or retry backoff. Preserve
+  that sibling's health and scheduled retry deadline; a skipped capability does not increment
+  account failure counts or emit another sync failure. If work performed now fails, its failure
+  takes precedence over a sibling's cached error. The five-minute schedule remains authoritative
+  if every change signal is delayed or absent.
 
 Google Mail uses Gmail history IDs and Google Calendar uses opaque sync tokens. iCloud Calendar
 uses WebDAV `sync-collection` only when the collection advertises it; an invalid opaque token

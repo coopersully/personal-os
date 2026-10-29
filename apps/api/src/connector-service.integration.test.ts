@@ -8838,6 +8838,28 @@ describe.sequential("connector service", () => {
     ).toBe("reconnect");
     expect(provider.listCalendars).toHaveBeenCalledTimes(calendarCalls);
     expect(provider.syncMail).toHaveBeenCalledTimes(mailCalls + 1);
+    // A new failure in the runnable sibling must take precedence over cached reconnect state.
+    vi.mocked(provider.syncMail).mockRejectedValueOnce(
+      new ConnectorError({
+        category: "rate_limited",
+        code: "google_rate_limited",
+        disposition: "retry",
+        message: "private",
+        status: 403,
+      }),
+    );
+    await localService.enqueueSyncTrigger(account.id, "notification");
+    await expect(localService.dispatchTriggeredSyncs()).resolves.toMatchObject({
+      attempted: 1,
+      failed: 1,
+      succeeded: 0,
+    });
+    const [newFailure] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(newFailure?.syncErrorCode).toBe("google_rate_limited");
+    expect(newFailure?.syncRecovery).toBe("automatic");
     const partialFreshness = await localService.observeSyncFreshness();
     if (!stored?.syncCapabilities?.mail) throw new Error("Missing Mail health");
     await database.db
@@ -8868,6 +8890,115 @@ describe.sequential("connector service", () => {
       (await localService.listAccounts(userId)).find((row) => row.id === account.id)?.capabilities
         .calendar?.health.state,
     ).toBe("ready");
+  });
+
+  it("consumes notifications during Mail backoff without inventing new failures", async () => {
+    const provider = mockGoogle();
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: "notification-backoff",
+        label: "Notification backoff",
+        calendarEnabled: true,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(
+          { ...credentials, scope: googleCalendarAndMailScope },
+          encryptionKey,
+        ),
+      })
+      .returning();
+    if (!account || !provider.syncMail) throw new Error("Missing fixture");
+    let clock = timestamp;
+    const logs: { event: string }[] = [];
+    const localService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => clock,
+      log: (entry) => logs.push(entry),
+    });
+    const quotaFailure = new ConnectorError({
+      category: "rate_limited",
+      code: "google_rate_limited",
+      disposition: "retry",
+      message: "private-provider-canary",
+      status: 403,
+      retryAfterMs: 60 * 60_000,
+    });
+    vi.mocked(provider.syncMail).mockRejectedValueOnce(quotaFailure);
+    await expect(localService.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "rate_limited",
+    });
+    const readAccount = async () =>
+      (
+        await database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, account.id))
+      )[0];
+    const failed = await readAccount();
+    const mailRetryAt = failed?.syncCapabilities?.mail?.health.nextSyncAt;
+    if (!mailRetryAt) throw new Error("Missing retry deadline");
+    const calendarCalls = vi.mocked(provider.listCalendars).mock.calls.length;
+    const mailCalls = vi.mocked(provider.syncMail).mock.calls.length;
+    logs.length = 0;
+    await database.db.delete(connectorSyncTriggers);
+    await localService.enqueueSyncTrigger(account.id, "notification");
+    await expect(localService.dispatchTriggeredSyncs()).resolves.toEqual({
+      attempted: 1,
+      succeeded: 1,
+      failed: 0,
+    });
+    expect(provider.listCalendars).toHaveBeenCalledTimes(calendarCalls + 1);
+    expect(provider.syncMail).toHaveBeenCalledTimes(mailCalls);
+    const waiting = await readAccount();
+    expect(waiting?.syncFailureCount).toBe(failed?.syncFailureCount);
+    expect(waiting?.syncStatus).toBe("error");
+    expect(waiting?.syncCapabilities?.mail).toEqual(failed?.syncCapabilities?.mail);
+    expect(logs.filter((entry) => entry.event === "connector_sync_failed")).toEqual([]);
+    expect(
+      await database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).toEqual([]);
+
+    // Ordinary reconciliation keeps the healthy sibling current without resetting Mail's backoff.
+    clock = new Date(timestamp.getTime() + 5 * 60_000);
+    await expect(
+      localService.syncAccount(userId, account.id, { automatic: true }),
+    ).rejects.toMatchObject({ code: "rate_limited" });
+    expect((await readAccount())?.syncFailureCount).toBe(failed?.syncFailureCount);
+    expect(provider.syncMail).toHaveBeenCalledTimes(mailCalls);
+    expect(logs.filter((entry) => entry.event === "connector_sync_failed")).toEqual([]);
+
+    // A real provider failure at the deadline still retains durable work and emits an error.
+    clock = new Date(mailRetryAt);
+    vi.mocked(provider.syncMail).mockRejectedValueOnce(quotaFailure);
+    await localService.enqueueSyncTrigger(account.id, "notification");
+    await expect(localService.dispatchTriggeredSyncs()).resolves.toEqual({
+      attempted: 1,
+      succeeded: 0,
+      failed: 1,
+    });
+    expect(provider.syncMail).toHaveBeenCalledTimes(mailCalls + 1);
+    expect((await readAccount())?.syncFailureCount).toBe((failed?.syncFailureCount ?? 0) + 1);
+    expect(logs.filter((entry) => entry.event === "connector_sync_failed")).toHaveLength(1);
+    const [pending] = await database.db
+      .select()
+      .from(connectorSyncTriggers)
+      .where(eq(connectorSyncTriggers.accountId, account.id));
+    expect(pending).toBeDefined();
+    const retryAt = (await readAccount())?.syncCapabilities?.mail?.health.nextSyncAt;
+    if (!retryAt) throw new Error("Missing retry deadline");
+    clock = new Date(retryAt);
+    await expect(localService.dispatchTriggeredSyncs()).resolves.toEqual({
+      attempted: 1,
+      succeeded: 1,
+      failed: 0,
+    });
+    expect((await readAccount())?.syncCapabilities?.mail?.health.state).toBe("ready");
+    expect((await readAccount())?.syncFailureCount).toBe(0);
   });
 
   it("backs off account credential failures instead of reusing stale capability schedules", async () => {

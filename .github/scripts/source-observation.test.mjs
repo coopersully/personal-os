@@ -542,7 +542,7 @@ test("workflow keeps read-only permissions, polling and one protected context", 
   assert.match(metadata, /actions: read/);
   assert.doesNotMatch(metadata, /write|workflow_run|--collect/);
   assert.match(metadata, /wait-source-ci.mjs/);
-  assert.match(readFileSync(".github/scripts/wait-source-ci.mjs", "utf8"), /40 \* 60 \* 1000/);
+  assert.match(readFileSync(".github/scripts/wait-source-ci.mjs", "utf8"), /55 \* 60 \* 1000/);
 });
 
 test("provider retry is bounded and malformed private payload stays out of errors", () => {

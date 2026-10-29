@@ -1150,7 +1150,13 @@ describe.sequential("connector service", () => {
       code: "service_unavailable",
     });
     expect(provider.syncMail).toHaveBeenCalledOnce();
-    clock = new Date(clock.getTime() + 65_000);
+    const [retryAccount] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    const retryAt = retryAccount?.syncCapabilities?.mail?.health.nextSyncAt;
+    if (!retryAt) throw new Error("Missing persisted Mail recovery deadline");
+    clock = new Date(retryAt);
     vi.mocked(provider.syncMail).mockResolvedValueOnce({ credentials, value: pending });
     await expect(local.syncAccount(userId, account.id)).resolves.toMatchObject({ pending: true });
     expect(
@@ -1213,11 +1219,16 @@ describe.sequential("connector service", () => {
       code: "service_unavailable",
     });
     clock = new Date(timestamp.getTime() + 71_000);
-    for (const options of [{}, { automatic: true, triggered: true }, { automatic: true }]) {
+    for (const options of [{}, { automatic: true }]) {
       await expect(local.syncAccount(userId, account.id, options)).rejects.toMatchObject({
         code: "service_unavailable",
       });
     }
+    // A push signal is acknowledged once runnable siblings finish; Mail stays
+    // blocked by its persisted cooldown instead of replaying provider reads.
+    await expect(
+      local.syncAccount(userId, account.id, { automatic: true, triggered: true }),
+    ).resolves.toEqual({ changed: 0 });
     expect(provider.syncMail).toHaveBeenCalledOnce();
     const [failed] = await database.db
       .select()

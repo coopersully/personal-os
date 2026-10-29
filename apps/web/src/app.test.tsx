@@ -8507,7 +8507,7 @@ describe("Personal OS web app", () => {
             return { count: visited, truncated: child !== null };
           };
           const scan = (element: Element) => {
-            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT);
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
             const found: { main: Element | null; settings: Element | null; title: boolean } = {
               main: null,
               settings: null,
@@ -8517,23 +8517,25 @@ describe("Personal OS web app", () => {
             let shells = 0;
             let panels = 0;
             let visited = 0;
-            let node: Element | null = element;
+            let node: Node | null = element;
             while (node && visited < 1_024) {
-              if (node.id === "main-content") found.main ??= node;
-              if (node.id === "settings-page-title") found.title = true;
-              if (node.classList.contains("app-shell")) shells += 1;
-              if (node.classList.contains("settings-panel")) {
-                panels += 1;
-                found.settings ??= node;
-              }
-              if (node.tagName === "A" && links.length < 8 && returnLabel(node)) {
-                links.push({
-                  hrefMatchesExpected: node.getAttribute("href") === target,
-                  ...hiddenHint(node),
-                });
+              if (node instanceof Element) {
+                if (node.id === "main-content") found.main ??= node;
+                if (node.id === "settings-page-title") found.title = true;
+                if (node.classList.contains("app-shell")) shells += 1;
+                if (node.classList.contains("settings-panel")) {
+                  panels += 1;
+                  found.settings ??= node;
+                }
+                if (node.tagName === "A" && links.length < 8 && returnLabel(node)) {
+                  links.push({
+                    hrefMatchesExpected: node.getAttribute("href") === target,
+                    ...hiddenHint(node),
+                  });
+                }
               }
               visited += 1;
-              node = walker.nextNode() as Element | null;
+              node = walker.nextNode();
             }
             return { found, links, shells, panels, visited, truncated: node !== null };
           };
@@ -8541,54 +8543,58 @@ describe("Personal OS web app", () => {
           const global = scan(document.body);
           const dom = (element: Element | null) => {
             if (!element) return { present: false, searchTruncated: own.truncated };
-            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT);
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
             const nodes = [];
-            let current: Element | null = element;
-            while (current && nodes.length < 48) {
-              const node: Element = current;
-              nodes.push({
-                tag: classify(node.tagName, [
-                  "MAIN",
-                  "SECTION",
-                  "DIV",
-                  "NAV",
-                  "HEADER",
-                  "H1",
-                  "H2",
-                  "H3",
-                  "A",
-                  "BUTTON",
-                  "P",
-                  "SPAN",
-                  "FORM",
-                  "INPUT",
-                  "LABEL",
-                  "UL",
-                  "LI",
-                  "ASIDE",
-                ]),
-                role: classify(node.getAttribute("role"), [
-                  "main",
-                  "region",
-                  "navigation",
-                  "heading",
-                  "link",
-                  "button",
-                  "status",
-                  "alert",
-                ]),
-                mainContent: node.id === "main-content",
-                settingsTitle: node.id === "settings-page-title",
-                settingsPanel: node.classList.contains("settings-panel"),
-                ...hiddenHint(node),
-                busy: node.getAttribute("aria-busy") === "true",
-                returnLabel: node.tagName === "A" && returnLabel(node),
-                returnHref: node.getAttribute("href") === target,
-                childElements: childCount(node),
-              });
-              current = walker.nextNode() as Element | null;
+            let current: Node | null = element;
+            let visited = 0;
+            while (current && visited < 48) {
+              if (current instanceof Element) {
+                const node = current;
+                nodes.push({
+                  tag: classify(node.tagName, [
+                    "MAIN",
+                    "SECTION",
+                    "DIV",
+                    "NAV",
+                    "HEADER",
+                    "H1",
+                    "H2",
+                    "H3",
+                    "A",
+                    "BUTTON",
+                    "P",
+                    "SPAN",
+                    "FORM",
+                    "INPUT",
+                    "LABEL",
+                    "UL",
+                    "LI",
+                    "ASIDE",
+                  ]),
+                  role: classify(node.getAttribute("role"), [
+                    "main",
+                    "region",
+                    "navigation",
+                    "heading",
+                    "link",
+                    "button",
+                    "status",
+                    "alert",
+                  ]),
+                  mainContent: node.id === "main-content",
+                  settingsTitle: node.id === "settings-page-title",
+                  settingsPanel: node.classList.contains("settings-panel"),
+                  ...hiddenHint(node),
+                  busy: node.getAttribute("aria-busy") === "true",
+                  returnLabel: node.tagName === "A" && returnLabel(node),
+                  returnHref: node.getAttribute("href") === target,
+                  childElements: childCount(node),
+                });
+              }
+              visited += 1;
+              current = walker.nextNode();
             }
-            return { present: true, nodes, truncated: current !== null };
+            return { present: true, nodes, visited, truncated: current !== null };
           };
           if (view.location.value.length > 4_096) throw new Error("Capture input limit");
           const actual = new URL(view.location.value, "https://diagnostic.invalid");

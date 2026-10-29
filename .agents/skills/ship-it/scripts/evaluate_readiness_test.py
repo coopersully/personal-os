@@ -244,6 +244,20 @@ class EvaluateReadinessTest(unittest.TestCase):
         state["ci"]["checks"].pop()
         self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
+    def test_hosted_requires_current_macos_job_not_retired_runner(self):
+        state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",
+            "equivalenceVerified": True, "localOnlyComplete": True,
+            "equivalentChecks": copy.deepcopy(FULL_COVERAGE)})
+        for name in FULL_SOURCE_JOBS:
+            state["ci"]["expectedSelectedChecks"].append(name)
+            state["ci"]["expectedCheckApps"][name] = 15368
+            state["ci"]["checks"].append(dict(state["ci"]["checks"][0], name=name))
+        self.assertEqual(evaluate(state)["decision"], "MERGE")
+        macos = next(check for check in state["ci"]["checks"]
+                     if check["name"] == "Desktop (macos-15)")
+        macos["name"] = "Desktop (macos-14)"
+        self.assertNotEqual(evaluate(state)["decision"], "MERGE")
+
     def test_hosted_shards_require_all_browser_members_and_node_quality(self):
         coverage = {"repository": "Repository contracts", "lint": "Lint and format",
                     "types-tests-coverage-builds": "Node quality",

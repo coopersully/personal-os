@@ -27,17 +27,21 @@ The contract remains `docs/superpowers/plans/2026-09-08-macos-native-bridge.md`,
 
 The native library does not introduce new callback action kinds. Server-owned recurrence occurrences are represented by distinct material/occurrence times; no local recurrence expansion changes server data. All-day calendar notification delivery stays off; the current settings contract has no all-day alert-time field. Animation respects the OS Reduce Motion preference; the current settings contract has no separate animation toggle.
 
-## Verification performed
+## Historical verification performed
 
 On September 8, 2026 with Xcode 26.6 / Swift 6.3.3:
 
 - `swift test --package-path apps/desktop/macos`: **29 tests passed**. Covers origin validation, account/occurrence action isolation, completed/cancelled filtering, planner bounds, privacy filtering, independent widget selection, same-day/earlier-overdue boundaries, event deduplication, quiet-hour meeting expiry, DST skipped-hour behavior, stale input and multi-display position clamping.
 - `swift build --package-path apps/desktop/macos -c release`: static library built successfully.
 - `apps/desktop/macos/scripts/build-widgets.sh`: arm64 macOS 14 extension compiled, App Intents metadata extracted, and both output plists passed `plutil -lint`.
-- `PERSONAL_OS_WIDGET_ARCH=x86_64 PERSONAL_OS_WIDGET_OUTPUT="$PWD/apps/desktop/macos/build/intel" apps/desktop/macos/scripts/build-widgets.sh`: Intel macOS 14 extension also compiled with metadata/plist validation.
+- `ILO_WIDGET_ARCH=x86_64 ILO_WIDGET_OUTPUT="$PWD/apps/desktop/macos/build/intel" apps/desktop/macos/scripts/build-widgets.sh`: Intel macOS 14 extension also compiled with metadata/plist validation.
 - Metadata contains both `CompleteWorkIntent` and `WorkspaceConfiguration`.
-- `nm -g .../libPersonalOsNative.a` confirms `_personal_os_native_dispatch` and `_personal_os_native_set_callback` exports.
+- `nm -g .../libIloNative.a` confirms `_ilo_native_dispatch` and `_ilo_native_set_callback` exports.
 - `bash -n apps/desktop/macos/scripts/{build-widgets,embed-widgets}.sh`: passed.
+
+These are the original September receipts, before the Personal OS source rename. Current
+build commands use `PERSONAL_OS_*`, `PersonalOsNative`, and `personal_os_native_*`;
+the naming change requires fresh candidate-bound native verification.
 
 ## Release provisioning and installed acceptance
 

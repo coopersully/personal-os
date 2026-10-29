@@ -1900,11 +1900,14 @@ describe("Personal OS web app", () => {
     expect(mocks.getMe).toHaveBeenCalled();
     expect(mocks.getCurrentRitual).not.toHaveBeenCalled();
     expect(
-      within(screen.getByRole("navigation", { name: "Product navigation" })).getByRole("link", {
+      within(screen.getByRole("navigation", { name: "product navigation" })).getByRole("link", {
         name: "sign in",
       }),
     ).toHaveAttribute("href", "/login");
-    expect(screen.getAllByRole("link", { name: "Sign up" })[0]).toHaveAttribute("href", "/signup");
+    expect(screen.getAllByRole("link", { name: "get started" })[0]).toHaveAttribute(
+      "href",
+      "/signup",
+    );
   });
 
   it.each([

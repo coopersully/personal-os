@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 const pages = [
-  ["about", "About nohmi"],
-  ["docs", "Using nohmi"],
+  ["about", "a personal harness."],
+  ["docs", "your tools. your terms."],
   ["privacy", "Privacy policy"],
   ["terms", "Terms of use"],
   ["data-use", "Your data and agent access"],
@@ -16,19 +16,18 @@ test.describe("public documentation without JavaScript or a session", () => {
   test("the product landing page is readable and navigable", async ({ page }) => {
     const response = await page.goto("/");
     expect(response?.status()).toBe(200);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      "your digital exoskeleton.",
-    );
-    await expect(page.getByRole("link", { name: "Sign up", exact: true }).first()).toHaveAttribute(
-      "href",
-      "/signup",
-    );
+    await expect(page.locator(".public-hero__scene").first()).toHaveCSS("animation-name", "none");
+    await expect(page.getByRole("button", { name: "pause scenery" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("your digital exoskeleton.");
+    await expect(
+      page.getByRole("link", { name: "get started", exact: true }).first(),
+    ).toHaveAttribute("href", "/signup");
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page
-      .getByRole("navigation", { name: "Public documentation" })
-      .getByRole("link", { name: "Privacy policy" })
+      .getByRole("navigation", { name: "public documentation" })
+      .getByRole("link", { name: "privacy" })
       .click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Privacy policy");
   });
@@ -38,9 +37,13 @@ test.describe("public documentation without JavaScript or a session", () => {
       const response = await page.goto(`/${path}/`);
       expect(response?.status()).toBe(200);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(title);
-      await expect(page.getByRole("navigation", { name: "Public documentation" })).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "public documentation" })).toBeVisible();
       await expect(page.locator('header [data-slot="navigation-menu"]')).toBeVisible();
-      await expect(page.locator('main [data-slot="card"]')).toBeVisible();
+      if (["about", "docs", "support"].includes(path)) {
+        await expect(page.locator("main.public-editorial")).toBeVisible();
+      } else {
+        await expect(page.locator('main [data-slot="card"]')).toBeVisible();
+      }
       expect(
         await page
           .locator("footer")
@@ -61,14 +64,40 @@ test.describe("public documentation without JavaScript or a session", () => {
         await page.screenshot({ path: test.info().outputPath(`${path}.png`), fullPage: true });
       }
       await page.keyboard.press("Tab");
-      await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
+      await expect(page.getByRole("link", { name: "skip to content" })).toBeFocused();
       await page.keyboard.press("Enter");
       await expect(page.getByRole("main")).toBeFocused();
       await page
-        .getByRole("navigation", { name: "Public documentation" })
-        .getByRole("link", { name: "Privacy policy" })
+        .getByRole("navigation", { name: "public documentation" })
+        .getByRole("link", { name: "privacy" })
         .click();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("Privacy policy");
+    });
+  }
+
+  for (const workspace of ["mail", "tasks", "calendar", "finances"]) {
+    test(`${workspace} guide keeps product examples next to instructions`, async ({ page }) => {
+      const response = await page.goto(`/docs/${workspace}/`);
+      expect(response?.status()).toBe(200);
+      await expect(
+        page
+          .getByRole("navigation", { name: "document navigation" })
+          .getByRole("link", { name: workspace, exact: true }),
+      ).toHaveAttribute("aria-current", "page");
+      await expect(page.locator(".public-guide-screenshot img")).toHaveAttribute(
+        "src",
+        `/brand/devices/${workspace}-premiere.jpg`,
+      );
+      await expect(page.locator(".public-guide-example")).toHaveCount(2);
+      await expect(
+        page.getByText("example workflow · you, directly", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("example workflow · with an agent", { exact: true }),
+      ).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
     });
   }
 
@@ -108,20 +137,19 @@ test("the product landing page links to dedicated authentication and public docu
   await expect(page.locator('[data-slot="card"]')).toHaveCount(5);
   await expect(
     page
-      .getByRole("navigation", { name: "Product navigation" })
+      .getByRole("navigation", { name: "product navigation" })
       .getByRole("link", { name: "sign in", exact: true }),
   ).toHaveAttribute("href", "/login");
-  await expect(page.getByRole("link", { name: "Sign up", exact: true }).first()).toHaveAttribute(
-    "href",
-    "/signup",
-  );
+  await expect(
+    page.getByRole("link", { name: "get started", exact: true }).first(),
+  ).toHaveAttribute("href", "/signup");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
   await page.screenshot({ path: test.info().outputPath("landing.png"), fullPage: true });
   await page
-    .getByRole("navigation", { name: "Public documentation" })
-    .getByRole("link", { name: "Privacy policy" })
+    .getByRole("navigation", { name: "public documentation" })
+    .getByRole("link", { name: "privacy" })
     .click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Privacy policy");
 });
@@ -159,21 +187,23 @@ test("login restores a protected destination and does not replace the product ro
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Privacy policy");
 });
 
-for (const path of ["/", "/privacy/"]) {
-  test(`public navigation docks and returns smoothly on ${path}`, async ({ page }) => {
+for (const path of ["/", "/docs/mail/"]) {
+  test(`public navigation stays pill-shaped while scrolling on ${path}`, async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.goto(path);
     const nav = page.locator(".public-nav");
     await expect(nav.getByRole("link", { name: "sign in", exact: true })).toBeVisible();
-    await expect(nav.getByRole("link", { name: "Sign up", exact: true })).toHaveCount(0);
-    await expect(nav).toHaveCSS("background-color", /(?:,\s*0|\/\s*0)\)$/);
+    await expect(nav.getByRole("link", { name: "get started", exact: true })).toHaveCount(0);
+    await expect(nav).toHaveCSS("border-radius", "9999px");
+    await expect(nav).toHaveCSS("backdrop-filter", "blur(24px) saturate(1.4)");
     await page.evaluate(() => window.scrollTo(0, 350));
     await expect
       .poll(() => nav.evaluate((node) => getComputedStyle(node).backdropFilter))
-      .toBe("blur(16px)");
+      .toBe("blur(24px) saturate(1.4)");
     expect((await page.locator("header").boundingBox())?.y).toBe(0);
     await page.screenshot({ path: test.info().outputPath("scrolled-nav.png") });
     await page.evaluate(() => window.scrollTo(0, 0));
-    await expect(nav).toHaveCSS("background-color", /(?:,\s*0|\/\s*0)\)$/);
+    await expect(nav).toHaveCSS("border-radius", "9999px");
+    await expect(nav).toHaveCSS("backdrop-filter", "blur(24px) saturate(1.4)");
   });
 }

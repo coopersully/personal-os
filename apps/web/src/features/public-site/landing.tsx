@@ -1,4 +1,4 @@
-import { type CSSProperties, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PauseIcon, PlayIcon } from "../../components/icons.js";
 import { Button } from "../../components/ui/button.js";
@@ -46,6 +46,8 @@ const workspaces = [
 
 export function ProductLanding() {
   const [sceneryPaused, setSceneryPaused] = useState(false);
+  const [motionReady, setMotionReady] = useState(false);
+  useEffect(() => setMotionReady(true), []);
   return (
     <PublicSiteLayout contentId="product-content">
       <main id="product-content" tabIndex={-1} className="public-landing">
@@ -53,6 +55,7 @@ export function ProductLanding() {
           className="public-hero"
           aria-labelledby="product-heading"
           data-scenery-paused={sceneryPaused}
+          data-motion-ready={motionReady}
         >
           <div className="public-hero__scenery" aria-hidden="true">
             {scenery.map((scene, index) => (
@@ -97,6 +100,7 @@ export function ProductLanding() {
           </div>
           <Button
             className="public-hero__motion"
+            hidden={!motionReady}
             variant="ghost"
             size="icon"
             aria-label={sceneryPaused ? "resume scenery" : "pause scenery"}

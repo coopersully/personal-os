@@ -56,13 +56,12 @@ build. A production deployment and Twilio approval require separate evidence.
 ## Exterior brand and composition
 
 The brand category and line are **“a personal harness.”** Explain it through the person's
-context, tools, and controls. The landing hero says “your digital exoskeleton.” A full-width white composition places
-live text above the head of the chest-angle white figure, crops its torso at the bottom, and fades
-into the white content below. The figure scales proportionally to the full page width so both
-shoulders reach the edges; the hero grows taller than 16:9 to retain the headline above its head.
-On narrow screens a minimum height preserves readable text and
-separates it from the figure. The decorative image has empty alternative text; four equally weighted workspace cards describe familiar work. A control section
-explains access, review, and revocation. Signup remains an invitation-based alpha.
+context, tools, and controls. The landing hero says “your digital exoskeleton.” Its bounded
+760–900px desktop composition places live text above a smaller central chest-angle figure,
+crops the torso at its lower boundary, and fades into the white content below. Mobile uses a
+790px minimum composition with readable text clearance. Decorative images have empty alternative
+text. Four equally weighted workspace cards describe familiar work; the control section explains
+access, review, and revocation. Signup remains an invitation-based alpha.
 
 Use lowercase authored copy, including accessible names. Preserve user content, external names,
 quoted consent, and policy commitments. The about page explains the category; the guide supports
@@ -72,22 +71,20 @@ The photographic landing composition stays light in either system theme so its o
 foreground joins the page without a seam. Documentation and authenticated screens retain their
 existing theme behavior.
 
-External light blue is scoped to `.public-site` and `.auth-shell` brand tokens. The desktop authentication panel uses the blue/ink pair, including in dark mode.
+External light blue is available only to company branding; signed-in product chrome has no favored hue. Authentication presentation remains with the Account presentation owner and retains current-main forms and decoration.
 The public footer has no border and inverts the page’s body tokens: foreground for its surface and background for its text. This follows the page theme, including the light landing page inside a dark system theme. The landing hero scenery extends behind the floating nav pill. No brand token
 changes signed-in product chrome. Other surfaces use the shared neutral theme tokens.
 
 Use 16px gaps between equal workspace cards, 32px square icon slots with 14–16px glyphs, one layer
-of card padding, and 16px outer radii. Desktop hero and control sections use two columns;
-narrow screens stack them and workspace cards reduce from four to two to one column. The square
-brand panel scales with its column, growing beyond square when narrow text requires it. Preserve
+of card padding, and 16px outer radii. Control sections use two columns;
+narrow screens stack them and workspace cards reduce from four to two to one column. Preserve
 text at zoom rather than clipping to a fixed height. Invitation code slots share available form
 width at 320px; coarse-pointer primary actions and public navigation retain at least 44px targets without enlarging glyphs.
 
-The landing header is a stable translucent pill over the hero scenery at every breakpoint.
-Other public pages retain the scroll-driven docking treatment with reduced-motion and older-browser fallbacks. The inverse-tone footer groups
+Landing and editorial document headers use a stable translucent pill at every breakpoint.
+Legal pages retain the scroll-driven docking treatment with reduced-motion and older-browser fallbacks. The inverse-tone footer groups
 links under product, account, and legal, with the current-year operator copyright and a quiet
-background wordmark. Authentication keeps its functional form and policy links; the decorative
-pattern is replaced by a static, readable brand panel on wide screens.
+background wordmark. Authentication keeps its current functional form, policy links and decoration; this integration does not restyle it.
 
 Public copy is direct and restrained. Name the capability, action, or consequence; remove slogans,
 repeated assurances, and unsupported comparisons. Keep the master-plan vision distinguishable
@@ -96,7 +93,7 @@ from available behavior, and retain consent, permission, and recovery details wh
 The hero uses nine locally hosted nature scenes supplied by the user behind the nav, copy, and
 figure. Provenance is recorded in `apps/web/public/brand/SOURCES.md`. Remove embedded collage
 separators before export; retain proportions and use responsive 960/1920-pixel WebP files.
-Scenes repeat at a smaller scale with alternating horizontal and vertical reflection so adjacent edges match with an eight-pixel blur and a light irregular noise layer, revealing more of each image rather than cropping it to cover the banner. Nine scenes crossfade on a 4.5-second cycle (one scene every half second);
+Scenery is static without JavaScript; animation starts only once its pause control is available. Scenes repeat at a smaller scale with alternating horizontal and vertical reflection so adjacent edges match with an eight-pixel blur and a light irregular noise layer, revealing more of each image rather than cropping it to cover the banner. Nine scenes crossfade on a 4.5-second cycle (one scene every half second);
 a compact pause/play button in the lower corner freezes the sequence, and reduced motion shows the first still. A stable
 dark scrim protects white text contrast, while the lower edge fades into the white page.
 
@@ -121,7 +118,7 @@ Device width and horizontal position are controlled by `--device-width` and `--d
 figure scale and position derive from the same device dimensions. Preserve each PNG's existing
 alpha instead of adding hand-traced masks. Screenshot dimensions match the visible aperture;
 never stretch the UI. Keep descriptive alternative text, lazy loading, and optional subtle
-animated dither confined to figure silhouettes. The dither uses a 4×4 Bayer threshold matrix and four quantized luminance levels within the original image alpha. Three matrix phases animate the ordered pattern without random TV-static noise. Do not add a periodic dot overlay. Devices and screenshots stay still. Reduced-motion mode disables both effects.
+animated dither confined to figure silhouettes. The dither uses a 4×4 Bayer threshold matrix and four quantized luminance levels within the original image alpha. Three matrix phases animate the ordered pattern for eight 600ms cycles, then settle on a still dithered silhouette without random TV-static noise. Do not add a periodic dot overlay. Devices and screenshots stay still. Reduced-motion mode disables both effects.
 
 Keep the main hero bounded to 760–900px on desktop and 790px on mobile. The smaller central portrait fades into the page; it does not need full-width shoulders.
 

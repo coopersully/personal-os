@@ -159,7 +159,8 @@
   height: auto;
   width: min(60vw, 600px);
   max-width: none;
-  animation: public-figure-distortion 600ms steps(1, end) infinite;
+  filter: url("/brand/figure-grain.svg?v=3#grain-a");
+  animation: public-figure-distortion 600ms steps(1, end) 8 forwards;
   pointer-events: none;
 }
 .public-hero::after {
@@ -723,7 +724,8 @@
   display: block;
   width: 100%;
   height: auto;
-  animation: public-figure-distortion 600ms steps(1, end) infinite;
+  filter: url("/brand/figure-grain.svg?v=3#grain-a");
+  animation: public-figure-distortion 600ms steps(1, end) 8 forwards;
 }
 @keyframes public-figure-distortion {
   0%,
@@ -859,7 +861,8 @@
   display: block;
   width: 100%;
   height: auto;
-  animation: public-figure-distortion 600ms steps(1, end) infinite;
+  filter: url("/brand/figure-grain.svg?v=3#grain-a");
+  animation: public-figure-distortion 600ms steps(1, end) 8 forwards;
 }
 @media (prefers-reduced-motion: reduce) {
   .public-finale-figure img {
@@ -990,7 +993,8 @@
   display: block;
   width: 100%;
   height: auto;
-  animation: public-figure-distortion 600ms steps(1, end) infinite;
+  filter: url("/brand/figure-grain.svg?v=3#grain-a");
+  animation: public-figure-distortion 600ms steps(1, end) 8 forwards;
 }
 .public-editorial-person {
   clip-path: polygon(
@@ -1019,7 +1023,8 @@
   inset: 0;
   width: 100%;
   height: auto;
-  animation: public-figure-distortion 600ms steps(1, end) infinite;
+  filter: url("/brand/figure-grain.svg?v=3#grain-a");
+  animation: public-figure-distortion 600ms steps(1, end) 8 forwards;
 }
 .public-editorial-hand--left {
   clip-path: polygon(17% 57%, 23% 56%, 30% 57%, 30% 66%, 24% 70%, 17% 68%);
@@ -1197,4 +1202,9 @@
 .public-guide-example [data-slot="item-description"] {
   -webkit-line-clamp: unset;
   overflow: visible;
+}
+
+/* Static rendering never starts scenery that cannot be paused. */
+.public-hero[data-motion-ready="false"] .public-hero__scene {
+  animation: none;
 }

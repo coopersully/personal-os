@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { ritualCloudRim } from "./ritual-atmosphere.js";
+import { mixSkyColor, type RitualSkyAppearance } from "./ritual-sky.js";
 
 // One timeline drives cloud motion, shape, and ordered dithering.
 const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
@@ -18,8 +20,20 @@ function noise(x: number, y: number) {
 }
 
 /** Cached fields keep interactive sky animation inexpensive. */
-export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
+export function RitualClouds({
+  kind,
+  appearance,
+}: {
+  kind: "morning" | "night";
+  appearance?: RitualSkyAppearance;
+}) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const latestAppearance = useRef(appearance);
+  const repaint = useRef<() => void>(() => {});
+  useEffect(() => {
+    latestAppearance.current = appearance;
+    repaint.current();
+  }, [appearance]);
   useEffect(() => {
     const element = canvas.current;
     if (!element || typeof CanvasRenderingContext2D === "undefined") return;
@@ -55,23 +69,87 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
     let buildTimer: ReturnType<typeof setTimeout> | undefined;
     const paint = () => {
       if (!image || !ready) return;
+      const appearance = latestAppearance.current;
       const elapsed = timeline;
       const evolution = Math.sin(elapsed / 56000) * 0.12;
       // Keep the ordered pattern stable, with a tiny, slow change at its edges.
       const thresholds = bayer.map(
         (value, index) => (value + 0.5) / 16 + Math.sin(elapsed / 28000 + index * 0.7) * 0.025,
       );
+      const offset = (((timeline / 450) % width) + width) % width;
+      const base = appearance
+        ? mixSkyColor(
+            appearance.cloud,
+            appearance.top,
+            appearance.celestial === "moon" ? 0.42 : 0.22,
+          )
+        : undefined;
+      const highlight =
+        appearance?.celestial === "moon"
+          ? ([216, 230, 255] as const)
+          : appearance?.phase === "sunset" || appearance?.phase === "dawn"
+            ? ([255, 207, 156] as const)
+            : ([255, 245, 215] as const);
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const pixel = y * width + x;
           const cloud = (field[pixel] ?? 0) + (variation[pixel] ?? 0) * evolution;
           const density = Math.max(
             0,
-            Math.min(0.94, kind === "night" ? (cloud - 0.43) * 2.8 : (cloud - 0.46) * 3.8),
+            Math.min(
+              0.94,
+              appearance
+                ? (cloud - (0.63 - appearance.cover * 0.38)) * 3.3
+                : kind === "night"
+                  ? (cloud - 0.43) * 2.8
+                  : (cloud - 0.46) * 3.8,
+            ),
           );
           const index = pixel * 4;
+          if (density <= (thresholds[(y % 4) * 4 + (x % 4)] ?? 0)) {
+            image.data[index + 3] = 0;
+            continue;
+          }
+          const left = field[y * width + ((x - 1 + width) % width)] ?? cloud;
+          const right = field[y * width + ((x + 1) % width)] ?? cloud;
+          const above = field[Math.max(0, y - 1) * width + x] ?? cloud;
+          const below = field[Math.min(height - 1, y + 1) * width + x] ?? cloud;
+          const rim = appearance
+            ? ritualCloudRim(
+                appearance,
+                ((x - offset + width) % width) / width,
+                y / height,
+                density,
+                (right - left) * width,
+                (below - above) * height,
+              )
+            : 0;
+          const light = rim * 0.7;
+          image.data[index] = base
+            ? base[0] + (highlight[0] - base[0]) * light
+            : kind === "night"
+              ? 170
+              : 255;
+          image.data[index + 1] = base
+            ? base[1] + (highlight[1] - base[1]) * light
+            : kind === "night"
+              ? 185
+              : 255;
+          image.data[index + 2] = base
+            ? base[2] + (highlight[2] - base[2]) * light
+            : kind === "night"
+              ? 210
+              : 255;
           image.data[index + 3] =
-            density > (thresholds[(y % 4) * 4 + (x % 4)] ?? 0) ? (kind === "night" ? 34 : 255) : 0;
+            density > (thresholds[(y % 4) * 4 + (x % 4)] ?? 0)
+              ? appearance
+                ? appearance.celestial === "moon"
+                  ? Math.round(165 + density * 90)
+                  : 240
+                : kind === "night"
+                  ? 34
+                  : 255
+              : 0;
         }
       }
       textureContext.putImageData(image, 0, 0);
@@ -89,6 +167,7 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
       context.setTransform(scaleX, 0, 0, scaleY, -offset * scaleX, 0);
       context.fillStyle = pattern;
       context.fillRect(offset, 0, width, height);
+      element.dataset.skyFrame = String(timeline);
     };
     const resize = () => {
       const bounds = element.getBoundingClientRect();
@@ -116,6 +195,7 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
       clearTimeout(buildTimer);
       const build = ++generation;
       ready = false;
+      delete element.dataset.skyFrame;
       pattern = null;
       image = context.createImageData(width, height);
       field = new Float32Array(width * height);
@@ -132,10 +212,6 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
           }
           const y = row;
           for (let x = 0; x < width; x++) {
-            const index = (y * width + x) * 4;
-            image.data[index] = kind === "night" ? 170 : 255;
-            image.data[index + 1] = kind === "night" ? 185 : 255;
-            image.data[index + 2] = kind === "night" ? 210 : 255;
             const nx = (x / width) * 5;
             const ny = (y / height) * 4;
             const periodic = (scale: number, vertical: number, offset = 0) => {
@@ -162,7 +238,7 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
       previousFrame = instant;
       if (!document.hidden && !motion?.matches) {
         if (!drag) {
-          timeline += dt * velocity;
+          timeline += dt * velocity * (latestAppearance.current?.wind ?? 1);
           velocity = 1 + (velocity - 1) * Math.exp(-dt / 850);
         }
         if (instant - lastPaint >= 120) {
@@ -231,6 +307,10 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
       previousFrame = performance.now();
       if (!motion?.matches) frame = requestAnimationFrame(tick);
     };
+    repaint.current = () => {
+      paint();
+      draw();
+    };
     resize();
     if (!motion?.matches) frame = requestAnimationFrame(tick);
     surface?.addEventListener("click", click, true);
@@ -242,7 +322,20 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
     motion?.addEventListener?.("change", updateMotion);
     const observer = new ResizeObserver(resize);
     observer.observe(element);
+    window.addEventListener("resize", resize);
+    let resolution: MediaQueryList | undefined;
+    const watchResolution = () => {
+      resolution?.removeEventListener?.("change", resolutionChanged);
+      resolution = window.matchMedia?.(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+      resolution?.addEventListener?.("change", resolutionChanged);
+    };
+    const resolutionChanged = () => {
+      resize();
+      watchResolution();
+    };
+    watchResolution();
     return () => {
+      repaint.current = () => {};
       generation++;
       clearTimeout(buildTimer);
       cancelAnimationFrame(frame);
@@ -254,7 +347,10 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
       surface?.removeEventListener("pointercancel", release);
       window.removeEventListener("blur", release);
       observer.disconnect();
+      delete element.dataset.skyFrame;
       motion?.removeEventListener?.("change", updateMotion);
+      window.removeEventListener("resize", resize);
+      resolution?.removeEventListener?.("change", resolutionChanged);
     };
   }, [kind]);
   return <canvas ref={canvas} className="ritual-clouds" aria-hidden="true" tabIndex={-1} />;

@@ -236,6 +236,9 @@ mobile safe-area spacing remain stable. A feature may adjust layout through
 slot `className` values, but must not replace the responsive presentation,
 overlay behavior, or semantic anatomy.
 
+Scheduled routines and full ritual previews are full-screen experiences on desktop and mobile,
+with focus isolation and their own routine actions; they are exempt from modal/drawer sizing.
+
 All in-app modal tasks, editors, confirmations, and detail overlays use this shared
 composition: centered dialogs at desktop widths and bottom drawers below 768 px.
 Do not implement editor side sheets or floating Calendar editor cards. Floating
@@ -302,7 +305,7 @@ colors, raw color utilities, or a second spacing scale.
 | Spacing | Use the shared 4 px rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
 | Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. |
-| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. Browser rituals follow the shared responsive modal presentation; shared cards and dialogs remain flat. |
+| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. Scheduled routines and full ritual previews fill the viewport at every width, with a bounded question card and full-screen pixel sky. Their dithered atmospheric color transitions are an illustration exception, never a gradient surface for controls or cards; shared cards and dialogs remain flat. |
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |

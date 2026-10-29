@@ -254,17 +254,13 @@ async fn present(app: &tauri::AppHandle, data: &Value, force: bool) -> Result<()
         if let Some(window) = app.get_webview_window("ritual") {
             window.destroy().map_err(|e| e.to_string())?;
         }
-        let steps = state["current"]["definition"]["steps"]
-            .as_array()
-            .map_or(0, Vec::len);
-        let height = (468.0 + steps as f64 * 90.0).min(900.0);
         let window = tauri::WebviewWindowBuilder::new(
             app,
             "ritual",
             tauri::WebviewUrl::App("index.html#ritual".into()),
         )
         .title("nohmi ritual")
-        .inner_size(648.0, height)
+        .inner_size(800.0, 600.0)
         .min_inner_size(320.0, 300.0)
         .resizable(false)
         .decorations(false)
@@ -274,15 +270,8 @@ async fn present(app: &tauri::AppHandle, data: &Value, force: bool) -> Result<()
         .visible(false)
         .build()
         .map_err(|e| e.to_string())?;
-        if let Some(monitor) = window.current_monitor().map_err(|e| e.to_string())? {
-            let size = monitor.size();
-            let scale = monitor.scale_factor();
-            let _ = window.set_size(tauri::LogicalSize::new(
-                648f64.min((size.width as f64 / scale - 64.0).max(320.0)),
-                height.min((size.height as f64 / scale - 64.0).max(300.0)),
-            ));
-        }
-        window.center().map_err(|e| e.to_string())?;
+        // Native preparation fits this hidden webview to the system primary display.
+        // AppKit owns subsequent display changes without remounting the checklist.
         #[cfg(target_os = "macos")]
         let window_address = window.ns_window().map_err(|e| e.to_string())? as usize;
         #[cfg(not(target_os = "macos"))]
@@ -595,6 +584,63 @@ pub async fn ritual_ready(
     *runtime.ready.lock().await = Some(occurrence_id);
     Ok(())
 }
+// Only the ready checklist can project decorative pixels for its current occurrence.
+fn sky_frame_matches(label: &str, occurrence: &str, ready: Option<&str>, shown: Option<&str>) -> bool {
+    label == "ritual" && !occurrence.is_empty() && ready == Some(occurrence) && shown == Some(occurrence)
+}
+fn valid_sky_pixels(width: u32, height: u32, pixels: &str) -> bool {
+    if !(1..=400).contains(&width) || !(1..=240).contains(&height) { return false; }
+    let length = ((width as usize * height as usize * 4 + 2) / 3) * 4;
+    pixels.len() == length && pixels.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+}
+#[tauri::command]
+pub async fn ritual_sky_frame(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    occurrence_id: String,
+    width: u32,
+    height: u32,
+    pixels: String,
+    dark: bool,
+) -> Result<bool, String> {
+    if window.label() != "ritual" || !valid_sky_pixels(width, height, &pixels) {
+        return Err("Invalid ritual sky frame".into());
+    }
+    let runtime = app.state::<RitualRuntime>();
+    let _lock = runtime.lock.lock().await;
+    identity(&app).await?;
+    if !sky_frame_matches(window.label(), &occurrence_id,
+        runtime.ready.lock().await.as_deref(), runtime.shown.lock().await.as_deref()) {
+        return Ok(false);
+    }
+    let result = crate::native::call(&app, json!({"op":"ritual_background_frame","width":width,"height":height,"pixels":pixels,"dark":dark})).await?;
+    Ok(result["accepted"] == true)
+}
+
+#[cfg(test)]
+mod sky_frame_tests {
+    use super::*;
+    #[test]
+    fn only_current_ready_ritual_can_publish_pixels() {
+        assert!(sky_frame_matches("ritual", "today", Some("today"), Some("today")));
+        for label in ["main", "pet", "ritual-secondary"] { assert!(!sky_frame_matches(label, "today", Some("today"), Some("today"))); }
+        assert!(!sky_frame_matches("ritual", "old", Some("today"), Some("today")));
+        assert!(!sky_frame_matches("ritual", "today", None, Some("today")));
+        assert!(!sky_frame_matches("ritual", "today", Some("today"), None));
+        assert!(!sky_frame_matches("ritual", "", Some(""), Some("")));
+    }
+    #[test]
+    fn rgba_payload_is_bounded_before_native_dispatch() {
+        assert!(valid_sky_pixels(1, 1, "AAAA/w=="));
+        assert!(!valid_sky_pixels(0, 1, ""));
+        assert!(!valid_sky_pixels(401, 1, ""));
+        assert!(!valid_sky_pixels(1, 241, ""));
+        assert!(!valid_sky_pixels(1, 1, "short"));
+        assert!(!valid_sky_pixels(1, 1, "<script>"));
+        assert!(valid_sky_pixels(400, 240, &"A".repeat(512000)));
+    }
+}
+
 // Pet transport authorizes its window before calling these account-fenced adapters.
 pub async fn pet_state(
     app: &tauri::AppHandle,

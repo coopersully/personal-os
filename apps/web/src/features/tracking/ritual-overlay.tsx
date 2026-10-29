@@ -47,11 +47,11 @@ import {
   submitRitualResponse,
 } from "../desktop/ritual-bridge.js";
 import { RitualCardHeader } from "./ritual-card-header.js";
-import { RitualClouds } from "./ritual-clouds.js";
 import { RitualCompletionWeek } from "./ritual-completion-week.js";
 import { RitualEscapeSummary } from "./ritual-escape-summary.js";
 import { RitualPreviewChecklist } from "./ritual-preview.js";
 import { RitualSkipConfirmation } from "./ritual-skip-confirmation.js";
+import { RitualWeatherSky } from "./ritual-weather-sky.js";
 export function RitualOverlay() {
   const [state, setState] = useState<RitualState | null>(null);
   const [readyId, setReadyId] = useState<string | null>(null);
@@ -574,7 +574,7 @@ export function RitualChecklist({
       ) : null}
       {confirmSkip ? (
         <RitualSkipConfirmation
-          key={`${occurrence.id}:${occurrence.revision}:${state.skipCount}`}
+          key={occurrence.id}
           count={state.syncStatus === "saved" ? state.skipCount : undefined}
           streak={state.streakCount}
           busy={busy}
@@ -582,29 +582,33 @@ export function RitualChecklist({
           onCancel={() => setConfirmSkip(false)}
         />
       ) : challenge ? (
-        <section
-          className="flex flex-col items-center gap-7 text-center"
+        <Card
+          key="snooze"
+          className="ritual-card ritual-screen"
+          role="region"
           aria-label="Confirm snooze"
         >
-          <RitualEscapeSummary streak={state.streakCount}>
-            {challenge.unavailable
-              ? `Recent snooze history is unavailable. This device has recorded ${challenge.count} snoozes in the last 3 days.`
-              : `You’ve snoozed your ${occurrence.definition.kind === "night" ? "evening" : "morning"} ritual ${challenge.count} times in the last 3 days.`}{" "}
-            Snooze another 10 minutes, or go back to continue your ritual now.
-          </RitualEscapeSummary>
-          <div className="flex flex-wrap justify-center gap-2">
-            <Button
-              variant="secondary"
-              disabled={busy}
-              onClick={() => void escapeAction("confirm_snooze")}
-            >
-              Snooze 10 minutes
-            </Button>
-            <Button disabled={busy} onClick={() => void escapeAction("cancel_snooze")}>
-              Go back
-            </Button>
-          </div>
-        </section>
+          <CardContent className="ritual-scroll flex min-h-0 flex-col items-center gap-7 overflow-y-auto text-center">
+            <RitualEscapeSummary streak={state.streakCount}>
+              {challenge.unavailable
+                ? `Recent snooze history is unavailable. This device has recorded ${challenge.count} snoozes in the last 3 days.`
+                : `You’ve snoozed your ${occurrence.definition.kind === "night" ? "evening" : "morning"} ritual ${challenge.count} times in the last 3 days.`}{" "}
+              Snooze another 10 minutes, or go back to continue your ritual now.
+            </RitualEscapeSummary>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => void escapeAction("confirm_snooze")}
+              >
+                Snooze 10 minutes
+              </Button>
+              <Button disabled={busy} onClick={() => void escapeAction("cancel_snooze")}>
+                Go back
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       ) : confirmComplete ? (
         <section
           aria-label="Finish optional steps"
@@ -619,7 +623,12 @@ export function RitualChecklist({
           </p>
         </section>
       ) : (
-        <Card className="ritual-card" role="region" aria-label="Ritual questions">
+        <Card
+          key="questions"
+          className="ritual-card ritual-screen"
+          role="region"
+          aria-label="Ritual questions"
+        >
           <RitualCardHeader
             kind={occurrence.definition.kind}
             timeZone={occurrence.timeZone}
@@ -635,12 +644,8 @@ export function RitualChecklist({
             className="ritual-scroll min-h-0 overflow-y-auto text-left"
           >
             <ul className="flex flex-col gap-5">
-              {occurrence.definition.steps.map((step, index) => (
-                <li
-                  key={step.id}
-                  className="flex flex-col gap-2"
-                  style={{ animationDelay: `${260 + Math.min(index, 7) * 35}ms` }}
-                >
+              {occurrence.definition.steps.map((step) => (
+                <li key={step.id} className="flex flex-col gap-2">
                   <Field orientation={step.kind === "checkbox" ? "horizontal" : "vertical"}>
                     {step.kind === "checkbox" ? (
                       <>
@@ -825,10 +830,12 @@ export function RitualChecklist({
   );
   return (
     <>
-      <div className="ritual-scene" aria-hidden="true">
-        <div className="ritual-glow" data-ritual-kind={occurrence.definition.kind} />
-        <RitualClouds kind={occurrence.definition.kind} />
-      </div>
+      <RitualWeatherSky
+        key={occurrence.id}
+        occurrenceId={occurrence.id}
+        kind={occurrence.definition.kind}
+        timeZone={occurrence.timeZone}
+      />
       {presentation}
     </>
   );

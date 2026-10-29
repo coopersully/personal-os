@@ -1,5 +1,5 @@
 import { Button } from "../../components/ui/button.js";
-import { RitualClouds } from "./ritual-clouds.js";
+import { RitualWeatherSky } from "./ritual-weather-sky.js";
 
 /** The miniature is one preview action; its content and footer are decorative placeholders. */
 export function RitualSkyPreview({
@@ -20,8 +20,7 @@ export function RitualSkyPreview({
       onClick={onPreview}
     >
       <span className="ritual-sky-preview__scene" data-ritual-kind={kind} aria-hidden="true">
-        <span className="ritual-glow" data-ritual-kind={kind} />
-        <RitualClouds kind={kind} />
+        <RitualWeatherSky kind={kind} thumbnail />
         <span className="ritual-sky-preview__card relative flex h-3/4 w-2/5 flex-col gap-1 rounded-md bg-card p-1.5">
           <span className="h-1.5 w-full rounded-sm bg-muted" />
           <span className="h-1.5 w-3/4 rounded-sm bg-muted" />

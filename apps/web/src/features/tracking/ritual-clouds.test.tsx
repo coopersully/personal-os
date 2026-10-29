@@ -176,7 +176,11 @@ it("honors reduced motion while allowing manual scrubbing and releases a capture
     addEventListener: vi.fn((_type: string, listener: () => void) => listeners.add(listener)),
     removeEventListener: vi.fn((_type: string, listener: () => void) => listeners.delete(listener)),
   };
-  vi.stubGlobal("matchMedia", () => motion);
+  vi.stubGlobal("matchMedia", (query: string) =>
+    query.includes("resolution")
+      ? { matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }
+      : motion,
+  );
   const frames = new Map<number, FrameRequestCallback>();
   let sequence = 0;
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -297,4 +301,96 @@ it.each([
   expect(click).toHaveBeenCalledOnce();
   expect(view.container.querySelector("canvas")).toHaveAttribute("aria-hidden", "true");
   expect(frame).not.toHaveBeenCalled();
+});
+
+it("updates lighting without rebuilding the cloud field or resetting its animation lifecycle", async () => {
+  const { resolveRitualSky } = await import("./ritual-sky.js");
+  const sky = resolveRitualSky({ now: Date.parse("2026-10-27T12:00:00Z"), timeZone: "UTC" });
+  vi.stubGlobal("CanvasRenderingContext2D", class {});
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect = disconnect;
+    },
+  );
+  vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+    width: 200,
+    height: 100,
+  } as DOMRect);
+  const create = vi.fn((w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }));
+  const paint = vi.fn();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    createImageData: create,
+    putImageData: paint,
+    createPattern: () => ({}),
+    setTransform: vi.fn(),
+    fillRect: vi.fn(),
+    clearRect: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  const view = render(<RitualClouds kind="morning" appearance={sky} />);
+  view.rerender(
+    <RitualClouds
+      kind="morning"
+      appearance={{ ...sky, moonPhase: 0.25, cloud: [255, 211, 175] }}
+    />,
+  );
+  expect(create).toHaveBeenCalledOnce();
+  expect(disconnect).not.toHaveBeenCalled();
+  expect(paint).toHaveBeenCalledTimes(2);
+  view.unmount();
+  expect(disconnect).toHaveBeenCalledOnce();
+});
+
+it("updates its backing canvas when monitor pixel density changes without a CSS resize", () => {
+  vi.stubGlobal("CanvasRenderingContext2D", class {});
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const queries: {
+    query: string;
+    listener: (() => void) | undefined;
+    remove: ReturnType<typeof vi.fn>;
+  }[] = [];
+  vi.stubGlobal("devicePixelRatio", 1);
+  vi.stubGlobal("matchMedia", (query: string) => {
+    const entry = { query, listener: undefined as (() => void) | undefined, remove: vi.fn() };
+    queries.push(entry);
+    return {
+      matches: false,
+      addEventListener: (_event: string, listener: () => void) => {
+        entry.listener = listener;
+      },
+      removeEventListener: entry.remove,
+    };
+  });
+  vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+    width: 200,
+    height: 100,
+  } as DOMRect);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    putImageData: vi.fn(),
+    createPattern: () => ({}),
+    setTransform: vi.fn(),
+    fillRect: vi.fn(),
+    clearRect: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  const view = render(<RitualClouds kind="morning" />);
+  const canvas = view.container.querySelector("canvas")!;
+  expect(canvas.width).toBe(200);
+  const original = queries.find(({ query }) => query === "(resolution: 1dppx)")!;
+  vi.stubGlobal("devicePixelRatio", 2);
+  original.listener?.();
+  expect(canvas.width).toBe(400);
+  expect(canvas.height).toBe(200);
+  expect(original.remove).toHaveBeenCalled();
+  const next = queries.find(({ query }) => query === "(resolution: 2dppx)")!;
+  view.unmount();
+  expect(next.remove).toHaveBeenCalled();
 });

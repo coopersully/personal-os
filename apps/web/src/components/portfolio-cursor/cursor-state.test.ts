@@ -25,3 +25,17 @@ test("special cursors retain direction and native overrides", () => {
   expect(cursorState("url(custom.svg), pointer")).toBe("native");
   expect(cursorState("unknown")).toBe("native");
 });
+
+test("explicit native affordances survive the custom pointer", () => {
+  expect(cursorState("pointer")).toBe("link");
+  expect(cursorState("text")).toBe("text");
+  expect(cursorState("vertical-text")).toBe("vertical-text");
+  expect(cursorState("grab")).toBe("grab");
+  expect(cursorState("grabbing")).toBe("grabbing");
+  expect(cursorState("not-allowed")).toBe("blocked");
+  expect(cursorState("no-drop")).toBe("blocked");
+  expect(cursorState("row-resize")).toBe("resize-y");
+  for (const cursor of ["crosshair", "cell", "move", "all-scroll"]) {
+    expect(cursorState(cursor)).toBe("crosshair");
+  }
+});

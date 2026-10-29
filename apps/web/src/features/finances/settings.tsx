@@ -1,6 +1,6 @@
 import type { FinanceGuidedSetupContext } from "@personal-os/domain";
-import { Spinner } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -154,7 +154,7 @@ function FinanceAgentGuidancePanel({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {loading ? <Spinner label="Loading Finance agent guidance" /> : null}
+        {loading ? <ContentSkeleton label="Loading Finance agent guidance" rows={3} /> : null}
         {error ? <InlineError error={error} /> : null}
         {setup ? (
           <ItemGroup>

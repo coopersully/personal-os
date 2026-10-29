@@ -5,12 +5,37 @@ snapshot, not a replacement for product documentation or Linear.
 
 ## Mandatory tracking lifecycle
 
-Every implementation or durable repository change has direct Nohmi issue coverage. The standing
-repository instruction grants bounded issue creation/reuse and material updates for assigned work.
-Resolve the live Project, deduplicate at intake, mark active work appropriately, record material
-scope/blockers, attach PRs and reconcile full acceptance before completion. Do not wait for PR
-creation to discover untracked work. Pure discussion/read-only inspection does not require issue churn.
-An unavailable or ambiguous tracker is a visible gap and merge blocker, not permission to omit tracking.
+This is the canonical tracking contract for every nohmi entrypoint: ordinary implementation,
+documentation maintenance, prerequisite repairs, review fixes, delivery and assigned network work.
+The standing repository instruction authorizes bounded tracking of assigned durable work; invoking
+a different skill does not postpone intake until PR creation or require the same permission again.
+
+1. Before implementation, resolve exactly one live, non-archived `Nohmi` Project and search existing
+   issues, linked PRs and owners. Reuse a confident direct issue; create only missing independently
+   shippable work in that Project. A review fix can use its existing direct issue; neither each file
+   nor each review comment needs a new issue. Reconcile already-started work immediately.
+2. Resolve the unique live Project again before every write and verify each target issue belongs to
+   it. Preserve human assignees, priorities, cycles and unrelated taxonomy. Record implementation
+   and acceptance owners separately; an agent doing work does not become the human assignee.
+3. Keep active work in the least advanced compatible status. Record material scope, progress,
+   blockers and acceptance changes once, linking durable evidence. Unchanged heartbeats, reads,
+   metadata-only corrections and repeated failures do not justify repetitive status comments.
+4. Follow `create-pr` before publication: direct issues in the Work map, then the actual returned PR
+   URL as a structured link on every direct issue. Re-read both systems before handoff. An upstream
+   prerequisite PR is a related reference, not a direct backlink for an unpublished child.
+5. Close only when the issue's full acceptance is evidenced, including required release/adoption
+   criteria. A merge or green aggregate alone does not complete an issue or its parent.
+
+Pure discussion and read-only inspection/review create no issue or tracker mutation. If they yield
+assigned durable follow-up, start this lifecycle before that work. This contract does not turn a
+review-only role into an implementer or grant unrelated external actions.
+
+An unavailable Project, ambiguous issue match or failed tracker write is a visible traceability gap:
+make no guessed/cross-project mutation, retain the last verified IDs and intended change in the
+existing checkpoint, and reconcile partial effects before retrying. Preserve source work and continue
+independent authorized work; oversight's kickoff gate still blocks new dependent dispatch and no
+merge may proceed until traceability is restored. Use `linear-context` and `linear-work-sync` for
+live lookup, sanitized audit and readback mechanics.
 
 ## Ownership model
 
@@ -59,4 +84,6 @@ Every repository PR body contains:
    branch identity must agree. Append the sanitized Linear audit record before handoff.
 
 The current workspace has no review-specific status. An open or draft PR therefore leaves direct
-issues `In Progress`; only merged work with issue-specific acceptance evidence moves to `Done`.
+issues `In Progress`. PR-backed work moves to `Done` only after required PRs merge and the full
+issue acceptance is evidenced, including required release/adoption criteria. Work with no required
+PR may complete on its full issue-specific acceptance evidence; no artificial merge is required.

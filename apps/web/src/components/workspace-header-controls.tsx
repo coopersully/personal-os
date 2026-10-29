@@ -10,7 +10,7 @@ export function WorkspaceHeaderControls({
 }: {
   children: ReactNode;
   label: string;
-  placement?: "title" | "leading" | "actions";
+  placement?: "title" | "leading" | "actions" | "workspace";
 }) {
   const slot = useContext(WorkspaceHeaderSlotContext);
   const controls = (
@@ -20,18 +20,20 @@ export function WorkspaceHeaderControls({
   );
   if (slot === undefined) return controls;
   const target =
-    placement === "title"
-      ? slot.titleTarget
-      : placement === "leading"
-        ? slot.leadingTarget
-        : slot.target;
+    placement === "workspace"
+      ? slot.workspaceTarget
+      : placement === "title"
+        ? slot.titleTarget
+        : placement === "leading"
+          ? slot.leadingTarget
+          : slot.target;
   return target ? createPortal(controls, target) : null;
 }
 
 export function WorkspaceHeaderControlsSlot({
   placement = "actions",
 }: {
-  placement?: "title" | "leading" | "actions";
+  placement?: "title" | "leading" | "actions" | "workspace";
 }) {
   const slot = useContext(WorkspaceHeaderSlotContext);
   return (
@@ -43,13 +45,16 @@ export function WorkspaceHeaderControlsSlot({
             ? "workspace-header-controls-slot workspace-header-controls-slot--leading flex flex-wrap items-center gap-1.5"
             : "workspace-header-controls-slot flex flex-wrap items-center gap-1.5"
       }
+      data-placement={placement}
       data-slot="workspace-header-controls"
       ref={
-        placement === "title"
-          ? slot?.setTitleTarget
-          : placement === "leading"
-            ? slot?.setLeadingTarget
-            : slot?.setTarget
+        placement === "workspace"
+          ? slot?.setWorkspaceTarget
+          : placement === "title"
+            ? slot?.setTitleTarget
+            : placement === "leading"
+              ? slot?.setLeadingTarget
+              : slot?.setTarget
       }
     />
   );

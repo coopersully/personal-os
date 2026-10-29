@@ -289,6 +289,7 @@ vi.spyOn(toast, "error");
 it("links compact position metrics to their owning views and explains Spending scope", async () => {
   mount();
   const metrics = await screen.findByRole("region", { name: "Finance key metrics" });
+  expect(within(metrics).getAllByRole("link")[0]).toHaveAccessibleName(/^Spent this month/);
   expect(within(metrics).getByRole("link", { name: /^Cash/ })).toHaveAttribute(
     "href",
     "/finances/accounts",

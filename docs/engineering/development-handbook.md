@@ -37,8 +37,10 @@ recurrence and production-effect authority still follows epic/handoff contracts.
 produce an issue proposal without creating it. Existing work enters at its next missing evidence,
 not at a fixed first step. Coordinators delegate implementation; choosing a mode never changes role.
 Carry the agreed intent, rationale, non-goals, unfinished obligations and grants through the handoff.
-Use repository oversight’s local lifecycle and monitoring references; do not require a personal skill
-install, add a supervisor layer or reconfirm settled decisions. Planning, dispatch, acknowledgement,
+Use the user-installed `nohmi-orchestrator` (`~/.codex/skills/nohmi-orchestrator/SKILL.md`)
+as the canonical coordination entrypoint, together with the repository oversight compatibility
+runbook’s lifecycle and monitoring constraints. Preserve existing roles and settled decisions.
+Planning, dispatch, acknowledgement,
 implementation, review and acceptance each require their own evidence, separate from waiting/blocked.
 
 ## Step contracts

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { toast } from "sonner";
 import { renderWithFeedback as render } from "@/test-utils/feedback";
 import { FinanceConfigurationEditor } from "./configuration-editor";
@@ -7,6 +7,41 @@ import { FinanceConfigurationEditor } from "./configuration-editor";
 const mocks = vi.hoisted(() => ({ query: vi.fn(), retry: vi.fn() }));
 vi.mock("./use-finance-configuration.js", () => ({ useFinanceConfiguration: mocks.query }));
 vi.mock("./configuration-income.js", () => ({ FinanceIncomeEditor: () => <p>Saved income</p> }));
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  mocks.query.mockReset();
+  mocks.retry.mockReset();
+});
+
+async function publishFeedback() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
+async function disposeFeedback() {
+  act(() => {
+    for (const entry of toast.getToasts()) toast.dismiss(entry.id);
+    cleanup();
+  });
+  // Unmount cancels normal duration timers, but Sonner's queued removal callback still runs.
+  // Execute that work while jsdom exists instead of discarding it or leaking it into teardown.
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+  expect(toast.getToasts()).toHaveLength(0);
+  expect(vi.getTimerCount()).toBe(0);
+}
+
+afterEach(async () => {
+  try {
+    await disposeFeedback();
+  } finally {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  }
+});
 
 it("keeps a failed profile read out of the settings layout with a retry action", async () => {
   mocks.query.mockReturnValue({
@@ -17,7 +52,8 @@ it("keeps a failed profile read out of the settings layout with a retry action",
     refetch: mocks.retry,
   });
   render(<FinanceConfigurationEditor />);
-  const notice = await screen.findByText("Financial settings could not load.");
+  await publishFeedback();
+  const notice = screen.getByText("Financial settings could not load.");
   expect(notice.closest("[data-sonner-toast]")).not.toBeNull();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByText("Saved income")).toBeVisible();
@@ -36,12 +72,46 @@ it("guides recovery of an unavailable profile response in a dialog", async () =>
     refetch: mocks.retry,
   });
   const view = render(<FinanceConfigurationEditor />);
-  const recovery = await screen.findByRole("dialog", { name: "Financial settings could not load" });
+  await publishFeedback();
+  const recovery = screen.getByRole("dialog", { name: "Financial settings could not load" });
   expect(view.container).not.toContainElement(recovery);
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-  await waitFor(() => expect(mocks.retry).toHaveBeenCalled());
-  const outcome = await screen.findByText("Financial settings could not load. Try again.");
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  });
+  await publishFeedback();
+  expect(mocks.retry).toHaveBeenCalled();
+  const outcome = screen.getByText("Financial settings could not load. Try again.");
   expect(outcome.closest("[data-sonner-toast]")).not.toBeNull();
   expect(recovery).toBeInTheDocument();
+});
+
+it("settles a dismissed toast after unmount without leaking feedback into a fresh render", async () => {
+  const timers = vi.spyOn(globalThis, "setTimeout");
+  const view = render(<p>Original editor</p>);
+  act(() => {
+    toast.error("Original feedback", { id: "configuration-cleanup", duration: Infinity });
+  });
+  await publishFeedback();
+  expect(screen.getByText("Original feedback").closest("[data-sonner-toast]")).not.toBeNull();
+
+  act(() => {
+    toast.dismiss("configuration-cleanup");
+  });
+  // Dismissal crosses two animation frames before queuing the 200ms exit callback.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(32);
+  });
+  expect(timers).toHaveBeenCalledWith(expect.any(Function), 200);
+  expect(vi.getTimerCount()).toBeGreaterThan(0);
+  view.unmount();
+  await disposeFeedback();
+
+  render(<p>Fresh editor</p>);
+  expect(screen.queryByText("Original feedback")).not.toBeInTheDocument();
+  act(() => {
+    toast.error("Fresh feedback", { id: "configuration-fresh", duration: Infinity });
+  });
+  await publishFeedback();
+  expect(screen.getByText("Fresh feedback").closest("[data-sonner-toast]")).not.toBeNull();
 });

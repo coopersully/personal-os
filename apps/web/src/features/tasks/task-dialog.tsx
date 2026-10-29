@@ -2,11 +2,18 @@ import type { Task, TaskMovePreview, User } from "@personal-os/domain";
 import { localDateTimeToUtc, parseLocalDate } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
   ResponsiveDialog,
+  ResponsiveDialogBody,
   ResponsiveDialogContent,
   ResponsiveDialogDescription,
   ResponsiveDialogFooter,
@@ -14,25 +21,9 @@ import {
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
@@ -74,6 +65,7 @@ export function TaskDialog({
   user: User;
 }) {
   const [searchParams] = useSearchParams();
+  const formId = useId();
   const queryClient = useQueryClient();
   const preferences = useWorkspacePreferences("tasks");
   const lists = useQuery({ queryFn: listAllTaskLists, queryKey: ["task-lists"] });
@@ -248,19 +240,19 @@ export function TaskDialog({
   };
 
   const pending = save.isPending || confirmMove.isPending || transition.isPending;
-  const EditorRoot = task ? Sheet : ResponsiveDialog;
-  const EditorContent = task ? SheetContent : ResponsiveDialogContent;
-  const EditorHeader = task ? SheetHeader : ResponsiveDialogHeader;
-  const EditorTitle = task ? SheetTitle : ResponsiveDialogTitle;
-  const EditorDescription = task ? SheetDescription : ResponsiveDialogDescription;
-  const EditorFooter = task ? SheetFooter : ResponsiveDialogFooter;
+  const EditorRoot = ResponsiveDialog;
+  const EditorContent = ResponsiveDialogContent;
+  const EditorHeader = ResponsiveDialogHeader;
+  const EditorTitle = ResponsiveDialogTitle;
+  const EditorDescription = ResponsiveDialogDescription;
+  const EditorFooter = ResponsiveDialogFooter;
   return (
     <>
       <EditorRoot open={!pendingMove} onOpenChange={(open) => !open && !pendingMove && close()}>
         <EditorContent
           className={
             task
-              ? "w-full overflow-y-auto sm:max-w-lg"
+              ? "max-sm:px-4 w-full overflow-y-auto sm:max-w-lg"
               : "max-sm:px-4 max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
           }
         >
@@ -271,242 +263,247 @@ export function TaskDialog({
             </EditorDescription>
             {!task ? <TaskCreationProgress step={3} total={3} /> : null}
           </EditorHeader>
-          <MutationFeedback feedback={transition.feedback} />
-          {lists.isError ? (
-            <div className="flex flex-col gap-3">
-              <InlineError
-                error={lists.error}
-                retry={lists.refetch}
-                stale={lists.data !== undefined}
-              />
-              <Button onClick={() => lists.refetch()} type="button" variant="outline">
-                Retry Lists
-              </Button>
-            </div>
-          ) : null}
-          {projects.isError ? (
-            <div className="flex flex-col gap-3">
-              <InlineError
-                error={projects.error}
-                retry={projects.refetch}
-                stale={projects.data !== undefined}
-              />
-              <Button onClick={() => projects.refetch()} type="button" variant="outline">
-                Retry Projects
-              </Button>
-            </div>
-          ) : null}
-          <FeedbackForm
-            feedback={save.feedback}
-            className={task ? "px-4" : undefined}
-            onSubmit={submit}
-          >
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="task-title">Task</FieldLabel>
-                <Input autoFocus defaultValue={task?.title} id="task-title" name="title" required />
-              </Field>
-              <FieldGroup className="grid gap-5 sm:grid-cols-2">
+          <ResponsiveDialogBody>
+            <MutationFeedback feedback={transition.feedback} />
+            {lists.isError ? (
+              <div className="flex flex-col gap-3">
+                <InlineError
+                  error={lists.error}
+                  retry={lists.refetch}
+                  stale={lists.data !== undefined}
+                />
+                <Button onClick={() => lists.refetch()} type="button" variant="outline">
+                  Retry Lists
+                </Button>
+              </div>
+            ) : null}
+            {projects.isError ? (
+              <div className="flex flex-col gap-3">
+                <InlineError
+                  error={projects.error}
+                  retry={projects.refetch}
+                  stale={projects.data !== undefined}
+                />
+                <Button onClick={() => projects.refetch()} type="button" variant="outline">
+                  Retry Projects
+                </Button>
+              </div>
+            ) : null}
+            <FeedbackForm id={formId} feedback={save.feedback} onSubmit={submit}>
+              <FieldGroup>
                 <Field>
-                  <FieldLabel htmlFor="task-list">List</FieldLabel>
-                  <NativeSelect
-                    disabled={lists.isPending}
-                    id="task-list"
-                    name="listId"
-                    onChange={(event) => {
-                      setListId(event.target.value);
-                      setProjectId("");
-                    }}
+                  <FieldLabel htmlFor="task-title">Task</FieldLabel>
+                  <Input
+                    autoFocus
+                    defaultValue={task?.title}
+                    id="task-title"
+                    name="title"
                     required
-                    value={listId}
-                  >
-                    <NativeSelectOption value="">Select a List</NativeSelectOption>
-                    {activeLists.map((list) => (
-                      <NativeSelectOption key={list.id} value={list.id}>
-                        {list.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                  {unscoped &&
-                  lists.isSuccess &&
-                  preferences.data?.preferences.defaultCaptureListId &&
-                  captureList?.kind === "inbox" &&
-                  captureList.id === listId &&
-                  captureList.id !== preferences.data.preferences.defaultCaptureListId ? (
-                    <FieldDescription>
-                      Your default list is unavailable. This task will go to Inbox.
-                    </FieldDescription>
-                  ) : null}
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="task-project">Project</FieldLabel>
-                  <NativeSelect
-                    disabled={!listId || projects.isPending}
-                    id="task-project"
-                    name="projectId"
-                    onChange={(event) => setProjectId(event.target.value)}
-                    value={projectId}
-                  >
-                    <NativeSelectOption value="">No Project</NativeSelectOption>
-                    {availableProjects.map((project) => (
-                      <NativeSelectOption key={project.id} value={project.id}>
-                        {project.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-              </FieldGroup>
-              <FieldGroup className="grid gap-5 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="task-due-at">Deadline</FieldLabel>
-                  <Input
-                    defaultValue={toDateTimeLocal(task?.dueAt, user.planningTimezone)}
-                    id="task-due-at"
-                    name="dueAt"
-                    type="datetime-local"
                   />
                 </Field>
-                <Field>
-                  <FieldLabel htmlFor="task-scheduled-at">Reserved time</FieldLabel>
-                  <Input
-                    defaultValue={toDateTimeLocal(task?.scheduledAt, user.planningTimezone)}
-                    id="task-scheduled-at"
-                    name="scheduledAt"
-                    type="datetime-local"
-                  />
-                </Field>
-              </FieldGroup>
-              <details
-                className="rounded-lg border border-border px-3 py-2"
-                open={task ? true : undefined}
-              >
-                <summary className="cursor-pointer text-sm font-medium">More details</summary>
-                <FieldGroup className="mt-4">
+                <FieldGroup className="grid gap-5 sm:grid-cols-2">
                   <Field>
-                    <FieldLabel htmlFor="task-why">Why it matters</FieldLabel>
-                    <Textarea defaultValue={task?.why ?? ""} id="task-why" name="why" rows={2} />
+                    <FieldLabel htmlFor="task-list">List</FieldLabel>
+                    <NativeSelect
+                      disabled={lists.isPending}
+                      id="task-list"
+                      name="listId"
+                      onChange={(event) => {
+                        setListId(event.target.value);
+                        setProjectId("");
+                      }}
+                      required
+                      value={listId}
+                    >
+                      <NativeSelectOption value="">Select a List</NativeSelectOption>
+                      {activeLists.map((list) => (
+                        <NativeSelectOption key={list.id} value={list.id}>
+                          {list.name}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                    {unscoped &&
+                    lists.isSuccess &&
+                    preferences.data?.preferences.defaultCaptureListId &&
+                    captureList?.kind === "inbox" &&
+                    captureList.id === listId &&
+                    captureList.id !== preferences.data.preferences.defaultCaptureListId ? (
+                      <FieldDescription>
+                        Your default list is unavailable. This task will go to Inbox.
+                      </FieldDescription>
+                    ) : null}
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="task-notes">Notes</FieldLabel>
-                    <Textarea
-                      defaultValue={task?.notes ?? ""}
-                      id="task-notes"
-                      name="notes"
-                      rows={3}
-                    />
-                  </Field>
-                  <FieldGroup className="grid gap-5 sm:grid-cols-2">
-                    <Field>
-                      <FieldLabel htmlFor="task-priority">Priority</FieldLabel>
-                      <NativeSelect
-                        defaultValue={task?.priority ?? "medium"}
-                        id="task-priority"
-                        name="priority"
-                      >
-                        <NativeSelectOption value="low">Low</NativeSelectOption>
-                        <NativeSelectOption value="medium">Medium</NativeSelectOption>
-                        <NativeSelectOption value="high">High</NativeSelectOption>
-                      </NativeSelect>
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="task-estimate">Estimate in minutes</FieldLabel>
-                      <Input
-                        defaultValue={task?.estimateMinutes ?? ""}
-                        id="task-estimate"
-                        max={24 * 60}
-                        min={5}
-                        name="estimateMinutes"
-                        step={5}
-                        type="number"
-                      />
-                    </Field>
-                  </FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="task-tags">Tags</FieldLabel>
-                    <Input
-                      defaultValue={task?.tags.join(", ") ?? ""}
-                      id="task-tags"
-                      name="tags"
-                      placeholder="Planning, home"
-                    />
-                    <FieldDescription>Separate tags with commas.</FieldDescription>
+                    <FieldLabel htmlFor="task-project">Project</FieldLabel>
+                    <NativeSelect
+                      disabled={!listId || projects.isPending}
+                      id="task-project"
+                      name="projectId"
+                      onChange={(event) => setProjectId(event.target.value)}
+                      value={projectId}
+                    >
+                      <NativeSelectOption value="">No Project</NativeSelectOption>
+                      {availableProjects.map((project) => (
+                        <NativeSelectOption key={project.id} value={project.id}>
+                          {project.name}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
                   </Field>
                 </FieldGroup>
-              </details>
-            </FieldGroup>
-            <MutationFeedback feedback={confirmMove.feedback} />
-            <EditorFooter className={task ? "mt-5 p-0" : "mt-5"}>
-              <Button onClick={close} type="button" variant="outline">
-                Cancel
-              </Button>
-              <Button
-                disabled={pending || !listId || lists.isError || projects.isError}
-                type="submit"
-              >
-                {save.isPending ? "Saving…" : task ? "Save changes" : "Create task"}
-              </Button>
-            </EditorFooter>
-          </FeedbackForm>
-          {task ? (
-            <div className="flex flex-col gap-4 px-4 pb-4">
-              <details className="rounded-lg border border-border px-3 py-2">
-                <summary className="cursor-pointer text-sm font-medium">Record details</summary>
-                <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <dt>Source</dt>
-                  <dd>{task.source.provider}</dd>
-                  <dt>Revision</dt>
-                  <dd>{task.revision}</dd>
-                  <dt>Created</dt>
-                  <dd>{new Date(task.createdAt).toLocaleString()}</dd>
-                  <dt>Updated</dt>
-                  <dd>{new Date(task.updatedAt).toLocaleString()}</dd>
-                </dl>
-              </details>
-              <fieldset aria-label="Task lifecycle actions" className="flex flex-wrap gap-2">
-                {task.deletedAt ? (
-                  <Button
-                    disabled={pending}
-                    onClick={() => transition.mutate("restore")}
-                    variant="outline"
-                  >
-                    Restore task
-                  </Button>
-                ) : (
-                  <>
-                    {task.lifecycle === "open" ? (
-                      <>
-                        <Button disabled={pending} onClick={() => transition.mutate("complete")}>
-                          Complete task
-                        </Button>
-                        <Button
-                          disabled={pending}
-                          onClick={() => transition.mutate("cancel")}
-                          variant="outline"
+                <FieldGroup className="grid gap-5 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="task-due-at">Deadline</FieldLabel>
+                    <Input
+                      defaultValue={toDateTimeLocal(task?.dueAt, user.planningTimezone)}
+                      id="task-due-at"
+                      name="dueAt"
+                      type="datetime-local"
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="task-scheduled-at">Reserved time</FieldLabel>
+                    <Input
+                      defaultValue={toDateTimeLocal(task?.scheduledAt, user.planningTimezone)}
+                      id="task-scheduled-at"
+                      name="scheduledAt"
+                      type="datetime-local"
+                    />
+                  </Field>
+                </FieldGroup>
+                <details
+                  className="rounded-lg border border-border px-3 py-2"
+                  open={task ? true : undefined}
+                >
+                  <summary className="cursor-pointer text-sm font-medium">More details</summary>
+                  <FieldGroup className="mt-4">
+                    <Field>
+                      <FieldLabel htmlFor="task-why">Why it matters</FieldLabel>
+                      <Textarea defaultValue={task?.why ?? ""} id="task-why" name="why" rows={2} />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="task-notes">Notes</FieldLabel>
+                      <Textarea
+                        defaultValue={task?.notes ?? ""}
+                        id="task-notes"
+                        name="notes"
+                        rows={3}
+                      />
+                    </Field>
+                    <FieldGroup className="grid gap-5 sm:grid-cols-2">
+                      <Field>
+                        <FieldLabel htmlFor="task-priority">Priority</FieldLabel>
+                        <NativeSelect
+                          defaultValue={task?.priority ?? "medium"}
+                          id="task-priority"
+                          name="priority"
                         >
-                          Cancel task
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        disabled={pending}
-                        onClick={() => transition.mutate("reopen")}
-                        variant="outline"
-                      >
-                        Reopen task
-                      </Button>
-                    )}
+                          <NativeSelectOption value="low">Low</NativeSelectOption>
+                          <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                          <NativeSelectOption value="high">High</NativeSelectOption>
+                        </NativeSelect>
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="task-estimate">Estimate in minutes</FieldLabel>
+                        <Input
+                          defaultValue={task?.estimateMinutes ?? ""}
+                          id="task-estimate"
+                          max={24 * 60}
+                          min={5}
+                          name="estimateMinutes"
+                          step={5}
+                          type="number"
+                        />
+                      </Field>
+                    </FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="task-tags">Tags</FieldLabel>
+                      <Input
+                        defaultValue={task?.tags.join(", ") ?? ""}
+                        id="task-tags"
+                        name="tags"
+                        placeholder="Planning, home"
+                      />
+                      <FieldDescription>Separate tags with commas.</FieldDescription>
+                    </Field>
+                  </FieldGroup>
+                </details>
+              </FieldGroup>
+              <MutationFeedback feedback={confirmMove.feedback} />
+            </FeedbackForm>
+            {task ? (
+              <div className="flex flex-col gap-4 pb-4">
+                <details className="rounded-lg border border-border px-3 py-2">
+                  <summary className="cursor-pointer text-sm font-medium">Record details</summary>
+                  <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <dt>Source</dt>
+                    <dd>{task.source.provider}</dd>
+                    <dt>Revision</dt>
+                    <dd>{task.revision}</dd>
+                    <dt>Created</dt>
+                    <dd>{new Date(task.createdAt).toLocaleString()}</dd>
+                    <dt>Updated</dt>
+                    <dd>{new Date(task.updatedAt).toLocaleString()}</dd>
+                  </dl>
+                </details>
+                <fieldset aria-label="Task lifecycle actions" className="flex flex-wrap gap-2">
+                  {task.deletedAt ? (
                     <Button
                       disabled={pending}
-                      onClick={() => transition.mutate("trash")}
-                      variant="destructive"
+                      onClick={() => transition.mutate("restore")}
+                      variant="outline"
                     >
-                      Move to Trash
+                      Restore task
                     </Button>
-                  </>
-                )}
-              </fieldset>
-            </div>
-          ) : null}
+                  ) : (
+                    <>
+                      {task.lifecycle === "open" ? (
+                        <>
+                          <Button disabled={pending} onClick={() => transition.mutate("complete")}>
+                            Complete task
+                          </Button>
+                          <Button
+                            disabled={pending}
+                            onClick={() => transition.mutate("cancel")}
+                            variant="outline"
+                          >
+                            Cancel task
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          disabled={pending}
+                          onClick={() => transition.mutate("reopen")}
+                          variant="outline"
+                        >
+                          Reopen task
+                        </Button>
+                      )}
+                      <Button
+                        disabled={pending}
+                        onClick={() => transition.mutate("trash")}
+                        variant="destructive"
+                      >
+                        Move to Trash
+                      </Button>
+                    </>
+                  )}
+                </fieldset>
+              </div>
+            ) : null}
+          </ResponsiveDialogBody>
+          <EditorFooter className={task ? "mt-5 p-0" : "mt-5"}>
+            <Button onClick={close} type="button" variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={pending || !listId || lists.isError || projects.isError}
+              type="submit"
+              form={formId}
+            >
+              {save.isPending ? "Saving…" : task ? "Save changes" : "Create task"}
+            </Button>
+          </EditorFooter>
         </EditorContent>
       </EditorRoot>
 
@@ -520,7 +517,9 @@ export function TaskDialog({
                 open in the selected List.
               </DialogDescription>
             </DialogHeader>
-            <MutationFeedback feedback={confirmMove.feedback} />
+            <ResponsiveDialogBody>
+              <MutationFeedback feedback={confirmMove.feedback} />
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button
                 onClick={() => {

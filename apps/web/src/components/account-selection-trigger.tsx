@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import type { ActionButton as Button } from "@/components/action-button";
+import { ActionButton as Button } from "@/components/action-button";
 import {
   PopoverContent,
   PopoverDescription,
@@ -7,7 +7,8 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { FilterTrigger } from "./data-view-controls";
+import { LayersIcon, UsersIcon } from "./icons";
+import { Badge } from "./ui/badge";
 
 type AccountSelectionTriggerProps = Omit<
   ComponentProps<typeof Button>,
@@ -33,23 +34,30 @@ export function AccountSelectionTrigger({
   ...buttonProps
 }: AccountSelectionTriggerProps) {
   return (
-    <FilterTrigger
+    <Button
       {...buttonProps}
       aria-label={ariaLabel}
       tooltip={
         tooltip ??
         `${ariaLabel}${allSynced && !needsAttention ? ", all accounts connected and syncing" : ""}`
       }
-      className={cn("account-selection-trigger", className)}
+      className={cn("account-selection-trigger relative", className)}
       disabled={disabled}
-      size="sm"
-      active={selectedCount !== totalCount}
-      label={
-        <span aria-hidden="true" className="tabular-nums">
-          {selectedCount}
-        </span>
-      }
-    />
+      size="icon"
+      variant="ghost"
+      badgeCount={selectedCount === totalCount ? 0 : selectedCount}
+    >
+      {selectedCount === totalCount ? (
+        <LayersIcon aria-hidden="true" />
+      ) : (
+        <UsersIcon aria-hidden="true" />
+      )}
+      {selectedCount === 0 && totalCount > 0 ? (
+        <Badge className="action-count-badge" aria-hidden="true">
+          0
+        </Badge>
+      ) : null}
+    </Button>
   );
 }
 

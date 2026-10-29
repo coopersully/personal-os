@@ -4,26 +4,22 @@ import { ArrowLeftIcon } from "@/components/icons";
 import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
+import { PageBreadcrumbs } from "@/components/workspace-breadcrumbs";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { SettingsDataStateNotice } from "./dev/data-state-preview";
 import { SettingsFieldFocus } from "./settings-field-focus.js";
 
-/** Settings composition: a page introduction, then task-sized groups. No workspace app bar. */
+/** Settings uses the shared workspace header and keeps task-sized groups in the page. */
 export function SettingsPageLayout({
   title,
-  description,
-  icon,
-  section,
   search,
   actions,
   children,
-  showHeader = true,
   back,
 }: {
   back?: { to: string; label: string } | undefined;
   title: string;
   description: string;
-  icon?: ReactNode;
-  showHeader?: boolean;
   section: string;
   search: ReactNode;
   actions?: ReactNode;
@@ -33,52 +29,33 @@ export function SettingsPageLayout({
     <div className="settings-page">
       <SettingsFieldFocus />
       {import.meta.env.DEV ? <SettingsDataStateNotice /> : null}
-      {showHeader ? (
-        <Card className="settings-page__heading relative" data-settings-section={section}>
-          {back ? (
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              className="absolute left-3 top-3"
-              aria-label={back.label}
-            >
-              <Link to={back.to}>
-                <ArrowLeftIcon aria-hidden="true" />
-              </Link>
-            </Button>
-          ) : null}
-          <CardHeader className="flex flex-col items-center gap-4 text-center">
-            <div className="flex min-w-0 flex-col items-center gap-3">
-              {icon ? (
-                <span className="settings-page__icon" aria-hidden="true">
-                  {icon}
-                </span>
-              ) : null}
-              <div className="min-w-0">
-                <h1 tabIndex={-1} id="settings-page-title">
-                  {title}
-                </h1>
-                <p>{description}</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-2 empty:hidden">
-              {actions}
-              <div className="settings-page__mobile-search">{search}</div>
-            </div>
-          </CardHeader>
-        </Card>
-      ) : (
-        <>
-          <h1 id="settings-page-title" className="sr-only" tabIndex={-1}>
+      <WorkspaceHeaderControls placement="title" label="Settings page">
+        <div className="settings-page-heading">
+          <PageBreadcrumbs
+            label="Settings breadcrumbs"
+            items={[
+              { label: "settings", to: "/settings" },
+              ...(back ? [{ label: back.label.replace(/^back to /i, ""), to: back.to }] : []),
+            ]}
+          />
+          <h1 className="workspace-app-bar__title" tabIndex={-1} id="settings-page-title">
             {title}
           </h1>
-          <div className="settings-page__tools" data-has-actions={Boolean(actions)}>
-            {actions}
-            <div className="settings-page__mobile-search">{search}</div>
-          </div>
-        </>
-      )}
+        </div>
+      </WorkspaceHeaderControls>
+      <WorkspaceHeaderControls label="Settings search" placement="workspace">
+        {search}
+      </WorkspaceHeaderControls>
+      <WorkspaceHeaderControls label="Settings actions">
+        {back ? (
+          <Button asChild variant="ghost" size="icon" aria-label={back.label}>
+            <Link to={back.to}>
+              <ArrowLeftIcon aria-hidden="true" />
+            </Link>
+          </Button>
+        ) : null}
+        {actions}
+      </WorkspaceHeaderControls>
       <section className="settings-panel" aria-labelledby="settings-page-title">
         <SettingsControlsContext.Provider value={true}>{children}</SettingsControlsContext.Provider>
       </section>
@@ -88,6 +65,7 @@ export function SettingsPageLayout({
 
 /** A shared shadcn Card composition; feature modules still own fields and mutations. */
 export function SettingsSection({
+  description,
   action,
   children,
   title,
@@ -95,7 +73,6 @@ export function SettingsSection({
   headerContent,
   headerAside,
   icon,
-  description,
 }: {
   layout?: "rows" | "content";
   headerContent?: ReactNode;

@@ -140,7 +140,7 @@ export function GoalProgressConfirmation({
             allocations.
           </DialogDescription>
         </DialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           <FeedbackForm
             feedback={correctionFeedback}
             fieldNames={{ progressAmountCents: "amount", currencyCode: "currency", asOf: "asOf" }}
@@ -165,47 +165,51 @@ export function GoalProgressConfirmation({
               save.mutate();
             }}
           >
-            <FieldSet disabled={save.isPending}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-amount`}>Current goal amount you confirm</FieldLabel>
-                  <Input
-                    id={`${id}-amount`}
-                    name="amount"
-                    inputMode="decimal"
-                    required
-                    value={amount}
-                    onChange={(event) => setAmount(event.target.value)}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-currency`}>Currency for the whole goal</FieldLabel>
-                  <Input
-                    id={`${id}-currency`}
-                    name="currency"
-                    required
-                    value={currency}
-                    onChange={(event) => setCurrency(event.target.value)}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-as-of`}>Progress statement as-of date</FieldLabel>
-                  <Input
-                    id={`${id}-as-of`}
-                    name="asOf"
-                    type="date"
-                    max={todayLocalDate}
-                    required
-                    value={asOf}
-                    onChange={(event) => setAsOf(event.target.value)}
-                  />
-                </Field>
-              </FieldGroup>
-            </FieldSet>
-            <p className="text-sm text-muted-foreground">
-              By confirming, you state that this amount and currency describe your goal progress on
-              the selected date. An explicitly entered zero is valid.
-            </p>
+            <ResponsiveDialogBody>
+              <FieldSet disabled={save.isPending}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-amount`}>
+                      Current goal amount you confirm
+                    </FieldLabel>
+                    <Input
+                      id={`${id}-amount`}
+                      name="amount"
+                      inputMode="decimal"
+                      required
+                      value={amount}
+                      onChange={(event) => setAmount(event.target.value)}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-currency`}>Currency for the whole goal</FieldLabel>
+                    <Input
+                      id={`${id}-currency`}
+                      name="currency"
+                      required
+                      value={currency}
+                      onChange={(event) => setCurrency(event.target.value)}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-as-of`}>Progress statement as-of date</FieldLabel>
+                    <Input
+                      id={`${id}-as-of`}
+                      name="asOf"
+                      type="date"
+                      max={todayLocalDate}
+                      required
+                      value={asOf}
+                      onChange={(event) => setAsOf(event.target.value)}
+                    />
+                  </Field>
+                </FieldGroup>
+              </FieldSet>
+              <p className="text-sm text-muted-foreground">
+                By confirming, you state that this amount and currency describe your goal progress
+                on the selected date. An explicitly entered zero is valid.
+              </p>
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button type="button" variant="outline" disabled={save.isPending} onClick={onClose}>
                 Cancel
@@ -215,7 +219,7 @@ export function GoalProgressConfirmation({
               </Button>
             </DialogFooter>
           </FeedbackForm>
-        </ResponsiveDialogBody>
+        </div>
       </DialogContent>
     </Dialog>
   );

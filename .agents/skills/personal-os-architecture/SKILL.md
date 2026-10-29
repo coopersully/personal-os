@@ -5,6 +5,9 @@ description: Keep nohmi changes within the established personal-os monorepo boun
 
 # personal-os architecture
 
+Apply the repository [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+to assigned durable work; pure read-only use of this skill creates no tracking work.
+
 Treat `docs/architecture/0001-system-shape.md` as the system boundary and
 `docs/engineering/feature-ownership.md` as the path-ownership authority.
 For workspace stewardship, also read `docs/product/workspace-stewardship.md` and

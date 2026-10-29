@@ -9,6 +9,11 @@ requires source references but does not authenticate their contents; inspect eac
 {
   "pr": {
     "state": "OPEN",
+    "number": 42,
+    "repository": "owner/repository",
+    "repositoryId": 123,
+    "baseRef": "main",
+    "mergeSha": "<live synthetic merge SHA>",
     "isDraft": false,
     "headSha": "<40-character SHA>",
     "pushedHeadSha": "<same SHA>",
@@ -169,3 +174,28 @@ unknown input, forged scope, missing/skipped source jobs or mismatched run ident
 Explicitly classify unselected skipped provider jobs as `required: false` only after checking the
 workflow's scope and complete job inventory. Do not omit selected security/metadata checks.
 All normal review, protection, metadata, ownership and production-plan gates still apply.
+
+
+### Stage A source observation
+
+`ci.sourceObservation` is the shared collector's bounded live observation, not a green-check alias.
+It binds `schemaVersion: 1`, `state: success`, `stable: true`, repository/PR number, head/base/ref,
+body SHA-256 (matching `pr.bodySha256`), merge SHA, canonical workflow ID, run ID/attempt and
+`event: pull_request`. It includes the validated source `receipt`, artifact ID/provider digest and
+successful exact-attempt selected-job IDs/names. When `verification.sourceRun` is present, all its
+identities must agree. Missing/pending/malformed/stale data blocks readiness even with green checks.
+Use `collect_evidence.py`'s `sources.sourceObservation`; do not synthesize it from status names.
+The observer verifies provenance and bounded archive/job reads; the offline evaluator checks the
+shape/bindings, not the authenticity of a fabricated caller record. Keep current collector evidence.
+
+When GitHub regenerates an otherwise identical synthetic merge commit, `receipt.mergeSha` and
+`receipt.workflowSha` remain the original source event identity while observation/`pr.mergeSha`
+retain the current live identity. A mismatch requires `mergeCommitEvidence` with
+`provider: github-rest`, exact `repository`, and `sourceCommit`/`liveCommit` records containing
+`sha`, `treeSha`, `parentShas` and the exact current-repository GitHub REST commit `url`.
+Both records must bind their requested original/live SHA, exactly ordered current base/head parents,
+and the same valid tree SHA. Current `pr.repository`, `repositoryId` and `baseRef` must also agree
+with the observation. No boolean, tree alone, branch name, timestamp, missing provider record or
+foreign/stale tuple establishes equivalence. Same-SHA observations omit this extra evidence and
+need no additional commit API reads. Keep provider responses/source references for owner inspection;
+the offline evaluator does not authenticate fabricated caller JSON.

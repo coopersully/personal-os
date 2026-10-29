@@ -123,7 +123,7 @@ export function RecurringCostConfirmation({
             does not change the payment with its provider.
           </DialogDescription>
         </DialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -131,78 +131,80 @@ export function RecurringCostConfirmation({
             }}
             className="flex flex-col gap-4"
           >
-            <dl className="grid gap-2 text-sm">
-              <div>
-                <dt>Expected amount</dt>
-                <dd>{item.expectedAmount}</dd>
-              </div>
-              <div>
-                <dt>Schedule</dt>
-                <dd>{item.cadence}</dd>
-              </div>
-              <div>
-                <dt>Account</dt>
-                <dd>{account?.name ?? "No available account"}</dd>
-              </div>
-              <div>
-                <dt>Source revision</dt>
-                <dd>{item.revision ?? "Unavailable — refresh recurring activity"}</dd>
-              </div>
-            </dl>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor={`${id}-fixedness`}>Amount behavior</FieldLabel>
-                <NativeSelect
-                  id={`${id}-fixedness`}
-                  value={fixedness}
-                  disabled={locked}
-                  onChange={(event) =>
-                    setFixedness(event.target.value as "" | "fixed" | "variable")
-                  }
-                >
-                  <NativeSelectOption value="">Choose fixed or variable</NativeSelectOption>
-                  <NativeSelectOption value="fixed">Fixed</NativeSelectOption>
-                  <NativeSelectOption value="variable">Variable</NativeSelectOption>
-                </NativeSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${id}-currency`}>Currency code</FieldLabel>
-                <Input
-                  id={`${id}-currency`}
-                  value={currency}
-                  disabled={locked}
-                  readOnly={Boolean(account?.currencyCode)}
-                  onChange={(event) => setCurrency(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${id}-asof`}>Statement as of</FieldLabel>
-                <Input
-                  id={`${id}-asof`}
-                  type="date"
-                  max={today}
-                  value={asOf}
-                  disabled={locked}
-                  onChange={(event) => setAsOf(event.target.value)}
-                />
-              </Field>
-              <Field orientation="horizontal">
-                <Checkbox
-                  id={`${id}-statement`}
-                  checked={statement}
-                  disabled={locked}
-                  onCheckedChange={(checked) => setStatement(checked === true)}
-                />
-                <FieldLabel htmlFor={`${id}-statement`}>
-                  I confirm this amount, schedule, currency, and amount behavior as of this date.
-                </FieldLabel>
-              </Field>
-            </FieldGroup>
-            {fixedness === "variable" ? (
-              <p className="text-sm text-muted-foreground">
-                Variable payments remain outside precise annual and monthly totals.
-              </p>
-            ) : null}
+            <ResponsiveDialogBody>
+              <dl className="grid gap-2 text-sm">
+                <div>
+                  <dt>Expected amount</dt>
+                  <dd>{item.expectedAmount}</dd>
+                </div>
+                <div>
+                  <dt>Schedule</dt>
+                  <dd>{item.cadence}</dd>
+                </div>
+                <div>
+                  <dt>Account</dt>
+                  <dd>{account?.name ?? "No available account"}</dd>
+                </div>
+                <div>
+                  <dt>Source revision</dt>
+                  <dd>{item.revision ?? "Unavailable — refresh recurring activity"}</dd>
+                </div>
+              </dl>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor={`${id}-fixedness`}>Amount behavior</FieldLabel>
+                  <NativeSelect
+                    id={`${id}-fixedness`}
+                    value={fixedness}
+                    disabled={locked}
+                    onChange={(event) =>
+                      setFixedness(event.target.value as "" | "fixed" | "variable")
+                    }
+                  >
+                    <NativeSelectOption value="">Choose fixed or variable</NativeSelectOption>
+                    <NativeSelectOption value="fixed">Fixed</NativeSelectOption>
+                    <NativeSelectOption value="variable">Variable</NativeSelectOption>
+                  </NativeSelect>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor={`${id}-currency`}>Currency code</FieldLabel>
+                  <Input
+                    id={`${id}-currency`}
+                    value={currency}
+                    disabled={locked}
+                    readOnly={Boolean(account?.currencyCode)}
+                    onChange={(event) => setCurrency(event.target.value)}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor={`${id}-asof`}>Statement as of</FieldLabel>
+                  <Input
+                    id={`${id}-asof`}
+                    type="date"
+                    max={today}
+                    value={asOf}
+                    disabled={locked}
+                    onChange={(event) => setAsOf(event.target.value)}
+                  />
+                </Field>
+                <Field orientation="horizontal">
+                  <Checkbox
+                    id={`${id}-statement`}
+                    checked={statement}
+                    disabled={locked}
+                    onCheckedChange={(checked) => setStatement(checked === true)}
+                  />
+                  <FieldLabel htmlFor={`${id}-statement`}>
+                    I confirm this amount, schedule, currency, and amount behavior as of this date.
+                  </FieldLabel>
+                </Field>
+              </FieldGroup>
+              {fixedness === "variable" ? (
+                <p className="text-sm text-muted-foreground">
+                  Variable payments remain outside precise annual and monthly totals.
+                </p>
+              ) : null}
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button type="button" variant="ghost" disabled={locked} onClick={onClose}>
                 Cancel
@@ -212,7 +214,7 @@ export function RecurringCostConfirmation({
               </Button>
             </DialogFooter>
           </form>
-        </ResponsiveDialogBody>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -408,6 +408,14 @@ function addBaseAccount(
   });
 }
 
+/** Keep the demo's final agenda item available through the end of its local day. */
+export function qaEveningAgendaStart(now: Date, timezone: string): Date {
+  const today = localDateAt(now, timezone);
+  const evening = localDateTimeToUtc(today, 21 * 60, timezone).getTime();
+  const latest = localDateTimeToUtc(today, 23 * 60 + 30, timezone).getTime();
+  return new Date(Math.min(Math.max(evening, now.getTime() + 15 * 60_000), latest));
+}
+
 function addLoadedWorkspace(
   data: FixtureData,
   account: QaFixtureAccount,
@@ -804,6 +812,48 @@ function addLoadedWorkspace(
       userId: account.id,
     },
   );
+  if (account.key === "demo-full") {
+    // Keep a useful evening and next-week agenda when fixtures are loaded after work.
+    const eveningStart = qaEveningAgendaStart(now, timezone).getTime();
+    data.calendarEvents.push({
+      id: fixtureId(account, 2100),
+      userId: account.id,
+      calendarId: localCalendarId,
+      title: "Read and plan tomorrow",
+      notes: "Put the library book by the keys, then choose tomorrow's one priority.",
+      startsAt: new Date(eveningStart),
+      endsAt: new Date(eveningStart + 30 * 60_000),
+      timezone,
+      provider: "local",
+      status: "confirmed",
+      transparency: "busy",
+      visibility: "private",
+      createdAt: ago(24),
+      updatedAt: now,
+    });
+    for (const [offset, title] of [
+      [2, "Autumn workshop volunteer briefing"],
+      [3, "River loop with Priya"],
+      [5, "Friday money check-in"],
+    ] as const) {
+      const date = addLocalDays(today, offset);
+      data.calendarEvents.push({
+        id: fixtureId(account, 2100 + offset),
+        userId: account.id,
+        calendarId: localCalendarId,
+        title,
+        startsAt: at(date, 17 * 60),
+        endsAt: at(date, 18 * 60),
+        timezone,
+        provider: "local",
+        status: "confirmed",
+        transparency: "busy",
+        visibility: "private",
+        createdAt: ago(24),
+        updatedAt: now,
+      });
+    }
+  }
   data.reminders.push(
     {
       createdAt: ago(72),

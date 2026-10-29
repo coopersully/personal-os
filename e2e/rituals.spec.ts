@@ -13,15 +13,13 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await cleanupRitual(page, cleanup, "morning");
   await page.goto("/settings?page=rituals");
   await expect(page.getByRole("heading", { name: "Rituals", level: 1 })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Top navigation" })).toHaveCount(
-    test.info().project.use.isMobile ? 1 : 0,
-  );
-  await page.getByRole("button", { name: "Search settings", exact: true }).click();
-  await page.getByRole("searchbox", { name: "Search all settings" }).fill("time zone");
+  await expect(page.getByRole("navigation", { name: "Top navigation" })).toHaveCount(1);
+  const search = page.getByRole("searchbox", { name: "Search settings", exact: true });
+  await search.fill("time zone");
   const results = page.getByRole("navigation", { name: "Settings search results" });
   await expect(results.getByRole("link", { name: /^Time zone Profile/ })).toBeVisible();
   await expect(results.getByRole("link", { name: /Appearance/ })).toHaveCount(0);
@@ -32,8 +30,13 @@ test("settings support field search, ritual history, and resumable setup replay"
       (mode) => document.documentElement.classList.toggle("dark", mode === "dark"),
       theme,
     );
-    await page.getByRole("searchbox", { name: "Search all settings" }).press("Tab");
     const result = results.getByRole("link").first();
+    await search.focus();
+    await search.press("ArrowDown");
+    await expect(result).toBeFocused();
+    await result.press("Tab");
+    await expect(results.getByRole("link").nth(1)).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
     await expect(result).toBeFocused();
     const colors = await result.evaluate((element) => {
       const style = getComputedStyle(element);
@@ -75,29 +78,35 @@ test("settings support field search, ritual history, and resumable setup replay"
     for (const behind of [colors.card, colors.canvas, colors.sidebar]) {
       expect(contrast(colors.overlay, behind)).toBeGreaterThanOrEqual(1.1);
     }
-    const shape = await page
-      .getByRole("searchbox", { name: "Search all settings" })
-      .evaluate((element) => {
-        const input = element.closest('[data-slot="input-group"]') ?? element;
-        const dialog = element.closest('[role="dialog"]');
-        if (!dialog) throw new Error("Missing search dialog");
-        return {
-          control: parseFloat(getComputedStyle(input).borderTopLeftRadius),
-          panel: parseFloat(getComputedStyle(dialog).borderTopLeftRadius),
-          height: input.getBoundingClientRect().height,
-        };
-      });
-    expect(shape.control).toBeLessThan(shape.height / 3);
-    expect(shape.panel).toBeGreaterThan(shape.control);
-    await page.getByRole("searchbox", { name: "Search all settings" }).focus();
+    const shape = await search.evaluate((element) => {
+      const input = element.closest('[data-slot="input-group"]') ?? element;
+      const panel = document.querySelector(
+        '[data-slot="popover-content"][aria-label="Settings search"]',
+      );
+      if (!panel) throw new Error("Missing settings search results popover");
+      const panelBounds = panel.getBoundingClientRect();
+      return {
+        control: parseFloat(getComputedStyle(input).borderTopLeftRadius),
+        panel: parseFloat(getComputedStyle(panel).borderTopLeftRadius),
+        height: input.getBoundingClientRect().height,
+        panelLeft: panelBounds.left,
+        panelRight: panelBounds.right,
+        viewport: window.innerWidth,
+      };
+    });
+    expect(shape.control).toBeGreaterThanOrEqual(shape.height / 2 - 1);
+    expect(shape.panel).toBeGreaterThan(0);
+    expect(shape.panel).toBeLessThan(shape.control);
+    expect(shape.panelLeft).toBeGreaterThanOrEqual(0);
+    expect(shape.panelRight).toBeLessThanOrEqual(shape.viewport);
+    await search.focus();
   }
   await page.evaluate(() => document.documentElement.classList.remove("dark"));
 
   await results.getByRole("link", { name: /^Time zone Profile/ }).click();
   await expect(page.locator("#profile-timezone")).toBeFocused();
   await expect(page.getByRole("heading", { name: "Daily Defaults" })).toBeVisible();
-  await page.getByRole("button", { name: "Search settings", exact: true }).click();
-  await page.getByRole("searchbox", { name: "Search all settings" }).fill("rituals");
+  await search.fill("rituals");
   await page
     .getByRole("navigation", { name: "Settings search results" })
     .getByRole("link", { name: /^Rituals Shape/ })
@@ -227,7 +236,7 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByRole("button", { name: "Exit Setup" }).click();
   await expect(page.getByRole("heading", { name: "Setup", level: 1 })).toBeVisible();
   await page.goto("/today");
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
 });
 
 test("ritual skipping requires a continuous hold and shows streak impact", async ({ page }) => {
@@ -332,10 +341,9 @@ test("browser rituals preserve the current page and save real answers and option
   await page.request.delete("/v1/rituals/morning/data");
   await page.request.delete("/v1/rituals/night/data");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/settings?page=rituals");
-  await page.getByRole("button", { name: "Search settings", exact: true }).click();
-  const search = page.getByRole("searchbox", { name: "Search all settings" });
+  const search = page.getByRole("searchbox", { name: "Search settings", exact: true });
   await search.fill("calendar");
   const before = page.url();
   {
@@ -417,7 +425,7 @@ test("browser snooze survives reload and another client can settle the same ritu
   await page.request.delete("/v1/rituals/morning/data");
   await page.request.delete("/v1/rituals/night/data");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   {
     const saved = await page.request.put("/v1/rituals/night", {
       data: {
@@ -446,7 +454,7 @@ test("browser snooze survives reload and another client can settle the same ritu
       .toBe(true);
     await expect(ritual).toHaveCount(0);
     await page.reload();
-    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
     await expect(ritual).toHaveCount(0);
     const current = await (await page.request.get("/v1/rituals/current")).json();
     expect(Date.parse(current.current.snoozedUntil)).toBeGreaterThan(Date.parse(current.serverNow));
@@ -465,7 +473,7 @@ test("browser snooze survives reload and another client can settle the same ritu
     expect(complete.ok()).toBe(true);
     expect((await complete.json()).state.current.status).toBe("completed");
     await page.reload();
-    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
     await expect(ritual).toHaveCount(0);
   }
 });

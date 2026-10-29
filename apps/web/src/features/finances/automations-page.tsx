@@ -21,7 +21,7 @@ import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { sameSession, usePreferenceSession } from "../workspace-settings/account-save-session";
-import { financeConversationReturnTo, financeRecoveryHref } from "./automation-recovery.js";
+import { financeConversationReturnTo } from "./automation-recovery.js";
 import {
   type AutomationAction,
   AutomationBinding,
@@ -34,6 +34,7 @@ import {
   FinanceConversationReadiness,
 } from "./automation-verification.js";
 import { HostPromptPanel } from "./host-prompt-panel.js";
+import { useFinanceConversationReadiness } from "./use-finance-conversation-readiness.js";
 
 const date = (value: string | null, timeZone?: string) =>
   value
@@ -105,7 +106,9 @@ function SessionFinanceAutomationsPage() {
     <SettingsFeedbackContext.Provider value={true}>
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p>One automation can maintain your finances. You can register additional hosts.</p>
+          <p className="text-sm text-muted-foreground">
+            Your host runs on its saved schedule. Chat messages wait for an eligible run.
+          </p>
           <AutomationRegistration pending={pending} perform={perform} />
         </div>
         {returnTo ? (
@@ -147,6 +150,8 @@ function Automation({
   returnTo: string | null;
 }) {
   const { schedule, health } = status;
+  const readiness = useFinanceConversationReadiness(schedule.id);
+
   const timeZone = schedule.trigger.type === "scheduled" ? schedule.trigger.timeZone : undefined;
   const [label, setLabel] = useState(schedule.label);
   const [removeOpen, setRemoveOpen] = useState(false);
@@ -173,7 +178,7 @@ function Automation({
                 ? "This registration no longer accepts runs. Register and verify an automation to use Chat."
                 : null;
   return (
-    <section aria-label={schedule.label} className="flex min-w-0 flex-col gap-3">
+    <section aria-label={schedule.label} className="flex min-w-0 flex-col gap-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2>{schedule.label}</h2>
         <Badge variant="secondary">{schedule.state.replaceAll("_", " ")}</Badge>
@@ -192,47 +197,24 @@ function Automation({
         <p>
           {schedule.trigger.type === "scheduled" ? "Projected next start" : "Next expected start"}:{" "}
           {date(health.nextExpectedAt, timeZone)}
-          {health.overdueAt ? ` · Overdue threshold: ${date(health.overdueAt, timeZone)}` : ""}
-          {health.graceMilliseconds !== null
-            ? ` · Grace: ${Math.round(health.graceMilliseconds / 60000)} minutes`
-            : ""}
         </p>
       ) : null}
-      {schedule.trigger.type === "scheduled" ? (
-        <p>
-          The declared cadence projects this slot; provider configuration and execution are
-          unverified. Saved answers wait for the next scheduled invocation. Starts may be several
-          minutes late; no API wake-up is sent.
-        </p>
-      ) : null}
-      <p>
-        Host observation: {date(health.lastObservedAt)}. Successful maintenance is not established
-        by an observation.
-      </p>
-      <AutomationHostReadiness scheduleId={schedule.id} />
-      <p>Saved instructions do not confirm installation.</p>
+      <AutomationHostReadiness scheduleId={schedule.id} returnTo={returnTo} />
       <div className="flex flex-wrap gap-2">
-        {status.connectionAvailable === false ? (
-          <Button asChild variant="secondary">
-            <Link
-              to={
-                returnTo
-                  ? financeRecoveryHref("/settings?section=agent-connections", returnTo)
-                  : "/settings?section=agent-connections"
-              }
-            >
-              Reconnect host
-            </Link>
-          </Button>
-        ) : null}
-        <HostPromptPanel status={status} />
         <AutomationVerification
           scheduleId={schedule.id}
-          disabled={pending || !live || status.connectionAvailable === false}
+          disabled={
+            pending ||
+            !live ||
+            status.connectionAvailable === false ||
+            readiness.data?.recovery === "authorize_execution"
+          }
         />
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="outline">{setupAction}</Button>
+            <Button variant="outline" className="min-h-11">
+              {setupAction}
+            </Button>
           </DialogTrigger>
           <DialogContent data-finance-dialog data-finance-size="default">
             <DialogHeader>
@@ -243,6 +225,27 @@ function Automation({
               </DialogDescription>
             </DialogHeader>
             <ResponsiveDialogBody>
+              <p className="text-sm text-muted-foreground">
+                Host observation: {date(health.lastObservedAt)}. Successful maintenance is not
+                established by an observation.
+              </p>
+              {schedule.trigger.type === "scheduled" ? (
+                <p className="text-sm text-muted-foreground">
+                  The declared cadence projects this slot; provider configuration and execution are
+                  unverified. Saved answers wait for the next scheduled invocation. Starts may be
+                  several minutes late; no API wake-up is sent.
+                </p>
+              ) : null}
+              <p className="text-sm text-muted-foreground">
+                {health.overdueAt ? `Overdue threshold: ${date(health.overdueAt, timeZone)}` : ""}
+                {health.graceMilliseconds != null
+                  ? ` · Grace: ${Math.round(health.graceMilliseconds / 60000)} minutes`
+                  : ""}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Saved instructions do not confirm installation.
+              </p>
+              <HostPromptPanel status={status} />
               <dl className="grid min-w-0 gap-2">
                 <dt>Registration ID</dt>
                 <dd className="break-all">{schedule.id}</dd>
@@ -289,52 +292,54 @@ function Automation({
                   </FieldGroup>
                 </form>
               ) : null}
+              {schedule.state === "setup_pending" || live ? (
+                <Dialog open={removeOpen} onOpenChange={setRemoveOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline">
+                      {live ? "Remove registration" : "Cancel setup"}
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent data-finance-dialog data-finance-size="default">
+                    <DialogHeader>
+                      <DialogTitle>
+                        {live ? "Remove this registration?" : "Cancel this setup?"}
+                      </DialogTitle>
+                      <DialogDescription>
+                        Future dispatch and acceptance under this registration will stop. History
+                        stays available. Remove the external job in its host separately.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <ResponsiveDialogBody>
+                      <Button
+                        variant="destructive"
+                        disabled={pending}
+                        onClick={() => {
+                          void perform(
+                            () =>
+                              schedule.state === "setup_pending"
+                                ? api.cancelAutomationHostSchedule(schedule.id, {
+                                    expectedVersion: schedule.version,
+                                    expectedState: "setup_pending",
+                                  })
+                                : api.revokeAutomationHostSchedule(schedule.id, {
+                                    expectedVersion: schedule.version,
+                                    expectedState: schedule.state as "active" | "paused",
+                                  }),
+                            "Registration removed. Stop the external job in its host.",
+                          ).then((saved) => {
+                            if (saved) setRemoveOpen(false);
+                          });
+                        }}
+                      >
+                        Confirm {live ? "removal" : "cancellation"}
+                      </Button>
+                    </ResponsiveDialogBody>
+                  </DialogContent>
+                </Dialog>
+              ) : null}
             </ResponsiveDialogBody>
           </DialogContent>
         </Dialog>
-        {schedule.state === "setup_pending" || live ? (
-          <Dialog open={removeOpen} onOpenChange={setRemoveOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline">{live ? "Remove registration" : "Cancel setup"}</Button>
-            </DialogTrigger>
-            <DialogContent data-finance-dialog data-finance-size="default">
-              <DialogHeader>
-                <DialogTitle>
-                  {live ? "Remove this registration?" : "Cancel this setup?"}
-                </DialogTitle>
-                <DialogDescription>
-                  Future dispatch and acceptance under this registration will stop. History stays
-                  available. Remove the external job in its host separately.
-                </DialogDescription>
-              </DialogHeader>
-              <ResponsiveDialogBody>
-                <Button
-                  variant="destructive"
-                  disabled={pending}
-                  onClick={() => {
-                    void perform(
-                      () =>
-                        schedule.state === "setup_pending"
-                          ? api.cancelAutomationHostSchedule(schedule.id, {
-                              expectedVersion: schedule.version,
-                              expectedState: "setup_pending",
-                            })
-                          : api.revokeAutomationHostSchedule(schedule.id, {
-                              expectedVersion: schedule.version,
-                              expectedState: schedule.state as "active" | "paused",
-                            }),
-                      "Registration removed. Stop the external job in its host.",
-                    ).then((saved) => {
-                      if (saved) setRemoveOpen(false);
-                    });
-                  }}
-                >
-                  Confirm {live ? "removal" : "cancellation"}
-                </Button>
-              </ResponsiveDialogBody>
-            </DialogContent>
-          </Dialog>
-        ) : null}
       </div>
       <Separator />
     </section>

@@ -3,6 +3,17 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import { CheckIcon, ChevronRightIcon, PulseIcon } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogClose as DialogClose,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { settingsPath } from "@/features/settings/settings-routes";
 import { api } from "../../api.js";
@@ -24,16 +35,6 @@ import {
   ColorPickerInput,
   ColorPickerSelection,
 } from "../../components/ui/color-picker.js";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select";
 import { Slider } from "../../components/ui/slider.js";
@@ -878,73 +879,75 @@ function DesktopSettingsContent({
                       checks update automatically while this is open and when you return.
                     </DialogDescription>
                   </DialogHeader>
-                  <ol className="space-y-5 text-sm">
-                    <li className="flex gap-3">
-                      <span
-                        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
-                        aria-hidden="true"
-                      >
-                        {permission === "authorized" ? <CheckIcon className="size-4" /> : "1"}
-                      </span>
-                      <div className="min-w-0 space-y-1">
-                        <h3 className="font-medium">Allow notifications</h3>
-                        <p className="text-muted-foreground" role="status">
-                          macOS permission: {permissionLabel}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {permission === "denied"
-                            ? "Open macOS notification settings, select nohmi, and turn on Allow Notifications. Return here to check it."
-                            : permission === "authorized"
-                              ? "nohmi is allowed to send notifications."
-                              : permissionPending
-                                ? "Respond to the macOS permission prompt to continue."
-                                : permission === "notDetermined"
-                                  ? "Choose Allow notifications below, then approve the macOS prompt."
-                                  : "macOS permission status is unavailable. Check again or open macOS notification settings."}
-                        </p>
-                      </div>
-                    </li>
-                    <li className="flex gap-3">
-                      <span
-                        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
-                        aria-hidden="true"
-                      >
-                        2
-                      </span>
-                      <div className="min-w-0 space-y-1">
-                        <h3 className="font-medium">Choose how alerts appear</h3>
-                        <p className="text-xs text-muted-foreground">
-                          {permission === "authorized" &&
-                          query.data?.native.notificationAlertsAvailable === false
-                            ? "macOS alerts are off. Choose banners or alerts in macOS notification settings."
-                            : "In macOS notification settings, choose banners or alerts. Focus and screen sharing can silence them."}
-                        </p>
-                        {draft.notifications.sound &&
-                        permission === "authorized" &&
-                        query.data?.native.notificationSoundsAvailable === false ? (
-                          <p className="text-xs text-muted-foreground">
-                            Sounds are disabled in macOS. Enable “Play sound for notification” there
-                            to hear alerts.
+                  <ResponsiveDialogBody>
+                    <ol className="space-y-5 text-sm">
+                      <li className="flex gap-3">
+                        <span
+                          className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+                          aria-hidden="true"
+                        >
+                          {permission === "authorized" ? <CheckIcon className="size-4" /> : "1"}
+                        </span>
+                        <div className="min-w-0 space-y-1">
+                          <h3 className="font-medium">Allow notifications</h3>
+                          <p className="text-muted-foreground" role="status">
+                            macOS permission: {permissionLabel}
                           </p>
-                        ) : null}
-                      </div>
-                    </li>
-                    <li className="flex gap-3">
-                      <span
-                        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
-                        aria-hidden="true"
-                      >
-                        3
-                      </span>
-                      <div className="min-w-0 space-y-1">
-                        <h3 className="font-medium">Send a test</h3>
-                        <p className="text-xs text-muted-foreground">
-                          Once permission is allowed, send a test and look for it in Notification
-                          Center. macOS accepting it doesn’t confirm a banner appeared.
-                        </p>
-                      </div>
-                    </li>
-                  </ol>
+                          <p className="text-xs text-muted-foreground">
+                            {permission === "denied"
+                              ? "Open macOS notification settings, select nohmi, and turn on Allow Notifications. Return here to check it."
+                              : permission === "authorized"
+                                ? "nohmi is allowed to send notifications."
+                                : permissionPending
+                                  ? "Respond to the macOS permission prompt to continue."
+                                  : permission === "notDetermined"
+                                    ? "Choose Allow notifications below, then approve the macOS prompt."
+                                    : "macOS permission status is unavailable. Check again or open macOS notification settings."}
+                          </p>
+                        </div>
+                      </li>
+                      <li className="flex gap-3">
+                        <span
+                          className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+                          aria-hidden="true"
+                        >
+                          2
+                        </span>
+                        <div className="min-w-0 space-y-1">
+                          <h3 className="font-medium">Choose how alerts appear</h3>
+                          <p className="text-xs text-muted-foreground">
+                            {permission === "authorized" &&
+                            query.data?.native.notificationAlertsAvailable === false
+                              ? "macOS alerts are off. Choose banners or alerts in macOS notification settings."
+                              : "In macOS notification settings, choose banners or alerts. Focus and screen sharing can silence them."}
+                          </p>
+                          {draft.notifications.sound &&
+                          permission === "authorized" &&
+                          query.data?.native.notificationSoundsAvailable === false ? (
+                            <p className="text-xs text-muted-foreground">
+                              Sounds are disabled in macOS. Enable “Play sound for notification”
+                              there to hear alerts.
+                            </p>
+                          ) : null}
+                        </div>
+                      </li>
+                      <li className="flex gap-3">
+                        <span
+                          className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+                          aria-hidden="true"
+                        >
+                          3
+                        </span>
+                        <div className="min-w-0 space-y-1">
+                          <h3 className="font-medium">Send a test</h3>
+                          <p className="text-xs text-muted-foreground">
+                            Once permission is allowed, send a test and look for it in Notification
+                            Center. macOS accepting it doesn’t confirm a banner appeared.
+                          </p>
+                        </div>
+                      </li>
+                    </ol>
+                  </ResponsiveDialogBody>
                   <DialogFooter className="grid-flow-row grid-cols-2">
                     <Button
                       type="button"

@@ -78,6 +78,31 @@ describe("Mail stewardship through MCP", () => {
     expect(await call("list_mail", { accountIds: [account.id], snoozed: true })).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: thread.id })]),
     );
+    expect(await call("get_mail_navigation_counts", { accountIds: [account.id] })).toMatchObject({
+      snoozed: 1,
+      drafts: 0,
+    });
+    expect(
+      await call("get_mail_navigation_counts", {
+        accountIds: ["00000000-0000-4000-8000-000000000099"],
+      }),
+    ).toMatchObject({ all: 0, unread: 0, starred: 0, snoozed: 0, sent: 0 });
+    const other = await f.connectAgent(["mail:read"], { ownerId: f.otherOwner.id });
+    const isolated = await other.client.callTool({
+      name: "get_mail_navigation_counts",
+      arguments: { accountIds: [account.id] },
+    });
+    expect(isolated.isError, JSON.stringify(isolated)).not.toBe(true);
+    expect(isolated.structuredContent).toMatchObject({
+      result: { all: 0, unread: 0, starred: 0, snoozed: 0, sent: 0, drafts: 0 },
+    });
+    const denied = await f.connectAgent(["tasks:read"]);
+    expect((await denied.client.listTools()).tools.map((tool) => tool.name)).not.toContain(
+      "get_mail_navigation_counts",
+    );
+    await expect(denied.api.getMailNavigationCounts([account.id])).rejects.toMatchObject({
+      status: 403,
+    });
     const revision = thread.updatedAt.toISOString();
     expect(
       await call("create_mail_attention_item", {

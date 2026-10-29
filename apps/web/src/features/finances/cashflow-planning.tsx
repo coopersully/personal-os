@@ -12,6 +12,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Button } from "@/components/ui/button";
 import { ItemGroup } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -497,7 +498,9 @@ function OwnerCashflowPlanning({ user }: { user: Awaited<ReturnType<typeof api.g
           onSaved={refresh}
         />
       ) : null}
-      {balanceAccountId && review.isPending ? <p>Loading current balance-review facts…</p> : null}
+      {balanceAccountId && review.isPending ? (
+        <ContentSkeleton label="Loading current balance-review facts…" rows={3} />
+      ) : null}
       {balanceAccountId && review.isError ? (
         <InlineError error={review.error} retry={() => void review.refetch()} />
       ) : null}

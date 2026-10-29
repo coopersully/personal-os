@@ -2,6 +2,7 @@ import { type FinanceProfileVersion, financeSetupPlanningSchema } from "@persona
 import { useId, useRef } from "react";
 import { toast } from "sonner";
 import { QueryFeedback } from "@/components/async-state";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { RecoveryRequest } from "@/components/recovery-request";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "../settings/settings-layout.js";
@@ -42,7 +43,8 @@ export function FinanceConfigurationEditor() {
       retrying.current = false;
     }
   }
-  if (query.isPending) return <p role="status">Loading financial settings…</p>;
+  if (query.isPending)
+    return <ContentSkeleton label="Loading financial settings…" shape="settings" rows={3} />;
   if (query.isError || query.data?.profile.state !== "loaded")
     return (
       <>

@@ -5,13 +5,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/api";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { WorkspacePreferencesSection } from "../workspace-settings/section";
+import { MailLayoutControl } from "./layout-control";
 import { MailPage } from "./mail";
 
 afterEach(() => vi.restoreAllMocks());
 it("retains a Mail layout attempt at its contextual control and after navigating to Settings", async () => {
+  const errorToast = vi.spyOn(toast, "error");
   const owner = { id: "owner", email: "person@example.com", planningTimezone: "UTC" } as User;
   vi.spyOn(api, "listConnectors").mockResolvedValue([
     {
@@ -45,7 +48,13 @@ it("retains a Mail layout attempt at its contextual control and after navigating
       </MemoryRouter>
     </QueryClientProvider>
   );
-  const view = render(<MailPage user={owner} />, { wrapper });
+  const view = render(
+    <>
+      <MailLayoutControl />
+      <MailPage user={owner} />
+    </>,
+    { wrapper },
+  );
   const user = userEvent.setup();
   const layout = await screen.findByRole("button", { name: "Message list layout" });
   await waitFor(() => expect(layout).toBeEnabled());
@@ -68,6 +77,8 @@ it("retains a Mail layout attempt at its contextual control and after navigating
   await user.click(screen.getByRole("menuitemradio", { name: "Full-width view" }));
   expect(await screen.findByText("Your change: Full-width view")).toBeVisible();
   expect(layout).toBeDisabled();
+  expect(errorToast).toHaveBeenCalled();
+  expect(document.querySelector('[data-slot="alert"][role="status"]')).toBeNull();
   read.mockResolvedValue(
     resolveWorkspaceSettings("mail", { mailConversationLayout: "split", revision: 3 }),
   );

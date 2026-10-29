@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -16,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import {
   classifyChanges,
   classifyGitChanges,
+  classifyPushChanges,
   expectedJobs,
   jobIds,
   requiredGate,
@@ -332,7 +334,7 @@ test("browser shards retain both complete matrices and the original coverage com
   assert.match(browser, /--project=\$\{\{ matrix.project \}\} --shard=\$\{\{ matrix.shard \}\}\/4/);
   assert.match(
     browser,
-    /name: playwright-report-\$\{\{ matrix.project \}\}-\$\{\{ matrix.shard \}\}/,
+    /name: browser-diagnostics-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}-\$\{\{ matrix.project \}\}-\$\{\{ matrix.shard \}\}/,
   );
   assert.match(browser, /fail-fast: false/);
   assert.doesNotMatch(browser, /continue-on-error/);
@@ -348,25 +350,151 @@ test("browser shards retain both complete matrices and the original coverage com
   );
 });
 
-test("production audit fails before expensive Node checks and still blocks readiness", () => {
+// This inspects our block-style workflow steps, including a leading name/id/uses/run
+// in any order. Nested env/with keys and script contents are not step properties.
+function workflowSteps(job) {
+  return [...job.matchAll(/^ {6}- ([^\n]+)(?:\n(?! {6}- | {2}\S)[^\n]*)*/gm)].map(([block]) => {
+    const fields = {};
+    for (const line of block.split("\n")) {
+      const field = line.match(/^(?: {6}- | {8})([a-z][a-z-]*): (.*)$/);
+      if (!field) continue;
+      assert.ok(!Object.hasOwn(fields, field[1]), `Duplicate step key: ${field[1]}`);
+      fields[field[1]] = field[2];
+    }
+    return { block, fields };
+  });
+}
+
+function assertNodeFailureContract(workflow) {
+  const jobs = workflowJobBlocks(workflow);
+  const quality = jobs.find((block) => block.startsWith("  quality:\n"));
+  assert.ok(quality);
+  // Neither the job nor any step may turn a failure into a successful job result.
+  assert.doesNotMatch(quality, /continue-on-error/);
+  const steps = workflowSteps(quality);
+  const source = steps.filter(({ fields }) => ["install", "audit", "node"].includes(fields.id));
+  assert.deepEqual(
+    source.map(({ fields }) => [fields.id, fields.run]),
+    [
+      ["install", "pnpm install --frozen-lockfile"],
+      ["audit", "pnpm audit --prod"],
+      ["node", "pnpm check:node"],
+    ],
+  );
+  for (const { fields } of source) {
+    // Omitted conditions retain GitHub's default success() blocking semantics.
+    assert.equal(fields.if, undefined, `${fields.id} must stop after an earlier failure.`);
+  }
+  const collector = steps.filter(({ fields }) => fields.id === "coverage");
+  const uploads = steps.filter(({ fields }) => fields.uses?.startsWith("actions/upload-artifact@"));
+  assert.equal(collector.length, 1);
+  assert.equal(uploads.length, 1);
+  assert.match(
+    collector[0].fields.run,
+    /^node \.github\/scripts\/collect-node-coverage\.mjs collect /,
+  );
+  assert.equal(collector[0].fields.if, "always()");
+  assert.equal(
+    uploads[0].fields.if,
+    "${{ always() && steps.coverage.outputs.artifact_ready == 'true' }}",
+  );
+  assert.deepEqual(
+    steps.filter(({ fields }) => fields.if !== undefined),
+    [collector[0], uploads[0]],
+    "Only diagnostic collection and upload may run after source failure.",
+  );
+  assert.ok(steps.indexOf(source[2]) < steps.indexOf(collector[0]));
+  assert.ok(steps.indexOf(collector[0]) < steps.indexOf(uploads[0]));
+  const required = jobs.find((block) => block.startsWith("  required:\n"));
+  assert.ok(required);
+  assert.match(required, /^ {6}- quality$/m);
+  assert.match(required, /NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/);
+  assert.match(required, /\[name, job\.result\]/);
+  assert.match(required, /if \(!requiredGate\(results, JSON\.parse\(scope\)\)\) \{/);
+  assert.match(required, /process\.exit\(1\)/);
+}
+
+test("production audit remains blocking while diagnostics retain failed source evidence", () => {
   const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
-  const quality = workflowJobBlocks(workflow).find((block) => block.startsWith("  quality:\n"));
-  const commands = [...quality.matchAll(/^ {6}- run: (.+)$/gm)].map((match) => match[1]);
-  assert.deepEqual(commands, [
-    "pnpm install --frozen-lockfile",
-    "pnpm audit --prod",
-    "pnpm check:node",
-  ]);
-  // Default step success conditions must prevent later checks after an audit failure.
-  assert.doesNotMatch(quality, /continue-on-error|always\(\)|if: failure\(\)/);
-  assert.equal(
-    requiredGate({ ...resultsFor(jobIds), quality: "failure" }, scope({ full: true })),
-    false,
+  assertNodeFailureContract(workflow);
+  // A collector/upload success never replaces the quality job's actual result.
+  for (const outcome of ["failure", "cancelled", "skipped"]) {
+    assert.equal(
+      requiredGate({ ...resultsFor(jobIds), quality: outcome }, scope({ full: true })),
+      false,
+      `Source quality ${outcome} must not pass readiness after diagnostic success.`,
+    );
+  }
+});
+
+test("Node failure contract accepts named steps with reordered properties", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const named = workflow.replace(
+    /^( {6})- id: (install|audit|node)\n {8}run: (.+)$/gm,
+    "$1- name: Source $2\n        run: $3\n        id: $2",
   );
-  assert.equal(
-    requiredGate({ ...resultsFor(jobIds), quality: "cancelled" }, scope({ full: true })),
-    false,
-  );
+  assert.notEqual(named, workflow);
+  assertNodeFailureContract(named);
+});
+
+test("Node failure contract rejects source bypasses and diagnostic masking", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const mutations = [
+    [
+      "source command",
+      (text) => text.replace("run: pnpm audit --prod", "run: pnpm audit --prod || true"),
+    ],
+    [
+      "source order",
+      (text) =>
+        text
+          .replace("id: install", "id: audit")
+          .replace("id: audit\n        run: pnpm audit", "id: install\n        run: pnpm audit"),
+    ],
+    ...["install", "audit", "node"].flatMap((id) => [
+      [
+        `${id} unconditional`,
+        (text) => text.replace(`- id: ${id}\n`, `- id: ${id}\n        if: always()\n`),
+      ],
+      [
+        `${id} ignored failure`,
+        (text) => text.replace(`- id: ${id}\n`, `- id: ${id}\n        continue-on-error: true\n`),
+      ],
+    ]),
+    [
+      "extra unconditional step",
+      (text) =>
+        text.replace("- id: coverage-prepare\n", "- id: coverage-prepare\n        if: always()\n"),
+    ],
+    [
+      "collector condition",
+      (text) =>
+        text.replace(
+          "if: always()\n        timeout-minutes: 1",
+          "if: success()\n        timeout-minutes: 1",
+        ),
+    ],
+    [
+      "upload readiness",
+      (text) =>
+        text.replace("always() && steps.coverage.outputs.artifact_ready == 'true'", "always()"),
+    ],
+    [
+      "job ignored failure",
+      (text) => text.replace("  quality:\n", "  quality:\n    continue-on-error: true\n"),
+    ],
+    ["aggregate dependency", (text) => text.replace("      - quality\n", "")],
+    ["aggregate result", (text) => text.replace("[name, job.result]", "[name, 'success']")],
+    [
+      "aggregate rejection",
+      (text) => text.replace("if (!requiredGate(results, JSON.parse(scope)))", "if (false)"),
+    ],
+  ];
+  for (const [name, mutate] of mutations) {
+    const changed = mutate(workflow);
+    assert.notEqual(changed, workflow, `${name} must change its fixture.`);
+    assert.throws(() => assertNodeFailureContract(changed), { name: "AssertionError" }, name);
+  }
 });
 
 function gitFixture(t) {
@@ -472,6 +600,203 @@ test("push or malformed Git identity emits broad scope and selected outputs", (t
   );
   assert.deepEqual(JSON.parse(output), scope({ full: true }));
   assert.ok(readFileSync(outputFile, "utf8").includes(`required_jobs=${JSON.stringify(jobIds)}`));
+});
+
+function pushFixture(t) {
+  const f = gitFixture(t);
+  f.write(".github/scripts/ci-scope.mjs", readFileSync(resolve(scriptDirectory, "ci-scope.mjs")));
+  const before = f.commit();
+  f.write("README.md", "First prose commit\n");
+  f.commit();
+  f.write("docs/engineering/example.md", "Second prose commit\n");
+  const after = f.commit();
+  const eventPath = resolve(f.root, "push-event.json");
+  const event = {
+    before,
+    after,
+    ref: "refs/heads/main",
+    repository: { id: 123, full_name: "owner/repo" },
+    head_commit: { id: after },
+    created: false,
+    deleted: false,
+    forced: false,
+  };
+  const context = {
+    eventName: "push",
+    repository: "owner/repo",
+    repositoryId: "123",
+    ref: event.ref,
+    sha: after,
+    workspace: f.root,
+  };
+  const env = {
+    ...process.env,
+    CI_FULL: "false",
+    GITHUB_EVENT_NAME: "push",
+    GITHUB_EVENT_PATH: eventPath,
+    GITHUB_REPOSITORY: context.repository,
+    GITHUB_REPOSITORY_ID: context.repositoryId,
+    GITHUB_REF: context.ref,
+    GITHUB_SHA: after,
+    GITHUB_WORKSPACE: f.root,
+  };
+  writeFileSync(eventPath, JSON.stringify(event));
+  return { ...f, before, after, event, context, env, eventPath };
+}
+
+function pushCli(f, args = [], env = f.env) {
+  const result = spawnSync(
+    process.execPath,
+    [
+      realpathSync(resolve(f.root, ".github/scripts/ci-scope.mjs")),
+      "--github-push",
+      "--json",
+      ...args,
+    ],
+    { encoding: "utf8", env, timeout: 5000 },
+  );
+  assert.equal(result.status, 0, result.error?.message ?? result.stderr);
+  return result;
+}
+
+test("authenticated push CLI narrows the entire committed prose range", (t) => {
+  const f = pushFixture(t);
+  assert.deepEqual(JSON.parse(pushCli(f).stdout), scope({ prose_only: true, repo: true }));
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const run = workflow
+    .match(/ {6}- id: scope[\s\S]*? {8}run: \|\n([\s\S]*?)(?=\n {6}- name: Record source event)/)[1]
+    .split("\n")
+    .map((line) => line.replace(/^ {10}/, ""))
+    .join("\n");
+  for (const eventName of ["push", "pull_request"]) {
+    const outputFile = resolve(f.root, `${eventName}-output`);
+    const result = execFileSync("bash", ["-e", "-c", run], {
+      cwd: f.root,
+      encoding: "utf8",
+      env: {
+        ...f.env,
+        EVENT_NAME: eventName,
+        GITHUB_EVENT_NAME: eventName,
+        // A push must use the actual event file, not these empty PR fields.
+        BASE_SHA: eventName === "push" ? "" : f.before,
+        HEAD_SHA: eventName === "push" ? "" : f.after,
+        RUNNER_TEMP: f.root,
+        GITHUB_OUTPUT: outputFile,
+        GITHUB_STEP_SUMMARY: resolve(f.root, "summary"),
+      },
+    });
+    assert.deepEqual(JSON.parse(result), scope({ prose_only: true, repo: true }));
+    assert.ok(readFileSync(outputFile, "utf8").includes('required_jobs=["changes","repository"]'));
+  }
+});
+
+test("push identity rejects unverified event, repository, ref and checkout bindings", (t) => {
+  const f = pushFixture(t);
+  const classify = (event = f.event, context = f.context, options = {}) =>
+    classifyPushChanges(event, context, { root: f.root, ...options });
+  assert.equal(classify().prose_only, true);
+  const events = [
+    null,
+    [],
+    {},
+    { ...f.event, repository: undefined },
+    { ...f.event, repository: { ...f.event.repository, full_name: "other/repo" } },
+    { ...f.event, repository: { ...f.event.repository, id: 124 } },
+    { ...f.event, repository: { ...f.event.repository, id: "123" } },
+    { ...f.event, repository: { ...f.event.repository, id: 0 } },
+    { ...f.event, ref: "refs/heads/other" },
+    { ...f.event, head_commit: null },
+    { ...f.event, head_commit: { id: f.before } },
+    ...["created", "deleted", "forced"].flatMap((key) =>
+      [true, undefined, null, "false"].map((value) => ({ ...f.event, [key]: value })),
+    ),
+    ...["before", "after"].flatMap((key) =>
+      [undefined, null, 123, "", "0".repeat(40), "f".repeat(39), "--all"].map((value) => ({
+        ...f.event,
+        [key]: value,
+      })),
+    ),
+  ];
+  for (const event of events) assert.equal(classify(event).full, true, JSON.stringify(event));
+  for (const context of [
+    null,
+    {},
+    { ...f.context, eventName: "pull_request" },
+    { ...f.context, eventName: "workflow_dispatch" },
+    { ...f.context, repository: "other/repo" },
+    { ...f.context, repositoryId: "00123" },
+    { ...f.context, repositoryId: 123 },
+    { ...f.context, ref: "refs/heads/other" },
+    { ...f.context, sha: f.before },
+    { ...f.context, workspace: undefined },
+    { ...f.context, workspace: tmpdir() },
+  ])
+    assert.equal(classify(f.event, context).full, true, JSON.stringify(context));
+  assert.equal(
+    classify({ ...f.event, ref: "refs/tags/v1" }, { ...f.context, ref: "refs/tags/v1" }).full,
+    true,
+  );
+  assert.equal(classify(f.event, f.context, { forceFull: true }).full, true);
+  assert.equal(
+    classify(
+      { ...f.event, after: f.before, head_commit: { id: f.before } },
+      { ...f.context, sha: f.before },
+    ).full,
+    true,
+    "Event and context agree but actual HEAD differs",
+  );
+});
+
+test("push classification includes earlier runtime changes and fails full on uncertain history", (t) => {
+  const f = pushFixture(t);
+  f.write("apps/web/src/example.ts", "export const changed = true;\n");
+  f.commit();
+  f.write("README.md", "Only the final commit is prose\n");
+  const after = f.commit();
+  const event = { ...f.event, after, head_commit: { id: after } };
+  const context = { ...f.context, sha: after };
+  assert.equal(classifyPushChanges(event, context, { root: f.root }).full, true);
+  assert.equal(
+    classifyGitChanges(f.git("rev-parse", "HEAD~1"), after, { root: f.root }).prose_only,
+    true,
+    "A HEAD~1 shortcut would omit the earlier runtime change",
+  );
+  assert.equal(
+    classifyPushChanges({ ...event, before: "f".repeat(40) }, context, { root: f.root }).full,
+    true,
+    "Missing history must not fall back to a guessed parent",
+  );
+  f.git("checkout", "-b", "diverged", f.before);
+  f.write("README.md", "Diverged prose\n");
+  const diverged = f.commit();
+  f.git("checkout", f.after);
+  assert.equal(
+    classifyPushChanges({ ...f.event, before: diverged }, f.context, { root: f.root }).full,
+    true,
+    "A nonancestor push stays full even if a caller clears the forced flag",
+  );
+});
+
+test("push CLI fails full for unreadable, malformed, oversized and conflicting inputs", (t) => {
+  const f = pushFixture(t);
+  assert.equal(JSON.parse(pushCli(f, [], { ...f.env, GITHUB_EVENT_PATH: "" }).stdout).full, true);
+  assert.equal(JSON.parse(pushCli(f, [], { ...f.env, CI_FULL: "true" }).stdout).full, true);
+  assert.equal(JSON.parse(pushCli(f, ["--base", f.before, "--head", f.after]).stdout).full, true);
+  writeFileSync(f.eventPath, '{"private-marker":');
+  const malformed = pushCli(f);
+  assert.equal(JSON.parse(malformed.stdout).full, true);
+  assert.doesNotMatch(malformed.stderr, /private-marker/);
+  writeFileSync(f.eventPath, `${JSON.stringify(f.event)}${" ".repeat(1024 * 1024)}`);
+  assert.equal(JSON.parse(pushCli(f).stdout).full, true);
+  assert.equal(
+    JSON.parse(pushCli(f, [], { ...f.env, GITHUB_EVENT_PATH: f.root }).stdout).full,
+    true,
+  );
+  if (process.platform !== "win32") {
+    rmSync(f.eventPath);
+    execFileSync("mkfifo", [f.eventPath]);
+    assert.equal(JSON.parse(pushCli(f).stdout).full, true, "Special file must not block opening");
+  }
 });
 
 test("readiness full-source inventory matches workflow names and both complete matrices", () => {

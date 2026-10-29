@@ -12,7 +12,7 @@ test("Finance outstanding items open with context and retain notes for maintenan
   await page.getByLabel("Email").fill(demoAccount.email);
   await page.getByLabel("Password", { exact: true }).fill(demoAccount.password);
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
 
   const transactionId = "33333333-3333-4333-8333-333333333333";
   const caseId = "44444444-4444-4444-8444-444444444444";

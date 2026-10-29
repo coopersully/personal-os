@@ -3,6 +3,7 @@ import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { QueryFeedback } from "@/components/async-state";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -128,7 +129,7 @@ function ReviewFlow({
             One decision at a time. Leave anything you’re unsure about for later.
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
-        {query.isPending ? <p role="status">Loading your decisions…</p> : null}
+        {query.isPending ? <ContentSkeleton label="Loading your decisions…" rows={3} /> : null}
         <QueryFeedback query={query} title="Couldn’t load your review session." />
         {workspace === "finances" && query.isError && !query.data ? (
           <ResponsiveDialogBody className="flex-1">

@@ -4,6 +4,7 @@ import type {
   WorkspaceSettings,
 } from "../packages/domain/src/workspace-settings.js";
 import { selectSetting } from "./settings-controls.js";
+import { revealWorkspaceOptions } from "./workspace-header-controls.js";
 
 async function preserveWorkspacePreferences(
   page: Page,
@@ -47,7 +48,7 @@ test("each workspace discovers records and Calendar settings without changing li
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
 
   for (const [workspace, query, title] of [
     ["Calendar", "dentist", "Dentist appointment"],
@@ -62,7 +63,7 @@ test("each workspace discovers records and Calendar settings without changing li
       const switcher = await header.getByRole("button", { name: "Switch workspace" }).boundingBox();
       expect(switcher).not.toBeNull();
       expect(Math.abs((switcher?.width ?? 0) - (switcher?.height ?? 1))).toBeLessThan(1);
-      expect((await header.boundingBox())?.height).toBeLessThanOrEqual(96);
+      expect((await header.boundingBox())?.height).toBe(104);
     }
     await header.getByRole("combobox", { name: `Search ${workspace}`, exact: true }).click();
     const before = page.url();
@@ -78,7 +79,7 @@ test("each workspace discovers records and Calendar settings without changing li
   await page.goto("/calendar");
   await page.getByRole("combobox", { name: "Search Calendar", exact: true }).click();
   await page.getByRole("combobox", { name: "Search Calendar", exact: true }).fill("weekends");
-  await page.getByRole("option", { name: "Show weekends Calendar settings Settings" }).click();
+  await page.getByRole("option", { name: /^Show weekends(?:\s|$)/ }).click();
   await expect(page).toHaveURL(/page=calendar.*field=calendar%3Ashow-weekends/);
   await expect(page.getByRole("switch", { name: "Show weekends" })).toBeFocused();
 });
@@ -89,7 +90,7 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "calendar", {
     calendarView: "auto",
     autoFollowToday: true,
@@ -164,7 +165,7 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "tasks", {
     taskSort: "default",
     taskRowDetails: ["estimate"],
@@ -187,11 +188,14 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
       await expect(header.getByRole("button", { name: `Tasks view: ${label}` })).toBeVisible();
     }
     await expect(header.getByRole("combobox", { name: "Search Tasks", exact: true })).toBeVisible();
-    for (const name of ["Filters", "Sort", "Display"]) {
-      await expect(header.getByRole("button", { name, exact: true })).toBeVisible();
+    await expect(header.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
+    await revealWorkspaceOptions(page);
+    for (const name of ["Sort", "Display"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toBeVisible();
     }
     await expect(page.getByRole("navigation", { name: "Tasks page controls" })).toHaveCount(0);
-    await header.getByRole("button", { name: "Sort", exact: true }).click();
+    await revealWorkspaceOptions(page);
+    await page.getByRole("button", { name: "Sort", exact: true }).click();
     const recommended = page.getByRole("menuitemradio", { name: "Recommended", exact: true });
     await expect(recommended).toBeVisible();
     expect(
@@ -227,7 +231,8 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
     await uncheckedRadio.click();
     expect((await sortSaved).ok()).toBeTruthy();
     await expect(page).toHaveURL(/sort=title/);
-    await header.getByRole("button", { name: "Display", exact: true }).click();
+    await revealWorkspaceOptions(page);
+    await page.getByRole("button", { name: "Display", exact: true }).click();
     const notes = page.getByRole("menuitemcheckbox", { name: "Notes", exact: true });
     await expect(notes).toHaveAttribute("aria-checked", "false");
     const checkbox = notes.locator('[data-slot="dropdown-menu-checkbox-item-indicator"]');
@@ -249,42 +254,46 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
       page.getByRole("menuitemcheckbox", { name: "Estimates", exact: true }),
     ).toHaveAttribute("aria-checked", "true");
     await notes.press("Escape");
-    await expect(header.getByRole("button", { name: "Display", exact: true })).toBeFocused();
-    await expect
-      .poll(() => header.evaluate((el) => el.getBoundingClientRect().height))
-      .toBeLessThanOrEqual(isMobile ? 84 : 64);
+    await revealWorkspaceOptions(page);
+    await expect(page.getByRole("button", { name: "Display", exact: true })).toBeFocused();
+    await expect.poll(() => header.evaluate((el) => el.getBoundingClientRect().height)).toBe(104);
+    // Workspace discovery stays above page orientation and directly accessible page controls.
+    const searchBox = await header
+      .getByRole("combobox", { name: "Search Tasks", exact: true })
+      .boundingBox();
+    const titleBox = await header.locator('[data-slot="workspace-app-bar-title"]').boundingBox();
+    const pageActions = header.locator('[data-slot="workspace-app-bar-page-actions"]');
+    const actionsBox = await pageActions.boundingBox();
+    if (!searchBox || !titleBox || !actionsBox) throw new Error("Missing Tasks header row");
+    expect(titleBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height);
+    expect(titleBox.height).toBe(44);
+    const rowCenter = titleBox.y + titleBox.height / 2;
+    expect(actionsBox.y + actionsBox.height / 2).toBeCloseTo(rowCenter, 0);
+    expect(actionsBox.y).toBeGreaterThanOrEqual(titleBox.y);
+    expect(actionsBox.y + actionsBox.height).toBeLessThanOrEqual(titleBox.y + titleBox.height + 1);
+    expect(actionsBox.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width - 1);
+    await expect(header.getByRole("button", { name: "View options", exact: true })).toHaveCount(0);
+    for (const name of ["Filters", "Sort", "Display"]) {
+      const control = pageActions.getByRole("button", {
+        name: name === "Sort" ? /^Sort(?::|$)/ : name,
+        exact: true,
+      });
+      await expect(control).toBeVisible();
+      const box = await control.boundingBox();
+      if (!box) throw new Error(`Missing Tasks ${name} control`);
+      expect(box.y + box.height / 2).toBeCloseTo(rowCenter, 0);
+      expect(box.y).toBeGreaterThanOrEqual(titleBox.y);
+      expect(box.y + box.height).toBeLessThanOrEqual(titleBox.y + titleBox.height + 1);
+      expect(box.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
+    }
     if (isMobile) {
-      // The accepted mobile header has one utility row, then the full-width scope selector.
-      const utilities = [
-        header.getByRole("button", { name: "Switch workspace", exact: true }),
-        header.getByRole("combobox", { name: "Search Tasks", exact: true }),
-        ...["Filters", "Sort: Title A–Z", "Display"].map((name) =>
-          header.getByRole("button", { name, exact: true }),
-        ),
-      ];
-      const view = header.getByRole("button", { name: "Tasks view: Inbox", exact: true });
-      const headerBox = await header.boundingBox();
-      const viewBox = await view.boundingBox();
-      if (!headerBox || !viewBox) throw new Error("Missing mobile Tasks header or scope selector");
-      const boxes = await Promise.all(utilities.map((control) => control.boundingBox()));
-      let previousRight = headerBox.x;
-      const centers: number[] = [];
-      for (const box of boxes) {
-        if (!box) throw new Error("Missing mobile Tasks utility");
-        expect(box.width).toBeGreaterThan(0);
-        expect(box.x).toBeGreaterThanOrEqual(previousRight - 1);
-        expect(box.x + box.width).toBeLessThanOrEqual(headerBox.x + headerBox.width + 1);
-        expect(box.y).toBeGreaterThanOrEqual(headerBox.y);
-        expect(box.y + box.height).toBeLessThanOrEqual(viewBox.y + 1);
-        centers.push(box.y + box.height / 2);
-        previousRight = box.x + box.width;
-      }
-      expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(2);
-      const switcherBox = boxes[0];
+      const switcherBox = await header
+        .getByRole("button", { name: "Switch workspace", exact: true })
+        .boundingBox();
       if (!switcherBox) throw new Error("Missing mobile workspace switcher");
-      expect(viewBox.x).toBeCloseTo(switcherBox.x, 0);
-      expect(viewBox.width).toBeGreaterThanOrEqual(headerBox.width - 32);
-      expect(viewBox.y + viewBox.height).toBeLessThanOrEqual(headerBox.y + headerBox.height + 1);
+      expect(titleBox.x).toBeCloseTo(switcherBox.x, 0);
+      expect(searchBox.x).toBeGreaterThanOrEqual(switcherBox.x + switcherBox.width);
     }
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -302,7 +311,7 @@ test("Tasks plus guides creation into the existing responsive editors", async ({
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/tasks");
   await page.getByRole("button", { name: "Create in Tasks" }).click();
   await page.getByRole("button", { name: "Task Something to do" }).click();
@@ -354,7 +363,7 @@ test("Tasks collections support browsing, searching, and sorting lists and proje
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "tasks", {
     pinnedListIds: [],
     taskContainerSort: "updated",
@@ -430,7 +439,7 @@ test("Tasks restores saved display preferences on a fresh workspace entry", asyn
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "tasks", {
     taskSort: "default",
     taskGroup: "none",
@@ -438,7 +447,6 @@ test("Tasks restores saved display preferences on a fresh workspace entry", asyn
   });
   try {
     await page.goto("/tasks?sort=default&group=none&details=estimate");
-    const header = page.getByRole("navigation", { name: "Top navigation", exact: true });
     const saved = () =>
       page.waitForResponse(
         (response) =>
@@ -446,23 +454,26 @@ test("Tasks restores saved display preferences on a fresh workspace entry", asyn
           response.request().method() === "PATCH" &&
           response.ok(),
       );
-    await header.getByRole("button", { name: "Sort", exact: true }).click();
+    await revealWorkspaceOptions(page);
+    await page.getByRole("button", { name: "Sort", exact: true }).click();
     const sortSaved = saved();
     await page.getByRole("menuitemradio", { name: "Title A–Z", exact: true }).click();
     await sortSaved;
-    await header.getByRole("button", { name: "Display", exact: true }).click();
+    await revealWorkspaceOptions(page);
+    await page.getByRole("button", { name: "Display", exact: true }).click();
     const groupSaved = saved();
     await page.getByRole("menuitemradio", { name: "Project", exact: true }).click();
     await groupSaved;
-    await header.getByRole("button", { name: "Display", exact: true }).click();
+    await revealWorkspaceOptions(page);
+    await page.getByRole("button", { name: "Display", exact: true }).click();
     const detailsSaved = saved();
     await page.getByRole("menuitemcheckbox", { name: "Estimates", exact: true }).click();
     await detailsSaved;
     await page.goto("/tasks");
-    await expect(
-      header.getByRole("button", { name: "Sort: Title A–Z", exact: true }),
-    ).toBeVisible();
-    await header.getByRole("button", { name: "Display", exact: true }).click();
+    await revealWorkspaceOptions(page);
+    await expect(page.getByRole("button", { name: "Sort: Title A–Z", exact: true })).toBeVisible();
+    await revealWorkspaceOptions(page);
+    await page.getByRole("button", { name: "Display", exact: true }).click();
     await expect(page.getByRole("menuitemradio", { name: "Project", exact: true })).toHaveAttribute(
       "aria-checked",
       "true",
@@ -475,13 +486,13 @@ test("Tasks restores saved display preferences on a fresh workspace entry", asyn
     }
     // An explicit link may differ from account defaults without saving over them.
     await page.goto("/tasks?sort=date");
+    await revealWorkspaceOptions(page);
     await expect(
-      header.getByRole("button", { name: "Sort: Relevant date", exact: true }),
+      page.getByRole("button", { name: "Sort: Relevant date", exact: true }),
     ).toBeVisible();
     await page.goto("/tasks");
-    await expect(
-      header.getByRole("button", { name: "Sort: Title A–Z", exact: true }),
-    ).toBeVisible();
+    await revealWorkspaceOptions(page);
+    await expect(page.getByRole("button", { name: "Sort: Title A–Z", exact: true })).toBeVisible();
   } finally {
     await restore();
   }
@@ -496,7 +507,7 @@ test("workspace settings edit Tasks display and Mail layout preferences", async 
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const restoreTasks = await preserveWorkspacePreferences(page, "tasks", {
     taskSort: "default",
     taskGroup: "none",
@@ -525,6 +536,7 @@ test("workspace settings edit Tasks display and Mail layout preferences", async 
     await expect(page.getByLabel("List and project sorting", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Notes", { exact: true })).toBeVisible();
     await page.goto("/tasks");
+    await revealWorkspaceOptions(page);
     await expect(page.getByRole("button", { name: "Sort: Title A–Z", exact: true })).toBeVisible();
     await page.goto("/settings?page=mail");
     await expect(page.getByLabel("Conversation density", { exact: true })).toBeEnabled();
@@ -565,6 +577,7 @@ test("workspace settings edit Tasks display and Mail layout preferences", async 
         }),
       ).toBeTruthy();
     }
+    await revealWorkspaceOptions(page);
     await page.getByRole("button", { name: "Message list layout", exact: true }).click();
     writing = saved("mail");
     await page.getByRole("menuitemradio", { name: "Expanded", exact: true }).click();
@@ -588,7 +601,7 @@ test("Mail opens at its latest message and retains scrollable conversation histo
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/mail");
   await page.locator(".mail-thread-row").filter({ hasText: "Board packet for Friday" }).click();
   const messages = page.locator(".mail-reader__message");
@@ -633,7 +646,7 @@ test("Mail single-message reader keeps the title at the top and uses the full ca
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/mail");
   await page
     .locator(".mail-thread-row")
@@ -670,12 +683,13 @@ test("Mail saves full-width conversation layout and supports returning to the li
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "mail", {
     mailConversationLayout: "split",
   });
   try {
     await page.goto("/mail");
+    await revealWorkspaceOptions(page);
     await page.getByRole("button", { name: "Message list layout", exact: true }).click();
     const saved = page.waitForResponse(
       (r) => r.url().includes("/settings") && r.request().method() === "PATCH" && r.ok(),
@@ -719,6 +733,7 @@ test("Mail saves full-width conversation layout and supports returning to the li
     await page.getByRole("button", { name: "Back to conversations", exact: true }).click();
     await expect(list).toBeVisible();
     await expect(reader).toBeHidden();
+    await revealWorkspaceOptions(page);
     await page.getByRole("button", { name: "Message list layout", exact: true }).click();
     const restored = page.waitForResponse(
       (r) => r.url().includes("/settings") && r.request().method() === "PATCH" && r.ok(),
@@ -734,22 +749,33 @@ test("Mail saves full-width conversation layout and supports returning to the li
   }
 });
 
-test("Collapsed workspace sidebar keeps reviews centered and exposes the count in a tooltip", async ({
+test("Collapsing the workspace sidebar preserves the header review icon and badge", async ({
   page,
   isMobile,
 }) => {
   test.skip(isMobile, "Mobile uses the header review control.");
+  await page.setViewportSize({ width: 920, height: 844 });
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/mail");
-  const review = page.locator('[data-sidebar="menu-button"].review-navigation');
+  const review = page
+    .getByRole("navigation", { name: "Top navigation", exact: true })
+    .getByRole("button", { name: /items? needs? review/ });
   await expect(review).toBeVisible();
+  const label = await review.getAttribute("aria-label");
+  const icon = await review.locator("svg").innerHTML();
+  const count = await review.locator(".review-navigation__count").textContent();
+  const sidebar = page.locator('[data-slot="sidebar"][data-state]');
+  await expect(sidebar).toHaveAttribute("data-state", "expanded");
   await page.keyboard.press("Control+b");
-  await expect(review.locator(".review-navigation__label")).toBeHidden();
-  await expect(review.locator(".review-navigation__count")).toBeHidden();
+  await expect(sidebar).toHaveAttribute("data-state", "collapsed");
+  await expect(review).toHaveAttribute("aria-label", label!);
+  await expect(review.locator("svg")).toHaveJSProperty("innerHTML", icon);
+  await expect(review.locator(".review-navigation__count")).toBeVisible();
+  await expect(review.locator(".review-navigation__count")).toHaveText(count!);
   await expect
     .poll(() =>
       review.evaluate((el) => {
@@ -770,7 +796,7 @@ test("Mail attachments download, retry failures, and preview safely", async ({ p
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.route("**/v1/mail/threads/*/messages", async (route) => {
     const response = await route.fetch();
     const payload = await response.json();
@@ -829,12 +855,12 @@ test("Finance consolidates contextual controls and preserves responsive creation
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const header = page.getByRole("navigation", { name: "Top navigation", exact: true });
   for (const [path, group, action] of [
     ["/finances/transactions", "Transaction controls", "Add in Transactions"],
     ["/finances/accounts", "Account controls", "Add account"],
-    ["/finances/wealth", "Wealth controls", "Create goal"],
+    ["/finances/wealth", "", "Create goal"],
     ["/finances/plan", "Budget controls", "Budget buckets"],
     ["/finances/cashflow", "Cash flow views", "Cash flow view"],
   ] as const) {
@@ -880,11 +906,23 @@ test("Finance consolidates contextual controls and preserves responsive creation
     await expect(page.getByRole("button", { name: "New transaction", exact: true })).toHaveCount(0);
     await expect(
       header.getByRole("button", { name: "Add in Transactions", exact: true }),
-    ).toHaveCount(path === "/finances/transactions" ? 1 : 0);
+    ).toHaveCount(0);
     if (path === "/finances/transactions") {
-      await expect(
-        header.getByRole("group", { name: "Transaction view", exact: true }),
-      ).toBeVisible();
+      const transactionViewGroup = header.getByRole("group", {
+        name: "Transaction view",
+        exact: true,
+      });
+      if (isMobile) await expect(transactionViewGroup).toHaveCount(0);
+      else await expect(transactionViewGroup).toBeVisible();
+      // Narrow headers place the same view selector inside the shared page controls.
+      const transactionView = header.getByRole("button", { name: /^Transaction view:/ });
+      await expect(transactionView).toBeVisible();
+      await expect(transactionView).toBeInViewport();
+      await transactionView.click();
+      await expect(page.getByRole("menuitemradio", { name: "Table", exact: true })).toBeVisible();
+      await expect(page.getByRole("menuitemradio", { name: "Cards", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(transactionView).toBeFocused();
       // Table exports share the record toolbar's overflow, not the workspace header.
       await expect(header.getByRole("button", { name: "Export", exact: true })).toHaveCount(0);
       const tableActions = page
@@ -902,17 +940,29 @@ test("Finance consolidates contextual controls and preserves responsive creation
       await expect(tableActions).toBeFocused();
     } else if (path === "/finances/accounts") {
       await expect(header.getByRole("link", { name: "Import records", exact: true })).toBeVisible();
-      await expect(header.getByRole("button", { name: "Add account", exact: true })).toBeVisible();
-    } else if (path === "/finances/wealth" || path === "/finances/plan") {
+      await expect(
+        page
+          .locator(".floating-action-region")
+          .getByRole("button", { name: "Add account", exact: true }),
+      ).toBeVisible();
+    } else if (path === "/finances/wealth") {
+      const create = page
+        .locator(".floating-action-region")
+        .getByRole("button", { name: "Create goal", exact: true });
+      await expect(create).toBeVisible();
+      await expect(header.getByRole("button", { name: "Create goal", exact: true })).toHaveCount(0);
+      const createBox = await create.boundingBox();
+      expect(createBox).not.toBeNull();
+      expect(createBox!.x + createBox!.width).toBeGreaterThan(page.viewportSize()!.width - 40);
+      expect(createBox!.y).toBeGreaterThan(page.viewportSize()!.height / 2);
+    } else if (path === "/finances/plan") {
       await expect(header.getByRole("button", { name: action, exact: true })).toBeVisible();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
       true,
     );
     const bounds = await header.boundingBox();
-    // Cash flow now includes timeline controls in the header: identity plus two control rows.
-    const mobileHeaderLimit = path === "/finances/cashflow" ? 144 : 112;
-    expect(bounds?.height).toBeLessThanOrEqual(isMobile ? mobileHeaderLimit : 64);
+    expect(bounds?.height).toBe(104);
     for (const control of await header
       .locator(".workspace-header-controls")
       .locator("button, a")
@@ -951,7 +1001,13 @@ test("Finance consolidates contextual controls and preserves responsive creation
   ).toBeVisible();
 
   await page.goto("/finances/transactions?view=table&search=coffee");
-  const add = header.getByRole("button", { name: "Add in Transactions", exact: true });
+  const add = page
+    .locator(".floating-action-region")
+    .getByRole("button", { name: "Add in Transactions", exact: true });
+  const addBox = await add.boundingBox();
+  expect(addBox).not.toBeNull();
+  expect(addBox!.x + addBox!.width).toBeGreaterThan(page.viewportSize()!.width - 40);
+  expect(addBox!.y).toBeGreaterThan(page.viewportSize()!.height / 2);
   await add.click();
   for (const name of ["Add transaction", "Add category", "Import transactions"]) {
     await expect(page.getByRole("menuitem", { name, exact: true })).toBeVisible();
@@ -1012,7 +1068,7 @@ test("Financial profile opens shared fields and preserves edits across sections 
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/finances/setup");
   const steps = page.getByRole("navigation", { name: "Financial profile sections" });
   await expect(steps.getByRole("button")).toHaveCount(3);

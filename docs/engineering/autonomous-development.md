@@ -8,9 +8,12 @@ Use [agent handoffs](agent-handoffs.md) for packet, evidence, and revision forma
 [research note](autonomous-development-research.md) explains the design precedents and deferred
 runtime work; it is background for maintainers, not required context for every worker.
 
-Use [epic planning and launch](epic-delivery.md) and the repository `oversight` skill for intake,
-admission and Codex section setup. Oversight is the common coordination procedure performed by
-these existing roles, not a fourth supervisor. Planning alone never activates the network.
+Use the user-installed `nohmi-orchestrator` (`~/.codex/skills/nohmi-orchestrator/SKILL.md`)
+as the canonical coordination entrypoint. Apply [epic planning and launch](epic-delivery.md) and
+the repository `oversight` compatibility runbook for repository-specific intake, admission and
+Codex section constraints. These existing roles perform coordination without a fourth supervisor.
+Planning alone never activates the network; repository security, role and delivery policy remains
+authoritative.
 
 ## Three roles
 
@@ -66,9 +69,18 @@ Unknown liveness blocks replacement writes rather than allowing two owners to ra
 
 ## Epic presentation
 
-Represent each admitted epic with one Codex sidebar section, reusing an existing section when its
+Represent each admitted epic with one Codex sidebar section named for the epic, preserving shared
+sections and explicit user-protected names. Reuse the existing section ID when its
 identity and membership match. The head records the epic-to-section mapping; its existing outcome
-lead maintains members. Use short common-prefix titles, Lead first, then persistent owners in
+lead maintains members. Name oversight chats exactly `👀 - <epic name>` from their verified
+Nohmi epic parent; Cooper’s October 27 exception supersedes issue-prefix names for oversight only.
+Ordinary children retain `ISSUE-ID - Issue name` from their verified direct issue, following the
+current oversight contract and `nohmi-project-manager` checklist. Issue subjects are durable and
+concise: preferably one or two words, generally at most five. Keep phases and progress in records;
+multi-slice oversight retains its parent mapping. Preserve later explicit exceptions and
+unrelated/shared chats. The portfolio manager maps to
+COO-170 — Portfolio oversight, with its exact user-selected title `Nohmi project manager`.
+Keep Lead first, then persistent owners in
 planned prerequisite/merge order. Order is a navigation aid, not an additional dependency gate.
 A portfolio head spanning epics stays outside their individual sections. Do not add another lead
 agent or create standalone workers just to fill the sidebar; subagents remain under their parent.
@@ -76,7 +88,9 @@ agent or create standalone workers just to fill the sidebar; subagents remain un
 Record section ID, member task/host IDs, exact titles, and intended display order in the outcome
 entry of the private registry, the authoritative setup record. Keep direct issue links/ownership and
 its registry reference reconciled under the kickoff gate; do not mirror raw host receipts in Linear. Confirm all live members before reordering and preserve unrelated members. Reconcile
-uncertain section creation before retrying; verify presentation after mutations. Respect explicit
+uncertain section creation before retrying; verify presentation after mutations. On every oversight
+heartbeat, verify live section name, membership/order and titles even when PRs and issues are unchanged, following
+the oversight skill’s per-wake check and saving readback in the same setup entry. Respect explicit
 user titles and existing ownership. Section maintenance does not authorize new tasks, schedulers,
 project moves, archival, or deletion. Apply the repository
 [mandatory kickoff/adoption gate](../../.agents/skills/oversight/SKILL.md#mandatory-kickoff-and-adoption-gate):

@@ -1,14 +1,14 @@
 import { useCallback, useRef, useState } from "react";
-import { Button } from "./ui/button.js";
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog.js";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogClose as DialogClose,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@/components/responsive-dialog";
+import { Button } from "./ui/button.js";
 
 type ConfirmationOptions = {
   intent?: "default" | "destructive";

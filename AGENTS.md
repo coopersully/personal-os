@@ -11,6 +11,9 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
   infrastructure and machine identifiers, `PersonalOs` / `personalOs` in code, and `PERSONAL_OS`
   for constants and environment variables.
 - The user-facing product name is `nohmi`, always lowercase, including at the start of a sentence.
+- This applies to signed-in screens, accessibility labels, notifications, exports, native/PWA
+  display names and agent-facing copy. Follow `docs/product/naming.md` and the CS-15 Product
+  identity section in `docs/engineering/code-standards.md` when implementing or reviewing names.
 - Do not introduce former product names in paths, prose, protocol identifiers, examples, fixtures,
   or agent guidance. The target contains none; remaining current runtime identifiers require an
   explicit hard-cutover migration rather than new compatibility aliases.
@@ -48,6 +51,9 @@ bounded prerequisite is part of the assigned outcome, not a reason to ask for me
 
 ## Linear Routing
 
+- All skills and installed nohmi role/context wrappers follow the canonical lifecycle in
+  `docs/engineering/work-context.md`; it covers implementation, documentation, prerequisite repair
+  and review fixes. Helper invocation does not exempt assigned durable work.
 - Implementation and durable repository changes MUST be tracked in Linear from intake through
   completion. Match/create the direct Nohmi issue before implementation when possible; reconcile
   already-started work immediately. Update material scope, progress, blockers, PR links and final

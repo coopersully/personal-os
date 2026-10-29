@@ -11,7 +11,7 @@ const FEED: &str =
     "https://github.com/coopersully/personal-os/releases/latest/download/latest.json";
 const MAX_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
 const AUTO_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
-const KEY: &str = match option_env!("NOHMI_UPDATER_PUBLIC_KEY") {
+const KEY: &str = match option_env!("PERSONAL_OS_UPDATER_PUBLIC_KEY") {
     Some(key) => key,
     None => "",
 };

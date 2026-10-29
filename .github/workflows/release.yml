@@ -109,10 +109,10 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
-          ILO_HOST_PROFILE_BASE64: ${{ secrets.ILO_HOST_PROFILE_BASE64 }}
-          ILO_WIDGET_PROFILE_BASE64: ${{ secrets.ILO_WIDGET_PROFILE_BASE64 }}
-          NOHMI_UPDATER_PUBLIC_KEY: ${{ vars.NOHMI_UPDATER_PUBLIC_KEY }}
-          ILO_KEYCHAIN_ACCESS_GROUP: ${{ vars.ILO_KEYCHAIN_ACCESS_GROUP }}
+          PERSONAL_OS_HOST_PROFILE_BASE64: ${{ secrets.ILO_HOST_PROFILE_BASE64 }}
+          PERSONAL_OS_WIDGET_PROFILE_BASE64: ${{ secrets.ILO_WIDGET_PROFILE_BASE64 }}
+          PERSONAL_OS_UPDATER_PUBLIC_KEY: ${{ vars.NOHMI_UPDATER_PUBLIC_KEY }}
+          PERSONAL_OS_KEYCHAIN_ACCESS_GROUP: ${{ vars.ILO_KEYCHAIN_ACCESS_GROUP }}
         run: bash macos/scripts/release.sh
       - uses: actions/upload-artifact@v7
         with:
@@ -141,7 +141,7 @@ jobs:
           pattern: macos-installer-*
           merge-multiple: true
       - name: Prepare the pinned signer without application dependencies
-        run: npm install --prefix "$RUNNER_TEMP/nohmi-signer" --ignore-scripts --no-audit --no-fund @tauri-apps/cli@2.12.0
+        run: npm install --prefix "$RUNNER_TEMP/personal-os-signer" --ignore-scripts --no-audit --no-fund @tauri-apps/cli@2.12.0
       - name: Sign only the final notarized updater archives
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
@@ -151,7 +151,7 @@ jobs:
           for arch in aarch64 x86_64; do
             archive="$GITHUB_WORKSPACE/release-assets/nohmi_${RELEASE_TAG#v}_${arch}.app.tar.gz"
             test -f "$archive"
-            "$RUNNER_TEMP/nohmi-signer/node_modules/.bin/tauri" signer sign --app-version "${RELEASE_TAG#v}" "$archive"
+            "$RUNNER_TEMP/personal-os-signer/node_modules/.bin/tauri" signer sign --app-version "${RELEASE_TAG#v}" "$archive"
           done
       - name: Assemble and publish the complete release
         env:

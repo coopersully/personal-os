@@ -343,7 +343,7 @@ struct GlanceWidget: Widget {
     ).supportedFamilies([.systemMedium, .systemLarge])
   }
 }
-@main struct IloWidgets: WidgetBundle {
+@main struct PersonalOsWidgets: WidgetBundle {
   var body: some Widget {
     TasksWidget()
     GlanceWidget()

@@ -416,7 +416,7 @@ const secondMailThread = {
   subject: "No body",
   unread: false,
 };
-function iloSetupFixture() {
+function personalOsSetupFixture() {
   return {
     access: { canRead: false, canWrite: false },
     connection: { lastObservedAt: null, observed: false },
@@ -498,7 +498,7 @@ const mocks = vi.hoisted(() => ({
   getCalendarStatus: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
-  getIloSetup: vi.fn(),
+  getPersonalOsSetup: vi.fn(),
   getDomainProfile: vi.fn(),
   getConnectorAuthorizationAttempt: vi.fn(),
   getWeather: vi.fn(),
@@ -1249,7 +1249,7 @@ function defaults() {
       },
     ],
   });
-  mocks.getIloSetup.mockImplementation(async () => iloSetupFixture());
+  mocks.getPersonalOsSetup.mockImplementation(async () => personalOsSetupFixture());
   mocks.listXBookmarkFolders.mockResolvedValue([]);
   mocks.listMailboxes.mockResolvedValue([mailbox]);
   mocks.getMailSetupContext.mockResolvedValue({
@@ -1884,7 +1884,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("ilo web app", () => {
+describe("Personal OS web app", () => {
   it("leaves automatic desktop ritual delivery to the native shell", async () => {
     mocks.isTauri.mockReturnValue(true);
     setup("/today");
@@ -3401,8 +3401,8 @@ describe("ilo web app", () => {
   });
 
   it("marks only workspace settings with a current person-owned action", async () => {
-    const basePlan = iloSetupFixture();
-    mocks.getIloSetup.mockImplementation(
+    const basePlan = personalOsSetupFixture();
+    mocks.getPersonalOsSetup.mockImplementation(
       async ({ domain = "mail" }: { domain?: "calendar" | "finances" | "mail" | "tasks" } = {}) =>
         domain === "mail"
           ? { ...basePlan, domain }

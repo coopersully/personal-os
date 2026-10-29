@@ -6,7 +6,7 @@ import QuartzCore
 /// captures pixels, or performs accessibility actions. Slow IPC stays off the render thread.
 final class PetDock {
   static let shared = PetDock()
-  private let queue = DispatchQueue(label: "nohmi.pet.dock", qos: .utility)
+  private let queue = DispatchQueue(label: "personal-os.pet.dock", qos: .utility)
   private var inFlight = false
   private var sampledAt: Double = 0
   private var measured: CGRect?

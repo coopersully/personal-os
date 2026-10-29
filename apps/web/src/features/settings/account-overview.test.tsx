@@ -9,7 +9,7 @@ import { AccountOverview } from "./account-overview";
 const mocks = vi.hoisted(() => ({
   listConnectors: vi.fn(),
   getXBookmarkAccount: vi.fn(),
-  getIloSetup: vi.fn(),
+  getPersonalOsSetup: vi.fn(),
   listAgentAccessWorkItems: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() } }));
@@ -30,7 +30,7 @@ function mount() {
 beforeEach(() => {
   mocks.listConnectors.mockResolvedValue([]);
   mocks.getXBookmarkAccount.mockResolvedValue(null);
-  mocks.getIloSetup.mockResolvedValue({ status: "complete", steps: [] });
+  mocks.getPersonalOsSetup.mockResolvedValue({ status: "complete", steps: [] });
   mocks.listAgentAccessWorkItems.mockResolvedValue({
     unavailableDomains: [],
     summary: { byDomain: { calendar: 0, tasks: 2, mail: 0, finances: 0 } },
@@ -55,7 +55,7 @@ it("shows live workspace counts and honest empty connections", async () => {
   expect(screen.queryByRole("link", { name: "Open Today at a Glance" })).not.toBeInTheDocument();
 });
 it("surfaces setup actions and unavailable domains without claiming all clear", async () => {
-  mocks.getIloSetup.mockImplementation(({ domain }) =>
+  mocks.getPersonalOsSetup.mockImplementation(({ domain }) =>
     Promise.resolve(
       domain === "mail"
         ? { status: "in_progress", currentStepId: "one", steps: [{ id: "one", owner: "person" }] }

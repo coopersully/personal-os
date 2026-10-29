@@ -2,7 +2,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import type { AccessScope } from "@personal-os/domain";
 import { createPersonalOsMcpServer } from "./server.js";
-import { availableToolNames, iloToolCatalog } from "./tool-catalog.js";
+import { availableToolNames, personalOsToolCatalog } from "./tool-catalog.js";
 
 describe("read-only task workspace MCP adapter", () => {
   it("requires both read scopes for mixed discovery, preserving single-domain tools", () => {
@@ -15,7 +15,7 @@ describe("read-only task workspace MCP adapter", () => {
     expect(availableToolNames(new Set(["tasks:read", "reminders:read"]), true)).toContain(
       "list_task_workspace",
     );
-    expect((iloToolCatalog as Record<string, unknown>).list_task_workspace).toMatchObject({
+    expect((personalOsToolCatalog as Record<string, unknown>).list_task_workspace).toMatchObject({
       readOnly: true,
       policy: "read_only",
       requiredScopes: ["tasks:read", "reminders:read"],

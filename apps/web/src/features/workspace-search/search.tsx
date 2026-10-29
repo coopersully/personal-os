@@ -45,8 +45,8 @@ export function WorkspaceFinder({
     const focusSearch = () => {
       setActivation((current) => current + 1);
     };
-    window.addEventListener("nohmi:workspace-search", focusSearch);
-    return () => window.removeEventListener("nohmi:workspace-search", focusSearch);
+    window.addEventListener("personal-os:workspace-search", focusSearch);
+    return () => window.removeEventListener("personal-os:workspace-search", focusSearch);
   }, []);
   const label = `Search ${workspace[0]?.toUpperCase()}${workspace.slice(1)}`;
   return (

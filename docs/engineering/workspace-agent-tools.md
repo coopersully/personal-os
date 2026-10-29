@@ -15745,7 +15745,7 @@ Synchronize the requested accounts now. Continue healthy accounts when one sourc
 
 ## sync_workspace_source
 
-Synchronize one owned provider account across its enabled workspaces. Read list_workspace_sources first. Requires mail/calendar/tasks write and execute, reminders:write, and enabled bypass for agents. Returns changed count; unavailable providers and partial failures retain API recovery diagnostics.
+Synchronize one owned provider account across its enabled workspaces. Read list_workspace_sources first. Requires mail/calendar/tasks write and execute, reminders:write, and enabled bypass for agents. Returns changed count, pending continuation and nextSyncAt; pending means synchronization continues automatically, not completion. Unavailable providers and partial failures retain API recovery diagnostics.
 
 - Domain: assistant; stage: commit; policy: approved_rule.
 - Grants (all): mail:write, mail:execute, calendar:write, calendar:execute, reminders:write, tasks:write, tasks:execute.

@@ -115,3 +115,24 @@ test("collects bounded read-only stats for the configured Compose project and re
   assert.ok(calls.some((args) => args.includes("--no-stream")));
   assert.ok(calls.some((args) => args.includes("--tail") && args.includes("5000")));
 });
+
+test("retains bounded synchronization progress without exposing Gmail continuation data", () => {
+  const summary = summarizeConnectorLogs(
+    ["connector_sync_progress", "connector_capability_progress"]
+      .map((event) =>
+        JSON.stringify({
+          event,
+          provider: "google",
+          capability: "mail",
+          status: 200,
+          accountId: "private-account",
+          syncToken: "private-cursor",
+          message: "private-message",
+        }),
+      )
+      .join("\n"),
+  );
+  assert.equal(summary.events.length, 2);
+  assert.ok(summary.events.every((event) => event.status === 200));
+  assert.ok(!JSON.stringify(summary).includes("private-"));
+});

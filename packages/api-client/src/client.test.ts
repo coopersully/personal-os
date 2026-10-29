@@ -3076,7 +3076,11 @@ describe("Personal OS API client", () => {
       }),
     ).resolves.toEqual(attentionItem);
     await api.snoozeMailThread(id, "2026-07-14T12:00:00.000Z");
-    await expect(api.syncConnector(id)).resolves.toBe(3);
+    await expect(api.syncConnector(id)).resolves.toEqual({
+      changed: 3,
+      pending: false,
+      nextSyncAt: null,
+    });
     await api.deleteConnector(id);
     await expect(api.listAccessTokens()).resolves.toHaveLength(1);
     await expect(
@@ -3293,4 +3297,15 @@ it("transports a duplicate preview and its exact reviewed resolution", async () 
     `https://api.example.com/v1/finances/accounts/${id}/resolve-duplicate`,
   );
   expect(resolveCall[1]).toMatchObject({ method: "POST", body: JSON.stringify(input) });
+});
+
+it("preserves durable connector continuation instead of reducing it to a changed count", async () => {
+  const pending = { changed: 25, pending: true, nextSyncAt: "2026-10-29T18:00:00.000Z" };
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValue(Response.json({ result: pending }));
+  const api = createApiClient({ baseUrl: "https://api.example.com", token: "scoped-token", fetch });
+  await expect(api.syncConnector(id)).resolves.toEqual(pending);
+  expect(fetch.mock.calls[0]?.[0]).toBe(`https://api.example.com/v1/connectors/${id}/sync`);
+  expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
 });

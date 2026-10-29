@@ -42,6 +42,7 @@ import {
 import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
 import { createMailService } from "./mail-service.js";
 import { decryptJson, encryptJson } from "./security.js";
+import type { RequestLog } from "./types.js";
 
 const timestamp = new Date("2026-07-13T12:00:00.000Z");
 const encryptionKey = Buffer.alloc(32, 7).toString("base64");
@@ -239,6 +240,32 @@ describe.sequential("connector service", () => {
   let google: GoogleConnector;
   let icloud: ICloudConnector;
   let service: ReturnType<typeof createConnectorService>;
+
+  /** Independent scenarios share a static clock, so explicitly seed their prior Mail attempt as due. */
+  async function agePriorGoogleMailAttempt(accountId: string, at = timestamp) {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountId));
+    const mail = account?.syncCapabilities?.mail;
+    if (account?.provider !== "google" || !mail) return;
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        syncCapabilities: {
+          ...account.syncCapabilities,
+          mail: {
+            ...mail,
+            lastAttemptAt: new Date(at.getTime() - 65_000).toISOString(),
+            health: {
+              ...mail.health,
+              nextSyncAt: mail.health.nextSyncAt === null ? null : at.toISOString(),
+            },
+          },
+        },
+      })
+      .where(eq(calendarAccounts.id, accountId));
+  }
 
   async function waitForLock(queryPatterns: string[]): Promise<boolean> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -494,6 +521,7 @@ describe.sequential("connector service", () => {
     );
     expect(google.listCalendars).not.toHaveBeenCalled();
     expect(google.syncMail).not.toHaveBeenCalled();
+    await agePriorGoogleMailAttempt(account.id);
     await service.syncAccount(userId, account.id);
     expect(
       (await service.listAccounts(userId)).find((item) => item.id === account.id),
@@ -534,6 +562,7 @@ describe.sequential("connector service", () => {
       returnPath: "/settings?section=connections",
       userId,
     });
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).rejects.toMatchObject({
       code: "service_unavailable",
       details: expect.objectContaining({ recovery: "automatic" }),
@@ -545,6 +574,7 @@ describe.sequential("connector service", () => {
       syncError: "Google is temporarily unavailable. nohmi will retry automatically.",
       syncStatus: "error",
     });
+    await agePriorGoogleMailAttempt(account.id);
     await service.syncAccount(userId, account.id);
 
     vi.mocked(google.getProfile).mockResolvedValueOnce({
@@ -900,6 +930,424 @@ describe.sequential("connector service", () => {
       .where(eq(calendarAccounts.id, account.id));
   });
 
+  it("commits pending Gmail batches with their cursor and health without pretending synchronization completed", async () => {
+    const provider = mockGoogle();
+    if (!provider.syncMail) throw new Error("Missing Mail connector");
+    let clock = timestamp;
+    const logs: RequestLog[] = [];
+    const local = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => clock,
+      log: (entry) => logs.push(entry),
+    });
+    const previousSuccess = new Date(timestamp.getTime() - 60_000);
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: "gmail-batch-fixture",
+        label: "Mail batch",
+        calendarEnabled: false,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        mailSyncToken: "previous-fence",
+        lastSyncedAt: previousSuccess,
+      })
+      .returning();
+    if (!account) throw new Error("Missing pending fixture");
+    const mailbox = {
+      id: "INBOX",
+      name: "Inbox",
+      role: "inbox" as const,
+      totalCount: 100,
+      unreadCount: 1,
+    };
+    const thread = {
+      bodyText: "Preserved content",
+      from: { address: "sender@example.com", name: null },
+      mailboxIds: ["INBOX"],
+      messageCount: 1,
+      receivedAt: timestamp,
+      remoteThreadId: "batch-thread",
+      snippet: "Batch",
+      starred: false,
+      subject: "Batch",
+      to: [],
+      unread: true,
+    };
+    const pending = {
+      deletedThreadIds: [],
+      mailboxes: [mailbox],
+      nextSyncToken: "pending-batch-cursor",
+      reset: true,
+      threads: [thread],
+      continuation: { notBefore: new Date(clock.getTime() + 65_000).toISOString() },
+    };
+    vi.mocked(provider.syncMail).mockResolvedValueOnce({ credentials, value: pending });
+    await expect(local.syncAccount(userId, account.id)).resolves.toMatchObject({ pending: true });
+    const read = async () =>
+      (
+        await database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, account.id))
+      )[0];
+    let stored = await read();
+    expect(stored).toMatchObject({
+      mailSyncToken: "pending-batch-cursor",
+      syncStatus: "idle",
+      syncFailureCount: 0,
+      lastSyncedAt: previousSuccess,
+      nextSyncAt: new Date(clock.getTime() + 5 * 60_000),
+    });
+    expect(stored?.syncCapabilities?.mail).toMatchObject({
+      lastSyncedAt: null,
+      failureCount: 0,
+      errorCode: null,
+      health: {
+        state: "syncing",
+        nextSyncAt: new Date(clock.getTime() + 5 * 60_000).toISOString(),
+      },
+    });
+    expect(logs.some(({ event }) => event === "connector_sync_progress")).toBe(true);
+    expect(logs.some(({ event }) => event === "connector_capability_progress")).toBe(true);
+    expect(
+      logs.some(
+        ({ event }) =>
+          event === "connector_sync_completed" ||
+          event === "connector_capability_completed" ||
+          event === "connector_sync_recovered",
+      ),
+    ).toBe(false);
+    await local.syncAccount(userId, account.id);
+    expect(provider.syncMail).toHaveBeenCalledOnce();
+    clock = new Date(clock.getTime() + 66_000);
+    // Exercise a durable cursor restored without capability cache metadata.
+    await database.db
+      .update(calendarAccounts)
+      .set({ syncCapabilities: null })
+      .where(eq(calendarAccounts.id, account.id));
+    const before = await database.db
+      .select()
+      .from(mailboxes)
+      .where(eq(mailboxes.accountId, account.id));
+    expect(before).toHaveLength(1);
+    vi.mocked(provider.syncMail).mockResolvedValueOnce({
+      credentials,
+      value: {
+        ...pending,
+        mailboxes: [],
+        threads: [],
+        continuation: { ...pending.continuation, deferred: true },
+      },
+    });
+    await expect(
+      local.syncAccount(userId, account.id, { automatic: true, triggered: true }),
+    ).resolves.toMatchObject({ pending: true });
+    expect(
+      await database.db.select().from(mailboxes).where(eq(mailboxes.accountId, account.id)),
+    ).toEqual(before);
+    expect(
+      await database.db.select().from(mailThreads).where(eq(mailThreads.accountId, account.id)),
+    ).toHaveLength(1);
+    stored = await read();
+    expect(stored?.lastSyncedAt).toEqual(previousSuccess);
+    clock = new Date(clock.getTime() + 5 * 60_000);
+    vi.mocked(provider.syncMail).mockResolvedValueOnce({
+      credentials,
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [mailbox],
+        threads: [thread],
+        nextSyncToken: "completed-fence",
+        reset: false,
+      },
+    });
+    await expect(
+      local.syncAccount(userId, account.id, { automatic: true }),
+    ).resolves.not.toHaveProperty("pending");
+    stored = await read();
+    expect(stored?.lastSyncedAt).toEqual(clock);
+    expect(stored?.syncCapabilities?.mail).toMatchObject({
+      lastSyncedAt: clock.toISOString(),
+      health: { state: "ready", message: null },
+    });
+    expect(
+      await database.db.select().from(mailThreads).where(eq(mailThreads.accountId, account.id)),
+    ).toHaveLength(1);
+  });
+
+  it("rolls back a Gmail continuation checkpoint with its projected batch when persistence fails", async () => {
+    const provider = mockGoogle();
+    if (!provider.syncMail) throw new Error("Missing Mail connector");
+    let clock = timestamp;
+    const local = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => clock,
+    });
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: "gmail-atomic-batch",
+        label: "Atomic Mail",
+        calendarEnabled: false,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        mailSyncToken: "atomic-previous",
+      })
+      .returning();
+    if (!account) throw new Error("Missing atomic fixture");
+    const pending = {
+      deletedThreadIds: [],
+      mailboxes: [],
+      nextSyncToken: "atomic-pending",
+      reset: false,
+      threads: [
+        {
+          bodyText: "Batch",
+          from: { address: "sender@example.com", name: null },
+          mailboxIds: [],
+          messageCount: 1,
+          receivedAt: timestamp,
+          remoteThreadId: "atomic-thread",
+          snippet: "Batch",
+          starred: false,
+          subject: "Batch",
+          to: [],
+          unread: false,
+        },
+      ],
+      continuation: { notBefore: new Date(timestamp.getTime() + 65_000).toISOString() },
+    };
+    await database.pool.query(`CREATE FUNCTION reject_gmail_batch_checkpoint() RETURNS trigger AS $$ BEGIN IF NEW.mail_sync_token = 'atomic-pending' THEN RAISE EXCEPTION 'synthetic persistence failure'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql;
+      CREATE TRIGGER reject_gmail_batch_checkpoint BEFORE UPDATE ON calendar_accounts FOR EACH ROW EXECUTE FUNCTION reject_gmail_batch_checkpoint();`);
+    try {
+      vi.mocked(provider.syncMail).mockResolvedValueOnce({ credentials, value: pending });
+      await expect(local.syncAccount(userId, account.id)).rejects.toMatchObject({
+        code: "service_unavailable",
+      });
+      const [stored] = await database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, account.id));
+      expect(stored?.mailSyncToken).toBe("atomic-previous");
+      expect(stored?.syncCapabilities?.mail?.health.state).toBe("retrying");
+      expect(
+        await database.db.select().from(mailThreads).where(eq(mailThreads.accountId, account.id)),
+      ).toHaveLength(0);
+    } finally {
+      await database.pool.query(
+        "DROP TRIGGER reject_gmail_batch_checkpoint ON calendar_accounts; DROP FUNCTION reject_gmail_batch_checkpoint();",
+      );
+    }
+    await expect(local.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    expect(provider.syncMail).toHaveBeenCalledOnce();
+    clock = new Date(clock.getTime() + 65_000);
+    vi.mocked(provider.syncMail).mockResolvedValueOnce({ credentials, value: pending });
+    await expect(local.syncAccount(userId, account.id)).resolves.toMatchObject({ pending: true });
+    expect(
+      await database.db.select().from(mailThreads).where(eq(mailThreads.accountId, account.id)),
+    ).toHaveLength(1);
+  });
+
+  it("reserves every Google Mail attempt before reads and blocks immediate manual or push retries after late failure", async () => {
+    const provider = mockGoogle();
+    if (!provider.syncMail) throw new Error("Missing Mail connector");
+    let clock = timestamp;
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: "gmail-attempt-reservation",
+        label: "Quota reservation",
+        calendarEnabled: true,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(
+          { ...credentials, scope: googleCalendarAndMailScope },
+          encryptionKey,
+        ),
+        mailSyncToken: "unchanged-fence",
+      })
+      .returning();
+    if (!account) throw new Error("Missing reservation fixture");
+    const local = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => clock,
+    });
+    vi.mocked(provider.listCalendars).mockImplementationOnce(async (current) => {
+      clock = new Date(timestamp.getTime() + 60_000);
+      return { credentials: current, value: [] };
+    });
+    vi.mocked(provider.syncMail).mockImplementationOnce(async () => {
+      const [reserved] = await database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, account.id));
+      expect(reserved?.mailSyncToken).toBe("unchanged-fence");
+      expect(reserved?.syncCapabilities?.mail).toMatchObject({
+        lastAttemptAt: new Date(timestamp.getTime() + 60_000).toISOString(),
+        health: { nextSyncAt: new Date(timestamp.getTime() + 125_000).toISOString() },
+      });
+      clock = new Date(timestamp.getTime() + 70_000);
+      throw new ConnectorError({
+        category: "temporary",
+        code: "google_temporary_failure",
+        disposition: "retry",
+        message: "Synthetic late failure",
+        status: 503,
+      });
+    });
+    await expect(local.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    clock = new Date(timestamp.getTime() + 71_000);
+    for (const options of [{}, { automatic: true, triggered: true }, { automatic: true }]) {
+      await expect(local.syncAccount(userId, account.id, options)).rejects.toMatchObject({
+        code: "service_unavailable",
+      });
+    }
+    expect(provider.syncMail).toHaveBeenCalledOnce();
+    const [failed] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(failed?.syncFailureCount).toBe(1);
+    expect(failed?.syncCapabilities?.mail?.failureCount).toBe(1);
+    expect(
+      Date.parse(failed?.syncCapabilities?.mail?.health.nextSyncAt ?? ""),
+    ).toBeGreaterThanOrEqual(timestamp.getTime() + 135_000);
+    clock = new Date(failed?.syncCapabilities?.mail?.health.nextSyncAt ?? timestamp.toISOString());
+    await local.syncAccount(userId, account.id);
+    expect(provider.syncMail).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains a fresh cooldown after a slow Google Mail attempt is interrupted by shutdown", async () => {
+    const provider = mockGoogle();
+    if (!provider.syncMail) throw new Error("Missing Mail connector");
+    const controller = new AbortController();
+    const interruption = new Error("Synthetic shutdown");
+    let clock = timestamp;
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: "gmail-slow-shutdown",
+        label: "Interrupted Mail",
+        calendarEnabled: false,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        mailSyncToken: "shutdown-previous",
+      })
+      .returning();
+    if (!account) throw new Error("Missing shutdown fixture");
+    const local = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => clock,
+      shutdown: { signal: controller.signal, deadlineMs: () => undefined },
+    });
+    vi.mocked(provider.syncMail).mockImplementationOnce(async () => {
+      clock = new Date(timestamp.getTime() + 70_000);
+      controller.abort(interruption);
+      throw interruption;
+    });
+    await expect(local.syncAccount(userId, account.id)).rejects.toBe(interruption);
+    const [stopped] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(stopped?.mailSyncToken).toBe("shutdown-previous");
+    expect(stopped?.syncCapabilities?.mail?.health).toMatchObject({
+      state: "syncing",
+      nextSyncAt: new Date(timestamp.getTime() + 135_000).toISOString(),
+    });
+    const resumed = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => clock,
+    });
+    clock = new Date(timestamp.getTime() + 71_000);
+    await expect(resumed.syncAccount(userId, account.id)).resolves.toMatchObject({ pending: true });
+    expect(provider.syncMail).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a superseded Gmail batch before persisting its continuation or thread projection", async () => {
+    const provider = mockGoogle();
+    if (!provider.syncMail) throw new Error("Missing Mail connector");
+    const local = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => timestamp,
+    });
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: "gmail-stale-batch",
+        label: "Stale Mail",
+        calendarEnabled: false,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        mailSyncToken: "stale-previous",
+      })
+      .returning();
+    if (!account) throw new Error("Missing stale fixture");
+    vi.mocked(provider.syncMail).mockImplementationOnce(async () => {
+      await database.db
+        .update(calendarAccounts)
+        .set({
+          syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
+          syncClaimId: null,
+          syncStatus: "idle",
+        })
+        .where(eq(calendarAccounts.id, account.id));
+      return {
+        credentials,
+        value: {
+          deletedThreadIds: [],
+          mailboxes: [],
+          threads: [],
+          nextSyncToken: "must-not-save",
+          reset: false,
+          continuation: { notBefore: new Date(timestamp.getTime() + 65_000).toISOString() },
+        },
+      };
+    });
+    await expect(local.syncAccount(userId, account.id)).rejects.toMatchObject({ code: "conflict" });
+    const [stored] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(stored?.mailSyncToken).toBe("stale-previous");
+    expect(stored?.syncCapabilities?.mail).toMatchObject({
+      lastAttemptAt: timestamp.toISOString(),
+      health: {
+        state: "syncing",
+        nextSyncAt: new Date(timestamp.getTime() + 65_000).toISOString(),
+      },
+    });
+  });
+
   it("advances Gmail history and applies only explicit deletions under the sync claim", async () => {
     const [account] = await database.db
       .select()
@@ -963,6 +1411,7 @@ describe.sequential("connector service", () => {
       },
     });
 
+    await agePriorGoogleMailAttempt(account.id);
     await service.syncAccount(userId, account.id);
 
     expect(syncMail).toHaveBeenLastCalledWith(
@@ -1027,6 +1476,7 @@ describe.sequential("connector service", () => {
       };
     });
 
+    await agePriorGoogleMailAttempt(account.id);
     const firstSync = service.syncAccount(userId, account.id);
     await syncWasEntered;
     await expect(service.syncAccount(userId, account.id)).rejects.toMatchObject({
@@ -1114,19 +1564,21 @@ describe.sequential("connector service", () => {
       syncStatus: "idle",
     });
 
+    // A restarted runtime retries after the interrupted Mail attempt's reserved cooldown.
+    const retryAt = new Date(timestamp.getTime() + 65_000);
     const retryService = createConnectorService({
       db: database.db,
       encryptionKey,
       google: cancellableGoogle,
       icloud: mockICloud(),
-      now: () => timestamp,
+      now: () => retryAt,
     });
     await expect(retryService.syncStaleAccounts()).resolves.toBeUndefined();
     await expect(
       database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, account.id)),
     ).resolves.toEqual([
       expect.objectContaining({
-        lastSyncedAt: timestamp,
+        lastSyncedAt: retryAt,
         syncError: null,
         syncStatus: "idle",
       }),
@@ -1231,6 +1683,7 @@ describe.sequential("connector service", () => {
         updatedAt: new Date(timestamp.getTime() - 31 * 60_000),
       })
       .where(eq(calendarAccounts.id, account.id));
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).resolves.toEqual(
       expect.objectContaining({ changed: expect.any(Number) }),
     );
@@ -2049,6 +2502,7 @@ describe.sequential("connector service", () => {
       ],
     };
     vi.mocked(syncMail).mockResolvedValueOnce({ credentials, value: completeMailValue });
+    await agePriorGoogleMailAttempt(account.id);
     await service.syncAccount(userId, account.id);
     expect(google.updateMailThread).not.toHaveBeenCalled();
     await expect(database.db.select().from(mailRuleWorkItems)).resolves.toEqual(
@@ -2534,6 +2988,7 @@ describe.sequential("connector service", () => {
         ],
       },
     });
+    await agePriorGoogleMailAttempt(account.id);
     await service.syncAccount(userId, account.id);
     await expect(
       database.db
@@ -2584,6 +3039,7 @@ describe.sequential("connector service", () => {
         ],
       },
     });
+    await agePriorGoogleMailAttempt(account.id);
     await service.syncAccount(userId, account.id);
     await expect(
       database.db.select().from(auditEvents).where(eq(auditEvents.entityId, removedIntake.id)),
@@ -2637,6 +3093,7 @@ describe.sequential("connector service", () => {
       activeWrites -= 1;
       return rotatedCredentials;
     });
+    await agePriorGoogleMailAttempt(account.id);
     await service.syncAccount(userId, account.id);
     expect(updateMailThread).not.toHaveBeenCalled();
     const boundedRun = service.dispatchDueMailRuleWork();
@@ -2733,6 +3190,7 @@ describe.sequential("connector service", () => {
       return rotatedCredentials;
     });
 
+    await agePriorGoogleMailAttempt(account.id);
     await service.syncAccount(userId, account.id);
     expect(updateMailThread).not.toHaveBeenCalled();
     const dispatch = service.dispatchDueMailRuleWork();
@@ -3017,6 +3475,7 @@ describe.sequential("connector service", () => {
       return rotatedCredentials;
     });
 
+    await agePriorGoogleMailAttempt(account.id);
     await service.syncAccount(userId, account.id);
     const dispatch = service.dispatchDueMailRuleWork();
     await providerCallStarted;
@@ -3169,6 +3628,7 @@ describe.sequential("connector service", () => {
       FOR EACH ROW EXECUTE FUNCTION fail_mail_run_summary_for_test();
     `);
     try {
+      await agePriorGoogleMailAttempt(account.id);
       await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 2 });
       expect(updateMailThread).not.toHaveBeenCalled();
       await expect(
@@ -3235,6 +3695,7 @@ describe.sequential("connector service", () => {
       FOR EACH ROW EXECUTE FUNCTION fail_mail_run_summary_for_test();
     `);
     try {
+      await agePriorGoogleMailAttempt(account.id);
       await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({
         changed: expect.any(Number),
       });
@@ -3302,6 +3763,7 @@ describe.sequential("connector service", () => {
       FOR EACH ROW EXECUTE FUNCTION fail_mail_sync_audit_for_test();
     `);
     try {
+      await agePriorGoogleMailAttempt(account.id);
       await expect(service.syncAccount(userId, account.id)).rejects.toMatchObject({
         code: "service_unavailable",
         details: expect.objectContaining({ recovery: "automatic" }),
@@ -3409,6 +3871,7 @@ describe.sequential("connector service", () => {
     });
     vi.mocked(updateMailThread).mockClear();
     try {
+      await agePriorGoogleMailAttempt(account.id);
       await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 4 });
       expect(updateMailThread).not.toHaveBeenCalled();
       await expect(
@@ -3494,6 +3957,7 @@ describe.sequential("connector service", () => {
       FOR EACH ROW EXECUTE FUNCTION fail_automatic_mail_audit_for_test();
     `);
     try {
+      await agePriorGoogleMailAttempt(account.id);
       await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 2 });
       expect(updateMailThread).not.toHaveBeenCalled();
       const [thread] = await database.db
@@ -3568,6 +4032,7 @@ describe.sequential("connector service", () => {
       FOR EACH ROW EXECUTE FUNCTION fail_mail_credential_save_for_test();
     `);
     try {
+      await agePriorGoogleMailAttempt(account.id);
       await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 2 });
       expect(updateMailThread).not.toHaveBeenCalled();
       const [thread] = await database.db
@@ -3633,6 +4098,7 @@ describe.sequential("connector service", () => {
         ],
       },
     });
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({
       changed: expect.any(Number),
     });
@@ -3767,6 +4233,7 @@ describe.sequential("connector service", () => {
         threads: [],
       },
     });
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 0 });
     expect(updateMailThread).not.toHaveBeenCalled();
 
@@ -3802,6 +4269,7 @@ describe.sequential("connector service", () => {
         threads: [],
       },
     });
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 0 });
 
     await database.db
@@ -3856,6 +4324,7 @@ describe.sequential("connector service", () => {
         threads: [],
       },
     });
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 0 });
 
     await database.db
@@ -3955,6 +4424,7 @@ describe.sequential("connector service", () => {
       },
     });
 
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({
       changed: 4,
     });
@@ -4836,6 +5306,7 @@ describe.sequential("connector service", () => {
       };
     });
 
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).resolves.toEqual({ changed: 7 });
     const records = await database.db
       .select()
@@ -4871,6 +5342,7 @@ describe.sequential("connector service", () => {
     vi.mocked(google.syncCalendar).mockRejectedValueOnce(
       new Error("raw-provider-canary token=secret"),
     );
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).rejects.toMatchObject({
       code: "service_unavailable",
       details: expect.objectContaining({
@@ -4904,6 +5376,7 @@ describe.sequential("connector service", () => {
         status: 401,
       }),
     );
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).rejects.toMatchObject({
       code: "service_unavailable",
       details: expect.objectContaining({ recovery: "reconnect" }),
@@ -4921,6 +5394,7 @@ describe.sequential("connector service", () => {
     });
     expect(JSON.stringify(reconnect)).not.toContain("raw-authorization-canary");
 
+    await agePriorGoogleMailAttempt(account.id);
     await expect(service.syncAccount(userId, account.id)).resolves.toEqual({ changed: 0 });
     const [recovered] = await database.db
       .select()
@@ -5066,6 +5540,7 @@ describe.sequential("connector service", () => {
       .update(calendarAccounts)
       .set({ calendarEnabled: false, mailEnabled: true })
       .where(eq(calendarAccounts.id, account.id));
+    await agePriorGoogleMailAttempt(account.id);
     await expect(serviceWithoutMail.syncAccount(userId, account.id)).rejects.toMatchObject({
       code: "service_unavailable",
       details: expect.objectContaining({ recovery: "operator" }),
@@ -8816,7 +9291,9 @@ describe.sequential("connector service", () => {
     expect(stored?.syncCapabilities?.calendar?.lastAttemptAt).toBe(timestamp.toISOString());
     expect(stored?.syncCapabilities?.mail?.lastSyncedAt).toBe(clock.toISOString());
     expect(stored?.nextSyncAt).toEqual(new Date(clock.getTime() + 5 * 60_000));
-    // Notification work can refresh the healthy sibling before its reconciliation deadline.
+    // Notification work can refresh the healthy sibling after its quota cooldown,
+    // while still preceding the normal five-minute reconciliation deadline.
+    clock = new Date(clock.getTime() + 65_000);
     const calendarCalls = vi.mocked(provider.listCalendars).mock.calls.length;
     const mailCalls = vi.mocked(provider.syncMail).mock.calls.length;
     await database.db.delete(connectorSyncTriggers);
@@ -8839,6 +9316,7 @@ describe.sequential("connector service", () => {
     expect(provider.listCalendars).toHaveBeenCalledTimes(calendarCalls);
     expect(provider.syncMail).toHaveBeenCalledTimes(mailCalls + 1);
     // A new failure in the runnable sibling must take precedence over cached reconnect state.
+    clock = new Date(clock.getTime() + 65_000);
     vi.mocked(provider.syncMail).mockRejectedValueOnce(
       new ConnectorError({
         category: "rate_limited",
@@ -8882,7 +9360,8 @@ describe.sequential("connector service", () => {
     expect((await localService.observeSyncFreshness()).eligibleAccountCount).toBe(
       partialFreshness.eligibleAccountCount - 1,
     );
-    // Explicit retry rechecks the blocked capability and clears its failure on success.
+    // Explicit retry rechecks the blocked capability after the quota cooldown.
+    clock = new Date(clock.getTime() + 65_000);
     await expect(localService.syncAccount(userId, account.id)).resolves.toMatchObject({
       changed: 0,
     });
@@ -9200,6 +9679,7 @@ describe.sequential("connector service", () => {
     expect(stored?.nextSyncAt).toBeNull();
     expect(stored?.syncCapabilities?.calendar?.health.recovery).toBe("reconnect");
     expect(stored?.syncCapabilities?.mail?.health.recovery).toBe("reconnect");
+    await agePriorGoogleMailAttempt(account.id);
     await localService.syncAccount(userId, account.id);
     expect(
       (await localService.listAccounts(userId)).find((value) => value.id === account.id)?.health

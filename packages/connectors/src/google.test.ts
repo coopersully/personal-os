@@ -46,14 +46,26 @@ function response(value: unknown, status = 200): Response {
   return status === 204 ? new Response(null, { status }) : Response.json(value, { status });
 }
 
-function connector(fetch: typeof globalThis.fetch, configured = true) {
+function connector(
+  fetch: typeof globalThis.fetch,
+  configured = true,
+  clock: () => Date = () => now,
+) {
   return createGoogleConnector({
     clientId: configured ? "client" : "",
     clientSecret: configured ? "secret" : "",
     redirectUri: "https://api.example.com/callback",
     fetch,
-    now: () => now,
+    now: clock,
   });
+}
+
+function gmailCursor(token: string | null) {
+  if (!token?.startsWith("nohmi:gmail-sync:v1:"))
+    throw new Error("Expected a Gmail continuation cursor");
+  return JSON.parse(
+    Buffer.from(token.slice("nohmi:gmail-sync:v1:".length), "base64url").toString("utf8"),
+  ) as { historyId: string; remainingThreadIds: string[]; notBefore: string; reset: boolean };
 }
 
 function queued(...responses: Response[]) {
@@ -739,8 +751,12 @@ describe("Google Calendar connector", () => {
     const result = await syncMail(fresh, null);
     expect(result.value).toMatchObject({
       deletedThreadIds: [],
-      nextSyncToken: "history-full",
+      nextSyncToken: expect.stringMatching(/^nohmi:gmail-sync:v1:/u),
       reset: true,
+    });
+    expect(gmailCursor(result.value.nextSyncToken)).toMatchObject({
+      historyId: "history-full",
+      remainingThreadIds: [],
     });
     expect(result.value.mailboxes.map((mailbox) => mailbox.role)).toEqual([
       "inbox",
@@ -858,13 +874,17 @@ describe("Google Calendar connector", () => {
 
     expect(result.value).toMatchObject({
       deletedThreadIds: ["thread-gone"],
-      nextSyncToken: "105",
+      nextSyncToken: expect.stringMatching(/^nohmi:gmail-sync:v1:/u),
       reset: false,
     });
     expect(result.value.threads.map((thread) => thread.remoteThreadId)).toEqual([
       "thread-1",
       "thread-2",
     ]);
+    expect(gmailCursor(result.value.nextSyncToken)).toMatchObject({
+      historyId: "105",
+      remainingThreadIds: [],
+    });
     const historyCalls = fetch.mock.calls.filter(([input]) => String(input).includes("/history"));
     expect(String(historyCalls[0]?.[0])).toContain("startHistoryId=100");
     expect(String(historyCalls[1]?.[0])).toContain("pageToken=next");
@@ -1025,7 +1045,7 @@ describe("Google Calendar connector", () => {
     ).rejects.toBeDefined();
   });
 
-  it("caps a Gmail synchronization at one hundred conversations", async () => {
+  it("resumes all one hundred Gmail conversations in four quota-bounded batches without losing the history fence", async () => {
     const threadIds = Array.from({ length: 100 }, (_, index) => ({ id: `thread-${index}` }));
     let activeThreadRequests = 0;
     let maximumThreadRequests = 0;
@@ -1043,6 +1063,18 @@ describe("Google Calendar connector", () => {
       if (url.pathname.endsWith("/threads")) {
         return response({ nextPageToken: "ignored", threads: threadIds });
       }
+      if (url.pathname.endsWith("/history")) {
+        expect(url.searchParams.get("startHistoryId")).toBe("history-100");
+        return response({
+          history: [
+            {
+              id: "new-history",
+              messagesAdded: [{ message: { id: "new-message", threadId: "thread-arrived" } }],
+            },
+          ],
+          historyId: "history-arrived-during-batches",
+        });
+      }
       activeThreadRequests += 1;
       maximumThreadRequests = Math.max(maximumThreadRequests, activeThreadRequests);
       await Promise.resolve();
@@ -1052,12 +1084,54 @@ describe("Google Calendar connector", () => {
         messages: [{ id: "message", payload: { mimeType: "text/plain" } }],
       });
     });
-    const syncMail = connector(fetch).syncMail;
+    let clock = now;
+    const syncMail = connector(fetch, true, () => clock).syncMail;
     if (!syncMail) throw new Error("Google Mail connector is missing.");
-    const result = await syncMail(fresh, null);
-    expect(result.value.threads).toHaveLength(100);
-    expect(result.value.nextSyncToken).toBe("history-100");
-    expect(fetch).toHaveBeenCalledTimes(103);
+    let result = await syncMail(fresh, null);
+    const observed = result.value.threads.map((thread) => thread.remoteThreadId);
+    expect(result.value.threads).toHaveLength(25);
+    expect(result.value.reset).toBe(false);
+    expect(gmailCursor(result.value.nextSyncToken)).toMatchObject({
+      historyId: "history-100",
+      remainingThreadIds: threadIds.slice(25).map(({ id }) => id),
+    });
+    const beforeCooldown = fetch.mock.calls.length;
+    const waiting = await syncMail(fresh, result.value.nextSyncToken);
+    expect(waiting.value).toMatchObject({
+      threads: [],
+      continuation: { deferred: true },
+      nextSyncToken: result.value.nextSyncToken,
+    });
+    expect(fetch).toHaveBeenCalledTimes(beforeCooldown);
+    for (let pass = 1; pass < 4; pass += 1) {
+      clock = new Date(clock.getTime() + 65_000);
+      result = await syncMail(fresh, result.value.nextSyncToken);
+      expect(result.value.threads).toHaveLength(25);
+      expect(result.value.reset).toBe(false);
+      observed.push(...result.value.threads.map((thread) => thread.remoteThreadId));
+      expect(Boolean(result.value.continuation)).toBe(pass < 3);
+    }
+    expect(new Set(observed).size).toBe(100);
+    expect(
+      fetch.mock.calls.filter(([input]) => new URL(String(input)).pathname.endsWith("/profile")),
+    ).toHaveLength(1);
+    expect(
+      fetch.mock.calls.filter(([input]) => new URL(String(input)).pathname.endsWith("/threads")),
+    ).toHaveLength(1);
+    expect(gmailCursor(result.value.nextSyncToken)).toMatchObject({
+      historyId: "history-100",
+      remainingThreadIds: [],
+    });
+    const terminalWait = await syncMail(fresh, result.value.nextSyncToken);
+    expect(terminalWait.value.continuation?.deferred).toBe(true);
+    clock = new Date(clock.getTime() + 65_000);
+    const arrived = await syncMail(fresh, result.value.nextSyncToken);
+    expect(arrived.value.threads.map(({ remoteThreadId }) => remoteThreadId)).toEqual([
+      "thread-arrived",
+    ]);
+    expect(gmailCursor(arrived.value.nextSyncToken)).toMatchObject({
+      historyId: "history-arrived-during-batches",
+    });
     expect(maximumThreadRequests).toBe(1);
   });
 
@@ -1354,5 +1428,113 @@ describe("Mail attachment retrieval", () => {
     await expect(
       connector(queued(response({}, 404))).downloadMailAttachment?.(fresh, "message", attachment),
     ).rejects.toThrow();
+  });
+});
+
+describe("Gmail resumable quota batches", () => {
+  it.each(
+    [
+      "nohmi:gmail-sync:v2:abc",
+      "nohmi:gmail-sync:v1:!",
+      `nohmi:gmail-sync:v1:${"a".repeat(40_001)}`,
+      `nohmi:gmail-sync:v1:${Buffer.from("not-json").toString("base64url")}`,
+      ...[
+        { version: 2 },
+        { remainingThreadIds: Array.from({ length: 101 }, (_, index) => `thread-${index}`) },
+        { remainingThreadIds: ["duplicate", "duplicate"] },
+        { remainingThreadIds: ["x".repeat(257)] },
+        { notBefore: "invalid-date" },
+        { extra: "unrecognized" },
+      ].map(
+        (override) =>
+          `nohmi:gmail-sync:v1:${Buffer.from(JSON.stringify({ version: 1, historyId: "fence", remainingThreadIds: [], reset: false, notBefore: now.toISOString(), ...override })).toString("base64url")}`,
+      ),
+    ].map((token, index) => [`case-${index + 1}`, token] as const),
+  )("rejects invalid bounded continuation %s before contacting Google", async (_case, token) => {
+    const fetch = vi.fn();
+    await expect(connector(fetch).syncMail?.(fresh, token)).rejects.toMatchObject({
+      code: "google_mail_cursor_invalid",
+      category: "invalid_response",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("resumes an incremental burst and removes only definitively missing threads", async () => {
+    let clock = now;
+    const fetched: string[] = [];
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/labels")) return response({ labels: [] });
+      if (url.pathname.endsWith("/history"))
+        return response({
+          historyId: "burst-fence",
+          history: [
+            {
+              id: "h1",
+              messagesAdded: Array.from({ length: 100 }, (_, index) => ({
+                message: { id: `m-${index}`, threadId: `thread-${index}` },
+              })),
+            },
+          ],
+        });
+      const id = url.pathname.split("/").at(-1) ?? "";
+      fetched.push(id);
+      return id === "thread-37"
+        ? response({}, 404)
+        : response({
+            id,
+            messages: [{ id: `message-${id}`, payload: { mimeType: "text/plain" } }],
+          });
+    });
+    const syncMail = connector(fetch, true, () => clock).syncMail;
+    if (!syncMail) throw new Error("Missing Gmail connector");
+    let token: string | null = "legacy-history";
+    const deleted: string[] = [];
+    for (let pass = 0; pass < 4; pass += 1) {
+      const result = await syncMail(fresh, token);
+      expect(result.value.threads.length + result.value.deletedThreadIds.length).toBe(25);
+      expect(result.value.reset).toBe(false);
+      token = result.value.nextSyncToken;
+      deleted.push(...result.value.deletedThreadIds);
+      clock = new Date(clock.getTime() + 65_000);
+    }
+    expect(fetched).toHaveLength(100);
+    expect(new Set(fetched).size).toBe(100);
+    expect(deleted).toEqual(["thread-37"]);
+    expect(gmailCursor(token)).toMatchObject({ historyId: "burst-fence", remainingThreadIds: [] });
+    expect(fetch.mock.calls.filter(([input]) => String(input).includes("/history?"))).toHaveLength(
+      1,
+    );
+  });
+
+  it("replays the same uncommitted batch after a transient failure without skipping any IDs", async () => {
+    const ids = Array.from({ length: 30 }, (_, index) => `thread-${index}`);
+    const token = `nohmi:gmail-sync:v1:${Buffer.from(JSON.stringify({ version: 1, historyId: "original-fence", remainingThreadIds: ids, reset: true, notBefore: now.toISOString() })).toString("base64url")}`;
+    let failure = true;
+    const fetched: string[] = [];
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/labels")) return response({ labels: [] });
+      const id = url.pathname.split("/").at(-1) ?? "";
+      fetched.push(id);
+      if (id === "thread-10" && failure) return response({}, 503);
+      return response({
+        id,
+        messages: [{ id: `message-${id}`, payload: { mimeType: "text/plain" } }],
+      });
+    });
+    const syncMail = connector(fetch).syncMail;
+    if (!syncMail) throw new Error("Missing Gmail connector");
+    await expect(syncMail(fresh, token)).rejects.toMatchObject({ disposition: "retry" });
+    failure = false;
+    const result = await syncMail(fresh, token);
+    expect(result.value.threads.map(({ remoteThreadId }) => remoteThreadId)).toEqual(
+      ids.slice(0, 25),
+    );
+    expect(gmailCursor(result.value.nextSyncToken)).toMatchObject({
+      historyId: "original-fence",
+      remainingThreadIds: ids.slice(25),
+    });
+    expect(fetched.filter((id) => id === "thread-0")).toHaveLength(2);
   });
 });

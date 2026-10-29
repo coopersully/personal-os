@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { ApiClientError } from "@personal-os/api-client";
 import {
   type CalendarStatus,
+  type ConnectorSyncResult,
   type FinanceBudgetVersion,
   getDefaultWorkspacePreferences,
   getFinanceBudgetApprovalReadiness,
@@ -1493,7 +1494,7 @@ function defaults() {
   mocks.openUrl.mockResolvedValue(undefined);
   mocks.setAlwaysOnTop.mockResolvedValue(undefined);
   mocks.listen.mockImplementation(async () => vi.fn());
-  mocks.syncConnector.mockResolvedValue(1);
+  mocks.syncConnector.mockResolvedValue({ changed: 1, pending: false, nextSyncAt: null });
   mocks.selectXBookmarkFolder.mockResolvedValue(1);
   mocks.syncXBookmarks.mockResolvedValue(2);
   mocks.deleteXBookmarkAccount.mockResolvedValue(undefined);
@@ -9283,7 +9284,56 @@ describe("Personal OS web app", () => {
     expect(details).toHaveAttribute("aria-expanded", "false");
   });
 
+  it.each([
+    true,
+    false,
+  ])("announces Settings sync continuation honestly (pending=%s)", async (pending) => {
+    const successes = vi.spyOn(toast, "success");
+    mocks.syncConnector.mockResolvedValue({
+      changed: 25,
+      pending,
+      nextSyncAt: pending ? now : null,
+    });
+    setup("/settings?page=connections");
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Sync Google" }));
+    const message = pending
+      ? "Updates saved. Mail synchronization will continue automatically."
+      : "Connection synced.";
+    await waitFor(() => expect(successes).toHaveBeenCalledWith(message));
+    expect(screen.getByRole("main")).not.toHaveTextContent(message);
+    if (pending) expect(successes).not.toHaveBeenCalledWith("Connection synced.");
+  });
+
+  it.each([
+    true,
+    false,
+  ])("announces the settled Mail batch honestly (pending=%s)", async (pending) => {
+    const successes = vi.spyOn(toast, "success");
+    let finish: (result: ConnectorSyncResult) => void = () => {};
+    mocks.syncConnector.mockImplementation(
+      () =>
+        new Promise<ConnectorSyncResult>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    setup("/mail");
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Sync all mail accounts" }));
+    await waitFor(() => expect(mocks.syncConnector).toHaveBeenCalled());
+    expect(successes).not.toHaveBeenCalled();
+    await act(async () => finish({ changed: 25, pending, nextSyncAt: pending ? now : null }));
+    const message = pending
+      ? "Updates saved. Mail synchronization will continue automatically."
+      : "Mail accounts synced.";
+    await waitFor(() => expect(successes).toHaveBeenCalledWith(message));
+    expect(screen.getByRole("main")).not.toHaveTextContent(message);
+    if (pending) expect(successes).not.toHaveBeenCalledWith("Mail accounts synced.");
+  });
+
   it("refreshes partial mail sync results and retries only the failed account", async () => {
+    const errors = vi.spyOn(toast, "error");
+    const successes = vi.spyOn(toast, "success");
     mocks.listConnectors.mockResolvedValue(
       [secondId, thirdId].map((accountId) => ({
         id: accountId,
@@ -9303,7 +9353,7 @@ describe("Personal OS web app", () => {
         ? new Promise((_resolve, reject) => {
             rejectFailedAccount = reject;
           })
-        : Promise.resolve(undefined),
+        : Promise.resolve({ changed: 25, pending: true, nextSyncAt: now }),
     );
     setup("/mail");
     const browser = userEvent.setup();
@@ -9317,9 +9367,20 @@ describe("Personal OS web app", () => {
     await act(async () => {
       rejectFailedAccount(new Error("private sync failure"));
     });
+    await waitFor(() =>
+      expect(errors).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          description:
+            "0 of 2 mail accounts synced. 1 will continue automatically. 1 account needs another attempt.",
+        }),
+      ),
+    );
     expect(
-      await screen.findByText("1 of 2 mail accounts synced. 1 account needs another attempt."),
-    ).toBeInTheDocument();
+      within(screen.getByRole("navigation", { name: "Top navigation" })).queryByText(
+        /will continue automatically/,
+      ),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(mocks.listConnectors.mock.calls.length).toBeGreaterThan(accountLoads);
       expect(mocks.listMailboxes.mock.calls.length).toBeGreaterThan(mailboxLoads);
@@ -9327,7 +9388,7 @@ describe("Personal OS web app", () => {
       expect(screen.getByRole("button", { name: "Retry failed mail accounts" })).toBeEnabled();
     });
     expect(screen.queryByText("private sync failure")).not.toBeInTheDocument();
-    mocks.syncConnector.mockResolvedValue(undefined);
+    mocks.syncConnector.mockResolvedValue({ changed: 1, pending: false, nextSyncAt: null });
     await browser.click(screen.getByRole("button", { name: "Retry failed mail accounts" }));
     await waitFor(() => expect(mocks.syncConnector).toHaveBeenCalledTimes(3));
     expect(mocks.syncConnector.mock.calls.map(([accountId]) => accountId)).toEqual([
@@ -9337,7 +9398,10 @@ describe("Personal OS web app", () => {
     ]);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Sync all mail accounts" })).toBeEnabled();
-      expect(screen.queryByText(/mail accounts synced\./)).not.toBeInTheDocument();
+      expect(successes).toHaveBeenCalledWith(
+        "Updates saved. Mail synchronization will continue automatically.",
+      );
+      expect(successes).not.toHaveBeenCalledWith("Mail accounts synced.");
     });
   });
 
@@ -9563,7 +9627,7 @@ describe("Personal OS web app", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     pendingEditorView.unmount();
 
-    let resolveSync: (value: number) => void = () => undefined;
+    let resolveSync: (value: ConnectorSyncResult) => void = () => undefined;
     mocks.syncConnector.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveSync = resolve;
@@ -9573,7 +9637,7 @@ describe("Personal OS web app", () => {
     await browser.click(await findSettingsLink("Connections"));
     await browser.click(await screen.findByRole("button", { name: "Sync Google" }));
     await waitFor(() => expect(syncingView.container.querySelector(".spin")).toBeInTheDocument());
-    resolveSync(1);
+    resolveSync({ changed: 1, pending: false, nextSyncAt: null });
     syncingView.unmount();
   }, 15_000);
 

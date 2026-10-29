@@ -31,9 +31,11 @@ import type {
 import {
   type ConnectedAccountHealth,
   type ConnectorCapabilities,
+  type ConnectorSyncResult,
   type ConnectorSyncStatus,
   connectedAccountHealthSchema,
   connectorAuthorizationOutcomeSchema,
+  connectorSyncResultSchema,
 } from "@personal-os/domain";
 import { createAgentAccountApi } from "./features/agent-accounts.js";
 import { createAssistantApiClient } from "./features/assistant.js";
@@ -511,11 +513,11 @@ export function createApiClient(options: ClientOptions) {
       await request<void>(`/v1/sessions/${id}`, { method: "DELETE" });
     },
 
-    async syncConnector(id: string): Promise<number> {
-      const response = await request<{ result: { changed: number } }>(`/v1/connectors/${id}/sync`, {
+    async syncConnector(id: string): Promise<ConnectorSyncResult> {
+      const response = await request<{ result: unknown }>(`/v1/connectors/${id}/sync`, {
         method: "POST",
       });
-      return response.result.changed;
+      return connectorSyncResultSchema.parse(response.result);
     },
 
     async selectXBookmarkFolder(folderId: string): Promise<number> {

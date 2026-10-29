@@ -17,6 +17,7 @@ import type {
   GoogleAuthorizationService,
   GoogleConnector,
   GoogleCredentials,
+  MailSyncResult,
   NormalizedRemoteEvent,
   NormalizedRemoteMailThread,
   ProviderOperationOptions,
@@ -213,6 +214,28 @@ type GoogleConnectorOptions = {
 const MAX_GMAIL_HISTORY_PAGES = 10;
 const MAX_GMAIL_FULL_SYNC_PAGES = 10;
 const MAX_GMAIL_SYNC_THREADS = 100;
+const MAX_GMAIL_BATCH_THREADS = 25;
+const GMAIL_BATCH_COOLDOWN_MS = 65_000;
+const GMAIL_CURSOR_PREFIX = "nohmi:gmail-sync:v1:";
+const gmailSyncCursorSchema = z
+  .object({
+    version: z.literal(1),
+    historyId: z.string().min(1).max(256),
+    remainingThreadIds: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(256)
+          .regex(/^[A-Za-z0-9_/-]+$/u),
+      )
+      .max(MAX_GMAIL_SYNC_THREADS),
+    reset: z.boolean(),
+    notBefore: z.iso.datetime(),
+  })
+  .strict()
+  .refine((value) => new Set(value.remainingThreadIds).size === value.remainingThreadIds.length);
+type GmailSyncCursor = z.infer<typeof gmailSyncCursorSchema>;
 
 export function createGoogleConnector(options: GoogleConnectorOptions): GoogleConnector {
   const request = options.fetch ?? globalThis.fetch;
@@ -474,23 +497,75 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       if (nextPageToken) seenPageTokens.add(nextPageToken);
       pageToken = nextPageToken;
     } while (pageToken);
+    return fetchMailBatch(
+      currentCredentials,
+      mailboxes,
+      {
+        historyId: profile.historyId,
+        remainingThreadIds: [...new Set(threadIds)],
+        reset: true,
+        version: 1,
+        notBefore: now().toISOString(),
+      },
+      operation,
+    );
+  }
+
+  function encodeMailCursor(cursor: GmailSyncCursor): string {
+    return `${GMAIL_CURSOR_PREFIX}${Buffer.from(JSON.stringify(gmailSyncCursorSchema.parse(cursor))).toString("base64url")}`;
+  }
+
+  function decodeMailCursor(value: string): GmailSyncCursor {
+    try {
+      const encoded = value.slice(GMAIL_CURSOR_PREFIX.length);
+      if (value.length > 40_000 || !/^[A-Za-z0-9_-]+$/u.test(encoded))
+        throw new Error("Invalid cursor");
+      const decoded = Buffer.from(encoded, "base64url");
+      if (decoded.toString("base64url") !== encoded) throw new Error("Invalid cursor");
+      return gmailSyncCursorSchema.parse(JSON.parse(decoded.toString("utf8")));
+    } catch {
+      throw new ConnectorError({
+        category: "invalid_response",
+        code: "google_mail_cursor_invalid",
+        disposition: "retry",
+        message: "Google Mail synchronization progress could not be read safely.",
+        status: 502,
+      });
+    }
+  }
+
+  async function fetchMailBatch(
+    credentials: GoogleCredentials,
+    mailboxes: RemoteMailbox[],
+    cursor: GmailSyncCursor,
+    operation?: ProviderOperationOptions,
+  ): Promise<MailSyncResult> {
     const threads: NormalizedRemoteMailThread[] = [];
     const deletedThreadIds: string[] = [];
-    for (const threadId of threadIds) {
+    let currentCredentials = credentials;
+    const batch = cursor.remainingThreadIds.slice(0, MAX_GMAIL_BATCH_THREADS);
+    for (const threadId of batch) {
       throwIfProviderOperationCancelled(operation);
       const result = await fetchMailThread(currentCredentials, threadId, operation);
       currentCredentials = result.credentials;
       if (result.value) threads.push(result.value);
       else deletedThreadIds.push(threadId);
     }
+    const remainingThreadIds = cursor.remainingThreadIds.slice(batch.length);
+    // Retain the cooldown even on the terminal batch; manual and push syncs must
+    // not immediately spend another full batch in the same provider quota window.
+    const notBefore = new Date(now().getTime() + GMAIL_BATCH_COOLDOWN_MS).toISOString();
     return {
       credentials: currentCredentials,
       value: {
         deletedThreadIds,
         mailboxes,
-        nextSyncToken: profile.historyId,
-        reset: true,
+        nextSyncToken: batch.length
+          ? encodeMailCursor({ ...cursor, remainingThreadIds, notBefore, reset: false })
+          : cursor.historyId,
+        reset: cursor.reset && remainingThreadIds.length === 0,
         threads,
+        ...(remainingThreadIds.length ? { continuation: { notBefore } } : {}),
       },
     };
   }
@@ -802,7 +877,36 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
 
     async syncMail(credentials, syncToken, operation) {
       throwIfProviderOperationCancelled(operation);
+      let pending: GmailSyncCursor | undefined;
+      if (syncToken?.startsWith("nohmi:gmail-sync:")) {
+        if (!syncToken.startsWith(GMAIL_CURSOR_PREFIX)) {
+          throw new ConnectorError({
+            category: "invalid_response",
+            code: "google_mail_cursor_invalid",
+            disposition: "retry",
+            message: "Google Mail synchronization progress could not be read safely.",
+            status: 502,
+          });
+        }
+        pending = decodeMailCursor(syncToken);
+        if (Date.parse(pending.notBefore) > now().getTime()) {
+          return {
+            credentials,
+            value: {
+              deletedThreadIds: [],
+              mailboxes: [],
+              nextSyncToken: syncToken,
+              reset: false,
+              threads: [],
+              continuation: { notBefore: pending.notBefore, deferred: true },
+            },
+          };
+        }
+        syncToken = pending.historyId;
+      }
       const mailboxResult = await listMailboxes(credentials, operation);
+      if (pending?.remainingThreadIds.length)
+        return fetchMailBatch(mailboxResult.credentials, mailboxResult.value, pending, operation);
       if (!syncToken) {
         return fullMailSync(mailboxResult.credentials, mailboxResult.value, operation);
       }
@@ -850,25 +954,18 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
           return fullMailSync(currentCredentials, mailboxResult.value, operation);
         }
       } while (pageToken);
-      const threads: NormalizedRemoteMailThread[] = [];
-      const deletedThreadIds: string[] = [];
-      for (const threadId of threadIds) {
-        throwIfProviderOperationCancelled(operation);
-        const result = await fetchMailThread(currentCredentials, threadId, operation);
-        currentCredentials = result.credentials;
-        if (result.value) threads.push(result.value);
-        else deletedThreadIds.push(threadId);
-      }
-      return {
-        credentials: currentCredentials,
-        value: {
-          deletedThreadIds,
-          mailboxes: mailboxResult.value,
-          nextSyncToken,
+      return fetchMailBatch(
+        currentCredentials,
+        mailboxResult.value,
+        {
+          historyId: nextSyncToken,
+          remainingThreadIds: [...threadIds],
           reset: false,
-          threads,
+          version: 1,
+          notBefore: now().toISOString(),
         },
-      };
+        operation,
+      );
     },
 
     /* v8 ignore start -- provider command variants are covered by connector contract tests */

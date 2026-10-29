@@ -174,6 +174,8 @@ export type SyncResult = CredentialResult<{
 }>;
 
 export type MailSyncResult = CredentialResult<{
+  /** More work, or a quota cooldown, remains; this pass does not establish freshness. */
+  continuation?: { notBefore: string; deferred?: boolean };
   deletedThreadIds: string[];
   mailboxes: RemoteMailbox[];
   nextSyncToken: string | null;

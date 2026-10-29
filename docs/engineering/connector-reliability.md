@@ -125,6 +125,31 @@ uses WebDAV `sync-collection` only when the collection advertises it; an invalid
 restarts one bounded tokenless collection sync so the replacement token remains incremental, while
 unsupported or malformed reports fall back to a controlled full reconciliation. Provider cursors
 are opaque, bounded, and committed inside the same fenced projection transaction as their changes.
+Gmail's [current quota contract](https://developers.google.com/workspace/gmail/api/reference/quota)
+charges 120 units for each full-thread read against a 6,000-unit per-user-per-project minute.
+Bootstrap still discovers the latest 100 conversations; bootstrap and incremental bursts fetch at
+most 25 full threads per pass. A bounded, versioned opaque cursor retains the captured history
+fence, remaining thread IDs, and a 65-second not-before time. The terminal batch retains that
+cooldown too, so manual or push requests cannot immediately start another expensive batch.
+Expired raw Gmail history IDs still trigger a bounded bootstrap. Malformed internal continuations
+fail closed rather than becoming provider history IDs.
+
+Before any Google Mail provider read, the API reserves a 65-second attempt cooldown in existing
+capability health under the account/credential claim fence without advancing the mail cursor.
+Every caller, including manual and triggered requests, honors that reservation after transient
+failure, projection rollback, or process interruption. Failed attempts retain the persisted retry
+deadline for every caller, including a provider's longer rate-limit deadline. Shutdown renews the
+cooldown from interruption time before releasing the claim, even after a long Mail attempt.
+Each projected batch and continuation then commit together under that same fence. Pending Mail
+health remains `syncing`, retains its previous success timestamp, and schedules
+the next ordinary five-minute pass; it emits progress rather than completion. A cooldown-only pass
+performs no provider reads and does not reconcile mailbox membership. Partial bootstrap never
+clears previously imported conversations. The captured history fence advances only after its
+entire queue is imported; the next incremental read catches changes arriving during those batches.
+Mock tests establish these bounds and recovery semantics. Other consumers of the same user's
+Google project quota can still cause a real rate-limit failure; deployed continuation and freshness
+must be checked separately before claiming production recovery.
+
 Gmail and Calendar watches renew durably before expiry. iCloud IMAP IDLE sessions are bounded
 change signals only; they never replace the authoritative five-minute reconciliation.
 

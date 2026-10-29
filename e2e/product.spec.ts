@@ -1035,12 +1035,26 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
   expect(composeBounds?.height).toBe(44);
   await revealWorkspaceOptions(page);
   await page.getByRole("button", { name: "Sync all mail accounts" }).click();
-  await expect(
-    page.getByText("1 of 2 mail accounts synced. 1 account needs another attempt."),
-  ).toBeVisible();
+  const partialSummary =
+    "1 of 2 mail accounts synced. 0 will continue automatically. 1 account needs another attempt.";
+  const failure = page
+    .locator('[data-sonner-toast][data-type="error"]')
+    .filter({ hasText: partialSummary });
+  await expect(failure).toBeVisible();
+  await expect(failure).toBeInViewport();
+  await expect(failure).toContainText("Couldn’t sync mail accounts. Try again.");
+  await expect(page.getByRole("main")).not.toContainText(partialSummary);
+  await expect(page.getByRole("navigation", { name: "Top navigation" })).not.toContainText(
+    /mail accounts synced\.|account needs another attempt/,
+  );
+  expect(synced).toHaveLength(2);
+  expect(synced.filter((id) => id === failedId)).toHaveLength(1);
   const details = page
     .locator('[data-slot="popover-content"]')
     .filter({ hasText: "Mail sync needs attention" });
+  await expect(details).toBeVisible();
+  await expect(details).not.toContainText(partialSummary);
+  await expect(details.getByRole("status")).toHaveCount(0);
   const bounds = await details.boundingBox();
   expect(bounds).not.toBeNull();
   expect(bounds?.x).toBeGreaterThanOrEqual(0);
@@ -1055,4 +1069,11 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
   await expect(page.getByRole("button", { name: "Sync all mail accounts" })).toBeEnabled();
   expect(synced).toHaveLength(3);
   expect(synced.at(-1)).toBe(failedId);
+  expect(synced.filter((id) => id === failedId)).toHaveLength(2);
+  await expect(
+    page
+      .locator('[data-sonner-toast][data-type="success"]')
+      .filter({ hasText: "Mail accounts synced." }),
+  ).toBeVisible();
+  await expect(page.getByRole("main")).not.toContainText("Mail accounts synced.");
 });

@@ -862,10 +862,74 @@ flow even when its controls are flattened, because changing it signs the user ou
 
 ### Full-screen ritual backgrounds
 
+Routine skies interpret the current weather and local daylight in the same ordered-dither
+pixel style as the cloud canvas. Interpolate night, dawn, daylight, sunset and blue-hour
+palettes around the location's sunrise and sunset; a dithered sun or approximate lunar
+phase occupies open sky above the question card. Cloud cover changes density, wind
+changes drift, and rain/snow use quiet pixel precipitation. Fog and overcast mute the
+palette; storms never flash. The routine card retains its normal readable surface.
+Outside-card chrome follows the brightness of its part of the sky, including predawn.
+
+Use the existing saved weather location or an already-granted device location. Opening a
+routine or preview never prompts for location permission. Full previews show current
+conditions; changing the preview weekday changes steps, not a pretend forecast. Settings
+thumbnails remain local representative morning/evening scenes without network reads.
+
+Weather is supplementary: the routine appears immediately with an approximate local-time
+sky, then uses a valid observation no more than thirty minutes old. Missing location,
+partial solar data, stale/future observations, permission denial and offline reads preserve
+the routine and its escape actions. Polar day/night uses the provider's daylight flag when
+sunrise/sunset are absent. An unavailable weather read adds no modal or inline action copy.
+Refresh while visible at a bounded cadence; do not persist device coordinates or weather
+in ritual answers. Reduced motion freezes cloud/precipitation animation while retaining
+manual sky dragging. Lighting updates preserve the cloud field and drag momentum.
+
+Approved atmospheric details remain confined to this illustrative backdrop: clear skies have a
+faint solar halo; cloud edges catch warm sun or cool moon light from the body’s direction;
+overcast diffuses the disk; rain makes sparse flattened ripples at the bottom edge; snow has a
+few larger, slower drifting flakes; low fog bands pass beneath a veiled celestial body; storms
+use gentle rain gusts without flashes. Stars sit behind the moving clouds rather than twinkling
+independently. Reduced motion freezes these details too. The question card remains opaque and stable. Apply the approved 1.5 px blur to the shared
+sky scene in every weather state, including browser/native routines and thumbnails; keep the
+question card, logo, and controls outside the filtered layer.
+
+
+Scheduled browser routines and full previews always fill the viewport on desktop and mobile;
+they do not use the shared centered modal or bottom drawer presentation. Keep focus trapped
+until a routine action returns to the underlying page, preserving its drafts. Previews retain
+their Close Preview action and Escape dismissal. Snooze and skip decisions use the same bounded,
+opaque shared Card as the checklist. Moving between these screens uses a brief 240 ms fade and
+8 px vertical entry with no delayed child stagger; reduced motion is static. Keep the background
+and logo mounted, retain answers, and do not restart a skip hold when background state polling
+updates revision/history metadata.
+
 The sky, glow and cloud canvas belong to the full viewport/window, independently of the
 width-constrained question card. Keep decorative layers outside the card's stacking context;
 thumbnail previews remain bounded to their own 16:9 scene. Native ritual surfaces fill the webview
-with fixed insets rather than relying on a dynamic viewport-height measurement. Check both axes
+with fixed insets rather than relying on a dynamic viewport-height measurement. On macOS, the
+checklist webview fills the system primary display's full frame in AppKit points (not the active
+window's display or a work-area inset). Its question card stays centered within that frame.
+Every secondary display has a full-screen, non-key backdrop with “continue on your main display”
+over the same sky palette, clouds and weather motion. Sun/moon disks and their halos appear only
+on the main display. The ready main ritual projects only its decorative canvas layers as bounded
+RGBA frames (at most 400 × 240 pixels, one in flight, at most twice per second) over local IPC;
+secondary displays never fetch weather, receive answers/credentials, or mount another checklist.
+Native consumers validate dimensions/base64 byte length and require the active unlocked session;
+Rust additionally fences the exact ritual window and ready/shown occurrence. Frames are volatile,
+shared with newly connected secondary panels, ignored during dismissal and cleared on hide.
+Reduced motion sends a still frame again only after sky/manual-cloud changes. Failed artwork
+projection retries at the bounded cadence and never blocks routine actions.
+Observe display topology and window backing/geometry changes: connecting, disconnecting, moving,
+rotating, rescaling or changing the primary display repositions the existing checklist in place,
+updates secondary messages, and removes disconnected panels. Never remount answers or replay the
+intro sound for a display change. Lock/unknown session state or loss of all displays removes all
+surfaces; subsequent presentation uses the existing readiness/session checks. Completion, snooze,
+skip and preview close tear down all display surfaces together. Preserve system shortcuts,
+app switching and quit; this is a borderless screen-sized experience, not a kiosk or a new native
+fullscreen Space. Display notifications are local and carry no credentials or routine answers;
+AppKit owns observation/reconciliation, with the existing bounded presenter refresh as recovery.
+Automated geometry/lifecycle checks do not establish physical hot-plug, Spaces or VoiceOver
+acceptance. Native ritual presentation remains macOS-only; browser routines fill their viewport. Check both axes
 of the background after entrance animations and after resizing, including short desktop windows.
 
 

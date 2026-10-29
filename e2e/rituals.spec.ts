@@ -366,6 +366,20 @@ test("browser rituals preserve the current page and save real answers and option
     expect(saved.ok()).toBe(true);
     const ritual = page.getByRole("dialog", { name: "Morning ritual", exact: true });
     await expect(ritual).toBeVisible({ timeout: 15000 });
+    await expect
+      .poll(async () => {
+        const bounds = await ritual.boundingBox();
+        const viewport = page.viewportSize();
+        return (
+          !!bounds &&
+          !!viewport &&
+          Math.abs(bounds.x) <= 1 &&
+          Math.abs(bounds.y) <= 1 &&
+          Math.abs(bounds.width - viewport.width) <= 1 &&
+          Math.abs(bounds.height - viewport.height) <= 1
+        );
+      })
+      .toBe(true);
     await expect(ritual.getByRole("button", { name: "0-day morning streak" })).toBeVisible();
     await page.keyboard.press("Control+k");
     await expect(page.getByRole("dialog")).toHaveCount(1);
@@ -443,6 +457,20 @@ test("browser snooze survives reload and another client can settle the same ritu
     expect(saved.ok()).toBe(true);
     const ritual = page.getByRole("dialog", { name: "Evening ritual", exact: true });
     await expect(ritual).toBeVisible({ timeout: 15000 });
+    await expect
+      .poll(async () => {
+        const bounds = await ritual.boundingBox();
+        const viewport = page.viewportSize();
+        return (
+          !!bounds &&
+          !!viewport &&
+          Math.abs(bounds.x) <= 1 &&
+          Math.abs(bounds.y) <= 1 &&
+          Math.abs(bounds.width - viewport.width) <= 1 &&
+          Math.abs(bounds.height - viewport.height) <= 1
+        );
+      })
+      .toBe(true);
     await ritual.getByRole("button", { name: "Snooze", exact: true }).click();
     await expect
       .poll(async () => {

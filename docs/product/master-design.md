@@ -305,11 +305,16 @@ Knowledge rather than a separate top-level workspace.
 #### Morning and evening rituals
 
 Enabled rituals also present automatically inside the signed-in browser application. A due,
-unexpired, unsnoozed occurrence opens the shared checklist in a modal over the existing page,
-with the page visible through a blurred backdrop. Keep the page mounted and restore its focus
-when the ritual is completed, snoozed, skipped, or settled by another client. Escape and outside
-clicks do not bypass the ritual. Authentication and standalone setup flows remain unobstructed;
-the desktop shell keeps its native presentation without a duplicate browser modal.
+unexpired, unsnoozed occurrence opens the shared checklist in a full-viewport ritual surface on
+desktop and mobile. Full previews use the same screen-filling presentation. The illustrated sky
+fills the surface behind a centered, readable checklist card; snooze and skip confirmations share
+that card treatment. Keep the underlying page mounted and restore its focus when the ritual is
+completed, snoozed, skipped, or settled by another client. Escape and outside clicks do not bypass
+a scheduled ritual; previews retain their explicit close action. Authentication and standalone
+setup flows remain unobstructed; the desktop shell keeps its native presentation without a
+duplicate browser ritual. On macOS, the checklist fills the system primary display and adapts in
+place to display changes. Secondary displays share only the decorative weather background and
+brief guidance to continue on the main display; the sun and moon appear only on the main display.
 
 The browser and desktop use the same account occurrence, revisions, answers, streaks, weekly
 progress, optional follow-ups, and snooze/skip policy. Browser writes require API acceptance and

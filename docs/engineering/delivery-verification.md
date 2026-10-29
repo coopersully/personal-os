@@ -109,9 +109,10 @@ matrix member and exact candidate identity required above, then check the normal
 Browser jobs allow 50 minutes including dependency downloads and artifact retention, with browser execution separately
 bounded to 30 minutes. The metadata observer waits up to 55 minutes inside a 60-minute job so
 source-job setup and aggregation can finish before its deadline. Individual test timeouts and
-assertions remain unchanged. Synthetic duplicate-confirmation review retains only its two
-explicitly named dialog PNGs as attempt/project/shard-bound artifacts for seven days, including
-on successful runs, so acceptance can inspect counts and consequence text. These use the
+assertions remain unchanged. Synthetic duplicate-confirmation review retains its two explicitly
+named dialog PNGs and a numeric layout/scroll/viewport receipt as attempt/project/shard-bound
+artifacts for seven days, including on successful runs, so acceptance can inspect counts,
+consequence text and fixed heading/footer geometry. These use the
 existing artifact authority and add a separately bounded two-minute upload; no inbox or live
 provider content is captured.
 

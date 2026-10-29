@@ -231,8 +231,8 @@ jobs:
           include-hidden-files: false
           retention-days: 7
 
-      - name: Retain synthetic duplicate review screenshots
-        if: ${{ always() && hashFiles('test-results/**/duplicate-counts.png', 'test-results/**/duplicate-comparison.png') != '' }}
+      - name: Retain synthetic duplicate review evidence
+        if: ${{ always() && hashFiles('test-results/**/duplicate-counts.png', 'test-results/**/duplicate-comparison.png', 'test-results/**/duplicate-layout.json') != '' }}
         timeout-minutes: 2
         uses: actions/upload-artifact@v7
         with:
@@ -240,6 +240,7 @@ jobs:
           path: |
             test-results/**/duplicate-counts.png
             test-results/**/duplicate-comparison.png
+            test-results/**/duplicate-layout.json
           if-no-files-found: error
           include-hidden-files: false
           retention-days: 7

@@ -21,6 +21,7 @@ import type {
   ExchangePlaidTokenInput,
   FinanceAccount,
   FinanceAccountConnection,
+  FinanceAccountDuplicatePreview,
   FinanceAccountList,
   FinanceAccountQuery,
   FinanceActionOutcome,
@@ -123,6 +124,7 @@ import type {
   PreviewFinanceBudgetPolicyInput,
   ReconcileFinanceReimbursementInput,
   RemoveFinanceTransactionInput,
+  ResolveFinanceAccountDuplicateInput,
   ResolveFinanceAlertInput,
   ReviseFinanceBudgetInput,
   ReviseFinanceBudgetPolicyInput,
@@ -967,6 +969,23 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "PATCH",
       });
     },
+    async getFinanceAccountDuplicatePreview(
+      redundantId: string,
+      keepAccountId: string,
+    ): Promise<FinanceToolResult<FinanceAccountDuplicatePreview>> {
+      return request(
+        `/v1/finances/accounts/${encodeURIComponent(redundantId)}/duplicate-preview?keepAccountId=${encodeURIComponent(keepAccountId)}`,
+      );
+    },
+    async resolveFinanceAccountDuplicate(
+      redundantId: string,
+      input: ResolveFinanceAccountDuplicateInput,
+    ): Promise<FinanceToolResult<FinanceAccount>> {
+      return request(`/v1/finances/accounts/${encodeURIComponent(redundantId)}/resolve-duplicate`, {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+    },
     async disconnectFinanceAccount(
       id: string,
       input: DisconnectFinanceAccountInput,
@@ -1079,13 +1098,26 @@ export function createFinanceApi(request: FinanceRequest) {
       }>(`/v1/finances/categorizations/propose${search.size ? `?${search}` : ""}`);
       return { items: response.proposals, nextCursor: response.nextCursor };
     },
-    async getPlaidLinkToken(): Promise<string> {
+    async completePlaidReconnect(
+      accountId: string,
+      idempotencyKey: string,
+    ): Promise<{ accountId: string; authorizationVerified: true; synchronizationScheduled: true }> {
+      return request(`/v1/finances/accounts/${encodeURIComponent(accountId)}/reconnect`, {
+        method: "POST",
+        body: JSON.stringify({ idempotencyKey }),
+      });
+    },
+    async getPlaidLinkToken(accountId?: string): Promise<string> {
       const response = await request<{ linkToken: string }>("/v1/finances/plaid/link-token", {
+        ...(accountId ? { body: JSON.stringify({ accountId }) } : {}),
         method: "POST",
       });
       return response.linkToken;
     },
-    async getPlaidStatus(): Promise<{ available: boolean }> {
+    async getPlaidStatus(): Promise<{
+      available: boolean;
+      environment?: "sandbox" | "development" | "production" | null;
+    }> {
       return request<{ available: boolean }>("/v1/finances/plaid/status");
     },
     async importFinanceCsv(

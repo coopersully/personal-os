@@ -12,7 +12,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createFinanceProviderItemService } from "../finance-provider-item-service.js";
 import { createFinanceProviderItemSyncService } from "../finance-provider-item-sync-service.js";
 import type { Principal } from "../types.js";
@@ -297,5 +297,266 @@ describe.sequential("Finance account disconnection", () => {
     expect(
       await database.db.select().from(financeAccounts).where(eq(financeAccounts.id, target.id)),
     ).toMatchObject([{ syncClaimId: null, syncClaimExpiresAt: null, encryptedCredentials: null }]);
+  });
+
+  async function duplicateFixture() {
+    const value = await fixture(2);
+    await database.db
+      .update(financeAccounts)
+      .set({
+        name: "Fixture card",
+        syncState: "current",
+        lastSyncedAt: now(),
+        ownershipType: "individual",
+        ownershipShareBps: 10_000,
+      })
+      .where(eq(financeAccounts.userId, value.context.userId));
+    await database.db
+      .update(financeProviderItems)
+      .set({ syncState: "current", lastSyncedAt: now() })
+      .where(eq(financeProviderItems.userId, value.context.userId));
+    const keep = value.accounts[1];
+    if (!keep) throw new Error("Missing keeper");
+    await database.db.insert(financeTransactions).values([
+      {
+        accountId: value.target.id,
+        userId: value.context.userId,
+        amount: 100,
+        direction: "expense",
+        merchant: "Same",
+        transactionDate: "2026-09-13",
+        notes: "Keep my annotation",
+      },
+      {
+        accountId: value.target.id,
+        userId: value.context.userId,
+        amount: 200,
+        direction: "expense",
+        merchant: "Unique",
+        transactionDate: "2026-09-12",
+      },
+      {
+        accountId: keep.id,
+        userId: value.context.userId,
+        amount: 100,
+        direction: "expense",
+        merchant: "Same",
+        transactionDate: "2026-09-13",
+      },
+    ]);
+    return { ...value, keep };
+  }
+
+  it("previews duplicates and stops only the chosen record without deleting unique or annotated history", async () => {
+    const f = await duplicateFixture();
+    const preview = await f.service.previewDuplicate(f.target.id, f.keep.id, f.context);
+    expect(preview.data).toMatchObject({
+      keptTransactionCount: 1,
+      redundantTransactionCount: 2,
+      overlappingTransactionCount: 1,
+      uniqueRedundantTransactionCount: 1,
+      match: "possible",
+    });
+    const result = await f.service.resolveDuplicate(
+      f.target.id,
+      { keepAccountId: f.keep.id, revision: preview.data.revision, idempotencyKey: "resolve" },
+      f.context,
+    );
+    expect(result.data).toMatchObject({
+      includeInPlanning: false,
+      synchronization: { failureCode: "finance_account_disconnected" },
+    });
+    expect(
+      (
+        await database.db.select().from(financeAccounts).where(eq(financeAccounts.id, f.keep.id))
+      )[0],
+    ).toMatchObject({ status: "connected", includeInPlanning: true });
+    const history = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.accountId, f.target.id));
+    expect(history).toHaveLength(2);
+    expect(history.some((row) => row.notes === "Keep my annotation")).toBe(true);
+    expect(
+      await f.service.resolveDuplicate(
+        f.target.id,
+        { keepAccountId: f.keep.id, revision: preview.data.revision, idempotencyKey: "resolve" },
+        f.context,
+      ),
+    ).toEqual(result);
+  });
+
+  it("rejects stale previews when ledger evidence changes", async () => {
+    const f = await duplicateFixture();
+    const preview = await f.service.previewDuplicate(f.target.id, f.keep.id, f.context);
+    await database.db
+      .update(financeTransactions)
+      .set({ notes: "New annotation" })
+      .where(eq(financeTransactions.accountId, f.target.id));
+    await expect(
+      f.service.resolveDuplicate(
+        f.target.id,
+        { keepAccountId: f.keep.id, revision: preview.data.revision, idempotencyKey: "stale" },
+        f.context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(
+      (
+        await database.db.select().from(financeAccounts).where(eq(financeAccounts.id, f.target.id))
+      )[0]?.providerItemRecordId,
+    ).not.toBeNull();
+  });
+
+  it("does not compare or resolve another owner's account", async () => {
+    const f = await duplicateFixture();
+    const other = await fixture();
+    await expect(
+      f.service.previewDuplicate(f.target.id, other.target.id, f.context),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      f.service.resolveDuplicate(
+        f.target.id,
+        { keepAccountId: other.target.id, revision: "a".repeat(64), idempotencyKey: "foreign" },
+        f.context,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("does not resolve distinct masks or discard a record in favor of an unhealthy keeper", async () => {
+    const f = await duplicateFixture();
+    await database.db
+      .update(financeAccounts)
+      .set({ providerInstitutionId: "ins_test", providerAccountMask: "1111" })
+      .where(eq(financeAccounts.id, f.keep.id));
+    await database.db
+      .update(financeAccounts)
+      .set({ providerInstitutionId: "ins_test", providerAccountMask: "2222" })
+      .where(eq(financeAccounts.id, f.target.id));
+    await expect(
+      f.service.previewDuplicate(f.target.id, f.keep.id, f.context),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await database.db
+      .update(financeAccounts)
+      .set({ providerAccountMask: "1111", status: "needs_reauth" })
+      .where(eq(financeAccounts.id, f.keep.id));
+    await expect(
+      f.service.previewDuplicate(f.target.id, f.keep.id, f.context),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+  it("keeps renamed provider duplicates discoverable and rejects contradictory persistent identities", async () => {
+    const f = await duplicateFixture();
+    await database.db
+      .update(financeAccounts)
+      .set({
+        providerInstitutionId: "ins-fixture",
+        providerAccountMask: "1234",
+        providerAccountName: "Provider card",
+        providerPersistentAccountId: "persistent-same",
+      })
+      .where(eq(financeAccounts.userId, f.context.userId));
+    await database.db
+      .update(financeAccounts)
+      .set({ name: "My renamed card" })
+      .where(eq(financeAccounts.id, f.keep.id));
+    const listed = await f.service.list(f.context.userId, { includeExcluded: true });
+    expect(listed.accountSemantics.possibleDuplicateGroups).toContainEqual({
+      accountIds: [f.keep.id, f.target.id].sort(),
+    });
+    expect(listed.accountSemantics.trustworthy).toBe(false);
+    expect((await f.service.previewDuplicate(f.target.id, f.keep.id, f.context)).data.match).toBe(
+      "provider_identity",
+    );
+    await database.db
+      .update(financeAccounts)
+      .set({ providerPersistentAccountId: "persistent-other" })
+      .where(eq(financeAccounts.id, f.keep.id));
+    expect(
+      (await f.service.list(f.context.userId, { includeExcluded: true })).accountSemantics
+        .possibleDuplicateGroups,
+    ).toEqual([]);
+    await expect(
+      f.service.previewDuplicate(f.target.id, f.keep.id, f.context),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+  it("handles empty legacy history, self-comparison and missing keeper links without changing data", async () => {
+    const f = await duplicateFixture();
+    await database.db
+      .delete(financeTransactions)
+      .where(eq(financeTransactions.userId, f.context.userId));
+    await database.db.insert(financeAccounts).values({
+      userId: f.context.userId,
+      provider: "manual",
+      name: "Cash fixture",
+      institution: "Manual",
+      status: "manual",
+      syncState: "current",
+    });
+    await database.db
+      .update(financeAccounts)
+      .set({ providerPersistentAccountId: "legacy-same" })
+      .where(eq(financeAccounts.userId, f.context.userId));
+    expect(
+      (await f.service.list(f.context.userId, { includeExcluded: true })).accountSemantics
+        .possibleDuplicateGroups,
+    ).toContainEqual({ accountIds: [f.target.id, f.keep.id].sort() });
+    const preview = await f.service.previewDuplicate(f.target.id, f.keep.id, f.context);
+    expect(preview.data).toMatchObject({
+      keptTransactionCount: 0,
+      redundantTransactionCount: 0,
+      overlappingTransactionCount: 0,
+      uniqueRedundantTransactionCount: 0,
+    });
+    await expect(
+      f.service.previewDuplicate(f.target.id, f.target.id, f.context),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await database.db
+      .update(financeAccounts)
+      .set({ providerItemRecordId: null })
+      .where(eq(financeAccounts.id, f.keep.id));
+    await expect(
+      f.service.previewDuplicate(f.target.id, f.keep.id, f.context),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("rejects non-Plaid comparison rather than treating matching labels as connection evidence", async () => {
+    const f = await duplicateFixture();
+    const [manual] = await database.db
+      .insert(financeAccounts)
+      .values({
+        userId: f.context.userId,
+        provider: "manual",
+        name: "Fixture card",
+        institution: "Fixture",
+        status: "manual",
+        syncState: "current",
+      })
+      .returning();
+    if (!manual) throw new Error("Missing fixture");
+    await expect(f.service.previewDuplicate(manual.id, f.keep.id, f.context)).rejects.toMatchObject(
+      { code: "invalid_request" },
+    );
+  });
+
+  it("bounds the attended resolution lock set without deleting a large ledger", async () => {
+    const f = await duplicateFixture();
+    await database.db.execute(
+      sql`INSERT INTO finance_transactions (user_id, account_id, amount_cents, direction, merchant, transaction_date) SELECT ${f.context.userId}::uuid, ${f.target.id}::uuid, 100, 'expense', 'Bounded fixture', '2026-09-13' FROM generate_series(1, 50001)`,
+    );
+    await expect(
+      f.service.resolveDuplicate(
+        f.target.id,
+        { keepAccountId: f.keep.id, revision: "a".repeat(64), idempotencyKey: "large" },
+        f.context,
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("attended reconciliation"),
+    });
+    const [record] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, f.target.id));
+    expect(record?.includeInPlanning).toBe(true);
+    expect(record?.providerItemRecordId).not.toBeNull();
   });
 });

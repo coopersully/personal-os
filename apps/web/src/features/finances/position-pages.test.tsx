@@ -74,8 +74,12 @@ vi.mock("../../api.js", () => ({
   api,
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Unknown error"),
 }));
+const plaidConnectProps = vi.hoisted(() => vi.fn());
 vi.mock("./plaid-connect.js", () => ({
-  PlaidConnectButton: () => <button type="button">Connect bank</button>,
+  PlaidConnectButton: (props: unknown) => {
+    plaidConnectProps(props);
+    return <button type="button">Connect bank</button>;
+  },
 }));
 const envelope = (data: unknown) => ({
   data,
@@ -1637,4 +1641,70 @@ it("keeps account details tucked away and labels debt as an amount owed", async 
   fireEvent.click(screen.getByRole("button", { name: "Account options for Shared checking" }));
   expect(screen.getByRole("button", { name: "Edit Shared checking" })).toBeVisible();
   expect(screen.getByText(/Included in planning/)).toBeVisible();
+});
+
+it("opens comparison from a duplicate account row and restricts keep choices to its group", async () => {
+  const response = await api.listFinanceAccounts();
+  api.listFinanceAccounts.mockResolvedValue({
+    ...response,
+    accounts: [
+      account,
+      { ...account, id: "account-2", name: "Replacement checking" },
+      { ...account, id: "account-3", name: "Unrelated checking" },
+    ],
+    accountSemantics: {
+      ...response.accountSemantics,
+      possibleDuplicateGroups: [{ accountIds: [account.id, "account-2"] }],
+    },
+  });
+  mount(<FinanceAccountsPage />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Compare duplicates for Shared checking" }),
+  );
+  const dialog = screen.getByRole("dialog");
+  expect(within(dialog).getByRole("option", { name: /Replacement checking/ })).toBeVisible();
+  expect(
+    within(dialog).queryByRole("option", { name: /Unrelated checking/ }),
+  ).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Preview comparison" })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+it.each([
+  "finance_account_disconnected",
+  "finance_account_legacy_disconnected",
+])("uses fresh consent for a stopped %s record", async (failureCode) => {
+  api.listFinanceAccounts.mockResolvedValue({
+    accounts: [
+      {
+        ...account,
+        provider: "plaid",
+        status: "needs_reauth",
+        synchronization: {
+          ...account.synchronization,
+          state: "blocked",
+          recovery: "reconnect",
+          failureCode,
+        },
+      },
+    ],
+    accountSemantics: {
+      trustworthy: false,
+      possibleDuplicateGroups: [],
+      excludedAccountIds: [],
+      unresolvedOwnershipAccountIds: [],
+    },
+    totals: { cash: 0, debt: 0, investments: 0, netWorth: 0, otherAssets: 0 },
+  });
+  mount(<FinanceAccountsPage />);
+  await screen.findByRole("button", { name: "Connect bank" });
+  expect(plaidConnectProps).toHaveBeenCalledWith(
+    expect.objectContaining({ label: "Reconnect bank" }),
+  );
+  expect(
+    plaidConnectProps.mock.calls
+      .filter(([props]) => props.label === "Reconnect bank")
+      .every(([props]) => props.accountId === undefined),
+  ).toBe(true);
 });

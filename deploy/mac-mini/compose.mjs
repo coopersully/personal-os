@@ -216,6 +216,18 @@ export function environmentFiles(source, password) {
     source.REGISTRATION_MODE !== "invite"
   )
     throw new Error("Expected canonical production URLs and invite-only registration.");
+  if (source.PLAID_CLIENT_ID !== undefined || source.PLAID_SECRET !== undefined) {
+    if (
+      typeof source.PLAID_CLIENT_ID !== "string" ||
+      !source.PLAID_CLIENT_ID.trim() ||
+      typeof source.PLAID_SECRET !== "string" ||
+      !source.PLAID_SECRET.trim() ||
+      source.PLAID_ENV !== "production"
+    )
+      throw new Error(
+        "Production Plaid requires nonblank PLAID_CLIENT_ID and PLAID_SECRET with explicit PLAID_ENV=production. Use sandbox credentials only in an isolated local runtime.",
+      );
+  }
   const api = Object.fromEntries(Object.entries(source).filter(([key]) => apiKeys.has(key)));
   Object.assign(api, {
     NODE_ENV: "production",

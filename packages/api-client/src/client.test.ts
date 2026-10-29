@@ -3268,3 +3268,29 @@ describe("ilo API client", () => {
     });
   });
 });
+
+it("transports a duplicate preview and its exact reviewed resolution", async () => {
+  const fetch = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ outcome: "completed", data: {} }), {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+  const api = createApiClient({ baseUrl: "https://api.example.com", fetch });
+  await api.getFinanceAccountDuplicatePreview(id, accountId);
+  const previewCall = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  expect(String(previewCall[0])).toBe(
+    `https://api.example.com/v1/finances/accounts/${id}/duplicate-preview?keepAccountId=${accountId}`,
+  );
+  const input = {
+    keepAccountId: accountId,
+    revision: "a".repeat(64),
+    idempotencyKey: "reviewed-pair",
+  };
+  await api.resolveFinanceAccountDuplicate(id, input);
+  const resolveCall = fetch.mock.calls[1] as unknown as [string, RequestInit];
+  expect(String(resolveCall[0])).toBe(
+    `https://api.example.com/v1/finances/accounts/${id}/resolve-duplicate`,
+  );
+  expect(resolveCall[1]).toMatchObject({ method: "POST", body: JSON.stringify(input) });
+});

@@ -48,6 +48,8 @@ for (const width of [320, 390, 1100]) {
         return {
           height: element.getBoundingClientRect().height,
           titleY: titleElement.getBoundingClientRect().y,
+          titleBottom: titleElement.getBoundingClientRect().bottom,
+          contextY: context.getBoundingClientRect().y,
           contextBottom: context.getBoundingClientRect().bottom,
           fontSize: getComputedStyle(titleElement).fontSize,
           overflow: document.documentElement.scrollWidth > innerWidth,
@@ -60,7 +62,9 @@ for (const width of [320, 390, 1100]) {
       });
       expect(geometry.overflow, route).toBe(false);
       expect(geometry.height, route).toBe(104);
-      expect(geometry.titleY, route).toBeGreaterThanOrEqual(geometry.contextBottom);
+      if (width > 900)
+        expect(geometry.contextY, route).toBeGreaterThanOrEqual(geometry.titleBottom);
+      else expect(geometry.titleY, route).toBeGreaterThanOrEqual(geometry.contextBottom);
       if (width < 768) {
         expect(geometry.titleY, route).toBeGreaterThanOrEqual(geometry.contextBottom);
         expect(geometry.fontSize, route).toBe("17px");

@@ -59,4 +59,17 @@ describe("brand marks", () => {
     expect(fallback).toHaveAttribute("aria-hidden", "true");
     expect(fallback).toHaveTextContent("?");
   });
+  it("provides approved institution fallbacks when provider artwork is missing", () => {
+    for (const bank of [
+      "Chase",
+      "American Express",
+      "Bank of America",
+      "Wells Fargo",
+      "Discover",
+    ]) {
+      expect(hasBrandMark(bank)).toBe(true);
+    }
+    render(<BrandMark brand="Chase" />);
+    expect(screen.getByRole("img", { name: "Chase" }).tagName.toLowerCase()).toBe("svg");
+  });
 });

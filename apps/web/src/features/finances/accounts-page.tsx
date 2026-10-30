@@ -11,7 +11,7 @@ import { ActionButton as Button } from "@/components/action-button";
 import { QueryFeedback } from "@/components/async-state";
 import { CurrencyInput } from "@/components/currency-input";
 import { FloatingActionRegion, FloatingActions } from "@/components/floating-actions";
-import { HistoryIcon } from "@/components/icons";
+import { HistoryIcon, RefreshIcon } from "@/components/icons";
 import { MutationFeedback } from "@/components/mutation-feedback";
 import {
   ResponsiveDialog as Dialog,
@@ -37,7 +37,6 @@ import {
 } from "@/components/settings-field";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { ItemGroup } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
@@ -46,23 +45,22 @@ import { FeedbackForm } from "../../components/feedback-form.js";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { AccountDuplicateDialog } from "./account-duplicate-dialog";
+import { FinanceAccountsView } from "./accounts-view";
 import { financeAccountNeedsConnectionAttention } from "./attention";
+import { BankAccount } from "./bank-account";
 import { FinanceSection } from "./finance-section";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
 } from "./mutation-retry.js";
 import { PlaidConnectButton } from "./plaid-connect";
-import {
-  FinanceAccountRecord,
-  FinanceSourceState,
-  refreshFinancePosition,
-} from "./position-material.js";
+import { FinanceSourceState, refreshFinancePosition } from "./position-material.js";
 import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
 import { FinanceCreateButton } from "./workspace-header";
 
 export function FinanceAccountsPage() {
   const client = useQueryClient();
+  const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
   const workspace = useFinanceWorkspaceReadiness();
   const task = new URLSearchParams(useLocation().search).get("financeTask");
   const canImport =
@@ -123,63 +121,40 @@ export function FinanceAccountsPage() {
               <MutationFeedback feedback={sync.feedback} />
               <QueryFeedback query={health} title="Couldn’t load account coverage." />
               {accounts.data.accounts.length ? (
-                <ItemGroup aria-label="Financial accounts" className="finance-account-grid">
-                  {accounts.data.accounts.map((account) => {
-                    const duplicateIds = new Set(
-                      accounts.data.accountSemantics.possibleDuplicateGroups
-                        .filter((group) => group.accountIds.includes(account.id))
-                        .flatMap((group) => group.accountIds),
-                    );
-                    const duplicateNames = accounts.data.accounts
-                      .filter((other) => other.id !== account.id && duplicateIds.has(other.id))
-                      .map((other) => other.name);
-                    return (
-                      <div key={account.id} className="grid min-w-0 gap-3">
-                        <FinanceAccountRecord
-                          account={account}
-                          duplicateNames={duplicateNames}
-                          key={account.id}
-                          onEdit={() => setEditing(account)}
-                          attentionAction={
-                            financeAccountNeedsConnectionAttention(account) ? (
-                              account.status === "needs_reauth" ? (
-                                <PlaidConnectButton
-                                  {...([
-                                    "finance_account_disconnected",
-                                    "finance_account_legacy_disconnected",
-                                  ].includes(account.synchronization.failureCode ?? "")
-                                    ? {}
-                                    : { accountId: account.id })}
-                                  label="Reconnect bank"
-                                  onConnected={() => refreshFinancePosition(client)}
-                                />
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={sync.isPending}
-                                  onClick={() => sync.mutate(account.id)}
-                                >
-                                  Sync account
-                                </Button>
-                              )
-                            ) : undefined
-                          }
+                <FinanceAccountsView
+                  accounts={accounts.data.accounts}
+                  {...(me.data?.id ? { ownerId: me.data.id } : {})}
+                  duplicateGroups={accounts.data.accountSemantics.possibleDuplicateGroups}
+                  onEdit={setEditing}
+                  onCompareDuplicates={setComparing}
+                  attentionAction={(account, iconOnly = false) =>
+                    financeAccountNeedsConnectionAttention(account) ? (
+                      account.status === "needs_reauth" ? (
+                        <PlaidConnectButton
+                          {...([
+                            "finance_account_disconnected",
+                            "finance_account_legacy_disconnected",
+                          ].includes(account.synchronization.failureCode ?? "")
+                            ? {}
+                            : { accountId: account.id })}
+                          label={`Reconnect ${account.name}`}
+                          iconOnly={iconOnly}
+                          onConnected={() => refreshFinancePosition(client)}
                         />
-                        {account.provider === "plaid" && duplicateNames.length ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setComparing(account)}
-                            aria-label={`Compare duplicates for ${account.name}`}
-                          >
-                            Compare duplicates
-                          </Button>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </ItemGroup>
+                      ) : (
+                        <Button
+                          size={iconOnly ? "icon-sm" : "sm"}
+                          variant={iconOnly ? "ghost" : "outline"}
+                          aria-label={iconOnly ? `Sync ${account.name}` : undefined}
+                          disabled={sync.isPending}
+                          onClick={() => sync.mutate(account.id)}
+                        >
+                          {iconOnly ? <RefreshIcon aria-hidden="true" /> : "Sync account"}
+                        </Button>
+                      )
+                    ) : null
+                  }
+                />
               ) : (
                 <Empty>
                   <EmptyHeader>
@@ -360,6 +335,7 @@ function AccountEditor({
             }}
           >
             <ResponsiveDialogBody>
+              <BankAccount account={account} />
               <FieldSet disabled={save.isPending}>
                 <FieldGroup>
                   <Field>

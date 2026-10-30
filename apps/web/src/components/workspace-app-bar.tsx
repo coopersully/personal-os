@@ -35,15 +35,15 @@ export function WorkspaceAppBar({
       data-workspace={workspace}
       data-header-layout={title ? "sentence" : undefined}
     >
-      <div className="workspace-app-bar__identity" data-slot="workspace-app-bar-identity">
-        {identity}
-      </div>
       {title ? (
         <div className="workspace-app-bar__page-title" data-slot="workspace-app-bar-title">
           <WorkspaceBreadcrumbs workspace={workspace} />
           {title}
         </div>
       ) : null}
+      <div className="workspace-app-bar__identity" data-slot="workspace-app-bar-identity">
+        {identity}
+      </div>
       <div className="workspace-app-bar__context" data-slot="workspace-app-bar-context">
         {context}
         <WorkspaceHeaderControlsSlot placement="workspace" />

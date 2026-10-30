@@ -31,6 +31,7 @@ import {
   financeQuestionSchema,
   financeStatusSchema,
   type MaintenanceScope,
+  projectFinanceInstitutionBranding,
 } from "@personal-os/domain";
 import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
@@ -157,6 +158,8 @@ function serializeAccount(
   row: typeof financeAccounts.$inferSelect,
   source?: SynchronizationSource,
   sourceSynchronization?: ReturnType<typeof synchronization>,
+  branding?: FinanceAccount["institutionBranding"],
+  includeArtwork = false,
 ): FinanceAccount {
   const synchronizationSource = source ?? row;
   const legacyPlaid = row.provider === "plaid" && row.providerItemRecordId === null;
@@ -167,6 +170,8 @@ function serializeAccount(
     id: row.id,
     includeInPlanning: row.includeInPlanning,
     institution: row.institution,
+    accountMask: row.providerAccountMask,
+    institutionBranding: projectFinanceInstitutionBranding(branding, includeArtwork),
     kind: row.kind,
     kindSource: row.kindSource,
     lastSyncedAt: legacyPlaid ? null : iso(synchronizationSource.lastSyncedAt),
@@ -259,6 +264,7 @@ export function createFinanceStatusService({ db, now }: Options) {
       userId: string,
       scope: MaintenanceScope,
       executor?: Parameters<Parameters<Database["transaction"]>[0]>[0],
+      includeArtwork = false,
     ): Promise<FinanceStatus> {
       const asOfDate = now();
       const asOf = asOfDate.toISOString();
@@ -673,6 +679,10 @@ export function createFinanceStatusService({ db, now }: Options) {
             account.providerItemRecordId
               ? providerItemSynchronizationById.get(account.providerItemRecordId)
               : effectiveSynchronization(account, asOfDate, account.provider === "manual"),
+            account.providerItemRecordId
+              ? providerItemById.get(account.providerItemRecordId)?.institutionBranding
+              : null,
+            includeArtwork,
           ),
         );
         const planningAccountTotals = summarizeFinanceAccounts(serializedAccounts).totals;

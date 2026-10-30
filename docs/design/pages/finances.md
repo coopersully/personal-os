@@ -743,7 +743,7 @@ Keep progress confirmation and exploration direct; place pause/resume, completio
 the goal's contextual menu. Completion/removal retain their confirmation dialogs. Goal editing uses
 shared Settings rows and checked priority choices without changing save, version or error behavior.
 
-Account rows align institution and account identity at the start, with type and recorded current balance at the end. Institution and type sit below the name. A shared Popover behind the account options button contains ownership, source observation details and edit/transaction actions. Debt uses destructive text and an Amount owed label; attention and recovery actions stay visible. Cash flow occurrences use distinct shared card surfaces, end-aligned expected amounts, and explicit money-in/money-out labels.
+Account rows align institution and account identity at the start, with type and recorded current balance at the end. Institution and type sit below the name. Standalone account summaries retain a shared Popover for ownership, source observations and secondary commands. The Accounts inventory exposes Edit, Transactions and applicable reconnect/sync commands directly in the standard pinned Actions column; ownership and source observations remain available as configurable table columns and in the account editor. Debt uses destructive text and an Amount owed label; attention and recovery actions stay visible. Cash flow occurrences use distinct shared card surfaces, end-aligned expected amounts, and explicit money-in/money-out labels.
 
 The shared title sentence starts with the current Finance page name. On mobile it occupies the second header row beneath the utility controls; desktop places both on one row. The root Finance route is labelled Overview. See [shared header rows](../system.md#shared-workspace-header-rows).
 
@@ -843,3 +843,71 @@ The overview starts with Spent this month, then Cash and Net worth. Compose the 
 grid variant, including its loading state: two equal columns on mobile and three on wide desktop.
 Keep the exact-value accessibility text, scope descriptions and existing drill-down destinations.
 Other metric rails retain their established presentation unless their page contract changes.
+
+### Account inventory and product identity
+
+Accounts uses a joined search/filter/sort control in the shared workspace header and the shared
+`DataTable` for the complete authorized inventory. Search covers name, institution, reported
+subtype, product type, provider and ownership. Combine account type, institution, connection and
+planning-inclusion filters; preserve unrelated navigation parameters and offer a clear-scope action
+for no matches. Filtering does not change financial totals or planning inclusion. Sort by name,
+institution, type or balance within currency; unknown balances follow known balances.
+
+Credit cards matching the current scope appear first in the shared `KeyMetrics` carousel, with
+account identity, amount owed, recovery and configuration access. The complete account table below
+retains credit cards so all account types have the same inspect, repair and export workflows.
+Table Options saves column visibility/order/width, row spacing and wrapping per owner on this
+device. Mobile uses the shared labelled record view. Account repair, configuration and transactions
+remain accessible; source, ownership, planning inclusion and duplicate warnings retain their
+existing authority.
+
+Product type comes from provider type/subtype, separately from the financial planning kind.
+Explicit credit card, line-of-credit, loan, depository and investment metadata take precedence over
+planning overrides. Do not infer a debit card from a checking account or a credit card from debt.
+When provider evidence is absent, show the known financial kind (cash, debt, investments or other
+assets). Plaid's Accounts contract supplies account type/subtype, not proof that a debit card was
+issued; exact card artwork remains unavailable in the current application contract.
+
+
+### Institution branding and financial cards
+
+`FinancialAccountCard` is the shared full-size, bank-branded card presentation; `BankAccount`
+composes the same `InstitutionLogo` in compact identities across tables, repair, selectors and
+settings. Credit cards lead Accounts in the shared carousel, with configuration/recovery controls
+outside the branded card. Preserve institution logo colors and choose readable foreground contrast
+against the institution primary color. A subtle tonal finish, rounded physical-card silhouette and
+decorative chip establish the card appearance without implying exact issuer artwork or chip
+capabilities. Never approximate trademarks. Long names and
+unusual balances wrap without horizontal page overflow.
+
+Plaid institution artwork and colors describe the institution, not the exact physical card product.
+Show only provider-supplied masked account digits; they are account identifiers, not necessarily
+card-number digits. Never manufacture a network, cardholder, expiration or CVC. A missing or
+broken image falls back to the existing approved mark/monogram; missing colors use theme tokens.
+Checking does not prove a debit card exists; Plaid's explicit prepaid subtype may be labeled debit.
+
+Unknown credit products remain debt accounts until an explicit subtype establishes a card or line
+of credit. Empty filter scope retains discovery/recovery controls and omits table chrome. Account
+masks use the shared optional `accountMask` contract. Logo bitmaps are requested for human display;
+agent and background context projections retain compact metadata without bitmap payloads.
+
+
+Card products use FinancialAccountCard at full carousel size. Account selectors, tables, setup
+and repair share the logo-led AccountPreview identity. The Cards section includes explicitly identified
+credit and debit cards; a bank account alone does not qualify. Card options use a labeled Details
+button inside the card header, never an orphaned ellipsis underneath. Type cells use secondary
+badges with decorative product icons, including on mobile. Bundled institution marks have a
+transparent canvas and stable dimensions independent of enclosing button icon rules; provider
+images retain their own colors with contained sizing and padded neutral backing. Monograms
+remain a neutral fallback. Long identities and balances may grow the card rather than clip.
+
+Row identities reserve one 40 × 40px (1:1) footprint. Show the institution logo or neutral
+monogram as the primary artwork, with a small semantic account-type icon at the bottom right.
+Do not render miniature cards or chip drawings in account rows. In the Accounts table, omit
+type/subtype from the account identity text because the separate Type badge already supplies it;
+keep the institution, known mask and source details. Other identity contexts may retain type text.
+
+Account-row logo canvases share the same rounded shape for supplied artwork and fallback
+monograms. Apply a subtle validated institution-color tint over the semantic secondary surface;
+keep original image colors and a neutral readable corner glyph. Default desktop and mobile
+field order puts Balance before Type; saved custom desktop column ordering remains user-owned.

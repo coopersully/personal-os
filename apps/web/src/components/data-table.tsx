@@ -39,18 +39,21 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 function isRecordClick(event: React.MouseEvent<HTMLElement>) {
   return (
     !(event.target as Element).closest(
-      'button, a, input, select, textarea, [role="button"], [role="checkbox"]',
+      'button, a, input, select, textarea, [role="button"], [role="checkbox"], [data-slot="data-table-actions"]',
     ) && !window.getSelection()?.toString()
   );
 }
 
 export type DataColumn<T> = {
   id: string;
+  /** Commands stay visible and pinned at the logical trailing edge. */
+  kind?: "data" | "actions";
   label: string;
   value: (row: T) => string | number;
   cell?: (row: T) => ReactNode;
   mobileCell?: (row: T) => ReactNode;
   mobileHidden?: boolean;
+  mobileFullWidth?: boolean;
   mobileOrder?: number;
   primary?: boolean;
   header?: ReactNode;
@@ -92,10 +95,29 @@ export function csvCell(value: string | number) {
     typeof value === "string" && /^[=+\-@\t\r]/.test(value) ? `'${value}` : String(value);
   return `"${text.replaceAll('"', '""')}"`;
 }
+/** Saved layouts may predate an Actions column or have hidden/reordered it. */
+function columnOrder<T>(order: string[], columns: DataColumn<T>[]) {
+  const ids = [...new Set([...order, ...columns.map((column) => column.id)])];
+  return [
+    ...ids.filter((id) => columns.some((column) => column.id === id && column.kind !== "actions")),
+    ...columns.filter((column) => column.kind === "actions").map((column) => column.id),
+  ];
+}
+
+export function DataTableActions({ children, label }: { children: ReactNode; label: string }) {
+  return (
+    <fieldset data-slot="data-table-actions" aria-label={label} className="data-table-actions">
+      {children}
+    </fieldset>
+  );
+}
+
 function defaults<T>(columns: DataColumn<T>[]): View {
   return {
-    order: columns.map((c) => c.id),
-    hidden: columns.filter((c) => c.defaultHidden && !c.primary).map((c) => c.id),
+    order: columnOrder([], columns),
+    hidden: columns
+      .filter((c) => c.defaultHidden && !c.primary && c.kind !== "actions")
+      .map((c) => c.id),
     density: "compact",
     wrap: false,
     sizing: {},
@@ -111,9 +133,11 @@ function readView<T>(key: string, columns: DataColumn<T>[]): View {
       ...new Set<string>(data.order.filter((id: unknown) => typeof id === "string" && ids.has(id))),
     ];
     return {
-      order: [...order, ...fallback.order.filter((id) => !order.includes(id))],
+      order: columnOrder(order, columns),
       hidden: data.hidden.filter(
-        (id: unknown) => typeof id === "string" && columns.some((c) => c.id === id && !c.primary),
+        (id: unknown) =>
+          typeof id === "string" &&
+          columns.some((c) => c.id === id && !c.primary && c.kind !== "actions"),
       ),
       density: data.density === "comfortable" ? "comfortable" : "compact",
       wrap: data.wrap === true,
@@ -172,11 +196,12 @@ function DataTableState<T>({
     () =>
       columns.map((column) => ({
         id: column.id,
-        header: () => column.header ?? column.label,
+        header: () => (column.kind === "actions" ? "Actions" : (column.header ?? column.label)),
         accessorFn: column.value,
-        size: column.width ?? 160,
+        size: column.kind === "actions" ? Math.min(160, column.width ?? 80) : (column.width ?? 160),
+        enableResizing: column.kind !== "actions",
         minSize: 80,
-        maxSize: 600,
+        maxSize: column.kind === "actions" ? 160 : 600,
         cell: ({ row }) =>
           column.primary ? (
             <Button
@@ -205,9 +230,17 @@ function DataTableState<T>({
     columnResizeMode: "onChange",
     enableRowSelection: true,
     state: {
-      columnOrder: view.order,
-      columnVisibility: Object.fromEntries(view.hidden.map((id) => [id, false])),
-      columnSizing: view.sizing,
+      columnOrder: columnOrder(view.order, columns),
+      columnVisibility: Object.fromEntries(
+        view.hidden
+          .filter((id) => !columns.some((column) => column.id === id && column.kind === "actions"))
+          .map((id) => [id, false]),
+      ),
+      columnSizing: Object.fromEntries(
+        Object.entries(view.sizing).filter(
+          ([id]) => !columns.some((column) => column.id === id && column.kind === "actions"),
+        ),
+      ),
       rowSelection: selectedIds,
     },
     onColumnSizingChange: (updater) =>
@@ -221,11 +254,13 @@ function DataTableState<T>({
   const selected =
     selectionControls?.selected ?? table.getSelectedRowModel().rows.map((row) => row.original);
   const wrapRow = renderRow ?? ((_row: T, children: ReactNode) => children);
-  const ordered = view.order.flatMap((id) => {
+  const ordered = columnOrder(view.order, columns).flatMap((id) => {
     const c = columns.find((item) => item.id === id);
     return c ? [c] : [];
   });
-  const visible = ordered.filter((column) => !view.hidden.includes(column.id));
+  const visible = ordered.filter(
+    (column) => column.kind !== "actions" && !view.hidden.includes(column.id),
+  );
   function exportPage() {
     const data = selected.length ? selected : rows;
     const csv = [
@@ -256,11 +291,15 @@ function DataTableState<T>({
       const other = index + delta;
       if (other < 0 || other >= order.length) return old;
       [order[index], order[other]] = [order[other]!, order[index]!];
-      return { ...old, order };
+      return { ...old, order: columnOrder(order, columns) };
     });
   }
   return (
-    <section className="flex min-w-0 flex-col gap-2" aria-label={`${label} view`}>
+    <section
+      data-has-actions={columns.some((column) => column.kind === "actions") || undefined}
+      className="flex min-w-0 flex-col gap-2"
+      aria-label={`${label} view`}
+    >
       <div className="flex min-w-0 items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {selected.length ? (
@@ -350,30 +389,46 @@ function DataTableState<T>({
               <Reorder.Group
                 as="div"
                 axis="y"
-                values={view.order}
+                values={view.order.filter(
+                  (id) => !columns.some((column) => column.id === id && column.kind === "actions"),
+                )}
                 layoutScroll
                 className="flex max-h-[45dvh] min-w-0 flex-col overflow-x-hidden overflow-y-auto pr-3"
-                onReorder={(order) => setView((old) => ({ ...old, order }))}
+                onReorder={(order) =>
+                  setView((old) => ({ ...old, order: columnOrder(order, columns) }))
+                }
               >
-                {ordered.map((column, index) => (
-                  <ColumnOption
-                    key={column.id}
-                    column={column}
-                    index={index}
-                    count={ordered.length}
-                    visible={!view.hidden.includes(column.id)}
-                    onMove={(offset) => move(column.id, offset)}
-                    onVisibleChange={(checked) =>
-                      setView((old) => ({
-                        ...old,
-                        hidden: checked
-                          ? old.hidden.filter((id) => id !== column.id)
-                          : [...old.hidden, column.id],
-                      }))
-                    }
-                  />
-                ))}
+                {ordered
+                  .filter((column) => column.kind !== "actions")
+                  .map((column, index) => (
+                    <ColumnOption
+                      key={column.id}
+                      column={column}
+                      index={index}
+                      count={ordered.filter((column) => column.kind !== "actions").length}
+                      visible={!view.hidden.includes(column.id)}
+                      onMove={(offset) => move(column.id, offset)}
+                      onVisibleChange={(checked) =>
+                        setView((old) => ({
+                          ...old,
+                          hidden: checked
+                            ? old.hidden.filter((id) => id !== column.id)
+                            : [...old.hidden, column.id],
+                        }))
+                      }
+                    />
+                  ))}
               </Reorder.Group>
+              {ordered
+                .filter((column) => column.kind === "actions")
+                .map((column) => (
+                  <Item key={column.id} size="xs" className="min-w-0 justify-between">
+                    <span className="text-sm">Actions</span>
+                    <span className="text-xs text-muted-foreground">
+                      Always visible · pinned to end
+                    </span>
+                  </Item>
+                ))}
             </ResponsiveDialogBody>
             <ResponsiveDialogFooter>
               <Button variant="secondary" onClick={() => setView(defaults(columns))}>
@@ -414,7 +469,7 @@ function DataTableState<T>({
                   )}
                   <dl
                     className={cn(
-                      "grid min-w-0 flex-1 grid-cols-2",
+                      "grid min-w-0 flex-1 grid-cols-1 min-[380px]:grid-cols-2",
                       view.density === "compact" ? "gap-x-3 gap-y-1.5" : "gap-3",
                     )}
                   >
@@ -422,23 +477,38 @@ function DataTableState<T>({
                       .getVisibleCells()
                       .filter(
                         (cell) =>
+                          columns.find((column) => column.id === cell.column.id)?.kind ===
+                            "actions" ||
                           !columns.find((column) => column.id === cell.column.id)?.mobileHidden,
                       )
                       .sort((a, b) => {
                         const left = columns.find((column) => column.id === a.column.id);
                         const right = columns.find((column) => column.id === b.column.id);
                         const rank = (column: DataColumn<T> | undefined) =>
-                          column?.primary ? -1 : (column?.mobileOrder ?? Number.MAX_SAFE_INTEGER);
+                          column?.primary
+                            ? -1
+                            : column?.kind === "actions"
+                              ? Number.POSITIVE_INFINITY
+                              : (column?.mobileOrder ?? Number.MAX_SAFE_INTEGER);
                         return rank(left) - rank(right);
                       })
                       .map((cell) => (
                         <div
                           className={cn(
                             "min-w-0",
-                            columns.find((column) => column.id === cell.column.id)?.primary
-                              ? "col-span-2"
+                            columns.find((column) => column.id === cell.column.id)
+                              ?.mobileFullWidth ||
+                              columns.find((column) => column.id === cell.column.id)?.primary ||
+                              columns.find((column) => column.id === cell.column.id)?.kind ===
+                                "actions"
+                              ? "col-span-full"
                               : view.density === "compact" &&
                                   "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2",
+                            (columns.find((column) => column.id === cell.column.id)?.kind ===
+                              "actions" ||
+                              columns.find((column) => column.id === cell.column.id)
+                                ?.mobileFullWidth) &&
+                              "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2",
                           )}
                           key={cell.id}
                         >
@@ -449,13 +519,21 @@ function DataTableState<T>({
                                 : "max-w-20 truncate text-sm leading-5 text-muted-foreground"
                             }
                           >
-                            {columns.find((column) => column.id === cell.column.id)?.label ??
-                              cell.column.id}
+                            {columns.find((column) => column.id === cell.column.id)?.kind ===
+                            "actions"
+                              ? "Actions"
+                              : (columns.find((column) => column.id === cell.column.id)?.label ??
+                                cell.column.id)}
                           </dt>
                           <dd
                             className={cn(
                               "min-w-0 text-sm leading-5",
-                              view.wrap ? "whitespace-pre-wrap break-words" : "truncate",
+                              columns.find((column) => column.id === cell.column.id)?.kind ===
+                                "actions"
+                                ? "whitespace-normal"
+                                : view.wrap
+                                  ? "whitespace-pre-wrap break-words"
+                                  : "truncate",
                             )}
                           >
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -495,6 +573,7 @@ function DataTableState<T>({
                 {table.getHeaderGroups()[0]?.headers.map((header) => (
                   <TableHead
                     key={header.id}
+                    data-column-kind={columns.find((column) => column.id === header.id)?.kind}
                     className={cn(
                       "relative",
                       columns.find((column) => column.id === header.id)?.align === "right" &&
@@ -505,28 +584,33 @@ function DataTableState<T>({
                     style={{ width: header.getSize() }}
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
-                    {/* biome-ignore lint/a11y/useSemanticElements: Focusable column-resize widget rather than a thematic break. */}
-                    <div
-                      role="separator"
-                      aria-label={`Resize ${columns.find((column) => column.id === header.id)?.label ?? header.id}`}
-                      aria-orientation="vertical"
-                      tabIndex={0}
-                      aria-valuenow={header.getSize()}
-                      aria-valuemin={80}
-                      aria-valuemax={600}
-                      onMouseDown={header.getResizeHandler()}
-                      onTouchStart={header.getResizeHandler()}
-                      onKeyDown={(event) => {
-                        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-                        event.preventDefault();
-                        const width = Math.min(
-                          600,
-                          Math.max(80, header.getSize() + (event.key === "ArrowRight" ? 16 : -16)),
-                        );
-                        table.setColumnSizing((old) => ({ ...old, [header.id]: width }));
-                      }}
-                      className="absolute inset-y-0 right-0 w-2 touch-none cursor-col-resize bg-border/40 opacity-0 hover:opacity-100 focus:opacity-100"
-                    />
+                    {header.column.getCanResize() ? (
+                      // biome-ignore lint/a11y/useSemanticElements: Focusable column-resize widget rather than a thematic break.
+                      <div
+                        role="separator"
+                        aria-label={`Resize ${columns.find((column) => column.id === header.id)?.label ?? header.id}`}
+                        aria-orientation="vertical"
+                        tabIndex={0}
+                        aria-valuenow={header.getSize()}
+                        aria-valuemin={header.column.columnDef.minSize ?? 80}
+                        aria-valuemax={header.column.columnDef.maxSize ?? 600}
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onKeyDown={(event) => {
+                          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                          event.preventDefault();
+                          const width = Math.min(
+                            header.column.columnDef.maxSize ?? 600,
+                            Math.max(
+                              header.column.columnDef.minSize ?? 80,
+                              header.getSize() + (event.key === "ArrowRight" ? 16 : -16),
+                            ),
+                          );
+                          table.setColumnSizing((old) => ({ ...old, [header.id]: width }));
+                        }}
+                        className="absolute inset-y-0 right-0 w-2 touch-none cursor-col-resize bg-border/40 opacity-0 hover:opacity-100 focus:opacity-100"
+                      />
+                    ) : null}
                   </TableHead>
                 ))}
               </TableRow>
@@ -576,13 +660,20 @@ function DataTableState<T>({
                     {row.getVisibleCells().map((cell) => (
                       <TableCell
                         key={cell.id}
+                        data-column-kind={
+                          columns.find((column) => column.id === cell.column.id)?.kind
+                        }
                         className={cn(
                           columns.find((column) => column.id === cell.column.id)?.align ===
                             "right" && "text-right",
                           columns.find((column) => column.id === cell.column.id)?.align ===
                             "center" && "text-center",
                           view.density === "compact" ? "py-1" : "py-3",
-                          view.wrap ? "whitespace-pre-wrap break-words" : "truncate",
+                          columns.find((column) => column.id === cell.column.id)?.kind === "actions"
+                            ? "whitespace-normal"
+                            : view.wrap
+                              ? "whitespace-pre-wrap break-words"
+                              : "truncate",
                         )}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}

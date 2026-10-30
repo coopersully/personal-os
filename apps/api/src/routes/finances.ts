@@ -438,6 +438,8 @@ export function registerFinanceRoutes({
       status: await financeStatus.getFinanceStatus(
         context.get("principal").userId,
         maintenanceScopeQuerySchema.parse(context.req.query()),
+        undefined,
+        context.get("principal").actorType === "user",
       ),
     }),
   );
@@ -532,7 +534,10 @@ export function registerFinanceRoutes({
   );
   app.get("/v1/finances/guided-setup", async (context) =>
     context.json({
-      setup: await finances.getGuidedSetupContext(context.get("principal").userId),
+      setup: await finances.getGuidedSetupContext(
+        context.get("principal").userId,
+        context.get("principal").actorType === "user",
+      ),
     }),
   );
   app.get("/v1/finances/profile", async (context) =>
@@ -1026,6 +1031,7 @@ export function registerFinanceRoutes({
       await finances.listFinanceAccounts(
         context.get("principal").userId,
         financeAccountQuerySchema.parse(context.req.query()),
+        context.get("principal").actorType === "user",
       ),
     ),
   );

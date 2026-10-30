@@ -2985,7 +2985,9 @@ describe("Personal OS web app", () => {
     const browser = userEvent.setup();
 
     expect(await screen.findByText("Connected")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Apple" })).toBeInTheDocument();
+    expect(
+      screen.getByText("iCloud", { selector: ".account-profile__details" }),
+    ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Continue" }));
     expect(await screen.findByText("1 account connected")).toBeInTheDocument();
   });

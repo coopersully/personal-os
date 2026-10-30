@@ -287,6 +287,9 @@ it("surfaces financial sync freshness and routes to financial accounts", async (
       {
         id: "bank",
         name: "Fixture Bank",
+        institution: "Fixture Credit Union",
+        kind: "cash",
+        providerSubtype: "checking",
         provider: "plaid",
         status: "connected",
         synchronization: { state: "stale", recovery: null },

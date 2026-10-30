@@ -1,8 +1,14 @@
+import { financeInstitutionBrandingSchema } from "@personal-os/domain";
+import { useState } from "react";
 import {
+  siAmericanexpress,
   siAnthropic,
   siApple,
+  siBankofamerica,
+  siChase,
   siClaude,
   siClaudecode,
+  siDiscover,
   siGithubcopilot,
   siGooglegemini,
   siIcloud,
@@ -11,6 +17,7 @@ import {
   siPaypal,
   siPerplexity,
   siVenmo,
+  siWellsfargo,
   siX,
   siZelle,
 } from "simple-icons";
@@ -93,6 +100,14 @@ const googleMark: BrandMark = {
  * entitled to ship.
  */
 const brandMarks: Record<string, BrandMark> = {
+  // Institution fallbacks from the installed simple-icons release. Provider PNGs take precedence.
+  "american express": monochrome(siAmericanexpress),
+  amex: monochrome(siAmericanexpress),
+  "bank of america": monochrome(siBankofamerica),
+  chase: monochrome(siChase),
+  "jpmorgan chase": monochrome(siChase),
+  discover: monochrome(siDiscover),
+  "wells fargo": monochrome(siWellsfargo),
   anthropic: monochrome(siAnthropic),
   apple: monochrome(siApple),
   claude: monochrome(siClaude),
@@ -137,16 +152,32 @@ export function BrandMark({
   className,
   decorative = false,
   label,
+  imageUrl,
 }: {
+  imageUrl?: string | null;
   brand: string;
   className?: string;
   decorative?: boolean;
   label?: string;
 }) {
+  const [failedImage, setFailedImage] = useState<string | null>(null);
+  const validImage = financeInstitutionBrandingSchema.shape.logo.safeParse(imageUrl);
   const mark = brandMarks[normalize(brand)];
   const name = label ?? mark?.title ?? brand;
   const monogram = brand.trim().slice(0, 1).toUpperCase() || "?";
 
+  if (validImage.success && validImage.data && failedImage !== validImage.data) {
+    const source = validImage.data;
+    return (
+      <img
+        src={source}
+        alt={decorative ? "" : name}
+        aria-hidden={decorative || undefined}
+        className={className}
+        onError={() => setFailedImage(source)}
+      />
+    );
+  }
   if (!mark) {
     return decorative ? (
       <span aria-hidden="true" className={className} data-brand-monogram="">

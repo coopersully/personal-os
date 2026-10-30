@@ -257,7 +257,7 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
     await revealWorkspaceOptions(page);
     await expect(page.getByRole("button", { name: "Display", exact: true })).toBeFocused();
     await expect.poll(() => header.evaluate((el) => el.getBoundingClientRect().height)).toBe(104);
-    // Workspace discovery stays above page orientation and directly accessible page controls.
+    // Desktop page orientation precedes discovery; mobile preserves its compact rows.
     const searchBox = await header
       .getByRole("combobox", { name: "Search Tasks", exact: true })
       .boundingBox();
@@ -265,13 +265,14 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
     const pageActions = header.locator('[data-slot="workspace-app-bar-page-actions"]');
     const actionsBox = await pageActions.boundingBox();
     if (!searchBox || !titleBox || !actionsBox) throw new Error("Missing Tasks header row");
-    expect(titleBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height);
+    const desktop = (page.viewportSize()?.width ?? 0) > 900;
+    if (desktop) expect(searchBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
+    else expect(titleBox.y).toBeGreaterThanOrEqual(searchBox.y + searchBox.height);
     expect(titleBox.height).toBe(44);
-    const rowCenter = titleBox.y + titleBox.height / 2;
+    const controlRow = desktop ? searchBox : titleBox;
+    const rowCenter = controlRow.y + controlRow.height / 2;
     expect(actionsBox.y + actionsBox.height / 2).toBeCloseTo(rowCenter, 0);
-    expect(actionsBox.y).toBeGreaterThanOrEqual(titleBox.y);
-    expect(actionsBox.y + actionsBox.height).toBeLessThanOrEqual(titleBox.y + titleBox.height + 1);
-    expect(actionsBox.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width - 1);
+    expect(actionsBox.x).toBeGreaterThanOrEqual(controlRow.x + controlRow.width - 1);
     await expect(header.getByRole("button", { name: "View options", exact: true })).toHaveCount(0);
     for (const name of ["Filters", "Sort", "Display"]) {
       const control = pageActions.getByRole("button", {

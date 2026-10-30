@@ -38,6 +38,7 @@ import {
 } from "./connector-sync-health.js";
 import { AppError } from "./errors.js";
 import { financeAccountKindFromProviderType } from "./finance/account-semantics.js";
+import { refreshInstitutionBranding } from "./finance/institution-branding.js";
 import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { decryptJson } from "./security.js";
 import type { Principal, RequestLog } from "./types.js";
@@ -865,6 +866,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
 
   async function projectAccounts(input: {
     accounts: PlaidAccountSnapshot[];
+    brandingUpdate: Awaited<ReturnType<typeof refreshInstitutionBranding>>;
     claim: ActiveClaim;
     context: FinanceProviderItemSyncContext;
     itemId: string;
@@ -877,6 +879,12 @@ export function createFinanceProviderItemSyncService(options: Options) {
         input.claim,
         input.context.principal.userId,
       );
+      if (input.brandingUpdate) {
+        await tx
+          .update(financeProviderItems)
+          .set(input.brandingUpdate)
+          .where(eq(financeProviderItems.id, input.itemId));
+      }
       const snapshotByProviderId = new Map(
         input.accounts.map((account) => [account.accountId, account]),
       );
@@ -1178,8 +1186,21 @@ export function createFinanceProviderItemSyncService(options: Options) {
       await preserveProgress(onProgress);
       const accountSnapshots = await getPlaid().getAccounts(accessToken);
       await preserveProgress(onProgress);
+      const institutionId = accountSnapshots[0]?.institutionId ?? undefined;
+      const provider = getPlaid();
+      const brandingUpdate =
+        provider.getInstitutionBranding && institutionId !== undefined
+          ? await refreshInstitutionBranding(
+              claimed.item,
+              institutionId,
+              now(),
+              provider.getInstitutionBranding.bind(provider),
+            )
+          : null;
+      await preserveProgress(onProgress);
       const accountProjection = await projectAccounts({
         accounts: accountSnapshots,
+        brandingUpdate,
         claim: claimed.claim,
         context,
         itemId,

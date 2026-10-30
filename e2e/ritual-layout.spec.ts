@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { useProductionStyles } from "./production-styles.js";
 
 async function fillsViewport(page: Page, layer: Locator) {
   await expect(layer).toBeVisible();
@@ -48,6 +49,7 @@ test("morning and evening previews fill the viewport independently of the ritual
     await page.getByRole("button", { name: `Preview ${kind} Ritual`, exact: true }).click();
     const preview = page.getByRole("dialog", { name: "Ritual preview" });
     await expect(preview).toBeVisible();
+    await useProductionStyles(page);
     const sizes = info.project.use.isMobile
       ? [
           { width: 390, height: 844 },

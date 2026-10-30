@@ -2,6 +2,30 @@ import { z } from "zod";
 import { type FinanceBudgetVersion, financeBudgetVersionSchema } from "./budget.js";
 import type { FinanceToolResult } from "./common.js";
 
+/** Month-specific approved plan context; category limits are a separate projection. */
+export const financeBudgetPlanSummarySchema = z.object({
+  id: z.uuid(),
+  planId: z.uuid(),
+  version: z.int().positive(),
+  effectiveFrom: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u),
+  status: z.enum(["active", "retired", "proposed", "incomplete"]),
+  approvedAt: z.iso.datetime().nullable(),
+  profileVersionId: z.uuid().nullable(),
+  expectedResources: z.number().finite(),
+  allocatedTotal: z.number().finite(),
+  spendingTotal: z.number().finite(),
+});
+export const financeBudgetPlanContextSchema = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u),
+  timezone: z.string(),
+  state: z.enum(["approved", "missing"]),
+  recovery: z.enum(["none", "create_proposal", "review_proposal", "revise_proposal"]),
+  current: financeBudgetPlanSummarySchema.nullable(),
+  previous: financeBudgetPlanSummarySchema.nullable(),
+  upcoming: financeBudgetPlanSummarySchema.nullable(),
+});
+export type FinanceBudgetPlanContext = z.infer<typeof financeBudgetPlanContextSchema>;
+
 export const financeBudgetApprovalReadinessSchema = z.object({
   ready: z.boolean(),
   code: z.enum([
@@ -21,6 +45,7 @@ export const financeBudgetApprovalReadinessSchema = z.object({
 export type FinanceBudgetApprovalReadiness = z.infer<typeof financeBudgetApprovalReadinessSchema>;
 export type FinanceBudgetReadResult = FinanceToolResult<FinanceBudgetVersion | null> & {
   approvalReadiness: FinanceBudgetApprovalReadiness;
+  planContext?: FinanceBudgetPlanContext;
 };
 
 /** Data prerequisites only. Approval still checks authenticated authority and locks current state. */

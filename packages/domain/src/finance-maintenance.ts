@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
+import { financeBudgetPlanContextSchema } from "./finance/budget-approval.js";
 import { financeConversationCausalClaimSchema } from "./finance/conversation.js";
 import { financePositionEvidenceCheckpointSchema } from "./finance/workflow-contracts.js";
 import {
@@ -108,6 +109,8 @@ export const financeStatusDetailsSchema = z.object({
   activeMotives: z.array(motiveSchema),
   budget: z.object({
     approved: z.boolean(),
+    planContext: financeBudgetPlanContextSchema.optional(),
+    categoryLimitTotal: nullableMoneySchema.optional(),
     month: z.string().regex(/^\d{4}-\d{2}$/u),
     total: nullableMoneySchema,
   }),

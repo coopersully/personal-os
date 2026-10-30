@@ -7,8 +7,10 @@ import {
   executionPolicySettings,
   financeAccounts,
   financeAgentActionReviews,
+  financeBudgetAllocations,
   financeBudgetPlans,
   financeBudgets,
+  financeBudgetVersions,
   financeCategories,
   financeIncomeStreams,
   financeProfiles,
@@ -27,6 +29,8 @@ import {
 import { applyFinanceCategorizationsInputSchema, financeQuestionSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, inArray } from "drizzle-orm";
+import { readBudgetPlanContext } from "./finance/budget-plan-projection.js";
+import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
 
@@ -65,14 +69,14 @@ describe.sequential("Finance status service", () => {
     return user.id;
   }
 
-  function service() {
+  function service(at = now) {
     return createFinanceStatusService({
       assistant: {} as never,
       db: database.db,
       finances: {} as never,
       goals: {} as never,
       maintenance: {} as never,
-      now: () => now,
+      now: () => at,
     });
   }
 
@@ -122,6 +126,288 @@ describe.sequential("Finance status service", () => {
     if (!created) throw new Error("Fixture account was not created.");
     return created;
   }
+
+  it("uses the approved monthly plan without confusing savings with spending limits", async () => {
+    const userId = await makeUser("Canonical budget status");
+    await account(userId, "current");
+    const [plan] = await database.db.insert(financeBudgetPlans).values({ userId }).returning();
+    if (!plan) throw new Error("Missing plan");
+    const [version] = await database.db
+      .insert(financeBudgetVersions)
+      .values({
+        userId,
+        planId: plan.id,
+        version: 7,
+        status: "active",
+        effectiveFrom: "2026-08",
+        expectedResources: 300000,
+        allocatedTotal: 300000,
+        balanceDelta: 0,
+        approvedAt: now,
+        rationale: "Synthetic approved plan",
+      })
+      .returning();
+    if (!version) throw new Error("Missing version");
+    await database.db.insert(financeBudgetAllocations).values([
+      {
+        userId,
+        budgetVersionId: version.id,
+        allocationKey: "spending",
+        kind: "spending",
+        amount: 100000,
+      },
+      {
+        userId,
+        budgetVersionId: version.id,
+        allocationKey: "savings",
+        kind: "savings",
+        amount: 200000,
+      },
+    ]);
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(status.details.budget.approved).toBe(true);
+    expect(status.details.budget.total).toBe(1000);
+    expect(status.details.budget.planContext?.current).toMatchObject({
+      id: version.id,
+      version: 7,
+      allocatedTotal: 3000,
+      spendingTotal: 1000,
+    });
+    expect(status.details.health.missingInputs).not.toContain("approved_budget");
+  });
+
+  async function planVersion(
+    userId: string,
+    month: string,
+    status: "active" | "retired" | "proposed" = "active",
+    planId?: string,
+    version = 7,
+  ) {
+    const [plan] = planId
+      ? [{ id: planId }]
+      : await database.db.insert(financeBudgetPlans).values({ userId }).returning();
+    if (!plan) throw new Error("Missing plan");
+    const [row] = await database.db
+      .insert(financeBudgetVersions)
+      .values({
+        userId,
+        planId: plan.id,
+        version,
+        status,
+        effectiveFrom: month,
+        expectedResources: 300000,
+        allocatedTotal: 300000,
+        balanceDelta: 0,
+        approvedAt: status === "proposed" ? null : now,
+        rationale: "Synthetic month projection",
+      })
+      .returning();
+    if (!row) throw new Error("Missing version");
+    await database.db.insert(financeBudgetAllocations).values([
+      {
+        userId,
+        budgetVersionId: row.id,
+        allocationKey: "spending",
+        kind: "spending",
+        amount: 100000,
+      },
+      {
+        userId,
+        budgetVersionId: row.id,
+        allocationKey: "savings",
+        kind: "savings",
+        amount: 200000,
+      },
+    ]);
+    return row;
+  }
+
+  it("does not treat legacy category limits as an approved allocation plan", async () => {
+    const userId = await makeUser("Legacy limits only");
+    await account(userId, "current");
+    await database.db
+      .insert(financeBudgets)
+      .values({ userId, month: "2026-08", category: "Food", limit: 50000 });
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(status.details.budget).toMatchObject({
+      approved: false,
+      total: null,
+      categoryLimitTotal: 500,
+      planContext: { state: "missing", current: null },
+    });
+    expect(status.details.health.missingInputs).toContain("approved_budget");
+  });
+
+  it("keeps October approval alongside November draft without changing latest-version reads", async () => {
+    const userId = await makeUser("Upcoming plan");
+    const current = await planVersion(userId, "2026-10");
+    expect(
+      await readBudgetPlanContext(database.db, userId, new Date("2026-11-01T12:00:00Z")),
+    ).toMatchObject({
+      state: "missing",
+      recovery: "create_proposal",
+      previous: { id: current.id },
+    });
+    // An older unapproved draft cannot become a new approval prompt.
+    await planVersion(userId, "2026-10", "proposed", current.planId, 6);
+    expect(
+      (await readBudgetPlanContext(database.db, userId, new Date("2026-10-30T12:00:00Z"))).upcoming,
+    ).toBeNull();
+    const upcoming = await planVersion(userId, "2026-11", "proposed", current.planId, 8);
+    const at = new Date("2026-10-30T12:00:00Z");
+    const profile = createProfileBudgetService({ db: database.db, now: () => at });
+    const latest = await profile.getFinanceBudget(userId, current.planId);
+    expect(latest.data?.id).toBe(upcoming.id);
+    expect(latest.planContext).toMatchObject({
+      state: "approved",
+      month: "2026-10",
+      current: { id: current.id },
+      upcoming: { id: upcoming.id, status: "proposed", approvedAt: null },
+    });
+    expect((await profile.getFinanceBudgetStatus(userId)).data?.id).toBe(current.id);
+    const status = await service(at).getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(status.details.budget).toMatchObject({
+      approved: true,
+      planContext: { current: { id: current.id }, upcoming: { id: upcoming.id } },
+    });
+    expect(status.details.health.missingInputs).not.toContain("approved_budget");
+    const future = createProfileBudgetService({
+      db: database.db,
+      now: () => new Date("2026-11-01T12:00:00Z"),
+    });
+    expect(await future.getFinanceBudgetStatus(userId)).toMatchObject({
+      data: null,
+      planContext: {
+        month: "2026-11",
+        state: "missing",
+        recovery: "review_proposal",
+        previous: { id: current.id },
+        upcoming: { id: upcoming.id },
+      },
+    });
+  });
+
+  it("uses the owner's planning month and never borrows a foreign or future approved plan", async () => {
+    const userId = await makeUser("Budget timezone");
+    const foreign = await makeUser("Foreign budget timezone");
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "America/New_York" })
+      .where(eq(users.id, userId));
+    const october = await planVersion(userId, "2026-10", "retired");
+    await planVersion(userId, "2026-11", "active", october.planId, 8);
+    await planVersion(foreign, "2026-10");
+    const at = new Date("2026-11-01T02:30:00Z");
+    expect(await readBudgetPlanContext(database.db, userId, at)).toMatchObject({
+      month: "2026-10",
+      current: { id: october.id },
+      previous: null,
+    });
+    const status = await service(at).getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(status.details.budget).toMatchObject({
+      approved: true,
+      month: "2026-10",
+      planContext: { current: { id: october.id } },
+    });
+    const empty = await makeUser("No owner budget");
+    expect(await readBudgetPlanContext(database.db, empty, at)).toMatchObject({
+      current: null,
+      previous: null,
+      upcoming: null,
+      recovery: "create_proposal",
+    });
+  });
+
+  it("exposes the latest incomplete draft for revision rather than reviving a superseded proposal", async () => {
+    const userId = await makeUser("Incomplete successor");
+    const proposal = await planVersion(userId, "2026-08", "proposed");
+    const [draft] = await database.db
+      .insert(financeBudgetVersions)
+      .values({
+        userId,
+        planId: proposal.planId,
+        version: 8,
+        status: "incomplete",
+        effectiveFrom: "2026-08",
+        expectedResources: 0,
+        allocatedTotal: 0,
+        balanceDelta: 0,
+        rationale: "Unfinished successor",
+      })
+      .returning();
+    if (!draft) throw new Error("Missing draft");
+    const context = await readBudgetPlanContext(database.db, userId, now);
+    expect(context).toMatchObject({
+      state: "missing",
+      upcoming: { id: draft.id, status: "incomplete" },
+      recovery: "revise_proposal",
+    });
+    const latest = await createProfileBudgetService({
+      db: database.db,
+      now: () => now,
+    }).getFinanceBudget(userId, proposal.planId);
+    expect(latest).toMatchObject({
+      data: { id: draft.id },
+      approvalReadiness: { ready: false, code: "not_proposed", recovery: "revise_proposal" },
+    });
+  });
+
+  it("ignores archived operative plans and drafts while retaining previous-month history", async () => {
+    const userId = await makeUser("Archived budget context");
+    const previous = await planVersion(userId, "2026-07", "retired");
+    const current = await planVersion(userId, "2026-08", "active", previous.planId, 8);
+    await planVersion(userId, "2026-09", "proposed", previous.planId, 9);
+    await database.db
+      .update(financeBudgetPlans)
+      .set({ status: "archived" })
+      .where(eq(financeBudgetPlans.id, previous.planId));
+    expect(await readBudgetPlanContext(database.db, userId, now)).toMatchObject({
+      state: "missing",
+      current: null,
+      upcoming: null,
+      previous: { id: previous.id },
+    });
+    const profile = createProfileBudgetService({ db: database.db, now: () => now });
+    expect((await profile.getFinanceBudgetStatus(userId)).data).toBeNull();
+    expect(
+      (await service().getFinanceStatus(userId, { type: "all_outstanding" })).details.budget
+        .approved,
+    ).toBe(false);
+    expect(current.status).toBe("active");
+  });
+
+  it("reports invalid stored planning timezone as unavailable rather than guessing a month", async () => {
+    const userId = await makeUser("Invalid budget timezone");
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "Invalid/Timezone" })
+      .where(eq(users.id, userId));
+    await expect(
+      service().getFinanceStatus(userId, { type: "all_outstanding" }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      createProfileBudgetService({ db: database.db, now: () => now }).getFinanceBudgetStatus(
+        userId,
+      ),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+  });
+
+  it("does not erase approval after a profile revision or expose a future approval as this month", async () => {
+    const userId = await makeUser("Budget profile changes");
+    const current = await planVersion(userId, "2026-08");
+    await database.db
+      .insert(financeProfileVersions)
+      .values({ userId, version: 1, expectedMonthlyTakeHome: 400000 });
+    expect(
+      (await service().getFinanceStatus(userId, { type: "all_outstanding" })).details.budget,
+    ).toMatchObject({ approved: true, planContext: { current: { id: current.id } } });
+    const futureOwner = await makeUser("Future budget only");
+    await planVersion(futureOwner, "2026-09");
+    expect(await readBudgetPlanContext(database.db, futureOwner, now)).toMatchObject({
+      state: "missing",
+      current: null,
+    });
+  });
 
   it.each([
     "owned",
@@ -251,6 +537,7 @@ describe.sequential("Finance status service", () => {
 
   it("reports current account and current-month evidence without manufacturing stale zeros", async () => {
     const userId = await makeUser("Current Finance");
+    await planVersion(userId, "2026-08");
     const source = await account(userId, "current");
     await database.db
       .insert(financeBudgets)
@@ -1321,6 +1608,7 @@ describe.sequential("Finance status service", () => {
 
   it("scopes work detail without replacing current-month budget and health evidence", async () => {
     const userId = await makeUser("Window Finance");
+    await planVersion(userId, "2026-08");
     const source = await account(userId, "current");
     await database.db.insert(financeBudgets).values([
       { category: "Food", limit: 50_000, month: "2026-07", userId },
@@ -1386,7 +1674,12 @@ describe.sequential("Finance status service", () => {
     expect(status.details.review).toMatchObject({ byReason: { unknown_merchant: 1 }, total: 1 });
     expect(status.work.actionable).toBe(1);
     expect(status.work.oldestOutstandingAt).toBe("2026-06-02T00:00:00.000Z");
-    expect(status.details.budget).toEqual({ approved: true, month: "2026-08", total: 1_000 });
+    expect(status.details.budget).toMatchObject({
+      approved: true,
+      month: "2026-08",
+      total: 1_000,
+      categoryLimitTotal: 1_000,
+    });
     expect(status.details.month.spending).toBe(400);
     expect(status.details.month.forecast).toBeCloseTo(826.67, 2);
     expect(status.details.health.month.rating).toBe("on_track");
@@ -1394,6 +1687,7 @@ describe.sequential("Finance status service", () => {
 
   it("uses a preserved approved Finance profile snapshot after the live profile becomes a draft", async () => {
     const userId = await makeUser("Approved Snapshot Finance");
+    await planVersion(userId, "2026-08");
     const source = await account(userId, "current");
     await database.db
       .insert(financeBudgets)

@@ -8399,7 +8399,48 @@ describe("Personal OS web app", () => {
   it("keeps Activity search results and URL state aligned", async () => {
     const view = setup("/settings?section=activity");
     const browser = userEvent.setup();
-    expect(await screen.findByText("Reminder · created")).toBeInTheDocument();
+    try {
+      expect(await screen.findByText("Reminder · created")).toBeInTheDocument();
+    } catch (error) {
+      let diagnostic = "diagnostic-unavailable";
+      try {
+        const [pathname, search = ""] = (view.location.value.split("#")[0] ?? "").split("?");
+        const params = new URLSearchParams(search);
+        const state = view.queryClient
+          .getQueryCache()
+          .findAll({ queryKey: ["activity"], exact: true })[0]?.state;
+        const status = state?.status;
+        const fetchStatus = state?.fetchStatus;
+        const serialized = JSON.stringify({
+          canonicalActivity:
+            pathname === "/settings" && params.get("page") === "activity" && !params.has("section"),
+          legacyActivity: pathname === "/settings" && params.get("section") === "activity",
+          hasSearch: params.has("q"),
+          query: {
+            status: status && ["pending", "success", "error"].includes(status) ? status : "absent",
+            fetchStatus:
+              fetchStatus && ["fetching", "paused", "idle"].includes(fetchStatus)
+                ? fetchStatus
+                : "absent",
+            errorPresent: state?.error != null,
+            dataCount: Array.isArray(state?.data) ? Math.min(999, state.data.length) : 0,
+          },
+          listActivityCalls: Math.min(999, mocks.listActivity.mock.calls.length),
+          activityRegionPresent: !!view.container.querySelector('[aria-label="Activity history"]'),
+          loadingPresent: !!view.container.querySelector('[aria-label="Loading activity"]'),
+          recoveryPresent: screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length > 0,
+        });
+        if (serialized.length <= 1024) diagnostic = serialized;
+      } catch {
+        // Preserve the original assertion if bounded observation fails.
+      }
+      try {
+        console.error("activity-readiness-v1", diagnostic);
+      } catch {
+        // Diagnostic delivery must not replace the original assertion error.
+      }
+      throw error;
+    }
     const activitySearch = screen.getByRole("searchbox", { name: "Search activity" });
     await browser.type(activitySearch, "system");
     expect(view.location.value).toBe("/settings?page=activity&q=system");

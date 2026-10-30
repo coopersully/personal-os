@@ -104,6 +104,11 @@
   --weather-sky-foreground: var(--content-primary);
   --weather-sky-muted: var(--content-secondary);
   --weather-sky-stat: var(--surface);
+  --workspace-icon-foreground: #f9f9f9;
+  --workspace-calendar-fill: #005be6;
+  --workspace-tasks-fill: #7928ff;
+  --workspace-mail-fill: #d4005a;
+  --workspace-finances-fill: #007f3d;
   --workspace-calendar-accent: #0067b1;
   --workspace-tasks-accent: #762bd4;
   --workspace-mail-accent: #b51f58;
@@ -826,12 +831,13 @@ p {
 }
 .workspace-icon {
   --workspace-icon-accent: var(--content-secondary);
+  --workspace-icon-fill: var(--content-secondary);
 
   align-items: center;
-  background: color-mix(in oklab, var(--workspace-icon-accent) 18%, var(--surface-raised));
-  border: 1px solid color-mix(in oklab, var(--workspace-icon-accent) 50%, var(--border-subtle));
+  background: var(--workspace-icon-fill);
+  border: 0;
   border-radius: var(--radius-lg);
-  color: var(--workspace-icon-accent);
+  color: var(--workspace-icon-foreground);
   display: inline-flex;
   flex: 0 0 auto;
   justify-content: center;
@@ -841,24 +847,28 @@ p {
 .workspace-rail__link[data-workspace="calendar"],
 .workspace-navigation-item[data-workspace="calendar"] {
   --workspace-icon-accent: var(--workspace-calendar-accent);
+  --workspace-icon-fill: var(--workspace-calendar-fill);
 }
 .account-workspace[data-workspace="tasks"],
 .workspace-icon[data-workspace="tasks"],
 .workspace-rail__link[data-workspace="tasks"],
 .workspace-navigation-item[data-workspace="tasks"] {
   --workspace-icon-accent: var(--workspace-tasks-accent);
+  --workspace-icon-fill: var(--workspace-tasks-fill);
 }
 .account-workspace[data-workspace="mail"],
 .workspace-icon[data-workspace="mail"],
 .workspace-rail__link[data-workspace="mail"],
 .workspace-navigation-item[data-workspace="mail"] {
   --workspace-icon-accent: var(--workspace-mail-accent);
+  --workspace-icon-fill: var(--workspace-mail-fill);
 }
 .account-workspace[data-workspace="finances"],
 .workspace-icon[data-workspace="finances"],
 .workspace-rail__link[data-workspace="finances"],
 .workspace-navigation-item[data-workspace="finances"] {
   --workspace-icon-accent: var(--workspace-finances-accent);
+  --workspace-icon-fill: var(--workspace-finances-fill);
 }
 .workspace-icon[data-size="sm"] {
   border-radius: var(--radius-md);

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { PublicDocument } from "../src/features/public-site/document.js";
+import { guidePages } from "../src/features/public-site/guide-pages.js";
 import { ProductLanding } from "../src/features/public-site/landing.js";
 import { publicDocuments } from "../src/features/public-site/layout.js";
 
@@ -20,7 +21,8 @@ await writeFile(
 const theme = await readFile(new URL("src/styles.css", root), "utf8");
 const darkTokens = theme.match(/^\.dark \{([\s\S]*?)^\}/m)?.[1];
 if (!darkTokens) throw new Error("Missing shared dark theme tokens.");
-for (const { slug } of publicDocuments) {
+const documents = [...publicDocuments, ...guidePages.filter(({ slug }) => slug !== "docs")];
+for (const { slug } of documents) {
   let content = await readFile(new URL(`content/public/${slug}.html`, root), "utf8");
   function take(pattern: RegExp) {
     const match = content.match(pattern);
@@ -52,5 +54,5 @@ for (const { slug } of publicDocuments) {
   await writeFile(new URL("index.html", directory), `<!doctype html>\n${html}\n`);
 }
 console.log(
-  `Rendered ${publicDocuments.length} public documents into ${fileURLToPath(new URL("public/", root))}`,
+  `Rendered ${documents.length} public documents into ${fileURLToPath(new URL("public/", root))}`,
 );

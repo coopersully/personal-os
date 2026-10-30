@@ -13,10 +13,19 @@ test("production nginx keeps public directory redirects on the visitor's HTTPS o
   // The production nginx worker runs as an unprivileged container user.
   chmodSync(directory, 0o755);
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const paths = ["about", "docs", "privacy", "terms", "data-use", "sms", "support"];
+  const paths = [
+    "about",
+    "docs",
+    "privacy",
+    "terms",
+    "data-use",
+    "sms",
+    "support",
+    ...["today", "mail", "tasks", "calendar", "finances", "agents"].map((slug) => `docs/${slug}`),
+  ];
   writeFileSync(join(directory, "index.html"), "<h1>Product landing</h1>");
   for (const path of paths) {
-    mkdirSync(join(directory, path));
+    mkdirSync(join(directory, path), { recursive: true });
     writeFileSync(join(directory, path, "index.html"), `<h1>${path}</h1>`);
   }
   const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");

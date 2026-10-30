@@ -11,8 +11,8 @@
 
 ## The workspace model
 
-nohmi is an autonomous exoskeleton for a person whose life increasingly happens through digital
-systems. It unifies fragmented provider data into four understandable workspaces, gives the person
+nohmi is a personal harness: the context, tools, and controls built around a person whose life
+increasingly happens through digital systems. It unifies fragmented provider data into four understandable workspaces, gives the person
 simple first-party interfaces for direct control, and gives authorized agents consistent tools for
 understanding, triaging, and resolving work on the person's behalf.
 

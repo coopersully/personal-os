@@ -9,9 +9,10 @@ the [role and merge contract](docs/engineering/autonomous-development.md).
 > trademark terms are available in [COMMERCIAL.md](COMMERCIAL.md) and
 > [TRADEMARKS.md](TRADEMARKS.md).
 
-nohmi is an autonomous exoskeleton for power users in an increasingly agentic and online world. It
-gives the person ownership of their data, workflows, and agent authority, learns how their life
-works, and helps authorized agents act as capable copilots rather than disconnected chat sessions.
+nohmi is a personal harness: context, tools, and controls built around a person. It connects
+mail, tasks, calendar, and finances so the person can work directly and choose what to delegate
+to agents. The target is ownership of their data, workflows, knowledge, and agent authority;
+current implementation is documented separately below.
 
 The internal application name is Personal OS (`personal-os` in repository and infrastructure identifiers); `nohmi` is the user-facing product
 name and is always lowercase.

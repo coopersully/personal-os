@@ -7,7 +7,8 @@
 
 ## 1. Decision and intentional scope expansion
 
-nohmi will be a private, cross-device autonomous exoskeleton for each person's commitments,
+nohmi is a **personal harness**: the context, tools, and controls built around a person.
+The product target is a private, cross-device home for each person's commitments,
 communications, time, priorities, and money. It is a multi-user product: every account, credential,
 provider projection, knowledge record, run, review, and audit event is isolated to its owner by
 default. It does not replace operating systems or the external
@@ -20,11 +21,31 @@ This design intentionally expands scope beyond the current MVP. The expansion is
 
 There are no deferred product domains in this document. Delivery is phased for dependency and safety reasons, but the target product includes every capability named here.
 
+### Personal harness as a planning lens
+
+Agents use a harness to connect context, tools, and execution controls. nohmi builds that
+structure around a person: their goals and preferences, their everyday work, and their authority
+over what happens. The person can work directly or bring agents into the same environment.
+
+For every proposed feature, identify which part of the person's harness it strengthens:
+
+- **Context:** the person's goals, knowledge, preferences, commitments, and current reality.
+- **Tools:** familiar workspaces and reliable actions on the same underlying records.
+- **Control:** legible access, review, activity, recovery, and revocation.
+
+A feature should reduce the work of understanding or acting on the person's life without
+obscuring evidence or transferring authority implicitly. A new chat surface, model integration,
+or dashboard is not valuable by itself. Preserve the canonical workspace and policy contracts.
+
+The public category and brand line are **“a personal harness.”** Describe current capabilities
+from implementation evidence; use this framing for the target without implying that every part
+has shipped. Light blue belongs to the external brand; signed-in product chrome remains neutral.
+
 ## 2. Product promise
 
 > At any moment, nohmi shows what matters next, what is actively happening, what is realistically still possible today, and what an authorized agent did or proposes to do.
 
-It must make the useful action easy for a person who wants a calm, low-information interface while retaining fast paths, search, keyboard access, automation, and inspection for a power user.
+It must make useful action feel effortless while retaining the information density, fast paths, search, keyboard access, automation, and inspection a power user needs. Minimalism removes friction and decoration; it must not hide necessary information.
 
 Each workspace has a persistent expert steward that maintains its living ledger, applies its
 approved rulebook, asks only for irreducible human judgment, learns from answers and reinforced safe

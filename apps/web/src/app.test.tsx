@@ -1895,16 +1895,19 @@ describe("Personal OS web app", () => {
     mocks.getMe.mockRejectedValue(new Error("unauthorized"));
     setup("/");
     expect(
-      await screen.findByRole("heading", { name: "Mail, tasks, calendar, and money." }),
+      await screen.findByRole("heading", { name: "your digital exoskeleton." }),
     ).toBeInTheDocument();
     expect(mocks.getMe).toHaveBeenCalled();
     expect(mocks.getCurrentRitual).not.toHaveBeenCalled();
     expect(
-      within(screen.getByRole("navigation", { name: "Product navigation" })).getByRole("link", {
-        name: "Login",
+      within(screen.getByRole("navigation", { name: "product navigation" })).getByRole("link", {
+        name: "sign in",
       }),
     ).toHaveAttribute("href", "/login");
-    expect(screen.getAllByRole("link", { name: "Sign up" })[0]).toHaveAttribute("href", "/signup");
+    expect(screen.getAllByRole("link", { name: "get started" })[0]).toHaveAttribute(
+      "href",
+      "/signup",
+    );
   });
 
   it.each([

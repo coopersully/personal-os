@@ -238,6 +238,10 @@ overlay behavior, or semantic anatomy.
 
 Scheduled routines and full ritual previews are full-screen experiences on desktop and mobile,
 with focus isolation and their own routine actions; they are exempt from modal/drawer sizing.
+Their Dialog composition removes the primitive's centering translation explicitly. Verify viewport
+bounds with the production-built stylesheet as well as development styles: CSS optimization can
+fold a standalone translation reset into `transform` without overriding Tailwind's independent
+`translate` utilities.
 
 All in-app modal tasks, editors, confirmations, and detail overlays use this shared
 composition: centered dialogs at desktop widths and bottom drawers below 768 px.

@@ -3,7 +3,7 @@ import { render } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { PortfolioCursor } from "./portfolio-cursor";
 
-it("updates the hit target on a nested scroll and restores native cursors on cleanup", () => {
+it("preserves native cursor handoff through scrolling, controls, pointer changes and cleanup", () => {
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: query.includes("pointer: fine"),
     addEventListener: vi.fn(),
@@ -23,17 +23,25 @@ it("updates the hit target on a nested scroll and restores native cursors on cle
   const first = document.createElement("button");
   const second = document.createElement("button");
   first.style.cursor = "pointer";
-  second.style.cursor = "pointer";
-  panel.append(first, second);
+  // The second target gets its cursor from CSS, so restoration must remove the inline override.
+  const styles = document.createElement("style");
+  styles.textContent = ".cursor-handoff-target { cursor: pointer; }";
+  second.className = "cursor-handoff-target";
+  const nativeControl = document.createElement("select");
+  panel.append(styles, first, second, nativeControl);
   document.body.append(panel);
-  let hit = first;
+  let hit: HTMLElement = first;
   const originalHitTest = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
   Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => hit });
   const { unmount } = render(<PortfolioCursor />);
-  try {
+  const movePointer = (pointerType: string) => {
     const move = new MouseEvent("pointermove", { clientX: 20, clientY: 30 });
-    Object.defineProperty(move, "pointerType", { value: "mouse" });
+    Object.defineProperty(move, "pointerType", { value: pointerType });
     document.dispatchEvent(move);
+  };
+  const overlay = () => document.querySelector(".dot-cursor");
+  try {
+    movePointer("mouse");
     flushFrame();
     expect(first.style.cursor).toBe("none");
     paint = undefined;
@@ -43,8 +51,30 @@ it("updates the hit target on a nested scroll and restores native cursors on cle
     flushFrame();
     expect(first.style.cursor).toBe("pointer");
     expect(second.style.cursor).toBe("none");
+    expect(overlay()?.hasAttribute("data-visible")).toBe(true);
+    hit = nativeControl;
+    movePointer("mouse");
+    flushFrame();
+    expect(second.style.getPropertyValue("cursor")).toBe("");
+    expect(second.style.getPropertyPriority("cursor")).toBe("");
+    expect(nativeControl.style.getPropertyValue("cursor")).toBe("");
+    expect(overlay()?.hasAttribute("data-visible")).toBe(false);
+    for (const pointerType of ["touch", "pen"]) {
+      hit = second;
+      movePointer("mouse");
+      flushFrame();
+      expect(overlay()?.hasAttribute("data-visible")).toBe(true);
+      expect(second.style.cursor).toBe("none");
+      movePointer(pointerType);
+      expect(overlay()?.hasAttribute("data-visible")).toBe(false);
+      expect(second.style.getPropertyValue("cursor")).toBe("");
+      expect(second.style.getPropertyPriority("cursor")).toBe("");
+    }
+    hit = first;
+    movePointer("mouse");
+    flushFrame();
     unmount();
-    expect(second.style.cursor).toBe("pointer");
+    expect(first.style.cursor).toBe("pointer");
     expect(document.querySelector(".dot-cursor")).toBeNull();
     paint = undefined;
     panel.dispatchEvent(new Event("scroll", { bubbles: false }));

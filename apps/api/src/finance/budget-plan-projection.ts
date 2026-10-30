@@ -117,7 +117,7 @@ async function loadBudgetPlanContext(
         ),
         or(
           and(
-            eq(financeBudgetVersions.status, "proposed"),
+            inArray(financeBudgetVersions.status, ["proposed", "incomplete"]),
             gte(financeBudgetVersions.effectiveFrom, month),
           ),
           and(approved, gt(financeBudgetVersions.effectiveFrom, month)),
@@ -165,7 +165,9 @@ async function loadBudgetPlanContext(
       ? "none"
       : upcoming?.version.status === "proposed" && upcoming.version.effectiveFrom === month
         ? "review_proposal"
-        : "create_proposal",
+        : upcoming?.version.status === "incomplete" && upcoming.version.effectiveFrom === month
+          ? "revise_proposal"
+          : "create_proposal",
     current: await summary(current),
     previous: await summary(previous),
     upcoming: await summary(upcoming),

@@ -21,7 +21,7 @@ its profile revision; readiness is informational and commit-time validation rema
 Finance status and canonical budget reads share owner-timezone monthly plan context. An approved
 versioned plan establishes approval; legacy monthly category-limit rows do not. Context names the
 approved version for the current month, the most recent earlier approved version, and the nearest
-current/future proposal or future approved plan. A future approval is never this month's plan;
+current/future proposal, incomplete draft or future approved plan. A future approval is never this month's plan;
 retirement when a successor is approved does not erase the earlier month's approval history.
 Latest-version budget reads still return a draft when it is the latest version, alongside this
 explicit context. Missing current-month approval does not mean no budget has ever been approved.
@@ -30,7 +30,8 @@ remain explicit historical context. Invalid stored planning timezones return a c
 error with timezone-repair guidance, never a guessed UTC month. Read failures remain unavailable
 errors (`service_unavailable` with refresh recovery), never fabricated missing plans. Missing
 current-month approval points to reviewing that month’s proposal when present, otherwise creating
-a proposal; it never asks to reapprove the previous month. Profile revisions can
+a proposal. If a newer incomplete draft supersedes an older proposal, recovery points to revising
+that latest draft, not approving the superseded proposal. It never asks to reapprove the previous month. Profile revisions can
 require a new proposal without erasing a previous approval.
 
 Status keeps complete allocated resources and spending allocations distinct. Health and forecast

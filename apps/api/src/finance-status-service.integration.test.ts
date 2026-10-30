@@ -318,6 +318,40 @@ describe.sequential("Finance status service", () => {
     });
   });
 
+  it("exposes the latest incomplete draft for revision rather than reviving a superseded proposal", async () => {
+    const userId = await makeUser("Incomplete successor");
+    const proposal = await planVersion(userId, "2026-08", "proposed");
+    const [draft] = await database.db
+      .insert(financeBudgetVersions)
+      .values({
+        userId,
+        planId: proposal.planId,
+        version: 8,
+        status: "incomplete",
+        effectiveFrom: "2026-08",
+        expectedResources: 0,
+        allocatedTotal: 0,
+        balanceDelta: 0,
+        rationale: "Unfinished successor",
+      })
+      .returning();
+    if (!draft) throw new Error("Missing draft");
+    const context = await readBudgetPlanContext(database.db, userId, now);
+    expect(context).toMatchObject({
+      state: "missing",
+      upcoming: { id: draft.id, status: "incomplete" },
+      recovery: "revise_proposal",
+    });
+    const latest = await createProfileBudgetService({
+      db: database.db,
+      now: () => now,
+    }).getFinanceBudget(userId, proposal.planId);
+    expect(latest).toMatchObject({
+      data: { id: draft.id },
+      approvalReadiness: { ready: false, code: "not_proposed", recovery: "revise_proposal" },
+    });
+  });
+
   it("ignores archived operative plans and drafts while retaining previous-month history", async () => {
     const userId = await makeUser("Archived budget context");
     const previous = await planVersion(userId, "2026-07", "retired");

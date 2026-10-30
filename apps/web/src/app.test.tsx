@@ -10532,9 +10532,56 @@ describe("Personal OS web app", () => {
       });
       const browser = userEvent.setup();
       const view = setup("/settings?page=wallpaper");
-      await waitFor(() =>
-        expect(mocks.invoke).toHaveBeenCalledWith("preview_pinterest_wallpaper", expect.anything()),
-      );
+      try {
+        await waitFor(() =>
+          expect(mocks.invoke).toHaveBeenCalledWith("preview_pinterest_wallpaper", expect.anything()),
+        );
+      } catch (error) {
+        // Failure-only readiness evidence; never serialize query keys, payloads or errors.
+        let diagnostic = '{"captureFailed":true}';
+        try {
+          const states = (prefix: string) =>
+            view.queryClient
+              .getQueryCache()
+              .findAll({ queryKey: [prefix] })
+              .slice(0, 3)
+              .map(({ state }) => ({
+                status: state.status,
+                fetchStatus: state.fetchStatus,
+                isInvalidated: state.isInvalidated,
+                error: Boolean(state.error),
+              }));
+          const countInvocations = (command: string) =>
+            Math.min(999, mocks.invoke.mock.calls.filter(([name]) => name === command).length);
+          const pinData = view.queryClient
+            .getQueryCache()
+            .findAll({ queryKey: ["pinterest-wallpaper-preview"] })[0]?.state.data;
+          const serialized = JSON.stringify({
+            settings: states("pinterest-wallpaper"),
+            pins: states("pinterest-wallpaper-preview"),
+            preview: states("native-wallpaper-preview"),
+            boardReady:
+              view.container.querySelector<HTMLInputElement>("#pinterest-board-url")?.value ===
+              "https://www.pinterest.com/",
+            pinsCount: Array.isArray(pinData) ? Math.min(999, pinData.length) : 0,
+            tauri: mocks.isTauri.mock.results.at(-1)?.value === true,
+            invocations: {
+              environment: countInvocations("desktop_preview_environment"),
+              preview: countInvocations("preview_pinterest_wallpaper"),
+              apply: countInvocations("apply_pinterest_wallpaper"),
+            },
+          });
+          if (serialized.length <= 2048) diagnostic = serialized;
+        } catch {
+          // Keep the fixed fallback when diagnostic capture itself fails.
+        }
+        try {
+          console.error("wallpaper-readiness-v1", diagnostic);
+        } catch {
+          // A diagnostic sink failure must not replace the original assertion error.
+        }
+        throw error;
+      }
       const refresh = within(view.container).getByRole("button", { name: "Refresh wallpaper" });
       expect(refresh).toBeDisabled();
       expect(

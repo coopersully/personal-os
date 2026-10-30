@@ -111,8 +111,9 @@ try {
     await human.login({ email: account.email, password: account.password });
     await completeFinanceSetupViaApi(human);
   }
-  // Browser CI starts from a clean checkout without generated public HTML.
-  await promisify(execFile)("pnpm", ["--filter", "@personal-os/web", "public:generate"], {
+  // Build once per server so layout regressions can use the shipped, optimized CSS.
+  // The build also generates the public HTML needed by a clean browser checkout.
+  await promisify(execFile)("pnpm", ["--filter", "@personal-os/web", "build"], {
     cwd: root,
   });
   web = start(

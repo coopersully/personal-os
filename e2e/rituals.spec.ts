@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { useProductionStyles } from "./production-styles.js";
 import { cleanupRitual, test } from "./recovery-fixtures.js";
 import { selectSetting, setSettingTime } from "./settings-controls.js";
 
@@ -366,6 +367,7 @@ test("browser rituals preserve the current page and save real answers and option
     expect(saved.ok()).toBe(true);
     const ritual = page.getByRole("dialog", { name: "Morning ritual", exact: true });
     await expect(ritual).toBeVisible({ timeout: 15000 });
+    await useProductionStyles(page);
     await expect
       .poll(async () => {
         const bounds = await ritual.boundingBox();

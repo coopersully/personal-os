@@ -80,6 +80,8 @@ const protectedResourceMetadata = {
   resource_documentation: appLinks.agentAccess,
   resource_name: "nohmi",
   scopes_supported: [
+    "knowledge:read",
+    "knowledge:write",
     "tasks:read",
     "tasks:write",
     "tasks:execute",

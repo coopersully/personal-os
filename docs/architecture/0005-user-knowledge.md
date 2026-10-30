@@ -1,6 +1,6 @@
 # ADR 0005: User Knowledge and purpose-bound context
 
-- Status: Accepted target architecture; implementation pending
+- Status: Accepted target architecture; initial save/read foundation implemented in source
 - Date: 2026-09-10
 
 ## Context
@@ -114,3 +114,17 @@ workflows declare knowledge contracts and consume context packs internally.
   layer; credential scopes and purpose-bounded context packs govern the initial target.
 - Current document-style profiles remain transitional and must not be described as complete
   persistent memory.
+
+## Initial save/read implementation
+
+The source now separates knowledge identity, initial immutable revision snapshots, sources,
+relationships and idempotency receipts in owner-keyed PostgreSQL tables. The API owns source
+classification and live disclosure checks; stateless MCP tools use the typed authenticated client.
+OAuth callers must explicitly request the knowledge scopes they need. Reads require
+`knowledge:read`; saves require both `knowledge:read` and `knowledge:write`. Consent describes
+these grants, and omitted scopes or refresh of earlier grants never add them. Knowledge text
+rejects NUL and unpaired UTF-16 surrogates before JSONB persistence, preserving valid Unicode.
+Source scope requirements propagate to derived records, which cannot broaden workspace, sensitivity
+or allowed purposes. Knowledge writes emit redacted audit metadata and never alter domain policy.
+Lifecycle mutations, retrieval indexes, context packs and user controls remain follow-up work;
+see the [current implementation boundary](../product/user-knowledge.md#relationship-to-current-implementation).

@@ -48,6 +48,7 @@ import { createFinanceMaintenanceExecutionApi } from "./features/finance-mainten
 import { createFinanceReviewBacklogApi } from "./features/finance-review-backlog.js";
 import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
+import { createKnowledgeApiClient } from "./features/knowledge.js";
 import { createMailApiClient } from "./features/mail.js";
 import { createMailStewardshipApiClient } from "./features/mail-stewardship.js";
 import { createReminderApiClient } from "./features/reminders.js";
@@ -226,6 +227,7 @@ export function createApiClient(options: ClientOptions) {
     ...createAgentAccountApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
+    ...createKnowledgeApiClient(request),
     ...createRitualsApiClient(request),
     ...createDesktopReleaseApiClient(request),
     ...createMailApiClient(request, toQuery),

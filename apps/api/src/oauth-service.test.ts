@@ -201,6 +201,12 @@ describe("OAuth authorized clients", () => {
   it("parses defaults, removes duplicates, and rejects empty or unsupported scopes", () => {
     const service = createOAuthService({ db: {} as Database, ...serviceOptions });
 
+    expect(service.parseScopes(undefined)).not.toContain("knowledge:read");
+    expect(service.parseScopes(undefined)).not.toContain("knowledge:write");
+    expect(service.parseScopes("knowledge:read knowledge:write knowledge:read")).toEqual([
+      "knowledge:read",
+      "knowledge:write",
+    ]);
     expect(service.parseScopes(undefined)).toContain("bookmarks:read");
     expect(service.parseScopes(undefined)).toContain("mail:write");
     expect(service.parseScopes(undefined)).not.toContain("finances:maintain");

@@ -8454,11 +8454,280 @@ describe("Personal OS web app", () => {
 
   it("returns from actual Connected agents settings to the original Finance question", async () => {
     const target = "/finances/chat?question=question-a&message=message-a";
+    const rootsBeforeSetup = document.body.children.length;
     const view = setup(
       `/settings?section=agent-connections&returnTo=${encodeURIComponent(target)}`,
     );
     const browser = userEvent.setup();
-    const back = await screen.findByRole("link", { name: "Return to conversation" });
+    const back = await screen
+      .findByRole("link", { name: "Return to conversation" })
+      .catch((originalError: unknown) => {
+        // Failure-only fixed-scenario capture: never serialize arbitrary DOM, URL, error or mock data.
+        const marker = "FINANCE_RETURN_LINK_FAILURE_V1";
+        const minimal = (captureStatus: "unavailable" | "envelope-limit") => ({
+          schemaVersion: 1,
+          sourceInputHead: "d31ea7bd224b5c7c863311a1a6b25e3ddfd2cca4",
+          sourceInputBase: "148c43cb0b340ad2dc84411e942f22feefc8cca0",
+          captureStatus,
+        });
+        try {
+          const classify = (value: unknown, allowed: readonly string[]) =>
+            typeof value === "string" && allowed.includes(value) ? value : "other";
+          const count = (value: number) => Math.min(Math.max(value, 0), 100_000);
+          const returnLabel = (element: Element) => {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
+            let node = walker.nextNode();
+            let text = "";
+            let visited = 0;
+            while (node && visited < 8 && text.length <= 80) {
+              if (node.nodeType === Node.TEXT_NODE) {
+                text += (node.nodeValue ?? "").slice(0, 81 - text.length);
+              }
+              visited += 1;
+              node = walker.nextNode();
+            }
+            return node === null && text.length <= 80 && text.trim() === "Return to conversation";
+          };
+          const hiddenHint = (element: Element) => {
+            let node: Element | null = element;
+            let visited = 0;
+            while (node && visited < 32) {
+              if (node.hasAttribute("hidden") || node.getAttribute("aria-hidden") === "true") {
+                return { hiddenAncestorHint: true, ancestorScanTruncated: false };
+              }
+              visited += 1;
+              node = node.parentElement;
+            }
+            return { hiddenAncestorHint: false, ancestorScanTruncated: node !== null };
+          };
+          const childCount = (element: Element) => {
+            let child = element.firstElementChild;
+            let visited = 0;
+            while (child && visited < 64) {
+              visited += 1;
+              child = child.nextElementSibling;
+            }
+            return { count: visited, truncated: child !== null };
+          };
+          const scan = (element: Element) => {
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
+            const found: { main: Element | null; settings: Element | null; title: boolean } = {
+              main: null,
+              settings: null,
+              title: false,
+            };
+            const links = [];
+            let shells = 0;
+            let panels = 0;
+            let visited = 0;
+            let node: Node | null = element;
+            while (node && visited < 1_024) {
+              if (node instanceof Element) {
+                if (node.id === "main-content") found.main ??= node;
+                if (node.id === "settings-page-title") found.title = true;
+                if (node.classList.contains("app-shell")) shells += 1;
+                if (node.classList.contains("settings-panel")) {
+                  panels += 1;
+                  found.settings ??= node;
+                }
+                if (node.tagName === "A" && links.length < 8 && returnLabel(node)) {
+                  links.push({
+                    hrefMatchesExpected: node.getAttribute("href") === target,
+                    ...hiddenHint(node),
+                  });
+                }
+              }
+              visited += 1;
+              node = walker.nextNode();
+            }
+            return { found, links, shells, panels, visited, truncated: node !== null };
+          };
+          const own = scan(view.container);
+          const global = scan(document.body);
+          const dom = (element: Element | null) => {
+            if (!element) return { present: false, searchTruncated: own.truncated };
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL);
+            const nodes = [];
+            let current: Node | null = element;
+            let visited = 0;
+            while (current && visited < 48) {
+              if (current instanceof Element) {
+                const node = current;
+                nodes.push({
+                  tag: classify(node.tagName, [
+                    "MAIN",
+                    "SECTION",
+                    "DIV",
+                    "NAV",
+                    "HEADER",
+                    "H1",
+                    "H2",
+                    "H3",
+                    "A",
+                    "BUTTON",
+                    "P",
+                    "SPAN",
+                    "FORM",
+                    "INPUT",
+                    "LABEL",
+                    "UL",
+                    "LI",
+                    "ASIDE",
+                  ]),
+                  role: classify(node.getAttribute("role"), [
+                    "main",
+                    "region",
+                    "navigation",
+                    "heading",
+                    "link",
+                    "button",
+                    "status",
+                    "alert",
+                  ]),
+                  mainContent: node.id === "main-content",
+                  settingsTitle: node.id === "settings-page-title",
+                  settingsPanel: node.classList.contains("settings-panel"),
+                  ...hiddenHint(node),
+                  busy: node.getAttribute("aria-busy") === "true",
+                  returnLabel: node.tagName === "A" && returnLabel(node),
+                  returnHref: node.getAttribute("href") === target,
+                  childElements: childCount(node),
+                });
+              }
+              visited += 1;
+              current = walker.nextNode();
+            }
+            return { present: true, nodes, visited, truncated: current !== null };
+          };
+          if (view.location.value.length > 4_096) throw new Error("Capture input limit");
+          const actual = new URL(view.location.value, "https://diagnostic.invalid");
+          const actualReturn = actual.searchParams.get("returnTo");
+          const queryNames = [
+            "me",
+            "agent-connection-guide",
+            "assistant-setup-status",
+            "personal-os-setup-plan",
+            "tokens",
+            "oauth-clients",
+            "connectors",
+            "workspace-settings",
+          ];
+          const allQueries = view.queryClient.getQueryCache().getAll();
+          const queries = allQueries
+            .slice(0, 64)
+            .filter(
+              (query) =>
+                typeof query.queryKey[0] === "string" && queryNames.includes(query.queryKey[0]),
+            )
+            .slice(0, 16)
+            .map((query) => ({
+              name: classify(query.queryKey[0], queryNames),
+              status: classify(query.state.status, ["pending", "error", "success"]),
+              fetchStatus: classify(query.state.fetchStatus, ["fetching", "paused", "idle"]),
+              observers: count(query.getObserversCount()),
+              hasData: query.state.data !== undefined,
+              hasError: query.state.error !== null,
+            }));
+          const me = view.queryClient.getQueryData<User>(["me"]);
+          const mockState = [
+            ["getMe", mocks.getMe],
+            ["getAgentConnectionGuide", mocks.getAgentConnectionGuide],
+            ["getAssistantSetupStatus", mocks.getAssistantSetupStatus],
+            ["listAccessTokens", mocks.listAccessTokens],
+            ["listOAuthClients", mocks.listOAuthClients],
+          ] as const;
+          const snapshot = {
+            ...minimal("envelope-limit"),
+            captureStatus: "captured",
+            sourceBinding:
+              "Input tuple only; bind diagnostic successor through its hosted source receipt",
+            failureKind: originalError instanceof Error ? "Error" : "non-Error",
+            router: {
+              pathname: classify(actual.pathname, [
+                "/settings",
+                "/finances/chat",
+                "/login",
+                "/today",
+              ]),
+              section: classify(actual.searchParams.get("section"), ["agent-connections"]),
+              page: classify(actual.searchParams.get("page"), ["connections", "agent-connections"]),
+              subpage: classify(actual.searchParams.get("subpage"), ["agent-connections"]),
+              parameterCount: count(actual.searchParams.size),
+              returnToPresent: actualReturn !== null,
+              returnToMatchesExpected: actualReturn === target,
+              unexpectedParameterPresent: [...actual.searchParams.keys()].some(
+                (key) => !["section", "page", "subpage", "returnTo"].includes(key),
+              ),
+            },
+            auth: {
+              meQueryStatus: classify(view.queryClient.getQueryState(["me"])?.status, [
+                "pending",
+                "error",
+                "success",
+              ]),
+              fixtureOwnerMatches: me?.id === user.id,
+              hasUserData: me !== undefined,
+            },
+            mocks: mockState.map(([name, mock]) => ({
+              name,
+              callCount: count(mock.mock.calls.length),
+              resultKinds: mock.mock.results
+                .slice(-8)
+                .map((result) => classify(result.type, ["return", "throw", "incomplete"])),
+            })),
+            queries,
+            queryScanTruncated: allQueries.length > 64,
+            mainDom: dom(own.found.main),
+            settingsDom: dom(own.found.settings),
+            settingsHeadingPresent: own.found.title,
+            roots: {
+              beforeSetup: count(rootsBeforeSetup),
+              atFailure: childCount(document.body),
+              currentContainerConnected: view.container.isConnected,
+              currentContainerInBody: document.body.contains(view.container),
+              shellsInCurrentContainer: own.shells,
+              shellsInBody: global.shells,
+              settingsPanelsInCurrentContainer: own.panels,
+              settingsPanelsInBody: global.panels,
+              ownScanVisited: own.visited,
+              globalScanVisited: global.visited,
+              ownScanTruncated: own.truncated,
+              globalScanTruncated: global.truncated,
+            },
+            returnLinks: own.links,
+            globalReturnLinkCount: global.links.length,
+            limits: {
+              domNodesEach: 48,
+              rootScanNodesEach: 1_024,
+              textTraversalNodesEach: 8,
+              routerInputCharacters: 4_096,
+              textCharactersEach: 80,
+              ancestorsEach: 32,
+              childrenEach: 64,
+              outputBytes: 32 * 1024,
+              queriesInspected: 64,
+              queries: 16,
+              mockResultsEach: 8,
+            },
+            omitted:
+              "All raw text/attributes, URL keys/values, Error names/messages, query data/errors, mock arguments/results, environment and network. Hidden flags are hints, not accessibility proof; mock return kinds do not settle Promises.",
+          };
+          const serialized = JSON.stringify(snapshot);
+          const output = `${marker} ${serialized}`;
+          console.error(
+            Buffer.byteLength(output, "utf8") <= 32 * 1024
+              ? output
+              : `${marker} ${JSON.stringify(minimal("envelope-limit"))}`,
+          );
+        } catch {
+          try {
+            console.error(`${marker} ${JSON.stringify(minimal("unavailable"))}`);
+          } catch {
+            // Even an unavailable stderr transport must preserve the original failure.
+          }
+        }
+        throw originalError;
+      });
     expect(back).toHaveAttribute("href", target);
     expect(await screen.findByDisplayValue("https://mcp.example.com/mcp")).toBeInTheDocument();
     await browser.click(back);

@@ -283,9 +283,9 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
       const box = await control.boundingBox();
       if (!box) throw new Error(`Missing Tasks ${name} control`);
       expect(box.y + box.height / 2).toBeCloseTo(rowCenter, 0);
-      expect(box.y).toBeGreaterThanOrEqual(titleBox.y);
-      expect(box.y + box.height).toBeLessThanOrEqual(titleBox.y + titleBox.height + 1);
-      expect(box.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width - 1);
+      expect(box.y).toBeGreaterThanOrEqual(controlRow.y);
+      expect(box.y + box.height).toBeLessThanOrEqual(controlRow.y + controlRow.height + 1);
+      expect(box.x).toBeGreaterThanOrEqual(controlRow.x + controlRow.width - 1);
       expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
     }
     if (isMobile) {

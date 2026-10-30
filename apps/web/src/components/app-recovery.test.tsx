@@ -686,6 +686,7 @@ it.each([
   const stopped = {
     id: "stopped-bank",
     name: "Stopped duplicate",
+    institution: "Fixture Credit Union",
     provider: "plaid" as const,
     status: "needs_reauth" as const,
     synchronization: {

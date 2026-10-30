@@ -2672,7 +2672,7 @@ describe("Personal OS web app", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect your Google accounts" }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("test@example.com")).toBeInTheDocument();
+    expect(await screen.findByText("Google · test@example.com")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Back" }));
     expect(
       await screen.findByRole("heading", { name: "What should nohmi help with?" }),
@@ -5739,7 +5739,7 @@ describe("Personal OS web app", () => {
     const browser = userEvent.setup();
     const view = setup("/finances/accounts");
     expect(
-      await screen.findByRole("list", { name: "Financial accounts" }, { timeout: 5_000 }),
+      await screen.findByRole("table", { name: "Accounts" }, { timeout: 5_000 }),
     ).toHaveTextContent("Checking");
     await browser.click(screen.getByRole("button", { name: "Add account" }));
     await browser.click(screen.getByRole("button", { name: "Connect bank" }));

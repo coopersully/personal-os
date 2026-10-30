@@ -16,6 +16,24 @@ fallback only where no canonical profile exists. An explicit unknown in the cano
 must not silently resurrect an older value. Budget approval binds the displayed proposal and
 its profile revision; readiness is informational and commit-time validation remains mandatory.
 
+## Approved plans and monthly category limits
+
+Finance status and canonical budget reads share owner-timezone monthly plan context. An approved
+versioned plan establishes approval; legacy monthly category-limit rows do not. Context names the
+approved version for the current month, the most recent earlier approved version, and the nearest
+current/future proposal or future approved plan. A future approval is never this month's plan;
+retirement when a successor is approved does not erase the earlier month's approval history.
+Latest-version budget reads still return a draft when it is the latest version, alongside this
+explicit context. Missing current-month approval does not mean no budget has ever been approved.
+Read failures remain unavailable errors, never fabricated missing plans. Profile revisions can
+require a new proposal without erasing a previous approval.
+
+Status keeps complete allocated resources and spending allocations distinct. Health and forecast
+comparisons use only the approved plan's spending allocations, never savings, debt, goals or buffer
+as spending limits. Legacy category-limit totals remain separately labeled and are not combined
+with the canonical plan. These reads neither approve nor retire a plan, qualify a monthly baseline,
+or alter financial records. Historical work scopes do not replace the current planning month.
+
 ## Grouped investigation
 
 Assessment groups outstanding material by useful investigation patterns, including roundups,

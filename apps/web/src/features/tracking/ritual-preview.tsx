@@ -147,7 +147,7 @@ export function RitualPreview({ state, onClose }: { state: RitualState; onClose:
       <DialogContent
         onOpenAutoFocus={(event) => event.preventDefault()}
         showCloseButton={false}
-        className="ritual-fullscreen ritual-surface ritual-browser-preview"
+        className="ritual-fullscreen ritual-surface ritual-browser-preview translate-x-0 translate-y-0"
         data-ritual-kind={state.current?.definition.kind}
       >
         <DialogTitle className="sr-only">Ritual preview</DialogTitle>

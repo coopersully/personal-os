@@ -29,6 +29,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { requireBudgetApproval } from "./budget-authority.js";
+import { readBudgetPlanContext } from "./budget-plan-projection.js";
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
@@ -99,8 +100,8 @@ function goalValue(row: typeof financeGoals.$inferSelect): FinanceGoal {
 
 export function createProfileBudgetService({ db, now, executor: transaction }: Options) {
   const planningEvidence = createFinancePlanningEvidenceService({ db, now });
-  async function latestProfile(userId: string) {
-    return db.query.financeProfileVersions.findFirst({
+  async function latestProfile(userId: string, reader: Pick<Database, "query"> = db) {
+    return reader.query.financeProfileVersions.findFirst({
       orderBy: [desc(financeProfileVersions.version)],
       where: eq(financeProfileVersions.userId, userId),
     });
@@ -387,32 +388,41 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async getFinanceBudget(userId: string, planId?: string): Promise<FinanceBudgetReadResult> {
-      const row = await db.query.financeBudgetVersions.findFirst({
-        orderBy: planId
-          ? [desc(financeBudgetVersions.version)]
-          : [desc(financeBudgetVersions.createdAt), desc(financeBudgetVersions.version)],
-        where: planId
-          ? and(eq(financeBudgetVersions.userId, userId), eq(financeBudgetVersions.planId, planId))
-          : eq(financeBudgetVersions.userId, userId),
-      });
-      const data = row ? await budgetValue(row) : null;
-      const profile = await latestProfile(userId);
-      return {
-        ...withFinanceBudgetPresentation(
-          result({
-            data,
-            disclosures: data ? budgetDisclosures(data) : [],
-            headline: data
-              ? `Budget version ${data.version} is ${data.status}.`
-              : "No budget exists yet.",
-          }),
-        ),
-        approvalReadiness: getFinanceBudgetApprovalReadiness({
-          budget: data,
-          currentProfileVersionId: profile?.id ?? null,
-          latestBudgetVersionId: row?.id ?? null,
-        }),
-      };
+      return db.transaction(
+        async (tx) => {
+          const row = await tx.query.financeBudgetVersions.findFirst({
+            orderBy: planId
+              ? [desc(financeBudgetVersions.version)]
+              : [desc(financeBudgetVersions.createdAt), desc(financeBudgetVersions.version)],
+            where: planId
+              ? and(
+                  eq(financeBudgetVersions.userId, userId),
+                  eq(financeBudgetVersions.planId, planId),
+                )
+              : eq(financeBudgetVersions.userId, userId),
+          });
+          const data = row ? await budgetValue(row, tx) : null;
+          const profile = await latestProfile(userId, tx);
+          return {
+            ...withFinanceBudgetPresentation(
+              result({
+                data,
+                disclosures: data ? budgetDisclosures(data) : [],
+                headline: data
+                  ? `Budget version ${data.version} is ${data.status}.`
+                  : "No budget exists yet.",
+              }),
+            ),
+            planContext: await readBudgetPlanContext(tx, userId, now()),
+            approvalReadiness: getFinanceBudgetApprovalReadiness({
+              budget: data,
+              currentProfileVersionId: profile?.id ?? null,
+              latestBudgetVersionId: row?.id ?? null,
+            }),
+          };
+        },
+        { accessMode: "read only", isolationLevel: "repeatable read" },
+      );
     },
 
     async createFinanceBudget(
@@ -648,20 +658,32 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async getFinanceBudgetStatus(userId: string) {
-      const row = await db.query.financeBudgetVersions.findFirst({
-        orderBy: [desc(financeBudgetVersions.effectiveFrom), desc(financeBudgetVersions.version)],
-        where: and(
-          eq(financeBudgetVersions.userId, userId),
-          eq(financeBudgetVersions.status, "active"),
-        ),
-      });
-      const data = row ? await budgetValue(row) : null;
-      return withFinanceBudgetPresentation(
-        result({
-          data,
-          disclosures: data ? budgetDisclosures(data) : [],
-          headline: data ? "Your active budget is balanced." : "There is no active budget.",
-        }),
+      return db.transaction(
+        async (tx) => {
+          const planContext = await readBudgetPlanContext(tx, userId, now());
+          const row = planContext.current
+            ? await tx.query.financeBudgetVersions.findFirst({
+                where: and(
+                  eq(financeBudgetVersions.userId, userId),
+                  eq(financeBudgetVersions.id, planContext.current.id),
+                ),
+              })
+            : null;
+          const data = row ? await budgetValue(row, tx) : null;
+          return {
+            ...withFinanceBudgetPresentation(
+              result({
+                data,
+                disclosures: data ? budgetDisclosures(data) : [],
+                headline: data
+                  ? `Your approved budget for ${planContext.month} is balanced.`
+                  : `There is no approved budget for ${planContext.month}.`,
+              }),
+            ),
+            planContext,
+          };
+        },
+        { accessMode: "read only", isolationLevel: "repeatable read" },
       );
     },
 

@@ -10534,7 +10534,10 @@ describe("Personal OS web app", () => {
       const view = setup("/settings?page=wallpaper");
       try {
         await waitFor(() =>
-          expect(mocks.invoke).toHaveBeenCalledWith("preview_pinterest_wallpaper", expect.anything()),
+          expect(mocks.invoke).toHaveBeenCalledWith(
+            "preview_pinterest_wallpaper",
+            expect.anything(),
+          ),
         );
       } catch (error) {
         // Failure-only readiness evidence; never serialize query keys, payloads or errors.

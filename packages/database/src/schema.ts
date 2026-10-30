@@ -2409,6 +2409,10 @@ export const financeAccounts = pgTable(
       .notNull()
       .default("manual"),
     encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>(),
+    providerInstitutionId: text("provider_institution_id"),
+    providerAccountMask: text("provider_account_mask"),
+    providerPersistentAccountId: text("provider_persistent_account_id"),
+    providerAccountName: text("provider_account_name"),
     providerAccountId: text("provider_account_id"),
     providerItemId: text("provider_item_id"),
     providerItemRecordId: uuid("provider_item_record_id").references(

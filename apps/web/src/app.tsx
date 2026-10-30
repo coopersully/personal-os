@@ -5833,13 +5833,29 @@ function MailSyncButton({
       : "Next sync not scheduled";
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [failedAccountIds, setFailedAccountIds] = useState<string[]>([]);
-  const [partialOutcome, setPartialOutcome] = useState<{ completed: number; total: number } | null>(
-    null,
-  );
+  const partialSyncSummary = useRef<string | null>(null);
+  const pendingSyncAccounts = useRef(new Set<string>());
   const sync = useFeedbackMutation({
     feedback: { action: "sync mail accounts", safeToRetry: true },
-    onMutate: () => setDetailsOpen(false),
+    onMutate: () => {
+      setDetailsOpen(false);
+      partialSyncSummary.current = null;
+    },
     onError: () => setDetailsOpen(true),
+    onFeedback: (feedback) => {
+      if (partialSyncSummary.current)
+        toast.error(feedback.message, {
+          ...(feedback.toastId ? { id: feedback.toastId } : {}),
+          description: partialSyncSummary.current,
+          duration: Number.POSITIVE_INFINITY,
+        });
+    },
+    onSuccess: ({ pending }) =>
+      toast.success(
+        pending
+          ? "Updates saved. Mail synchronization will continue automatically."
+          : "Mail accounts synced.",
+      ),
     mutationFn: async () => {
       const targets = failedAccountIds.length
         ? enabledAccounts.filter((account) => failedAccountIds.includes(account.id))
@@ -5854,17 +5870,30 @@ function MailSyncButton({
           : [];
       });
       setFailedAccountIds(failures.map((failure) => failure.id));
-      setPartialOutcome(
-        failures.length
-          ? { completed: targets.length - failures.length, total: targets.length }
-          : null,
-      );
+      if (!failedAccountIds.length) pendingSyncAccounts.current.clear();
+      let completed = 0;
+      let continuing = 0;
+      results.forEach((result, index) => {
+        const account = targets[index];
+        if (result.status !== "fulfilled" || !account) return;
+        if (result.value.pending) {
+          pendingSyncAccounts.current.add(account.id);
+          continuing++;
+        } else {
+          pendingSyncAccounts.current.delete(account.id);
+          completed++;
+        }
+      });
+      partialSyncSummary.current = failures.length
+        ? `${completed} of ${targets.length} mail accounts synced. ${continuing} will continue automatically. ${failures.length} ${failures.length === 1 ? "account needs" : "accounts need"} another attempt.`
+        : null;
       if (failures.length) {
         const authenticationFailure = failures.find(
           ({ error }) => error instanceof ApiClientError && error.status === 401,
         );
         throw authenticationFailure?.error ?? failures[0]?.error;
       }
+      return { pending: pendingSyncAccounts.current.size > 0 };
     },
     onSettled: () =>
       Promise.allSettled([
@@ -5874,7 +5903,9 @@ function MailSyncButton({
       ]),
   });
 
-  const hasSyncDetails = Boolean(accounts.isError || sync.feedback?.persistent || partialOutcome);
+  const hasSyncDetails = Boolean(
+    accounts.isError || sync.feedback?.persistent || failedAccountIds.length,
+  );
   useEffect(() => {
     if (!hasSyncDetails) setDetailsOpen(false);
   }, [hasSyncDetails]);
@@ -5895,14 +5926,6 @@ function MailSyncButton({
               </ShadcnPopoverHeader>
               <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
               <MutationFeedback feedback={sync.feedback} />
-              {partialOutcome ? (
-                <p className="text-sm text-muted-foreground" role="status">
-                  {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
-                  {failedAccountIds.length}{" "}
-                  {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another
-                  attempt.
-                </p>
-              ) : null}
             </ShadcnPopoverContent>
           </ShadcnPopover>
         ) : null}
@@ -6599,7 +6622,12 @@ function ConnectorsSettings() {
         queryClient.invalidateQueries({ queryKey: ["connectors"] }),
         invalidateMaterial(queryClient),
       ]),
-    onSuccess: () => toast.success("Connection synced."),
+    onSuccess: (result) =>
+      toast.success(
+        result.pending
+          ? "Updates saved. Mail synchronization will continue automatically."
+          : "Connection synced.",
+      ),
   });
   const disconnect = useFeedbackMutation({
     feedback: { action: "disconnect this account", safeToRetry: false },

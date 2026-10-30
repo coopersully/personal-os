@@ -2,7 +2,6 @@ import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { type DatabaseClient, migrateDatabase } from "@personal-os/database";
 import { createAuthService } from "../apps/api/src/auth-service.js";
-import { createFinanceService } from "../apps/api/src/finance-service.js";
 import { migrationsWithout } from "../apps/api/src/test-migrations.js";
 
 const legacyMigrationTag = "0118_finance_preferences_legacy_access";
@@ -56,7 +55,6 @@ export async function prepareFinanceLegacyMigrationFixture(
       sessionTtlDays: 30,
       registrationMode: "open",
     });
-    const finance = createFinanceService({ db: database.db, now });
     for (const persona of financeLegacyBrowserAccounts) {
       for (const [kind, account] of Object.entries({
         legacy: persona.legacy,
@@ -76,23 +74,16 @@ export async function prepareFinanceLegacyMigrationFixture(
         });
         await auth.updateAccountSetup(registered.user.id, { action: "complete" });
         if (kind === "legacy") {
-          await finance.createAccount(
-            {
-              provider: "manual",
-              institution: "Historical fixture bank",
-              name: "Legacy checking",
-              kind: "cash",
-              balance: 700,
-            },
-            {
-              principal: {
-                actorType: "user",
-                actorId: registered.user.id,
-                userId: registered.user.id,
-                scopes: new Set(["finances:read", "finances:write"]),
-              },
-              requestId: `legacy-browser-${persona.project}`,
-            },
+          // Pin the historical row shape: today's ORM/writer can reference columns
+          // introduced after this journal prefix. The real migration, rather than
+          // the fixture, must derive the legacy access grant from this account.
+          await database.pool.query(
+            `insert into finance_accounts
+              (user_id, provider, institution, name, kind, kind_source,
+               ownership_type, ownership_share_bps, balance_cents, status, sync_state)
+             values ($1, 'manual', 'Historical fixture bank', 'Legacy checking',
+                     'cash', 'user', 'individual', 10000, 70000, 'manual', 'current')`,
+            [registered.user.id],
           );
         }
       }

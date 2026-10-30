@@ -45,6 +45,7 @@ import { financeActionFingerprint } from "./finance-action-identity.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
+import { decryptJson } from "./security.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
 
@@ -3492,6 +3493,428 @@ describe.sequential("finance service", () => {
     await expect(
       database.db.select().from(financeAccounts).where(eq(financeAccounts.userId, atomicUserId)),
     ).resolves.toHaveLength(0);
+  });
+
+  it("reconnects an owned existing Plaid Item without exchanging tokens or resetting its ledger cursors", async () => {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Update mode",
+      email: `update-mode-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const exchangePublicToken = vi
+      .fn()
+      .mockResolvedValue({ accessToken: "existing-access", itemId: "existing-item" });
+    const createLinkToken = vi.fn().mockResolvedValue("update-link");
+    const getItem = vi.fn().mockResolvedValue({ itemId: "existing-item" });
+    const getAccounts = vi.fn().mockResolvedValue([
+      {
+        accountId: "existing-account",
+        balanceCurrent: 10,
+        currencyCode: "USD",
+        name: "Provider checking",
+        officialName: null,
+      },
+    ]);
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid: {
+        createLinkToken,
+        validateCredentials: async () => undefined,
+        exchangePublicToken,
+        getItem,
+        getAccounts,
+        syncTransactions: async () => ({
+          added: [],
+          modified: [],
+          removed: [],
+          hasMore: false,
+          nextCursor: "unused",
+          transactionsUpdateStatus: null,
+        }),
+      },
+    });
+    const context = { principal: financePrincipal(userId), requestId: "update-mode" };
+    const [account] = await service.exchangePlaidToken(
+      { publicToken: "initial-token", institution: "Fixture" },
+      context,
+    );
+    if (!account) throw new Error("Reconnect fixture missing.");
+    const [item] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.userId, userId));
+    if (!item) throw new Error("Reconnect Item missing.");
+    await database.db
+      .update(financeProviderItems)
+      .set({ syncCursor: "preserved-item-cursor", syncState: "current", nextSyncAt: null })
+      .where(eq(financeProviderItems.id, item.id));
+    await database.db
+      .update(financeAccounts)
+      .set({
+        syncCursor: "preserved-account-cursor",
+        name: "My renamed checking",
+        status: "needs_reauth",
+        nextSyncAt: null,
+      })
+      .where(eq(financeAccounts.id, account.id));
+    await expect(service.createPlaidLinkToken(userId, account.id)).resolves.toBe("update-link");
+    expect(createLinkToken).toHaveBeenCalledWith(
+      expect.objectContaining({ accessToken: "existing-access" }),
+    );
+    await expect(
+      service.createPlaidLinkToken(crypto.randomUUID(), account.id),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const authorization = await loadFinanceAuthorization({
+      db: database.db,
+      principal: financePrincipal(userId),
+      requestId: "update-complete",
+    });
+    const input = { idempotencyKey: "update-completion" };
+    await expect(service.completePlaidReconnect(account.id, input, authorization)).resolves.toEqual(
+      { accountId: account.id, authorizationVerified: true, synchronizationScheduled: true },
+    );
+    await service.completePlaidReconnect(account.id, input, authorization);
+    expect(exchangePublicToken).toHaveBeenCalledExactlyOnceWith("initial-token");
+    expect(getItem).toHaveBeenCalledOnce();
+    const [savedItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, item.id));
+    const [savedAccount] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, account.id));
+    expect(savedItem).toMatchObject({
+      syncCursor: "preserved-item-cursor",
+      nextSyncAt: now,
+      syncState: "stale",
+    });
+    expect(savedAccount).toMatchObject({
+      syncCursor: "preserved-account-cursor",
+      name: "My renamed checking",
+      status: "connected",
+    });
+    const otherOwnerId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: otherOwnerId,
+      displayName: "Other reconnect owner",
+      email: `other-reconnect-${otherOwnerId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    await expect(
+      service.completePlaidReconnect(
+        account.id,
+        { idempotencyKey: "other-owner" },
+        { ...authorization, userId: otherOwnerId, actorId: otherOwnerId },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await database.db.delete(users).where(eq(users.id, otherOwnerId));
+    getAccounts.mockResolvedValueOnce([]);
+    await expect(
+      service.completePlaidReconnect(
+        account.id,
+        { idempotencyKey: "missing-account" },
+        authorization,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    getItem.mockResolvedValueOnce({ itemId: "wrong-item" });
+    await expect(
+      service.completePlaidReconnect(account.id, { idempotencyKey: "wrong-item" }, authorization),
+    ).rejects.toMatchObject({ code: "conflict" });
+    getItem.mockRejectedValueOnce(new Error("Synthetic provider unavailable"));
+    await expect(
+      service.completePlaidReconnect(
+        account.id,
+        { idempotencyKey: "provider-failure" },
+        authorization,
+      ),
+    ).rejects.toThrow("Synthetic provider unavailable");
+    const claimId = crypto.randomUUID();
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        syncClaimId: claimId,
+        syncClaimOwner: "worker",
+        syncClaimGeneration: 1,
+        syncClaimStartedAt: now,
+        syncClaimExpiresAt: new Date(now.getTime() + 60_000),
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    await expect(
+      service.completePlaidReconnect(account.id, { idempotencyKey: "active-claim" }, authorization),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await database.db
+      .update(financeProviderItems)
+      .set({ syncClaimExpiresAt: new Date(now.getTime() - 1) })
+      .where(eq(financeProviderItems.id, item.id));
+    await expect(
+      service.completePlaidReconnect(
+        account.id,
+        { idempotencyKey: "expired-claim" },
+        authorization,
+      ),
+    ).resolves.toMatchObject({ synchronizationScheduled: true });
+    const [recovered] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, item.id));
+    expect(recovered).toMatchObject({
+      syncClaimId: null,
+      syncClaimOwner: null,
+      syncClaimGeneration: null,
+      syncCursor: "preserved-item-cursor",
+    });
+    await database.db.delete(users).where(eq(users.id, userId));
+  });
+
+  it("rejects known Link account metadata before a duplicate public token is exchanged", async () => {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Duplicate preflight",
+      email: `preflight-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const exchangePublicToken = vi
+      .fn()
+      .mockResolvedValue({ accessToken: "preflight-access", itemId: "preflight-item" });
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid: {
+        createLinkToken: async () => "unused",
+        validateCredentials: async () => undefined,
+        exchangePublicToken,
+        getItem: async () => ({ itemId: "preflight-item" }),
+        getAccounts: async () => [
+          {
+            accountId: "preflight-account",
+            balanceCurrent: 10,
+            currencyCode: "USD",
+            name: "Checking",
+            officialName: null,
+            institutionId: "ins-fixture",
+            mask: "0042",
+          },
+        ],
+        syncTransactions: async () => ({
+          added: [],
+          modified: [],
+          removed: [],
+          hasMore: false,
+          nextCursor: "unused",
+          transactionsUpdateStatus: null,
+        }),
+      },
+    });
+    const context = { principal: financePrincipal(userId), requestId: "duplicate-preflight" };
+    const [saved] = await service.exchangePlaidToken(
+      { publicToken: "first-token", institution: "Fixture" },
+      context,
+    );
+    await expect(
+      service.exchangePlaidToken(
+        {
+          publicToken: "must-not-exchange",
+          institution: "Fixture",
+          metadata: {
+            institutionId: "ins-fixture",
+            accounts: [{ name: " checking ", mask: "0042" }],
+          },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: { reason: "duplicate_bank_accounts", accountIds: [saved?.id] },
+    });
+    expect(exchangePublicToken).toHaveBeenCalledExactlyOnceWith("first-token");
+    await database.db.delete(users).where(eq(users.id, userId));
+  });
+
+  it("retains direct Plaid exchanges across duplicate and account-read failures without repeating consent", async () => {
+    const ownerId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: ownerId,
+      displayName: "Exchange recovery",
+      email: `${ownerId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    let remoteId = "first-account";
+    const getAccounts = vi.fn(async () => [
+      {
+        accountId: remoteId,
+        balanceCurrent: 10,
+        currencyCode: "USD",
+        name: "Checking",
+        officialName: null,
+        institutionId: "ins-recovery",
+        mask: "0042",
+      },
+    ]);
+    const exchangePublicToken = vi.fn(async (token: string) => ({
+      accessToken: `access-${token}`,
+      itemId: `item-${token}`,
+    }));
+    const recoveryLogs: unknown[] = [];
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      log: (entry) => recoveryLogs.push(entry),
+      plaid: {
+        createLinkToken: async () => "unused",
+        validateCredentials: async () => undefined,
+        exchangePublicToken,
+        getAccounts,
+        getItem: async () => ({ itemId: "unused" }),
+        syncTransactions: async () => ({
+          added: [],
+          modified: [],
+          removed: [],
+          hasMore: false,
+          nextCursor: "unused",
+          transactionsUpdateStatus: null,
+        }),
+      },
+    });
+    const context = { principal: financePrincipal(ownerId), requestId: "direct-recovery" };
+    await service.exchangePlaidToken({ institution: null, publicToken: "first" }, context);
+    remoteId = "duplicate-account";
+    const duplicate = await service
+      .exchangePlaidToken({ institution: null, publicToken: "duplicate" }, context)
+      .catch((error: unknown) => error);
+    expect(duplicate).toMatchObject({
+      code: "conflict",
+      details: {
+        reason: "duplicate_bank_accounts",
+        recovery: "complete_connection",
+        connectionId: expect.any(String),
+      },
+    });
+    const retained = await database.db
+      .select()
+      .from(financeAccountConnections)
+      .where(eq(financeAccountConnections.userId, ownerId));
+    const duplicateReceipt = retained.find((row) => row.status === "failed");
+    if (!duplicateReceipt?.encryptedHandoffState)
+      throw new Error("Missing retained duplicate exchange");
+    expect(decryptJson(duplicateReceipt.encryptedHandoffState, key)).toMatchObject({
+      phase: "exchanged",
+      accessToken: "access-duplicate",
+      itemId: "item-duplicate",
+    });
+    expect(JSON.stringify(duplicate)).not.toContain("access-duplicate");
+    const outsider = await loadFinanceAuthorization({
+      db: database.db,
+      principal: financePrincipal(userId),
+      requestId: "foreign-recovery",
+    });
+    await expect(
+      service.completeFinanceAccountConnection(duplicateReceipt.id, outsider),
+    ).rejects.toMatchObject({ code: "not_found" });
+    remoteId = "recoverable-account";
+    let retainedBeforeRead: unknown;
+    getAccounts.mockImplementationOnce(async () => {
+      const [receiptBeforeRead] = await database.db
+        .select()
+        .from(financeAccountConnections)
+        .where(
+          and(
+            eq(financeAccountConnections.userId, ownerId),
+            eq(financeAccountConnections.status, "pending"),
+          ),
+        );
+      if (!receiptBeforeRead?.encryptedHandoffState)
+        throw new Error("Exchange was not durable before provider read");
+      retainedBeforeRead = decryptJson(receiptBeforeRead.encryptedHandoffState, key);
+      throw new Error("provider-read-canary access-secret");
+    });
+    const failed = await service
+      .exchangePlaidToken({ institution: null, publicToken: "read-failure" }, context)
+      .catch((error: unknown) => error);
+    expect(failed).toMatchObject({
+      code: "service_unavailable",
+      details: { connectionId: expect.any(String), recovery: "complete_connection" },
+    });
+    expect(retainedBeforeRead).toMatchObject({
+      phase: "exchanged",
+      accessToken: "access-read-failure",
+    });
+    expect(JSON.stringify(failed)).not.toContain("access-secret");
+    const [pending] = await database.db
+      .select()
+      .from(financeAccountConnections)
+      .where(
+        and(
+          eq(financeAccountConnections.userId, ownerId),
+          eq(financeAccountConnections.status, "pending"),
+        ),
+      );
+    if (!pending?.encryptedHandoffState) throw new Error("Missing retained provider-read exchange");
+    const authorization = await loadFinanceAuthorization({ db: database.db, ...context });
+    // The next snapshot is a distinct account, so completion can commit its projection.
+    getAccounts.mockResolvedValueOnce([
+      {
+        accountId: remoteId,
+        balanceCurrent: 10,
+        currencyCode: "USD",
+        name: "Checking",
+        officialName: null,
+        institutionId: "ins-recovery",
+        mask: "9999",
+      },
+    ]);
+    const completed = await service.completeFinanceAccountConnection(pending.id, authorization);
+    expect(completed.data.status).toBe("connected");
+    expect(completed.data.accountIds).toHaveLength(1);
+    const [settled] = await database.db
+      .select()
+      .from(financeAccountConnections)
+      .where(eq(financeAccountConnections.id, pending.id));
+    expect(settled?.encryptedHandoffState).toBeNull();
+    expect(exchangePublicToken).toHaveBeenCalledTimes(3);
+    await database.pool.query(`CREATE SEQUENCE direct_receipt_failures;
+      CREATE FUNCTION reject_direct_receipt() RETURNS trigger AS $$ BEGIN
+        PERFORM nextval('direct_receipt_failures');
+        RAISE EXCEPTION 'synthetic credential storage outage';
+      END; $$ LANGUAGE plpgsql;
+      CREATE TRIGGER reject_direct_receipt BEFORE INSERT ON finance_account_connections
+      FOR EACH ROW EXECUTE FUNCTION reject_direct_receipt();`);
+    const readsBeforeOutage = getAccounts.mock.calls.length;
+    try {
+      await expect(
+        service.exchangePlaidToken(
+          { institution: null, publicToken: "persistence-outage" },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "service_unavailable" });
+      const attempts = await database.pool.query("SELECT last_value FROM direct_receipt_failures");
+      expect(Number(attempts.rows[0]?.last_value)).toBe(3);
+      expect(getAccounts).toHaveBeenCalledTimes(readsBeforeOutage);
+      expect(exchangePublicToken).toHaveBeenCalledTimes(4);
+      expect(recoveryLogs).toContainEqual(
+        expect.objectContaining({
+          event: "connector_handoff_failed",
+          code: "exchange_persistence_failed",
+        }),
+      );
+      expect(JSON.stringify(recoveryLogs)).not.toContain("access-persistence-outage");
+    } finally {
+      await database.pool.query(
+        "DROP TRIGGER reject_direct_receipt ON finance_account_connections; DROP FUNCTION reject_direct_receipt(); DROP SEQUENCE direct_receipt_failures;",
+      );
+    }
+    await database.db.delete(users).where(eq(users.id, ownerId));
   });
 
   it("commits Plaid categories, Item, accounts, and audits atomically", async () => {
@@ -10797,5 +11220,63 @@ describe.sequential("finance service", () => {
       outcome: "completed",
       data: { imported: 1, skipped: 0 },
     });
+  });
+  it("qualifies Wealth and Accounts consistently for renamed matching provider identities", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Renamed duplicate fixture",
+        email: `renamed-${crypto.randomUUID()}@example.test`,
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing fixture");
+    const provider = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    await provider.upsertConnection({
+      accessToken: "synthetic-only",
+      itemId: `fixture-${owner.id}`,
+      institution: "Fixture bank",
+      context: { principal: financePrincipal(owner.id), requestId: "fixture" },
+      accounts: [
+        {
+          accountId: `one-${owner.id}`,
+          balanceCurrent: 100,
+          currencyCode: "USD",
+          name: "Original one",
+          officialName: null,
+        },
+        {
+          accountId: `two-${owner.id}`,
+          balanceCurrent: 100,
+          currencyCode: "USD",
+          name: "Original two",
+          officialName: null,
+        },
+      ],
+    });
+    await database.db
+      .update(financeAccounts)
+      .set({
+        providerPersistentAccountId: "same-provider-identity",
+        ownershipType: "individual",
+        ownershipShareBps: 10_000,
+        lastSyncedAt: now,
+        syncState: "current",
+      })
+      .where(eq(financeAccounts.userId, owner.id));
+    await database.db
+      .update(financeProviderItems)
+      .set({ syncState: "current", lastSyncedAt: now })
+      .where(eq(financeProviderItems.userId, owner.id));
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const accounts = await service.listFinanceAccounts(owner.id, { includeExcluded: true });
+    expect(accounts.accountSemantics.trustworthy).toBe(false);
+    expect(accounts.accountSemantics.possibleDuplicateGroups).toHaveLength(1);
+    const wealth = await service.getWealthSummary(owner.id);
+    expect(wealth.accountSemantics).toEqual(accounts.accountSemantics);
   });
 });

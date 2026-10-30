@@ -33,7 +33,7 @@ test("production has isolated storage, no published ports and explicit resource 
     assert.ok(!JSON.stringify(service).includes("docker.sock"));
   }
   assert.equal(model.networks.database.internal, true);
-  assert.deepEqual(model.services.tunnel.networks, ["edge"]);
+  assert.deepEqual(Object.keys(model.services.tunnel.networks), ["edge"]);
   assert.deepEqual(model.services.web.networks, ["origin"]);
   assert.equal(model.services.api.stop_grace_period, "120s");
   assert.deepEqual(model.services.postgres.volumes, ["postgres-data:/var/lib/postgresql/data"]);
@@ -203,5 +203,71 @@ test("operation lock excludes concurrent work and releases after failure", async
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("edge services have distinct fixed addresses regardless of restart order", () => {
+  const { services } = composeModel(fixture());
+  assert.equal(services.gateway.networks.edge.ipv4_address, "172.30.253.2");
+  assert.equal(services.tunnel.networks.edge.ipv4_address, "172.30.253.3");
+  assert.notEqual(
+    services.gateway.networks.edge.ipv4_address,
+    services.tunnel.networks.edge.ipv4_address,
+  );
+});
+
+test("production Plaid accepts only an explicit production credential pair and keeps values intact", () => {
+  const source = {
+    APP_BASE_URL: "https://nohmi.coopersully.me",
+    API_BASE_URL: "https://nohmi-api.coopersully.me",
+    APP_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64"),
+    MCP_INTERNAL_SECRET: "x".repeat(32),
+    GOOGLE_CLIENT_ID: "google",
+    GOOGLE_CLIENT_SECRET: "google-secret",
+    GOOGLE_REDIRECT_URI: "https://nohmi-api.coopersully.me/v1/connectors/google/callback",
+    X_REDIRECT_URI: "https://nohmi-api.coopersully.me/v1/x-bookmarks/callback",
+    EMAIL_FROM: "nohmi <no@example.com>",
+    RESEND_API_KEY: "resend",
+    OWNER_EMAILS: "owner@example.com",
+    REGISTRATION_MODE: "invite",
+  };
+  const password = "a".repeat(64);
+  const disabled = environmentFiles(source, password);
+  assert.ok(!disabled.api.includes("PLAID_CLIENT_ID="));
+  assert.ok(!disabled.api.includes("PLAID_SECRET="));
+  const credentials = {
+    PLAID_CLIENT_ID: "fictional-client",
+    PLAID_SECRET: "literal$fictional#secret",
+  };
+  const configured = { ...credentials, PLAID_ENV: "production" };
+  const enabled = environmentFiles({ ...source, ...configured }, password);
+  for (const [key, value] of Object.entries(configured)) {
+    assert.ok(enabled.api.includes(`${key}=${value}\n`));
+    assert.ok(!enabled.mcp.includes(key));
+    assert.ok(!enabled.postgres.includes(key));
+  }
+  for (const invalid of [
+    { ...credentials, PLAID_ENV: "sandbox" },
+    { ...credentials, PLAID_ENV: "development" },
+    credentials,
+    { ...credentials, PLAID_ENV: "" },
+    { PLAID_CLIENT_ID: credentials.PLAID_CLIENT_ID, PLAID_ENV: "production" },
+    { PLAID_SECRET: credentials.PLAID_SECRET, PLAID_ENV: "production" },
+    { ...configured, PLAID_CLIENT_ID: "" },
+    { ...configured, PLAID_SECRET: "   " },
+    { PLAID_CLIENT_ID: "", PLAID_SECRET: "", PLAID_ENV: "production" },
+  ]) {
+    assert.throws(
+      () => environmentFiles({ ...source, ...invalid }, password),
+      (error) => {
+        assert.equal(
+          error.message,
+          "Production Plaid requires nonblank PLAID_CLIENT_ID and PLAID_SECRET with explicit PLAID_ENV=production. Use sandbox credentials only in an isolated local runtime.",
+        );
+        assert.ok(!error.message.includes(credentials.PLAID_CLIENT_ID));
+        assert.ok(!error.message.includes(credentials.PLAID_SECRET));
+        return true;
+      },
+    );
   }
 });

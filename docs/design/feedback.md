@@ -189,7 +189,8 @@ uncertain disconnect, refresh its state before offering another action.
 
 ## Sonner behavior and message quality
 
-- Use one mounted Toaster available to each application flow that emits toasts.
+- Use one mounted Toaster available to each application flow that emits toasts. Mount it before
+  content that can emit feedback from effects, so initial errors reach an active subscriber.
   The shared feedback layer owns positioning, durations, dismissal, and styling;
   features own the action-specific language and recovery.
 - Start with 5 seconds for short success/info messages as a product default,

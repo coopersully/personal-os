@@ -45,6 +45,7 @@ import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { AccountDuplicateDialog } from "./account-duplicate-dialog";
 import { financeAccountNeedsConnectionAttention } from "./attention";
 import { FinanceSection } from "./finance-section";
 import {
@@ -84,6 +85,7 @@ export function FinanceAccountsPage() {
     queryFn: () => api.listFinanceAccounts(),
   });
   const [editing, setEditing] = useState<FinanceAccount | null>(null);
+  const [comparing, setComparing] = useState<FinanceAccount | null>(null);
   return (
     <div className="flex flex-col gap-5">
       <FloatingActionRegion align="end">
@@ -142,6 +144,12 @@ export function FinanceAccountsPage() {
                             financeAccountNeedsConnectionAttention(account) ? (
                               account.status === "needs_reauth" ? (
                                 <PlaidConnectButton
+                                  {...([
+                                    "finance_account_disconnected",
+                                    "finance_account_legacy_disconnected",
+                                  ].includes(account.synchronization.failureCode ?? "")
+                                    ? {}
+                                    : { accountId: account.id })}
                                   label="Reconnect bank"
                                   onConnected={() => refreshFinancePosition(client)}
                                 />
@@ -158,6 +166,16 @@ export function FinanceAccountsPage() {
                             ) : undefined
                           }
                         />
+                        {account.provider === "plaid" && duplicateNames.length ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setComparing(account)}
+                            aria-label={`Compare duplicates for ${account.name}`}
+                          >
+                            Compare duplicates
+                          </Button>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -176,6 +194,18 @@ export function FinanceAccountsPage() {
           ) : null}
         </div>
       </FinanceSection>
+      {comparing && accounts.data ? (
+        <AccountDuplicateDialog
+          account={comparing}
+          candidates={accounts.data.accounts.filter((candidate) =>
+            accounts.data.accountSemantics.possibleDuplicateGroups.some(
+              (group) =>
+                group.accountIds.includes(comparing.id) && group.accountIds.includes(candidate.id),
+            ),
+          )}
+          onClose={() => setComparing(null)}
+        />
+      ) : null}
       {editing ? (
         <AccountEditor
           account={editing}

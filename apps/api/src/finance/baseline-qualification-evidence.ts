@@ -112,7 +112,11 @@ export async function prepareBaselineEvidence(
       "The historical budget is incomplete; review a complete budget first.",
     );
   const accounts = await tx
-    .select()
+    .select({
+      id: financeAccounts.id,
+      currencyCode: financeAccounts.currencyCode,
+      updatedAt: financeAccounts.updatedAt,
+    })
     .from(financeAccounts)
     .where(and(eq(financeAccounts.userId, userId), inArray(financeAccounts.id, input.accountIds)))
     .orderBy(financeAccounts.id)

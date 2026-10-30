@@ -48,6 +48,79 @@ consent at the institution. The connector does not implement an Item-removal API
 tests do not establish real consent, production coverage, reconnect frequency or remote revocation.
 Deleting an account is a separate data-control operation with its existing ledger/guidance guards.
 
+## Duplicate detection and reviewed resolution
+
+Plaid account IDs can change across separate authorizations of the same institution login. Retain
+optional provider institution ID, account mask, original provider name and persistent account ID
+alongside each projection. Existing records remain unchanged until an authoritative account snapshot
+supplies this evidence. Only the mask enters the ordinary account response; provider IDs remain
+internal. Two populated persistent IDs take precedence, including when they contradict matching
+institution/mask/name. Otherwise the complete institution/mask/provider-name tuple supplies a
+possible identity match. Institution or editable display name alone cannot block a connection.
+
+Connection hints from Link/Hosted Link can reject a known duplicate before token exchange. The
+transactional owner topology lock repeats the check against provider-returned identity before
+saving new account IDs; exact-ID relinks retain their ledger. Intentionally stopped records do not
+block new consent. Missing hints and concurrent new authorizations can still reach provider exchange
+before another local commit; this guard prevents duplicate local projections, not every provider
+charge. Both direct Link and hosted completion retain an encrypted exchanged-Item receipt before
+account reads and projection. A direct post-exchange failure returns its safe connection ID for
+canonical completion; retry reuses that receipt rather than exchanging a consumed public token.
+Only successful atomic projection attaches account IDs and clears the receipt. A total credential
+storage outage can still prevent retention after the bounded retries; its redacted failure is
+reported explicitly. No automatic Item removal or provider consent revocation is implemented.
+
+The account-list duplicate groups combine display-name warnings with retained provider evidence,
+so a user rename cannot hide matching provider identities. Groups remain owner-scoped and qualify
+planning trust when multiple included records are possible duplicates. Warnings never authorize a
+merge or deletion.
+
+The signed-in Accounts page offers **Compare duplicates** and requires choosing a connected,
+current account to keep. The server compares owner-scoped ledger entries by date, signed amount,
+currency, direction, merchant and pending state, counting matches as a multiset. These are possible
+matching charges, not proof that two financial events are identical. Show overlapping and unique
+history counts, both account identities, freshness and the consequence before confirmation.
+
+Resolution uses a fingerprint of both accounts, authoritative Item state and complete transaction
+row evidence. It rechecks the preview under the owner topology/account/ledger locks and rejects
+stale evidence. The attended lock set is capped at 50,000 transaction rows; larger histories require
+separate reconciliation. Existing active sync claims reject the operation. The idempotent canonical
+account disconnect then excludes only the selected redundant record from planning and stops its
+local synchronization. All histories, annotations and relationships remain on their original
+accounts. Unique history remains inspectable but no longer contributes to planning; historical
+spending totals may change. Keep the healthy account and other attached accounts connected.
+
+This is an explicit source-selection action, not an automatic ledger merge, institution-side
+revocation or billing cancellation. Ordinary account disconnect retains its existing separate
+planning preference. Read-only tokens cannot resolve duplicates; agent execution retains the
+existing Finance execution authority requirements.
+
+## Reconnect and safe test environments
+
+Reconnect for an attached Item uses Plaid Link update mode with the existing access token, omits
+new-product configuration and performs no public-token exchange. Completion verifies the owned Item
+identity and selected account through bounded provider reads, preserves cursors and user-authored
+account details, clears expired claims and schedules synchronization. Authorization verification is
+not proof that Transactions synchronization completed. Ambiguous HTTP/server responses retain the
+same idempotency key. Intentionally stopped/detached records use fresh consent instead of attempting
+update mode against a missing Item.
+
+The connection button labels Sandbox/development test environments. Actual Mac production
+environment generation rejects configured Plaid credentials unless both credentials are present and
+`PLAID_ENV=production` is explicit; isolated local production-build runtimes may still use Sandbox.
+Regression tests use synthetic provider responses and disposable PostgreSQL without Plaid calls.
+Optional live Sandbox work uses separate keys, runtime and database under the
+[QA fixture contract](qa-fixtures.md); never seed it into production or infer real entitlement from
+its success.
+
+The durable commit point is the existing fenced account/Item or account-disconnect transaction.
+Identity migration is additive and does not reconcile existing production duplicates. Tests prove
+application persistence, owner isolation, retry and UI behavior. After authorized deployment, the
+delivery owner separately verifies migration provenance, actual update-mode consent and subsequent
+scheduled synchronization, then observes an explicitly approved duplicate resolution preserving
+keeper/siblings/history. Billing, provider availability and institution consent require their own
+provider evidence. A successful mock or healthy server establishes none of those facts.
+
 ## Regression evidence
 
 - `finance/account-disconnect.integration.test.ts`: local access removal, final credential deletion,

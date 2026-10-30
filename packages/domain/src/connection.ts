@@ -98,3 +98,10 @@ export const connectorCapabilitySyncSchema = z.object({
 });
 export type ConnectorCapabilitySync = z.infer<typeof connectorCapabilitySyncSchema>;
 export type ConnectorCapabilities = Partial<Record<"calendar" | "mail", ConnectorCapabilitySync>>;
+
+export const connectorSyncResultSchema = z.object({
+  changed: z.number().int().nonnegative(),
+  pending: z.boolean().default(false),
+  nextSyncAt: isoDateTimeSchema.nullable().default(null),
+});
+export type ConnectorSyncResult = z.infer<typeof connectorSyncResultSchema>;

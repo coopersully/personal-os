@@ -439,6 +439,13 @@ export const personalOsToolCatalog = {
   create_finance_category: write("finances", ["finances:write", "finances:execute"], {
     policy: "approved_rule",
   }),
+  get_finance_account_duplicate_preview: preview("finances", ["finances:read"]),
+  resolve_finance_account_duplicate: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+    destructive: true,
+    idempotent: true,
+    openWorld: false,
+  }),
   disconnect_finance_account: write("finances", ["finances:write", "finances:execute"], {
     policy: "approved_rule",
     destructive: true,

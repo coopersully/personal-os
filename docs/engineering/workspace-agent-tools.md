@@ -5652,6 +5652,38 @@ Inspect bank-connection status and redacted errors. This read never returns the 
 }
 ```
 
+## get_finance_account_duplicate_preview
+
+Compare an owned redundant account with the account to keep tracking. Inspect masked identity, freshness, overlapping and unique transaction counts, and the returned revision before resolving. Matching provider details do not establish that accounts are the same. Requires finances:read.
+
+- Domain: finances; stage: prepare; policy: preview.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances-management.ts); typed API methods: `getFinanceAccountDuplicatePreview`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "redundantAccountId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "keepAccountId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "redundantAccountId",
+    "keepAccountId"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
 ## get_finance_automation_settings
 
 Read the account-wide review policy inherited by Finance. The setting is informational only: nohmi still enforces scopes, registered actions, and stronger approval requirements.
@@ -12650,6 +12682,49 @@ Remove the exact observed Finance override so notifications inherit global setti
 }
 ```
 
+## resolve_finance_account_duplicate
+
+After reviewing get_finance_account_duplicate_preview and confirming both records represent the same account, stop local tracking of the redundant account and exclude it from planning. Preserve all history on its original account without merging transactions; unique redundant history remains visible but excluded from planning and may change past spending totals. Does not revoke provider access or cancel billing. Use the exact preview revision and retain the idempotency key on uncertain retries; reload the preview after a conflict. Requires finances:write, finances:execute and enabled review bypass for agents.
+
+- Domain: finances; stage: commit; policy: approved_rule.
+- Grants (all): finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances-management.ts); typed API methods: `resolveFinanceAccountDuplicate`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "keepAccountId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "redundantAccountId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "keepAccountId",
+    "revision",
+    "idempotencyKey",
+    "redundantAccountId"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
 ## resolve_finance_alert
 
 Resolve or dismiss a Finance ledger alert; nohmi returns its apply-or-review disposition.
@@ -15670,7 +15745,7 @@ Synchronize the requested accounts now. Continue healthy accounts when one sourc
 
 ## sync_workspace_source
 
-Synchronize one owned provider account across its enabled workspaces. Read list_workspace_sources first. Requires mail/calendar/tasks write and execute, reminders:write, and enabled bypass for agents. Returns changed count; unavailable providers and partial failures retain API recovery diagnostics.
+Synchronize one owned provider account across its enabled workspaces. Read list_workspace_sources first. Requires mail/calendar/tasks write and execute, reminders:write, and enabled bypass for agents. Returns changed count, pending continuation and nextSyncAt; pending means synchronization continues automatically, not completion. Unavailable providers and partial failures retain API recovery diagnostics.
 
 - Domain: assistant; stage: commit; policy: approved_rule.
 - Grants (all): mail:write, mail:execute, calendar:write, calendar:execute, reminders:write, tasks:write, tasks:execute.

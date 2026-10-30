@@ -242,7 +242,7 @@ export function FinanceAccountsView({
       cell: (account) => {
         const TypeIcon = financeAccountTypeIcon(financeAccountType(account));
         return (
-          <Badge variant="secondary" className="max-w-full whitespace-normal">
+          <Badge variant="secondary" className="h-auto min-h-5 max-w-full whitespace-normal">
             <TypeIcon aria-hidden="true" />
             {financeAccountTypeLabel(account)}
           </Badge>
@@ -259,7 +259,7 @@ export function FinanceAccountsView({
         <div className="flex flex-col gap-1">
           <Badge
             variant={attention(account) ? "destructive" : "secondary"}
-            className="max-w-full whitespace-normal"
+            className="h-auto min-h-5 max-w-full whitespace-normal"
           >
             {attention(account) ? "Needs attention" : stateLabel(account)}
           </Badge>

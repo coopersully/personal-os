@@ -15,6 +15,10 @@ test("account recovery overlays rather than displaces settings and requires a su
     exact: true,
     includeHidden: true,
   });
+  const completedDays = card.getByRole("button", {
+    name: /^\d+ of the past 7 days completed$/,
+  });
+  await expect(completedDays).toBeVisible();
   const before = await card.boundingBox();
   let fail = true;
   await page.route("**/v1/me", async (route) => {
@@ -49,6 +53,7 @@ test("account recovery overlays rather than displaces settings and requires a su
   await recovery.getByRole("button", { name: "Try again" }).click();
   await expect(recovery).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Morning Ritual", exact: true })).toBeVisible();
+  await expect(completedDays).toBeVisible();
   const after = await card.boundingBox();
   expect(after?.y).toBe(before?.y);
   expect(after?.height).toBe(before?.height);

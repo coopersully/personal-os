@@ -309,6 +309,46 @@ describe.sequential("Finance status service", () => {
     });
   });
 
+  it("ignores archived operative plans and drafts while retaining previous-month history", async () => {
+    const userId = await makeUser("Archived budget context");
+    const previous = await planVersion(userId, "2026-07", "retired");
+    const current = await planVersion(userId, "2026-08", "active", previous.planId, 8);
+    await planVersion(userId, "2026-09", "proposed", previous.planId, 9);
+    await database.db
+      .update(financeBudgetPlans)
+      .set({ status: "archived" })
+      .where(eq(financeBudgetPlans.id, previous.planId));
+    expect(await readBudgetPlanContext(database.db, userId, now)).toMatchObject({
+      state: "missing",
+      current: null,
+      upcoming: null,
+      previous: { id: previous.id },
+    });
+    const profile = createProfileBudgetService({ db: database.db, now: () => now });
+    expect((await profile.getFinanceBudgetStatus(userId)).data).toBeNull();
+    expect(
+      (await service().getFinanceStatus(userId, { type: "all_outstanding" })).details.budget
+        .approved,
+    ).toBe(false);
+    expect(current.status).toBe("active");
+  });
+
+  it("reports invalid stored planning timezone as unavailable rather than guessing a month", async () => {
+    const userId = await makeUser("Invalid budget timezone");
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "Invalid/Timezone" })
+      .where(eq(users.id, userId));
+    await expect(
+      service().getFinanceStatus(userId, { type: "all_outstanding" }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      createProfileBudgetService({ db: database.db, now: () => now }).getFinanceBudgetStatus(
+        userId,
+      ),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+  });
+
   it("does not erase approval after a profile revision or expose a future approval as this month", async () => {
     const userId = await makeUser("Budget profile changes");
     const current = await planVersion(userId, "2026-08");

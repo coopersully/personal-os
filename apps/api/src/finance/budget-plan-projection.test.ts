@@ -7,7 +7,9 @@ describe("budget plan projection read boundary", () => {
       "2026-10-31",
     );
     expect(budgetPlanningDate(new Date("2026-11-01T02:30:00Z"), "UTC")).toBe("2026-11-01");
-    expect(() => budgetPlanningDate(new Date(), "Invalid/Timezone")).toThrow();
+    expect(() => budgetPlanningDate(new Date(), "Invalid/Timezone")).toThrow(
+      expect.objectContaining({ code: "service_unavailable" }),
+    );
   });
   it("propagates unavailable storage instead of fabricating a missing plan", async () => {
     const error = new Error("storage unavailable");

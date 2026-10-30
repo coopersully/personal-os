@@ -26,12 +26,22 @@ import { AppError } from "../errors.js";
 type Reader = Pick<Database, "select">;
 
 export function budgetPlanningDate(now: Date, timezone: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    throw new AppError(
+      "service_unavailable",
+      "Finance planning timezone is unavailable. Set a valid planning timezone and retry.",
+    );
+  }
+  const parts = formatter.formatToParts(now);
   const value = (part: string) => parts.find((item) => item.type === part)?.value;
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
@@ -73,7 +83,14 @@ export async function readBudgetPlanContext(
   ];
   // Retirement of October on approval of November does not erase October's approval history.
   const [current] = await query()
-    .where(and(owned, approved, eq(financeBudgetVersions.effectiveFrom, month)))
+    .where(
+      and(
+        owned,
+        eq(financeBudgetPlans.status, "active"),
+        approved,
+        eq(financeBudgetVersions.effectiveFrom, month),
+      ),
+    )
     .orderBy(...latest)
     .limit(1);
   const [previous] = await query()
@@ -85,6 +102,7 @@ export async function readBudgetPlanContext(
     .where(
       and(
         owned,
+        eq(financeBudgetPlans.status, "active"),
         notExists(
           reader
             .select({ id: successor.id })

@@ -25,7 +25,10 @@ current/future proposal or future approved plan. A future approval is never this
 retirement when a successor is approved does not erase the earlier month's approval history.
 Latest-version budget reads still return a draft when it is the latest version, alongside this
 explicit context. Missing current-month approval does not mean no budget has ever been approved.
-Read failures remain unavailable errors, never fabricated missing plans. Profile revisions can
+Archived plan containers are excluded from current/upcoming selection; earlier approved versions
+remain explicit historical context. Invalid stored planning timezones return a controlled unavailable
+error with timezone-repair guidance, never a guessed UTC month. Read failures remain unavailable
+errors, never fabricated missing plans. Profile revisions can
 require a new proposal without erasing a previous approval.
 
 Status keeps complete allocated resources and spending allocations distinct. Health and forecast

@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   createDatabaseClient,
-  financeAccounts,
   financeReviewArchives,
   financeTransactions,
   migrateDatabase,
@@ -59,10 +58,13 @@ it("upgrades a database that already applied the first published 0105 archive", 
       })
       .returning();
     if (!owner) throw new Error("Archive upgrade owner was not created.");
-    const [account] = await database.db
-      .insert(financeAccounts)
-      .values({ institution: "Test bank", name: "Checking", provider: "manual", userId: owner.id })
-      .returning();
+    // The fixture is pinned to 0105; avoid current ORM insert/returning columns.
+    const {
+      rows: [account],
+    } = await database.pool.query<{ id: string }>(
+      "INSERT INTO finance_accounts (user_id,institution,name,provider) VALUES ($1,'Test bank','Checking','manual') RETURNING id",
+      [owner.id],
+    );
     if (!account) throw new Error("Archive upgrade account was not created.");
     // Seed only columns published in the original 0105 schema.
     const transactions: { id: string }[] = [];

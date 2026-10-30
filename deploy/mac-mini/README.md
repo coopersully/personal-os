@@ -305,3 +305,22 @@ recovery, or offsite restore. Record each live gate separately.
 snapshot of host/container resources, restart/OOM state and sanitized connector events. Missing
 readings are listed explicitly; the configured revision is not proof of the deployed revision.
 See [Grafana Cloud setup](../observability/README.md) for optional historical metrics and logs.
+### Edge addresses during host recovery
+
+The gateway retains `172.30.253.2` and the tunnel uses fixed address `172.30.253.3`
+on the private `172.30.253.0/29` edge network. Both must remain explicit: Docker
+restart policies can start the tunnel before the gateway after a VM reboot,
+regardless of Compose `depends_on`. A dynamically addressed tunnel previously
+claimed the gateway address and prevented its startup.
+
+For an existing installation, pause deployment through the supported maintenance
+command and unload its controller before updating the installed Compose generator
+and runtime Compose model together. Preserve private environment files, tunnel
+token, images, and database volume. Recreate only the tunnel container to apply its
+fixed endpoint; changing a file does not change an existing container's network
+request. Validate the installed model with `cli.mjs check`, resume with `publish`,
+and reload the controller. Verify the adverse order explicitly: stop tunnel and
+gateway, start the tunnel first, then the gateway; inspect their addresses and
+check public app/API/MCP health after the tunnel reconnects. Do not use Compose
+`down --volumes` or recreate the database. This tests the network allocation
+boundary; a full no-login host reboot remains separate evidence.

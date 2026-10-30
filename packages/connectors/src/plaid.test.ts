@@ -145,13 +145,19 @@ describe("Plaid connector", () => {
       accessToken: "access-token",
       itemId: "item-1",
     });
-    await expect(plaid.getItem("access-token")).resolves.toEqual({ itemId: "item-1" });
+    await expect(plaid.getItem("access-token")).resolves.toEqual({
+      itemId: "item-1",
+      institutionId: null,
+    });
     await expect(plaid.getAccounts("access-token")).resolves.toEqual([
       {
         accountId: "account-1",
         balanceCurrent: 12.5,
         currencyCode: "USD",
+        institutionId: null,
+        mask: null,
         name: "Checking",
+        persistentAccountId: null,
         officialName: null,
         subtype: "checking",
         type: "depository",
@@ -160,7 +166,10 @@ describe("Plaid connector", () => {
         accountId: "account-unknown-currency",
         balanceCurrent: 7.5,
         currencyCode: null,
+        institutionId: null,
+        mask: null,
         name: "Legacy account",
+        persistentAccountId: null,
         officialName: null,
         subtype: null,
         type: "investment",
@@ -195,6 +204,138 @@ describe("Plaid connector", () => {
       hasMore: false,
       nextCursor: "cursor-1",
     });
+  });
+
+  it("maps authoritative institution and account identity metadata without extra requests", async () => {
+    const requests: string[] = [];
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async (input) => {
+        const path = new URL(String(input)).pathname;
+        requests.push(path);
+        const item = { item_id: "item-1", institution_id: "ins-1" };
+        return Response.json(
+          path === "/item/get"
+            ? { item }
+            : {
+                item,
+                accounts: [
+                  {
+                    account_id: "account-1",
+                    balances: { current: 12.5, iso_currency_code: "USD" },
+                    mask: "0042",
+                    name: "Checking",
+                    official_name: null,
+                    persistent_account_id: "persistent-1",
+                    subtype: "checking",
+                    type: "depository",
+                  },
+                ],
+              },
+        );
+      },
+      secret: "secret",
+    });
+
+    await expect(plaid.getItem("access-token")).resolves.toEqual({
+      itemId: "item-1",
+      institutionId: "ins-1",
+    });
+    await expect(plaid.getAccounts("access-token")).resolves.toMatchObject([
+      {
+        accountId: "account-1",
+        institutionId: "ins-1",
+        mask: "0042",
+        persistentAccountId: "persistent-1",
+      },
+    ]);
+    expect(requests).toEqual(["/item/get", "/accounts/get"]);
+  });
+
+  it.each([
+    undefined,
+    null,
+  ])("normalizes absent identity metadata (%s) to null", async (metadata) => {
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () =>
+        Response.json({
+          item: { item_id: "item-1", institution_id: metadata },
+          accounts: [
+            {
+              account_id: "account-1",
+              balances: { current: null },
+              mask: metadata,
+              name: "Checking",
+              official_name: null,
+              persistent_account_id: metadata,
+              subtype: null,
+              type: "depository",
+            },
+          ],
+        }),
+      secret: "secret",
+    });
+
+    await expect(plaid.getItem("access-token")).resolves.toMatchObject({ institutionId: null });
+    await expect(plaid.getAccounts("access-token")).resolves.toMatchObject([
+      {
+        institutionId: null,
+        mask: null,
+        persistentAccountId: null,
+      },
+    ]);
+  });
+
+  it.each([
+    ["mask", 42],
+    ["mask", " "],
+    ["mask", "x".repeat(33)],
+    ["persistent_account_id", {}],
+    ["persistent_account_id", ""],
+    ["persistent_account_id", "x".repeat(257)],
+    ["institution_id", []],
+    ["institution_id", " "],
+    ["institution_id", "x".repeat(257)],
+  ])("rejects malformed or unbounded %s metadata", async (field, metadata) => {
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () =>
+        Response.json({
+          item: {
+            item_id: "item-1",
+            ...(field === "institution_id" ? { institution_id: metadata } : {}),
+          },
+          accounts: [
+            {
+              account_id: "account-1",
+              balances: { current: 10 },
+              name: "Checking",
+              official_name: null,
+              subtype: null,
+              type: "depository",
+              ...(field === "institution_id" ? {} : { [field]: metadata }),
+            },
+          ],
+        }),
+      secret: "secret",
+    });
+
+    const error = await connectorErrorFrom(() => plaid.getAccounts("sensitive-access-token"));
+    expect(error).toMatchObject({
+      category: "invalid_response",
+      code: "plaid_invalid_response",
+      message: "Plaid returned an invalid response.",
+    });
+    assertRedactedMessage(error.message, ["sensitive-access-token"]);
+    if (field === "institution_id") {
+      await expect(plaid.getItem("access-token")).rejects.toMatchObject({
+        code: "plaid_invalid_response",
+      });
+    }
   });
 
   it("rejects an empty Plaid account snapshot with a sanitized invalid response", async () => {

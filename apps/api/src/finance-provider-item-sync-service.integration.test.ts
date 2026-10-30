@@ -202,6 +202,38 @@ describe.sequential("Finance Provider Item synchronization", () => {
     });
   }
 
+  it("refreshes original provider identity metadata during fenced account projection", async () => {
+    const { accounts, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target?.providerAccountId) throw new Error("Identity fixture missing.");
+    const providerAccountId = target.providerAccountId;
+    const provider = plaid({
+      getAccounts: async () => [
+        {
+          ...remoteAccount(providerAccountId),
+          institutionId: "ins-synced",
+          mask: "0042",
+          persistentAccountId: "persistent-synced",
+          name: "Original provider checking",
+        },
+      ],
+    });
+    await service(provider).syncAccount(target.id, {
+      principal: principal(userId),
+      requestId: "identity-projection",
+    });
+    const [stored] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, target.id));
+    expect(stored).toMatchObject({
+      providerInstitutionId: "ins-synced",
+      providerAccountMask: "0042",
+      providerPersistentAccountId: "persistent-synced",
+      providerAccountName: "Original provider checking",
+    });
+  });
+
   it("commits legacy identity before paging and ignores divergent account cursor shadows", async () => {
     const { accounts, item, userId } = await fixture({ itemId: null });
     const observed: Array<{ cursor: string | null; identity: string | null }> = [];

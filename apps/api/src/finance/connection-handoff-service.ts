@@ -4,6 +4,7 @@ import type { FinanceOutcome } from "@personal-os/domain";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "../errors.js";
+import type { PlaidAccountIdentityMetadata } from "../finance-provider-item-service.js";
 import { decryptJson, encryptJson } from "../security.js";
 import type { RequestLog } from "../types.js";
 import type { createFinanceAccountService } from "./account-service.js";
@@ -32,6 +33,10 @@ export function createFinanceConnectionHandoffService(options: {
   log?: (entry: RequestLog) => void;
   plaid?: PlaidConnector;
   accounts: ReturnType<typeof createFinanceAccountService>;
+  findDuplicateAccounts?: (
+    userId: string,
+    metadata: PlaidAccountIdentityMetadata[],
+  ) => Promise<string[]>;
   preparePersistence: (
     item: { accessToken: string; itemId: string; institution?: string | undefined },
     context: FinanceMutationContext,
@@ -102,6 +107,54 @@ export function createFinanceConnectionHandoffService(options: {
     };
   }
   return {
+    async retainExchange(
+      item: { accessToken: string; itemId: string; institution?: string | undefined },
+      context: FinanceMutationContext,
+    ) {
+      // The caller authorized the provider exchange already. Retain its known
+      // external result even if policy changes now; complete reauthorizes before
+      // reading the provider or committing any account projection.
+      if (!options.encryptionKey)
+        throw new AppError("service_unavailable", "Bank credential storage is unavailable.");
+      const id = crypto.randomUUID();
+      const encryptedHandoffState = encryptJson(
+        { phase: "exchanged", ...item },
+        options.encryptionKey,
+      );
+      const startedAt = Date.now();
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await db
+            .insert(financeAccountConnections)
+            .values({
+              id,
+              userId: context.userId,
+              provider: "plaid",
+              encryptedHandoffState,
+            })
+            .onConflictDoNothing({ target: financeAccountConnections.id });
+          return id;
+        } catch {
+          if (attempt < 2) continue;
+          options.log?.({
+            event: "connector_handoff_failed",
+            code: "exchange_persistence_failed",
+            provider: "plaid",
+            category: "unexpected",
+            durationMs: Date.now() - startedAt,
+            method: "POST",
+            path: "/v1/finances/plaid/exchange",
+            requestId: context.requestId,
+            status: 503,
+          });
+          throw new AppError(
+            "service_unavailable",
+            "Bank authorization completed, but its credentials could not be retained after bounded retries. Do not repeat the consumed token.",
+          );
+        }
+      }
+      throw new AppError("internal_error", "Bank exchange retention did not settle.");
+    },
     async start(
       input: { provider: "plaid"; idempotencyKey: string },
       context: FinanceMutationContext,
@@ -213,7 +266,10 @@ export function createFinanceConnectionHandoffService(options: {
       await requireFinanceExecution(db, context, now());
       let row = await owned(id, context.userId);
       if (row.status === "connected") return options.accounts.getConnection(context.userId, id);
-      const { plaid, getHostedLinkResult, key } = provider();
+      const plaid = options.plaid;
+      const key = options.encryptionKey;
+      if (!plaid || !key)
+        throw new AppError("service_unavailable", "Bank authorization recovery is unavailable.");
       if (!row.encryptedHandoffState)
         throw new AppError(
           "conflict",
@@ -221,6 +277,7 @@ export function createFinanceConnectionHandoffService(options: {
         );
       let state = stateSchema.parse(decryptJson(row.encryptedHandoffState, key));
       if (state.phase === "waiting") {
+        const { getHostedLinkResult } = provider();
         const result = await getHostedLinkResult(state.linkToken);
         if (result.publicTokens.length === 0) {
           if (row.externalHandoffExpiresAt && row.externalHandoffExpiresAt <= now()) {
@@ -254,6 +311,47 @@ export function createFinanceConnectionHandoffService(options: {
         const publicToken = result.publicTokens[0];
         if (!publicToken)
           throw new AppError("conflict", "The provider consent receipt is unavailable.");
+        const metadata = result.accountMetadata?.[publicToken];
+        if (metadata && options.findDuplicateAccounts) {
+          const duplicateIds = await options.findDuplicateAccounts(
+            context.userId,
+            metadata.accounts.map((account) => ({
+              ...account,
+              institutionId: metadata.institutionId,
+            })),
+          );
+          if (duplicateIds.length > 0) {
+            await db
+              .update(financeAccountConnections)
+              .set({
+                status: "failed",
+                encryptedHandoffState: null,
+                externalHandoffUrl: null,
+                externalHandoffExpiresAt: null,
+                lastError: {
+                  code: "duplicate_bank_accounts",
+                  message:
+                    "These bank accounts are already connected. Review existing accounts before reconnecting.",
+                  retryable: false,
+                },
+                updatedAt: now(),
+              })
+              .where(
+                and(
+                  eq(financeAccountConnections.id, id),
+                  eq(financeAccountConnections.version, row.version),
+                ),
+              );
+            throw new AppError(
+              "conflict",
+              "These bank accounts are already connected. Review existing accounts before reconnecting.",
+              {
+                reason: "duplicate_bank_accounts",
+                accountIds: duplicateIds,
+              },
+            );
+          }
+        }
         const claimed = await db.transaction(async (tx) => {
           await tx
             .select({ id: financeAccountConnections.id })
@@ -430,14 +528,23 @@ export function createFinanceConnectionHandoffService(options: {
             .where(eq(financeAccountConnections.id, id));
         });
       } catch (error) {
+        const duplicate =
+          error instanceof AppError &&
+          error.code === "conflict" &&
+          typeof error.details === "object" &&
+          error.details !== null &&
+          "reason" in error.details &&
+          error.details.reason === "duplicate_bank_accounts";
         await db
           .update(financeAccountConnections)
           .set({
+            ...(duplicate ? { status: "failed" as const } : {}),
             lastError: {
-              code: "connection_persist_failed",
-              message:
-                "Authorized bank details were retained securely. Retry completion to save the accounts; provider consent will not be exchanged again.",
-              retryable: true,
+              code: duplicate ? "duplicate_bank_accounts" : "connection_persist_failed",
+              message: duplicate
+                ? "These bank accounts are already connected. Provider authorization was retained securely for recovery; review existing accounts before reconnecting."
+                : "Authorized bank details were retained securely. Retry completion to save the accounts; provider consent will not be exchanged again.",
+              retryable: !duplicate,
             },
             updatedAt: now(),
           })

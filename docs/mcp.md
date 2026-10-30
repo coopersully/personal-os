@@ -443,6 +443,16 @@ legacy recovery before selecting a new supported scope.
 structured result includes planning totals plus excluded-account, unresolved-ownership, and
 possible-duplicate disclosures calculated by the Finance API; the MCP adapter only forwards the
 typed query and response.
+`get_finance_account_duplicate_preview` compares an owned redundant account with the account to
+keep tracking and returns masked identity, transaction overlap, unique-history counts, and an exact
+revision. After confirming the records represent the same account, an agent with `finances:write`,
+`finances:execute`, and enabled review bypass may call `resolve_finance_account_duplicate` with
+that revision and an idempotency key. Resolution stops local tracking and excludes the redundant
+account from planning while retaining all history on its original account. Unique redundant history
+remains visible but excluded from planning, which may change past spending totals. No transactions
+are merged, provider access revoked, or billing cancelled. Retain the same key for uncertain retries;
+refresh the preview after a conflict. Preview requires only `finances:read` and remains available in
+read-only discovery; resolution does not.
 `create_finance_attention_item` is the bounded transaction-linked attention operation: it locks one owned transaction, derives provider/account/remote/revision attribution
 server-side, deduplicates the same open transaction/kind item, and writes a redacted audit in the
 same transaction. The audit carries `approved_rule` policy and privacy-safe source attribution

@@ -480,6 +480,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const finances = createFinanceService({
     db: dependencies.db,
+    plaidEnvironment: dependencies.config.plaidEnvironment,
     encryptionKey: dependencies.config.encryptionKey,
     ...(dependencies.log ? { log: dependencies.log } : {}),
     now,

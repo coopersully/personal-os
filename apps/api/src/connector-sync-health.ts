@@ -78,6 +78,8 @@ export function connectorRetryAt(input: {
 export function connectionHealthForAccount(
   account: {
     syncCapabilities?: ConnectorCapabilities | null;
+    calendarEnabled?: boolean;
+    mailEnabled?: boolean;
     nextSyncAt: Date | null;
     syncError: string | null;
     syncRecovery: ConnectorSyncRecovery | null;
@@ -97,6 +99,20 @@ export function connectionHealthForAccount(
     escalated
   ) {
     return { ...escalated.health, nextSyncAt: account.nextSyncAt?.toISOString() ?? null };
+  }
+  if (!capability && account.syncStatus !== "syncing" && account.syncRecovery === null) {
+    const enabled = Object.entries(account.syncCapabilities ?? {})
+      .filter(([name]) =>
+        name === "mail" ? account.mailEnabled !== false : account.calendarEnabled !== false,
+      )
+      .map(([, value]) => value);
+    const unavailable =
+      enabled.find((value) => value.health.state === "reconnect") ??
+      enabled.find((value) => value.health.state === "service_attention") ??
+      enabled.find((value) => value.health.state === "retrying");
+    if (unavailable) return unavailable.health;
+    const pending = enabled.find((value) => value.health.state === "syncing");
+    if (pending) return pending.health;
   }
   const state =
     account.syncStatus === "syncing"

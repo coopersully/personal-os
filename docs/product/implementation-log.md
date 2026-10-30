@@ -81,6 +81,20 @@
   Existing notification preferences and OS permissions still govern delivery; the native changes
   require a rebuilt desktop app.
 
+## 2026-10-21 — Personal harness exterior (branch implementation)
+
+- The design branch positions nohmi as **a personal harness**: context, tools, and controls
+  built around a person. Canonical planning and design guidance use that lens. This is product
+  direction, not a claim that the entire target is available.
+- The public landing page, about page, getting-started guide, and authentication brand panel
+  adopt lowercase copy, restrained proportions, and external light blue. The shared public
+  navigation/footer and authentication labels follow the same voice. Product theme tokens and
+  policy/consent bodies retain their existing behavior and commitments.
+- Public documents and the landing page still use the existing static rendering path and work
+  without JavaScript or a session. The public-site page contract records layout and color scope.
+- This entry records local branch implementation only; no merge or production publication is
+  asserted. The application-wide neutral-theme migration remains a separate implementation task.
+
 ## 2026-10-19 — Integrated Finance experience merged
 
 - [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270)
@@ -1183,3 +1197,10 @@ value rather than a false zero. A recovered ritual-settings conflict dispatches 
 with the latest authoritative revision, including when refreshed fields are unchanged;
 server compare-and-swap and local draft rebasing remain in force. Added regression cases
 cover failed refresh recovery, reduced-motion clouds, data-view controls and form editors.
+
+## 2026-10-29 — Public campaign integration candidate
+
+- Reconciled the figure-led company landing page, independent workspace guide routes, screenshot walkthroughs and static product UI examples with current app/session routing. Existing account controls, auth forms and signed-in workspace behavior remain owned by their current implementations.
+- Retained the adapted cursor and vivid solid workspace identity treatment. Campaign nature scenes, figure silhouettes and device screenshots are locally hosted.
+- Excluded the historical optional premiere capture fixture: current Finance demo enrichment invalidates its fixed category assumptions. The original source remains in `b397f08f`; campaign captures do not certify live actions or provider behavior.
+- This is a review candidate, not a claim of merge or production deployment. Current-candidate independent review, verification and release evidence remain required.

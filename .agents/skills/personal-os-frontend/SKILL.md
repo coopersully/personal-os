@@ -123,8 +123,8 @@ already-open editors and drafts, and allow nested repair dialogs inside the reco
   destination.
 - Treat Calendar, Tasks, Mail, and Finances as the only colored workspace
   identities. Read their label, route, and glyph from the shared workspace
-  registry and render the framed `WorkspaceIcon` whenever representing the
-  whole workspace. Keep its frame and palette stable across selection; use the
+  registry and render the solid `WorkspaceIcon` whenever representing the
+  whole workspace. Use a white glyph on fully saturated fill without a border or extra frame. Keep its palette stable across selection; use the
   control surface for active state. Keep every palette high-chroma and distinct
   at peripheral glance in both themes; do not mute workspace identity toward
   gray in the name of calmness. Never copy workspace palette values into a

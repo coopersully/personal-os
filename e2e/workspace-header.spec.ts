@@ -13,9 +13,14 @@ for (const width of [320, 390, 1100]) {
       const header = page.getByRole("navigation", { name: "Top navigation", exact: true });
       const title = header.locator('[data-slot="workspace-title-sentence"]');
       await expect(title).toBeVisible();
-      const search = header.getByRole("combobox");
+      const search = header.getByRole(width < 768 ? "button" : "combobox", {
+        name: /^Search /,
+      });
       await expect(search).toBeVisible();
       if (width < 768) {
+        // The first header control follows the visible workspace identity row.
+        await header.locator("a[href], button, input").first().focus();
+        await expect(header.getByRole("button", { name: "Switch workspace" })).toBeFocused();
         const switcher = await header
           .getByRole("button", { name: "Switch workspace" })
           .boundingBox();
@@ -48,6 +53,8 @@ for (const width of [320, 390, 1100]) {
         return {
           height: element.getBoundingClientRect().height,
           titleY: titleElement.getBoundingClientRect().y,
+          titleBottom: titleElement.getBoundingClientRect().bottom,
+          contextY: context.getBoundingClientRect().y,
           contextBottom: context.getBoundingClientRect().bottom,
           fontSize: getComputedStyle(titleElement).fontSize,
           overflow: document.documentElement.scrollWidth > innerWidth,
@@ -60,7 +67,9 @@ for (const width of [320, 390, 1100]) {
       });
       expect(geometry.overflow, route).toBe(false);
       expect(geometry.height, route).toBe(104);
-      expect(geometry.titleY, route).toBeGreaterThanOrEqual(geometry.contextBottom);
+      if (width > 900)
+        expect(geometry.contextY, route).toBeGreaterThanOrEqual(geometry.titleBottom);
+      else expect(geometry.titleY, route).toBeGreaterThanOrEqual(geometry.contextBottom);
       if (width < 768) {
         expect(geometry.titleY, route).toBeGreaterThanOrEqual(geometry.contextBottom);
         expect(geometry.fontSize, route).toBe("17px");

@@ -4,15 +4,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { QueryFeedback } from "@/components/async-state";
-import {
-  BankIcon,
-  CircleAlertIcon,
-  EditIcon,
-  MoreHorizontalIcon,
-  ReceiptIcon,
-  TargetIcon,
-  WalletIcon,
-} from "@/components/icons";
+import { CircleAlertIcon, EditIcon, MoreHorizontalIcon, ReceiptIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -22,11 +14,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
+import { Item, ItemActions, ItemContent } from "@/components/ui/item";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { financeAccountBalance } from "./account-type";
 import { financeAccountNeedsAttention } from "./attention";
+import { BankAccount } from "./bank-account";
+import { FinancialAccountCard } from "./financial-account-card";
 import { formatMoney } from "./format.js";
 
 export function refreshFinancePosition(client: QueryClient) {
@@ -170,43 +165,36 @@ export function accountOwnership(account: FinanceAccount) {
 export function FinanceAccountRecord({
   account,
   duplicateNames = [],
+  card = false,
   onEdit,
   attentionAction,
 }: {
   account: FinanceAccount;
   duplicateNames?: string[];
+  card?: boolean;
   onEdit?: () => void;
   attentionAction?: ReactNode;
 }) {
-  const balance =
-    account.balance === null
-      ? "Balance unavailable"
-      : account.currencyCode
-        ? new Intl.NumberFormat(undefined, {
-            style: "currency",
-            currency: account.currencyCode,
-          }).format(account.balance)
-        : account.balance.toLocaleString(undefined, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          });
+  const balance = financeAccountBalance(account);
   return (
     <Item
       id={`account-${account.id}`}
       role="listitem"
       variant="secondary"
-      className="finance-account-record"
+      className={`finance-account-record${card ? " finance-account-record--card" : ""}`}
     >
       <ItemContent className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          {account.kind === "debt" ? (
-            <WalletIcon aria-hidden="true" />
-          ) : account.kind === "investment" ? (
-            <TargetIcon aria-hidden="true" />
+          {card ? (
+            <FinancialAccountCard
+              account={account}
+              actions={
+                <FinanceAccountOptions account={account} {...(onEdit ? { onEdit } : {})} card />
+              }
+            />
           ) : (
-            <BankIcon aria-hidden="true" />
+            <BankAccount account={account} />
           )}
-          <ItemTitle>{account.name}</ItemTitle>
           {financeAccountNeedsAttention(account, duplicateNames.length > 0) ? (
             <Badge variant="destructive">
               <CircleAlertIcon />
@@ -214,16 +202,6 @@ export function FinanceAccountRecord({
             </Badge>
           ) : null}
         </div>
-        <ItemDescription>
-          {account.institution} ·{" "}
-          {account.kind === "investment"
-            ? "Investments"
-            : account.kind === "cash"
-              ? "Cash"
-              : account.kind === "debt"
-                ? "Debt"
-                : "Other assets"}
-        </ItemDescription>
         {account.synchronization.message ? (
           <p className="text-sm">{account.synchronization.message}</p>
         ) : null}
@@ -240,83 +218,100 @@ export function FinanceAccountRecord({
         ) : null}
         {attentionAction}
       </ItemContent>
-      <div className="finance-account-balance">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              className={
-                account.kind === "debt"
-                  ? "font-semibold tabular-nums text-destructive"
-                  : "font-semibold tabular-nums"
-              }
-            >
-              {balance}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {account.currencyCode ?? "The source has not provided a currency code."}
-          </TooltipContent>
-        </Tooltip>
-        <span
-          className={
-            account.kind === "debt" ? "text-xs text-destructive" : "text-xs text-muted-foreground"
-          }
-        >
-          {account.kind === "debt" ? "Amount owed" : "Current balance"}
-        </span>
-      </div>
-      <ItemActions>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label={`Account options for ${account.name}`}
-            >
-              <MoreHorizontalIcon />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="end" aria-label={`Details for ${account.name}`}>
-            <p className="font-medium">{account.name}</p>
-            <p className="text-sm text-muted-foreground">
-              {accountOwnership(account)} ·{" "}
-              {account.includeInPlanning ? "Included in planning" : "Excluded from planning"}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {account.provider === "manual" ? "Manually tracked" : "Connected source"} ·{" "}
-              {account.lastSyncedAt
-                ? `Last synced ${financeObservedAt(account.lastSyncedAt)}`
-                : "No recorded sync"}
-            </p>
-            <div className="flex items-center gap-2">
-              {onEdit ? (
-                <Button
-                  aria-label={`Edit ${account.name}`}
-                  onClick={onEdit}
-                  size="sm"
-                  variant="ghost"
-                >
-                  <EditIcon /> Edit account
-                </Button>
-              ) : (
-                <Button asChild size="sm" variant="outline">
-                  <Link to={`/finances/accounts#account-${account.id}`}>Inspect account</Link>
-                </Button>
-              )}
+      {!card ? (
+        <div className="finance-account-balance">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className={
+                  account.kind === "debt"
+                    ? "font-semibold tabular-nums text-destructive"
+                    : "font-semibold tabular-nums"
+                }
+              >
+                {balance}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {account.currencyCode ?? "The source has not provided a currency code."}
+            </TooltipContent>
+          </Tooltip>
+          <span
+            className={
+              account.kind === "debt" ? "text-xs text-destructive" : "text-xs text-muted-foreground"
+            }
+          >
+            {account.kind === "debt" ? "Amount owed" : "Current balance"}
+          </span>
+        </div>
+      ) : null}
+      {!card ? <FinanceAccountOptions account={account} {...(onEdit ? { onEdit } : {})} /> : null}
+    </Item>
+  );
+}
+
+export function FinanceAccountOptions({
+  account,
+  onEdit,
+  card = false,
+}: {
+  account: FinanceAccount;
+  onEdit?: () => void;
+  card?: boolean;
+}) {
+  return (
+    <ItemActions>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            size={card ? "sm" : "icon-sm"}
+            variant="ghost"
+            className={card ? "financial-account-card__details" : undefined}
+            aria-label={`Account options for ${account.name}`}
+          >
+            {card ? "Details" : <MoreHorizontalIcon />}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" aria-label={`Details for ${account.name}`}>
+          <p className="font-medium">{account.name}</p>
+          <p className="text-sm text-muted-foreground">
+            {accountOwnership(account)} ·{" "}
+            {account.includeInPlanning ? "Included in planning" : "Excluded from planning"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {account.provider === "manual" ? "Manually tracked" : "Connected source"} ·{" "}
+            {account.lastSyncedAt
+              ? `Last synced ${financeObservedAt(account.lastSyncedAt)}`
+              : "No recorded sync"}
+          </p>
+          <div className="flex items-center gap-2">
+            {onEdit ? (
               <Button
-                asChild
+                aria-label={`Edit ${account.name}`}
+                onClick={onEdit}
                 size="sm"
                 variant="ghost"
-                aria-label={`Transactions for ${account.name}`}
               >
-                <Link to={`/finances/transactions?accountId=${encodeURIComponent(account.id)}`}>
-                  <ReceiptIcon /> Transactions
-                </Link>
+                <EditIcon /> Edit account
               </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
-      </ItemActions>
-    </Item>
+            ) : (
+              <Button asChild size="sm" variant="outline">
+                <Link to={`/finances/accounts#account-${account.id}`}>Inspect account</Link>
+              </Button>
+            )}
+            <Button
+              asChild
+              size="sm"
+              variant="ghost"
+              aria-label={`Transactions for ${account.name}`}
+            >
+              <Link to={`/finances/transactions?accountId=${encodeURIComponent(account.id)}`}>
+                <ReceiptIcon /> Transactions
+              </Link>
+            </Button>
+          </div>
+        </PopoverContent>
+      </Popover>
+    </ItemActions>
   );
 }

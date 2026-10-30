@@ -303,6 +303,35 @@ export const financeGuidedPreferencesSchema = z
   });
 export type FinanceGuidedPreferences = z.infer<typeof financeGuidedPreferencesSchema>;
 
+/** Display-only institution branding, never a payment credential or exact card artwork. */
+export const financeInstitutionBrandingSchema = z.object({
+  institutionId: z.string().min(1).max(160),
+  logo: z
+    .string()
+    .max(44_000)
+    .regex(/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/u)
+    .nullable(),
+  primaryColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/u)
+    .nullable(),
+  url: z
+    .string()
+    .max(2048)
+    .url()
+    .refine((value) => value.startsWith("https://"), "HTTPS required")
+    .nullable(),
+});
+export type FinanceInstitutionBranding = z.infer<typeof financeInstitutionBrandingSchema>;
+
+/** Keep decorative bitmap payloads out of agent/context reads unless a human UI explicitly needs them. */
+export function projectFinanceInstitutionBranding(
+  branding: FinanceInstitutionBranding | null | undefined,
+  includeArtwork = false,
+): FinanceInstitutionBranding | null {
+  return branding ? { ...branding, logo: includeArtwork ? branding.logo : null } : null;
+}
+
 export const financeAccountSchema = z
   .object({
     accountMask: z.string().max(32).nullable().optional(),
@@ -315,6 +344,7 @@ export const financeAccountSchema = z
       .default(null),
     id: idSchema,
     includeInPlanning: z.boolean(),
+    institutionBranding: financeInstitutionBrandingSchema.nullable().optional(),
     institution: z.string().min(1).max(160),
     kind: financeAccountKindSchema,
     kindSource: financeAccountKindSourceSchema,

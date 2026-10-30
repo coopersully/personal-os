@@ -11,6 +11,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, notExists, or, sql } from "dr
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { financeAccountKindFromProviderType } from "./finance/account-semantics.js";
+import { serializeFinanceAccountRows } from "./finance/account-service.js";
 import type { FinanceTransaction } from "./finance/context.js";
 import { decryptJson, encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
@@ -98,38 +99,6 @@ const blockedReasons = {
     message: "Legacy Plaid connection provider identity is inconsistent.",
   },
 } as const;
-
-function serializeAccount(row: typeof financeAccounts.$inferSelect): FinanceAccount {
-  return {
-    balance: row.balance === null ? null : row.balance / 100,
-    createdAt: row.createdAt.toISOString(),
-    currencyCode: row.currencyCode,
-    id: row.id,
-    includeInPlanning: row.includeInPlanning,
-    institution: row.institution,
-    kind: row.kind,
-    kindSource: row.kindSource,
-    lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
-    name: row.name,
-    ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10_000,
-    ownershipType: row.ownershipType,
-    provider: row.provider,
-    providerSubtype: row.providerSubtype,
-    providerType: row.providerType,
-    status: row.status,
-    synchronization: {
-      failureCode: row.syncErrorCode,
-      failureCount: row.syncFailureCount,
-      lastAttemptAt: row.lastSyncAttemptAt?.toISOString() ?? null,
-      lastSuccessAt: row.lastSyncedAt?.toISOString() ?? null,
-      message: row.syncError,
-      nextRetryAt: row.syncFailureCount > 0 ? (row.nextSyncAt?.toISOString() ?? null) : null,
-      recovery: row.syncRecovery,
-      state: row.syncState,
-    },
-    updatedAt: row.updatedAt.toISOString(),
-  };
-}
 
 function accountAuditSnapshot(row: typeof financeAccounts.$inferSelect) {
   return {
@@ -569,7 +538,11 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
         return saved;
       };
       const rows = await (executor ? write(executor) : db.transaction(write));
-      return rows.map(serializeAccount);
+      return serializeFinanceAccountRows(
+        executor ?? db,
+        rows,
+        input.context.principal.actorType === "user",
+      );
     },
 
     async backfillLegacyItems(limit = 100): Promise<FinanceProviderItemBackfillResult> {

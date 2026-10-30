@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
-import { csvCell, type DataColumn, DataTable } from "./data-table";
+import { csvCell, type DataColumn, DataTable, DataTableActions } from "./data-table";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 const rows = [
@@ -331,4 +331,88 @@ it("uses domain-owned selection for actions and clears it without opening the ro
   fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
   expect(clear).toHaveBeenCalledOnce();
   expect(props.onOpen).not.toHaveBeenCalled();
+});
+
+it("keeps command columns visible at the end despite older hidden and reordered layouts", async () => {
+  localStorage.setItem(
+    "nohmi:data-view:table-test",
+    JSON.stringify({
+      order: ["commands", "name", "notes"],
+      hidden: ["commands"],
+      sizing: { commands: 280 },
+    }),
+  );
+  const command = vi.fn();
+  render(
+    <DataTable
+      {...props}
+      rows={rows}
+      columns={[
+        {
+          id: "commands",
+          kind: "actions",
+          label: "Legacy commands",
+          defaultHidden: true,
+          value: () => "",
+          cell: (row) => (
+            <DataTableActions label={`Actions for ${row.name}`}>
+              <button type="button" onClick={command}>
+                Edit {row.name}
+              </button>
+            </DataTableActions>
+          ),
+        },
+        ...columns,
+      ]}
+    />,
+  );
+  const headers = screen.getAllByRole("columnheader");
+  expect(headers.at(-1)).toHaveTextContent("Actions");
+  expect(headers.at(-1)).toHaveAttribute("data-column-kind", "actions");
+  expect(headers.at(-1)).toHaveStyle({ width: "80px" });
+  expect(screen.queryByRole("separator", { name: "Resize Legacy commands" })).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Edit First record" }));
+  fireEvent.click(screen.getByRole("group", { name: "Actions for First record" }));
+  expect(command).toHaveBeenCalledOnce();
+  expect(props.onOpen).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "Table actions" }));
+  await userEvent.click(screen.getByRole("menuitem", { name: "Table Options" }));
+  expect(screen.getByText("Always visible · pinned to end")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Reorder Legacy commands" })).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: "Legacy commands" })).toBeNull();
+});
+
+it("retains command buttons in mobile records even when old layouts hid them", async () => {
+  vi.stubGlobal("innerWidth", 375);
+  localStorage.setItem(
+    "nohmi:data-view:table-test",
+    JSON.stringify({ order: ["commands", "name"], hidden: ["commands"] }),
+  );
+  render(
+    <DataTable
+      {...props}
+      rows={rows}
+      columns={[
+        ...columns,
+        {
+          id: "commands",
+          kind: "actions",
+          label: "Actions",
+          mobileHidden: true,
+          value: () => "",
+          cell: (row) => (
+            <DataTableActions label={`Actions for ${row.name}`}>
+              <button type="button">Edit {row.name}</button>
+            </DataTableActions>
+          ),
+        },
+      ]}
+    />,
+  );
+  await waitFor(() => expect(screen.queryByRole("table")).toBeNull());
+  expect(screen.getByRole("button", { name: "Edit First record" })).toBeVisible();
+  expect(screen.getAllByText("Actions")).toHaveLength(2);
+  expect(
+    screen.getByRole("group", { name: "Actions for First record" }).closest("dl")?.lastElementChild,
+  ).toHaveTextContent("Edit First record");
 });

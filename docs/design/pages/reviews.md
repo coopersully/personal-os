@@ -109,3 +109,5 @@ as the session snapshot, so a version conflict can be recovered without reopenin
 Mail rule approval always displays the match condition and future actions, including retention timing,
 even when the bounded preview has no candidates. Mail maintenance blockers retain their title,
 explanation, and preview evidence when no question is available to answer.
+
+Reviews navigation always uses a compact hand action with a content-sized count pill, at desktop and mobile widths and in both sidebar states. The accessible label and tooltip retain the exact count.

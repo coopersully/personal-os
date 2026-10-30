@@ -4744,22 +4744,6 @@ p {
   display: inline-flex;
   gap: 0.25rem;
 }
-.connected-account-identity {
-  display: inline-flex;
-  flex: 0 0 auto;
-}
-.provider-emblem {
-  background: var(--background) !important;
-  color: var(--foreground) !important;
-  height: 0.75rem !important;
-  width: 0.75rem !important;
-}
-.provider-emblem svg,
-.provider-emblem > svg {
-  display: block !important;
-  height: 0.5625rem;
-  width: 0.5625rem;
-}
 .calendar-settings__groups {
   gap: 1rem;
 }
@@ -9017,3 +9001,109 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
 .ritual-surface:has(.ritual-scene[data-sky-bottom-dark="false"]) .ritual-escapes,
 .ritual-browser-preview:has(.ritual-scene[data-sky-bottom-dark="false"]) .ritual-escapes,
 .ritual-surface:has(.ritual-scene[data-sky-bottom-dark="false"]) .ritual-support { --ritual-chrome: var(--ritual-morning-content); --ritual-chrome-muted: var(--ritual-morning-content); }
+/* Provider identity is shared by account selection, setup, settings, and recovery. */
+.connection-card__profile { flex: 1 1 14rem; min-width: 0; }
+.account-profile { display: flex; align-items: center; gap: .75rem; min-width: 0; flex: 1 1 auto; text-align: start; }
+.account-profile__copy { display: flex; flex-direction: column; min-width: 0; gap: .125rem; }
+.account-profile__name { font-size: .875rem; font-weight: 600; overflow-wrap: anywhere; }
+.account-profile__details { color: var(--muted-foreground); font-size: .75rem; font-weight: 400; overflow-wrap: anywhere; }
+.connected-account-visual { position: relative; display: inline-flex; flex-shrink: 0; margin-inline-end: .125rem; }
+.connected-account-visual__service { position: absolute; right: -.125rem; bottom: -.125rem; display: flex; align-items: center; justify-content: center; width: 1.125rem; height: 1.125rem; border-radius: 50%; background: var(--background); color: var(--foreground); }
+.bank-account-visual { display: flex; flex-shrink: 0; align-items: flex-start; justify-content: space-between; width: 3.5rem; height: 2.25rem; padding: .375rem; border-radius: var(--radius-sm); background: var(--surface-strong); color: var(--foreground); }
+.bank-account-visual__mark { width: 1rem; height: 1rem; font-size: .75rem; font-weight: 600; }
+.bank-account-visual__kind { width: .875rem; height: .875rem; align-self: flex-end; }
+
+/* Reviews is always one compact control. Text counts grow into a pill. */
+.review-navigation { position: relative; }
+.review-navigation__count.action-count-badge { right: 0; bottom: 0; flex-shrink: 0; max-width: none; display: inline-flex; align-items: center; justify-content: center; width: max-content; min-width: 1.125rem; background: var(--status-warning-foreground); color: var(--background); height: 1.125rem; padding-inline: .25rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.review-navigation[data-sidebar="menu-button"],
+.app-shell[data-sidebar-state="collapsed"] .review-navigation[data-sidebar="menu-button"] { width: 2.75rem; height: 2.75rem; padding: .625rem; justify-content: center; overflow: visible; flex-shrink: 0; }
+.app-shell[data-sidebar-state="collapsed"] .review-navigation[data-sidebar="menu-button"] .review-navigation__count { display: inline-flex; clip-path: none; width: max-content; height: 1.125rem; overflow: visible; }
+
+/* Desktop page orientation precedes discovery. Keep the mobile composition. */
+@media (min-width: 901px) {
+  .workspace-app-bar[data-header-layout="sentence"]:not([data-workspace="today"]) {
+    grid-template-areas: "identity title title actions" "context context page-actions page-actions";
+  }
+  .workspace-app-bar[data-header-layout="sentence"]:not([data-workspace="today"]):has(> .workspace-app-bar__identity:empty) {
+    grid-template-areas: "title title title actions" "context context page-actions page-actions";
+  }
+}
+
+/* Credit account summaries share the KPI carousel footprint and full-height tiles. */
+.credit-account-rail .finance-account-record { height: 100%; display: flex; flex-direction: column; align-items: stretch; justify-content: space-between; gap: 1rem; padding: 1rem; background: var(--card); border-radius: var(--radius-lg); }
+.credit-account-rail .finance-account-record [data-slot="item-content"] { flex: 0 0 auto; }
+.credit-account-rail .finance-account-record [data-slot="item-actions"] { align-self: flex-end; }
+.credit-account-rail .finance-account-balance { align-items: flex-start; text-align: start; }
+
+/* Command columns stay available while the record's data scrolls underneath. */
+.data-table-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .25rem; min-width: 0; }
+[data-slot="table-head"][data-column-kind="actions"],
+[data-slot="table-cell"][data-column-kind="actions"] { position: sticky; inset-inline-end: 0; z-index: 1; background: var(--data-table-row-background, var(--card)); border-inline-start: 1px solid var(--settings-divider-color); }
+[data-slot="table-head"][data-column-kind="actions"] { z-index: 2; text-align: end; }
+[data-has-actions="true"] [data-slot="table-body"] [data-slot="table-row"] { --data-table-row-background: var(--card); }
+[data-has-actions="true"] [data-slot="table-body"] [data-slot="table-row"]:is(:hover, :has([aria-expanded="true"])) { --data-table-row-background: var(--control-hover-background); }
+[data-has-actions="true"] [data-slot="table-body"] [data-slot="table-row"][data-state="selected"] { --data-table-row-background: var(--surface-subtle); }
+[data-has-actions="true"] [data-slot="table-body"] [data-slot="table-cell"] { background: var(--data-table-row-background); }
+
+/* Institution artwork preserves the provider's colors on a neutral image canvas. */
+.institution-logo { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; color: inherit; }
+.institution-logo > .institution-logo__image { width: 100%; height: 100%; flex-shrink: 0; object-fit: contain; display: block; font-weight: 600; }
+.institution-logo > svg.institution-logo__image { padding: .125rem; overflow: visible; }
+.institution-logo > img.institution-logo__image { padding: .375rem; border-radius: var(--radius-sm); background: var(--card); }
+.institution-logo > .institution-logo__image[data-brand-monogram] { display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); background: var(--secondary); color: var(--secondary-foreground); }
+/* A physical-card silhouette; decorative finish never conveys account capabilities. */
+.financial-account-card { position: relative; isolation: isolate; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; gap: .875rem; width: 100%; min-width: 0; min-height: 12rem; aspect-ratio: 1.586; padding: 1.25rem; border-radius: var(--radius-xl); background: var(--surface-strong); color: var(--foreground); }
+.financial-account-card::before { content: ""; position: absolute; z-index: -1; inset: 0; pointer-events: none; background: color-mix(in srgb, currentColor 4%, transparent); clip-path: polygon(0 0, 72% 0, 30% 100%, 0 100%); }
+.financial-account-card::after { content: ""; position: absolute; z-index: -1; width: 110%; aspect-ratio: 1; inset-inline-end: -55%; top: -25%; border: 1px solid color-mix(in srgb, currentColor 12%, transparent); border-radius: 50%; pointer-events: none; }
+.financial-account-card__issuer { display: flex; align-items: center; gap: .625rem; min-width: 0; font-size: .8125rem; font-weight: 500; }
+.financial-account-card__issuer > span:last-child { overflow-wrap: anywhere; }
+.financial-account-card__issuer .institution-logo { width: 2rem; height: 2rem; }
+.financial-account-card__identity { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; min-width: 0; column-gap: .875rem; row-gap: .125rem; }
+.financial-account-card__chip { position: relative; grid-row: span 2; width: 2.5rem; height: 1.875rem; border-radius: var(--radius-sm); border: 1px solid color-mix(in srgb, currentColor 40%, transparent); background: color-mix(in srgb, currentColor 16%, transparent); overflow: hidden; }
+.financial-account-card__chip::before { content: ""; position: absolute; inset: 30% -1px; border-block: 1px solid color-mix(in srgb, currentColor 40%, transparent); }
+.financial-account-card__chip::after { content: ""; position: absolute; inset: -1px 30%; border-inline: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-radius: var(--radius-sm); }
+.financial-account-card__name { font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
+.financial-account-card__type { font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; }
+.financial-account-card__bottom { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: .75rem; }
+.financial-account-card__mask { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; letter-spacing: .18em; font-size: 1.125rem; }
+.financial-account-card__balance { display: flex; flex-direction: column; gap: .125rem; text-align: end; margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+.financial-account-card__balance > span { font-size: .625rem; letter-spacing: .05em; text-transform: uppercase; }
+.financial-account-card__balance > strong { font-size: 1.125rem; font-weight: 500; overflow-wrap: anywhere; }
+.credit-account-rail .finance-account-record--card { padding: 0; background: transparent; }
+.credit-account-rail .finance-account-record--card [data-slot="item-content"] { align-self: stretch; }
+.credit-account-rail .finance-account-record--card [data-slot="item-actions"] { margin-inline-end: .25rem; }
+
+/* Full cards and their compact identities share the same artwork and finish. */
+.financial-account-card__header { display: flex; align-items: flex-start; justify-content: space-between; gap: .5rem; min-width: 0; }
+.financial-account-card__issuer { flex: 1 1 auto; }
+.financial-account-card__header > [data-slot="item-actions"] { align-self: flex-start; flex-shrink: 0; }
+.financial-account-card__details { color: inherit; background: color-mix(in srgb, currentColor 8%, transparent); }
+.financial-account-card__details:is(:hover, :focus-visible, [data-state="open"]) { color: inherit; background: color-mix(in srgb, currentColor 18%, transparent); }
+.financial-account-card--compact { flex: 0 0 auto; width: 2.5rem; height: 2.5rem; min-height: 0; padding: .375rem; gap: 0; border-radius: var(--radius-sm); }
+.financial-account-card--compact .institution-logo { width: 1.375rem; height: 1.125rem; align-self: flex-end; }
+.financial-account-card--compact .institution-logo > img.institution-logo__image { padding: .125rem; }
+.credit-account-rail .finance-account-record--card { gap: .5rem; }
+@media (max-width: 480px) {
+  .financial-account-card:not(.financial-account-card--compact) { padding: 1rem; }
+  .financial-account-card__name { font-size: .9375rem; }
+}
+/* Avoid a flex percentage-height cycle that can clip a card at its minimum height. */
+.credit-account-rail .finance-account-record--card { display: block; height: auto; }
+.credit-account-rail .finance-account-record--card > [data-slot="item-content"] > div:first-child { display: block; }
+/* Content is the minimum: narrow cards and long provider names must grow, not clip. */
+.financial-account-card-frame { container-type: inline-size; width: 100%; min-width: 0; }
+.financial-account-card:not(.financial-account-card--compact) { aspect-ratio: auto; min-height: max(12rem, calc(100cqw / 1.586)); }
+
+/* Shared account identity: institution logo with a small product glyph at the corner. */
+.account-preview { position: relative; display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; aspect-ratio: 1; color: var(--foreground); }
+.account-preview > .institution-logo { width: 2.5rem; height: 2.5rem; border-radius: var(--radius-sm); overflow: hidden; background: color-mix(in srgb, var(--account-preview-color, var(--foreground)) 14%, var(--secondary)); }
+.account-preview > .institution-logo > .institution-logo__image { padding: .375rem; border-radius: inherit; background: transparent; color: inherit; }
+.account-preview__type { position: absolute; inset-inline-end: -.125rem; bottom: -.125rem; display: flex; align-items: center; justify-content: center; width: 1.125rem; height: 1.125rem; border-radius: 50%; background: var(--card); color: var(--muted-foreground); }
+.data-table-actions { flex-wrap: nowrap; gap: .125rem; }
+
+/* Compact workspace discovery uses the same circular hit target as header actions. */
+.workspace-app-bar[data-header-layout="sentence"] .workspace-finder[data-compact="true"] { flex: 0 0 var(--header-control-size, 2.75rem); width: var(--header-control-size, 2.75rem); }
+.workspace-finder[data-compact="true"] .workspace-finder-trigger { width: var(--header-control-size, 2.75rem); height: var(--header-control-size, 2.75rem); padding: 0; aspect-ratio: 1; border-radius: 50%; }
+
+.workspace-finder-trigger > [data-slot="combobox-trigger-icon"] { display: none; }

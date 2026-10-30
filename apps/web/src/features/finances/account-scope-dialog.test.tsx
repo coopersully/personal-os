@@ -10,8 +10,24 @@ it("distinguishes none from all eligible, shows names without implying snapshot 
   const change = vi.fn();
   const props = {
     accounts: [
-      { id: "cash", name: "Everyday checking", kind: "cash", balance: 42 },
-      { id: "investment", name: "Retirement", kind: "investment", balance: 100 },
+      {
+        id: "cash",
+        name: "Everyday checking",
+        kind: "cash",
+        balance: 42,
+        institution: "Fixture Bank",
+        provider: "manual",
+        providerSubtype: null,
+      },
+      {
+        id: "investment",
+        name: "Retirement",
+        kind: "investment",
+        balance: 100,
+        institution: "Fixture Bank",
+        provider: "manual",
+        providerSubtype: null,
+      },
     ] as FinanceAccount[],
     disabled: false,
     feedback: null,
@@ -38,7 +54,17 @@ it("preserves the legacy dialog label and amount presentation", () => {
   render(
     <AccountScopeDialog
       accounts={
-        [{ id: "cash", name: "Everyday checking", kind: "cash", balance: 42 }] as FinanceAccount[]
+        [
+          {
+            id: "cash",
+            name: "Everyday checking",
+            kind: "cash",
+            balance: 42,
+            institution: "Fixture Bank",
+            provider: "manual",
+            providerSubtype: null,
+          },
+        ] as FinanceAccount[]
       }
       disabled={false}
       feedback={null}
@@ -51,5 +77,7 @@ it("preserves the legacy dialog label and amount presentation", () => {
     />,
   );
   expect(screen.getByRole("dialog", { name: "Accounts included in cash" })).toBeVisible();
-  expect(screen.getByLabelText(/Everyday checking ·/)).toBeChecked();
+  expect(screen.getByLabelText("Everyday checking")).toBeChecked();
+  expect(screen.getByText(/Fixture Bank/)).toBeVisible();
+  expect(screen.getByText(/\$42/)).toBeVisible();
 });

@@ -1,3 +1,4 @@
+import { ConnectedAccount } from "@/components/connected-account";
 import { settingsPath } from "@/features/settings/settings-routes";
 import {
   DayTimeline,
@@ -148,7 +149,6 @@ import {
   ImageIcon,
   LayersIcon,
   ListChecksIcon,
-  ListTodoIcon,
   LockIcon,
   MailIcon,
   MapPinIcon,
@@ -212,12 +212,6 @@ import {
   AlertDescription as ShadcnAlertDescription,
   AlertTitle as ShadcnAlertTitle,
 } from "@/components/ui/alert";
-import {
-  Avatar as ShadcnAvatar,
-  AvatarBadge as ShadcnAvatarBadge,
-  AvatarFallback as ShadcnAvatarFallback,
-  AvatarImage as ShadcnAvatarImage,
-} from "@/components/ui/avatar";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import { Card as ShadcnCard, CardContent as ShadcnCardContent } from "@/components/ui/card";
@@ -3509,11 +3503,21 @@ function CalendarAccountsControl() {
           <p className="calendar-accounts-popover__empty">No calendars are available.</p>
         ) : (
           <ShadcnFieldGroup className="calendar-accounts-popover__list">
-            {groupCalendarsByAccount(enabledAccounts, records).flatMap((group) =>
-              group.calendars.map((calendar) => (
-                <CalendarVisibilitySwitch calendar={calendar} key={calendar.id} />
-              )),
-            )}
+            {groupCalendarsByAccount(enabledAccounts, records).map((group) => (
+              <div key={group.accountId} className="flex min-w-0 flex-col gap-3">
+                <ConnectedAccount
+                  account={{
+                    avatarUrl: group.account?.avatarUrl,
+                    email: group.account?.email,
+                    label: group.label,
+                    provider: group.provider,
+                  }}
+                />
+                {group.calendars.map((calendar) => (
+                  <CalendarVisibilitySwitch calendar={calendar} key={calendar.id} />
+                ))}
+              </div>
+            ))}
           </ShadcnFieldGroup>
         )}
       </AccountSelectionPopoverContent>
@@ -3585,30 +3589,6 @@ function ConnectedServiceMark({ provider }: { provider: string }) {
   return (
     <span className={`connected-service-mark connected-service-mark--${normalizedProvider}`}>
       <BrandMark brand={provider} label={`${label} calendar`} />
-    </span>
-  );
-}
-
-function ConnectedAccountIdentity({
-  avatarUrl,
-  label,
-  provider,
-  size = "sm",
-}: {
-  avatarUrl: string | null | undefined;
-  label: string;
-  provider: string;
-  size?: "default" | "sm";
-}) {
-  return (
-    <span aria-hidden="true" className="connected-account-identity">
-      <ShadcnAvatar size={size}>
-        {avatarUrl ? <ShadcnAvatarImage alt="" src={avatarUrl} /> : null}
-        <ShadcnAvatarFallback>{initials(label)}</ShadcnAvatarFallback>
-        <ShadcnAvatarBadge className="provider-emblem">
-          <CalendarProviderEmblem provider={provider} />
-        </ShadcnAvatarBadge>
-      </ShadcnAvatar>
     </span>
   );
 }
@@ -5741,18 +5721,7 @@ function MailAccountsControl() {
                   onCheckedChange={(checked) => setAccountVisible(account.id, checked === true)}
                 />
                 <ShadcnFieldLabel htmlFor={`mail-account-${account.id}`}>
-                  <ShadcnAvatar size="sm">
-                    {account.avatarUrl ? (
-                      <ShadcnAvatarImage alt="" src={account.avatarUrl} />
-                    ) : null}
-                    <ShadcnAvatarFallback>{initials(accountLabel)}</ShadcnAvatarFallback>
-                  </ShadcnAvatar>
-                  <span className="mail-account-visibility__copy">
-                    <strong>{accountLabel}</strong>
-                    <small>
-                      {account.email || brandTitle(account.provider) || account.provider}
-                    </small>
-                  </span>
+                  <ConnectedAccount account={account} />
                 </ShadcnFieldLabel>
                 <MailAccountHealthIndicator
                   accountLabel={brandTitle(account.provider) || accountLabel}
@@ -6440,20 +6409,14 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
               className="border-b border-(--settings-divider-color) last:border-b-0"
             >
               <div className="settings-subsection__header flex min-w-0 items-center gap-3 p-4">
-                <span className="settings-icon-slot">
-                  <ConnectedAccountIdentity
-                    avatarUrl={group.account?.avatarUrl}
-                    label={group.label}
-                    provider={group.provider}
-                    size="default"
-                  />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{group.label}</p>
-                  {group.account?.email ? (
-                    <p className="truncate text-xs text-muted-foreground">{group.account.email}</p>
-                  ) : null}
-                </div>
+                <ConnectedAccount
+                  account={{
+                    avatarUrl: group.account?.avatarUrl,
+                    email: group.account?.email,
+                    label: group.label,
+                    provider: group.provider,
+                  }}
+                />
                 <span className="shrink-0 text-xs text-muted-foreground">
                   {group.calendars.filter((calendar) => calendar.isSelected).length} /{" "}
                   {group.calendars.length}
@@ -7845,10 +7808,9 @@ function ConnectorRow({
           </div>
         </>
       }
-      identity={<BrandMark brand={account.provider} className="size-5" />}
+      account={account}
       state={health.state}
       status={<ConnectionHealthBadge health={health} />}
-      subtitle={account.email ?? "Connected account"}
       summary={
         <>
           <strong>{connectionHealthTitle(health.state)}</strong>
@@ -7866,7 +7828,6 @@ function ConnectorRow({
           )}
         </>
       }
-      title={account.label}
     />
   );
 }

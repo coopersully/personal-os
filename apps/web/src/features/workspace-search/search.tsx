@@ -16,6 +16,7 @@ import {
   SettingsIcon,
 } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
+import { Button as CompactSearchButton } from "@/components/ui/button";
 import {
   Combobox,
   ComboboxContent,
@@ -24,8 +25,10 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
+  ComboboxTrigger,
 } from "@/components/ui/combobox";
 import { InputGroupAddon } from "@/components/ui/input-group";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { parseCalendarDateQuery } from "../calendar/search-date";
 import { useWorkspacePreferences } from "../workspace-settings/preferences";
 import { type SearchAction, type SearchOption, workspaceCatalog } from "./catalog";
@@ -40,6 +43,7 @@ export function WorkspaceFinder({
   onAction?: (action: SearchAction) => void;
   timeZone?: string;
 }) {
+  const compact = useIsMobile();
   const [activation, setActivation] = useState(0);
   useEffect(() => {
     const focusSearch = () => {
@@ -50,13 +54,14 @@ export function WorkspaceFinder({
   }, []);
   const label = `Search ${workspace[0]?.toUpperCase()}${workspace.slice(1)}`;
   return (
-    <div className="workspace-finder" data-search-workspace={workspace}>
+    <div className="workspace-finder" data-search-workspace={workspace} data-compact={compact}>
       <FinderInput
         workspace={workspace}
         label={label}
         timeZone={timeZone}
         {...(onAction ? { onAction } : {})}
         activation={activation}
+        compact={compact}
       />
     </div>
   );
@@ -67,12 +72,14 @@ function FinderInput({
   timeZone,
   onAction,
   activation = 0,
+  compact,
 }: {
   workspace: SearchableWorkspace;
   label: string;
   timeZone: string;
   onAction?: (action: SearchAction) => void;
   activation?: number;
+  compact: boolean;
 }) {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -91,6 +98,9 @@ function FinderInput({
   const needsRecords = ["all", "content", "reviews"].includes(filter);
   const recordKind = filter === "content" ? "content" : filter === "reviews" ? "reviews" : "all";
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (compact && open) inputRef.current?.focus();
+  }, [compact, open]);
   const preferences = useWorkspacePreferences(workspace);
   const [archiveOverride, setArchiveOverride] = useState<boolean | null>(null);
   const includeArchived =
@@ -298,6 +308,21 @@ function FinderInput({
       ) : null}
     </>
   );
+  const searchInput = (
+    <ComboboxInput
+      ref={inputRef}
+      aria-label={label}
+      placeholder=""
+      showTrigger={false}
+      className="workspace-finder-input w-full rounded-full"
+      onClick={() => setOpen(true)}
+      maxLength={200}
+    >
+      <InputGroupAddon align="inline-start">
+        <SearchIcon />
+      </InputGroupAddon>
+    </ComboboxInput>
+  );
   return (
     <div className="min-w-0" ref={anchorRef}>
       <Combobox<SearchOption>
@@ -312,31 +337,32 @@ function FinderInput({
         itemToStringLabel={(item) => item?.title ?? ""}
         itemToStringValue={(item) => (item ? `${item.kind}:${item.id}` : "")}
         onValueChange={(item) => {
-          if (item) select(item);
+          if (open && item) select(item);
         }}
         open={open}
         onOpenChange={setOpen}
         autoHighlight
       >
-        <ComboboxInput
-          ref={inputRef}
-          aria-label={label}
-          placeholder=""
-          showTrigger={false}
-          className="workspace-finder-input w-full rounded-full"
-          onClick={() => setOpen(true)}
-          maxLength={200}
-        >
-          <InputGroupAddon align="inline-start">
-            <SearchIcon />
-          </InputGroupAddon>
-        </ComboboxInput>
+        {compact ? (
+          <ComboboxTrigger
+            role="button"
+            tabIndex={0}
+            className="workspace-finder-trigger"
+            render={<CompactSearchButton size="icon" variant="secondary" aria-label={label} />}
+          >
+            <SearchIcon aria-hidden="true" />
+          </ComboboxTrigger>
+        ) : (
+          searchInput
+        )}
         <ComboboxContent
+          aria-label={compact ? label : undefined}
           anchor={anchorRef}
           collisionPadding={16}
           align="center"
           className="workspace-finder-results max-h-[65dvh] overflow-y-auto"
         >
+          {compact ? <div className="p-2">{searchInput}</div> : null}
           {results}
         </ComboboxContent>
       </Combobox>

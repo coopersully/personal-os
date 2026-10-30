@@ -356,6 +356,7 @@ function FinderInput({
           searchInput
         )}
         <ComboboxContent
+          aria-label={compact ? label : undefined}
           anchor={anchorRef}
           collisionPadding={16}
           align="center"

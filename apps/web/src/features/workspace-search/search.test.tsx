@@ -160,12 +160,16 @@ it("opens compact mobile search from a named button and restores keyboard focus"
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
   try {
     renderSearch("tasks");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const popup = await screen.findByRole("dialog", { name: "Search Tasks" });
     const trigger = screen.getByRole("button", { name: "Search Tasks" });
     expect(trigger).toHaveAttribute("tabindex", "0");
     const input = await screen.findByRole("combobox", { name: "Search Tasks" });
+    expect(popup).toContainElement(input);
     await waitFor(() => expect(input).toHaveFocus());
     await userEvent.setup().keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Search Tasks" })).not.toBeInTheDocument(),
+    );
     await waitFor(() => expect(trigger).toHaveFocus());
     await userEvent.setup().keyboard("{Enter}");
     await waitFor(() =>

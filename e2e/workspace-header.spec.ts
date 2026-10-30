@@ -13,7 +13,9 @@ for (const width of [320, 390, 1100]) {
       const header = page.getByRole("navigation", { name: "Top navigation", exact: true });
       const title = header.locator('[data-slot="workspace-title-sentence"]');
       await expect(title).toBeVisible();
-      const search = header.getByRole("combobox");
+      const search = header.getByRole(width < 768 ? "button" : "combobox", {
+        name: /^Search /,
+      });
       await expect(search).toBeVisible();
       if (width < 768) {
         const switcher = await header

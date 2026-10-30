@@ -483,7 +483,7 @@ activity still come to Review.
 - Summary metrics live within their owning position block instead of separate,
   equally weighted metric cards.
 - Transactions exposes nonzero ledger checks not guaranteed to appear in Reviews; Accounts owns
-  connection freshness, ownership, balances, and account coverage. Legacy Ledger health links
+  connection freshness, ownership and balances. Legacy Ledger health links
   redirect to Transactions checks rather than a dedicated health page.
 - Empty budget pace does not render an inactive time-range control or an empty
   visualization.
@@ -603,8 +603,8 @@ visible next action and do not present absent resource evidence as a confirmed z
 progress is shown only when expected resources are positive.
 
 Transactions owns a leading icon-and-label view menu and trailing Export and Add header actions. Add offers transaction, category, and transaction import commands. Import is a responsive dialog/drawer;
-legacy import links redirect into that flow. The standalone Ledger health page is retired. Only nonzero diagnostics not guaranteed to appear in Reviews belong on Transactions, while connection freshness, ownership,
-balances, and account coverage belong on Accounts. Pending activity and balance-only tracking are
+legacy import links redirect into that flow. The standalone Ledger health page is retired. Only nonzero diagnostics not guaranteed to appear in Reviews belong on Transactions, while connection freshness, ownership and
+balances belong on Accounts. Pending activity and balance-only tracking are
 informational, not automatically warnings. Existing health links redirect to Transactions checks.
 
 Financial profile is the durable name for the planning-input surface. Sidebar attention derives
@@ -612,13 +612,11 @@ from missing planning facts, proposed budgets awaiting approval, and disconnecte
 not successfully refreshed for more than 24 hours. Accounts displays the total account count, including manual accounts. Missing balances, unresolved ownership, and possible duplicate accounts also set sidebar attention.
 Account warnings name the affected account and provide sync, reconnect, or edit actions.
 
-Accounts use compact full-width records with type icons, institution/type below the title, end-aligned balances, and a shared Popover for source details and edit/transaction actions. Debt uses destructive text and an Amount owed label. Wealth presents current metrics in responsive shared KPI cards and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
+Accounts uses the shared inventory with institution identities, separate Type badges, balances and pinned icon Actions for Edit, Transactions and applicable reconnect/sync commands. Standalone summaries retain the shared Popover for source details and secondary commands. Debt uses destructive text and an Amount owed label. Wealth presents current metrics in responsive shared KPI cards and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
 
 Accounts, Budget buckets, and Financial goals expose their management actions in the shared workspace header. The transaction-only Add menu lives at the end of the header; other Finance pages have no
 workspace-wide Add menu. Cash flow view selection occupies the shared leading header slot; search
-and other utilities remain at the end. Account records are secondary Items within the Accounts
-card, with inline attention, source, kind, balance, and recovery actions rather than separate warning
-cards. Currency fields use CurrencyInput; absent account currency stays unspecified, with the
+and other utilities remain at the end. Account records are inventory items with inline attention, source, type, balance and recovery actions rather than separate warning cards. Currency fields use CurrencyInput; absent account currency stays unspecified, with the
 source caveat available in a tooltip. Pending posting state has an explicit badge and subdued row;
 it is independent of review status. URL `reviewState` filters transactions, while `review` opens a
 review flow. Historical review-state links remain readable without opening a review dialog.
@@ -912,4 +910,4 @@ monograms. Apply a subtle validated institution-color tint over the semantic sec
 keep original image colors and a neutral readable corner glyph. Default desktop and mobile
 field order puts Balance before Type; saved custom desktop column ordering remains user-owned.
 
-Accounts begins with Cards and the inventory; the frame owns the page title. Do not repeat an Accounts heading or aggregate balance-only notice in the body. Mobile account records put Balance across the row, followed by adjacent self-describing Type and Status badges whose field labels remain available to assistive technology. Icon actions retain their named footer.
+Accounts begins with Cards and the inventory; the frame owns the page title. Do not repeat an Accounts heading or aggregate balance-only notice in the body. The absence of recorded transactions does not establish provider history availability; retain account-specific transaction navigation and genuine connection recovery without inferring missing provider capability. Mobile account records put Balance across the row, followed by adjacent self-describing Type and Status badges whose field labels remain available to assistive technology. Icon actions retain their named footer.

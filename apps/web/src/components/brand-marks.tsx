@@ -129,11 +129,16 @@ const brandMarks: Record<string, BrandMark> = {
 };
 
 export function hasBrandMark(brand: string) {
-  return normalize(brand) in brandMarks;
+  return lookupBrandMark(brand) !== undefined;
 }
 
 export function brandTitle(brand: string) {
-  return brandMarks[normalize(brand)]?.title;
+  return lookupBrandMark(brand)?.title;
+}
+
+function lookupBrandMark(brand: string) {
+  const key = normalize(brand);
+  return Object.hasOwn(brandMarks, key) ? brandMarks[key] : undefined;
 }
 
 function normalize(brand: string) {
@@ -162,7 +167,7 @@ export function BrandMark({
 }) {
   const [failedImage, setFailedImage] = useState<string | null>(null);
   const validImage = financeInstitutionBrandingSchema.shape.logo.safeParse(imageUrl);
-  const mark = brandMarks[normalize(brand)];
+  const mark = lookupBrandMark(brand);
   const name = label ?? mark?.title ?? brand;
   const monogram = brand.trim().slice(0, 1).toUpperCase() || "?";
 

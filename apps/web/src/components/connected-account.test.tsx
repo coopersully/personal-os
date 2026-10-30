@@ -45,3 +45,8 @@ it("uses email or service when the display name is absent and a monogram for unk
   expect(screen.getByText("Example service", { selector: ".account-profile__name" })).toBeVisible();
   expect(container.querySelector("[data-brand-monogram]")).toHaveTextContent("E");
 });
+
+it("preserves astral characters in missing-photo initials", () => {
+  render(<ConnectedAccount account={{ label: "🪐 Example", provider: "google" }} />);
+  expect(screen.getByText("🪐E")).toBeVisible();
+});

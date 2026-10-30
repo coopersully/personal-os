@@ -186,6 +186,31 @@ it("opens compact mobile search from a named button and restores keyboard focus"
   }
 });
 
+it.each([
+  "n",
+  "i",
+])("does not select results when typing %s on a closed compact trigger", async (key) => {
+  const originalWidth = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  try {
+    const user = userEvent.setup();
+    const onAction = renderSearch("tasks");
+    const trigger = screen.getByRole("button", { name: "Search Tasks" });
+    await screen.findByRole("option", { name: /New task/ });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await user.keyboard(key);
+    expect(onAction).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/tasks?view=week");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("option", { name: /New task/ }));
+    expect(onAction).toHaveBeenCalledExactlyOnceWith("new-task");
+  } finally {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+  }
+});
+
 it("filters discovery without changing the page and paginates server results", async () => {
   vi.mocked(api.searchWorkspace).mockResolvedValue({
     items: [],

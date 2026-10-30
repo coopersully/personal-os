@@ -1186,7 +1186,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
       await preserveProgress(onProgress);
       const accountSnapshots = await getPlaid().getAccounts(accessToken);
       await preserveProgress(onProgress);
-      const institutionId = accountSnapshots[0]?.institutionId ?? undefined;
+      const institutionId = accountSnapshots[0]?.institutionId;
       const provider = getPlaid();
       const brandingUpdate =
         provider.getInstitutionBranding && institutionId !== undefined

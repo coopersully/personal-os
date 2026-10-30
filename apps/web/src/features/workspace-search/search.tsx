@@ -337,7 +337,7 @@ function FinderInput({
         itemToStringLabel={(item) => item?.title ?? ""}
         itemToStringValue={(item) => (item ? `${item.kind}:${item.id}` : "")}
         onValueChange={(item) => {
-          if (item) select(item);
+          if (open && item) select(item);
         }}
         open={open}
         onOpenChange={setOpen}

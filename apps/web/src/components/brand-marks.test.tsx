@@ -53,6 +53,17 @@ describe("brand marks", () => {
     expect(fallback).toHaveTextContent("C");
   });
 
+  it.each([
+    "constructor",
+    "__proto__",
+    "toString",
+  ])("uses a monogram rather than inherited object properties for %s", (brand) => {
+    expect(hasBrandMark(brand)).toBe(false);
+    expect(brandTitle(brand)).toBeUndefined();
+    render(<BrandMark brand={brand} />);
+    expect(screen.getByRole("img", { name: brand })).toHaveAttribute("data-brand-monogram");
+  });
+
   it("hides a decorative monogram and survives an empty brand name", () => {
     const { container } = render(<BrandMark brand="  " decorative />);
     const fallback = container.querySelector("[data-brand-monogram]");

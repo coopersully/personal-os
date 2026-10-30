@@ -2753,6 +2753,67 @@ describe.sequential("Finance Provider Item synchronization", () => {
     expect(fetchBranding).toHaveBeenCalledTimes(3);
   });
 
+  it.each([
+    "explicit-null",
+    "empty-snapshot",
+  ] as const)("clears branding only for an explicit missing institution identity: %s", async (scenario) => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    if (!target) throw new Error("Missing fixture");
+    const branding = {
+      institutionId: "ins_1",
+      logo: null,
+      primaryColor: "#004466",
+      url: null,
+    };
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        institutionId: "ins_1",
+        institutionBranding: branding,
+        brandingNextRefreshAt: new Date(now.getTime() + 86_400_000),
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    const fetchBranding = vi.fn();
+    const provider = plaid({
+      getAccounts: async () =>
+        scenario === "empty-snapshot"
+          ? []
+          : accounts.map((account) => ({
+              ...remoteAccount(account.providerAccountId ?? ""),
+              institutionId: null,
+            })),
+      getInstitutionBranding: fetchBranding,
+    });
+    await expect(
+      service(provider).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "missing-institution-branding",
+      }),
+    ).resolves.toEqual({ changed: 0 });
+    const [stored] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, item.id));
+    expect(stored).toMatchObject({
+      syncState: "current",
+      institutionId: scenario === "empty-snapshot" ? "ins_1" : null,
+      institutionBranding: scenario === "empty-snapshot" ? branding : null,
+    });
+    expect(fetchBranding).not.toHaveBeenCalled();
+    if (scenario === "explicit-null") {
+      const currentAccounts = await database.db
+        .select()
+        .from(financeAccounts)
+        .where(eq(financeAccounts.providerItemRecordId, item.id));
+      const { serializeFinanceAccountRows } = await import("./finance/account-service.js");
+      expect(currentAccounts[0]?.providerInstitutionId).toBeNull();
+      expect(
+        (await serializeFinanceAccountRows(database.db, currentAccounts))[0]?.institutionBranding,
+      ).toBeNull();
+    }
+  });
+
   it("discards a branding response after its sync claim is revoked", async () => {
     const { accounts, item, userId } = await fixture();
     const target = accounts[0];

@@ -18,6 +18,9 @@ for (const width of [320, 390, 1100]) {
       });
       await expect(search).toBeVisible();
       if (width < 768) {
+        // The first header control follows the visible workspace identity row.
+        await header.locator("a[href], button, input").first().focus();
+        await expect(header.getByRole("button", { name: "Switch workspace" })).toBeFocused();
         const switcher = await header
           .getByRole("button", { name: "Switch workspace" })
           .boundingBox();

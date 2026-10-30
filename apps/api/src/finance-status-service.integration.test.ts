@@ -241,6 +241,13 @@ describe.sequential("Finance status service", () => {
   it("keeps October approval alongside November draft without changing latest-version reads", async () => {
     const userId = await makeUser("Upcoming plan");
     const current = await planVersion(userId, "2026-10");
+    expect(
+      await readBudgetPlanContext(database.db, userId, new Date("2026-11-01T12:00:00Z")),
+    ).toMatchObject({
+      state: "missing",
+      recovery: "create_proposal",
+      previous: { id: current.id },
+    });
     // An older unapproved draft cannot become a new approval prompt.
     await planVersion(userId, "2026-10", "proposed", current.planId, 6);
     expect(
@@ -273,6 +280,7 @@ describe.sequential("Finance status service", () => {
       planContext: {
         month: "2026-11",
         state: "missing",
+        recovery: "review_proposal",
         previous: { id: current.id },
         upcoming: { id: upcoming.id },
       },
@@ -306,6 +314,7 @@ describe.sequential("Finance status service", () => {
       current: null,
       previous: null,
       upcoming: null,
+      recovery: "create_proposal",
     });
   });
 

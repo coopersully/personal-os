@@ -19,6 +19,7 @@ export const financeBudgetPlanContextSchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u),
   timezone: z.string(),
   state: z.enum(["approved", "missing"]),
+  recovery: z.enum(["none", "create_proposal", "review_proposal"]),
   current: financeBudgetPlanSummarySchema.nullable(),
   previous: financeBudgetPlanSummarySchema.nullable(),
   upcoming: financeBudgetPlanSummarySchema.nullable(),

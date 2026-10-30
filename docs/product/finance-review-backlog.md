@@ -28,7 +28,9 @@ explicit context. Missing current-month approval does not mean no budget has eve
 Archived plan containers are excluded from current/upcoming selection; earlier approved versions
 remain explicit historical context. Invalid stored planning timezones return a controlled unavailable
 error with timezone-repair guidance, never a guessed UTC month. Read failures remain unavailable
-errors, never fabricated missing plans. Profile revisions can
+errors (`service_unavailable` with refresh recovery), never fabricated missing plans. Missing
+current-month approval points to reviewing that month’s proposal when present, otherwise creating
+a proposal; it never asks to reapprove the previous month. Profile revisions can
 require a new proposal without erasing a previous approval.
 
 Status keeps complete allocated resources and spending allocations distinct. Health and forecast

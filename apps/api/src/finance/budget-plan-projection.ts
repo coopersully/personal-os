@@ -47,7 +47,7 @@ export function budgetPlanningDate(now: Date, timezone: string) {
 }
 
 /** No fallback on read errors: unavailable evidence must not become a missing plan. */
-export async function readBudgetPlanContext(
+async function loadBudgetPlanContext(
   reader: Reader,
   userId: string,
   now: Date,
@@ -161,8 +161,33 @@ export async function readBudgetPlanContext(
     month,
     timezone: owner.timezone,
     state: current ? "approved" : "missing",
+    recovery: current
+      ? "none"
+      : upcoming?.version.status === "proposed" && upcoming.version.effectiveFrom === month
+        ? "review_proposal"
+        : "create_proposal",
     current: await summary(current),
     previous: await summary(previous),
     upcoming: await summary(upcoming),
   });
+}
+
+/** Preserve typed denials, but report failed canonical evidence as unavailable, never absent. */
+export async function readBudgetPlanContext(
+  reader: Reader,
+  userId: string,
+  now: Date,
+): Promise<FinanceBudgetPlanContext> {
+  try {
+    return await loadBudgetPlanContext(reader, userId, now);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    const unavailable = new AppError(
+      "service_unavailable",
+      "Finance budget evidence is unavailable. Refresh the plan and retry.",
+      { recovery: "refresh_plan" },
+    );
+    unavailable.cause = error;
+    throw unavailable;
+  }
 }

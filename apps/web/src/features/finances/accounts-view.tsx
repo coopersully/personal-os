@@ -198,6 +198,7 @@ export function FinanceAccountsView({
       label: "Balance",
       align: "right",
       mobileOrder: 0,
+      mobileFullWidth: true,
       value: financeAccountBalance,
       mobileCell: (account) => (
         <span
@@ -236,12 +237,12 @@ export function FinanceAccountsView({
       label: "Type",
       width: 180,
       mobileOrder: 1,
-      mobileFullWidth: true,
+      mobileLabelHidden: true,
       value: financeAccountTypeLabel,
       cell: (account) => {
         const TypeIcon = financeAccountTypeIcon(financeAccountType(account));
         return (
-          <Badge variant="secondary">
+          <Badge variant="secondary" className="max-w-full whitespace-normal">
             <TypeIcon aria-hidden="true" />
             {financeAccountTypeLabel(account)}
           </Badge>
@@ -251,11 +252,15 @@ export function FinanceAccountsView({
     {
       id: "status",
       label: "Status",
+      mobileLabelHidden: true,
       width: 210,
       value: stateLabel,
       cell: (account) => (
         <div className="flex flex-col gap-1">
-          <Badge variant={attention(account) ? "destructive" : "secondary"}>
+          <Badge
+            variant={attention(account) ? "destructive" : "secondary"}
+            className="max-w-full whitespace-normal"
+          >
             {attention(account) ? "Needs attention" : stateLabel(account)}
           </Badge>
           {attention(account) ? (

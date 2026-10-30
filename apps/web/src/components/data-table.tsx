@@ -53,6 +53,8 @@ export type DataColumn<T> = {
   cell?: (row: T) => ReactNode;
   mobileCell?: (row: T) => ReactNode;
   mobileHidden?: boolean;
+  /** Self-describing badges may keep their mobile field label screen-reader-only. */
+  mobileLabelHidden?: boolean;
   mobileFullWidth?: boolean;
   mobileOrder?: number;
   primary?: boolean;
@@ -503,6 +505,8 @@ function DataTableState<T>({
                                 "actions"
                               ? "col-span-full"
                               : view.density === "compact" &&
+                                  !columns.find((column) => column.id === cell.column.id)
+                                    ?.mobileLabelHidden &&
                                   "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2",
                             (columns.find((column) => column.id === cell.column.id)?.kind ===
                               "actions" ||
@@ -514,7 +518,8 @@ function DataTableState<T>({
                         >
                           <dt
                             className={
-                              columns.find((c) => c.id === cell.column.id)?.primary
+                              columns.find((c) => c.id === cell.column.id)?.primary ||
+                              columns.find((c) => c.id === cell.column.id)?.mobileLabelHidden
                                 ? "sr-only"
                                 : "max-w-20 truncate text-sm leading-5 text-muted-foreground"
                             }

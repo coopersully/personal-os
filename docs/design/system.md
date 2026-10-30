@@ -1420,3 +1420,5 @@ Express, Bank of America, Wells Fargo and Discover when provider artwork is unav
 `FinancialAccountCard`; reuse them for compact and full account presentations. Provider brand
 colors are data, validated as hex and paired with a contrast-aware black/white foreground;
 application surfaces without provider branding continue to use semantic theme tokens.
+
+On mobile, workspace discovery collapses to a circular named search button with the same square hit target as neighbouring header controls. Opening it places focus in the existing searchable result popup; Escape returns focus to its trigger. Desktop retains the inline finder.

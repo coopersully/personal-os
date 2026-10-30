@@ -1255,10 +1255,7 @@ it("keeps account evidence visible when its refresh fails and allows source-spec
   );
 });
 
-it("retries account coverage and syncs an account with blocked evidence", async () => {
-  api.getFinanceLedgerHealth
-    .mockRejectedValueOnce(new Error("Offline"))
-    .mockResolvedValue({ balanceOnlyAccounts: 1 });
+it("syncs blocked accounts without a duplicate heading or unused coverage read", async () => {
   const response = await api.listFinanceAccounts();
   api.listFinanceAccounts.mockResolvedValue({
     ...response,
@@ -1266,9 +1263,10 @@ it("retries account coverage and syncs an account with blocked evidence", async 
   });
   api.syncFinanceAccount.mockResolvedValue({});
   mount(<FinanceAccountsPage />);
-  fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
-  expect(await screen.findByText(/1 balance-only account/)).toBeVisible();
-  const syncAction = screen.getByRole("button", { name: `Sync ${account.name}` });
+  const syncAction = await screen.findByRole("button", { name: `Sync ${account.name}` });
+  expect(screen.queryByRole("heading", { name: "Accounts", level: 2 })).not.toBeInTheDocument();
+  expect(screen.queryByText(/balance-only account/)).not.toBeInTheDocument();
+  expect(api.getFinanceLedgerHealth).not.toHaveBeenCalled();
   expect(syncAction.textContent?.trim()).toBe("");
   fireEvent.click(syncAction);
   await waitFor(() => expect(api.syncFinanceAccount).toHaveBeenCalledWith(account.id));

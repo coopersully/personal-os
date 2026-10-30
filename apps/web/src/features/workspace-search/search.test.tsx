@@ -155,13 +155,22 @@ it("shares the settings field catalog and recognizes weekdays with the account t
   expect(parseCalendarDateQuery("2026-02-30", "UTC")).toBeUndefined();
 });
 
-it("renders mobile search inline and closes its results after selection", async () => {
+it("opens compact mobile search from a named button and restores keyboard focus", async () => {
   const originalWidth = window.innerWidth;
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
   try {
     renderSearch("tasks");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Search Tasks" })).not.toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Search Tasks" });
+    expect(trigger).toHaveAttribute("tabindex", "0");
+    const input = await screen.findByRole("combobox", { name: "Search Tasks" });
+    await waitFor(() => expect(input).toHaveFocus());
+    await userEvent.setup().keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await userEvent.setup().keyboard("{Enter}");
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Search Tasks" })).toHaveFocus(),
+    );
     fireEvent.change(screen.getByRole("combobox", { name: "Search Tasks" }), {
       target: { value: "reviews" },
     });

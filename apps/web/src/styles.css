@@ -9101,3 +9101,9 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
 .account-preview > .institution-logo > .institution-logo__image { padding: .375rem; border-radius: inherit; background: transparent; color: inherit; }
 .account-preview__type { position: absolute; inset-inline-end: -.125rem; bottom: -.125rem; display: flex; align-items: center; justify-content: center; width: 1.125rem; height: 1.125rem; border-radius: 50%; background: var(--card); color: var(--muted-foreground); }
 .data-table-actions { flex-wrap: nowrap; gap: .125rem; }
+
+/* Compact workspace discovery uses the same circular hit target as header actions. */
+.workspace-app-bar[data-header-layout="sentence"] .workspace-finder[data-compact="true"] { flex: 0 0 var(--header-control-size, 2.75rem); width: var(--header-control-size, 2.75rem); }
+.workspace-finder[data-compact="true"] .workspace-finder-trigger { width: var(--header-control-size, 2.75rem); height: var(--header-control-size, 2.75rem); padding: 0; aspect-ratio: 1; border-radius: 50%; }
+
+.workspace-finder-trigger > [data-slot="combobox-trigger-icon"] { display: none; }

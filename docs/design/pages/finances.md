@@ -911,3 +911,5 @@ Account-row logo canvases share the same rounded shape for supplied artwork and 
 monograms. Apply a subtle validated institution-color tint over the semantic secondary surface;
 keep original image colors and a neutral readable corner glyph. Default desktop and mobile
 field order puts Balance before Type; saved custom desktop column ordering remains user-owned.
+
+Accounts begins with Cards and the inventory; the frame owns the page title. Do not repeat an Accounts heading or aggregate balance-only notice in the body. Mobile account records put Balance across the row, followed by adjacent self-describing Type and Status badges whose field labels remain available to assistive technology. Icon actions retain their named footer.

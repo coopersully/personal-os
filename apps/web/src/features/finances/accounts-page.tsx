@@ -8,7 +8,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
-import { QueryFeedback } from "@/components/async-state";
 import { CurrencyInput } from "@/components/currency-input";
 import { FloatingActionRegion, FloatingActions } from "@/components/floating-actions";
 import { HistoryIcon, RefreshIcon } from "@/components/icons";
@@ -48,7 +47,6 @@ import { AccountDuplicateDialog } from "./account-duplicate-dialog";
 import { FinanceAccountsView } from "./accounts-view";
 import { financeAccountNeedsConnectionAttention } from "./attention";
 import { BankAccount } from "./bank-account";
-import { FinanceSection } from "./finance-section";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
@@ -69,10 +67,6 @@ export function FinanceAccountsPage() {
     !workspace.isPending &&
     workspace.readiness?.workspaceAccessible === true &&
     !task;
-  const health = useQuery({
-    queryKey: ["finance-ledger-health"],
-    queryFn: () => api.getFinanceLedgerHealth(),
-  });
   const sync = useFeedbackMutation({
     feedback: { action: "sync this account", safeToRetry: true },
     mutationFn: (id: string) => api.syncFinanceAccount(id),
@@ -106,20 +100,12 @@ export function FinanceAccountsPage() {
           </Button>
         ) : null}
       </WorkspaceHeaderControls>
-      <FinanceSection
-        title="Accounts"
-        description={
-          health.data
-            ? `${health.data.balanceOnlyAccounts} balance-only ${health.data.balanceOnlyAccounts === 1 ? "account" : "accounts"} · Balances are tracked without transaction history.`
-            : undefined
-        }
-      >
+      <section aria-label="Accounts" className="flex min-w-0 flex-col gap-3 px-1">
         <div className="flex min-w-0 flex-col gap-4">
           <FinanceSourceState label="Accounts" query={accounts} />
           {accounts.data ? (
             <>
               <MutationFeedback feedback={sync.feedback} />
-              <QueryFeedback query={health} title="Couldn’t load account coverage." />
               {accounts.data.accounts.length ? (
                 <FinanceAccountsView
                   accounts={accounts.data.accounts}
@@ -168,7 +154,7 @@ export function FinanceAccountsPage() {
             </>
           ) : null}
         </div>
-      </FinanceSection>
+      </section>
       {comparing && accounts.data ? (
         <AccountDuplicateDialog
           account={comparing}

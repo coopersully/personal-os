@@ -65,7 +65,12 @@ test("each workspace discovers records and Calendar settings without changing li
       expect(Math.abs((switcher?.width ?? 0) - (switcher?.height ?? 1))).toBeLessThan(1);
       expect((await header.boundingBox())?.height).toBe(104);
     }
-    await header.getByRole("combobox", { name: `Search ${workspace}`, exact: true }).click();
+    await header
+      .getByRole((page.viewportSize()?.width ?? 0) < 768 ? "button" : "combobox", {
+        name: `Search ${workspace}`,
+        exact: true,
+      })
+      .click();
     const before = page.url();
     const input = page.getByRole("combobox", { name: `Search ${workspace}`, exact: true });
     await input.fill(query ?? "");
@@ -77,7 +82,12 @@ test("each workspace discovers records and Calendar settings without changing li
   }
 
   await page.goto("/calendar");
-  await page.getByRole("combobox", { name: "Search Calendar", exact: true }).click();
+  await page
+    .getByRole((page.viewportSize()?.width ?? 0) < 768 ? "button" : "combobox", {
+      name: "Search Calendar",
+      exact: true,
+    })
+    .click();
   await page.getByRole("combobox", { name: "Search Calendar", exact: true }).fill("weekends");
   await page.getByRole("option", { name: /^Show weekends(?:\s|$)/ }).click();
   await expect(page).toHaveURL(/page=calendar.*field=calendar%3Ashow-weekends/);
@@ -187,7 +197,12 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
       await page.getByRole("menuitemradio", { name: label, exact: true }).click();
       await expect(header.getByRole("button", { name: `Tasks view: ${label}` })).toBeVisible();
     }
-    await expect(header.getByRole("combobox", { name: "Search Tasks", exact: true })).toBeVisible();
+    await expect(
+      header.getByRole((page.viewportSize()?.width ?? 0) < 768 ? "button" : "combobox", {
+        name: "Search Tasks",
+        exact: true,
+      }),
+    ).toBeVisible();
     await expect(header.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
     await revealWorkspaceOptions(page);
     for (const name of ["Sort", "Display"]) {
@@ -259,7 +274,10 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
     await expect.poll(() => header.evaluate((el) => el.getBoundingClientRect().height)).toBe(104);
     // Desktop page orientation precedes discovery; mobile preserves its compact rows.
     const searchBox = await header
-      .getByRole("combobox", { name: "Search Tasks", exact: true })
+      .getByRole((page.viewportSize()?.width ?? 0) < 768 ? "button" : "combobox", {
+        name: "Search Tasks",
+        exact: true,
+      })
       .boundingBox();
     const titleBox = await header.locator('[data-slot="workspace-app-bar-title"]').boundingBox();
     const pageActions = header.locator('[data-slot="workspace-app-bar-page-actions"]');
@@ -1045,7 +1063,10 @@ test("Finance consolidates contextual controls and preserves responsive creation
   // Overview has no route-owned controls; shared search still contains input groups.
   await expect(header.locator(".workspace-header-controls")).toHaveCount(0);
   await expect(
-    header.getByRole("combobox", { name: "Search Finances", exact: true }),
+    header.getByRole((page.viewportSize()?.width ?? 0) < 768 ? "button" : "combobox", {
+      name: "Search Finances",
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Add in Transactions", exact: true })).toHaveCount(
     0,

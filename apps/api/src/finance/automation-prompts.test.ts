@@ -1,3 +1,4 @@
+import { financeMaintenanceInputSchema } from "@personal-os/domain";
 import { renderFinanceAutomationPrompt } from "./automation-prompts.js";
 
 describe("issued Finance automation prompts", () => {
@@ -18,6 +19,37 @@ describe("issued Finance automation prompts", () => {
       expect(a).not.toContain("send_finance_message");
     }
   });
+});
+
+it.each([
+  "codex_desktop",
+  "claude_code_routine",
+] as const)("issues schema-valid maintenance commands and follows blocked recovery for %s", (hostSurface) => {
+  const scheduleId = "11111111-1111-4111-8111-111111111111";
+  const runId = "22222222-2222-4222-8222-222222222222";
+  const continuationId = "33333333-3333-4333-8333-333333333333";
+  const text = renderFinanceAutomationPrompt({ id: scheduleId, hostSurface });
+  const commands = [...text.matchAll(/maintain_finances (\{[^}]+\})/g)].map((match) =>
+    financeMaintenanceInputSchema.parse(
+      JSON.parse(
+        (match[1] ?? "")
+          .replace("<returned run ID>", runId)
+          .replace("<continuation ID>", continuationId),
+      ),
+    ),
+  );
+  expect(commands).toEqual([
+    { operation: "continue", continuationId, automationScheduleId: scheduleId },
+    { operation: "start", automationScheduleId: scheduleId, scope: { type: "all_outstanding" } },
+    { operation: "resume", runId },
+  ]);
+  expect(text).toContain("If nextAction names get_finance_status, read its exact scope instead");
+  expect(text).toContain("Do not repeatedly resume unchanged blocked work");
+  expect(text).toContain("Never invent or rebind original-host authority");
+  expect(text).not.toContain("then resume the returned run ID");
+  expect(financeMaintenanceInputSchema.safeParse({ operation: "start", runId }).success).toBe(
+    false,
+  );
 });
 
 it("makes scheduled-only continuation latency and server-owned slots explicit", () => {

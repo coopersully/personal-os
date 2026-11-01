@@ -70,9 +70,17 @@ export async function requireFinanceEffectMessageProof(
   principal: Principal,
   at: Date,
 ) {
-  await requireHostRunAuthority(tx, run, principal, at);
   if (!run.authorizationConnectionId || !run.automationScheduleId)
-    throw new AppError("forbidden", "Use the original registered Finance message host.");
+    throw new AppError(
+      "forbidden",
+      "This saved Finance run has no complete original-host binding. Owner inspection is required.",
+      {
+        reason: "run_host_binding_missing",
+        recovery: "owner_inspection_required",
+        runId: run.id,
+      },
+    );
+  await requireHostRunAuthority(tx, run, principal, at);
   await requireCurrentFinanceExecutionProof(
     tx,
     run.userId,

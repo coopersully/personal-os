@@ -151,6 +151,37 @@ it("requires an explicit healthy keep choice and review, preserves history, then
     expect.objectContaining({ id: loadingToast.mock.calls.at(-1)?.[1]?.id }),
   );
 });
+it("distinguishes identical account labels and carries the selected record into comparison", async () => {
+  const first = { ...kept, id: "11111111-1111-4111-8111-11111111abcd" };
+  const second = { ...kept, id: "22222222-2222-4222-8222-22222222abcd" };
+  api.getFinanceAccountDuplicatePreview.mockResolvedValue(
+    envelope({ ...preview, keptAccount: second }),
+  );
+  mount([first, second]);
+  expect(screen.getByRole("option", { name: /^Record 1111abcd/ })).toBeVisible();
+  expect(screen.getByRole("option", { name: /^Record 2222abcd/ })).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Account to keep tracking"), {
+    target: { value: second.id },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Preview comparison" }));
+  await screen.findByRole("button", { name: "Stop tracking duplicate" });
+  expect(api.getFinanceAccountDuplicatePreview).toHaveBeenCalledWith(redundant.id, second.id);
+  expect(screen.getByRole("region", { name: "Keep tracking" })).toHaveTextContent(
+    "Record 2222abcd",
+  );
+  expect(screen.getByRole("region", { name: "Stop tracking" })).toHaveTextContent(
+    "Record -account",
+  );
+  expect(api.resolveFinanceAccountDuplicate).not.toHaveBeenCalled();
+});
+it("uses complete record references when shortened identifiers collide", () => {
+  const first = { ...kept, id: "11111111-1111-4111-8111-aaaaaaaaaaaa" };
+  const second = { ...kept, id: "22222222-2222-4222-8222-aaaaaaaaaaaa" };
+  mount([first, second]);
+  expect(screen.getByRole("option", { name: `Record ${first.id}`, exact: false })).toBeVisible();
+  expect(screen.getByRole("option", { name: `Record ${second.id}`, exact: false })).toBeVisible();
+  expect(api.getFinanceAccountDuplicatePreview).not.toHaveBeenCalled();
+});
 it("preserves the reviewed comparison and idempotency key for an uncertain retry, with Sonner only", async () => {
   api.resolveFinanceAccountDuplicate.mockRejectedValueOnce(new Error("connection lost"));
   mount();

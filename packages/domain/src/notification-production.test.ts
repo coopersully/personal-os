@@ -111,4 +111,24 @@ describe("owner-local receipt period identities", () => {
       }),
     ).toThrow();
   });
+
+  it.each([
+    "0000",
+    "0001",
+    "0099",
+  ])("keeps a valid early-year anchor %s on its fourteen-day calendar grid", (year) => {
+    const anchorLocalDate = `${year}-01-01`;
+    const localAsOf = "2026-11-01";
+    const period = getNotificationReceiptPeriod({
+      cadence: "fortnightly",
+      timeZone: "UTC",
+      asOf: new Date(`${localAsOf}T12:00:00Z`),
+      anchorLocalDate,
+    });
+    expect(period.startLocalDate <= localAsOf).toBe(true);
+    expect(period.endLocalDateExclusive > localAsOf).toBe(true);
+    const day = (value: string) => new Date(`${value}T00:00:00Z`).getTime() / 86_400_000;
+    expect(day(period.endLocalDateExclusive) - day(period.startLocalDate)).toBe(14);
+    expect((day(period.startLocalDate) - day(anchorLocalDate)) % 14).toBe(0);
+  });
 });

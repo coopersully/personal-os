@@ -1,6 +1,6 @@
 import type { FinanceConversationEffectReceipt } from "./finance/conversation.js";
 import type { FinanceHumanWorkRef } from "./finance/workflow-contracts.js";
-import { addLocalDays, localDateAt, localDateToIso, parseLocalDate } from "./time.js";
+import { localDateAt, localDateToIso } from "./time.js";
 
 /**
  * Producer correlation only, never canonical ownership or execution evidence.
@@ -58,8 +58,21 @@ export function getNotificationReceiptPeriod(
     // UTC here numbers calendar days; it does not measure elapsed owner-local hours.
     const localClock = new Date(`${localDateToIso(local)}T00:00:00.000Z`);
     const daysFromAnchor = (localClock.getTime() - anchorClock.getTime()) / 86_400_000;
-    start = addLocalDays(parseLocalDate(anchor), Math.floor(daysFromAnchor / 14) * 14);
-    end = addLocalDays(start, 14);
+    // Mutate a cloned actual calendar date: Date.UTC would reinterpret years 0–99 as 1900–1999.
+    const startClock = new Date(anchorClock);
+    startClock.setUTCDate(startClock.getUTCDate() + Math.floor(daysFromAnchor / 14) * 14);
+    const endClock = new Date(startClock);
+    endClock.setUTCDate(endClock.getUTCDate() + 14);
+    start = {
+      year: startClock.getUTCFullYear(),
+      month: startClock.getUTCMonth() + 1,
+      day: startClock.getUTCDate(),
+    };
+    end = {
+      year: endClock.getUTCFullYear(),
+      month: endClock.getUTCMonth() + 1,
+      day: endClock.getUTCDate(),
+    };
   }
   const startLocalDate = localDateToIso(start);
   const endLocalDateExclusive = localDateToIso(end);

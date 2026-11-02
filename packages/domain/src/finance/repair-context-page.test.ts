@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  financeConversationBatchPageSchema,
   type FinanceConversationMessage,
+  financeConversationBatchPageSchema,
 } from "./conversation.js";
 import {
   type FinanceRepairContextHeldEntry,

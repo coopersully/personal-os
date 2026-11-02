@@ -762,5 +762,5 @@ it("restores the actual owned Activity opener when keyboard dismissal closes det
   await waitFor(() =>
     expect(screen.queryByRole("dialog", { name: "Activity details" })).not.toBeInTheDocument(),
   );
-  expect(opener).toHaveFocus();
+  await waitFor(() => expect(opener).toHaveFocus());
 });

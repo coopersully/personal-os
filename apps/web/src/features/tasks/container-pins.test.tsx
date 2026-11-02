@@ -75,8 +75,9 @@ it("keeps a failed pin reachable through Settings without silently retrying", as
   await userEvent.click(screen.getByRole("button", { name: "Pin First" }));
   expect(
     await screen.findByRole("link", { name: "Review unsaved pin preferences" }),
-  ).toHaveAttribute("href", "/settings?section=tasks");
-  expect(screen.getByRole("button", { name: "Pin First" })).toBeDisabled();
+  ).toHaveAttribute("href", "/settings?page=tasks");
+  expect(screen.queryByRole("button", { name: "Pin First" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Review unsaved pin preferences" })).toBeVisible();
 });
 
 function OtherTaskPreferences() {
@@ -108,7 +109,7 @@ it("keeps non-pin recovery in Settings without resurrecting archived unpinned co
                 <OtherTaskPreferences />
                 <TaskContainerPin id="active" kind="list" name="Active" />
                 <TaskContainerPin id="archived" kind="project" name="Archived" unpinOnly />
-                <Link to="/settings?section=tasks">Open Tasks settings</Link>
+                <Link to="/settings?page=tasks">Open Tasks settings</Link>
               </>
             }
           />

@@ -51,3 +51,34 @@ export const showRitualPreview = (state: RitualState | null, completed = false) 
 
 export const ritualContentReady = (occurrenceId: string) =>
   invoke("ritual_ready", { occurrenceId });
+
+/** Decorative RGBA only: no document/screen capture, answers or credentials cross this bridge. */
+export async function publishRitualSkyFrame(
+  occurrenceId: string,
+  width: number,
+  height: number,
+  rgba: Uint8ClampedArray,
+  dark = false,
+) {
+  if (!isDesktop()) return false;
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width < 1 ||
+    height < 1 ||
+    width > 400 ||
+    height > 240 ||
+    rgba.length !== width * height * 4
+  )
+    return false;
+  let binary = "";
+  for (let i = 0; i < rgba.length; i += 8192)
+    binary += String.fromCharCode(...rgba.subarray(i, i + 8192));
+  return invoke<boolean>("ritual_sky_frame", {
+    occurrenceId,
+    width,
+    height,
+    pixels: btoa(binary),
+    dark,
+  });
+}

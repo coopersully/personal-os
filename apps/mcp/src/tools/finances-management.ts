@@ -10,6 +10,7 @@ import {
   financeReviewDecisionInputSchema,
   financeReviewHistoryQuerySchema,
   idSchema,
+  resolveFinanceAccountDuplicateInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
@@ -173,10 +174,34 @@ export function registerFinanceManagementTools(server: McpServer, api: PersonalO
     {
       title: "Create finance category",
       description:
-        "Create a named financial category; inspect get_finance_categories first to avoid duplicates. Requires finances:write, finances:execute and enabled review bypass for agents.",
+        "Create a named financial category; inspect get_finance_categories first to avoid duplicates. Category icons are assigned automatically from meaning; do not ask about or narrate cosmetic icon choices unless the user requests them. Requires finances:write, finances:execute and enabled review bypass for agents.",
       inputSchema: createFinanceCategoryInputSchema,
     },
     async (input) => apiResult(() => api.createFinanceCategory(input)),
+  );
+  server.registerTool(
+    "get_finance_account_duplicate_preview",
+    {
+      title: "Preview Finance account duplicate resolution",
+      description:
+        "Compare an owned redundant account with the account to keep tracking. Inspect masked identity, freshness, overlapping and unique transaction counts, and the returned revision before resolving. Matching provider details do not establish that accounts are the same. Requires finances:read.",
+      inputSchema: { redundantAccountId: idSchema, keepAccountId: idSchema },
+    },
+    async ({ redundantAccountId, keepAccountId }) =>
+      apiResult(() => api.getFinanceAccountDuplicatePreview(redundantAccountId, keepAccountId)),
+  );
+  server.registerTool(
+    "resolve_finance_account_duplicate",
+    {
+      title: "Resolve Finance account duplicate",
+      description:
+        "After reviewing get_finance_account_duplicate_preview and confirming both records represent the same account, stop local tracking of the redundant account and exclude it from planning. Preserve all history on its original account without merging transactions; unique redundant history remains visible but excluded from planning and may change past spending totals. Does not revoke provider access or cancel billing. Use the exact preview revision and retain the idempotency key on uncertain retries; reload the preview after a conflict. Requires finances:write, finances:execute and enabled review bypass for agents.",
+      inputSchema: resolveFinanceAccountDuplicateInputSchema.extend({
+        redundantAccountId: idSchema,
+      }),
+    },
+    async ({ redundantAccountId, ...input }) =>
+      apiResult(() => api.resolveFinanceAccountDuplicate(redundantAccountId, input)),
   );
   server.registerTool(
     "disconnect_finance_account",

@@ -1,8 +1,17 @@
 import { z } from "zod";
+import { agentAccountSchema } from "../agent-account.js";
 import { actorTypeSchema, idSchema, isoDateTimeSchema } from "../common.js";
+import { notificationDeliveryStateSchema } from "../notification-policy.js";
+import { textMessageStatusSchema } from "../texting.js";
 import { financeConversationSequenceSchema } from "./conversation.js";
+import { financeHumanWorkRefSchema } from "./workflow-contracts.js";
 
-export const financeActivityKindSchema = z.enum(["human_answer_decision", "financial_action"]);
+export const financeActivityKindSchema = z.enum([
+  "human_answer_decision",
+  "financial_action",
+  "notification_delivery",
+]);
+export type FinanceActivityKind = z.infer<typeof financeActivityKindSchema>;
 export const financeActivityStatusSchema = z.enum([
   "accepted",
   "proposed",
@@ -89,11 +98,12 @@ export const financeActivityChangeSchema = z
     auditEventIds: z.array(idSchema).max(100),
   })
   .strict();
-export const financeActivityEntrySchema = z
+const financeActivityFinancialEntrySchema = z
   .object({
+    agentAccount: agentAccountSchema.nullable().optional(),
     id: idSchema,
     occurredAt: isoDateTimeSchema,
-    kind: financeActivityKindSchema,
+    kind: z.enum(["human_answer_decision", "financial_action"]),
     status: financeActivityStatusSchema,
     actor: z.object({ type: actorTypeSchema, id: z.string().min(1).max(240).nullable() }).strict(),
     action: z.string().min(1).max(160),
@@ -115,6 +125,66 @@ export const financeActivityEntrySchema = z
     (entry) => !entry.evidence || entry.evidence.loadedChanges === entry.changes.length,
     "The entry must contain exactly its stated loaded evidence.",
   );
+/** Transport observation only: historical attempts do not establish initiating actor or audit. */
+export const financeActivityNotificationEntrySchema = z
+  .object({
+    id: idSchema,
+    occurredAt: isoDateTimeSchema,
+    kind: z.literal("notification_delivery"),
+    status: z.enum([
+      "claimed",
+      "submitting",
+      "accepted",
+      "uncertain",
+      "failed",
+      "suppressed",
+      "delivered",
+      "undelivered",
+    ]),
+    actor: z.null(),
+    agentAccount: z.null().optional(),
+    action: z.string().min(1).max(160),
+    explanation: z.string().min(1).max(4000),
+    caseId: z.null(),
+    runId: z.null(),
+    actionId: z.null(),
+    sourceOperationId: z.null(),
+    auditEventIds: z.array(z.never()).length(0),
+    sourceMessages: z.array(z.never()).length(0),
+    recordRefs: z.array(financeActivityRecordReferenceSchema).max(100),
+    changes: z.array(z.never()).length(0),
+    targets: z.array(financeActivityTargetSchema).max(100),
+    effect: z.never().optional(),
+    evidence: z.never().optional(),
+    delivery: z
+      .object({
+        attemptId: idSchema,
+        attemptState: notificationDeliveryStateSchema,
+        observedAt: isoDateTimeSchema,
+        messageId: idSchema.nullable(),
+        messageStatus: textMessageStatusSchema.nullable(),
+        submittedAt: isoDateTimeSchema.nullable(),
+        deliveredAt: isoDateTimeSchema.nullable(),
+        evidenceState: z.enum(["complete", "partial"]),
+        work: z
+          .array(
+            z
+              .object({
+                intentId: idSchema,
+                work: financeHumanWorkRefSchema,
+                runId: idSchema.nullable(),
+              })
+              .strict(),
+          )
+          .max(100),
+      })
+      .strict(),
+  })
+  .strict();
+export const financeActivityEntrySchema = z.union([
+  financeActivityFinancialEntrySchema,
+  financeActivityNotificationEntrySchema,
+]);
 export type FinanceActivityEntry = z.infer<typeof financeActivityEntrySchema>;
 export const financeActivityEvidencePageSchema = z
   .object({
@@ -139,6 +209,10 @@ export const financeActivityQuerySchema = z
     cursor: z.string().min(1).max(3000).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     type: financeActivityKindSchema.optional(),
+    // Explicit response-shape awareness, never a permission or mutation capability.
+    includeNotificationDeliveries: z
+      .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
+      .optional(),
     actor: actorTypeSchema.optional(),
     recordId: idSchema.optional(),
     from: isoDateTimeSchema.optional(),
@@ -150,6 +224,12 @@ export const financeActivityQuerySchema = z
     "The date range must be ordered.",
   );
 export type FinanceActivityQuery = z.infer<typeof financeActivityQuerySchema>;
+export function isFinanceActivityNotificationAware(
+  query: Pick<FinanceActivityQuery, "type" | "includeNotificationDeliveries">,
+): boolean {
+  return query.includeNotificationDeliveries === true || query.type === "notification_delivery";
+}
+
 export const financeActivityPageSchema = z
   .object({
     entries: z.array(financeActivityEntrySchema).max(100),
@@ -183,6 +263,7 @@ export const financeActivityPageSchema = z
               "historical_decisions_without_causal_message_not_projected",
               "financial_actions_outside_committed_candidate_receipts_not_projected",
               "committed_receipts_with_incomplete_evidence_not_projected",
+              "notification_delivery_without_complete_owned_evidence_not_projected",
             ]),
           )
           .min(1)

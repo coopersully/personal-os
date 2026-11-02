@@ -6,15 +6,16 @@ import {
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
+import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { api } from "../../api.js";
@@ -130,7 +131,7 @@ export function GoalProgressConfirmation({
         if (!open && !save.isPending) onClose();
       }}
     >
-      <DialogContent>
+      <DialogContent data-finance-dialog data-finance-size="default">
         <DialogHeader>
           <DialogTitle>Confirm progress for {goal.name}</DialogTitle>
           <DialogDescription>
@@ -139,79 +140,86 @@ export function GoalProgressConfirmation({
             allocations.
           </DialogDescription>
         </DialogHeader>
-        <FeedbackForm
-          feedback={correctionFeedback}
-          fieldNames={{ progressAmountCents: "amount", currencyCode: "currency", asOf: "asOf" }}
-          className="flex flex-col gap-4"
-          validate={() => {
-            const errors: Record<string, string> = {};
-            const cents = exactCents(amount);
-            if (cents === null || cents > 2_147_483_647)
-              errors.amount =
-                "Enter a non-negative amount with at most two decimal places, no greater than 21,474,836.47.";
-            if (!financePlanningEvidenceCurrencySchema.safeParse(currency.trim()).success)
-              errors.currency = "Choose a recognized currency with two minor-unit digits.";
-            const parsed = financeConfirmGoalPlanningEvidenceInputSchema.shape.asOf.safeParse(asOf);
-            if (!parsed.success) errors.asOf = "Choose the date this progress statement is true.";
-            else if (asOf > todayLocalDate)
-              errors.asOf = "The progress date cannot be in the future.";
-            return errors;
-          }}
-          onSubmit={(event) => {
-            event.preventDefault();
-            save.mutate();
-          }}
-        >
-          <FieldSet disabled={save.isPending}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor={`${id}-amount`}>Current goal amount you confirm</FieldLabel>
-                <Input
-                  id={`${id}-amount`}
-                  name="amount"
-                  inputMode="decimal"
-                  required
-                  value={amount}
-                  onChange={(event) => setAmount(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${id}-currency`}>Currency for the whole goal</FieldLabel>
-                <Input
-                  id={`${id}-currency`}
-                  name="currency"
-                  required
-                  value={currency}
-                  onChange={(event) => setCurrency(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${id}-as-of`}>Progress statement as-of date</FieldLabel>
-                <Input
-                  id={`${id}-as-of`}
-                  name="asOf"
-                  type="date"
-                  max={todayLocalDate}
-                  required
-                  value={asOf}
-                  onChange={(event) => setAsOf(event.target.value)}
-                />
-              </Field>
-            </FieldGroup>
-          </FieldSet>
-          <p className="text-sm text-muted-foreground">
-            By confirming, you state that this amount and currency describe your goal progress on
-            the selected date. An explicitly entered zero is valid.
-          </p>
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={save.isPending} onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Confirming…" : "Confirm my progress statement"}
-            </Button>
-          </DialogFooter>
-        </FeedbackForm>
+        <div data-responsive-slot="layout">
+          <FeedbackForm
+            feedback={correctionFeedback}
+            fieldNames={{ progressAmountCents: "amount", currencyCode: "currency", asOf: "asOf" }}
+            className="flex flex-col gap-4"
+            validate={() => {
+              const errors: Record<string, string> = {};
+              const cents = exactCents(amount);
+              if (cents === null || cents > 2_147_483_647)
+                errors.amount =
+                  "Enter a non-negative amount with at most two decimal places, no greater than 21,474,836.47.";
+              if (!financePlanningEvidenceCurrencySchema.safeParse(currency.trim()).success)
+                errors.currency = "Choose a recognized currency with two minor-unit digits.";
+              const parsed =
+                financeConfirmGoalPlanningEvidenceInputSchema.shape.asOf.safeParse(asOf);
+              if (!parsed.success) errors.asOf = "Choose the date this progress statement is true.";
+              else if (asOf > todayLocalDate)
+                errors.asOf = "The progress date cannot be in the future.";
+              return errors;
+            }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              save.mutate();
+            }}
+          >
+            <ResponsiveDialogBody>
+              <FieldSet disabled={save.isPending}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-amount`}>
+                      Current goal amount you confirm
+                    </FieldLabel>
+                    <Input
+                      id={`${id}-amount`}
+                      name="amount"
+                      inputMode="decimal"
+                      required
+                      value={amount}
+                      onChange={(event) => setAmount(event.target.value)}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-currency`}>Currency for the whole goal</FieldLabel>
+                    <Input
+                      id={`${id}-currency`}
+                      name="currency"
+                      required
+                      value={currency}
+                      onChange={(event) => setCurrency(event.target.value)}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-as-of`}>Progress statement as-of date</FieldLabel>
+                    <Input
+                      id={`${id}-as-of`}
+                      name="asOf"
+                      type="date"
+                      max={todayLocalDate}
+                      required
+                      value={asOf}
+                      onChange={(event) => setAsOf(event.target.value)}
+                    />
+                  </Field>
+                </FieldGroup>
+              </FieldSet>
+              <p className="text-sm text-muted-foreground">
+                By confirming, you state that this amount and currency describe your goal progress
+                on the selected date. An explicitly entered zero is valid.
+              </p>
+            </ResponsiveDialogBody>
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={save.isPending} onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={save.isPending}>
+                {save.isPending ? "Confirming…" : "Confirm my progress statement"}
+              </Button>
+            </DialogFooter>
+          </FeedbackForm>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -40,6 +40,7 @@ export type WorkspacePreferenceChange<W extends Workspace> =
   | Partial<WorkspacePreferences<W>>
   | ((current: WorkspacePreferences<W>) => Partial<WorkspacePreferences<W>>);
 type SaveAttempt<W extends Workspace> = {
+  toastId?: string | undefined;
   change: WorkspacePreferenceChange<W>;
   observed: WorkspaceSettings<W> | undefined;
   attempted?: Partial<WorkspacePreferences<W>>;
@@ -57,6 +58,7 @@ type SaveQueue = {
   advances: Map<number, WorkspaceSettings<Workspace>>;
 };
 type PreferenceRecovery<W extends Workspace> = {
+  toastId?: string | undefined;
   attempted: Partial<WorkspacePreferences<W>>;
   fieldSequences: Record<string, number>;
   fieldOutcomes: Record<string, "conflict" | "uncertain" | "rejected">;
@@ -138,7 +140,14 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
   );
   const mutation = useFeedbackMutation({
     scope: { id: `workspace-settings:${identity}:${session.epoch}:${workspace}` },
-    feedback: { action: "save workspace preferences", safeToRetry: false },
+    feedback: {
+      action: "save workspace preferences",
+      safeToRetry: false,
+      errorPosition: "top-center",
+    },
+    onFeedback: (feedback, attempt) => {
+      attempt.toastId = feedback.toastId;
+    },
     mutationFn: async (attempt: SaveAttempt<W>) => {
       const { change, observed, queue: saves } = attempt;
       if (!sameSession(cache, attempt.session))
@@ -233,6 +242,7 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
           }
           return Object.keys(attempted).length
             ? {
+                toastId: attempt.toastId,
                 attempted,
                 fieldSequences,
                 fieldOutcomes,

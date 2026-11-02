@@ -44,12 +44,14 @@ import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
-import { requireExplicitUser } from "./planning-evidence-service.js";
+import { requirePlanningConfirmation } from "./planning-evidence-service.js";
 import { resolveFinanceSpendingEvidence } from "./recognition.js";
 import { type CashflowTransaction, cashflowResult } from "./recurring-schedule-service.js";
 
 type Executor = Database | CashflowTransaction;
-const LIMIT = 1000;
+/** Private source-read ceiling shared by composed Finance projections. */
+export const financeCashflowReadLimit = 1000;
+const LIMIT = financeCashflowReadLimit;
 /** Matching exclusions do not remove cash already evidenced in the opening statement.
  * The caller still validates the complete basis, account scope, bounds and date horizon.
  */
@@ -344,6 +346,7 @@ export function basisValue(
     validUntil: row.validUntil.toISOString(),
     protectedFloorCents: row.protectedFloorCents,
     actorUserId: row.actorUserId,
+    ...(row.approvalActor ? { approvalActor: row.approvalActor } : {}),
     recordedAt: row.recordedAt.toISOString(),
     reflections: reflections.map((entry) => ({
       transactionId: entry.transactionId,
@@ -543,7 +546,7 @@ export function createFinanceBalanceBasisService({
       raw: ConfirmFinanceBalanceBasisInput,
       context: FinanceMutationContext,
     ) {
-      requireExplicitUser(context);
+      requirePlanningConfirmation(context);
       const input = confirmFinanceBalanceBasisInputSchema.parse(raw);
       if (Date.parse(input.asOf) > now().getTime())
         throw new AppError(
@@ -630,6 +633,8 @@ export function createFinanceBalanceBasisService({
             .values({
               userId: context.userId,
               actorUserId: context.userId,
+              approvalActor:
+                context.actorType === "agent" ? { type: "agent", id: context.actorId } : null,
               recordedAt: now(),
               accountId: account.id,
               basisRevision: input.expectedBasisRevision + 1,
@@ -686,9 +691,14 @@ export function createFinanceBalanceBasisService({
     async getFinanceCashflowProjection(
       userId: string,
       raw: FinanceCashflowProjectionQuery,
+      executor?: CashflowTransaction,
     ): Promise<FinanceCashflowProjectionView> {
       const query = financeCashflowProjectionQuerySchema.parse(raw);
-      return db.transaction(
+      const read = <T>(
+        fn: (tx: CashflowTransaction) => Promise<T>,
+        options: Parameters<Database["transaction"]>[1],
+      ) => (executor ? fn(executor) : db.transaction(fn, options));
+      return read(
         async (tx) => {
           const schedule = await readOccurrences(
             userId,

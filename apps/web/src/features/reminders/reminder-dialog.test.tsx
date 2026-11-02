@@ -37,7 +37,10 @@ it("creates with an explicit false override and retains text on a failed save", 
   const { user, close } = setup();
   await user.type(screen.getByLabelText("What needs attention?"), "Call the studio");
   await user.selectOptions(screen.getByRole("combobox", { name: "Active reminder" }), "false");
-  await user.click(screen.getByRole("button", { name: "Create reminder" }));
+  const create = screen.getByRole("button", { name: "Create reminder" });
+  expect(create.closest('[data-responsive-slot="body"]')).toBeNull();
+  expect(create.closest("form")).toContainElement(screen.getByLabelText("What needs attention?"));
+  await user.click(create);
   await waitFor(() =>
     expect(mocked.createReminder).toHaveBeenCalledWith(
       expect.objectContaining({ activeReminder: false, title: "Call the studio" }),

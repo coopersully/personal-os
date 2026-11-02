@@ -1,11 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/server";
-import { createIloToolSurface } from "./tool-surface.js";
+import { createPersonalOsToolSurface } from "./tool-surface.js";
 
 describe("nohmi MCP tool surface", () => {
   it("fails closed when a feature registers an operation missing from the catalog", () => {
     const registerTool = vi.fn();
     const server = { marker: "server", registerTool } as unknown as McpServer;
-    const surface = createIloToolSurface(server, {
+    const surface = createPersonalOsToolSurface(server, {
       appBaseUrl: "https://app.example.com",
       includeCompatibility: false,
       readOnly: false,
@@ -27,7 +27,7 @@ describe("nohmi MCP tool surface", () => {
   it("preserves primitive tool results without fabricating structured metadata", async () => {
     const registerTool = vi.fn();
     const server = { registerTool } as unknown as McpServer;
-    const surface = createIloToolSurface(server, {
+    const surface = createPersonalOsToolSurface(server, {
       appBaseUrl: "https://app.example.com",
       includeCompatibility: false,
       readOnly: false,

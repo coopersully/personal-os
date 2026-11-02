@@ -1,5 +1,16 @@
 import type { Workspace } from "@personal-os/domain";
+import { type ReactNode, useId } from "react";
+import { RecoveryRequest } from "@/components/recovery-request";
 import { Button } from "@/components/ui/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
 import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
 
 /** Domain-owned callers supply reviewed values and exact-revision reapply actions. */
@@ -13,7 +24,13 @@ export function SettingsSaveRecovery({
   onRefresh,
   onAccept,
   onReapply,
+  children,
+  recoveryActions,
+  toastId,
 }: {
+  toastId?: string | undefined;
+  children?: ReactNode;
+  recoveryActions?: ReactNode;
   title: string;
   outcome: "conflict" | "uncertain" | "rejected";
   rows: Array<{ label: string; attempted: string; current?: string }>;
@@ -24,46 +41,102 @@ export function SettingsSaveRecovery({
   onAccept: () => void;
   onReapply: () => void;
 }) {
+  const descriptionId = useId();
   return (
-    <fieldset className="flex flex-col gap-3" aria-label={title}>
-      <p>{title} Review the latest settings before applying your change.</p>
-      <p className="text-sm text-muted-foreground">
-        {outcome === "conflict"
-          ? "Another editor changed these settings. Your attempted change was rejected."
+    <RecoveryRequest
+      toastId={toastId}
+      open
+      title={title}
+      description={
+        outcome === "conflict"
+          ? "Another editor changed these settings. Review the latest values before applying your change."
           : outcome === "uncertain"
             ? "The change may have been saved. Refresh checks the current values without writing."
-            : "The change could not be applied. Refresh the current values before trying again."}
-      </p>
-      <dl className="text-sm">
-        {rows.map((row) => (
-          <div key={row.label}>
-            <dt className="font-medium">{row.label}</dt>
-            <dd>Your change: {row.attempted}</dd>
-            <dd>Latest: {reviewed ? row.current : "Not loaded — refresh to review"}</dd>
-          </div>
-        ))}
-      </dl>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="secondary" disabled={pending} onClick={onRefresh}>
-          Refresh latest settings
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={pending || !reviewed}
-          onClick={onAccept}
-        >
-          Use latest settings
-        </Button>
-        <Button
-          type="button"
-          disabled={pending || !reviewed || reapplyUnavailable}
-          onClick={onReapply}
-        >
-          Reapply reviewed change
-        </Button>
+            : "The change could not be applied. Refresh the current values before trying again."
+      }
+      actions={
+        <div className="grid w-full min-w-0 gap-2">
+          {recoveryActions}
+          <ItemGroup className="grid gap-2 sm:grid-cols-2">
+            <Item variant="muted" className="min-w-0 flex-col flex-nowrap items-stretch">
+              <ItemContent>
+                <ItemTitle>Apply your change</ItemTitle>
+                <ItemDescription className="line-clamp-none" id={`${descriptionId}-apply`}>
+                  Save your attempted values after reviewing the latest settings.
+                </ItemDescription>
+              </ItemContent>
+              <ItemFooter className="basis-auto">
+                <Button
+                  aria-describedby={`${descriptionId}-apply`}
+                  className="w-full whitespace-normal"
+                  type="button"
+                  variant="secondary"
+                  disabled={pending || !reviewed || reapplyUnavailable}
+                  onClick={onReapply}
+                >
+                  Reapply reviewed change
+                </Button>
+              </ItemFooter>
+            </Item>
+            <Item variant="muted" className="min-w-0 flex-col flex-nowrap items-stretch">
+              <ItemContent>
+                <ItemTitle>Keep saved settings</ItemTitle>
+                <ItemDescription className="line-clamp-none" id={`${descriptionId}-keep`}>
+                  Discard your attempted change and use the saved values.
+                </ItemDescription>
+              </ItemContent>
+              <ItemFooter className="basis-auto">
+                <Button
+                  aria-describedby={`${descriptionId}-keep`}
+                  className="w-full"
+                  type="button"
+                  disabled={pending || !reviewed}
+                  onClick={onAccept}
+                >
+                  Use latest settings
+                </Button>
+              </ItemFooter>
+            </Item>
+          </ItemGroup>
+        </div>
+      }
+    >
+      <div className="grid min-w-0 gap-3">
+        {children}
+        <ItemGroup className="gap-2" aria-label={title}>
+          {rows.map((row) => (
+            <Item key={row.label} variant="muted">
+              <ItemContent>
+                <ItemTitle>{row.label}</ItemTitle>
+                <p>Your change: {row.attempted}</p>
+                <p className="text-muted-foreground">
+                  Latest: {reviewed ? row.current : "Not loaded — refresh to review"}
+                </p>
+              </ItemContent>
+            </Item>
+          ))}
+          <Item variant="muted">
+            <ItemContent>
+              <ItemTitle>Review saved values first</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                Read the saved values without changing them.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Button
+                type="button"
+                variant={reviewed ? "secondary" : "default"}
+                disabled={pending}
+                onClick={onRefresh}
+                aria-label="Refresh latest settings"
+              >
+                Refresh
+              </Button>
+            </ItemActions>
+          </Item>
+        </ItemGroup>
       </div>
-    </fieldset>
+    </RecoveryRequest>
   );
 }
 
@@ -121,8 +194,12 @@ export function WorkspacePreferenceRecovery<W extends Workspace>({
   workspace,
   formatValue = preferenceValueLabel,
   unavailable = false,
+  children,
+  recoveryActions,
 }: {
   workspace: W;
+  children?: ReactNode;
+  recoveryActions?: ReactNode;
   formatValue?: (value: unknown, key: string) => string;
   unavailable?: boolean;
 }) {
@@ -131,6 +208,8 @@ export function WorkspacePreferenceRecovery<W extends Workspace>({
   if (!save.recovery) return null;
   return (
     <SettingsSaveRecovery
+      toastId={save.recovery.toastId}
+      recoveryActions={recoveryActions}
       outcome={save.recovery.outcome}
       title="Workspace preference change has not been confirmed."
       pending={query.isFetching || save.isWorkspacePending}
@@ -147,6 +226,8 @@ export function WorkspacePreferenceRecovery<W extends Workspace>({
       onRefresh={() => void save.refreshRecovery()}
       onAccept={save.acceptLatest}
       onReapply={save.reapplyReviewed}
-    />
+    >
+      {children}
+    </SettingsSaveRecovery>
   );
 }

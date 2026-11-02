@@ -15,6 +15,32 @@ import type { FinanceTransaction } from "./finance/context.js";
 import { decryptJson, encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
 
+export type PlaidAccountIdentityMetadata = {
+  institutionId?: string | null | undefined;
+  mask?: string | null | undefined;
+  persistentAccountId?: string | null | undefined;
+  name: string;
+};
+
+/** Only provider identity evidence may block a changed account ID; names alone never match. */
+export function plaidAccountsHaveSameIdentity(
+  left: PlaidAccountIdentityMetadata,
+  right: PlaidAccountIdentityMetadata,
+): boolean {
+  if (left.persistentAccountId && right.persistentAccountId)
+    return left.persistentAccountId === right.persistentAccountId;
+  const normalizeName = (name: string) =>
+    name.trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
+  return Boolean(
+    left.institutionId &&
+      left.institutionId === right.institutionId &&
+      left.mask?.trim() &&
+      left.mask.trim() === right.mask?.trim() &&
+      normalizeName(left.name) &&
+      normalizeName(left.name) === normalizeName(right.name),
+  );
+}
+
 type MutationContext = {
   principal: Principal;
   requestId: string;
@@ -137,6 +163,29 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
   }
 
   return {
+    async findDuplicateAccounts(userId: string, metadata: PlaidAccountIdentityMetadata[]) {
+      const accounts = await db
+        .select()
+        .from(financeAccounts)
+        .where(and(eq(financeAccounts.userId, userId), eq(financeAccounts.provider, "plaid")));
+      return accounts
+        .filter(
+          (account) =>
+            account.providerItemRecordId !== null &&
+            account.syncErrorCode !== "finance_account_disconnected",
+        )
+        .filter((account) =>
+          metadata.some((identity) =>
+            plaidAccountsHaveSameIdentity(identity, {
+              institutionId: account.providerInstitutionId,
+              mask: account.providerAccountMask,
+              persistentAccountId: account.providerPersistentAccountId,
+              name: account.providerAccountName ?? "",
+            }),
+          ),
+        )
+        .map((account) => account.id);
+    },
     async upsertConnection(
       input: UpsertConnectionInput,
       executor?: FinanceTransaction,
@@ -156,6 +205,53 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${input.context.principal.userId}`}, 0))`,
         );
+        const ownedAccounts = await tx
+          .select()
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, input.context.principal.userId),
+              eq(financeAccounts.provider, "plaid"),
+            ),
+          );
+        const knownAccountIds = new Set(ownedAccounts.map((account) => account.providerAccountId));
+        const duplicates = ownedAccounts.filter(
+          (account) =>
+            account.providerItemRecordId !== null &&
+            account.syncErrorCode !== "finance_account_disconnected" &&
+            input.accounts.some(
+              (remote) =>
+                !knownAccountIds.has(remote.accountId) &&
+                remote.accountId !== account.providerAccountId &&
+                plaidAccountsHaveSameIdentity(remote, {
+                  institutionId: account.providerInstitutionId,
+                  mask: account.providerAccountMask,
+                  persistentAccountId: account.providerPersistentAccountId,
+                  name: account.providerAccountName ?? "",
+                }),
+            ),
+        );
+        const incomingDuplicate = input.accounts.some((remote, index) =>
+          input.accounts
+            .slice(0, index)
+            .some(
+              (previous) =>
+                (!knownAccountIds.has(previous.accountId) ||
+                  !knownAccountIds.has(remote.accountId)) &&
+                previous.accountId !== remote.accountId &&
+                plaidAccountsHaveSameIdentity(previous, remote),
+            ),
+        );
+        if (duplicates.length > 0 || incomingDuplicate) {
+          throw new AppError(
+            "conflict",
+            "These bank accounts are already connected. Review existing accounts before reconnecting.",
+            {
+              reason: "duplicate_bank_accounts",
+              accountIds: duplicates.map((account) => account.id),
+            },
+          );
+        }
         const providerAccountIds = [...new Set(input.accounts.map((account) => account.accountId))];
         const discoveredAccounts =
           providerAccountIds.length === 0
@@ -386,6 +482,10 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
               nextSyncAt: connectedAt,
               provider: "plaid",
               providerAccountId: remote.accountId,
+              providerInstitutionId: remote.institutionId ?? null,
+              providerAccountMask: remote.mask ?? null,
+              providerPersistentAccountId: remote.persistentAccountId ?? null,
+              providerAccountName: remote.name,
               providerSubtype: remote.subtype ?? null,
               providerType: remote.type ?? null,
               providerItemId: input.itemId,
@@ -408,6 +508,10 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
                 lastSyncedAt: null,
                 name: remote.officialName ?? remote.name,
                 nextSyncAt: connectedAt,
+                providerInstitutionId: remote.institutionId ?? null,
+                providerAccountMask: remote.mask ?? null,
+                providerPersistentAccountId: remote.persistentAccountId ?? null,
+                providerAccountName: remote.name,
                 providerItemId: input.itemId,
                 providerItemRecordId: item.id,
                 providerSubtype: remote.subtype ?? null,

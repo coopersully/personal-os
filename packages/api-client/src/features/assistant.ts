@@ -11,7 +11,7 @@ import type {
   CreateAttentionItemInput,
   DomainProfile,
   ExecutionPolicySettings,
-  IloAgentContext,
+  PersonalOsAgentContext,
   UpdateAttentionItemInput,
   UpdateExecutionPolicySettingsInput,
   UpsertDomainProfileInput,
@@ -39,8 +39,8 @@ export function createAssistantApiClient(request: Request, toQuery: ToQuery) {
       );
       return response.settings;
     },
-    async getIloContext(): Promise<IloAgentContext> {
-      const response = await request<{ context: IloAgentContext }>("/v1/assistant/context");
+    async getPersonalOsContext(): Promise<PersonalOsAgentContext> {
+      const response = await request<{ context: PersonalOsAgentContext }>("/v1/assistant/context");
       return response.context;
     },
     async createAttentionItem(input: CreateAttentionItemInput): Promise<AttentionItem> {
@@ -54,7 +54,7 @@ export function createAssistantApiClient(request: Request, toQuery: ToQuery) {
       const response = await request<{ setup: AssistantSetupStatus }>("/v1/assistant/setup-status");
       return response.setup;
     },
-    async getIloSetup(query: AssistantSetupPlanQuery = {}): Promise<AssistantSetupPlan> {
+    async getPersonalOsSetup(query: AssistantSetupPlanQuery = {}): Promise<AssistantSetupPlan> {
       const suffix = Object.keys(query).length > 0 ? `?${toQuery(query)}` : "";
       const response = await request<{ plan: AssistantSetupPlan }>(
         `/v1/assistant/setup-plan${suffix}`,

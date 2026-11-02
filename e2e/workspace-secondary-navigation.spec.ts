@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { WorkspaceSettings } from "../packages/domain/src/workspace-settings.js";
+import { revealWorkspaceOptions } from "./workspace-header-controls.js";
 
 for (const width of [320, 390, 1100]) {
   test(`shared Tasks workspace remains usable at ${width}px`, async ({ page }) => {
@@ -8,7 +9,7 @@ for (const width of [320, 390, 1100]) {
     await page.getByLabel("Email").fill("demo+full@nohmi.test");
     await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
     await page.getByRole("button", { name: "Log in" }).click();
-    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
     const settingsPath = "/v1/workspaces/tasks/settings";
     const originalResponse = await page.request.get(settingsPath);
     expect(originalResponse.ok()).toBe(true);
@@ -18,6 +19,8 @@ for (const width of [320, 390, 1100]) {
         (response) =>
           response.url().endsWith(settingsPath) && response.request().method() === "PATCH",
       );
+    let testFailed = false;
+    let testError: unknown;
     try {
       await page.goto("/tasks?sort=default&group=none");
       const bar = page.getByRole("navigation", { name: "Top navigation" });
@@ -55,20 +58,29 @@ for (const width of [320, 390, 1100]) {
         expect((await saved).ok()).toBe(true);
       }
       await expect(unpin).toHaveAttribute("aria-pressed", "true");
-      if (width < 768) await page.getByRole("button", { name: "Workspace actions" }).click();
-      const sidebar =
-        width < 768
-          ? page.getByRole("dialog")
-          : page.getByRole("complementary", { name: "Tasks Sidebar" });
-      const pins = sidebar.getByRole("navigation", { name: "Pinned lists and projects" });
-      await expect(
-        pins.getByRole("link", { name: "Autumn program opening", exact: true }),
-      ).toBeVisible();
+      const mobile = width <= 900;
+      const dock = page.getByRole("navigation", { name: "Workspace sections" });
+      if (mobile) {
+        await dock.getByRole("link", { name: "pinned", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "pinned", exact: true })).toBeVisible();
+      }
+      const navigation = mobile
+        ? page.getByRole("main")
+        : page.getByRole("complementary", { name: "Tasks Sidebar" });
+      const pins = navigation.getByRole("navigation", { name: "Pinned lists and projects" });
+      const pinnedProject = pins.getByRole("link", { name: "Autumn program opening", exact: true });
+      await expect(pinnedProject).toBeVisible();
       await expect(pins.locator('[data-slot="sidebar-menu-sub"]')).toHaveCount(0);
-      await expect(sidebar.getByRole("button", { name: /More views|Expand|Collapse/ })).toHaveCount(
-        0,
-      );
-      await sidebar.getByRole("link", { name: "All", exact: true }).click();
+      await expect(
+        navigation.getByRole("button", { name: /More views|Expand|Collapse/ }),
+      ).toHaveCount(0);
+      if (mobile) {
+        await pinnedProject.click();
+        await expect(view).toHaveAccessibleName("Tasks view: Autumn program opening");
+        await dock.getByRole("link", { name: "views", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "views", exact: true })).toBeVisible();
+      }
+      await navigation.getByRole("link", { name: "All", exact: true }).click();
       await expect(view).toHaveAccessibleName("Tasks view: All tasks");
       await page.goto("/tasks?view=all&sort=default&group=none");
       await expect(page.getByRole("button", { name: "Open Call Mom" })).toBeVisible();
@@ -85,12 +97,14 @@ for (const width of [320, 390, 1100]) {
       ).toHaveCount(0);
       await bar.getByRole("button", { name: /Filters/ }).click();
       await dialog.getByRole("button", { name: "Clear", exact: true }).click();
-      await bar.getByRole("button", { name: /^Sort(?:$|:)/ }).click();
+      await revealWorkspaceOptions(page);
+      await page.getByRole("button", { name: /^Sort(?:$|:)/ }).click();
       const sorted = savedPreference();
       await page.getByRole("menuitemradio", { name: "Priority", exact: true }).click();
       expect((await sorted).ok()).toBe(true);
       await expect(page).toHaveURL(/sort=priority/);
-      await bar.getByRole("button", { name: "Display", exact: true }).click();
+      await revealWorkspaceOptions(page);
+      await page.getByRole("button", { name: "Display", exact: true }).click();
       const grouped = savedPreference();
       await page.getByRole("menuitemradio", { name: "Date", exact: true }).click();
       expect((await grouped).ok()).toBe(true);
@@ -134,7 +148,11 @@ for (const width of [320, 390, 1100]) {
         page.getByRole("navigation", { name: "Calendar week navigation" }),
       ).toBeVisible();
       await expect(bar.getByRole("button", { name: /^Tasks view:/ })).toHaveCount(0);
-    } finally {
+    } catch (error) {
+      testFailed = true;
+      testError = error;
+    }
+    try {
       const latestResponse = await page.request.get(settingsPath);
       expect(latestResponse.ok()).toBe(true);
       const latest = (await latestResponse.json()) as WorkspaceSettings<"tasks">;
@@ -151,6 +169,13 @@ for (const width of [320, 390, 1100]) {
         },
       });
       expect(restored.ok()).toBe(true);
+    } catch (error) {
+      if (!testFailed) throw error;
+      test.info().annotations.push({
+        type: "preference cleanup failed",
+        description: String(error),
+      });
     }
+    if (testFailed) throw testError;
   });
 }

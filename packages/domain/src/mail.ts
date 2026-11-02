@@ -648,3 +648,9 @@ export const connectICloudInputSchema = z
     message: "Select at least one iCloud service",
   });
 export type ConnectICloudInput = z.infer<typeof connectICloudInputSchema>;
+
+/** Full destination totals, independent of the bounded conversation page. */
+export type MailNavigationCounts = Record<
+  "all" | "unread" | "starred" | "snoozed" | "sent" | "drafts",
+  number
+>;

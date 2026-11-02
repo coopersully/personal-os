@@ -41,6 +41,7 @@ it("distinguishes unknown and confirmed zero and shows anchored exact hypothetic
   expect(screen.getByText(/Progress unknown. Enter an amount/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("checkbox"));
   compare();
+  expect(screen.getByRole("region", { name: "Hypothetical goal results" })).toHaveFocus();
   const baseline = screen.getByRole("region", { name: "Hypothetical Baseline" });
   expect(within(baseline).getByText("Hypothetical completion: 2027-03-31")).toBeInTheDocument();
   fireEvent.click(within(baseline).getByText("Hypothetical dated contribution curve for Baseline"));
@@ -86,14 +87,17 @@ it("reports invalid cents and unsupported currency through Sonner and permits co
   expect(feedback.error).toHaveBeenLastCalledWith(
     "Enter each amount with at most two decimal places.",
   );
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "Enter each amount with at most two decimal places.",
-  );
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("Enter each amount with at most two decimal places."),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText("Amounts accept up to two decimal places.")).toBeVisible();
   fill("Hypothetical target amount", "10");
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   fill("Currency code (two minor-unit digits)", "JPY");
   compare();
   expect(feedback.error).toHaveBeenLastCalledWith(expect.stringContaining("two minor-unit digits"));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   fill("Currency code (two minor-unit digits)", "USD");
   fill("Hypothetical current amount (blank means unknown)", "10");
   fireEvent.click(screen.getByRole("checkbox"));
@@ -114,6 +118,7 @@ it("lazily renders at most 24 curve points and preserves access to the final hor
   }
   compare();
   expect(screen.queryByRole("table", { hidden: true })).not.toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Hypothetical goal results" })).toHaveFocus();
   const baseline = screen.getByRole("region", { name: "Hypothetical Baseline" });
   fireEvent.click(within(baseline).getByText("Hypothetical dated contribution curve for Baseline"));
   const table = await within(baseline).findByRole("table");
@@ -182,7 +187,7 @@ it("uses only applicable saved evidence, preserves provenance and never asks for
     />,
   );
   expect(
-    screen.getByText(/Confirmed by you as of 2027-01-30 · EUR · Goal version 3/),
+    screen.getByText(/Saved progress confirmed by you as of 2027-01-30 · EUR/),
   ).toBeInTheDocument();
   expect(screen.getByLabelText("Confirmed goal progress")).toHaveValue("0");
   expect(screen.getByLabelText("Confirmed goal currency")).toHaveValue("EUR");

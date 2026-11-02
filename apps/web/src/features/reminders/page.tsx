@@ -4,6 +4,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
 import {
+  FloatingActionButton,
+  FloatingActionRegion,
+  FloatingActions,
+} from "@/components/floating-actions";
+import {
   CircleCheckIcon,
   ClockIcon,
   ListTodoIcon,
@@ -45,10 +50,13 @@ import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 export function RemindersCreateButton({ onCreate }: { onCreate: () => void }) {
   return (
-    <ShadcnButton aria-label="New reminder" onClick={onCreate} size="sm">
-      <PlusIcon aria-hidden="true" data-icon="inline-start" />
-      <span>New reminder</span>
-    </ShadcnButton>
+    <FloatingActionRegion align="end">
+      <FloatingActions aria-label="Reminder actions">
+        <FloatingActionButton label="New reminder" onClick={onCreate}>
+          <PlusIcon aria-hidden="true" />
+        </FloatingActionButton>
+      </FloatingActions>
+    </FloatingActionRegion>
   );
 }
 

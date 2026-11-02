@@ -248,3 +248,12 @@ Lists and Projects are first-class Tasks views in the sidebar, view picker, and 
 Lists and projects can be explicitly pinned from their cards. Account-backed Tasks preferences store separate list/project IDs with revision checks and owner validation. The sidebar replaces My lists and automatic project nesting with a flat Pinned group containing only explicit, available pins. Pinning a list does not implicitly pin its projects. Pins do not alter the grid sort. Archived or deleted material stays out of active sidebar navigation.
 
 The Tasks view picker contains page destinations only: Inbox, Today, Upcoming, All Lists, Projects, History, Trash, and Archive. Individual containers remain accessible through their grids and explicit sidebar pins. Archive has its own sidebar destination and active state, separate from History. Action collections with one available action render a directly labeled icon button; overflow menus are reserved for multiple actions.
+
+Tasks creation uses the shared end-aligned floating action region and existing
+creation flow. On mobile the action clears the bottom workspace app bar. Page
+name selectors keep words intact rather than wrapping a word to fit utilities.
+
+Today and Tasks use the same `WorkspaceRow` record renderer. Completion controls
+align with the first title line across wrapped titles and optional metadata.
+
+Mobile Tasks exposes Views, Pinned, and History as section pages using the sidebar navigation and counts. Views also includes Reminders. Create actions stay bottom-right above the section app bar.

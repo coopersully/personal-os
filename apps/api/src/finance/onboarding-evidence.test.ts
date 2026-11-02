@@ -95,7 +95,7 @@ it("shows readable display choices and account names without storage keys", () =
   value.preferences.financeManualVisibility = "show";
   const summary = projectFinanceOnboardingEvidence(value).displayPreferences.summary.join(" ");
   expect(summary).toContain("Personal cost");
-  expect(summary).toContain("This month");
+  expect(summary).toContain("This week");
   expect(summary).toContain("Checking");
   expect(summary).toContain("Always show");
   expect(summary).not.toContain("personal_cost");

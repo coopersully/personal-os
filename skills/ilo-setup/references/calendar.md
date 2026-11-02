@@ -1,7 +1,7 @@
 # Calendar setup
 
 Calendar setup records the user's time semantics; it does not grant access, scan Mail, or treat an
-MCP tool annotation as authorization. Ilo's API remains authoritative for scope, policy, source
+MCP tool annotation as authorization. nohmi's API remains authoritative for scope, policy, source
 evidence, destination capability, provider state, conflicts, and writes.
 
 ## Interview briefly
@@ -14,7 +14,7 @@ initial questions, one at a time when the host supports conversation:
 2. Which commitments are hard versus flexible, and which time zone should ambiguous times use?
 3. Should cross-calendar blocks be private `busy` or include details, and what before/after buffers
    matter?
-4. Which evidence kinds would be eligible for automatic creation after Ilo has a verified intake
+4. Which evidence kinds would be eligible for automatic creation after nohmi has a verified intake
    path: `ticket`, `booking`, `registration`, or `explicit_acceptance`? Everything else remains
    preview or approve-each.
 
@@ -77,7 +77,7 @@ there are no blocks. For one-block operations, pass that block's own `updatedAt`
 compare-and-swap values prevent an agent from overwriting a change made after its read.
 `source.revision` is provenance: it is a provider ETag when one exists and otherwise falls back to
 the local `updatedAt`. Do not use a provider ETag in an `expectedUpdatedAt` field. Use the revisions
-returned by `delete_event` for `restore_event`. Ilo's public time and local CAS precision is one
+returned by `delete_event` for `restore_event`. nohmi's public time and local CAS precision is one
 millisecond; connected projections additionally compare their provider ETag.
 
 ## Keep attention useful
@@ -85,7 +85,7 @@ millisecond; connected projections additionally compare their provider ETag.
 After a person creates or confirms a commitment, use
 `create_calendar_attention_item` with the owned event ID for one linked `upcoming` item when it
 needs preparation. Use `important` only when the user says the commitment needs durable visibility
-beyond its event time. Do not supply source provenance yourself: Ilo locks the event, derives its
+beyond its event time. Do not supply source provenance yourself: nohmi locks the event, derives its
 account/provider/remote ID/current revision, deduplicates the open event/kind pair, and does not
 copy event notes. Generic `create_attention_item` remains available for intentional unlinked
 Calendar notes but rejects claimed `calendar_event` provenance. Never create attention merely

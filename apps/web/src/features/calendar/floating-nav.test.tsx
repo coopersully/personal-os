@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import type { User } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { MotionProvider } from "@/components/motion-provider.js";
@@ -47,7 +47,7 @@ function renderCalendar() {
   );
 }
 
-it("orders the three primary Calendar actions", () => {
+it("keeps date and create actions in the bottom floating region", () => {
   render(
     <MotionProvider>
       <MemoryRouter>
@@ -63,37 +63,31 @@ it("orders the three primary Calendar actions", () => {
   );
 
   const actions = screen.getByRole("navigation", { name: "Calendar actions" });
+  expect(actions.closest('.calendar-floating-nav[data-align="end"]')).not.toBeNull();
+  expect(actions.closest(".workspace-app-bar")).toBeNull();
   expect(Array.from(actions.querySelectorAll("button"), (button) => button.ariaLabel)).toEqual([
     "Choose date",
     "Create event",
-    "Search calendar",
   ]);
 });
 
-it("morphs one persistent surface through every pill action", async () => {
+it("opens centered dialogs while keeping the bottom actions mounted", async () => {
   const browser = userEvent.setup();
-  const { container } = renderCalendar();
-  const surface = container.querySelector('[data-slot="calendar-floating-surface"]');
-
-  expect(surface).toHaveAttribute("data-state", "closed");
-  expect(surface).toHaveStyle({ position: "relative" });
+  renderCalendar();
+  const actions = screen.getByRole("navigation", { name: "Calendar actions" });
   await browser.click(screen.getByRole("button", { name: "Choose date" }));
-  expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
-  expect(surface).toHaveAttribute("data-state", "date");
-  const activeContent = surface?.querySelector(
-    '.calendar-floating-nav__transition-content:not([aria-hidden="true"])',
+  expect(screen.getByRole("dialog", { name: "Choose date" })).toHaveAttribute(
+    "data-presentation",
+    "dialog",
   );
-  expect((activeContent as HTMLElement).style.transform).toBe("");
+  expect(actions).toBeInTheDocument();
   await browser.click(screen.getByRole("button", { name: "Close" }));
-  await browser.click(await screen.findByRole("button", { name: "Create event" }));
-  expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
-  expect(surface).toHaveAttribute("data-state", "create");
-  const composer = container.querySelector(".calendar-floating-nav__composer");
-  expect(composer).toBeInTheDocument();
-  await browser.click(within(composer as HTMLElement).getByRole("button", { name: "Close" }));
-  await browser.click(await screen.findByRole("button", { name: "Search calendar" }));
-  expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
-  expect(surface).toHaveAttribute("data-state", "closed");
+  await browser.click(screen.getByRole("button", { name: "Create event" }));
+  expect(screen.getByRole("dialog", { name: "Create event" })).toHaveAttribute(
+    "data-presentation",
+    "dialog",
+  );
+  expect(actions).toBeInTheDocument();
 });
 
 it("moves focus into each surface and restores it to the triggering action", async () => {
@@ -112,27 +106,12 @@ it("moves focus into each surface and restores it to the triggering action", asy
   expect(await screen.findByRole("button", { name: "Create event" })).toHaveFocus();
 });
 
-it("holds the pill content back while an expanded surface collapses", async () => {
-  const { container } = renderCalendar();
-  fireEvent.click(screen.getByRole("button", { name: "Create event" }));
-  await screen.findByLabelText("Create event");
-  await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
-
-  const composer = container.querySelector(".calendar-floating-nav__composer");
-  fireEvent.click(within(composer as HTMLElement).getByRole("button", { name: "Close" }));
-  await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
-
-  const pill = screen.getByRole("navigation", { name: "Calendar actions" });
-  const incoming = pill.closest(".calendar-floating-nav__transition-content") as HTMLElement;
-  expect(Number(incoming.style.opacity)).toBeLessThan(0.2);
-});
-
 it("lets the schedule controls size to content around a flexible duration line", () => {
-  const { container } = renderCalendar();
+  renderCalendar();
   fireEvent.click(screen.getByRole("button", { name: "Create event" }));
 
-  expect(container.querySelectorAll('[data-layout="schedule-control"]')).toHaveLength(2);
-  expect(container.querySelector('[data-layout="duration-fill"]')).toBeInTheDocument();
+  expect(document.querySelectorAll('[data-layout="schedule-control"]')).toHaveLength(2);
+  expect(document.querySelector('[data-layout="duration-fill"]')).toBeInTheDocument();
 });
 
 it("collapses optional event fields back into add actions", () => {

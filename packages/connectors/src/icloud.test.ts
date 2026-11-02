@@ -791,6 +791,40 @@ describe("iCloud connector", () => {
     expect(imap.logout).toHaveBeenCalledOnce();
   });
 
+  it("keeps nested address comments out of synced sender and recipient identities", async () => {
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch: vi.fn(async function* () {
+        yield {
+          source: Buffer.from(
+            "From: Sender (x(y) <wrong@example.net>) <sender@example.com>\r\n" +
+              "To: Recipient (x(y) <wrong@example.net>) <recipient@example.com>\r\n" +
+              "Subject: Nested comment\r\n\r\nMessage",
+          ),
+          uid: 7,
+        };
+      }),
+      mailbox: { exists: 1, path: "INBOX", uidValidity: 100n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 100n },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+    const mail = await connector(davClient(), imap).value.syncMail(credentials, null);
+    expect(mail.threads[0]?.from?.address).toBe("sender@example.com");
+    expect(mail.threads[0]?.to.map((recipient) => recipient.address)).toEqual([
+      "recipient@example.com",
+    ]);
+    expect(mail.threads[0]?.messages?.[0]?.from?.address).toBe("sender@example.com");
+    expect(imap.logout).toHaveBeenCalledOnce();
+  });
+
   it("changes iCloud source identity when UIDVALIDITY resets and a UID is reused", async () => {
     let uidValidity = 100n;
     const imap = {

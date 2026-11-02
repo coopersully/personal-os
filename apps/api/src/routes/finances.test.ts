@@ -881,6 +881,13 @@ describe("finance routes", () => {
       expect((await app.request(`/v1/finances/${path}?id=`)).status).toBe(400);
       expect(read.mock.calls).toHaveLength(calls);
     }
+    const oversizedAnswer = await app.request(`/v1/finances/questions/${id}/answer`, {
+      body: JSON.stringify({ answer: "😀".repeat(2001) }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(oversizedAnswer.status).toBe(400);
+    expect(answerQuestion).not.toHaveBeenCalled();
     const answered = await app.request(`/v1/finances/questions/${id}/answer`, {
       body: JSON.stringify({ answer: JSON.stringify({ answer: { kind: "not_reimbursement" } }) }),
       headers: { "content-type": "application/json" },

@@ -7,7 +7,8 @@
 
 ## 1. Decision and intentional scope expansion
 
-nohmi will be a private, cross-device autonomous exoskeleton for each person's commitments,
+nohmi is a **personal harness**: the context, tools, and controls built around a person.
+The product target is a private, cross-device home for each person's commitments,
 communications, time, priorities, and money. It is a multi-user product: every account, credential,
 provider projection, knowledge record, run, review, and audit event is isolated to its owner by
 default. It does not replace operating systems or the external
@@ -20,11 +21,31 @@ This design intentionally expands scope beyond the current MVP. The expansion is
 
 There are no deferred product domains in this document. Delivery is phased for dependency and safety reasons, but the target product includes every capability named here.
 
+### Personal harness as a planning lens
+
+Agents use a harness to connect context, tools, and execution controls. nohmi builds that
+structure around a person: their goals and preferences, their everyday work, and their authority
+over what happens. The person can work directly or bring agents into the same environment.
+
+For every proposed feature, identify which part of the person's harness it strengthens:
+
+- **Context:** the person's goals, knowledge, preferences, commitments, and current reality.
+- **Tools:** familiar workspaces and reliable actions on the same underlying records.
+- **Control:** legible access, review, activity, recovery, and revocation.
+
+A feature should reduce the work of understanding or acting on the person's life without
+obscuring evidence or transferring authority implicitly. A new chat surface, model integration,
+or dashboard is not valuable by itself. Preserve the canonical workspace and policy contracts.
+
+The public category and brand line are **“a personal harness.”** Describe current capabilities
+from implementation evidence; use this framing for the target without implying that every part
+has shipped. Light blue belongs to the external brand; signed-in product chrome remains neutral.
+
 ## 2. Product promise
 
 > At any moment, nohmi shows what matters next, what is actively happening, what is realistically still possible today, and what an authorized agent did or proposes to do.
 
-It must make the useful action easy for a person who wants a calm, low-information interface while retaining fast paths, search, keyboard access, automation, and inspection for a power user.
+It must make useful action feel effortless while retaining the information density, fast paths, search, keyboard access, automation, and inspection a power user needs. Minimalism removes friction and decoration; it must not hide necessary information.
 
 Each workspace has a persistent expert steward that maintains its living ledger, applies its
 approved rulebook, asks only for irreducible human judgment, learns from answers and reinforced safe
@@ -301,6 +322,75 @@ current Goals/Motives are not implemented. Their normative target and research b
 two 2026-08-12 Tasks and Tracking specifications. Cross-workspace goals, priorities, motives,
 relationships, circumstances, preferences, constraints, and inferred patterns belong to User
 Knowledge rather than a separate top-level workspace.
+
+#### Morning and evening rituals
+
+Enabled rituals also present automatically inside the signed-in browser application. A due,
+unexpired, unsnoozed occurrence opens the shared checklist in a full-viewport ritual surface on
+desktop and mobile. Full previews use the same screen-filling presentation. The illustrated sky
+fills the surface behind a centered, readable checklist card; snooze and skip confirmations share
+that card treatment. Keep the underlying page mounted and restore its focus when the ritual is
+completed, snoozed, skipped, or settled by another client. Escape and outside clicks do not bypass
+a scheduled ritual; previews retain their explicit close action. Authentication and standalone
+setup flows remain unobstructed; the desktop shell keeps its native presentation without a
+duplicate browser ritual. On macOS, the checklist fills the system primary display and adapts in
+place to display changes. Secondary displays share only the decorative weather background and
+brief guidance to continue on the main display; the sun and moon appear only on the main display.
+
+The browser and desktop use the same account occurrence, revisions, answers, streaks, weekly
+progress, optional follow-ups, and snooze/skip policy. Browser writes require API acceptance and
+never claim to be queued offline. Refresh while visible and on focus/reconnection; recheck snooze
+and expiry using server time plus elapsed monotonic time. Read access denials and session expiry clear private state;
+read outages use deduplicated Sonner feedback and retry. Browser presentation covers only the
+open nohmi tab, with no screen capture or control over other tabs/apps. Use the shared browser
+interface for rapid visual iteration, then smoke-test native presentation on macOS.
+
+Ritual steps support required or optional participation and everyday, weekday, weekend, or custom
+weekday inclusion. Existing steps remain required every day. Resolve inclusion using the ritual's
+scheduled local date and profile planning time zone, then preserve the daily snapshot even if settings change. Morning and evening schedules share the profile time zone; they do not expose a separate ritual time-zone preference.
+Only scheduled required steps gate explicit completion. A day with no scheduled steps settles
+without opening the checklist; an all-optional day still permits voluntary participation.
+
+Each ritual has a configurable default follow-up time (initially noon for morning and 22:00 for
+evening). When unfinished optional steps remain, offer an unchecked “Remind me about these later”
+checkbox with an editable time. Show Today or Tomorrow explicitly when the chosen time rolls over.
+Checking it requests one standalone Reminder per unfinished optional step on completion; leaving
+it unchecked records those steps as optional and not done. Completed optional steps never generate
+follow-ups. These reminders remain independently editable and completable in Reminders; completing
+them does not rewrite the settled ritual's original answers. Deleting ritual history does not
+remove independently created reminders.
+
+Reminder creation and completion must be atomic, owner-scoped, and safe to retry. Offline desktop
+completion retains the reminder request in its durable queue and does not claim a scheduled
+reminder until the API accepts it. If an otherwise valid completion syncs after its requested time,
+make the reminder due shortly after acceptance. Expired/conflicting completions retain the existing
+explicit recovery flow. Delivery follows the person's existing reminder notification settings and
+OS permissions; accepting a reminder is not evidence of a displayed notification.
+
+Show the current ritual's streak at the top of its main checklist. Morning and evening have
+separate streaks of consecutive completed scheduled days. Today's pending ritual leaves the
+streak intact; skipped or missed scheduled days break it. Optional answers never gate a streak,
+and days with no scheduled steps neither add to nor break it. Streaks use retained history;
+an unrecorded scheduled day interrupts continuity. For unrecorded dates, use the current weekday
+schedule; recorded daily snapshots remain authoritative. Deleting history can reduce a streak.
+
+Keep the streak alongside a compact rolling seven-day completion strip at the top of the main
+ritual. Each morning/evening strip ends on that occurrence's scheduled local date, including
+night rituals that continue after midnight. Preserve visible completed days across streak breaks;
+show a completion count, dated days, and accessible completed, skipped, missed, pending,
+not-scheduled, and no-record states. Unscheduled days are neutral, and absent/deleted records
+must not be presented as verified misses or completions. Preview has no personal progress strip.
+Queued local completions update the current day and remain labeled as waiting to sync; clear
+cached weekly progress when offline advancement changes the current occurrence.
+
+
+“Skip for Today” first shows this ritual's applied skip count over the last 72 hours and warns
+when a streak will end. Require a continuous 30-second pointer or keyboard hold, with a visible
+countdown and progress fill, before submitting the skip. Release, pointer exit/cancellation,
+focus loss, tab visibility changes, or leaving confirmation resets the hold. The hold is an
+interaction safeguard in the shared web/desktop checklist, not an API authorization boundary.
+Offline skip history is explicitly unavailable; cached streaks are labeled as last synchronized
+and are cleared when advancing to another occurrence.
 
 ### 6.7 Finances
 

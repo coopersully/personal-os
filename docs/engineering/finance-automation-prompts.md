@@ -19,7 +19,8 @@ Issuing or copying a prompt never creates a host job or proves the host adopted 
 
 The server template takes the stable internal schedule ID and immutable host surface. Labels and
 cadence are not embedded mutable inputs. Current instructions use the existing continuation and
-`maintain_finances` protocol and prohibit budget self-approval. The ID is not a credential. Every
+`maintain_finances` protocol and honor the current review policy: bypass with execution authority
+permits agent approval for prepared changes including budgets; otherwise the owner approves. The ID is not a credential. Every
 instruction change requires a new monotonically increasing template version. Never rewrite issued
 text to match a new release or a changed schedule label.
 

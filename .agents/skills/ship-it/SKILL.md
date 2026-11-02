@@ -60,7 +60,8 @@ Do not report completion when merely waiting or after enabling some external ope
    Obtain current independent deep-review acceptance and collect eligible approvals. CodeRabbit is
    optional advisory feedback; missing, skipped or rate-limited coverage does not block delivery.
    Inspect its actual findings through the common feedback gate; preserve any live GitHub-required check.
-   Obtain one complete verification set: `pnpm verify` through the shared runner, or evidenced
+   Only the canonical Git-verified prose exception may omit full stages; use its `prose` readiness
+   mode and actual source-run receipts. Otherwise obtain one complete verification set: `pnpm verify` through the shared runner, or evidenced
    equivalent current-candidate hosted stages under the delivery-verification contract. Diagnose
    any local failures; green CI never excuses an unexplained defect. Do not edit a running verifier’s
    checkout. If a new finding requires a change, stop the owned run, retire that candidate, fix it,

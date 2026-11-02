@@ -150,6 +150,14 @@ export function registerMailRoutes({ app, db, mail, mutationContext }: MailRoute
       ),
     }),
   );
+  app.get("/v1/mail/counts", requireScope("mail:read"), async (context) =>
+    context.json({
+      counts: await mail.navigationCounts(
+        context.get("principal").userId,
+        mailListQuerySchema.parse(context.req.query()).accountIds,
+      ),
+    }),
+  );
   app.get("/v1/mail/threads", async (context) =>
     context.json({
       threads: await mail.listThreads(

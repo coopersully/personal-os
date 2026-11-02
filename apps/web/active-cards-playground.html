@@ -208,8 +208,8 @@ setInterval(()=>{times();if(cards.some(c=>c.snooze&&c.snooze<=Date.now())){for(c
 
 if(embedded){
   const announce=()=>parent.postMessage({type:'nohmi:active-cards-ready'},location.origin);
-  function previewLayout(){
-    const done=new Set();for(const c of visible()){if(done.has(c.id))continue;const group=connected(c),r=bbox(group);group.forEach(c=>done.add(c.id));const p=arrival({...r,id:c.id},group.map(card=>card.id));if(p)shift(group,p.x,p.y)}dock();
+  const previewLayout=()=>{
+    const done=new Set();for(const c of visible()){if(done.has(c.id))continue;const group=connected(c),r=bbox(group);group.forEach(c=>{done.add(c.id)});const p=arrival({...r,id:c.id},group.map(card=>card.id));if(p)shift(group,p.x,p.y)}dock();
   }
   window.addEventListener('message',event=>{
     if(event.origin!==location.origin||event.source!==parent||event.data?.type!=='nohmi:active-cards-preview')return;

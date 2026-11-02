@@ -2,7 +2,13 @@ import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "../common.js";
 import { financeReviewReasonSchema } from "./inbox.js";
 
-const revisionSchema = z.string().trim().min(1).max(200);
+// Persisted Finance revision contracts count UTF-16 units, not Unicode code points.
+const revisionSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .refine((value) => value.length <= 200, "Use at most 200 characters.");
 const centsSchema = z.number().int().safe();
 const financeLifecycleIdSchema = idSchema.toLowerCase();
 const positiveInt64RevisionSchema = z

@@ -13,6 +13,7 @@ import type {
   ApproveFinanceBudgetInput,
   CreateFinanceBudgetVersionInput,
   FinanceBudgetAllocation,
+  FinanceBudgetReadResult,
   FinanceBudgetResource,
   FinanceBudgetVersion,
   FinanceChange,
@@ -23,10 +24,14 @@ import type {
   ReviseFinanceBudgetInput,
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
+import { getFinanceBudgetApprovalReadiness } from "@personal-os/domain";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
-import { requireHumanBudgetApproval } from "./budget-authority.js";
+import { requireBudgetApproval } from "./budget-authority.js";
+import { readBudgetPlanContext } from "./budget-plan-projection.js";
+import { budgetRoomCommunication } from "./budget-room.js";
+import { readFinanceBudgetRoom } from "./budget-room-service.js";
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
@@ -35,7 +40,7 @@ import {
 } from "./context.js";
 import {
   createFinancePlanningEvidenceService,
-  requireExplicitUser,
+  requirePlanningConfirmation,
 } from "./planning-evidence-service.js";
 import { withFinanceBudgetPresentation } from "./presentation-service.js";
 import { lockFinanceProfileVersion } from "./profile-version-lock.js";
@@ -97,8 +102,8 @@ function goalValue(row: typeof financeGoals.$inferSelect): FinanceGoal {
 
 export function createProfileBudgetService({ db, now, executor: transaction }: Options) {
   const planningEvidence = createFinancePlanningEvidenceService({ db, now });
-  async function latestProfile(userId: string) {
-    return db.query.financeProfileVersions.findFirst({
+  async function latestProfile(userId: string, reader: Pick<Database, "query"> = db) {
+    return reader.query.financeProfileVersions.findFirst({
       orderBy: [desc(financeProfileVersions.version)],
       where: eq(financeProfileVersions.userId, userId),
     });
@@ -384,24 +389,41 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
       );
     },
 
-    async getFinanceBudget(userId: string, planId?: string) {
-      const row = await db.query.financeBudgetVersions.findFirst({
-        orderBy: planId
-          ? [desc(financeBudgetVersions.version)]
-          : [desc(financeBudgetVersions.createdAt), desc(financeBudgetVersions.version)],
-        where: planId
-          ? and(eq(financeBudgetVersions.userId, userId), eq(financeBudgetVersions.planId, planId))
-          : eq(financeBudgetVersions.userId, userId),
-      });
-      const data = row ? await budgetValue(row) : null;
-      return withFinanceBudgetPresentation(
-        result({
-          data,
-          disclosures: data ? budgetDisclosures(data) : [],
-          headline: data
-            ? `Budget version ${data.version} is ${data.status}.`
-            : "No budget exists yet.",
-        }),
+    async getFinanceBudget(userId: string, planId?: string): Promise<FinanceBudgetReadResult> {
+      return db.transaction(
+        async (tx) => {
+          const row = await tx.query.financeBudgetVersions.findFirst({
+            orderBy: planId
+              ? [desc(financeBudgetVersions.version)]
+              : [desc(financeBudgetVersions.createdAt), desc(financeBudgetVersions.version)],
+            where: planId
+              ? and(
+                  eq(financeBudgetVersions.userId, userId),
+                  eq(financeBudgetVersions.planId, planId),
+                )
+              : eq(financeBudgetVersions.userId, userId),
+          });
+          const data = row ? await budgetValue(row, tx) : null;
+          const profile = await latestProfile(userId, tx);
+          return {
+            ...withFinanceBudgetPresentation(
+              result({
+                data,
+                disclosures: data ? budgetDisclosures(data) : [],
+                headline: data
+                  ? `Budget version ${data.version} is ${data.status}.`
+                  : "No budget exists yet.",
+              }),
+            ),
+            planContext: await readBudgetPlanContext(tx, userId, now()),
+            approvalReadiness: getFinanceBudgetApprovalReadiness({
+              budget: data,
+              currentProfileVersionId: profile?.id ?? null,
+              latestBudgetVersionId: row?.id ?? null,
+            }),
+          };
+        },
+        { accessMode: "read only", isolationLevel: "repeatable read" },
       );
     },
 
@@ -499,13 +521,26 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async approveFinanceBudget(input: ApproveFinanceBudgetInput, context: FinanceMutationContext) {
-      requireFinanceMutation(context);
-      requireHumanBudgetApproval({
-        ...context,
-        scopes: new Set(context.canMutate ? ["finances:write"] : []),
-      });
-      if (input.approvalSource !== "user_instruction")
-        throw new AppError("forbidden", "Budget activation requires human approval.");
+      requireFinanceMutation(context, { approvalSource: input.approvalSource });
+      requireBudgetApproval(
+        {
+          ...context,
+          scopes:
+            context.actorType === "agent"
+              ? (context.executionPrincipal?.scopes ?? new Set())
+              : new Set(context.canMutate ? ["finances:write"] : []),
+        },
+        context.bypassEnabled,
+      );
+      if (
+        input.approvalSource !==
+        (context.actorType === "agent" ? "agent_self_approval" : "user_instruction")
+      )
+        throw new AppError(
+          "forbidden",
+          "Budget approval source must match the authenticated actor.",
+        );
+      if (context.actorType === "agent") context.requiresApprovalBypass = true;
       return executeFinanceIdempotently(
         db,
         context,
@@ -531,27 +566,32 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
               ),
             });
             if (!version) throw new AppError("not_found", "That budget version was not found.");
-            if (
-              version.profileVersionId !== (currentProfile?.id ?? null) ||
-              version.profileVersionId !== (input.expectedProfileVersionId ?? null)
-            )
-              throw new AppError(
-                "conflict",
-                "The proposal's profile revision changed. Review a new proposal before approving.",
-              );
             const latest = await tx.query.financeBudgetVersions.findFirst({
               orderBy: [desc(financeBudgetVersions.version)],
               where: eq(financeBudgetVersions.planId, version.planId),
             });
-            if (latest?.id !== version.id)
-              throw new AppError("conflict", "Review the latest budget revision before approving.");
-            if (version.version !== input.expectedVersion) {
-              throw new AppError("conflict", "The budget version changed before approval.");
-            }
-            if (version.status !== "proposed" || version.balanceDelta !== 0) {
+            const readiness = getFinanceBudgetApprovalReadiness({
+              budget: await budgetValue(version, tx),
+              currentProfileVersionId: currentProfile?.id ?? null,
+              latestBudgetVersionId: latest?.id ?? null,
+            });
+            if (!readiness.ready) {
               throw new AppError(
-                "invalid_request",
-                "Only a complete balanced proposal can be approved.",
+                readiness.code === "profile_changed" || readiness.code === "superseded"
+                  ? "conflict"
+                  : "invalid_request",
+                readiness.message,
+                { approvalReadiness: readiness },
+              );
+            }
+            if (
+              version.version !== input.expectedVersion ||
+              version.profileVersionId !== (input.expectedProfileVersionId ?? null)
+            ) {
+              throw new AppError(
+                "conflict",
+                "The displayed budget or profile revision changed. Refresh and review before approving.",
+                { code: "approval_input_changed", recovery: "refresh_plan" },
               );
             }
             await tx
@@ -578,7 +618,10 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
             if (!active) throw new AppError("internal_error", "The budget was not activated.");
             await tx.insert(auditEvents).values(
               auditValues({
-                action: "finance.budget.user_instruction_approved",
+                action:
+                  context.actorType === "agent"
+                    ? "finance.budget.agent_self_approved"
+                    : "finance.budget.user_instruction_approved",
                 after: {
                   approvalSource: input.approvalSource,
                   status: "active",
@@ -617,20 +660,45 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async getFinanceBudgetStatus(userId: string) {
-      const row = await db.query.financeBudgetVersions.findFirst({
-        orderBy: [desc(financeBudgetVersions.effectiveFrom), desc(financeBudgetVersions.version)],
-        where: and(
-          eq(financeBudgetVersions.userId, userId),
-          eq(financeBudgetVersions.status, "active"),
-        ),
-      });
-      const data = row ? await budgetValue(row) : null;
-      return withFinanceBudgetPresentation(
-        result({
-          data,
-          disclosures: data ? budgetDisclosures(data) : [],
-          headline: data ? "Your active budget is balanced." : "There is no active budget.",
-        }),
+      return db.transaction(
+        async (tx) => {
+          const asOf = now();
+          const planContext = await readBudgetPlanContext(tx, userId, asOf);
+          const row = planContext.current
+            ? await tx.query.financeBudgetVersions.findFirst({
+                where: and(
+                  eq(financeBudgetVersions.userId, userId),
+                  eq(financeBudgetVersions.id, planContext.current.id),
+                ),
+              })
+            : null;
+          const data = row ? await budgetValue(row, tx) : null;
+          const room = data
+            ? budgetRoomCommunication(
+                await readFinanceBudgetRoom({
+                  db,
+                  tx,
+                  userId,
+                  asOf,
+                  context: planContext,
+                  budget: data,
+                }),
+              )
+            : { optionalDetails: [], disclosures: [] };
+          const status = result({
+            data,
+            disclosures: [...(data ? budgetDisclosures(data) : []), ...room.disclosures],
+            headline: data
+              ? `Your approved budget for ${planContext.month} is balanced.`
+              : `There is no approved budget for ${planContext.month}.`,
+          });
+          status.communication.optionalDetails.push(...room.optionalDetails);
+          return {
+            ...withFinanceBudgetPresentation(status),
+            planContext,
+          };
+        },
+        { accessMode: "read only", isolationLevel: "repeatable read" },
       );
     },
 
@@ -658,7 +726,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async manageFinanceGoal(input: ManageFinanceGoalInput, context: FinanceMutationContext) {
-      if (input.operation === "confirm_progress") requireExplicitUser(context);
+      if (input.operation === "confirm_progress") requirePlanningConfirmation(context);
       return executeFinanceIdempotently(
         db,
         context,
@@ -680,7 +748,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
                 ...goalValue(source),
                 planningEvidence: evidence.kind === "goal" ? evidence : null,
               },
-              headline: "Your stated goal progress was recorded.",
+              headline: "Goal progress was recorded.",
             });
           }
           if (input.operation === "create") {

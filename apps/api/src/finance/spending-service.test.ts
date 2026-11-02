@@ -112,7 +112,10 @@ describe("Spending dashboard canonical consumer", () => {
       categories: [{ id: "food", label: "Food", color: "#12aB34" }],
     });
     expect(result.groups[0]?.visual).toEqual({ color: null, icon: "bucket" });
-    expect(result.groups[0]?.categories[0]?.visual).toEqual({ color: "#12aB34", icon: "category" });
+    expect(result.groups[0]?.categories[0]?.visual).toEqual({
+      color: "#12aB34",
+      icon: "groceries",
+    });
     const invalid = buildFinanceSpendingDashboard(
       evidence,
       { ...query, grouping: "categories" },
@@ -121,7 +124,7 @@ describe("Spending dashboard canonical consumer", () => {
         categories: [{ id: "food", label: "Food", color: "url(https://invalid)" }],
       },
     );
-    expect(invalid.groups[0]?.visual).toEqual({ color: null, icon: "category" });
+    expect(invalid.groups[0]?.visual).toEqual({ color: null, icon: "groceries" });
     expect(invalid.snapshot).toEqual(result.snapshot);
     expect(invalid.groups[0]?.drillDown).toEqual(result.groups[0]?.categories[0]?.drillDown);
   });

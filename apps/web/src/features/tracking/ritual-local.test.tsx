@@ -26,10 +26,19 @@ it("shows unavailable instead of a false disabled status and retries a failed re
     .mockRejectedValueOnce(new Error("Private diagnostic detail"))
     .mockResolvedValue({ enabled: true, queue: [], localHistory: [], deliveryHealth: null });
   mount();
-  expect(await screen.findByRole("alert")).toHaveTextContent("Ritual status unavailable");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Couldn’t load local routine status.",
+      expect.objectContaining({ action: expect.objectContaining({ label: "Try again" }) }),
+    ),
+  );
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByText("Automatic rituals on this Mac: unavailable")).toBeInTheDocument();
   expect(screen.queryByText(/Private diagnostic detail/)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  const retry = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action;
+  if (!retry || typeof retry !== "object" || !("onClick" in retry))
+    throw new Error("Missing read retry");
+  retry.onClick({} as never);
   expect(await screen.findByText("Automatic rituals on this Mac: on")).toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });

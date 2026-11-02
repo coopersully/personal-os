@@ -81,7 +81,7 @@ person, hide uncertainty, or narrate ordinary interface mechanics.
 
 ### Voice rules
 
-- Use sentence case, direct verbs, concrete nouns, and short clauses.
+- Use lowercase interface copy, direct verbs, concrete nouns, and short clauses. Preserve the spelling of user content and editable values.
 - Address the person as “you” only when it makes the consequence clearer. Avoid
   repeated second-person phrasing in labels and navigation.
 - Name the object and outcome: **Save budget**, **Reconnect calendar**, **Move 3
@@ -124,10 +124,9 @@ unrelated tools.
   or interaction feedback. A border must communicate a control, ordered row,
   modal/sheet edge, or semantic state boundary; adjoining regions do not earn
   a border merely because they meet.
-- Empty states are the deliberate absence-boundary exception: their container
-  has no background fill and uses one quiet, widely spaced dashed semantic border. The dashed
-  treatment belongs only to absent material, including reflective empty-state
-  quotes, and never decorates populated cards or ordinary page sections.
+- Empty states use the shared centered icon and concise copy on a transparent,
+  borderless surface. Absence never needs a dashed box nested inside a card;
+  loading and failed reads remain distinct states.
 - Icons come from one pack, reicon, reached through the shared registry. Its
   Outline and Filled weights are the vocabulary for active state; a second pack
   is never the answer to a glyph that is missing or reads wrong.
@@ -137,7 +136,7 @@ unrelated tools.
 - Light and dark themes carry the same roles and reading hierarchy. A feature
   consumes semantic roles and never chooses a raw color for one theme.
 - Calendar, Tasks, Mail, and Finances are first-class workspaces with clear,
-  high-chroma identity palettes. Their color is confined to the shared framed workspace
+  high-chroma identity palettes. Their color is confined to the shared solid workspace
   icon and related identity marks; it does not recolor a page, replace status,
   or compete with content hierarchy. Other features do not invent accents.
 
@@ -146,7 +145,7 @@ unrelated tools.
 - Treat Calendar, Tasks, Mail, and Finances as sub-apps inside nohmi. Each has one
   established glyph, label, route, and light/dark palette in the shared
   workspace identity registry.
-- Use the framed `WorkspaceIcon` whenever the whole workspace is represented:
+- Use the solid `WorkspaceIcon` whenever the whole workspace is represented:
   the workspace switcher, primary navigation, onboarding workspace choice, and
   Agent Access product setup. Use ordinary unframed icons for actions, views,
   records, providers, and destinations inside a workspace.
@@ -244,3 +243,7 @@ Before approving a visible change, ask:
   supports platform-agnostic, named design decisions and aliases. nohmi currently
   implements semantic CSS variables; adopting a token interchange file is a
   future tooling decision, not a prerequisite for sound token ownership.
+
+Workspace identity icons use white glyphs on fully saturated solid fills, without a border or extra frame. Selection remains owned by the surrounding control.
+
+Solid workspace icons use dedicated fill tokens and a stable near-white foreground. Keep the existing per-theme accent tokens for unframed glyphs on neutral surfaces. Both foreground/background roles retain 4.5:1 minimum contrast in light and dark modes; a fill palette does not replace readable inline accents.

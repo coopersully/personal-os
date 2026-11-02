@@ -17,6 +17,7 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
+import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +38,10 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
+import {
+  useNavigationSection,
+  useNavigationShortcuts,
+} from "@/components/workspace-navigation-page";
 import { useWorkspacePreferences } from "../workspace-settings/preferences";
 import { TaskListDialog } from "./task-list-dialog";
 import { getTaskListIcon } from "./task-list-icons";
@@ -211,6 +216,7 @@ export function TaskContainerActions({
 
 function TaskListBranch({
   list,
+  count,
   lists,
   projects,
   params,
@@ -219,6 +225,7 @@ function TaskListBranch({
   onNavigate,
 }: {
   list: TaskList;
+  count?: number | undefined;
   lists: TaskList[];
   projects: TaskProject[];
   params: URLSearchParams;
@@ -236,7 +243,11 @@ function TaskListBranch({
           asChild
           isActive={selected}
           tooltip={list.name}
-          className="min-w-0 max-md:h-10"
+          className={
+            count === undefined
+              ? "min-w-0 max-md:h-10"
+              : "min-w-0 max-md:h-10 sidebar-item-with-meta"
+          }
           data-user-created={list.kind === "standard" ? "true" : undefined}
         >
           <Link
@@ -249,9 +260,10 @@ function TaskListBranch({
               data-list-icon={list.kind === "standard" ? list.icon : undefined}
               weight={selected ? "Filled" : "Outline"}
             />
-            <span>{list.name}</span>
+            <span data-user-content>{list.name}</span>
           </Link>
         </SidebarMenuButton>
+        <SidebarItemMeta count={count} label={`${list.name} items`} />
         <TaskContainerActions list={list} lists={lists} projects={projects} sidebar />
       </div>
       {children.length > 0 ? (
@@ -272,7 +284,7 @@ function TaskListBranch({
                     aria-hidden="true"
                     weight={selectedProjectId === project.id ? "Filled" : "Outline"}
                   />
-                  <span>{project.name}</span>
+                  <span data-user-content>{project.name}</span>
                 </Link>
               </SidebarMenuSubButton>
               <TaskContainerActions
@@ -292,15 +304,19 @@ function TaskListBranch({
 
 export function TaskNavigation({
   lists,
+  counts = {},
   projects,
   status,
   onNavigate,
 }: {
   lists: TaskList[];
+  counts?: Record<string, number | undefined>;
   projects: TaskProject[];
   status?: ReactNode;
   onNavigate: () => void;
 }) {
+  const navigationSection = useNavigationSection();
+  const navigationShortcuts = useNavigationShortcuts();
   const [params] = useSearchParams();
   const pathname = useLocation().pathname;
   const decisions = pathname === "/tasks/decisions";
@@ -358,7 +374,7 @@ export function TaskNavigation({
         <SidebarMenuButton
           asChild
           isActive={selectedView === value || (archive && value === "archive")}
-          className="max-md:h-10"
+          className="max-md:h-10 sidebar-item-with-meta"
           tooltip={view.label}
         >
           <Link
@@ -372,12 +388,14 @@ export function TaskNavigation({
             <span>{view.label}</span>
           </Link>
         </SidebarMenuButton>
+        <SidebarItemMeta count={counts[value]} label={`${view.label} items`} />
       </SidebarMenuItem>
     );
   };
   const renderList = (list: TaskList) => (
     <TaskListBranch
       key={list.id}
+      count={list.kind === "inbox" ? counts.inbox : undefined}
       list={list}
       lists={lists}
       projects={[]}
@@ -389,102 +407,120 @@ export function TaskNavigation({
   );
   return (
     <>
-      <SidebarGroup>
-        <SidebarGroupLabel>Views</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <nav aria-label="Task views">
-            <SidebarMenu>
-              {lists.filter((list) => list.kind === "inbox").map(renderList)}
-              {renderView("today")}
-              {renderView("upcoming")}
-              {renderView("all")}
-              {renderView("lists")}
-              {renderView("projects")}
-            </SidebarMenu>
-          </nav>
-        </SidebarGroupContent>
-      </SidebarGroup>
-      <SidebarGroup>
-        <SidebarGroupLabel>Pinned</SidebarGroupLabel>
-        <SidebarGroupContent>
-          {status}
-          <nav aria-label="Pinned lists and projects">
-            <SidebarMenu>
-              {lists
-                .filter((list) => pins.data?.preferences.pinnedListIds?.includes(list.id))
-                .map((list) => (
-                  <TaskListBranch
-                    key={list.id}
-                    list={list}
-                    lists={lists}
-                    projects={[]}
-                    params={taskParams}
-                    selectedListId={selectedListId}
-                    selectedProjectId={selectedProject?.id ?? null}
-                    onNavigate={onNavigate}
-                  />
-                ))}
-              {projects
-                .filter((project) => pins.data?.preferences.pinnedProjectIds?.includes(project.id))
-                .map((project) => (
-                  <SidebarMenuItem key={project.id}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={selectedProject?.id === project.id}
-                      tooltip={project.name}
-                    >
-                      <Link
-                        to={taskPath(taskParams, { list: project.listId, project: project.id })}
-                        onClick={onNavigate}
-                        aria-current={selectedProject?.id === project.id ? "page" : undefined}
+      {(!navigationSection || navigationSection === "views") && (
+        <SidebarGroup>
+          <SidebarGroupLabel>Views</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <nav aria-label="Task views">
+              <SidebarMenu>
+                {lists.filter((list) => list.kind === "inbox").map(renderList)}
+                {!navigationShortcuts.includes("today") && renderView("today")}
+                {renderView("upcoming")}
+                {renderView("all")}
+                {renderView("lists")}
+                {renderView("projects")}
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={reminders} tooltip="Reminders">
+                    <Link to="/reminders" onClick={onNavigate}>
+                      <ClockIcon aria-hidden="true" />
+                      <span>Reminders</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </nav>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      )}
+      {(!navigationSection || navigationSection === "pinned") && (
+        <SidebarGroup>
+          <SidebarGroupLabel>Pinned</SidebarGroupLabel>
+          <SidebarGroupContent>
+            {status}
+            <nav aria-label="Pinned lists and projects">
+              <SidebarMenu>
+                {lists
+                  .filter((list) => pins.data?.preferences.pinnedListIds?.includes(list.id))
+                  .map((list) => (
+                    <TaskListBranch
+                      key={list.id}
+                      list={list}
+                      lists={lists}
+                      projects={[]}
+                      params={taskParams}
+                      selectedListId={selectedListId}
+                      selectedProjectId={selectedProject?.id ?? null}
+                      onNavigate={onNavigate}
+                    />
+                  ))}
+                {projects
+                  .filter((project) =>
+                    pins.data?.preferences.pinnedProjectIds?.includes(project.id),
+                  )
+                  .map((project) => (
+                    <SidebarMenuItem key={project.id}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={selectedProject?.id === project.id}
+                        tooltip={project.name}
                       >
-                        <ProjectIcon aria-hidden="true" />
-                        <span>{project.name}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                    {lists
-                      .filter((list) => list.id === project.listId)
-                      .map((list) => (
-                        <TaskContainerActions
-                          key={list.id}
-                          list={list}
-                          project={project}
-                          lists={lists}
-                          projects={projects}
-                          sidebar
-                        />
-                      ))}
-                  </SidebarMenuItem>
-                ))}
-            </SidebarMenu>
-            {pins.isError ? (
-              <p className="px-2 text-xs text-muted-foreground">Couldn’t load pins.</p>
-            ) : pins.isSuccess &&
-              !(
-                lists.some((list) => pins.data.preferences.pinnedListIds?.includes(list.id)) ||
-                projects.some((project) =>
-                  pins.data.preferences.pinnedProjectIds?.includes(project.id),
-                )
-              ) ? (
-              <p className="px-2 text-xs text-muted-foreground">
-                Pin items from Lists or Projects.
-              </p>
-            ) : null}
-          </nav>
-        </SidebarGroupContent>
-      </SidebarGroup>
-      <SidebarGroup>
-        <SidebarGroupLabel>History</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <nav aria-label="Task history">
-            <SidebarMenu>
-              {renderView("history")}
-              {renderView("trash")}
-              {renderView("archive")}
-            </SidebarMenu>
-          </nav>
-        </SidebarGroupContent>
-      </SidebarGroup>
+                        <Link
+                          to={taskPath(taskParams, { list: project.listId, project: project.id })}
+                          onClick={onNavigate}
+                          aria-current={selectedProject?.id === project.id ? "page" : undefined}
+                        >
+                          <ProjectIcon aria-hidden="true" />
+                          <span data-user-content>{project.name}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                      {lists
+                        .filter((list) => list.id === project.listId)
+                        .map((list) => (
+                          <TaskContainerActions
+                            key={list.id}
+                            list={list}
+                            project={project}
+                            lists={lists}
+                            projects={projects}
+                            sidebar
+                          />
+                        ))}
+                    </SidebarMenuItem>
+                  ))}
+              </SidebarMenu>
+              {pins.isError ? (
+                <p className="sidebar-helper-text px-2 text-xs text-muted-foreground">
+                  Couldn’t load pins.
+                </p>
+              ) : pins.isSuccess &&
+                !(
+                  lists.some((list) => pins.data.preferences.pinnedListIds?.includes(list.id)) ||
+                  projects.some((project) =>
+                    pins.data.preferences.pinnedProjectIds?.includes(project.id),
+                  )
+                ) ? (
+                <p className="sidebar-helper-text px-2 text-xs text-muted-foreground">
+                  Pin items from Lists or Projects.
+                </p>
+              ) : null}
+            </nav>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      )}
+      {(!navigationSection || navigationSection === "history") && (
+        <SidebarGroup>
+          <SidebarGroupLabel>History</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <nav aria-label="Task history">
+              <SidebarMenu>
+                {renderView("history")}
+                {renderView("trash")}
+                {renderView("archive")}
+              </SidebarMenu>
+            </nav>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      )}
     </>
   );
 }

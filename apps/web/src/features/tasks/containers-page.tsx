@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { PageLoading, QueryFeedback } from "@/components/async-state";
+import { FilterTrigger, SortOptionIcon, SortTrigger } from "@/components/data-view-controls";
 import { ListTodoIcon, ProjectIcon, SliderHorizontalIcon, SortIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -106,12 +107,16 @@ export function TaskContainerControls({ kind }: { kind: ContainerKind }) {
     <>
       <Popover>
         <PopoverTrigger asChild>
-          <Button
-            size="icon"
-            variant="ghost"
+          <FilterTrigger
+            compact
+            label={`Filter ${kind}`}
             aria-label={`Filter ${kind}`}
-            title={`Filter ${kind}`}
-            badgeCount={
+            active={Boolean(
+              params.get("q") ||
+                (params.get("containerStatus") &&
+                  params.get("containerStatus") !== (kind === "archive" ? "all" : "active")),
+            )}
+            count={
               Number(Boolean(params.get("q"))) +
               Number(
                 Boolean(
@@ -120,9 +125,7 @@ export function TaskContainerControls({ kind }: { kind: ContainerKind }) {
                 ),
               )
             }
-          >
-            <SliderHorizontalIcon />
-          </Button>
+          />
         </PopoverTrigger>
         <PopoverContent align="end">
           <FieldGroup>
@@ -155,9 +158,13 @@ export function TaskContainerControls({ kind }: { kind: ContainerKind }) {
       </Popover>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="icon" variant="ghost" aria-label={`Sort ${kind}`} title={`Sort ${kind}`}>
-            <SortIcon />
-          </Button>
+          <SortTrigger
+            compact
+            label={
+              sorts.find(([key]) => key === containerSort(kind, params))?.[1] ?? "Recently updated"
+            }
+            aria-label={`Sort ${kind}`}
+          />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuRadioGroup
@@ -171,6 +178,7 @@ export function TaskContainerControls({ kind }: { kind: ContainerKind }) {
               .filter(([key]) => kind !== "lists" || key !== "target")
               .map(([key, label]) => (
                 <DropdownMenuRadioItem key={key} value={key}>
+                  <SortOptionIcon value={key} />
                   {label}
                 </DropdownMenuRadioItem>
               ))}

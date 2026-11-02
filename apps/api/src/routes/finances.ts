@@ -50,6 +50,7 @@ import {
   mergeFinanceMerchantsInputSchema,
   previewFinanceBudgetPolicySchema,
   reconcileFinanceReimbursementInputSchema,
+  resolveFinanceAccountDuplicateInputSchema,
   resolveFinanceAlertInputSchema,
   reviseFinanceBudgetInputSchema,
   reviseFinanceBudgetPolicySchema,
@@ -81,6 +82,8 @@ import {
   buildFinancePeriodReviewResult,
   buildFinanceSnapshotResult,
 } from "../finance/presentation-service.js";
+import type { createFinanceReviewBacklogService } from "../finance/review-backlog-service.js";
+import type { createFinanceReviewBatchService } from "../finance/review-batch-service.js";
 import type { createFinanceSpendingService } from "../finance/spending-service.js";
 import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
 import type { FinanceChallengeService } from "../finance-challenge-service.js";
@@ -93,6 +96,7 @@ import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
 import { registerFinanceBaselineQualificationRoutes } from "./finance-baseline-qualification.js";
+import { registerFinanceReviewBacklogRoutes } from "./finance-review-backlog.js";
 import { registerFinanceSpendingRoute } from "./finance-spending.js";
 import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
@@ -102,6 +106,8 @@ type MutationContext = {
 };
 
 type FinanceRouteOptions = {
+  reviewBacklog?: ReturnType<typeof createFinanceReviewBacklogService>;
+  reviewBatches?: ReturnType<typeof createFinanceReviewBatchService>;
   financeSpending?: ReturnType<typeof createFinanceSpendingService>;
   app: Hono<AppEnv>;
   db?: Database;
@@ -122,6 +128,8 @@ type FinanceRouteOptions = {
 
 /** Register the Finance-owned HTTP surface without constructing shared services. */
 export function registerFinanceRoutes({
+  reviewBacklog,
+  reviewBatches,
   app,
   actions,
   db,
@@ -195,6 +203,7 @@ export function registerFinanceRoutes({
           "/v1/finances/categorizations/propose",
           "/v1/finances/scenarios/compare",
           "/v1/finances/budget-policies/preview",
+          "/v1/finances/review-batches/qualification",
         ].includes(context.req.path))
     ) {
       await requireFinanceRead(context, next);
@@ -204,6 +213,8 @@ export function registerFinanceRoutes({
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
+  if (reviewBacklog && reviewBatches)
+    registerFinanceReviewBacklogRoutes({ app, backlog: reviewBacklog, batches: reviewBatches });
   registerFinanceBaselineQualificationRoutes({
     app,
     service: baselineQualification,
@@ -978,7 +989,16 @@ export function registerFinanceRoutes({
   app.post("/v1/finances/questions/:id/answer", async (context) => {
     const { answer } = await parseBody(
       context,
-      z.object({ answer: z.string().trim().min(1).max(4_000) }).strict(),
+      z
+        .object({
+          answer: z
+            .string()
+            .trim()
+            .min(1)
+            .max(4_000)
+            .refine((value) => value.length <= 4_000, "Answer exceeds the length limit."),
+        })
+        .strict(),
     );
     return context.json({
       outcome: await requireActions().answerQuestion(
@@ -1245,12 +1265,34 @@ export function registerFinanceRoutes({
     });
   });
   app.get("/v1/finances/plaid/status", async (context) =>
-    context.json({ available: finances.plaidAvailable() }),
-  );
-  app.post("/v1/finances/plaid/link-token", requireHuman, async (context) =>
     context.json({
-      linkToken: await finances.createPlaidLinkToken(context.get("principal").userId),
+      available: finances.plaidAvailable(),
+      environment: finances.plaidEnvironment(),
     }),
+  );
+  app.post("/v1/finances/plaid/link-token", requireHuman, async (context) => {
+    const input = context.req.header("content-type")?.includes("application/json")
+      ? await parseBody(context, z.object({ accountId: idSchema.optional() }))
+      : {};
+    return context.json({
+      linkToken: await finances.createPlaidLinkToken(
+        context.get("principal").userId,
+        input.accountId,
+      ),
+    });
+  });
+  app.post(
+    "/v1/finances/accounts/:id/reconnect",
+    requireHuman,
+    requireWorkspaceExecutionRoute(db, "finances"),
+    async (context) =>
+      context.json(
+        await finances.completePlaidReconnect(
+          routeId(context),
+          await parseBody(context, z.object({ idempotencyKey: z.string().trim().min(1).max(200) })),
+          await financeContext(context),
+        ),
+      ),
   );
   app.post("/v1/finances/plaid/exchange", requireHuman, async (context) =>
     context.json(
@@ -1306,6 +1348,27 @@ export function registerFinanceRoutes({
         await financeContext(context),
       ),
     ),
+  );
+  app.get("/v1/finances/accounts/:id/duplicate-preview", async (context) =>
+    context.json(
+      await finances.previewFinanceAccountDuplicate(
+        routeId(context),
+        idSchema.parse(context.req.query("keepAccountId")),
+        await financeContext(context),
+      ),
+    ),
+  );
+  app.post(
+    "/v1/finances/accounts/:id/resolve-duplicate",
+    requireWorkspaceExecutionRoute(db, "finances"),
+    async (context) =>
+      context.json(
+        await finances.resolveFinanceAccountDuplicate(
+          routeId(context),
+          await parseBody(context, resolveFinanceAccountDuplicateInputSchema),
+          await financeContext(context),
+        ),
+      ),
   );
   app.post(
     "/v1/finances/accounts/:id/disconnect",

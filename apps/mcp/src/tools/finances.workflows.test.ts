@@ -1,6 +1,6 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
+import { ApiClientError, createApiClient, type PersonalOsApiClient } from "@personal-os/api-client";
 import { financeCapabilityManifest } from "@personal-os/domain";
 import { registerFinanceTools } from "./finances.js";
 
@@ -40,7 +40,7 @@ describe("Finance MCP workflows", () => {
   });
 
   it("forwards exact approval profile evidence and setup skips without hiding agent denial", async () => {
-    const approveFinanceBudget = vi.fn(async () => {
+    const approveFinanceBudget = vi.fn(async (): Promise<unknown> => {
       throw new ApiClientError({
         status: 403,
         code: "forbidden",
@@ -79,15 +79,23 @@ describe("Finance MCP workflows", () => {
     const tools = await client.listTools();
     expect(
       tools.tools.find((tool) => tool.name === "approve_finance_budget")?.description,
-    ).toContain("exact authenticated human approval");
+    ).toContain("persisted review bypass");
     const setupDescription = tools.tools.find(
       (tool) => tool.name === "setup_finances",
     )?.description;
-    expect(setupDescription).toContain("requires exact authenticated human approval in nohmi");
-    expect(setupDescription).toContain(
-      "cannot activate budgets, even with execution or review bypass",
-    );
-    expect(setupDescription).not.toContain("agent_self_approval");
+    expect(setupDescription).toContain("enabled review bypass using agent_self_approval");
+    const bypassInput = {
+      ...input,
+      approvalSource: "agent_self_approval",
+      idempotencyKey: "bypassed-decision",
+    };
+    approveFinanceBudget.mockResolvedValueOnce({ ...base, data: {} });
+    const applied = await client.callTool({
+      name: "approve_finance_budget",
+      arguments: bypassInput,
+    });
+    expect(approveFinanceBudget).toHaveBeenLastCalledWith(bypassInput);
+    expect(applied.isError).not.toBe(true);
     await client.close();
     await server.close();
   });
@@ -1081,4 +1089,123 @@ it("preserves typed pending recovery and strips only run routing from the strict
     await client.close();
     await server.close();
   }
+});
+
+it("keeps category and bucket icon choices automatic in agent discovery", async () => {
+  const { registerFinanceManagementTools } = await import("./finances-management.js");
+  const server = new McpServer({ name: "finance-appearance", version: "1" });
+  const api = {} as PersonalOsApiClient;
+  registerFinanceTools(server, api);
+  registerFinanceManagementTools(server, api);
+  const client = new Client({ name: "appearance-client", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const result = await client.listTools();
+    for (const name of ["create_finance_category", "manage_finance_budget_bucket"]) {
+      expect(result.tools.find((tool) => tool.name === name)?.description).toContain(
+        "do not ask about or narrate cosmetic icon choices",
+      );
+    }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+describe("Finance budget HTTP-to-MCP approval readiness", () => {
+  it("preserves additive readiness in text and structured results, including null budgets", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const api = createApiClient({ baseUrl: "https://example.test", token: "budget-token", fetch });
+    const server = new McpServer({ name: "budget-readiness", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "budget-reader", version: "1" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    try {
+      for (const [code, recovery] of [
+        ["ready", "approve"],
+        ["no_budget", "create_proposal"],
+        ["profile_changed", "revise_proposal"],
+        ["superseded", "refresh_plan"],
+      ] as const) {
+        const payload = {
+          ...base,
+          data: code === "no_budget" ? null : { id, status: "proposed" },
+          approvalReadiness: {
+            ready: code === "ready",
+            code,
+            recovery,
+            message: "Review current prerequisites",
+            budgetVersionId: code === "no_budget" ? null : id,
+            latestBudgetVersionId: id,
+            currentProfileVersionId: id,
+          },
+        };
+        fetch.mockResolvedValueOnce(Response.json(payload));
+        const output = await client.callTool({
+          name: "get_finance_budget",
+          arguments: { planId: id },
+        });
+        expect(output.isError).not.toBe(true);
+        expect(output.structuredContent).toEqual(payload);
+        expect(output.content).toEqual([{ type: "text", text: JSON.stringify(payload, null, 2) }]);
+      }
+      for (const [url, init] of fetch.mock.calls) {
+        expect(url).toBe(`https://example.test/v1/finances/budget-plans?planId=${id}`);
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer budget-token");
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("preserves HTTP permission errors and approval conflict recovery through MCP", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const api = createApiClient({ baseUrl: "https://example.test", token: "budget-token", fetch });
+    const server = new McpServer({ name: "budget-errors", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "budget-reader", version: "1" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    try {
+      for (const status of [403, 409]) {
+        const error = {
+          code: status === 403 ? "forbidden" : "conflict",
+          message: "Budget requires a fresh decision",
+          details: {
+            approvalReadiness: {
+              ready: false,
+              code: "profile_changed",
+              recovery: "revise_proposal",
+            },
+          },
+          requestId: "budget-error",
+        };
+        fetch.mockResolvedValueOnce(Response.json({ error }, { status }));
+        const output = await client.callTool({
+          name: "approve_finance_budget",
+          arguments: {
+            approvalSource: "user_instruction",
+            budgetVersionId: id,
+            expectedProfileVersionId: id,
+            expectedVersion: 3,
+            idempotencyKey: "approval-request",
+          },
+        });
+        expect(output.isError).toBe(true);
+        expect(output.structuredContent).toMatchObject({ error: { ...error, status } });
+        const text = output.content
+          .filter((item) => item.type === "text")
+          .map((item) => item.text)
+          .join("\n");
+        expect(JSON.parse(text)).toEqual(output.structuredContent);
+      }
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
 });

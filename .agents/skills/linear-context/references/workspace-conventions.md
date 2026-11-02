@@ -101,7 +101,7 @@ Use live names. Choose the least advanced state definitely supported by evidence
 | Planned or not started | `Backlog` or `Todo` |
 | Active implementation or branch work | `In Progress` |
 | PR open or awaiting review | `In Progress` unless a live review status is added |
-| Acceptance criteria met, merged, shipped, or explicitly completed | `Done` |
+| Full issue acceptance evidenced, including any required PR merges and release/adoption criteria | `Done` |
 | Deliberately abandoned | `Canceled` |
 | Confirmed duplicate | `Duplicate` |
 

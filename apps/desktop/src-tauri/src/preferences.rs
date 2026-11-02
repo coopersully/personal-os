@@ -38,7 +38,7 @@ mod tests {
     #[test]
     fn preferences_do_not_cross_accounts_or_origins() {
         let directory =
-            std::env::temp_dir().join(format!("ilo-preferences-{}", std::process::id()));
+            std::env::temp_dir().join(format!("personal-os-preferences-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         let root = directory.join("desktop.json");
         let mut first = DesktopSettings::default();

@@ -70,7 +70,7 @@ describe("useFeedbackMutation", () => {
     expect(result.current.feedback?.message).not.toContain("private diagnostic");
   });
 
-  it("does not toast or automatically retry an uncertain form write", async () => {
+  it("announces an uncertain form write without automatically retrying it", async () => {
     vi.clearAllMocks();
     const mutationFn = vi.fn().mockRejectedValue(new Error("secret"));
     const { result } = renderHook(
@@ -80,7 +80,7 @@ describe("useFeedbackMutation", () => {
     act(() => result.current.mutate(undefined));
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(mutationFn).toHaveBeenCalledOnce();
-    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(result.current.feedback?.message, expect.anything());
     expect(result.current.feedback?.kind).toBe("uncertain");
     act(() => result.current.reset());
     await waitFor(() => expect(result.current.feedback).toBeNull());
@@ -283,5 +283,85 @@ it("retains the original preparation error without executing or claiming an unce
     undefined,
     expect.anything(),
   );
+  expect(toast.error).toHaveBeenCalledWith(result.current.feedback?.message, expect.anything());
+});
+
+it("leaves recognized domain conflicts to their decision surface without generic duplicate feedback", async () => {
+  vi.clearAllMocks();
+  const conflict = new Error("Choose a destination");
+  const onError = vi.fn();
+  const mutationFn = vi.fn().mockRejectedValue(conflict);
+  const { result } = renderHook(
+    () =>
+      useFeedbackMutation({
+        mutationFn,
+        onError,
+        feedback: { action: "archive this list", ownsError: (error) => error === conflict },
+      }),
+    { wrapper },
+  );
+  act(() => result.current.mutate(undefined));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(onError).toHaveBeenCalledOnce();
+  expect(mutationFn).toHaveBeenCalledOnce();
   expect(toast.error).not.toHaveBeenCalled();
+  expect(result.current.feedback?.message).toContain("Check the latest state");
+});
+
+it("announces a failed action without waiting for an asynchronous recovery callback", async () => {
+  vi.clearAllMocks();
+  const recovery = deferred<void>();
+  const { result } = renderHook(
+    () =>
+      useFeedbackMutation({
+        mutationFn: async () => {
+          throw new Error("Offline");
+        },
+        onError: () => recovery.promise,
+        feedback: { action: "save this draft" },
+      }),
+    { wrapper },
+  );
+  act(() => result.current.mutate(undefined));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("Couldn’t confirm"),
+      expect.anything(),
+    ),
+  );
+  await act(async () => recovery.resolve());
+  await waitFor(() => expect(result.current.isError).toBe(true));
+});
+
+it("publishes feedback and its exact identity before domain recovery can take ownership", async () => {
+  vi.clearAllMocks();
+  const draft: { toastId?: string | undefined } = {};
+  const onError = vi.fn(() => {
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ id: draft.toastId }),
+    );
+    toast.dismiss(draft.toastId);
+  });
+  const { result } = renderHook(
+    () =>
+      useFeedbackMutation({
+        mutationFn: async (_draft: typeof draft) => {
+          throw new Error("Offline");
+        },
+        onFeedback: (feedback, value) => {
+          value.toastId = feedback.toastId;
+        },
+        onError,
+        feedback: { action: "save workspace preferences" },
+      }),
+    { wrapper },
+  );
+  act(() => result.current.mutate(draft));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(draft.toastId).toEqual(expect.any(String));
+  expect(onError).toHaveBeenCalledOnce();
+  expect(vi.mocked(toast.error).mock.invocationCallOrder[0]).toBeLessThan(
+    vi.mocked(toast.dismiss).mock.invocationCallOrder.at(-1) ?? 0,
+  );
 });

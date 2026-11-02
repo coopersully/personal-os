@@ -1,7 +1,7 @@
-import { iloSetupRelease, semanticVersionSchema } from "@personal-os/domain";
+import { personalOsSetupRelease, semanticVersionSchema } from "@personal-os/domain";
 import { z } from "zod";
 
-export const officialAgentSkill = iloSetupRelease;
+export const officialAgentSkill = personalOsSetupRelease;
 
 const configSchema = z
   .object({

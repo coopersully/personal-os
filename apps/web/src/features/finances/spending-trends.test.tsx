@@ -1,14 +1,27 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import type { FinanceSpendingDashboard, FinanceSpendingScope } from "@personal-os/domain";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   FinanceSpendingTrends,
   spendingComparisonScopes,
   spendingTrendBins,
 } from "./spending-trends";
 
+afterEach(() => cleanup());
+
+beforeAll(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("Expected fixture entry");
   return value;
@@ -167,12 +180,14 @@ describe("spending trends", () => {
     const onSelect = vi.fn();
     render(<FinanceSpendingTrends dashboard={value} comparison={previous} onSelect={onSelect} />);
     expect(screen.getByText(/Percentage unavailable/)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Trend details" }));
     expect(screen.getByRole("table", { name: "Spending trends data" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /2026-03-01: \$1.01/ }));
+    await userEvent.click(screen.getByRole("button", { name: "2026-03-01" }));
     expect(onSelect).toHaveBeenCalledWith(required(value.snapshot.bins[0]).drillDown);
   });
 });
-it("separates complete zero, refunds, future and partial evidence in accessible daily bars", () => {
+it("separates complete zero, refunds, future and partial evidence in accessible daily bars", async () => {
   const value = dashboard();
   const base = required(value.snapshot.bins[0]);
   value.snapshot.bins = [
@@ -193,6 +208,7 @@ it("separates complete zero, refunds, future and partial evidence in accessible 
   expect(screen.getByRole("button", { name: /2026-03-02:.*Net refund/ })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /2026-03-03:.*Future/ })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /2026-03-04:.*Partial coverage/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Trend details" }));
   expect(screen.getByText("Refunds/adjustments −$1.25")).toBeInTheDocument();
 });
 it("compares disappearing and newly observed groups without inventing a percentage basis", async () => {
@@ -213,6 +229,7 @@ it("compares disappearing and newly observed groups without inventing a percenta
   const select = vi.fn();
   render(<FinanceSpendingTrends dashboard={value} comparison={previous} onSelect={select} />);
   expect(screen.getByText("$2.00 change · 200.0%")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Trend details" }));
   expect(
     screen.getByText("Unsupported currencies excluded: EUR, Unknown currency"),
   ).toBeInTheDocument();

@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { WorkspaceAppBar } from "./workspace-app-bar.js";
+import { WorkspaceHeaderControls } from "./workspace-header-controls.js";
 import { WorkspaceLayout } from "./workspace-layout.js";
 import { WorkspaceSecondaryAppBar } from "./workspace-secondary-app-bar.js";
 
@@ -67,4 +68,30 @@ describe("workspace frame composition", () => {
       screen.getByLabelText("Draft").closest('[data-slot="workspace-primary-actions"]'),
     ).not.toBeNull();
   });
+});
+
+it("keeps workspace search above page-owned controls", () => {
+  render(
+    <WorkspaceLayout
+      primaryNavigation={<WorkspaceAppBar workspace="finances" title="Transactions" />}
+    >
+      <WorkspaceHeaderControls placement="workspace" label="Workspace tools">
+        <input aria-label="Search finances" />
+      </WorkspaceHeaderControls>
+      <WorkspaceHeaderControls label="Page tools">
+        <button type="button">Filters</button>
+      </WorkspaceHeaderControls>
+      <WorkspaceHeaderControls placement="leading" label="Page view">
+        <button type="button">Table view</button>
+      </WorkspaceHeaderControls>
+    </WorkspaceLayout>,
+  );
+  expect(
+    screen.getByLabelText("Search finances").closest('[data-slot="workspace-app-bar-context"]'),
+  ).not.toBeNull();
+  for (const name of ["Filters", "Table view"]) {
+    expect(
+      screen.getByRole("button", { name }).closest('[data-slot="workspace-app-bar-page-actions"]'),
+    ).not.toBeNull();
+  }
 });

@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
-  financeAccounts,
   financeBudgetPlans,
   financeGoals,
   financeOnboardingLegacyAccess,
@@ -82,9 +81,11 @@ describe.sequential("Finance preferences and migration-time access", () => {
       if (!row) throw new Error("Missing source fixture owner");
       return row.id;
     };
-    await database.db
-      .insert(financeAccounts)
-      .values({ userId: owner(0), provider: "manual", institution: "Fixture", name: "Cash" });
+    // This fixture is still on 0117; current account inserts include later columns.
+    await database.pool.query(
+      "INSERT INTO finance_accounts (user_id,provider,institution,name) VALUES ($1,'manual','Fixture','Cash')",
+      [owner(0)],
+    );
     await database.db.insert(financeBudgetPlans).values({ userId: owner(1), name: "Plan" });
     await database.db
       .insert(financeGoals)
@@ -114,6 +115,29 @@ describe.sequential("Finance preferences and migration-time access", () => {
     await database?.close();
     await container?.stop();
     if (staging) await rm(staging, { recursive: true, force: true });
+  });
+
+  it("defaults new persisted settings to List while preserving legacy view choices", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        email: "finance-list-default@example.com",
+        displayName: "List default",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing owner");
+    const [row] = await database.db
+      .insert(financesWorkspaceSettings)
+      .values({ userId: owner.id })
+      .returning();
+    expect(row?.financeSpendingView).toBe("list");
+    expect(row?.financeSpendingPeriod).toBe("week");
+    expect(row?.financeSpendingGrouping).toBe("auto");
+    expect((await settings.get(owner.id, "finances")).preferences.financeSpendingView).toBe("list");
+    expect((await settings.get(legacyId, "finances")).preferences.financeSpendingView).toBe(
+      "bubbles",
+    );
   });
 
   it("adds defaults without changing existing revision or explicit empty account selection", async () => {

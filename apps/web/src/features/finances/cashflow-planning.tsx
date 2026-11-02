@@ -12,6 +12,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Button } from "@/components/ui/button";
 import { ItemGroup } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,6 +26,7 @@ import {
   CashflowPlanningControls,
   type CashflowPlanningRow as Row,
 } from "./cashflow-planning-views.js";
+import { FinanceDisclosure } from "./disclosure";
 import { OccurrenceMatchDialog } from "./occurrence-match-dialog.js";
 import { PaydayView } from "./payday-view.js";
 import {
@@ -278,14 +280,19 @@ function OwnerCashflowPlanning({ user }: { user: Awaited<ReturnType<typeof api.g
   const historical =
     projection.data?.schedule.occurrences.filter((item) => !item.inCurrentSchedule) ?? [];
   return (
-    <section aria-label="Upcoming money" className="flex min-w-0 flex-col gap-5">
+    <section aria-label="Upcoming money" className="flex min-w-0 flex-col gap-6">
       <div>
         <h2 className="text-lg font-semibold">Upcoming money</h2>
         <p className="text-sm text-muted-foreground">
-          Confirmed schedules expand into versioned occurrences. Unconfirmed records show only their
-          next source date. Occurrence dates use each schedule’s recorded timezone; today uses{" "}
-          {timezone}. Neither view proves fresh bank data.
+          Expected income and payments, with matched receipts kept separate. Unconfirmed records
+          show only their next source date.
         </p>
+        <FinanceDisclosure title="Date scope">
+          <p>
+            Occurrence dates use each schedule’s recorded timezone; today uses {timezone}. Neither
+            view proves fresh bank data.
+          </p>
+        </FinanceDisclosure>
       </div>
       {snapshot?.coverage.truncated ? (
         <p role="status" className="text-sm text-muted-foreground">
@@ -428,12 +435,13 @@ function OwnerCashflowPlanning({ user }: { user: Awaited<ReturnType<typeof api.g
           />
           <section id="planning-sources" tabIndex={-1} aria-label="Recurring schedule sources">
             <h3 className="text-sm font-medium">Confirm or revise a source schedule</h3>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col gap-1">
               {snapshot
                 ? scheduleSources.slice(0, sourceLimit).map(({ item, kind }) => (
                     <Button
                       key={`${kind}:${item.id}`}
-                      variant="outline"
+                      variant="ghost"
+                      className="min-h-11 justify-between"
                       disabled={!schedules.data}
                       onClick={() => openSchedule({ kind, id: item.id })}
                     >
@@ -463,8 +471,8 @@ function OwnerCashflowPlanning({ user }: { user: Awaited<ReturnType<typeof api.g
               Review balance statements and movement inclusion
             </h3>
             <p className="text-sm text-muted-foreground">
-              State current or available balance, explicit validity, and whether each known movement
-              is included. This is your statement, not provider confirmation.
+              Confirm a balance and which movements it includes. This is your statement, not a fresh
+              bank check.
             </p>
             <div className="flex flex-wrap gap-2">
               {snapshot?.accounts
@@ -490,7 +498,9 @@ function OwnerCashflowPlanning({ user }: { user: Awaited<ReturnType<typeof api.g
           onSaved={refresh}
         />
       ) : null}
-      {balanceAccountId && review.isPending ? <p>Loading current balance-review facts…</p> : null}
+      {balanceAccountId && review.isPending ? (
+        <ContentSkeleton label="Loading current balance-review facts…" rows={3} />
+      ) : null}
       {balanceAccountId && review.isError ? (
         <InlineError error={review.error} retry={() => void review.refetch()} />
       ) : null}

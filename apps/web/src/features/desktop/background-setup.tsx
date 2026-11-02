@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { settingsPath } from "@/features/settings/settings-routes";
 import { api } from "../../api.js";
 import { MonitorIcon } from "../../components/icons.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
@@ -89,7 +90,7 @@ export function BackgroundSetup({
       </Button>
     ) : (
       <Button asChild size="sm" variant="outline">
-        <a href={`/settings?section=${target}`}>{label}</a>
+        <a href={settingsPath(target)}>{label}</a>
       </Button>
     );
   const login = status.native.loginStatus;
@@ -155,7 +156,7 @@ export function BackgroundSetup({
     },
     {
       id: "pet",
-      title: "Desktop pet",
+      title: "Desktop Pet",
       complete: !stale && status.settings.petEnabled,
       description: status.settings.petEnabled
         ? "The pet is enabled and stays available when you close the main window."

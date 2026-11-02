@@ -190,7 +190,10 @@ it("shows today's shared timeline before tasks, including an ongoing overnight e
   mount();
   const event = await screen.findByText("Overnight coverage");
   const task = screen.getByText("Review the draft");
-  expect(event.closest(".today-timeline")).not.toBeNull();
+  const timeline = event.closest('[role="list"]');
+  expect(timeline).toHaveClass("calendar-time-grid", "today-calendar-grid");
+  expect(timeline?.querySelector('[data-calendar-axis="left"]')).toBeInTheDocument();
+  expect(screen.getByRole("timer", { name: /^Current time / })).toBeInTheDocument();
   expect(event.compareDocumentPosition(task) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 it("reports pin and resize failures through Sonner", async () => {
@@ -798,10 +801,11 @@ it("uses calendar colors for shared timed and all-day cards in one scroll area",
     screen.getByRole("button", { name: /All day Planning day/ }).closest("li"),
   ).toBeInTheDocument();
   expect(container.querySelectorAll('[data-slot="scroll-area-viewport"]')).toHaveLength(1);
-  expect(container.querySelector(".today-timeline")?.parentElement).not.toHaveClass(
-    "overflow-y-auto",
-    "max-h-72",
-  );
+  const timeline = container.querySelector(".today-calendar-grid");
+  expect(timeline).toBeInTheDocument();
+  expect(timed?.closest('[role="list"]')).toBe(timeline);
+  expect(timeline?.parentElement).not.toHaveClass("overflow-y-auto", "max-h-72");
+  expect(timeline?.querySelector('[data-slot="scroll-area-viewport"]')).toBeNull();
   const pin = screen.getByRole("button", { name: "Pin quick access" });
   expect(pin).toHaveAttribute("data-variant", "ghost");
   fireEvent.click(pin);

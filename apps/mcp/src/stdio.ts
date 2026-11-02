@@ -16,7 +16,7 @@ if (!token) {
 }
 
 const api = createApiClient({ baseUrl: apiUrl, token });
-const context = await api.getIloContext();
+const context = await api.getPersonalOsContext();
 
 serveStdio(() =>
   createPersonalOsMcpServer({

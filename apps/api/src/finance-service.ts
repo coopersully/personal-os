@@ -120,6 +120,7 @@ import {
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { financeProviderDuplicateGroups } from "./finance/account-duplicate-service.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
 import {
   createFinanceAccountService,
@@ -139,6 +140,7 @@ import { createFinanceConnectionHandoffService } from "./finance/connection-hand
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
+  loadFinanceAuthorization,
   requireFinanceExecution,
 } from "./finance/context.js";
 import { mirrorNewMaintenanceReviewQuestion } from "./finance/conversation-review-mirror.js";
@@ -152,7 +154,7 @@ import { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identi
 import { createFinanceMerchantService } from "./finance/merchant-service.js";
 import {
   createFinancePlanningEvidenceService,
-  requireExplicitUser,
+  requirePlanningConfirmation,
 } from "./finance/planning-evidence-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
@@ -189,6 +191,7 @@ import {
 import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
 import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { createFinanceReimbursementService } from "./finance-reimbursement-service.js";
+import { decryptJson } from "./security.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
@@ -203,6 +206,13 @@ type MaintenanceMutationAttribution = {
   runId: string;
 };
 type MutationContext = {
+  /** Internal exact-case scope, constructed only by the validated batch service. */
+  financeReviewBatchScope?: {
+    transactionId: string;
+    reviewId: string | null;
+    transferReview?: boolean;
+    transferCounterpart?: { transactionId: string; revision: string };
+  };
   financeExecution?: FinanceExecutionFence;
   financeBudgetApproval?: FinanceBudgetApproval;
   /** Internal action-service capability; never derived from a token or MCP input. */
@@ -221,6 +231,7 @@ type Options = {
   now: () => Date;
   onProposalSnapshotRead?: () => Promise<void>;
   plaid?: PlaidConnector;
+  plaidEnvironment?: "sandbox" | "development" | "production";
   providerItems?: ReturnType<typeof createFinanceProviderItemService>;
   searchReceiptCandidates?: (
     userId: string,
@@ -767,6 +778,7 @@ export function createFinanceService({
   now,
   onProposalSnapshotRead,
   plaid,
+  plaidEnvironment,
   providerItems: configuredProviderItems,
   searchReceiptCandidates,
 }: Options) {
@@ -809,6 +821,8 @@ export function createFinanceService({
     ...(log ? { log } : {}),
     now,
     accounts: canonicalAccounts,
+    findDuplicateAccounts: (userId, metadata) =>
+      providerItems.findDuplicateAccounts(userId, metadata),
     ...(encryptionKey ? { encryptionKey } : {}),
     ...(plaid ? { plaid } : {}),
     preparePersistence: async (item, context) => {
@@ -2739,10 +2753,26 @@ export function createFinanceService({
     } = {},
     executor?: FinanceActionWriteExecutor,
   ) {
+    const batchScope = context.financeReviewBatchScope;
+    if (
+      batchScope &&
+      (!executor ||
+        batchScope.transactionId !== decision.transactionId ||
+        batchScope.reviewId !== (options.requiredReviewId ?? null))
+    )
+      throw new AppError(
+        "invalid_request",
+        "The internal Finance batch scope does not match the writer.",
+      );
     const readExecutor = executor ?? db;
     // Direct ledger editing has its own prepared-action contract. Resolving a
     // categorization review must still match current server-owned evidence.
+    const exactTransferReviewExecution =
+      options.reviewedExecution === true &&
+      batchScope?.transferReview === true &&
+      !!options.requiredReviewId;
     const directLedgerExecution = options.reviewedExecution === true && !options.requiredReviewId;
+    const explicitExecution = directLedgerExecution || exactTransferReviewExecution;
     if (options.reviewedExecution)
       await requireWorkspaceExecution(readExecutor, context.principal, "finances", now());
     const before = await ownedTransaction(
@@ -2773,7 +2803,7 @@ export function createFinanceService({
     );
     let confidence = decision.confidence;
     let agentProposal: FinanceCategorizationProposal | null = null;
-    if (!directLedgerExecution && (source === "agent" || source === "rule")) {
+    if (!explicitExecution && (source === "agent" || source === "rule")) {
       const proposal = await categorizationProposal(
         context.principal.userId,
         beforeValue,
@@ -2796,7 +2826,11 @@ export function createFinanceService({
       if (source === "agent") agentProposal = proposal;
     }
     const canApply =
-      directLedgerExecution || source !== "agent" || agentProposal?.meetsPolicyThreshold === true;
+      explicitExecution || source !== "agent" || agentProposal?.meetsPolicyThreshold === true;
+    // A batch cannot rewrite an unrelated question into a categorization question.
+    // Its durable item receipt carries the policy-required follow-up instead.
+    if (!canApply && batchScope)
+      return { applied: false, replayed: false, threshold, transaction: beforeValue };
     if (!canApply) {
       const defer = async (tx: FinanceActionWriteExecutor) => {
         await assertMaintenanceClaim(tx, context);
@@ -3033,7 +3067,7 @@ export function createFinanceService({
         .where(eq(financeCategories.userId, context.principal.userId))
         .orderBy(financeCategories.id)
         .for("update");
-      if (!directLedgerExecution && (source === "agent" || source === "rule")) {
+      if (!explicitExecution && (source === "agent" || source === "rule")) {
         const currentProposal = await categorizationProposal(
           context.principal.userId,
           transaction(current),
@@ -3056,7 +3090,7 @@ export function createFinanceService({
         threshold = currentProposal.threshold;
       }
       const mustProtectAmbiguousTransfer =
-        !directLedgerExecution && (source === "rule" || source === "agent");
+        !explicitExecution && (source === "rule" || source === "agent");
       const [protectedReview] = mustProtectAmbiguousTransfer
         ? await tx
             .select({ id: financeReviewCases.id })
@@ -3089,6 +3123,23 @@ export function createFinanceService({
       if (!current.pending) {
         await assertAllocationsMayBeReplaced(tx, context.principal.userId, current.id);
       }
+      const outstandingReviews = batchScope
+        ? await tx
+            .select({ id: financeReviewCases.id })
+            .from(financeReviewCases)
+            .where(
+              and(
+                eq(financeReviewCases.userId, context.principal.userId),
+                eq(financeReviewCases.transactionId, before.id),
+                inArray(financeReviewCases.status, ["deferred", "open"]),
+              ),
+            )
+            .orderBy(financeReviewCases.id)
+            .for("update")
+        : [];
+      const preserveReviewFlag = outstandingReviews.some(
+        (review) => review.id !== batchScope?.reviewId,
+      );
       const [updated] = await tx
         .update(financeTransactions)
         .set({
@@ -3099,7 +3150,7 @@ export function createFinanceService({
           categoryRationale: decision.rationale,
           categorySource: source,
           direction: options.direction,
-          needsReview: false,
+          needsReview: preserveReviewFlag,
           reconciliationStatus: options.reconciliationStatus,
           transferGroupId: options.reconciliationStatus === "not_applicable" ? null : undefined,
           updatedAt: now(),
@@ -3120,6 +3171,7 @@ export function createFinanceService({
           .where(
             and(
               eq(financeTransactionAllocations.transactionId, updated.id),
+              eq(financeTransactionAllocations.userId, context.principal.userId),
               eq(financeTransactionAllocations.state, "active"),
             ),
           );
@@ -3152,6 +3204,12 @@ export function createFinanceService({
         .where(
           and(
             eq(financeReviewCases.transactionId, before.id),
+            eq(financeReviewCases.userId, context.principal.userId),
+            batchScope
+              ? batchScope.reviewId
+                ? eq(financeReviewCases.id, batchScope.reviewId)
+                : sql`false`
+              : undefined,
             inArray(financeReviewCases.status, ["deferred", "open"]),
           ),
         );
@@ -3174,6 +3232,15 @@ export function createFinanceService({
           action: options.auditAction ?? "finance.transaction_categorized",
           after: {
             ...transactionAuditSnapshot(after),
+            ...(exactTransferReviewExecution && batchScope?.transferCounterpart
+              ? {
+                  confirmedTransferPair: {
+                    transactionRevision: updated.contextualRevision.toString(),
+                    counterpartTransactionId: batchScope.transferCounterpart.transactionId,
+                    counterpartRevision: batchScope.transferCounterpart.revision,
+                  },
+                }
+              : {}),
             ...(maintenanceSource ? maintenanceAuditAttribution(context, maintenanceSource) : {}),
           },
           before: transactionAuditSnapshot(beforeValue),
@@ -3968,6 +4035,8 @@ export function createFinanceService({
     mutateFinanceBudgetBucket: budgetBuckets.mutate,
     updateFinanceAccount: canonicalAccounts.update,
     disconnectFinanceAccount: canonicalAccounts.disconnect,
+    previewFinanceAccountDuplicate: canonicalAccounts.previewDuplicate,
+    resolveFinanceAccountDuplicate: canonicalAccounts.resolveDuplicate,
     getFinanceTransaction: canonicalLedger.getTransaction,
     removeFinanceTransaction: canonicalLedger.removeTransaction,
     splitFinanceTransaction: canonicalLedger.splitTransaction,
@@ -4160,6 +4229,9 @@ export function createFinanceService({
       return serializeAttentionItem(saved);
     },
 
+    plaidEnvironment() {
+      return plaidEnvironment ?? null;
+    },
     plaidAvailable() {
       return Boolean(plaid);
     },
@@ -4824,8 +4896,31 @@ export function createFinanceService({
       for (const userId of userIds) await refreshCashflowIntelligence(userId);
       return { processed: userIds.length };
     },
-    async createPlaidLinkToken(userId: string) {
+    async createPlaidLinkToken(userId: string, accountId?: string) {
+      let accessToken: string | undefined;
+      if (accountId) {
+        const item = await providerItems.resolveItemForAccount(userId, accountId);
+        if (!encryptionKey || !item.providerItemId)
+          throw new AppError(
+            "conflict",
+            "This bank connection needs recovery before reconnecting.",
+          );
+        const credentials = decryptJson(item.encryptedCredentials, encryptionKey);
+        if (
+          typeof credentials !== "object" ||
+          credentials === null ||
+          !("accessToken" in credentials) ||
+          typeof credentials.accessToken !== "string" ||
+          !credentials.accessToken
+        )
+          throw new AppError(
+            "conflict",
+            "This bank connection needs recovery before reconnecting.",
+          );
+        accessToken = credentials.accessToken;
+      }
       return getPlaid().createLinkToken({
+        ...(accessToken ? { accessToken } : {}),
         clientName: "nohmi",
         countryCodes: ["US"],
         language: "en",
@@ -4835,6 +4930,161 @@ export function createFinanceService({
         userId,
       });
     },
+    async completePlaidReconnect(
+      accountId: string,
+      input: { idempotencyKey: string },
+      context: FinanceMutationContext,
+    ) {
+      await requireFinanceExecution(db, context, now());
+      return executeFinanceIdempotently(
+        db,
+        context,
+        {
+          operation: "finance.account.reconnect",
+          requireUserAdmission: true,
+          idempotencyKey: input.idempotencyKey,
+          payload: { accountId },
+        },
+        async (tx) => {
+          await requireFinanceExecution(tx, context, now());
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${context.userId}`}, 0))`,
+          );
+          const item = await providerItems.resolveItemForAccount(context.userId, accountId);
+          const [lockedItem] = await tx
+            .select()
+            .from(financeProviderItems)
+            .where(
+              and(
+                eq(financeProviderItems.id, item.id),
+                eq(financeProviderItems.userId, context.userId),
+              ),
+            )
+            .for("update");
+          const accounts = await tx
+            .select()
+            .from(financeAccounts)
+            .where(
+              and(
+                eq(financeAccounts.providerItemRecordId, item.id),
+                eq(financeAccounts.userId, context.userId),
+              ),
+            )
+            .orderBy(financeAccounts.id)
+            .for("update");
+          const account = accounts.find((candidate) => candidate.id === accountId);
+          if (
+            !lockedItem ||
+            !account?.providerAccountId ||
+            !lockedItem.providerItemId ||
+            !encryptionKey
+          )
+            throw new AppError(
+              "conflict",
+              "This bank connection needs recovery before reconnecting.",
+            );
+          if (
+            (lockedItem.syncClaimId &&
+              lockedItem.syncClaimExpiresAt &&
+              lockedItem.syncClaimExpiresAt > now()) ||
+            accounts.some(
+              (candidate) =>
+                candidate.syncClaimId &&
+                candidate.syncClaimExpiresAt &&
+                candidate.syncClaimExpiresAt > now(),
+            )
+          )
+            throw new AppError(
+              "conflict",
+              "This bank connection is synchronizing. Retry reconnect completion shortly.",
+            );
+          const credentials = decryptJson(lockedItem.encryptedCredentials, encryptionKey);
+          if (
+            typeof credentials !== "object" ||
+            credentials === null ||
+            !("accessToken" in credentials) ||
+            typeof credentials.accessToken !== "string" ||
+            !credentials.accessToken
+          )
+            throw new AppError(
+              "conflict",
+              "This bank connection needs recovery before reconnecting.",
+            );
+          const provider = getPlaid();
+          const verifiedItem = await provider.getItem(credentials.accessToken);
+          if (verifiedItem.itemId !== lockedItem.providerItemId)
+            throw new AppError(
+              "conflict",
+              "The bank authorization does not match the existing connection.",
+            );
+          const snapshots = await provider.getAccounts(credentials.accessToken);
+          const snapshot = snapshots.find(
+            (remote) => remote.accountId === account.providerAccountId,
+          );
+          if (!snapshot)
+            throw new AppError(
+              "conflict",
+              "The selected account is unavailable in this bank authorization.",
+            );
+          await requireFinanceExecution(tx, context, now());
+          const reset = {
+            nextSyncAt: now(),
+            syncState: "stale" as const,
+            syncError: null,
+            syncErrorCategory: null,
+            syncErrorCode: null,
+            syncFailureCount: 0,
+            syncRecovery: null,
+            syncClaimId: null,
+            syncClaimExpiresAt: null,
+            updatedAt: now(),
+          };
+          await tx
+            .update(financeProviderItems)
+            .set({
+              ...reset,
+              syncClaimOwner: null,
+              syncClaimGeneration: null,
+              syncClaimStartedAt: null,
+            })
+            .where(eq(financeProviderItems.id, lockedItem.id));
+          await tx
+            .update(financeAccounts)
+            .set(reset)
+            .where(
+              inArray(
+                financeAccounts.id,
+                accounts.map((candidate) => candidate.id),
+              ),
+            );
+          await tx
+            .update(financeAccounts)
+            .set({
+              status: "connected",
+              providerInstitutionId: snapshot.institutionId ?? null,
+              providerAccountMask: snapshot.mask ?? null,
+              providerPersistentAccountId: snapshot.persistentAccountId ?? null,
+              providerAccountName: snapshot.name,
+            })
+            .where(eq(financeAccounts.id, accountId));
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.plaid_reconnected",
+              before: null,
+              after: { id: accountId, synchronizationScheduled: true },
+              entityId: accountId,
+              entityType: "finance_account",
+              ...legacyMutationContext(context),
+            }),
+          );
+          return {
+            accountId,
+            authorizationVerified: true as const,
+            synchronizationScheduled: true as const,
+          };
+        },
+      );
+    },
     startFinanceAccountConnection: accountHandoff.start,
     completeFinanceAccountConnection: accountHandoff.complete,
     async exchangePlaidToken(
@@ -4842,18 +5092,62 @@ export function createFinanceService({
       context: MutationContext,
     ): Promise<FinanceAccount[]> {
       const plaid = getPlaid();
+      if (input.metadata) {
+        const duplicateIds = await providerItems.findDuplicateAccounts(
+          context.principal.userId,
+          input.metadata.accounts.map((account) => ({
+            ...account,
+            institutionId: input.metadata?.institutionId,
+          })),
+        );
+        if (duplicateIds.length > 0)
+          throw new AppError(
+            "conflict",
+            "These bank accounts are already connected. Review existing accounts before reconnecting.",
+            {
+              reason: "duplicate_bank_accounts",
+              accountIds: duplicateIds,
+            },
+          );
+      }
+      const authorization = await loadFinanceAuthorization({ db, ...context });
+      await requireFinanceExecution(db, authorization, now());
+      if (!encryptionKey)
+        throw new AppError("service_unavailable", "Bank credential storage is unavailable.");
       const { accessToken, itemId } = await plaid.exchangePublicToken(input.publicToken);
-      const accounts = await plaid.getAccounts(accessToken);
-      return providerItems.upsertConnection({
-        accessToken,
-        accounts,
-        context,
-        institution: input.institution ?? "Plaid",
-        itemId,
-        prepareTransaction: async (transaction) => {
-          await ensureCategories(context.principal.userId, transaction);
-        },
-      });
+      const connectionId = await accountHandoff.retainExchange(
+        { accessToken, itemId, institution: input.institution ?? "Plaid" },
+        authorization,
+      );
+      try {
+        const completed = await accountHandoff.complete(connectionId, authorization);
+        const rows = await db
+          .select()
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, context.principal.userId),
+              inArray(financeAccounts.id, completed.data.accountIds),
+            ),
+          );
+        return serializeAccounts(rows);
+      } catch (error) {
+        throw new AppError(
+          error instanceof AppError ? error.code : "service_unavailable",
+          error instanceof AppError
+            ? error.message
+            : "Bank authorization was retained securely. Retry completion to save its accounts.",
+          {
+            ...(error instanceof AppError &&
+            typeof error.details === "object" &&
+            error.details !== null
+              ? error.details
+              : {}),
+            connectionId,
+            recovery: "complete_connection",
+          },
+        );
+      }
     },
     async syncPlaidAccount(
       id: string,
@@ -5593,7 +5887,7 @@ export function createFinanceService({
       input: ManageFinanceRecurringItemInput,
       context: FinanceMutationContext,
     ) {
-      if (input.operation === "confirm_cost") requireExplicitUser(context);
+      if (input.operation === "confirm_cost") requirePlanningConfirmation(context);
       return executeFinanceIdempotently(
         db,
         context,
@@ -7366,12 +7660,18 @@ export function createFinanceService({
         total: scopedReviews.length,
       };
     },
-    async resolveReview(id: string, input: FinanceReviewDecisionInput, context: MutationContext) {
+    async resolveReview(
+      id: string,
+      input: FinanceReviewDecisionInput,
+      context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
+    ) {
+      const readExecutor = executor ?? db;
       const reviewedExecution =
         context.principal.actorType === "agent" && context.principal.scopes.has("finances:execute");
       if (reviewedExecution)
-        await requireWorkspaceExecution(db, context.principal, "finances", now());
-      const [review] = await db
+        await requireWorkspaceExecution(readExecutor, context.principal, "finances", now());
+      const [review] = await readExecutor
         .select()
         .from(financeReviewCases)
         .where(
@@ -7427,7 +7727,7 @@ export function createFinanceService({
       }
       if (input.action === "defer") {
         if (review.status === "deferred") return { deferred: true };
-        await db.transaction(async (tx) => {
+        const defer = async (tx: FinanceActionWriteExecutor) => {
           if (reviewedExecution)
             await requireWorkspaceExecution(tx, context.principal, "finances", now());
           const [updated] = await tx
@@ -7457,7 +7757,9 @@ export function createFinanceService({
               ...context,
             }),
           );
-        });
+        };
+        if (executor) await defer(executor);
+        else await db.transaction(defer);
         return { deferred: true };
       }
       if (input.expectedTransactionUpdatedAt === undefined) {
@@ -7466,7 +7768,11 @@ export function createFinanceService({
           "Resolving a Finance review requires the displayed transaction revision.",
         );
       }
-      const current = await ownedTransaction(context.principal.userId, review.transactionId);
+      const current = await ownedTransaction(
+        context.principal.userId,
+        review.transactionId,
+        readExecutor,
+      );
       // Signed provider direction is authoritative when available; the user
       // choice is only the fallback for legacy/manual rows without provenance.
       const nonTransferDirection =
@@ -7487,7 +7793,7 @@ export function createFinanceService({
         input.action === "approve"
           ? (current.categoryId ?? review.suggestedCategoryId)
           : input.action === "confirm_transfer"
-            ? (await categoryForName(context.principal.userId, "Transfers")).id
+            ? (await categoryForName(context.principal.userId, "Transfers", readExecutor)).id
             : input.categoryId;
       if (!categoryId)
         throw new AppError("invalid_request", "Choose a category before resolving this review.");
@@ -7525,6 +7831,7 @@ export function createFinanceService({
                 reviewedExecution,
               }
             : { requiredReviewId: review.id, reviewedExecution },
+        executor,
       );
       return result;
     },
@@ -7614,11 +7921,11 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ) {
-      const approval = requireActiveBudgetAuthority(input, context);
-      if (!context.financeBudgetApproval || !executor) {
+      const approval = await requireActiveBudgetAuthority(input, context, executor);
+      if (!executor) {
         throw new AppError(
           "forbidden",
-          "Submit this budget allocation for revision-bound human review before applying it.",
+          "Submit this budget allocation as an exact prepared action before applying it.",
         );
       }
       const write = async (tx: FinanceActionWriteExecutor) => {
@@ -7712,11 +8019,11 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ): Promise<FinanceBudgetPlan> {
-      const approval = requireActiveBudgetAuthority(input, context);
-      if (!context.financeBudgetApproval || !executor) {
+      const approval = await requireActiveBudgetAuthority(input, context, executor);
+      if (!executor) {
         throw new AppError(
           "forbidden",
-          "Submit this budget plan for revision-bound human review before applying it.",
+          "Submit this budget plan as an exact prepared action before applying it.",
         );
       }
       const write = async (tx: FinanceActionWriteExecutor) => {
@@ -8563,6 +8870,7 @@ export function createFinanceService({
       ]);
       const { accountSemantics, totals } = summarizeFinanceAccounts(
         await serializeAccounts(accounts),
+        financeProviderDuplicateGroups(accounts),
       );
       const matchedCredit = matchedReimbursementCentsByCredit(matches);
       const observedAnnualIncome =

@@ -8,10 +8,11 @@ import {
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import {
   ResponsiveDialog,
+  ResponsiveDialogBody,
   ResponsiveDialogContent,
   ResponsiveDialogDescription,
   ResponsiveDialogFooter,
@@ -44,6 +45,7 @@ export function TaskProjectDialog({
   project: TaskProject | undefined;
   projects: TaskProject[];
 }) {
+  const formId = useId();
   const queryClient = useQueryClient();
   const [completionConflict, setCompletionConflict] =
     useState<TaskProjectCompletionConflict | null>(null);
@@ -72,7 +74,12 @@ export function TaskProjectDialog({
     onSuccess: () => finish(project ? "Project updated." : "Project created."),
   });
   const lifecycle = useFeedbackMutation({
-    feedback: { action: "update this project", safeToRetry: false, form: false },
+    feedback: {
+      action: "update this project",
+      safeToRetry: false,
+      form: false,
+      ownsError: (error) => Boolean(projectCompletionConflict(error)),
+    },
     mutationFn: async ({
       destinationListId,
       destinationProjectId,
@@ -177,105 +184,109 @@ export function TaskProjectDialog({
             </ResponsiveDialogDescription>
             {!project ? <TaskCreationProgress step={3} total={3} /> : null}
           </ResponsiveDialogHeader>
-          <MutationFeedback feedback={lifecycleFeedback} />
-          <MutationFeedback feedback={previewMove.feedback} />
-          <MutationFeedback feedback={confirmMove.feedback} />
-          <FeedbackForm feedback={save.feedback} onSubmit={submit}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="task-project-name">Name</FieldLabel>
-                <Input
-                  autoFocus
-                  defaultValue={project?.name}
-                  id="task-project-name"
-                  name="name"
-                  required
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="task-project-why">Why it matters</FieldLabel>
-                <Textarea
-                  defaultValue={project?.why ?? ""}
-                  id="task-project-why"
-                  name="why"
-                  rows={2}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="task-project-target-date">Target date</FieldLabel>
-                <Input
-                  defaultValue={project?.targetDate ?? ""}
-                  id="task-project-target-date"
-                  name="targetDate"
-                  type="date"
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="task-project-notes">Notes</FieldLabel>
-                <Textarea
-                  defaultValue={project?.notes ?? ""}
-                  id="task-project-notes"
-                  name="notes"
-                  rows={3}
-                />
-              </Field>
-            </FieldGroup>
-
-            <ResponsiveDialogFooter className="mt-5">
-              <Button onClick={close} type="button" variant="outline">
-                Cancel
-              </Button>
-              <Button disabled={pending} type="submit">
-                {save.isPending ? "Saving…" : project ? "Save changes" : "Create Project"}
-              </Button>
-            </ResponsiveDialogFooter>
-          </FeedbackForm>
-          {project ? (
-            <FieldGroup>
-              {project.lifecycle === "open" ? (
-                <fieldset aria-label="Project lifecycle actions" className="flex flex-wrap gap-2">
-                  <Button disabled={pending} onClick={() => lifecycle.mutate({ type: "complete" })}>
-                    Complete Project
-                  </Button>
+          <ResponsiveDialogBody>
+            <MutationFeedback feedback={lifecycleFeedback} />
+            <MutationFeedback feedback={previewMove.feedback} />
+            <MutationFeedback feedback={confirmMove.feedback} />
+            <FeedbackForm id={formId} feedback={save.feedback} onSubmit={submit}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="task-project-name">Name</FieldLabel>
+                  <Input
+                    autoFocus
+                    defaultValue={project?.name}
+                    id="task-project-name"
+                    name="name"
+                    required
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="task-project-why">Why it matters</FieldLabel>
+                  <Textarea
+                    defaultValue={project?.why ?? ""}
+                    id="task-project-why"
+                    name="why"
+                    rows={2}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="task-project-target-date">Target date</FieldLabel>
+                  <Input
+                    defaultValue={project?.targetDate ?? ""}
+                    id="task-project-target-date"
+                    name="targetDate"
+                    type="date"
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="task-project-notes">Notes</FieldLabel>
+                  <Textarea
+                    defaultValue={project?.notes ?? ""}
+                    id="task-project-notes"
+                    name="notes"
+                    rows={3}
+                  />
+                </Field>
+              </FieldGroup>
+            </FeedbackForm>
+            {project ? (
+              <FieldGroup>
+                {project.lifecycle === "open" ? (
+                  <fieldset aria-label="Project lifecycle actions" className="flex flex-wrap gap-2">
+                    <Button
+                      disabled={pending}
+                      onClick={() => lifecycle.mutate({ type: "complete" })}
+                    >
+                      Complete Project
+                    </Button>
+                    <Button
+                      disabled={pending}
+                      onClick={() => lifecycle.mutate({ type: "cancel" })}
+                      variant="outline"
+                    >
+                      Cancel Project
+                    </Button>
+                  </fieldset>
+                ) : null}
+                <Field>
+                  <FieldLabel htmlFor="task-project-move-list">Move to List</FieldLabel>
+                  <NativeSelect
+                    id="task-project-move-list"
+                    onChange={(event) => setMoveDestinationListId(event.target.value)}
+                    value={moveDestinationListId}
+                  >
+                    {lists.map((list) => (
+                      <NativeSelectOption key={list.id} value={list.id}>
+                        {list.name}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
                   <Button
-                    disabled={pending}
-                    onClick={() => lifecycle.mutate({ type: "cancel" })}
+                    disabled={pending || moveDestinationListId === project.listId}
+                    onClick={() => previewMove.mutate()}
                     variant="outline"
                   >
-                    Cancel Project
+                    Preview Project move
                   </Button>
-                </fieldset>
-              ) : null}
-              <Field>
-                <FieldLabel htmlFor="task-project-move-list">Move to List</FieldLabel>
-                <NativeSelect
-                  id="task-project-move-list"
-                  onChange={(event) => setMoveDestinationListId(event.target.value)}
-                  value={moveDestinationListId}
-                >
-                  {lists.map((list) => (
-                    <NativeSelectOption key={list.id} value={list.id}>
-                      {list.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+                </Field>
                 <Button
-                  disabled={pending || moveDestinationListId === project.listId}
-                  onClick={() => previewMove.mutate()}
-                  variant="outline"
+                  disabled={pending}
+                  onClick={() => lifecycle.mutate({ type: "archive" })}
+                  variant="destructive"
                 >
-                  Preview Project move
+                  Archive Project
                 </Button>
-              </Field>
-              <Button
-                disabled={pending}
-                onClick={() => lifecycle.mutate({ type: "archive" })}
-                variant="destructive"
-              >
-                Archive Project
-              </Button>
-            </FieldGroup>
-          ) : null}
+              </FieldGroup>
+            ) : null}
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter className="mt-5">
+            <Button onClick={close} type="button" variant="outline">
+              Cancel
+            </Button>
+            <Button disabled={pending} type="submit" form={formId}>
+              {save.isPending ? "Saving…" : project ? "Save changes" : "Create Project"}
+            </Button>
+          </ResponsiveDialogFooter>
         </ResponsiveDialogContent>
       </ResponsiveDialog>
 

@@ -14,6 +14,9 @@ the API reaches PostgreSQL at `postgres:5432`, and web reaches API and MCP at `a
 Compose Watch synchronizes source changes into the application containers without mounting host
 `node_modules`. Changes to package manifests rebuild the development image.
 
+On macOS, lifecycle actions discover Docker Desktop's bundled CLI when Docker is missing from the
+shell's `PATH`. An existing CLI on `PATH` retains precedence. Docker Desktop must still be running.
+
 ## Lifecycle
 
 - `pnpm env:start` builds and runs this worktree in the foreground.

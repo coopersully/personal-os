@@ -43,3 +43,9 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     dispatchEvent: () => false,
   });
 }
+
+if (typeof HTMLElement !== "undefined") {
+  HTMLElement.prototype.setPointerCapture ??= () => {};
+  HTMLElement.prototype.releasePointerCapture ??= () => {};
+  HTMLElement.prototype.hasPointerCapture ??= () => false;
+}

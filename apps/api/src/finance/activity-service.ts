@@ -1,5 +1,8 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
+  accessTokens,
+  agentAccountConnections,
+  agentAccounts,
   auditEvents,
   type Database,
   financeContextualAnswers,
@@ -9,21 +12,25 @@ import {
 import {
   type FinanceActivityEntry,
   type FinanceActivityEvidenceQuery,
+  type FinanceActivityKind,
   type FinanceActivityPage,
   type FinanceActivityQuery,
   financeActivityEntrySchema,
   financeActivityEvidenceQuerySchema,
+  financeActivityKindSchema,
   financeActivityQuerySchema,
   idSchema,
+  isFinanceActivityNotificationAware,
   isoDateTimeSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "../errors.js";
 import {
   listFinanceActivityEffects,
   readFinanceActivityEvidence,
 } from "./activity-effect-store.js";
+import { listFinanceNotificationActivity } from "./activity-notification-store.js";
 
 type Audit = typeof auditEvents.$inferSelect;
 type Message = typeof financeConversationMessages.$inferSelect;
@@ -41,7 +48,7 @@ const cursorSchema = z
     filtersHash: z.string().regex(/^[a-f0-9]{64}$/u),
     at: isoDateTimeSchema,
     id: idSchema,
-    kind: z.enum(["human_answer_decision", "financial_action"]).default("human_answer_decision"),
+    kind: financeActivityKindSchema.default("human_answer_decision"),
   })
   .strict();
 type Cursor = z.infer<typeof cursorSchema>;
@@ -54,6 +61,9 @@ function filterHash(query: FinanceActivityQuery) {
         recordId: query.recordId ?? null,
         from: query.from ?? null,
         through: query.through ?? null,
+        ...(isFinanceActivityNotificationAware(query)
+          ? { includeNotificationDeliveries: true }
+          : {}),
       }),
     )
     .digest("hex");
@@ -61,7 +71,7 @@ function filterHash(query: FinanceActivityQuery) {
 export function encodeFinanceActivityCursor(
   userId: string,
   query: FinanceActivityQuery,
-  position: { at: string; id: string; kind?: "human_answer_decision" | "financial_action" },
+  position: { at: string; id: string; kind?: FinanceActivityKind },
   secret: string,
 ): string {
   const payload = Buffer.from(
@@ -187,6 +197,7 @@ function page(
   entries: FinanceActivityEntry[],
   nextCursor: string | null,
   incompleteEvidence = false,
+  includeNotificationDeliveries = false,
 ): FinanceActivityPage {
   return {
     entries,
@@ -200,6 +211,9 @@ function page(
       reasons: [
         "financial_actions_outside_committed_candidate_receipts_not_projected",
         "historical_decisions_without_causal_message_not_projected",
+        ...(includeNotificationDeliveries
+          ? ["notification_delivery_without_complete_owned_evidence_not_projected" as const]
+          : []),
         ...(incompleteEvidence
           ? ["committed_receipts_with_incomplete_evidence_not_projected" as const]
           : []),
@@ -232,13 +246,31 @@ export function createFinanceActivityService({
     async listActivity(userId: string, raw: FinanceActivityQuery): Promise<FinanceActivityPage> {
       const query = financeActivityQuerySchema.parse(raw);
       const cursor = decodeFinanceActivityCursor(userId, query, cursorSecret);
+      // Notification sorts before both legacy kinds at equal time/ID. The effect
+      // reader's existing human cursor comparison includes that same financial row.
+      const effectCursor: {
+        at: string;
+        id: string;
+        kind: "human_answer_decision" | "financial_action";
+      } | null = cursor
+        ? {
+            at: cursor.at,
+            id: cursor.id,
+            kind: cursor.kind === "financial_action" ? "financial_action" : "human_answer_decision",
+          }
+        : null;
       const effects =
-        query.type !== "human_answer_decision"
-          ? await listFinanceActivityEffects(db, userId, query, cursor, cursorSecret)
+        query.type === undefined || query.type === "financial_action"
+          ? await listFinanceActivityEffects(db, userId, query, effectCursor, cursorSecret)
           : [];
+      const includeNotificationDeliveries = isFinanceActivityNotificationAware(query);
+      const notifications = includeNotificationDeliveries
+        ? await listFinanceNotificationActivity(db, userId, query, cursor)
+        : [];
       // Canonical receipt and audit remain after live question/answer deletion.
       const rows =
-        query.type !== "financial_action" && (!query.actor || query.actor === "user")
+        (query.type === undefined || query.type === "human_answer_decision") &&
+        (!query.actor || query.actor === "user")
           ? await db
               .select({
                 audit: auditEvents,
@@ -304,7 +336,12 @@ export function createFinanceActivityService({
                         sql`${auditEvents.createdAt} < ${cursor.at}::timestamptz`,
                         and(
                           sql`${auditEvents.createdAt} = ${cursor.at}::timestamptz`,
-                          lt(auditEvents.id, cursor.id),
+                          or(
+                            lt(auditEvents.id, cursor.id),
+                            cursor.kind === "notification_delivery"
+                              ? eq(auditEvents.id, cursor.id)
+                              : undefined,
+                          ),
                         ),
                       )
                     : undefined,
@@ -321,6 +358,7 @@ export function createFinanceActivityService({
           kind: "human_answer_decision" as const,
         })),
         ...effects,
+        ...notifications,
       ];
       // PostgreSQL microseconds remain in the cursor; do not collapse their order to JS milliseconds.
       const orderTime = (at: string) =>
@@ -335,6 +373,50 @@ export function createFinanceActivityService({
       const entries = selected
         .map((source) => source.entry)
         .filter((entry): entry is FinanceActivityEntry => entry !== null);
+      const actorIds = entries
+        .filter(
+          (entry) =>
+            entry.actor?.type === "agent" &&
+            entry.actor?.id &&
+            idSchema.safeParse(entry.actor?.id).success,
+        )
+        .map((entry) => entry.actor?.id as string);
+      if (actorIds.length) {
+        const actors = await db
+          .select({ actorId: accessTokens.id, account: agentAccounts })
+          .from(accessTokens)
+          .innerJoin(
+            agentAccountConnections,
+            and(
+              eq(agentAccountConnections.userId, accessTokens.userId),
+              eq(
+                agentAccountConnections.authorizationConnectionId,
+                accessTokens.authorizationConnectionId,
+              ),
+            ),
+          )
+          .innerJoin(
+            agentAccounts,
+            and(
+              eq(agentAccounts.userId, agentAccountConnections.userId),
+              eq(agentAccounts.id, agentAccountConnections.agentAccountId),
+            ),
+          )
+          .where(and(eq(accessTokens.userId, userId), inArray(accessTokens.id, actorIds)));
+        const profiles = new Map(
+          actors.map((actor) => [
+            actor.actorId,
+            {
+              ...actor.account,
+              createdAt: actor.account.createdAt.toISOString(),
+              updatedAt: actor.account.updatedAt.toISOString(),
+            },
+          ]),
+        );
+        for (const entry of entries)
+          if (entry.actor?.type === "agent" && entry.actor?.id)
+            entry.agentAccount = profiles.get(entry.actor?.id) ?? null;
+      }
       const last = selected.at(-1);
       return page(
         entries,
@@ -347,6 +429,7 @@ export function createFinanceActivityService({
             )
           : null,
         candidates.some((source) => source.kind === "financial_action" && source.entry === null),
+        includeNotificationDeliveries,
       );
     },
   };

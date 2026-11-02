@@ -1,8 +1,9 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { CalendarReview, CalendarStatus } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { CalendarStewardshipPage } from "./stewardship-page.js";
@@ -266,7 +267,7 @@ describe("Calendar schedule health", () => {
     expect(screen.getByText("Google access needs to be renewed.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Connections" })).toHaveAttribute(
       "href",
-      "/settings?section=connections",
+      "/settings?page=connections",
     );
     expect(screen.queryByText(/No findings/)).not.toBeInTheDocument();
     expect(screen.getByText("Unknown until source evidence is current")).toBeInTheDocument();
@@ -297,7 +298,12 @@ describe("Calendar schedule health", () => {
 
     expect(await screen.findByText("Schedule health is unavailable")).toBeInTheDocument();
     expect(screen.getAllByRole("main")).toHaveLength(1);
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await browser.click(
+      within(screen.getByRole("region", { name: "Schedule health is unavailable" })).getByRole(
+        "button",
+        { name: "Try again" },
+      ),
+    );
     expect(await screen.findByText("This review is stale")).toBeInTheDocument();
     expect(screen.getByText("Busy events overlap")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Assess calendar" }));

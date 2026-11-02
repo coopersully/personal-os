@@ -32,7 +32,10 @@ function renderSearch(
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  fireEvent.click(screen.getByRole("button", { name: /^Search / }));
+  fireEvent.click(
+    screen.queryByRole("button", { name: /^Search / }) ??
+      screen.getByRole("combobox", { name: /^Search / }),
+  );
   return onAction;
 }
 beforeEach(() => {
@@ -57,7 +60,7 @@ it("opens a setting field without modifying the underlying workspace filters whi
   expect(screen.getByLabelText("Current route")).toHaveTextContent("/calendar?view=week");
   await user.click(await screen.findByRole("option", { name: /Show weekends/ }));
   expect(screen.getByLabelText("Current route")).toHaveTextContent(
-    "/settings?section=calendar&field=calendar%3Ashow-weekends",
+    "/settings?page=calendar&field=calendar%3Ashow-weekends",
   );
 });
 it("launches creation and reviews through existing destinations", async () => {
@@ -70,7 +73,7 @@ it("launches creation and reviews through existing destinations", async () => {
   await user.click(await screen.findByRole("option", { name: /New task/ }));
   expect(onAction).toHaveBeenCalledWith("new-task");
   await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
-  await user.click(screen.getByRole("button", { name: "Search Tasks" }));
+  await user.click(screen.getByRole("combobox", { name: "Search Tasks" }));
   await user.type(
     screen.getByRole("combobox", { name: /^Search (Calendar|Tasks|Mail|Finances)$/ }),
     "reviews",
@@ -141,7 +144,7 @@ it("shows honest pending and empty states and does not retain results from anoth
 });
 it("shares the settings field catalog and recognizes weekdays with the account time zone", () => {
   expect(
-    workspaceCatalog("calendar", "time zone").some((item) => item.href.includes("section=profile")),
+    workspaceCatalog("calendar", "time zone").some((item) => item.href.includes("page=profile")),
   ).toBe(true);
   expect(workspaceCatalog("finances", "reviews")[0]?.href).toBe("/finances?review=open");
   expect(workspaceCatalog("mail", "unread")[0]?.href).toBe("/mail?unread=1");
@@ -152,18 +155,18 @@ it("shares the settings field catalog and recognizes weekdays with the account t
   expect(parseCalendarDateQuery("2026-02-30", "UTC")).toBeUndefined();
 });
 
-it("renders mobile results inside the drawer and closes after selection", async () => {
+it("renders mobile search inline and closes its results after selection", async () => {
   const originalWidth = window.innerWidth;
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
   try {
     renderSearch("tasks");
-    const dialog = screen.getByRole("dialog", { name: "Search Tasks" });
-    expect(dialog).toContainElement(screen.getByRole("listbox"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Search Tasks" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox", { name: "Search Tasks" }), {
       target: { value: "reviews" },
     });
-    fireEvent.click(screen.getByRole("option", { name: /Items needing review/ }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByRole("option", { name: /Items needing review/ }));
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
     expect(screen.getByLabelText("Current route")).toHaveTextContent("/tasks?review=open");
   } finally {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
@@ -187,7 +190,8 @@ it("filters discovery without changing the page and paginates server results", a
       expect.any(AbortSignal),
     ),
   );
-  await user.selectOptions(screen.getByRole("combobox", { name: "Search result type" }), "reviews");
+  await user.click(screen.getByRole("button", { name: "Search result type" }));
+  await user.click(screen.getByRole("button", { name: /^Reviews$/ }));
   await waitFor(() =>
     expect(api.searchWorkspace).toHaveBeenLastCalledWith(
       "mail",
@@ -196,4 +200,18 @@ it("filters discovery without changing the page and paginates server results", a
     ),
   );
   expect(screen.getByLabelText("Current route")).toHaveTextContent("/mail?view=week");
+});
+
+it.each([
+  "calendar",
+  "tasks",
+  "mail",
+  "finances",
+] as const)("keeps %s search icon-only while retaining its accessible name", (workspace) => {
+  renderSearch(workspace);
+  const input = screen.getByRole("combobox", { name: /^Search / });
+  expect(input).toHaveAttribute("placeholder", "");
+  expect(
+    screen.queryByRole("button", { name: input.getAttribute("aria-label") ?? "" }),
+  ).not.toBeInTheDocument();
 });

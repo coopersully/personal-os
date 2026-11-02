@@ -1,5 +1,6 @@
 import type {
   AccessScope,
+  AgentAccount,
   AutomationHostPromptIssue,
   AutomationHostSchedule,
   AutomationHostScheduleBindInput,
@@ -13,6 +14,7 @@ import type {
 
 type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
 export type HostScheduleStatus = {
+  agentAccount?: AgentAccount | null;
   schedule: AutomationHostSchedule;
   health: AutomationHostScheduleHealth;
   connectionAvailable?: boolean;
@@ -59,9 +61,9 @@ export function createAutomationHostApi(request: Request) {
         body: JSON.stringify(input),
       }),
     listAutomationHostConnections: () =>
-      request<{ id: string; label: string; scopes: AccessScope[] }[]>(
-        "/v1/automation-hosts/connections",
-      ),
+      request<
+        { id: string; label: string; scopes: AccessScope[]; agentAccount?: AgentAccount | null }[]
+      >("/v1/automation-hosts/connections"),
     listAutomationHostSchedules: () => request<HostScheduleStatus[]>("/v1/automation-hosts"),
     createAutomationHostSchedule: (input: AutomationHostScheduleCreateInput) =>
       request<HostScheduleStatus>("/v1/automation-hosts", {

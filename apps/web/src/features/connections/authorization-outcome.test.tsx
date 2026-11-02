@@ -17,7 +17,7 @@ function LocationProbe() {
 function setup(
   outcome: ConnectorAuthorizationOutcome,
   onRetry = vi.fn(),
-  entry = `/settings?section=connections&connection_attempt=${attemptId}`,
+  entry = `/settings?page=connections&connection_attempt=${attemptId}`,
 ) {
   const loadAttempt = vi.fn(async () => outcome);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -62,7 +62,7 @@ describe("connection authorization outcome", () => {
     setup({ accountId: attemptId, provider: "google", retryable: false, status: "connected" });
     await screen.findByText("Google is connected");
     await waitFor(() =>
-      expect(screen.getByLabelText("location")).toHaveTextContent("/settings?section=connections"),
+      expect(screen.getByLabelText("location")).toHaveTextContent("/settings?page=connections"),
     );
   });
 
@@ -71,7 +71,7 @@ describe("connection authorization outcome", () => {
     const { loadAttempt } = setup(
       { accountId: null, provider: "google", retryable: false, status: "failed" },
       onRetry,
-      "/settings?section=connections&connection_result=restart_required",
+      "/settings?page=connections&connection_result=restart_required",
     );
     expect(screen.getByText("Restart the connection")).toBeInTheDocument();
     expect(loadAttempt).not.toHaveBeenCalled();
@@ -101,7 +101,7 @@ describe("connection authorization outcome", () => {
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter
-          initialEntries={[`/settings?section=connections&connection_attempt=${attemptId}`]}
+          initialEntries={[`/settings?page=connections&connection_attempt=${attemptId}`]}
         >
           <ConnectionAuthorizationOutcome
             loadAttempt={vi.fn(async () => {

@@ -5,6 +5,9 @@ description: Build and review secure nohmi MCP tools and transports. Use when ch
 
 # nohmi MCP
 
+Apply the repository [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+to assigned durable work; pure read-only use of this skill creates no tracking work.
+
 Read `docs/mcp.md` and the agent-action section of
 `docs/engineering/feature-ownership.md` before altering MCP behavior.
 For a workspace status or maintenance surface, also read

@@ -24,7 +24,7 @@ function mount(field: string, children: React.ReactNode, section = "profile") {
 describe("Settings field destinations", () => {
   it.each([
     ["goals", "goals:target-date", "Add goal", "goal-target-date"],
-    ["motives", "motives:context", "Add motive", "motive-detail"],
+    ["goals", "goals:context", "Add motive", "motive-detail"],
   ])("reveals the %s creation form before focusing its searched field", async (section, field, action, target) => {
     function CreationForm() {
       const [open, setOpen] = useState(false);
@@ -64,33 +64,35 @@ describe("Settings field destinations", () => {
     await act(async () => screen.getByRole("button", { name: "Finish loading" }).click());
     await waitFor(() => expect(screen.getByLabelText("Buffer target")).toHaveFocus());
   });
-  it("selects the right ritual before focusing an identically labelled field", async () => {
+  it("opens the existing ritual step editor without changing its prompt", async () => {
     function Rituals() {
-      const [evening, setEvening] = useState(false);
+      const [open, setOpen] = useState(false);
       return (
         <>
-          <input
-            type="radio"
-            aria-label="Evening"
-            checked={evening}
-            onChange={() => setEvening(true)}
-          />
-          <label htmlFor="prompt">Prompt</label>
-          <input id="prompt" value={evening ? "Evening prompt" : "Morning prompt"} readOnly />
+          <h2>Steps</h2>
+          <button type="button" aria-label="Edit step 1" onClick={() => setOpen(true)}>
+            Evening reflection
+          </button>
+          {open ? (
+            <>
+              <label htmlFor="prompt">Prompt</label>
+              <input id="prompt" defaultValue="Evening reflection" />
+            </>
+          ) : null}
         </>
       );
     }
-    mount("rituals:evening-checklist-prompt", <Rituals />, "rituals");
+    mount("ritual-evening:evening-step-prompt", <Rituals />, "ritual-evening");
     await waitFor(() => expect(screen.getByLabelText("Prompt")).toHaveFocus());
-    expect(screen.getByLabelText("Prompt")).toHaveValue("Evening prompt");
+    expect(screen.getByLabelText("Prompt")).toHaveValue("Evening reflection");
   });
   it("focuses a prerequisite without sending a verification code", async () => {
     const send = vi.fn();
     mount(
       "texting:verification-code",
       <>
-        <label htmlFor="phone">Mobile number</label>
-        <input id="phone" />
+        <label htmlFor="texting-phone">Mobile number</label>
+        <input id="texting-phone" />
         <button type="button" onClick={send}>
           Send code
         </button>
@@ -173,4 +175,49 @@ describe("Settings field destinations", () => {
     expect(settingMatchScore("", "Color mode")).toBe(0);
     expect(new Set(settingsFields.map(settingsFieldId)).size).toBe(settingsFields.length);
   });
+});
+
+it("focuses the response type when a step has no answer choices, without editing it", async () => {
+  const changed = vi.fn();
+  function Editor() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <section aria-hidden={open || undefined}>
+          <h2>Steps</h2>
+          <button type="button" aria-label="Edit step 1" onClick={() => setOpen(true)}>
+            Drink water
+          </button>
+        </section>
+        {open ? (
+          <div role="dialog" aria-label="Edit step">
+            <label htmlFor="response-type">Response type</label>
+            <select id="response-type" defaultValue="checkbox" onChange={changed}>
+              <option value="checkbox">Checkbox</option>
+              <option value="multiple_choice">Multiple choice</option>
+            </select>
+          </div>
+        ) : null}
+      </>
+    );
+  }
+  mount("ritual-evening:evening-answer-choices", <Editor />, "ritual-evening");
+  await waitFor(() => expect(screen.getByLabelText("Response type")).toHaveFocus());
+  expect(screen.getByLabelText("Response type")).toHaveValue("checkbox");
+  expect(changed).not.toHaveBeenCalled();
+});
+it("focuses the empty steps heading without creating a ritual step", async () => {
+  const create = vi.fn();
+  mount(
+    "ritual-evening:evening-answer-choices",
+    <>
+      <h2>Steps</h2>
+      <button type="button" onClick={create}>
+        Add step
+      </button>
+    </>,
+    "ritual-evening",
+  );
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Steps" })).toHaveFocus());
+  expect(create).not.toHaveBeenCalled();
 });

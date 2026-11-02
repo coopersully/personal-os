@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinanceSpendingDashboard, FinanceSpendingMonthlyBudget } from "@personal-os/domain";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { type CSSProperties, createElement } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -144,7 +145,10 @@ it("keeps selected-period circle sizing independent of qualified monthly fill an
   expect(screen.getByRole("button", { name: /Groceries:/ })).toHaveAccessibleName(
     /Over budget \$10.00/,
   );
-  expect(screen.getByRole("button", { name: /Groceries:/ })).toHaveClass("border-2");
+  expect(screen.getByRole("button", { name: /Groceries:/ })).toHaveClass(
+    "border-transparent",
+    "focus-visible:border-foreground/50",
+  );
   expect(
     screen
       .getByRole("button", { name: /Groceries:/ })
@@ -211,8 +215,13 @@ it("uses assigned category tint and semantic icons with readable foregrounds at 
   expect(large.getAttribute("style")).toContain("rgba(18, 52, 86");
   expect(large).toHaveClass("text-foreground");
   expect(large).not.toHaveClass("text-primary");
-  expect(large.querySelector('[data-spending-icon="category"] svg')).not.toBeNull();
+  expect(large.querySelector('[data-spending-icon="groceries"] svg')).not.toBeNull();
   expect(large).toHaveTextContent("Groceries");
+  const material = large.querySelector(".spending-bubble-material");
+  expect(material).not.toBeNull();
+  expect(material?.querySelector("[data-spending-icon]")).toBeNull();
+  expect(material).toHaveTextContent("");
+  expect(large.querySelector("[data-spending-icon]")?.parentElement).toBe(large);
   const small = screen.getByRole("button", { name: /Living costs: \$1.00/ });
   expect(small.querySelector('[data-spending-icon="bucket"] svg')).not.toBeNull();
   expect(small).not.toHaveTextContent("Living costs");
@@ -341,7 +350,8 @@ it("defensively renders a zero target separately from null without infinite util
   expect(selected()).toHaveAccessibleName(
     /Monthly budget used \$2.50 of \$0.00; Over budget \$2.50/,
   );
-  expect(selected()).toHaveClass("border-2");
+  expect(selected()).toHaveClass("border-transparent", "focus-visible:border-foreground/50");
+  expect(selected()).toHaveTextContent("Over budget");
   expect(fillAnimation.props.at(-1)).toMatchObject({ animate: { clipPath: "inset(0% 0 0 0)" } });
   for (const usedCents of [0, -100]) {
     rerender(
@@ -355,7 +365,7 @@ it("defensively renders a zero target separately from null without infinite util
     );
     expect(selected()).toHaveAccessibleName(/No utilization/);
     expect(selected()).not.toHaveAccessibleName(/Over budget|Infinity|NaN/);
-    expect(selected()).not.toHaveClass("border-2");
+    expect(selected()).toHaveClass("border-transparent", "focus-visible:border-foreground/50");
     expect(fillAnimation.props.at(-1)).toMatchObject({
       animate: { clipPath: "inset(100% 0 0 0)" },
     });
@@ -374,4 +384,105 @@ it("defensively renders a zero target separately from null without infinite util
   rerender(createElement(SpendingBubbles, { ...props, monthlyBudget }));
   expect(selected()).toHaveAccessibleName(/Monthly budget comparison unavailable/);
   expect(selected().querySelector("[data-budget-fill]")).toBeNull();
+});
+
+it("keeps tiny and long-named groups readable and selectable without inflating their area", async () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(240);
+  const groups = [
+    {
+      id: "large",
+      label: "Home",
+      kind: "category",
+      netCents: 100000,
+      positiveAreaCents: 100000,
+      categories: [],
+    },
+    {
+      id: "tiny",
+      label: "A very long category name for a single small transaction",
+      kind: "category",
+      netCents: 1,
+      positiveAreaCents: 1,
+      categories: [],
+    },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  const select = vi.fn();
+  render(createElement(SpendingBubbles, { groups, onSelect: select }));
+  const tiny = screen.getByRole("button", { name: /A very long category name.*: \$0.01/ });
+  tiny.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(select).toHaveBeenCalledWith(groups[1]);
+  const smallCircle = screen.getByRole("button", { name: /A very long category name.*: \$0.01/ });
+  const largeCircle = screen.getByRole("button", { name: /Home: \$1,000.00/ });
+  expect(
+    Number.parseFloat(smallCircle.style.width) ** 2 /
+      Number.parseFloat(largeCircle.style.width) ** 2,
+  ).toBeCloseTo(1 / 100000, 8);
+  expect(smallCircle).toHaveAttribute("tabindex", "0");
+  expect(screen.queryByText(/Circle size:/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("list")).not.toBeInTheDocument();
+});
+it("keeps arrangement available with reduced motion and offers only reset", () => {
+  const groups = [
+    {
+      id: "food",
+      label: "Food",
+      kind: "category",
+      netCents: 100,
+      positiveAreaCents: 100,
+      categories: [],
+    },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  const props = { groups, onSelect: vi.fn() };
+  const { rerender } = render(createElement(SpendingBubbles, props));
+  expect(screen.getByRole("button", { name: /Food:/ }).style.touchAction).toBe("none");
+  expect(screen.queryByRole("button", { name: "Layout" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Reset bubble layout" }));
+  fillAnimation.reduced = true;
+  rerender(createElement(SpendingBubbles, props));
+  expect(screen.getByRole("button", { name: /Food:/ }).style.touchAction).toBe("none");
+  expect(screen.getByText("Breakdown")).toBeVisible();
+});
+
+it("centers settled bounds and keeps a dragged body fixed while resolving collisions", () => {
+  const nodes = [
+    { x: 0.2, y: 0.3, radius: 0.15 },
+    { x: 0.2, y: 0.3, radius: 0.08 },
+  ];
+  const centered = settleSpendingBubbles(nodes);
+  expect(
+    (Math.min(...centered.map((node) => node.x - node.radius)) +
+      Math.max(...centered.map((node) => node.x + node.radius))) /
+      2,
+  ).toBeCloseTo(0.5);
+  expect(
+    (Math.min(...centered.map((node) => node.y - node.radius)) +
+      Math.max(...centered.map((node) => node.y + node.radius))) /
+      2,
+  ).toBeCloseTo(0.5);
+  const pinned = settleSpendingBubbles(nodes, 0);
+  expect(pinned[0]).toEqual(nodes[0]);
+  const [a, b] = pinned;
+  if (!a || !b) throw new Error("Missing collision bodies");
+  expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(0.23);
+});
+
+it("recovers crowded coincident layouts without overlaps or escaping bounds", () => {
+  for (const count of [6, 16, 32]) {
+    const radius = 0.28 / Math.sqrt(count);
+    const input = Array.from({ length: count }, () => ({ x: 0.5, y: 0.5, radius }));
+    const result = settleSpendingBubbles(input);
+    for (const [index, a] of result.entries()) {
+      expect(a.x).toBeGreaterThanOrEqual(a.radius - 1e-6);
+      expect(a.x).toBeLessThanOrEqual(1 - a.radius + 1e-6);
+      expect(a.y).toBeGreaterThanOrEqual(a.radius - 1e-6);
+      expect(a.y).toBeLessThanOrEqual(1 - a.radius + 1e-6);
+      for (const b of result.slice(index + 1))
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(a.radius + b.radius - 1e-5);
+    }
+    const recovered = settleSpendingBubbles(result);
+    for (const [index, a] of recovered.entries())
+      for (const b of recovered.slice(index + 1))
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(a.radius + b.radius - 1e-5);
+  }
 });

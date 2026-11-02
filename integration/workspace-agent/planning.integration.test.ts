@@ -43,6 +43,7 @@ describe("Finance planning and recurring workflows through MCP", () => {
       expectedNetPay: 2000,
     });
     const category = await call("create_finance_category", { name: "Planning food" });
+    await f.setBypass(false);
     const proposed = await call("set_finance_budget_plan", {
       month: "2026-10",
       allocations: [{ categoryId: category.id, limit: 100 }],
@@ -64,6 +65,7 @@ describe("Finance planning and recurring workflows through MCP", () => {
     expect(
       JSON.stringify(await call("get_finance_category_budget_status", { month: "2026-10" })),
     ).toContain("Planning food");
+    await f.setBypass(true);
     const scenario = await call("compare_finance_scenarios", {
       asOf: "2026-10-11",
       horizonMonths: 3,

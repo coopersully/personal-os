@@ -58,6 +58,9 @@ test.describe("durable Finance manual setup", () => {
     await page.reload();
     await expect(page).toHaveURL(/\/finances\/transactions\?view=table$/);
     await page.goto("/finances/accounts");
+    await page
+      .getByRole("button", { name: "Account options for Legacy checking", exact: true })
+      .click();
     await page.getByRole("button", { name: "Edit Legacy checking", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Edit account", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -170,8 +173,12 @@ test.describe("durable Finance manual setup", () => {
           .getByRole("article", { name: "Your message", exact: true })
           .getByText(message, { exact: true }),
       ).toBeVisible();
+      await expect
+        .poll(async () =>
+          (await human.getFinanceConversationHistory()).messages.map((item) => item.text),
+        )
+        .toContain(message);
       const history = await human.getFinanceConversationHistory();
-      expect(history.messages.map((item) => item.text)).toContain(message);
       await page.reload();
       await expect(chat.getByText(message, { exact: true })).toBeVisible();
       await host.revokeOriginalToken();
@@ -258,6 +265,9 @@ test.describe("durable Finance manual setup", () => {
       if (visibility === "hide") await expect(manual).toHaveCount(0);
       else await expect(manual).toBeVisible();
       await page.keyboard.press("Escape");
+      await page
+        .getByRole("button", { name: "Account options for Setup checking", exact: true })
+        .click();
       await page.getByRole("button", { name: "Edit Setup checking", exact: true }).click();
       await expect(page.getByRole("dialog", { name: "Edit account", exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
@@ -477,11 +487,11 @@ test.describe("durable Finance manual setup", () => {
     const before = await human.getFinanceOnboarding();
     await page.route("**/v1/finances/onboarding", (route) => route.abort("failed"));
     await page.goto("/finances/setup");
-    await expect(
-      page.getByText("Finance setup could not be checked. Try again.", { exact: true }),
-    ).toBeVisible();
+    const recovery = page.getByRole("dialog", { name: "Let’s reconnect" });
+    await expect(recovery).toBeVisible();
     await page.unroute("**/v1/finances/onboarding");
-    await page.getByRole("button", { name: "Retry setup review", exact: true }).click();
+    await recovery.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(recovery).not.toBeVisible();
     const review = page.getByRole("region", { name: "Setup review", exact: true });
     await review.getByRole("radio", { name: "Use Finance manually", exact: true }).check();
     await page.route("**/v1/finances/onboarding/answers", (route) => route.abort("failed"));

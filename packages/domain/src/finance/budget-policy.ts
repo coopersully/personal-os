@@ -1,10 +1,18 @@
 import { z } from "zod";
-import { idSchema, isoDateTimeSchema } from "../common.js";
+import { idSchema } from "../common.js";
 import { financePositionEvidenceSchema, financeRevisionRefSchema } from "./workflow-contracts.js";
 
 /** Explicit terms for hypothetical evaluation only; this contract confers no authority. */
 export const financeBudgetPolicyCentsSchema = z.number().int().min(0).max(2_147_483_647);
-const keySchema = z.string().trim().min(1).max(120);
+// Match the immutable budget-policy SQL UTF-16 identity bounds.
+const keySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .refine((value) => value.length <= 120, "Use at most 120 characters.");
+// Immutable budget-policy JSON packets require seconds (migration 0087).
+const policyInstantSchema = z.iso.datetime({ offset: true });
 const revisionRef = financeRevisionRefSchema.readonly();
 
 export const financeBudgetPolicyPeriodSchema = z
@@ -35,7 +43,7 @@ export const financeBudgetPolicyTermsSchema = z
     usageScope: z.literal("user_month_all_policy_versions"),
     perChangeCapCents: financeBudgetPolicyCentsSchema,
     monthlyCapCents: financeBudgetPolicyCentsSchema,
-    expiresAt: isoDateTimeSchema,
+    expiresAt: policyInstantSchema,
     baseline: revisionRef,
     directions: z
       .array(
@@ -88,8 +96,18 @@ export const financeBudgetPolicyRevisionTupleSchema = z
     baseline: revisionRef,
     activeBudget: revisionRef.nullable(),
     latestBudget: revisionRef.nullable(),
-    positionRevision: z.string().min(1).max(200).nullable(),
-    usageRevision: z.string().min(1).max(200).nullable(),
+    positionRevision: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine((value) => value.length <= 200, "Use at most 200 characters.")
+      .nullable(),
+    usageRevision: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine((value) => value.length <= 200, "Use at most 200 characters.")
+      .nullable(),
   })
   .strict()
   .readonly();
@@ -176,7 +194,7 @@ function immutableEvidence<T>(value: T): ImmutableEvidence<T> {
 
 export const financeBudgetPolicyEvaluationInputSchema = z
   .object({
-    evaluatedAt: isoDateTimeSchema,
+    evaluatedAt: policyInstantSchema,
     terms: financeBudgetPolicyTermsSchema,
     policyState: z.enum(["draft", "disabled", "expired", "unknown"]),
     expected: financeBudgetPolicyRevisionTupleSchema,
@@ -202,7 +220,11 @@ export const financeBudgetPolicyEvaluationInputSchema = z
           state: z.literal("available"),
           userId: idSchema,
           period: financeBudgetPolicyPeriodSchema,
-          revision: z.string().min(1).max(200),
+          revision: z
+            .string()
+            .min(1)
+            .max(200)
+            .refine((value) => value.length <= 200, "Use at most 200 characters."),
           accounting: z.literal("gross_positive_allocation_deltas"),
           scope: z.literal("user_month_all_policy_versions"),
           consumedCents: financeBudgetPolicyCentsSchema,
@@ -247,7 +269,7 @@ export const financeBudgetPolicyEvaluationSchema = z
     executionUnavailableReasons: z
       .tuple([z.literal("authority_not_wired"), z.literal("position_commit_fence_not_wired")])
       .readonly(),
-    evaluatedAt: isoDateTimeSchema,
+    evaluatedAt: policyInstantSchema,
     input: financeBudgetPolicyEvaluationInputSchema,
     revisions: financeBudgetPolicyRevisionTupleSchema,
     reasons: z.array(financeBudgetPolicyDenialReasonSchema).readonly(),

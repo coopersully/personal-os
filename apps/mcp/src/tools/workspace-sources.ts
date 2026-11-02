@@ -19,7 +19,7 @@ export function registerWorkspaceSourceTools(server: McpServer, api: PersonalOsA
     {
       title: "Sync workspace source",
       description:
-        "Synchronize one owned provider account across its enabled workspaces. Read list_workspace_sources first. Requires mail/calendar/tasks write and execute, reminders:write, and enabled bypass for agents. Returns changed count; unavailable providers and partial failures retain API recovery diagnostics.",
+        "Synchronize one owned provider account across its enabled workspaces. Read list_workspace_sources first. Requires mail/calendar/tasks write and execute, reminders:write, and enabled bypass for agents. Returns changed count, pending continuation and nextSyncAt; pending means synchronization continues automatically, not completion. Unavailable providers and partial failures retain API recovery diagnostics.",
       inputSchema: { accountId: idSchema },
     },
     async ({ accountId }) => apiResult(() => api.syncConnector(accountId)),

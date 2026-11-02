@@ -254,17 +254,13 @@ async fn present(app: &tauri::AppHandle, data: &Value, force: bool) -> Result<()
         if let Some(window) = app.get_webview_window("ritual") {
             window.destroy().map_err(|e| e.to_string())?;
         }
-        let steps = state["current"]["definition"]["steps"]
-            .as_array()
-            .map_or(0, Vec::len);
-        let height = (468.0 + steps as f64 * 90.0).min(900.0);
         let window = tauri::WebviewWindowBuilder::new(
             app,
             "ritual",
             tauri::WebviewUrl::App("index.html#ritual".into()),
         )
         .title("nohmi ritual")
-        .inner_size(648.0, height)
+        .inner_size(800.0, 600.0)
         .min_inner_size(320.0, 300.0)
         .resizable(false)
         .decorations(false)
@@ -274,15 +270,8 @@ async fn present(app: &tauri::AppHandle, data: &Value, force: bool) -> Result<()
         .visible(false)
         .build()
         .map_err(|e| e.to_string())?;
-        if let Some(monitor) = window.current_monitor().map_err(|e| e.to_string())? {
-            let size = monitor.size();
-            let scale = monitor.scale_factor();
-            let _ = window.set_size(tauri::LogicalSize::new(
-                648f64.min((size.width as f64 / scale - 64.0).max(320.0)),
-                height.min((size.height as f64 / scale - 64.0).max(300.0)),
-            ));
-        }
-        window.center().map_err(|e| e.to_string())?;
+        // Native preparation fits this hidden webview to the system primary display.
+        // AppKit owns subsequent display changes without remounting the checklist.
         #[cfg(target_os = "macos")]
         let window_address = window.ns_window().map_err(|e| e.to_string())? as usize;
         #[cfg(not(target_os = "macos"))]
@@ -327,7 +316,7 @@ async fn api(
     validate_api_result(method, response.status, &value)?;
     Ok((response.status, value))
 }
-fn valid_definition(value: &Value) -> bool {
+fn valid_definition(value: &Value, allow_empty: bool) -> bool {
     value["id"].as_str().is_some_and(|id| !id.is_empty())
         && matches!(value["kind"].as_str(), Some("morning" | "night"))
         && value["revision"]
@@ -341,7 +330,7 @@ fn valid_definition(value: &Value) -> bool {
             .as_str()
             .is_some_and(|at| chrono::DateTime::parse_from_rfc3339(at).is_ok())
         && value["steps"].as_array().is_some_and(|steps| {
-            !steps.is_empty()
+            (allow_empty || !steps.is_empty())
                 && steps.len() <= 20
                 && steps.iter().all(|step| {
                     step["id"].is_string()
@@ -363,7 +352,7 @@ fn valid_definition(value: &Value) -> bool {
 fn valid_occurrence(value: &Value) -> bool {
     value["id"].is_string()
         && value["ritualId"].is_string()
-        && valid_definition(&value["definition"])
+        && valid_definition(&value["definition"], true)
         && value["revision"]
             .as_u64()
             .is_some_and(|revision| revision > 0)
@@ -392,7 +381,10 @@ fn valid_occurrence(value: &Value) -> bool {
 }
 fn valid_state(value: &Value) -> bool {
     value["definitions"].as_array().is_some_and(|definitions| {
-        definitions.len() <= 2 && definitions.iter().all(valid_definition)
+        definitions.len() <= 2
+            && definitions
+                .iter()
+                .all(|definition| valid_definition(definition, false))
     }) && value
         .get("current")
         .is_some_and(|current| current.is_null() || valid_occurrence(current))
@@ -592,6 +584,63 @@ pub async fn ritual_ready(
     *runtime.ready.lock().await = Some(occurrence_id);
     Ok(())
 }
+// Only the ready checklist can project decorative pixels for its current occurrence.
+fn sky_frame_matches(label: &str, occurrence: &str, ready: Option<&str>, shown: Option<&str>) -> bool {
+    label == "ritual" && !occurrence.is_empty() && ready == Some(occurrence) && shown == Some(occurrence)
+}
+fn valid_sky_pixels(width: u32, height: u32, pixels: &str) -> bool {
+    if !(1..=400).contains(&width) || !(1..=240).contains(&height) { return false; }
+    let length = ((width as usize * height as usize * 4 + 2) / 3) * 4;
+    pixels.len() == length && pixels.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+}
+#[tauri::command]
+pub async fn ritual_sky_frame(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    occurrence_id: String,
+    width: u32,
+    height: u32,
+    pixels: String,
+    dark: bool,
+) -> Result<bool, String> {
+    if window.label() != "ritual" || !valid_sky_pixels(width, height, &pixels) {
+        return Err("Invalid ritual sky frame".into());
+    }
+    let runtime = app.state::<RitualRuntime>();
+    let _lock = runtime.lock.lock().await;
+    identity(&app).await?;
+    if !sky_frame_matches(window.label(), &occurrence_id,
+        runtime.ready.lock().await.as_deref(), runtime.shown.lock().await.as_deref()) {
+        return Ok(false);
+    }
+    let result = crate::native::call(&app, json!({"op":"ritual_background_frame","width":width,"height":height,"pixels":pixels,"dark":dark})).await?;
+    Ok(result["accepted"] == true)
+}
+
+#[cfg(test)]
+mod sky_frame_tests {
+    use super::*;
+    #[test]
+    fn only_current_ready_ritual_can_publish_pixels() {
+        assert!(sky_frame_matches("ritual", "today", Some("today"), Some("today")));
+        for label in ["main", "pet", "ritual-secondary"] { assert!(!sky_frame_matches(label, "today", Some("today"), Some("today"))); }
+        assert!(!sky_frame_matches("ritual", "old", Some("today"), Some("today")));
+        assert!(!sky_frame_matches("ritual", "today", None, Some("today")));
+        assert!(!sky_frame_matches("ritual", "today", Some("today"), None));
+        assert!(!sky_frame_matches("ritual", "", Some(""), Some("")));
+    }
+    #[test]
+    fn rgba_payload_is_bounded_before_native_dispatch() {
+        assert!(valid_sky_pixels(1, 1, "AAAA/w=="));
+        assert!(!valid_sky_pixels(0, 1, ""));
+        assert!(!valid_sky_pixels(401, 1, ""));
+        assert!(!valid_sky_pixels(1, 241, ""));
+        assert!(!valid_sky_pixels(1, 1, "short"));
+        assert!(!valid_sky_pixels(1, 1, "<script>"));
+        assert!(valid_sky_pixels(400, 240, &"A".repeat(512000)));
+    }
+}
+
 // Pet transport authorizes its window before calling these account-fenced adapters.
 pub async fn pet_state(
     app: &tauri::AppHandle,
@@ -706,7 +755,7 @@ pub async fn ritual_preview(
             Some("morning" | "night")
         ) || !state["current"]["definition"]["steps"]
             .as_array()
-            .is_some_and(|s| !s.is_empty() && s.len() <= 20)
+            .is_some_and(|s| s.len() <= 20)
         {
             return Err("Invalid ritual preview".into());
         }
@@ -906,52 +955,27 @@ fn apply_offline(
             let done = current["definition"]["steps"]
                 .as_array()
                 .is_some_and(|steps| {
-                    steps.iter().all(|step| {
-                        let answer = current["responses"]
-                            .as_array()
-                            .and_then(|r| r.iter().rev().find(|r| r["stepId"] == step["id"]));
-                        answer.is_some_and(|r| {
-                            r["submitted"] == true
-                                && if step["kind"] == "checkbox" {
-                                    r["value"] == true
-                                } else {
-                                    r["value"].as_str().is_some_and(|v| {
-                                        if v.trim().is_empty() {
-                                            return false;
-                                        }
-                                        match step["kind"].as_str() {
-                                            Some("time") => {
-                                                v.len() == 5
-                                                    && chrono::NaiveTime::parse_from_str(v, "%H:%M")
-                                                        .is_ok()
-                                            }
-                                            Some("date") => {
-                                                v.len() == 10
-                                                    && chrono::NaiveDate::parse_from_str(
-                                                        v, "%Y-%m-%d",
-                                                    )
-                                                    .is_ok()
-                                            }
-                                            Some("number") => {
-                                                v.parse::<f64>().is_ok_and(|n| n.is_finite())
-                                            }
-                                            Some("multiple_choice") => {
-                                                step["options"].as_array().is_some_and(|options| {
-                                                    options
-                                                        .iter()
-                                                        .any(|option| option.as_str() == Some(v))
-                                                })
-                                            }
-                                            _ => true,
-                                        }
-                                    })
-                                }
-                        })
-                    })
+                    steps
+                        .iter()
+                        .all(|step| step["optional"] == true || step_answered(current, step))
                 });
             if done {
+                if body["optionalReminderAt"].is_string() {
+                    let steps: Vec<Value> = current["definition"]["steps"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|step| step["optional"] == true && !step_answered(current, step))
+                        .map(|step| step["id"].clone())
+                        .collect();
+                    if !steps.is_empty() {
+                        current["optionalFollowUp"] =
+                            json!({"dueAt": body["optionalReminderAt"], "stepIds": steps});
+                    }
+                }
                 current["status"] = json!("completed");
                 current["settledAt"] = json!(now);
+                mark_local_completion_day(state, "completed");
             }
             Ok(json!({"outcome": if done { "applied" } else { "conflict" }, "state":state}))
         }
@@ -967,12 +991,24 @@ fn apply_offline(
         Some("skip") => {
             current["status"] = json!("skipped");
             current["settledAt"] = json!(now);
+            mark_local_completion_day(state, "skipped");
             Ok(json!({"outcome":"applied","state":state}))
         }
         Some("cancel_snooze") => Ok(json!({"outcome":"applied","state":state})),
         _ => Err("Invalid ritual action".into()),
     }
 }
+fn mark_local_completion_day(state: &mut Value, status: &str) {
+    let date = state["current"]["scheduledLocalDate"].clone();
+    if let Some(days) = state.get_mut("completionWeek").and_then(Value::as_array_mut) {
+        for day in days {
+            if day["date"] == date {
+                day["status"] = json!(status);
+            }
+        }
+    }
+}
+
 fn delivery_health(stage: Option<&str>, at: chrono::DateTime<chrono::Utc>) -> Value {
     match stage {
         Some(stage @ ("identity" | "store_read" | "sync" | "store_write" | "presentation")) => {
@@ -1305,9 +1341,15 @@ mod recovery_tests {
     #[test]
     fn sleep_catches_up_from_cached_horizon_without_stacking() {
         let mut data = json!({"state":{"current":{"id":"old","dueAt":"2026-09-29T06:00:00Z","expiresAt":"2026-09-29T21:00:00Z","status":"pending","responses":[{"value":"partial"}]},"upcoming":[{"id":"night","dueAt":"2026-09-29T21:00:00Z","expiresAt":"2026-09-30T06:00:00Z","status":"pending"},{"id":"morning","dueAt":"2026-09-30T06:00:00Z","expiresAt":"2026-09-30T21:00:00Z","status":"pending"}]}});
+        data["state"]["streakCount"] = json!(12);
+        data["state"]["skipCount"] = json!(1);
+        data["state"]["completionWeek"] = json!([]);
         data["queue"] = json!([{"path":"/v1/rituals/occurrences/old/responses/one"}]);
         advance_offline(&mut data, "2026-09-30T08:00:00Z");
         assert_eq!(data["state"]["current"]["id"], "morning");
+        assert!(data["state"].get("streakCount").is_none());
+        assert!(data["state"].get("skipCount").is_none());
+        assert!(data["state"].get("completionWeek").is_none());
         assert_eq!(data["localHistory"][0]["status"], "missed");
         assert_eq!(data["localHistory"][0]["responses"][0]["value"], "partial");
         advance_offline(&mut data, "2026-09-30T08:00:00Z");
@@ -1347,6 +1389,12 @@ fn advance_offline(data: &mut Value, now: &str) {
             history.push(old);
         }
         data["localHistory"] = json!(history);
+        // Counts refer to the last synchronized occurrence, not this new boundary.
+        if let Some(state) = data["state"].as_object_mut() {
+            state.remove("streakCount");
+            state.remove("skipCount");
+            state.remove("completionWeek");
+        }
         data["state"]["current"] = next;
         data["state"]["snoozeCount"] = json!(0);
         data["state"]["syncStatus"] = json!("queued");
@@ -1749,5 +1797,91 @@ mod completion_tests {
         assert_eq!(complete(&mut data)["outcome"], "conflict");
         answer(&mut data, "one", json!("Final"), true);
         assert_eq!(complete(&mut data)["outcome"], "applied");
+    }
+}
+
+#[cfg(test)]
+mod optional_step_tests {
+    use super::*;
+
+    #[test]
+    fn optional_steps_complete_offline_with_a_pending_follow_up() {
+        let mut data = json!({"state":{"current":{"id":"today","status":"pending","revision":1,"expiresAt":"2099-01-01T00:00:00Z","definition":{"steps":[{"id":"journal","kind":"short_text","optional":true}]},"responses":[]}}});
+        let result = apply_offline(
+            &mut data,
+            "/actions",
+            "POST",
+            &json!({"kind":"complete","optionalReminderAt":"2090-01-01T12:00:00Z"}),
+        )
+        .unwrap();
+        assert_eq!(result["outcome"], "applied");
+        assert_eq!(
+            data["state"]["current"]["optionalFollowUp"]["stepIds"],
+            json!(["journal"])
+        );
+        assert!(data["state"]["current"]["optionalFollowUp"]["reminderIds"].is_null());
+    }
+}
+
+fn step_answered(current: &Value, step: &Value) -> bool {
+    let answer = current["responses"]
+        .as_array()
+        .and_then(|r| r.iter().rev().find(|r| r["stepId"] == step["id"]));
+    answer.is_some_and(|r| {
+        r["submitted"] == true
+            && if step["kind"] == "checkbox" {
+                r["value"] == true
+            } else {
+                r["value"].as_str().is_some_and(|v| {
+                    if v.trim().is_empty() {
+                        return false;
+                    }
+                    match step["kind"].as_str() {
+                        Some("time") => {
+                            v.len() == 5 && chrono::NaiveTime::parse_from_str(v, "%H:%M").is_ok()
+                        }
+                        Some("date") => {
+                            v.len() == 10
+                                && chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d").is_ok()
+                        }
+                        Some("number") => v.parse::<f64>().is_ok_and(|n| n.is_finite()),
+                        Some("multiple_choice") => {
+                            step["options"].as_array().is_some_and(|options| {
+                                options.iter().any(|option| option.as_str() == Some(v))
+                            })
+                        }
+                        _ => true,
+                    }
+                })
+            }
+    })
+}
+
+
+#[cfg(test)]
+mod completion_week_tests {
+    use super::*;
+    #[test]
+    fn queued_completions_and_skips_update_only_the_current_day() {
+        for (kind, status) in [("complete", "completed"), ("skip", "skipped")] {
+            let mut data = json!({"state": {"current": {
+                "status": "pending", "revision": 1, "expiresAt": "2099-01-01T00:00:00Z",
+                "scheduledLocalDate": "2026-10-20", "definition": {"steps": []}
+            }, "completionWeek": [
+                {"date": "2026-10-19", "status": "completed"},
+                {"date": "2026-10-20", "status": "pending"}
+            ]}});
+            let result = apply_offline(&mut data, "/actions", "POST", &json!({"kind": kind})).unwrap();
+            assert_eq!(result["outcome"], "applied");
+            assert_eq!(data["state"]["completionWeek"][0]["status"], "completed");
+            assert_eq!(data["state"]["completionWeek"][1]["status"], status);
+            assert_eq!(data["state"]["syncStatus"], "queued");
+        }
+    }
+    #[test]
+    fn old_caches_do_not_fabricate_weekly_history() {
+        let mut state = json!({"current": {"scheduledLocalDate": "2026-10-20"}});
+        mark_local_completion_day(&mut state, "completed");
+        assert!(state.get("completionWeek").is_none());
     }
 }

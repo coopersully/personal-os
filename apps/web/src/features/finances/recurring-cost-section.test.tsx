@@ -91,6 +91,7 @@ it("uses applicable evidence without asking for redundant confirmation", async (
   });
   expect(await screen.findByRole("button", { name: "Edit statement for Music" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Confirm cost for Music" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Annual equivalents (EUR)"));
   expect(screen.getAllByText("€12.00")[0]).toBeVisible();
 });
 

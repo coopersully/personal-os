@@ -21,7 +21,7 @@ describe.sequential("budget policy management migration", () => {
     const folder = resolve(process.cwd(), "packages/database/migrations");
     const prior = await migrationsWithout(
       folder,
-      "nohmi-budget-policy-",
+      "personal-os-budget-policy-",
       existsSync(resolve(folder, "0087_finance_budget_policy_management.sql"))
         ? [
             "0087_finance_budget_policy_management",

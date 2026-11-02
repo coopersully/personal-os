@@ -10,17 +10,21 @@ export type PlaidLinkTokenInput = {
   products: readonly string[];
   transactions: { daysRequested: number };
   userId: string;
+  accessToken?: string;
 };
 
 export type PlaidItemToken = { accessToken: string; itemId: string };
-export type PlaidItemSnapshot = { itemId: string };
+export type PlaidItemSnapshot = { itemId: string; institutionId?: string | null };
 
 export type PlaidAccountSnapshot = {
   accountId: string;
   balanceCurrent: number | null;
   currencyCode: string | null;
+  institutionId?: string | null;
+  mask?: string | null;
   name: string;
   officialName: string | null;
+  persistentAccountId?: string | null;
   /** Always populated by the real connector; optional only for injected test connectors. */
   subtype?: string | null;
   /** Always populated by the real connector; optional only for injected test connectors. */
@@ -63,9 +67,17 @@ export type PlaidConnector = {
   createHostedLink?(
     input: PlaidLinkTokenInput,
   ): Promise<{ linkToken: string; url: string; expiresAt: string }>;
-  getHostedLinkResult?(
-    linkToken: string,
-  ): Promise<{ publicTokens: string[]; institutions?: Record<string, string> }>;
+  getHostedLinkResult?(linkToken: string): Promise<{
+    publicTokens: string[];
+    institutions?: Record<string, string>;
+    accountMetadata?: Record<
+      string,
+      {
+        institutionId?: string | null;
+        accounts: Array<{ name: string; mask?: string | null }>;
+      }
+    >;
+  }>;
   exchangePublicToken(publicToken: string): Promise<PlaidItemToken>;
   getItem(accessToken: string): Promise<PlaidItemSnapshot>;
   getAccounts(accessToken: string): Promise<PlaidAccountSnapshot[]>;
@@ -82,6 +94,7 @@ type PlaidConnectorOptions = {
   secret: string;
 };
 
+const institutionIdSchema = z.string().max(256).trim().min(1).nullish();
 const accountSchema = z.object({
   account_id: z.string().min(1),
   balances: z.object({
@@ -93,7 +106,9 @@ const accountSchema = z.object({
       .optional(),
   }),
   name: z.string(),
+  mask: z.string().max(32).trim().min(1).nullish(),
   official_name: z.string().nullable(),
+  persistent_account_id: z.string().max(256).trim().min(1).nullish(),
   subtype: z.string().nullable(),
   type: z.enum(["depository", "investment", "brokerage", "credit", "loan", "other"]),
 });
@@ -271,8 +286,12 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
           country_codes: input.countryCodes,
           language: input.language,
           link_customization_name: input.linkCustomizationName,
-          products: input.products,
-          transactions: { days_requested: input.transactions.daysRequested },
+          ...(input.accessToken
+            ? { access_token: input.accessToken }
+            : { products: input.products }),
+          ...(input.accessToken
+            ? {}
+            : { transactions: { days_requested: input.transactions.daysRequested } }),
           user: { client_user_id: input.userId },
         }),
       );
@@ -290,8 +309,12 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
           country_codes: input.countryCodes,
           language: input.language,
           link_customization_name: input.linkCustomizationName,
-          products: input.products,
-          transactions: { days_requested: input.transactions.daysRequested },
+          ...(input.accessToken
+            ? { access_token: input.accessToken }
+            : { products: input.products }),
+          ...(input.accessToken
+            ? {}
+            : { transactions: { days_requested: input.transactions.daysRequested } }),
           user: { client_user_id: input.userId },
           hosted_link: { url_lifetime_seconds: 1800 },
         }),
@@ -328,10 +351,19 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
                       .array(
                         z.object({
                           public_token: z.string().min(1),
+                          accounts: z
+                            .array(
+                              z.object({
+                                name: z.string().max(240).trim().min(1),
+                                mask: z.string().max(32).trim().min(1).nullish(),
+                              }),
+                            )
+                            .max(100)
+                            .optional(),
                           institution: z
                             .object({
                               name: z.string().trim().min(1).max(240),
-                              institution_id: z.string(),
+                              institution_id: institutionIdSchema,
                             })
                             .nullish(),
                         }),
@@ -355,6 +387,20 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
           disposition: "operator",
         });
       return {
+        accountMetadata: Object.fromEntries(
+          value.link_sessions.flatMap((session) =>
+            (session.results?.item_add_results ?? []).map((item) => [
+              item.public_token,
+              {
+                institutionId: item.institution?.institution_id ?? null,
+                accounts: (item.accounts ?? []).map((account) => ({
+                  name: account.name,
+                  mask: account.mask ?? null,
+                })),
+              },
+            ]),
+          ),
+        ),
         institutions: Object.fromEntries(
           value.link_sessions.flatMap((session) =>
             (session.results?.item_add_results ?? []).flatMap((item) =>
@@ -381,22 +427,33 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
     },
     async getItem(accessToken) {
       const value = parse(
-        z.object({ item: z.object({ item_id: z.string().min(1) }) }),
+        z.object({
+          item: z.object({
+            item_id: z.string().min(1),
+            institution_id: institutionIdSchema,
+          }),
+        }),
         await plaidRequest("/item/get", { access_token: accessToken }),
       );
-      return { itemId: value.item.item_id };
+      return { itemId: value.item.item_id, institutionId: value.item.institution_id ?? null };
     },
     async getAccounts(accessToken) {
       const value = parse(
-        z.object({ accounts: z.array(accountSchema).min(1) }),
+        z.object({
+          accounts: z.array(accountSchema).min(1),
+          item: z.object({ institution_id: institutionIdSchema }).nullish(),
+        }),
         await plaidRequest("/accounts/get", { access_token: accessToken }),
       );
       return value.accounts.map((account) => ({
         accountId: account.account_id,
         balanceCurrent: account.balances.current,
         currencyCode: account.balances.iso_currency_code ?? null,
+        institutionId: value.item?.institution_id ?? null,
+        mask: account.mask ?? null,
         name: account.name,
         officialName: account.official_name,
+        persistentAccountId: account.persistent_account_id ?? null,
         subtype: account.subtype,
         type: account.type,
       }));

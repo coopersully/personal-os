@@ -23,7 +23,10 @@ function duplicateKey(account: FinanceAccount): string {
     .trim();
 }
 
-export function summarizeFinanceAccounts(accounts: FinanceAccount[]): {
+export function summarizeFinanceAccounts(
+  accounts: FinanceAccount[],
+  providerDuplicateGroups: string[][] = [],
+): {
   accountSemantics: FinanceAccountList["accountSemantics"];
   totals: FinanceAccountTotals;
 } {
@@ -54,7 +57,25 @@ export function summarizeFinanceAccounts(accounts: FinanceAccount[]): {
     else totals.cash += (account.balance ?? 0) * share;
   }
   totals.netWorth = totals.cash + totals.investments + totals.otherAssets - totals.debt;
-  const possibleDuplicateGroups = [...duplicateIds.values()]
+  const roots = new Map(accounts.map((account) => [account.id, account.id]));
+  const root = (id: string): string => {
+    let current = id;
+    while (roots.get(current) && roots.get(current) !== current)
+      current = roots.get(current) as string;
+    return current;
+  };
+  for (const ids of [...duplicateIds.values(), ...providerDuplicateGroups]) {
+    const valid = ids.filter((id) => roots.has(id));
+    const first = valid[0];
+    if (!first) continue;
+    for (const id of valid) roots.set(root(id), root(first));
+  }
+  const groups = new Map<string, string[]>();
+  for (const account of accounts) {
+    const key = root(account.id);
+    groups.set(key, [...(groups.get(key) ?? []), account.id]);
+  }
+  const possibleDuplicateGroups = [...groups.values()]
     .filter((accountIds) => accountIds.length > 1)
     .map((accountIds) => ({ accountIds: accountIds.sort() }));
   const includedIds = new Set(

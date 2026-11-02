@@ -1,6 +1,7 @@
 import {
   type Database,
   financeContextRevisions,
+  financeConversationMessages,
   financeSmsCompletions,
   notificationPreferences,
   textInboundClaims,
@@ -166,6 +167,21 @@ export function createFinanceSmsAcknowledgementDispatcher(options: {
             }) !== "eligible"
           )
             return null;
+          const [chatMessage] =
+            row.financeDisposition === "context_captured"
+              ? await tx
+                  .select({ id: financeConversationMessages.id })
+                  .from(financeConversationMessages)
+                  .where(
+                    and(
+                      eq(financeConversationMessages.userId, row.userId),
+                      eq(financeConversationMessages.sourceOperationId, row.id),
+                      eq(financeConversationMessages.idempotencyKey, `sms-context:${row.id}`),
+                      eq(financeConversationMessages.authorKind, "user"),
+                    ),
+                  )
+                  .limit(1)
+              : [];
           const acceptedCount = (receipt?.children ?? []).filter(
             (child) => child.state === "accepted",
           ).length;
@@ -177,7 +193,7 @@ export function createFinanceSmsAcknowledgementDispatcher(options: {
               row.financeDisposition === "clarification_required"
                 ? "nohmi: I could not safely attach that reply. For new context, send Finance: followed by your note. For a question, include its item number. Approvals require the exact approve/reject choices or the nohmi app."
                 : row.financeDisposition === "context_captured"
-                  ? "nohmi: Saved your Finance context. No transaction, amount or bookkeeping change was assumed. Review or revise it in nohmi."
+                  ? `nohmi: Saved your Finance context.${chatMessage ? " Queued in Finance Chat for the next eligible host run." : ""} No transaction, amount or bookkeeping change was assumed. Review or revise it in nohmi.`
                   : acceptedCount === 0
                     ? "nohmi: Your Finance reply could not apply to the current work. No decision was applied. Review the current proposal or question in nohmi."
                     : `nohmi: Saved ${acceptedCount === 1 ? "your reply" : `${acceptedCount} replies`}.${reviewCount ? ` ${reviewCount} other ${reviewCount === 1 ? "reply needs" : "replies need"} review in nohmi.` : ""} Finance maintenance may still be waiting for its host or another decision. Review progress in nohmi.`,

@@ -1,3 +1,5 @@
+import { accessTokens } from "@personal-os/database";
+import { eq } from "drizzle-orm";
 import { createMcpWorkspaceFixture, type WorkspaceFixture } from "./fixture.js";
 
 describe("workspace execution authorization", () => {
@@ -43,6 +45,33 @@ describe("OAuth-bound MCP authority", () => {
   }, 120_000);
   afterAll(async () => {
     await f?.close();
+  });
+  it("enforces audience-bound authority behind the trusted MCP header while preserving personal tokens", async () => {
+    const personal = await f.connectAgent(["reminders:read"]);
+    const bound = await f.connectAgent(["reminders:read"]);
+    const audience = `${f.config.apiBaseUrl}/mcp`;
+    await f.db
+      .update(accessTokens)
+      .set({ audience })
+      .where(eq(accessTokens.id, bound.credential.id));
+    const request = (token: string, resource?: string, key?: string) =>
+      f.app.request("/v1/assistant/context", {
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(resource ? { "x-personal-os-mcp-resource": resource } : {}),
+          ...(key ? { "x-personal-os-mcp-key": key } : {}),
+        },
+      });
+    expect((await request(personal.credential.token)).status).toBe(200);
+    expect(
+      (await request(bound.credential.token, audience, f.config.mcpInternalSecret)).status,
+    ).toBe(200);
+    expect(
+      (await request(bound.credential.token, `${audience}/other`, f.config.mcpInternalSecret))
+        .status,
+    ).toBe(401);
+    expect((await request(bound.credential.token, audience)).status).toBe(401);
+    expect((await request(bound.credential.token, audience, "spoofed-key")).status).toBe(401);
   });
   it("executes through real OAuth authentication, expires and refreshes the same connection", async () => {
     await f.setBypass(true);

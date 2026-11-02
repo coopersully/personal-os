@@ -38,6 +38,8 @@ it("keeps unknown amount, currency and provenance explicit and prevents unavaila
     </MemoryRouter>,
   );
   expect(screen.getByText(/Amount unknown/)).toBeVisible();
+  expect(screen.getByText(/Cadence not established/)).not.toBeVisible();
+  fireEvent.click(screen.getByText("Schedule details"));
   expect(screen.getByText(/Cadence not established/)).toBeVisible();
   expect(screen.getByRole("link", { name: "Unconfirmed bill" })).toHaveAttribute(
     "href",
@@ -101,11 +103,15 @@ function controls(accountIds: string[] | undefined) {
   return { onParamChange, onReset };
 }
 
-it("changes dates and presentation through named controls and provides filter reset", () => {
+it("changes dates and presentation through named controls and provides filter reset", async () => {
   const callbacks = controls(undefined);
+  await userEvent.click(screen.getByRole("button", { name: "Timeline options" }));
   fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-10-02" } });
   fireEvent.change(screen.getByLabelText("Through"), { target: { value: "2026-10-30" } });
-  fireEvent.change(screen.getByLabelText("Timeline view"), { target: { value: "calendar" } });
+  await userEvent.click(screen.getByRole("button", { name: "Close" }));
+  await userEvent.click(screen.getByRole("button", { name: "View: Agenda" }));
+  await userEvent.click(screen.getByRole("menuitemradio", { name: "Calendar" }));
+  await userEvent.click(screen.getByRole("button", { name: "Timeline options" }));
   fireEvent.click(screen.getByRole("button", { name: "Reset timeline filters" }));
   expect(callbacks.onParamChange.mock.calls).toEqual([
     ["cashflowFrom", "2026-10-02"],
@@ -132,6 +138,7 @@ it.each([
 }) => {
   const user = userEvent.setup();
   const { onParamChange } = controls(scope);
+  await user.click(screen.getByRole("button", { name: "Timeline options" }));
   await user.click(screen.getByRole("button", { name: label }));
   await user.click(screen.getByRole("menuitemcheckbox", { name: accountName }));
   expect(onParamChange).toHaveBeenCalledWith("cashflowAccounts", expected);
@@ -143,6 +150,7 @@ it.each([
 ])("offers the explicit $menu policy", async ({ menu, expected }) => {
   const user = userEvent.setup();
   const { onParamChange } = controls(["cash-a"]);
+  await user.click(screen.getByRole("button", { name: "Timeline options" }));
   await user.click(screen.getByRole("button", { name: "1 selected accounts" }));
   await user.click(screen.getByRole("menuitem", { name: menu }));
   expect(onParamChange).toHaveBeenCalledWith("cashflowAccounts", expected);

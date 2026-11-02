@@ -18,7 +18,7 @@ import { BRAND_NAME, BRAND_PROMISE } from "../brand.js";
 
 const ORBIT_PROMISE = BRAND_PROMISE.replace(/[.!?]+$/, "");
 const ORBIT_COPY = `✦\u00A0\u00A0${ORBIT_PROMISE}\u00A0\u00A0✦\u00A0\u00A0${ORBIT_PROMISE}\u00A0\u00A0`;
-const NOHMI_SYMBOL_PATH =
+const PERSONAL_OS_SYMBOL_PATH =
   "M145 368V144h55v42c18-31 47-48 83-48 57 0 84 37 84 103v127h-55V254c0-38-13-61-48-61-39 0-64 27-64 73v102h-55Z";
 
 /**
@@ -182,7 +182,7 @@ export function BrandMark({
   );
 }
 
-export function NohmiBrandMark({
+export function PersonalOsBrandMark({
   auth = false,
   compact = false,
   symbol = false,
@@ -194,7 +194,7 @@ export function NohmiBrandMark({
   if (symbol) {
     return (
       <svg aria-label={BRAND_NAME} role="img" className="brand-symbol" viewBox="0 0 512 512">
-        <path d={NOHMI_SYMBOL_PATH} />
+        <path d={PERSONAL_OS_SYMBOL_PATH} />
       </svg>
     );
   }
@@ -221,7 +221,7 @@ export function NohmiBrandMark({
         </svg>
         <span className="auth-brand-graphic__frame">
           <svg aria-hidden="true" className="auth-brand-graphic__mark" viewBox="0 0 512 512">
-            <path d={NOHMI_SYMBOL_PATH} />
+            <path d={PERSONAL_OS_SYMBOL_PATH} />
           </svg>
         </span>
       </span>

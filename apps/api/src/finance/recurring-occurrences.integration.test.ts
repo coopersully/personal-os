@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
+  accessTokens,
   createDatabaseClient,
   type DatabaseClient,
+  executionPolicySettings,
   financeAccounts,
   financeBalanceInclusions,
   financeCashBalanceBases,
@@ -23,7 +25,7 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { createFinanceService } from "../finance-service.js";
-import type { FinanceMutationContext } from "./context.js";
+import { type FinanceMutationContext, loadFinanceAuthorization } from "./context.js";
 
 describe.sequential("recurring schedule actual matching and explicit balance basis", () => {
   let container: StartedPostgreSqlContainer;
@@ -1186,5 +1188,103 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
         .from(financeTransactionAllocations)
         .where(eq(financeTransactionAllocations.transactionId, actual.id)),
     ).toHaveLength(0);
+  });
+  it("confirms schedules, actual matches and balance statements under bypass with agent provenance", async () => {
+    const f = await fixture();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.user.id,
+        name: "Planning confirmations",
+        tokenHash: randomUUID(),
+        scopes: ["finances:write", "finances:execute"],
+      })
+      .returning();
+    if (!token) throw new Error("Missing execution token");
+    await database.db
+      .insert(executionPolicySettings)
+      .values({ userId: f.user.id, reviewBypassEnabled: true });
+    const authority = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: token.id,
+        actorType: "agent",
+        userId: f.user.id,
+        scopes: new Set(token.scopes),
+      },
+      requestId: "agent-confirmation",
+    });
+    const schedule = await f.service.confirmFinanceRecurringSchedule(
+      {
+        ...f.costInput,
+        expectedSourceRevision: 2,
+        supersedesId: f.cost.data.id,
+        effectiveFrom: "2026-03-01",
+        idempotencyKey: randomUUID(),
+      },
+      authority,
+    );
+    expect(schedule.data.approvalActor).toEqual({ type: "agent", id: token.id });
+    const occurrences = await f.service.listFinanceRecurringOccurrences(f.user.id, {
+      from: "2026-03-01",
+      to: "2026-03-01",
+    });
+    const occurrence = occurrences.occurrences.find(
+      (item) => item.scheduleVersionId === schedule.data.id,
+    );
+    if (!occurrence) throw new Error("Missing occurrence");
+    const match = await f.service.manageFinanceOccurrenceMatch(
+      {
+        ...f.match,
+        occurrence: {
+          scheduleVersionId: schedule.data.id,
+          localDate: occurrence.localDate,
+          slot: occurrence.slot,
+        },
+        idempotencyKey: randomUUID(),
+      },
+      authority,
+    );
+    expect(match.data).toMatchObject({ approvalActor: { type: "agent", id: token.id } });
+    const sources = await f.service.listFinanceBalanceBasisSources(f.user.id, {
+      accountIds: [f.account.id],
+    });
+    const basis = await f.service.confirmFinanceBalanceBasis(
+      {
+        accountId: f.account.id,
+        kind: "current",
+        amountCents: 100000,
+        currencyCode: "USD",
+        asOf: now().toISOString(),
+        validUntil: "2026-05-01T00:00:00Z",
+        protectedFloorCents: 0,
+        expectedAccountRevision: f.account.contextualRevision.toString(),
+        expectedBasisRevision: 0,
+        reflections: sources.transactions.map((row) => ({
+          transactionId: row.id,
+          transactionRevision: row.transactionRevision,
+          reimbursementRelationshipRevision: row.reimbursementRelationshipRevision,
+          reflection: "included" as const,
+        })),
+        idempotencyKey: randomUUID(),
+      },
+      authority,
+    );
+    expect(basis.data.approvalActor).toEqual({ type: "agent", id: token.id });
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(executionPolicySettings.userId, f.user.id));
+    await expect(
+      f.service.manageFinanceOccurrenceMatch(
+        {
+          operation: "reverse",
+          matchId: match.data.id,
+          rationale: "Stale approval",
+          idempotencyKey: randomUUID(),
+        },
+        authority,
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
   });
 });

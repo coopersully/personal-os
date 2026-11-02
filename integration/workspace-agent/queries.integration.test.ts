@@ -1,6 +1,6 @@
 import { workspaceMaintenanceRuns } from "@personal-os/database";
 import { accessScopeSchema } from "@personal-os/domain";
-import { type IloToolName, iloToolCatalog } from "../../apps/mcp/src/tool-catalog.js";
+import { type PersonalOsToolName, personalOsToolCatalog } from "../../apps/mcp/src/tool-catalog.js";
 import { createMcpWorkspaceFixture, type WorkspaceFixture } from "./fixture.js";
 
 describe("discovered workspace query execution", () => {
@@ -97,7 +97,7 @@ describe("discovered workspace query execution", () => {
     const failures: string[] = [];
     const called: string[] = [];
     for (const tool of tools) {
-      const definition = iloToolCatalog[tool.name as IloToolName];
+      const definition = personalOsToolCatalog[tool.name as PersonalOsToolName];
       if (
         !definition.readOnly ||
         !["mail", "calendar", "tasks", "reminders", "finances", "texting", "assistant"].includes(

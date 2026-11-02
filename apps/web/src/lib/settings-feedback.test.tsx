@@ -43,7 +43,12 @@ it("keeps settings failures in Sonner with a retry action and no duplicate alert
   );
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
   expect(screen.queryByText("Couldn’t load settings.")).not.toBeInTheDocument();
-  const options = vi.mocked(toast.error).mock.calls.at(-1)?.[1];
+  const options = vi
+    .mocked(toast.error)
+    .mock.calls.filter(
+      ([message, options]) => message === "Couldn’t load settings." && options?.action,
+    )
+    .at(-1)?.[1];
   expect(options?.action).toEqual({ label: "Try again", onClick: expect.any(Function) });
   const action = options?.action;
   if (!action || typeof action !== "object" || !("onClick" in action))
@@ -61,9 +66,13 @@ it("announces an existing error when enabled and dismisses it when disabled", ()
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.dismiss).mockClear();
   const error = new Error("offline");
+  function ScopedError() {
+    useSettingsError(error, "Couldn’t load settings.");
+    return null;
+  }
   const content = (enabled: boolean) => (
     <SettingsFeedbackContext.Provider value={enabled}>
-      <InlineError error={error} title="Couldn’t load settings." retry={() => {}} />
+      <ScopedError />
     </SettingsFeedbackContext.Provider>
   );
   const { rerender } = render(content(false));
@@ -73,7 +82,7 @@ it("announces an existing error when enabled and dismisses it when disabled", ()
   expect(screen.queryByText("Couldn’t load settings.")).not.toBeInTheDocument();
   rerender(content(false));
   expect(toast.dismiss).toHaveBeenCalledTimes(1);
-  expect(screen.getByText("Couldn’t load settings.")).toBeInTheDocument();
+  expect(screen.queryByText("Couldn’t load settings.")).not.toBeInTheDocument();
   rerender(content(true));
   expect(toast.error).toHaveBeenCalledTimes(2);
 });

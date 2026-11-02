@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn cache_verifies_url_and_atomic_payload() {
         let root = std::env::temp_dir().join(format!(
-            "ilo-wallpaper-test-{}-{}",
+            "personal-os-wallpaper-test-{}-{}",
             std::process::id(),
             NEXT_JOB.fetch_add(1, Ordering::SeqCst)
         ));
@@ -582,7 +582,7 @@ mod tests {
     #[test]
     fn cache_prunes_expired_and_oversized_entries() {
         let root = std::env::temp_dir().join(format!(
-            "ilo-wallpaper-prune-{}-{}",
+            "personal-os-wallpaper-prune-{}-{}",
             std::process::id(),
             NEXT_JOB.fetch_add(1, Ordering::SeqCst)
         ));

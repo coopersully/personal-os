@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +13,7 @@ export function FinancePeriodReviewPage({ id }: { id: string }) {
     queryKey: ["finance-period-review", id],
     queryFn: () => api.getFinancePeriodReview(id),
   });
-  if (result.isPending) return <p role="status">Loading financial review…</p>;
+  if (result.isPending) return <ContentSkeleton label="Loading financial review…" rows={3} />;
   if (result.isError && !result.data)
     return (
       <div>

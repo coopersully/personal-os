@@ -7,6 +7,7 @@ import {
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
+  ResponsiveDialogDescription,
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
@@ -41,6 +42,7 @@ export function FinanceCreateButton({
   return (
     <>
       <Button
+        className="floating-actions__button"
         aria-label={
           kind === "account"
             ? "Add account"
@@ -70,13 +72,18 @@ export function FinanceCreateButton({
         <ManualAccountEditor onClose={() => setStep(null)} />
       ) : (
         <ResponsiveDialog open={step !== null} onOpenChange={(open) => !open && setStep(null)}>
-          <ResponsiveDialogContent>
+          <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
             <ResponsiveDialogHeader>
               <ResponsiveDialogTitle>
                 {step === "account"
                   ? "How would you like to add an account?"
                   : "What would you like to add?"}
               </ResponsiveDialogTitle>
+              <ResponsiveDialogDescription>
+                {step === "account"
+                  ? "Connect your bank to sync records, or track a balance yourself."
+                  : "Record a transaction or add an account to your finances."}
+              </ResponsiveDialogDescription>
             </ResponsiveDialogHeader>
             <ResponsiveDialogBody className="flex flex-col gap-3">
               {step === "account" ? (

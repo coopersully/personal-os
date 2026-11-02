@@ -1,8 +1,9 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { TaskListDialog } from "./task-list-dialog";
@@ -96,7 +97,7 @@ it("does not allow the protected Inbox to be edited", () => {
       />
     </QueryClientProvider>,
   );
-  expect(container).toBeEmptyDOMElement();
+  expect(container.querySelector("[data-slot=dialog-content]")).toBeNull();
 });
 
 it("resolves an active-content archive conflict with a destination and current revision", async () => {

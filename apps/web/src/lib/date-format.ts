@@ -92,3 +92,56 @@ export function formatCalendarDate(value: string): string {
     timeZone: "UTC",
   }).format(date);
 }
+
+/** Relative labels compare calendar days in the user's zone, never elapsed hours. */
+export function formatRelativeCalendarDate(
+  value: string,
+  timeZone: string,
+  { now = new Date() }: { now?: Date } = {},
+): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return value;
+  const difference = date.getTime() / 86_400_000 - localDayNumber(now, timeZone);
+  if (difference === 0) return "Today";
+  if (difference === -1) return "Yesterday";
+  if (difference === 1) return "Tomorrow";
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+    ...(date.getUTCFullYear() !==
+    new Date(localDayNumber(now, timeZone) * 86_400_000).getUTCFullYear()
+      ? { year: "numeric" as const }
+      : {}),
+  }).format(date);
+}
+
+/** Display labels for a date-only value or an instant, compared by calendar day in its zone. */
+export function dateDisplayLabels(value: string, timeZone: string, now = new Date()) {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/u.test(value);
+  const date = new Date(dateOnly ? `${value}T00:00:00Z` : value);
+  if (!Number.isFinite(date.getTime()) || (dateOnly && date.toISOString().slice(0, 10) !== value))
+    return null;
+  const day = dateOnly ? date.getTime() / 86_400_000 : localDayNumber(date, timeZone);
+  const difference = day - localDayNumber(now, timeZone);
+  return {
+    absolute: new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: dateOnly ? "UTC" : timeZone,
+    }).format(date),
+    relative:
+      difference === 0
+        ? "Today"
+        : difference === -1
+          ? "Yesterday"
+          : difference === 1
+            ? "Tomorrow"
+            : difference < 0
+              ? `${Math.abs(difference)} days ago`
+              : `in ${difference} days`,
+    nearby: Math.abs(difference) <= 1,
+  };
+}

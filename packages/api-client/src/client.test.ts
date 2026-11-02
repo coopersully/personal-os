@@ -1479,7 +1479,7 @@ function apiFetch() {
   });
 }
 
-describe("ilo API client", () => {
+describe("Personal OS API client", () => {
   it("uses canonical task organization HTTP transport", async () => {
     const fetch = apiFetch();
     const api = createApiClient({ baseUrl: "https://api.example.com", fetch });
@@ -2939,14 +2939,14 @@ describe("ilo API client", () => {
     await expect(api.getAssistantSetupStatus()).resolves.toMatchObject({
       domains: [expect.objectContaining({ domain: "mail" })],
     });
-    await expect(api.getIloContext()).resolves.toMatchObject({
+    await expect(api.getPersonalOsContext()).resolves.toMatchObject({
       access: { grantedScopes: ["mail:read", "mail:write"] },
       identity: { actorType: "agent", displayName: "Test" },
       links: { today: "https://app.example.com/today" },
       time: { timezone: "UTC" },
     });
     await expect(
-      api.getIloSetup({ domain: "mail", stepId: "learn_preferences" }),
+      api.getPersonalOsSetup({ domain: "mail", stepId: "learn_preferences" }),
     ).resolves.toMatchObject({
       currentStepId: "learn_preferences",
       domain: "mail",
@@ -3078,7 +3078,11 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual(attentionItem);
     await api.snoozeMailThread(id, "2026-07-14T12:00:00.000Z");
-    await expect(api.syncConnector(id)).resolves.toBe(3);
+    await expect(api.syncConnector(id)).resolves.toEqual({
+      changed: 3,
+      pending: false,
+      nextSyncAt: null,
+    });
     await api.deleteConnector(id);
     await expect(api.listAccessTokens()).resolves.toHaveLength(1);
     await expect(
@@ -3269,4 +3273,41 @@ describe("ilo API client", () => {
       requestId: null,
     });
   });
+});
+
+it("transports a duplicate preview and its exact reviewed resolution", async () => {
+  const fetch = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ outcome: "completed", data: {} }), {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+  const api = createApiClient({ baseUrl: "https://api.example.com", fetch });
+  await api.getFinanceAccountDuplicatePreview(id, accountId);
+  const previewCall = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  expect(String(previewCall[0])).toBe(
+    `https://api.example.com/v1/finances/accounts/${id}/duplicate-preview?keepAccountId=${accountId}`,
+  );
+  const input = {
+    keepAccountId: accountId,
+    revision: "a".repeat(64),
+    idempotencyKey: "reviewed-pair",
+  };
+  await api.resolveFinanceAccountDuplicate(id, input);
+  const resolveCall = fetch.mock.calls[1] as unknown as [string, RequestInit];
+  expect(String(resolveCall[0])).toBe(
+    `https://api.example.com/v1/finances/accounts/${id}/resolve-duplicate`,
+  );
+  expect(resolveCall[1]).toMatchObject({ method: "POST", body: JSON.stringify(input) });
+});
+
+it("preserves durable connector continuation instead of reducing it to a changed count", async () => {
+  const pending = { changed: 25, pending: true, nextSyncAt: "2026-10-29T18:00:00.000Z" };
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValue(Response.json({ result: pending }));
+  const api = createApiClient({ baseUrl: "https://api.example.com", token: "scoped-token", fetch });
+  await expect(api.syncConnector(id)).resolves.toEqual(pending);
+  expect(fetch.mock.calls[0]?.[0]).toBe(`https://api.example.com/v1/connectors/${id}/sync`);
+  expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
 });

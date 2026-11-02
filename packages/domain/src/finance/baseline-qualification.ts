@@ -88,6 +88,7 @@ export const financeBudgetBaselineQualificationSchema = financeBudgetBaselineSna
     id: idSchema,
     revision: z.literal(1),
     confirmedAt: isoDateTimeSchema,
+    confirmedByActorType: z.enum(["user", "agent"]).optional(),
     confirmedByActorId: z.string().min(1),
     qualificationKind: z.enum(["current", "retrospective"]),
   })

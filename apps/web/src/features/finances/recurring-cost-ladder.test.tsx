@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinanceRecurringObligation } from "@personal-os/domain";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { RecurringCostLadder } from "./recurring-cost-ladder";
 
@@ -40,6 +40,7 @@ it("preserves payment evidence and does not infer fixedness from a user supplied
   expect(row.getByText(/User supplied · Monthly · Checking/)).toBeVisible();
   expect(row.getAllByText("Unavailable")).toHaveLength(2);
   expect(row.getByText("Fixed or variable amount not established")).toBeVisible();
+  fireEvent.click(row.getByText("Calculation and source details"));
   expect(row.getByText(/Next expected: 2026-11-01 · Last observed: 2026-10-01/)).toBeVisible();
   expect(row.getByRole("link", { name: "View source account activity for Music" })).toHaveAttribute(
     "href",
@@ -172,6 +173,8 @@ function qualified(items: FinanceRecurringObligation[]) {
 it("normalizes only current explicit fixed evidence, with rounded monthly labels and subset coverage", () => {
   qualified([evidenced(), fixture({ id: "missing", displayName: "Missing" })]);
   const row = within(screen.getByRole("listitem", { name: "Music" }));
+  expect(row.getByText("$52.52")).not.toBeVisible();
+  fireEvent.click(row.getByText("Calculation and source details"));
   expect(row.getByText("$52.52")).toBeVisible();
   expect(row.getByText("$4.38 (rounded)")).toBeVisible();
   expect(row.getByText(/52 payments per year/)).toBeVisible();
@@ -198,6 +201,9 @@ it("keeps currencies separate and review evidence in the suspected subset", () =
   if (euro.planningEvidence) euro.planningEvidence.currencyCode = "EUR";
   qualified([evidenced(), euro]);
   const subset = within(screen.getByRole("region", { name: "Known recurring cost subset" }));
+  expect(subset.getByText("Confirmed USD annual subset")).not.toBeVisible();
+  fireEvent.click(subset.getByText("Annual equivalents (USD)"));
+  fireEvent.click(subset.getByText("Annual equivalents (EUR)"));
   expect(subset.getByText("Confirmed USD annual subset")).toBeVisible();
   expect(subset.getByText("Suspected EUR annual subset")).toBeVisible();
   expect(subset.getByText("$52.52")).toBeVisible();

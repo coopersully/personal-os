@@ -92,9 +92,41 @@ it("retains the cached journey during a transient refresh failure", async () => 
 it("uses verified transaction currency and never inserts a USD fallback", async () => {
   show();
   expect(
-    await screen.findByText(/40.00 \(currency unknown\) received of 120.00 \(currency unknown\)/),
+    await screen.findByText(
+      /40.00 \(currency unknown\) recorded received of 120.00 \(currency unknown\)/,
+    ),
   ).toBeVisible();
   expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+});
+it("keeps pending receipt state visible before opening expense or receipt evidence", async () => {
+  const item = claim({
+    matches: [
+      {
+        id: tx,
+        reimbursementId: id,
+        creditTransactionId: tx,
+        amount: 40,
+        createdAt: "2026-10-18T12:00:00Z",
+        rationale: "Pending repayment",
+        evidence,
+        creditTransaction: {
+          transactionId: tx,
+          amount: 40,
+          currency: "EUR",
+          date: "2026-10-18",
+          merchant: "Pending credit",
+          pending: true,
+        },
+      },
+    ],
+  });
+  show(item);
+  expect(await screen.findByText("Includes pending credit")).toBeVisible();
+  expect(screen.getByText("Expense basis and personal cost").parentElement).not.toHaveAttribute(
+    "open",
+  );
+  expect(screen.queryByRole("link", { name: "Open credit transaction 1" })).not.toBeInTheDocument();
+  expect(screen.getByText(/40.00 \(currency unknown\) recorded received of 120.00/)).toBeVisible();
 });
 it("shows canonical source currency and warns about mismatched credit currency", async () => {
   const item = claim({
@@ -131,7 +163,7 @@ it("shows canonical source currency and warns about mismatched credit currency",
     },
   ];
   show(item);
-  expect(await screen.findByText(/€40.00 received of €120.00/)).toBeVisible();
+  expect(await screen.findByText(/€40.00 recorded received of €120.00/)).toBeVisible();
   expect(screen.getByText(/Receipt currency differs from the source expense/)).toBeVisible();
 });
 
@@ -158,6 +190,7 @@ it("labels qualified personal cost as whole-expense material and never adds case
     },
   });
   show(item);
+  fireEvent.click(await screen.findByText("Expense basis and personal cost"));
   expect(
     await screen.findByText(
       /Personal cost to date \(whole expense\): €150.00. May repeat on related claims; do not add case cards together/,

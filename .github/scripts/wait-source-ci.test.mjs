@@ -47,7 +47,10 @@ test("metadata changes cannot cancel source CI, and protected gate requires both
   assert.match(metadata, /types: \[edited, opened, ready_for_review, reopened, synchronize\]/);
   assert.match(metadata, /group: pr-metadata-/);
   assert.match(metadata, /name: CI required/);
-  assert.match(metadata, /check-pr-body.sh/);
+  assert.match(
+    readFileSync(new URL("./source-observation.mjs", import.meta.url), "utf8"),
+    /check-pr-body.sh/,
+  );
   assert.match(metadata, /wait-source-ci.mjs/);
 });
 

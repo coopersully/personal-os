@@ -5,11 +5,13 @@ import {
   type UseMutationOptions,
   useMutation,
 } from "@tanstack/react-query";
-import { useContext, useId, useMemo, useRef } from "react";
+import { useId, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { classifyMutationError, type FeedbackOptions } from "./feedback.js";
-
-import { SettingsFeedbackContext } from "./settings-feedback.js";
+import {
+  classifyMutationError,
+  type FeedbackOptions,
+  type MutationFeedbackState,
+} from "./feedback.js";
 
 type Attempt<T> = { toastId: string; callerContext: T | undefined; preparationFailed: boolean };
 
@@ -21,11 +23,14 @@ export function useFeedbackMutation<
 >(
   {
     feedback: options,
+    onFeedback,
     ...mutationOptions
-  }: UseMutationOptions<TData, TError, TVariables, TOnMutateResult> & { feedback: FeedbackOptions },
+  }: UseMutationOptions<TData, TError, TVariables, TOnMutateResult> & {
+    feedback: FeedbackOptions;
+    onFeedback?: (feedback: MutationFeedbackState, variables: TVariables) => void;
+  },
   queryClient?: QueryClient,
 ) {
-  const settingsFeedback = useContext(SettingsFeedbackContext);
   const operationId = useId();
   const sequence = useRef(0);
   const latest = useRef<Attempt<TOnMutateResult> | null>(null);
@@ -62,14 +67,18 @@ export function useFeedbackMutation<
           ...options,
           ...(attempt?.preparationFailed ? { safeToRetry: true } : {}),
         });
-        if (
-          attempt === latest.current &&
-          (settingsFeedback || options.pending || !failure.persistent)
-        )
-          toast.error(failure.message, {
-            id: attempt?.toastId,
-            duration: Number.POSITIVE_INFINITY,
-          });
+        // Publish first: a domain callback may synchronously present recovery and dismiss this
+        // exact toast. Publishing afterwards could resurrect an already-owned error message.
+        if (attempt === latest.current) {
+          if (options.ownsError?.(error)) toast.dismiss(attempt?.toastId);
+          else
+            toast.error(failure.message, {
+              id: attempt?.toastId,
+              duration: Number.POSITIVE_INFINITY,
+              ...(options.errorPosition ? { position: options.errorPosition } : {}),
+            });
+        }
+        onFeedback?.({ ...failure, toastId: attempt?.toastId }, variables);
         return mutationOptions.onError?.(error, variables, attempt?.callerContext, context);
       },
       onSuccess: async (data, variables, attempt, context) => {
@@ -117,11 +126,14 @@ export function useFeedbackMutation<
   const feedback = useMemo(
     () =>
       mutation.isError
-        ? classifyMutationError(mutation.error, {
-            action: options.action,
-            form: Boolean(options.form),
-            safeToRetry: preparationFailed || Boolean(options.safeToRetry),
-          })
+        ? {
+            ...classifyMutationError(mutation.error, {
+              action: options.action,
+              form: Boolean(options.form),
+              safeToRetry: preparationFailed || Boolean(options.safeToRetry),
+            }),
+            toastId: latest.current?.toastId,
+          }
         : null,
     [
       mutation.isError,

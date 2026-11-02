@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { financeTransactionSchema } from "../finance.js";
+import { financeGroupIconSchema } from "./appearance.js";
 
 const cents = z.number().int().safe();
 const reference = z.string().min(1);
@@ -114,7 +115,7 @@ export const financeSpendingGroupSchema = z.object({
         .string()
         .regex(/^#[0-9a-fA-F]{6}$/)
         .nullable(),
-      icon: z.enum(["category", "bucket", "uncategorized"]),
+      icon: financeGroupIconSchema,
     })
     .optional(),
   categoryIds: z.array(reference.nullable()),

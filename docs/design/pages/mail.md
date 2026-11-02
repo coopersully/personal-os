@@ -127,7 +127,7 @@ the signed-in Mail surface and separately authorized exact-draft MCP calls use t
   available shell height like Calendar, rather than sitting in a capped card or
   narrow page column.
 - Inbox, Unread, Starred, Snoozed, Sent, and Drafts are direct unified destinations.
-- The sidebar contains destinations only. A compact app-bar avatar control filters the unified view
+- The sidebar contains destinations only. A compact shared app-bar account icon/count control filters the unified view
   by source account, defaults to every account, preserves at least one visible account, and exposes
   account health plus a direct Settings repair path.
 - Mail keeps workspace identity, search, and Sync together at the start of the primary app bar.
@@ -215,3 +215,18 @@ Mail guidance exposes the typed inbox style, important-email handling, low-prior
 and retention period beside the existing objective and instructions. Saving preserves the profile
 version guard and unrelated preference keys. Changing these preferences does not activate rules;
 existing previews and approval remain required. Review-only disposition clears the retention period.
+
+### Shared workspace header
+
+Mail uses the shared title row for its mailbox view selector, preserving account and search filters when changing views. Search and accounts stay in the mobile utility row; sync and list layout are under View options. The conversation toolbar appears only when a conversation is selected. See [shared header rows](../system.md#shared-workspace-header-rows) for sizing and responsive placement.
+
+Header Sync is an icon action after layout options; mobile keeps it last inside
+the shared View options surface. Search yields width before icon actions clip.
+
+
+All mailbox destinations display complete conversation totals via the owner-scoped
+Mail navigation-count read, including zero. Counts follow Inbox/Unread/Starred/Snoozed/
+Sent filters and selected accounts; Drafts mirrors the owner-wide unsent draft view.
+The counts use shared sidebar metadata and refresh with conversation/draft changes.
+
+Mobile Mail uses a Mailboxes section landing page for Inbox, Unread, Starred, Snoozed, Sent, and Drafts, reusing sidebar rows/counts and preserving selected accounts. Compose stays in a bottom-right floating action above the section app bar.

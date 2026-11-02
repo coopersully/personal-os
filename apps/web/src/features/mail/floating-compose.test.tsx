@@ -1,9 +1,10 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import type { MailDraft, MailSetupAccount } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { toast } from "sonner";
@@ -238,7 +239,7 @@ describe("FloatingMailComposer", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reconnect account" }));
     await waitFor(() =>
       expect(screen.getByLabelText("Current route")).toHaveTextContent(
-        "/settings?section=connections",
+        "/settings?page=connections",
       ),
     );
   });
@@ -287,7 +288,7 @@ describe("FloatingMailComposer", () => {
     resolveDraft?.(draft);
     await waitFor(() =>
       expect(screen.getByLabelText("Current route")).toHaveTextContent(
-        "/settings?section=connections",
+        "/settings?page=connections",
       ),
     );
   });
@@ -830,7 +831,7 @@ describe("FloatingMailComposer", () => {
     else
       await waitFor(() =>
         expect(screen.getByLabelText("Current route")).toHaveTextContent(
-          "/settings?section=connections",
+          "/settings?page=connections",
         ),
       );
     expect(create).not.toHaveBeenCalled();

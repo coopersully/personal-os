@@ -2,10 +2,11 @@
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { renderWithFeedback as render } from "../../test-utils/feedback";
 import { ReviewsPage } from "./page.js";
 
 const now = "2026-08-12T12:00:00.000Z";
@@ -80,7 +81,7 @@ describe("Reviews", () => {
         {
           action: {
             label: "Review rule",
-            to: "/settings?section=mail&reviewRule=one",
+            to: "/settings?page=mail&reviewRule=one",
           },
           actionAt: null,
           domain: "mail",
@@ -132,15 +133,17 @@ describe("Reviews", () => {
     expect(screen.queryByRole("radio", { name: "Setup" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review rule" })).toHaveAttribute(
       "href",
-      "/settings?section=mail&reviewRule=one",
+      "/settings?page=mail&reviewRule=one",
     );
     expect(screen.queryByText("Legacy setup item")).not.toBeInTheDocument();
 
     const callsBeforeEmptySelection = mocks.listAgentAccessWorkItems.mock.calls.length;
-    await browser.click(screen.getByRole("radio", { name: "All work" }));
+    await browser.click(screen.getByRole("button", { name: "Filter by work type" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "All work" }));
     expect(mocks.listAgentAccessWorkItems).toHaveBeenCalledTimes(callsBeforeEmptySelection);
 
-    await browser.click(screen.getByRole("radio", { name: "Attention" }));
+    await browser.click(screen.getByRole("button", { name: "Filter by work type" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Attention" }));
     await waitFor(() =>
       expect(mocks.listAgentAccessWorkItems).toHaveBeenLastCalledWith({
         kind: "attention",
@@ -149,7 +152,8 @@ describe("Reviews", () => {
     );
     expect(screen.getByLabelText("Current location")).toHaveTextContent("/reviews?kind=attention");
 
-    await browser.selectOptions(screen.getByLabelText("Filter by workspace"), "calendar");
+    await browser.click(screen.getByRole("button", { name: "Filter by workspace" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Calendar" }));
     await waitFor(() =>
       expect(mocks.listAgentAccessWorkItems).toHaveBeenLastCalledWith({
         domain: "calendar",
@@ -161,14 +165,16 @@ describe("Reviews", () => {
       "/reviews?kind=attention&workspace=calendar",
     );
 
-    await browser.click(screen.getByRole("radio", { name: "All work" }));
+    await browser.click(screen.getByRole("button", { name: "Filter by work type" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "All work" }));
     await waitFor(() =>
       expect(mocks.listAgentAccessWorkItems).toHaveBeenLastCalledWith({
         domain: "calendar",
         limit: 10,
       }),
     );
-    await browser.selectOptions(screen.getByLabelText("Filter by workspace"), "all");
+    await browser.click(screen.getByRole("button", { name: "Filter by workspace" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "All workspaces" }));
     await waitFor(() =>
       expect(mocks.listAgentAccessWorkItems).toHaveBeenLastCalledWith({ limit: 10 }),
     );
@@ -191,15 +197,17 @@ describe("Reviews", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Some workspaces are unavailable")).toBeInTheDocument();
+    expect(await screen.findByText(/Some workspaces are unavailable/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByText("Available work is clear")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Check again" }));
+    await browser.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Review newsletters")).toBeInTheDocument();
 
     mocks.listAgentAccessWorkItems.mockRejectedValueOnce(new Error("Queue unavailable"));
-    await browser.click(screen.getByRole("radio", { name: "Review" }));
-    expect(await screen.findByText("Couldn’t load your reviews.")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await browser.click(screen.getByRole("button", { name: "Filter by work type" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Review" }));
+    const failure = await screen.findByRole("region", { name: "Couldn’t load your reviews." });
+    await browser.click(within(failure).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Review newsletters")).toBeInTheDocument();
   });
 
@@ -333,8 +341,8 @@ describe("Reviews", () => {
     renderPage();
     expect(await screen.findByText("First review")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Next page" }));
-    expect(await screen.findByText("Couldn’t load your reviews.")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    const failure = await screen.findByRole("region", { name: "Couldn’t load your reviews." });
+    await browser.click(within(failure).getByRole("button", { name: "Try again" }));
 
     await waitFor(() =>
       expect(mocks.listAgentAccessWorkItems).toHaveBeenLastCalledWith({ limit: 10 }),

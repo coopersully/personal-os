@@ -1,6 +1,7 @@
 import type { FinanceOnboardingAdapter } from "@personal-os/domain";
 import { useMutationState, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -111,7 +112,7 @@ export function FinanceSetupPage({
         ))}
       </nav>
       {query.isPending ? (
-        <p role="status">Loading financial setup…</p>
+        <ContentSkeleton label="Loading financial setup…" rows={3} />
       ) : (
         <>
           {section === "profile" ? <FinanceConfigurationEditor /> : null}

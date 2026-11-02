@@ -6,11 +6,8 @@ import {
 } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { QueryFeedback } from "@/components/async-state";
 import { CurrencyInput } from "@/components/currency-input";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
   FieldDescription,
@@ -18,7 +15,11 @@ import {
   FieldLabel,
   FieldLegend,
   FieldSet,
-} from "@/components/ui/field";
+} from "@/components/settings-field";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import {
@@ -469,17 +470,7 @@ export function FinanceScenarioComparison() {
               />
             </Field>
           </FieldGroup>
-          {categories.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Spending categories unavailable</AlertTitle>
-              <AlertDescription>
-                {"Couldn’t refresh this information. Try again."}
-                <Button type="button" variant="outline" onClick={() => void categories.refetch()}>
-                  Retry categories
-                </Button>
-              </AlertDescription>
-            </Alert>
-          ) : null}
+          <QueryFeedback query={categories} title="Couldn’t load spending categories." />
           {drafts.map((draft, index) => (
             <ScenarioFields
               key={draft.id}

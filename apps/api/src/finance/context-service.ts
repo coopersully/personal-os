@@ -27,6 +27,8 @@ import {
   loadFinanceAuthorization,
 } from "./context.js";
 
+import { recordFinanceConversationSmsContext } from "./conversation-service.js";
+
 type Snapshot = typeof financeContextRevisions.$inferSelect;
 const maxRevision = 9223372036854775807n;
 function value(row: Snapshot): FinanceContext {
@@ -206,7 +208,7 @@ export function createFinanceContextService(options: {
         : principal.actorType === "user"
           ? "app"
           : "agent";
-      return executeFinanceIdempotently(
+      const result = await executeFinanceIdempotently(
         db,
         context,
         {
@@ -290,6 +292,15 @@ export function createFinanceContextService(options: {
         },
         executor,
       );
+      if (options.smsEvidence && executor) {
+        await recordFinanceConversationSmsContext(executor, {
+          userId: principal.userId,
+          claimId: options.smsEvidence.claimId,
+          text: result.text,
+          recordedAt: now(),
+        });
+      }
+      return result;
     },
     /** Deterministic expiry requires read scope; no editable content is changed. */
     async getCurrentContext(

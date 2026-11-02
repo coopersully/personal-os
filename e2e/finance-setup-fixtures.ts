@@ -87,7 +87,7 @@ export async function createFinanceSetupHost(human: FinanceSetupHuman, baseURL: 
       );
   };
   try {
-    const context = await agent.getIloContext();
+    const context = await agent.getPersonalOsContext();
     await human.updateExecutionPolicySettings({
       expectedVersion: originalPolicy.version,
       reviewBypassEnabled: true,

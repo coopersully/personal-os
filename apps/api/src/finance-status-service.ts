@@ -11,6 +11,7 @@ import {
   financeIncomeStreams,
   financePeriodReviews,
   financeProfiles,
+  financeProfileVersions,
   financeProviderItems,
   financeRecurringObligations,
   financeReimbursementMatches,
@@ -35,6 +36,8 @@ import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
+import { projectFinanceActionQuestion } from "./finance/action-question-projection.js";
+import { budgetPlanningDate, readBudgetPlanContext } from "./finance/budget-plan-projection.js";
 import { findUnverifiedLegacyFinanceEffects } from "./finance/legacy-maintenance-evidence.js";
 import {
   activeAllocationsByTransaction,
@@ -190,7 +193,7 @@ export function nextMonth(month: string): string {
 export function transactionIsInScope(
   row: typeof financeTransactions.$inferSelect,
   scope: MaintenanceScope,
-  defaultMonth: string,
+  _defaultMonth: string,
   targetReviewTransactionId: string | null,
 ): boolean {
   if (scope.type === "window") {
@@ -202,10 +205,7 @@ export function transactionIsInScope(
     if (scope.entityType === "finance_review_case") return row.id === targetReviewTransactionId;
     return false;
   }
-  return (
-    row.transactionDate >= `${defaultMonth}-01` &&
-    row.transactionDate < `${nextMonth(defaultMonth)}-01`
-  );
+  return true;
 }
 
 export function latestProfile(rows: Array<typeof financeProfiles.$inferSelect>, date: string) {
@@ -263,11 +263,13 @@ export function createFinanceStatusService({ db, now }: Options) {
     ): Promise<FinanceStatus> {
       const asOfDate = now();
       const asOf = asOfDate.toISOString();
-      const currentMonth = asOf.slice(0, 7);
+
       if (scope.type === "target" && !isFinanceTargetType(scope.entityType)) {
         throw new AppError("invalid_request", "The Finance target type is not supported.");
       }
       const read = async (tx: Parameters<Parameters<Database["transaction"]>[0]>[0]) => {
+        const planContext = await readBudgetPlanContext(tx, userId, asOfDate);
+        const currentMonth = planContext.month;
         const accounts = await tx
           .select()
           .from(financeAccounts)
@@ -369,10 +371,15 @@ export function createFinanceStatusService({ db, now }: Options) {
           .where(
             and(
               eq(financeTransactions.userId, userId),
-              or(
-                gte(financeTransactions.transactionDate, lowerBound),
-                inArray(financeTransactions.id, explicitlyRequiredTransactionIds),
-              ),
+              scope.type === "all_outstanding"
+                ? undefined
+                : or(
+                    gte(financeTransactions.transactionDate, lowerBound),
+                    inArray(financeTransactions.id, explicitlyRequiredTransactionIds),
+                    scope.type === "target" && scope.entityType === "finance_account"
+                      ? eq(financeTransactions.accountId, scope.id)
+                      : undefined,
+                  ),
             ),
           )
           .orderBy(financeTransactions.transactionDate, financeTransactions.id);
@@ -467,6 +474,12 @@ export function createFinanceStatusService({ db, now }: Options) {
           .select()
           .from(financeProfiles)
           .where(eq(financeProfiles.userId, userId));
+        const [canonicalProfile] = await tx
+          .select()
+          .from(financeProfileVersions)
+          .where(eq(financeProfileVersions.userId, userId))
+          .orderBy(desc(financeProfileVersions.version))
+          .limit(1);
         const approvals = await tx
           .select()
           .from(domainProfileApprovals)
@@ -542,8 +555,11 @@ export function createFinanceStatusService({ db, now }: Options) {
         ) {
           throw new AppError("not_found", "The Finance target was not found.");
         }
-        const currentTransactions = transactions.filter((row) =>
-          transactionIsInScope(row, { type: "all_outstanding" }, currentMonth, null),
+        // Backlog coverage is independent of the current accounting month.
+        const currentTransactions = transactions.filter(
+          (row) =>
+            row.transactionDate >= currentMonthStart &&
+            row.transactionDate < `${nextMonth(currentMonth)}-01`,
         );
         const scopedTransactions = transactions.filter((row) =>
           transactionIsInScope(row, scope, currentMonth, targetReview?.transactionId ?? null),
@@ -582,21 +598,41 @@ export function createFinanceStatusService({ db, now }: Options) {
             0,
           ) / 100;
         const activeProfile = latestProfile(profiles, asOf.slice(0, 10));
-        const statedMonthlyIncome =
-          activeProfile?.grossAnnualIncome != null ? activeProfile.grossAnnualIncome / 1200 : null;
+        const incomeProfile = canonicalProfile ?? activeProfile;
+        const householdSize = canonicalProfile
+          ? canonicalProfile.householdSize
+          : activeProfile?.householdSize;
+        // An explicit canonical null must never resurrect stale legacy income.
+        const statedMonthlyIncome = canonicalProfile
+          ? canonicalProfile.expectedMonthlyTakeHome === null
+            ? null
+            : canonicalProfile.expectedMonthlyTakeHome / 100
+          : activeProfile?.grossAnnualIncome != null
+            ? activeProfile.grossAnnualIncome / 1200
+            : null;
         const observedIncome = incomeObserved > 0 ? incomeObserved : null;
-        const budgetTotal =
+        const categoryLimitTotal =
           budgets.length > 0 ? budgets.reduce((sum, row) => sum + row.limit, 0) / 100 : null;
-        const selectedDay = asOfDate.getUTCDate();
+        // Only spending allocations are comparable to forecast spending. Savings and buffers
+        // never become category limits; legacy limits remain separately disclosed.
+        const budgetTotal = planContext.current?.spendingTotal ?? null;
+        const selectedDay = Number(budgetPlanningDate(asOfDate, planContext.timezone).slice(8, 10));
         const daysInMonth = new Date(
           Date.UTC(Number(currentMonth.slice(0, 4)), Number(currentMonth.slice(5, 7)), 0),
         ).getUTCDate();
         const reliableIncomeInput = {
-          expectedNetPay:
-            activeProfile?.expectedNetPay == null ? null : activeProfile.expectedNetPay / 100,
-          expectedNetPayFrequency: activeProfile?.payFrequency ?? null,
+          expectedNetPay: canonicalProfile
+            ? statedMonthlyIncome
+            : activeProfile?.expectedNetPay == null
+              ? null
+              : activeProfile.expectedNetPay / 100,
+          expectedNetPayFrequency: canonicalProfile
+            ? "monthly"
+            : (activeProfile?.payFrequency ?? null),
           grossAnnualIncome:
-            activeProfile?.grossAnnualIncome == null ? null : activeProfile.grossAnnualIncome / 100,
+            canonicalProfile || activeProfile?.grossAnnualIncome == null
+              ? null
+              : activeProfile.grossAnnualIncome / 100,
           observedMonthlyIncome: observedIncome,
           observedIncomeWindow: {
             complete: selectedDay === daysInMonth,
@@ -773,12 +809,16 @@ export function createFinanceStatusService({ db, now }: Options) {
         const byReason: Record<string, number> = {};
         for (const review of scopedReviews)
           byReason[review.reason] = (byReason[review.reason] ?? 0) + 1;
-        const needsFirstBudgetFacts = latestBudgetPlan === undefined && budgets.length === 0;
+        const needsFirstBudgetFacts =
+          latestBudgetPlan === undefined &&
+          !planContext.current &&
+          !planContext.previous &&
+          !planContext.upcoming;
         const missingFacts = needsFirstBudgetFacts
           ? [
               ...(monthlyIncome === null ? ["reliable_monthly_income"] : []),
               ...(activeProfile?.monthlyHousingCost == null ? ["monthly_housing_cost"] : []),
-              ...(activeProfile?.householdSize == null ? ["household_size"] : []),
+              ...(householdSize == null ? ["household_size"] : []),
               ...(recurringObligations.length === 0 ? ["recurring_obligations"] : []),
               ...(!hasStatedGoalPriority ? ["goal_priority"] : []),
             ]
@@ -802,7 +842,7 @@ export function createFinanceStatusService({ db, now }: Options) {
                 ),
               ]
             : []),
-          ...(needsFirstBudgetFacts && activeProfile?.householdSize == null
+          ...(needsFirstBudgetFacts && householdSize == null
             ? [
                 planningQuestion(
                   "household_size",
@@ -832,14 +872,18 @@ export function createFinanceStatusService({ db, now }: Options) {
         ];
         const questions = [
           ...planningQuestions,
-          ...actionQuestions.flatMap((row) => {
-            const payload = row.privatePayload as { question: unknown };
-            const parsed = financeQuestionSchema.safeParse({
-              ...(payload.question as Record<string, unknown>),
-              id: row.id,
-            });
-            return parsed.success ? [parsed.data] : [];
-          }),
+          ...(
+            await Promise.all(
+              actionQuestions.map(async (row) => {
+                const payload = row.privatePayload as { question: unknown };
+                const parsed = financeQuestionSchema.safeParse({
+                  ...(payload.question as object),
+                  id: row.id,
+                });
+                return parsed.success ? [await projectFinanceActionQuestion(tx, row)] : [];
+              }),
+            )
+          ).flat(),
         ];
         const latestRun = maintenanceRuns[0];
         const activeRun =
@@ -856,11 +900,15 @@ export function createFinanceStatusService({ db, now }: Options) {
             : null;
         const rulebookInput = {
           accountRoles: { available: false, revisions: [] },
-          activeBudgets: budgets.map((row) => ({
-            id: row.id,
-            month: row.month,
-            updatedAt: row.updatedAt.toISOString(),
-          })),
+          activeBudgets: planContext.current
+            ? [
+                {
+                  id: planContext.current.id,
+                  month: planContext.current.effectiveFrom,
+                  updatedAt: planContext.current.approvedAt,
+                },
+              ]
+            : [],
           activeGoals: goals.map((row) => ({
             id: row.id,
             revision: row.updatedAt.toISOString(),
@@ -899,6 +947,7 @@ export function createFinanceStatusService({ db, now }: Options) {
             row.direction,
           ].join(":");
           return (
+            row.needsReview ||
             row.pending ||
             row.reconciliationStatus === "candidate" ||
             (possibleDuplicateKeys.get(duplicateKey) ?? 0) > 1 ||
@@ -923,7 +972,11 @@ export function createFinanceStatusService({ db, now }: Options) {
                 .at(-1)?.transactionDate ?? null);
         const oldestOutstandingAt = outstandingReviews[0]?.createdAt.toISOString() ?? null;
         const work = {
-          actionable: scopedReviews.length,
+          // Review rows are separate obligations; add flags without a corresponding row.
+          actionable:
+            scopedReviews.length +
+            scopedTransactions.filter((row) => row.needsReview && !reviewTransactionIds.has(row.id))
+              .length,
           awaitingApproval: latestRun?.status === "awaiting_approval" ? 1 : 0,
           awaitingInput: questions.length,
           blocked: blockedCount + legacyEffects.length + (latestRun?.status === "blocked" ? 1 : 0),
@@ -973,18 +1026,18 @@ export function createFinanceStatusService({ db, now }: Options) {
               ? activeProfile.monthlyHousingCost / 100
               : null;
         const statedIncomeEvidence = {
-          asOf: activeProfile?.updatedAt.toISOString() ?? null,
+          asOf: incomeProfile?.updatedAt.toISOString() ?? null,
           basis: statedMonthlyIncome === null ? "missing" : "user_stated",
           confidence: statedMonthlyIncome === null ? null : "high",
           sourceRefs:
-            activeProfile === undefined
+            incomeProfile === undefined
               ? []
               : [
                   {
                     accountId: null,
                     provider: "local" as const,
-                    remoteId: activeProfile.id,
-                    revision: activeProfile.updatedAt.toISOString(),
+                    remoteId: incomeProfile.id,
+                    revision: incomeProfile.updatedAt.toISOString(),
                     sourceType: "local" as const,
                   },
                 ],
@@ -1062,7 +1115,9 @@ export function createFinanceStatusService({ db, now }: Options) {
             activeGoals: goals.map(serializeGoal),
             activeMotives: motives.map(serializeMotive),
             budget: {
-              approved: budgets.length > 0,
+              approved: planContext.current !== null,
+              planContext,
+              categoryLimitTotal: evidenceCurrent ? categoryLimitTotal : null,
               month: currentMonth,
               total: evidenceCurrent ? budgetTotal : null,
             },
@@ -1176,7 +1231,17 @@ export function createFinanceStatusService({ db, now }: Options) {
               unmatchedCredits,
             },
             reviewMode: { reviewBypassEnabled: automationSettings?.reviewBypassEnabled ?? false },
-            review: { byReason, total: scopedReviews.length },
+            review: {
+              byReason,
+              total: scopedReviews.length,
+              coverage: {
+                scope,
+                complete: true,
+                flaggedTransactions: scopedTransactions.filter((row) => row.needsReview).length,
+                outstandingReviewRows: scopedReviews.length,
+                transactionsWithOutstandingReviews: reviewTransactionIds.size,
+              },
+            },
             rulebookVersion,
             wealth: {
               cash,

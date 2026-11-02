@@ -155,7 +155,68 @@ describe("server-validated Finance conversation causality", () => {
     );
     await expect(
       requireFinanceEffectMessageProof(f.tx, f.run, f.principal, f.at),
-    ).rejects.toMatchObject({ code: "forbidden" });
+    ).rejects.toMatchObject({
+      code: "forbidden",
+      details: {
+        reason: "run_host_binding_missing",
+        recovery: "owner_inspection_required",
+        runId: f.run.id,
+      },
+    });
+  });
+  it.each([
+    "schedule",
+    "connection",
+  ])("identifies a missing saved host %s without assigning a replacement", async (missing) => {
+    const f = await fixture();
+    if (missing === "schedule") f.run.automationScheduleId = null;
+    else f.run.authorizationConnectionId = null;
+    const saved = { ...f.run };
+    await expect(
+      requireFinanceEffectMessageProof(f.tx, f.run, f.principal, f.at),
+    ).rejects.toMatchObject({
+      code: "forbidden",
+      details: {
+        reason: "run_host_binding_missing",
+        recovery: "owner_inspection_required",
+        runId: f.run.id,
+      },
+    });
+    expect(f.run).toEqual(saved);
+  });
+  it.each([
+    "foreign",
+    "inactive",
+  ])("retains original-host denial for a fully bound run with an %s host", async (variant) => {
+    const f = await fixture();
+    if (variant === "foreign") f.principal.authorizationConnectionId = randomUUID();
+    else
+      f.rows.set(automationHostSchedules, [
+        {
+          id: f.run.automationScheduleId,
+          authorizationConnectionId: f.run.authorizationConnectionId,
+          schedule: { state: "paused" },
+        },
+      ]);
+    await expect(
+      requireFinanceEffectMessageProof(f.tx, f.run, f.principal, f.at),
+    ).rejects.toMatchObject({
+      code: "forbidden",
+      message: "Use this run's original active host connection.",
+    });
+  });
+  it("requires current verified protocol proof even for the rightful live host", async () => {
+    const f = await fixture();
+    await expect(
+      requireFinanceEffectMessageProof(f.tx, f.run, f.principal, f.at),
+    ).resolves.toBeUndefined();
+    f.rows.set(financeConversationCapabilities, [{ generation: 2n, verifiedAt: null }]);
+    await expect(
+      requireFinanceEffectMessageProof(f.tx, f.run, f.principal, f.at),
+    ).rejects.toMatchObject({
+      code: "forbidden",
+      message: "Verify the current original-host Finance message protocol.",
+    });
   });
   it.each([
     "revoked",

@@ -72,6 +72,10 @@ export const financeBalanceBasisSchema = z
     basisRevision: z.number().int().positive(),
     accountRevision: financeActualRevisionSchema,
     actorUserId: idSchema,
+    approvalActor: z
+      .object({ type: z.literal("agent"), id: idSchema })
+      .strict()
+      .optional(),
     recordedAt: isoDateTimeSchema,
   })
   .strict()

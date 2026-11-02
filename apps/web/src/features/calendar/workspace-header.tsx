@@ -30,6 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import {
   useSaveWorkspacePreferences,
@@ -119,10 +120,12 @@ export function CalendarAppBarControls({
   onToday,
   user,
   accounts,
+  search,
 }: {
   onToday: () => void;
   user: User;
   accounts: ReactNode;
+  search?: ReactNode;
 }) {
   const saveCalendarView = useSaveWorkspacePreferences("calendar");
   const [searchParams, setSearchParams] = useSearchParams();
@@ -169,77 +172,11 @@ export function CalendarAppBarControls({
     });
     onToday();
   };
-  const ViewIcon = calendarViews.find((option) => option.value === view)?.icon ?? CalendarIcon;
   return (
-    <fieldset className="calendar-app-bar__controls">
-      <legend className="sr-only">Calendar controls</legend>
-      {!saveCalendarView.recovery ? (
-        <MutationFeedback feedback={saveCalendarView.feedback} />
-      ) : null}
-      <WorkspacePreferenceRecovery workspace="calendar" />
-      <div className="calendar-app-bar__control-set">
-        <div className="calendar-app-bar__compact-view">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <ShadcnButton aria-label={`Calendar view: ${view}`} size="icon" variant="ghost">
-                <ViewIcon aria-hidden="true" />
-              </ShadcnButton>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup value={view} onValueChange={selectView}>
-                {calendarViews.map((option) => (
-                  <DropdownMenuRadioItem
-                    key={option.value}
-                    value={option.value}
-                    disabled={saveCalendarView.isPending || !!saveCalendarView.recovery}
-                  >
-                    <option.icon aria-hidden="true" />
-                    {option.label}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-              {compactPeriodNavigation ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuItem onSelect={goToToday}>
-                      <LocationFixedIcon aria-hidden="true" />
-                      Today
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => movePeriod(-1)}>
-                      <ChevronLeftIcon aria-hidden="true" />
-                      Previous {view}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => movePeriod(1)}>
-                      <ChevronRightIcon aria-hidden="true" />
-                      Next {view}
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        {accounts}
-        <div className="calendar-app-bar__period-navigation">
-          <ShadcnButton
-            aria-label="Today"
-            aria-pressed={
-              (searchParams.has("follow")
-                ? searchParams.get("follow") !== "0"
-                : (preferences.data?.preferences.autoFollowToday ??
-                  getDefaultWorkspacePreferences("calendar").autoFollowToday)) &&
-              (!requestedAnchor ||
-                requestedAnchor === localDateToIso(localDateAt(new Date(), user.planningTimezone)))
-            }
-            title="Follow today"
-            className="calendar-app-bar__today"
-            onClick={goToToday}
-            size="icon"
-            variant="ghost"
-          >
-            <LocationFixedIcon aria-hidden="true" data-icon="inline-start" />
-          </ShadcnButton>
+    <>
+      <WorkspaceHeaderControls label="Calendar period">
+        <div className="calendar-header-period-arrows">
+          {" "}
           <ShadcnButton
             aria-label={`Previous ${view}`}
             onClick={() => movePeriod(-1)}
@@ -257,8 +194,85 @@ export function CalendarAppBarControls({
             <ChevronRightIcon aria-hidden="true" />
           </ShadcnButton>
         </div>
-      </div>
-    </fieldset>
+      </WorkspaceHeaderControls>
+      {search}
+      <WorkspaceHeaderControls label="Calendar page controls">
+        <fieldset className="calendar-app-bar__controls">
+          <legend className="sr-only">Calendar controls</legend>
+          {!saveCalendarView.recovery ? (
+            <MutationFeedback feedback={saveCalendarView.feedback} />
+          ) : null}
+          <WorkspacePreferenceRecovery workspace="calendar" />
+          <div className="calendar-app-bar__control-set">
+            <WorkspaceHeaderControls label="Calendar title view" placement="title">
+              <span>in</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <ShadcnButton aria-label={`Calendar view: ${view}`} size="sm" variant="ghost">
+                    {view} view
+                  </ShadcnButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuRadioGroup value={view} onValueChange={selectView}>
+                    {calendarViews.map((option) => (
+                      <DropdownMenuRadioItem
+                        key={option.value}
+                        value={option.value}
+                        disabled={saveCalendarView.isPending || !!saveCalendarView.recovery}
+                      >
+                        <option.icon aria-hidden="true" />
+                        {option.label}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                  {compactPeriodNavigation ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem onSelect={goToToday}>
+                          <LocationFixedIcon aria-hidden="true" />
+                          Today
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => movePeriod(-1)}>
+                          <ChevronLeftIcon aria-hidden="true" />
+                          Previous {view}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => movePeriod(1)}>
+                          <ChevronRightIcon aria-hidden="true" />
+                          Next {view}
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </WorkspaceHeaderControls>
+            {accounts}
+            <div className="calendar-app-bar__period-navigation">
+              <ShadcnButton
+                aria-label="Today"
+                aria-pressed={
+                  (searchParams.has("follow")
+                    ? searchParams.get("follow") !== "0"
+                    : (preferences.data?.preferences.autoFollowToday ??
+                      getDefaultWorkspacePreferences("calendar").autoFollowToday)) &&
+                  (!requestedAnchor ||
+                    requestedAnchor ===
+                      localDateToIso(localDateAt(new Date(), user.planningTimezone)))
+                }
+                title="Follow today"
+                className="calendar-app-bar__today"
+                onClick={goToToday}
+                size="icon"
+                variant="ghost"
+              >
+                <LocationFixedIcon aria-hidden="true" data-icon="inline-start" />
+              </ShadcnButton>
+            </div>
+          </div>
+        </fieldset>
+      </WorkspaceHeaderControls>
+    </>
   );
 }
 

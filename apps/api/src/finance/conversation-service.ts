@@ -278,6 +278,61 @@ export function decodeConversationBatchCursor(
   }
 }
 
+/** Only called after signed SMS context admission under its claim lock, in the same tx.
+ * sourceOperationId joins the immutable context revision (operationId/requestId) to the
+ * inbound claim/message; sourceMessageIds remains reserved for canonical Chat messages. */
+export async function recordFinanceConversationSmsContext(
+  tx: Transaction,
+  input: { userId: string; claimId: string; text: string; recordedAt: Date },
+) {
+  const key = `sms-context:${input.claimId}`;
+  const [existing] = await tx
+    .select()
+    .from(financeConversationMessages)
+    .where(
+      and(
+        eq(financeConversationMessages.userId, input.userId),
+        eq(financeConversationMessages.sourceOperationId, input.claimId),
+      ),
+    );
+  if (existing) {
+    if (
+      existing.authorKind !== "user" ||
+      existing.idempotencyKey !== key ||
+      existing.text !== input.text
+    )
+      throw new AppError(
+        "conflict",
+        "The admitted SMS already has different conversation content.",
+      );
+    return existing;
+  }
+  const [conversation] = await tx
+    .insert(financeConversations)
+    .values({ userId: input.userId, nextSequence: 1n })
+    .onConflictDoUpdate({
+      target: financeConversations.userId,
+      set: { nextSequence: sql`${financeConversations.nextSequence} + 1` },
+    })
+    .returning();
+  if (!conversation)
+    throw new AppError("internal_error", "The SMS message sequence was not allocated.");
+  const [message] = await tx
+    .insert(financeConversationMessages)
+    .values({
+      userId: input.userId,
+      sequence: conversation.nextSequence,
+      authorKind: "user",
+      text: input.text,
+      sourceOperationId: input.claimId,
+      idempotencyKey: key,
+      createdAt: input.recordedAt,
+    })
+    .returning();
+  if (!message) throw new AppError("internal_error", "The admitted SMS message was not recorded.");
+  return message;
+}
+
 /** Existing accepted-answer tx owns authority, canonical operation/revision and continuation. */
 export async function recordFinanceConversationAcceptedAnswer(
   tx: Transaction,

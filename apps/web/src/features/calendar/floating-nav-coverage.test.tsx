@@ -1,8 +1,9 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { Calendar, User } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { toast } from "sonner";
@@ -93,18 +94,8 @@ describe("Calendar floating navigation edge states", () => {
     expect(screen.getByPlaceholderText("Event title")).toHaveFocus();
     expect(mocks.createEvent).not.toHaveBeenCalled();
     await browser.click(screen.getByRole("button", { name: "Close" }));
-    await browser.click(await screen.findByRole("button", { name: "Search calendar" }));
+    expect(screen.queryByRole("button", { name: "Search calendar" })).not.toBeInTheDocument();
     expect(mocks.listEvents).not.toHaveBeenCalled();
-  });
-
-  it("delegates search to the shared workspace control", async () => {
-    const listener = vi.fn();
-    window.addEventListener("nohmi:workspace-search", listener);
-    const browser = userEvent.setup();
-    renderCalendar();
-    await browser.click(screen.getByRole("button", { name: "Search calendar" }));
-    expect(listener).toHaveBeenCalledOnce();
-    window.removeEventListener("nohmi:workspace-search", listener);
   });
 
   it("submits optional links and keeps provider failures visible", async () => {
@@ -364,7 +355,7 @@ describe("Calendar floating navigation edge states", () => {
       );
       expect(reselectedStart).not.toBeNull();
       expect(reselectedStart).toHaveAttribute("data-selected-single", "true");
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.getAllByRole("dialog")).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }

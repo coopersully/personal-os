@@ -7,8 +7,8 @@ use std::sync::OnceLock;
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 #[cfg(target_os = "macos")]
 unsafe extern "C" {
-    fn ilo_native_set_callback(callback: extern "C" fn(*const c_char));
-    fn ilo_native_dispatch(request: *const c_char) -> *mut c_char;
+    fn personal_os_native_set_callback(callback: extern "C" fn(*const c_char));
+    fn personal_os_native_dispatch(request: *const c_char) -> *mut c_char;
 }
 #[cfg(target_os = "macos")]
 extern "C" fn receive_action(data: *const c_char) {
@@ -32,13 +32,13 @@ pub fn initialize(app: &tauri::AppHandle) {
     let _ = APP.set(app.clone());
     #[cfg(target_os = "macos")]
     unsafe {
-        ilo_native_set_callback(receive_action);
+        personal_os_native_set_callback(receive_action);
     }
 }
 #[cfg(target_os = "macos")]
 fn dispatch(value: Value) -> Result<Value, String> {
     let request = CString::new(value.to_string()).map_err(|e| e.to_string())?;
-    let ptr = unsafe { ilo_native_dispatch(request.as_ptr()) };
+    let ptr = unsafe { personal_os_native_dispatch(request.as_ptr()) };
     if ptr.is_null() {
         return Err("The macOS companion did not respond.".into());
     }

@@ -1,9 +1,21 @@
-import { appendFileSync, readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  appendFileSync,
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+} from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const scopeKeys = [
+  "prose_only",
   "full",
   "repo",
   "terraform",
@@ -69,11 +81,131 @@ function expandDependents(changedNames, packages) {
 function safePath(path) {
   if (typeof path !== "string" || path.length === 0 || isAbsolute(path)) return false;
   const parts = path.split("/");
-  return !parts.includes("..") && !parts.includes("") && !path.includes("\\");
+  return (
+    !parts.includes("..") &&
+    !parts.includes("") &&
+    !path.includes("\\") &&
+    [...path].every((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127) &&
+    !parts.includes(".")
+  );
 }
 
-function isDocumentation(path) {
-  return path === "README.md" || path === "AGENTS.md" || path.startsWith("docs/");
+// Narrow allowlist: repository prose only. Published skills (apps/web/public),
+// generated tool dictionaries, fixtures, scripts and other extensions are inputs.
+export function isDocumentation(path) {
+  return (
+    ["README.md", "AGENTS.md", "CONTRIBUTING.md"].includes(path) ||
+    (/^docs\/(?:engineering|architecture|design|product)\/.*\.md$/u.test(path) &&
+      path !== "docs/engineering/workspace-agent-tools.md") ||
+    /^\.agents\/skills\/[^/]+\/(?:SKILL\.md|references\/[^/]+\.md)$/u.test(path)
+  );
+}
+
+// A path list is iteration advice, never proof of prose-only final acceptance.
+// Use both Git modes and the entire diff; --no-renames exposes every old path.
+export function classifyGitChanges(base, head, options = {}) {
+  if (![base, head].every((sha) => typeof sha === "string" && /^[a-f0-9]{40}$/u.test(sha)))
+    return fullScope();
+  try {
+    const git = (...args) =>
+      execFileSync("git", args, {
+        cwd: options.root ?? repositoryRoot,
+        encoding: "utf8",
+        maxBuffer: 16 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    git("merge-base", "--is-ancestor", base, head);
+    const raw = git("diff", "--raw", "--no-abbrev", "--no-renames", "-z", base, head, "--");
+    const parts = raw.split("\0");
+    if (parts.pop() !== "" || !parts.length || parts.length % 2) return fullScope();
+    for (let i = 0; i < parts.length; i += 2) {
+      const match = parts[i].match(/^:(\d{6}) (\d{6}) [a-f0-9]{40} [a-f0-9]{40} ([AM])$/u);
+      if (
+        match?.[2] !== "100644" ||
+        match[1] !== (match[3] === "A" ? "000000" : "100644") ||
+        !safePath(parts[i + 1]) ||
+        !isDocumentation(parts[i + 1])
+      )
+        return fullScope();
+    }
+    return options.forceFull ? fullScope() : { ...emptyScope(), prose_only: true, repo: true };
+  } catch {
+    return fullScope();
+  }
+}
+
+export function classifyPushChanges(event, context, options = {}) {
+  const sha = (value) =>
+    typeof value === "string" && /^[a-f0-9]{40}$/u.test(value) && !/^0+$/u.test(value);
+  if (
+    options.forceFull ||
+    !event ||
+    typeof event !== "object" ||
+    Array.isArray(event) ||
+    context?.eventName !== "push" ||
+    !/^[\w.-]+\/[\w.-]+$/u.test(context.repository ?? "") ||
+    event.repository?.full_name !== context.repository ||
+    !Number.isSafeInteger(event.repository?.id) ||
+    event.repository.id <= 0 ||
+    String(event.repository.id) !== context.repositoryId ||
+    typeof context.ref !== "string" ||
+    !/^refs\/heads\/.+$/u.test(context.ref) ||
+    event.ref !== context.ref ||
+    event.created !== false ||
+    event.deleted !== false ||
+    event.forced !== false ||
+    !sha(event.before) ||
+    !sha(event.after) ||
+    event.after !== context.sha ||
+    event.head_commit?.id !== event.after
+  )
+    return fullScope();
+  try {
+    const root = options.root ?? repositoryRoot;
+    if (realpathSync(root) !== realpathSync(context.workspace)) return fullScope();
+    const checkedOut = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 15000,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+    if (checkedOut !== event.after) return fullScope();
+    return classifyGitChanges(event.before, event.after, options);
+  } catch {
+    return fullScope();
+  }
+}
+
+function classifyGitHubPush(options) {
+  let descriptor;
+  try {
+    // The GitHub-generated payload is data, never shell input. Bound even a
+    // special or oversized local file before parsing; uncertain input stays full.
+    descriptor = openSync(process.env.GITHUB_EVENT_PATH, constants.O_RDONLY | constants.O_NONBLOCK);
+    const file = fstatSync(descriptor);
+    const limit = 1024 * 1024;
+    if (!file.isFile() || file.size > limit) return fullScope();
+    const bytes = Buffer.alloc(limit + 1);
+    const length = readSync(descriptor, bytes, 0, bytes.length, 0);
+    if (length > limit || length !== file.size) return fullScope();
+    return classifyPushChanges(
+      JSON.parse(bytes.subarray(0, length).toString("utf8")),
+      {
+        eventName: process.env.GITHUB_EVENT_NAME,
+        repository: process.env.GITHUB_REPOSITORY,
+        repositoryId: process.env.GITHUB_REPOSITORY_ID,
+        ref: process.env.GITHUB_REF,
+        sha: process.env.GITHUB_SHA,
+        workspace: process.env.GITHUB_WORKSPACE,
+      },
+      options,
+    );
+  } catch {
+    // JSON errors can contain commit-message/payload excerpts. Do not log them.
+    return fullScope();
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
 }
 
 export function classifyChanges(paths, options = {}) {
@@ -91,7 +223,10 @@ export function classifyChanges(paths, options = {}) {
   const directlyChangedPackages = new Set();
 
   for (const path of paths) {
-    if (isDocumentation(path)) continue;
+    if (isDocumentation(path)) {
+      result.repo = true;
+      continue;
+    }
 
     if (path === "pnpm-lock.yaml" || path === "pnpm-workspace.yaml" || path === "package.json") {
       result.full = true;
@@ -175,17 +310,67 @@ export function classifyChanges(paths, options = {}) {
   return result;
 }
 
-export function requiredGate(results) {
-  const conclusions = Object.values(results);
-  return (
-    conclusions.length > 0 &&
-    conclusions.every((conclusion) => conclusion === "success" || conclusion === "skipped")
+export const jobIds = [
+  "changes",
+  "infrastructure",
+  "repository",
+  "lint-and-format",
+  "quality",
+  "browser",
+  "desktop",
+];
+
+export function expectedJobs(scope) {
+  if (
+    !scope ||
+    typeof scope !== "object" ||
+    Array.isArray(scope) ||
+    Object.keys(scope).sort().join() !== [...scopeKeys, "changed_packages"].sort().join() ||
+    scopeKeys.some((key) => typeof scope[key] !== "boolean") ||
+    !Array.isArray(scope.changed_packages) ||
+    scope.changed_packages.some(
+      (name) => typeof name !== "string" || !name.startsWith("@personal-os/"),
+    )
+  )
+    return null;
+  if (
+    scope.prose_only &&
+    (scope.full ||
+      !scope.repo ||
+      scope.changed_packages.length ||
+      scopeKeys.some((key) => !["prose_only", "repo"].includes(key) && scope[key]))
+  )
+    return null;
+  // Final CI accepts only the Git classifier's two canonical states. The
+  // package/path planner's partial scopes are not final acceptance evidence.
+  if (scope.changed_packages.length) return null;
+  if (scope.full && scopeKeys.every((key) => key === "full" || scope[key] === false))
+    return [...jobIds];
+  if (scope.prose_only) return ["changes", "repository"];
+  return null;
+}
+
+export function requiredGate(results, scope) {
+  const selected = expectedJobs(scope);
+  if (
+    !selected ||
+    !results ||
+    typeof results !== "object" ||
+    Array.isArray(results) ||
+    Object.keys(results).sort().join() !== [...jobIds].sort().join()
+  )
+    return false;
+  return jobIds.every((job) =>
+    selected.includes(job)
+      ? results[job] === "success"
+      : ["success", "skipped"].includes(results[job]),
   );
 }
 
 function githubOutputs(scope) {
   return [
     ...scopeKeys.map((key) => `${key}=${scope[key]}`),
+    `required_jobs=${JSON.stringify(expectedJobs(scope))}`,
     `changed_packages=${JSON.stringify(scope.changed_packages)}`,
     `scope_json=${JSON.stringify(scope)}`,
   ].join("\n");
@@ -199,16 +384,30 @@ function parseArguments(args) {
       options.json = true;
       continue;
     }
-    if (argument === "--files" || argument === "--github-output") {
+    if (argument === "--github-push") {
+      options.githubPush = true;
+      continue;
+    }
+    if (["--files", "--github-output", "--base", "--head"].includes(argument)) {
       const value = args[index + 1];
-      if (!value) throw new Error(`${argument} requires a path.`);
-      options[argument === "--files" ? "files" : "githubOutput"] = value;
+      if (value === undefined) throw new Error(`${argument} requires a value.`);
+      options[argument === "--github-output" ? "githubOutput" : argument.slice(2)] = value;
       index += 1;
       continue;
     }
     throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!options.files) throw new Error("--files is required.");
+  if (
+    options.githubPush &&
+    [options.base, options.head, options.files].some((value) => value !== undefined)
+  )
+    throw new Error("--github-push cannot be combined with caller-supplied revisions or files.");
+  if (
+    !options.githubPush &&
+    !(options.base !== undefined && options.head !== undefined) &&
+    !options.files
+  )
+    throw new Error("--base and --head, or --files, are required.");
   return options;
 }
 
@@ -217,8 +416,16 @@ function runCli() {
   let scope;
   try {
     options = parseArguments(process.argv.slice(2));
-    const paths = readFileSync(options.files, "utf8").split(/\r?\n/u).filter(Boolean);
-    scope = classifyChanges(paths, { forceFull: process.env.CI_FULL === "true" });
+    const forceFull = process.env.CI_FULL === "true";
+    scope = options.githubPush
+      ? classifyGitHubPush({ forceFull })
+      : options.base !== undefined && options.head !== undefined
+        ? classifyGitChanges(options.base, options.head, {
+            forceFull,
+          })
+        : classifyChanges(readFileSync(options.files, "utf8").split(/\r?\n/u).filter(Boolean), {
+            forceFull,
+          });
   } catch (error) {
     scope = fullScope();
     process.stderr.write(`CI scope classifier failed closed: ${error.message}\n`);

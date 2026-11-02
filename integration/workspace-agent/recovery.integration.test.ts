@@ -5,6 +5,7 @@ import {
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { eq, sql } from "drizzle-orm";
+import { FINANCE_AUTOMATION_PROMPT_VERSION as currentPromptVersion } from "../../apps/api/src/finance/automation-prompts.js";
 import { createMcpWorkspaceFixture, type WorkspaceFixture } from "./fixture.js";
 
 describe("connection-bound host controls", () => {
@@ -14,6 +15,60 @@ describe("connection-bound host controls", () => {
   }, 120_000);
   afterAll(async () => {
     await f?.close();
+  });
+  it("creates and observes scheduled-only Claude through authenticated MCP and HTTP", async () => {
+    await f.setBypass(true);
+    const a = await f.connectAgent([
+      "finances:read",
+      "finances:write",
+      "finances:execute",
+      "finances:maintain",
+    ]);
+    const [connection] = await a.api.listAutomationHostConnections();
+    if (!connection) throw new Error("Missing authorized connection");
+    const created = await a.client.callTool({
+      name: "create_automation_host_schedule",
+      arguments: {
+        label: "Twice daily Claude",
+        hostSurface: "claude_code_routine",
+        tenantAuthorizationConnectionId: connection.id,
+        requestedScopes: ["finances:maintain"],
+        trigger: {
+          type: "scheduled",
+          localTimes: ["08:00", "20:00"],
+          timeZone: "America/New_York",
+        },
+      },
+    });
+    expect(created.isError, JSON.stringify(created)).not.toBe(true);
+    const { result } = created.structuredContent as { result: { schedule: { id: string } } };
+    const bound = await a.api.bindAutomationHostSchedule(result.schedule.id, {
+      hostSurface: "claude_code_routine",
+      hostAutomationId: "native-scheduled-routine",
+      expectedState: "setup_pending",
+      expectedVersion: 1,
+    });
+    expect(bound.schedule.nextExpectedAt).not.toBeNull();
+    expect(bound.prompt?.latestIssued?.text).toContain(
+      "No API trigger or trigger bearer is required",
+    );
+    const observation = await a.client.callTool({
+      name: "observe_finance_host_schedule",
+      arguments: {
+        scheduleId: result.schedule.id,
+        observation: {
+          hostSurface: "claude_code_routine",
+          expectedState: "active",
+          expectedVersion: 2,
+          observedState: "active",
+          observedAt: "2026-10-11T15:00:00Z",
+        },
+      },
+    });
+    expect(observation.isError, JSON.stringify(observation)).not.toBe(true);
+    expect(observation.structuredContent).toMatchObject({
+      result: { schedule: { state: "active", version: 3 }, health: { state: "expected" } },
+    });
   });
   it("manages only the caller's existing host connection", async () => {
     await f.setBypass(true);
@@ -97,7 +152,7 @@ describe("connection-bound host controls", () => {
         entityType: "automation_host_schedule",
         entityId: created.schedule.id,
         before: null,
-        after: { templateVersion: 1, scheduleVersionAtIssue: 1 },
+        after: { templateVersion: currentPromptVersion, scheduleVersionAtIssue: 1 },
       }),
     ]);
     expect(scheduleAudit).toHaveLength(lifecycleAudit.length + promptAudit.length);
@@ -320,7 +375,7 @@ describe("connection-bound host controls", () => {
     expect(original).toBeDefined();
     const exact = await a.client.callTool({
       name: "get_finance_host_prompt",
-      arguments: { scheduleId, templateVersion: 1 },
+      arguments: { scheduleId, templateVersion: currentPromptVersion },
     });
     expect(exact.isError, JSON.stringify(exact)).not.toBe(true);
     expect(exact.structuredContent).toMatchObject({ result: original });
@@ -329,11 +384,15 @@ describe("connection-bound host controls", () => {
       arguments: { scheduleId, limit: 1 },
     });
     expect(history.structuredContent).toMatchObject({
-      result: { issues: [original], nextCursor: null, currentTemplateVersion: 1 },
+      result: {
+        issues: [original],
+        nextCursor: null,
+        currentTemplateVersion: currentPromptVersion,
+      },
     });
     const empty = await a.client.callTool({
       name: "get_finance_host_prompt_history",
-      arguments: { scheduleId, beforeVersion: 1, limit: 1 },
+      arguments: { scheduleId, beforeVersion: currentPromptVersion, limit: 1 },
     });
     expect(empty.structuredContent).toMatchObject({ result: { issues: [], nextCursor: null } });
     for (const name of [
@@ -345,7 +404,9 @@ describe("connection-bound host controls", () => {
         name,
         arguments: {
           scheduleId,
-          ...(name === "get_finance_host_prompt_history" ? {} : { templateVersion: 1 }),
+          ...(name === "get_finance_host_prompt_history"
+            ? {}
+            : { templateVersion: currentPromptVersion }),
           ...(name === "issue_finance_host_prompt" ? { expectedScheduleVersion: 1 } : {}),
         },
       });
@@ -359,22 +420,27 @@ describe("connection-bound host controls", () => {
     await f.setBypass(false);
     const denied = await a.client.callTool({
       name: "issue_finance_host_prompt",
-      arguments: { scheduleId, templateVersion: 1, expectedScheduleVersion: 1 },
+      arguments: { scheduleId, templateVersion: currentPromptVersion, expectedScheduleVersion: 1 },
     });
     expect(denied.isError).toBe(true);
     expect(denied.structuredContent).toMatchObject({ error: { code: "forbidden" } });
     await f.setBypass(true);
     const issued = await a.client.callTool({
       name: "issue_finance_host_prompt",
-      arguments: { scheduleId, templateVersion: 1, expectedScheduleVersion: 1 },
+      arguments: { scheduleId, templateVersion: currentPromptVersion, expectedScheduleVersion: 1 },
     });
     expect(issued.isError, JSON.stringify(issued)).not.toBe(true);
     expect(issued.structuredContent).toMatchObject({
-      result: { scheduleId, templateVersion: 1, scheduleVersionAtIssue: 1, text: original?.text },
+      result: {
+        scheduleId,
+        templateVersion: currentPromptVersion,
+        scheduleVersionAtIssue: 1,
+        text: original?.text,
+      },
     });
     const replay = await a.client.callTool({
       name: "issue_finance_host_prompt",
-      arguments: { scheduleId, templateVersion: 1, expectedScheduleVersion: 1 },
+      arguments: { scheduleId, templateVersion: currentPromptVersion, expectedScheduleVersion: 1 },
     });
     expect((replay.structuredContent as { result: unknown }).result).toEqual(
       (issued.structuredContent as { result: unknown }).result,

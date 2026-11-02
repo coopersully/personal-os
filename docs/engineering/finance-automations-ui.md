@@ -35,6 +35,27 @@ Focused coverage lives in `automations-page.test.tsx`; exact stored prompt behav
 by `host-prompt-panel.test.tsx`. Browser inspection, integration authorization evidence, independent
 review, and complete candidate verification remain required before delivery acceptance.
 
+## Cause-specific recovery and conversation return
+
+Recovery names the current blocker and links to its owner. Missing or paused/revoked registrations
+lead to Finance Automations; an unavailable, expired or revoked original connection leads to
+Settings → Connected agents; missing execution permission leads to Workspace access. Missing,
+expired or outdated messaging proof leads to the actual verification flow. An overdue observation
+asks the person to inspect the external job. Editing a registration does not reschedule that job,
+and no recovery link itself verifies message capability.
+
+Recovery navigation retains a validated return to the original Finance conversation question or
+source message. Editable unsent drafts and exact failed retry commands survive Chat, Automations
+and Settings navigation in memory, scoped to the authenticated owner and session epoch. They are
+not persisted in browser storage. Confirmed acceptance clears only the matching submitted draft,
+even after remount, while preserving newer edits. Sign-out, authentication expiry and identity or
+session changes clear local Finance drafts; stale asynchronous completions cannot change another
+session. A scoped permission failure or transient failure retains the same-session draft.
+
+Existing canonical question answers remain available while general Chat sending is locked.
+The existing 30-second UI readiness refresh does not poll messages during an agent run or establish
+an actual scheduled check-in. Real protocol verification and current authority still control sending.
+
 ## Durable workspace setup through MCP
 
 Initial agent guidance retains `get_finance_playbook` and `setup_finances` for canonical financial

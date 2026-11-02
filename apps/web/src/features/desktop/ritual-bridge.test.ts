@@ -2,6 +2,7 @@
 import {
   enableRitualPresentation,
   openCurrentRitual,
+  publishRitualSkyFrame,
   readRitualState,
   ritualContentReady,
   ritualDeviceId,
@@ -125,5 +126,28 @@ it("starts presentation only after content readiness and forwards preview comple
   expect(mocks.invoke).toHaveBeenLastCalledWith("ritual_preview", {
     state: null,
     completed: false,
+  });
+});
+
+it("publishes only bounded decorative RGBA frames from the desktop", async () => {
+  mocks.desktop.mockReturnValue(false);
+  expect(await publishRitualSkyFrame("occ", 1, 1, new Uint8ClampedArray([1, 2, 3, 255]))).toBe(
+    false,
+  );
+  expect(mocks.invoke).not.toHaveBeenCalled();
+  mocks.desktop.mockReturnValue(true);
+  expect(await publishRitualSkyFrame("occ", 401, 1, new Uint8ClampedArray(4))).toBe(false);
+  expect(await publishRitualSkyFrame("occ", 1, 1, new Uint8ClampedArray(3))).toBe(false);
+  expect(mocks.invoke).not.toHaveBeenCalled();
+  mocks.invoke.mockResolvedValue(true);
+  expect(
+    await publishRitualSkyFrame("occ", 1, 1, new Uint8ClampedArray([1, 2, 3, 255]), true),
+  ).toBe(true);
+  expect(mocks.invoke).toHaveBeenCalledWith("ritual_sky_frame", {
+    occurrenceId: "occ",
+    width: 1,
+    height: 1,
+    pixels: "AQID/w==",
+    dark: true,
   });
 });

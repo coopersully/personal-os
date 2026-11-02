@@ -82,63 +82,67 @@ export function ReminderDialog({
           </ResponsiveDialogTitle>
           {!reminder ? <TaskCreationProgress step={2} total={2} /> : null}
         </ResponsiveDialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           <FeedbackForm feedback={mutation.feedback} onSubmit={submit}>
-            <ShadcnFieldGroup>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="reminder-title">What needs attention?</ShadcnFieldLabel>
-                <ShadcnInput
-                  autoFocus
-                  id="reminder-title"
-                  defaultValue={reminder?.title}
-                  name="title"
-                  required
-                />
-              </ShadcnField>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <ResponsiveDialogBody>
+              <ShadcnFieldGroup>
                 <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="reminder-deadline">Deadline</ShadcnFieldLabel>
+                  <ShadcnFieldLabel htmlFor="reminder-title">
+                    What needs attention?
+                  </ShadcnFieldLabel>
                   <ShadcnInput
-                    id="reminder-deadline"
-                    defaultValue={toDateTimeLocal(reminder?.dueAt, user.planningTimezone)}
-                    name="dueAt"
-                    type="datetime-local"
+                    autoFocus
+                    id="reminder-title"
+                    defaultValue={reminder?.title}
+                    name="title"
+                    required
                   />
                 </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="reminder-priority">Priority</ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="reminder-priority"
-                    defaultValue={reminder?.priority ?? "medium"}
-                    name="priority"
-                  >
-                    <NativeSelectOption value="low">Low</NativeSelectOption>
-                    <NativeSelectOption value="medium">Medium</NativeSelectOption>
-                    <NativeSelectOption value="high">High</NativeSelectOption>
-                  </ShadcnNativeSelect>
-                </ShadcnField>
-              </div>
-              <ActiveReminderField
-                ownerId={user.id}
-                {...(reminder ? { value: reminder.activeReminder ?? false } : {})}
-              />
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="reminder-notes">Notes</ShadcnFieldLabel>
-                <ShadcnTextarea
-                  id="reminder-notes"
-                  defaultValue={reminder?.notes ?? ""}
-                  name="notes"
-                  rows={4}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="reminder-deadline">Deadline</ShadcnFieldLabel>
+                    <ShadcnInput
+                      id="reminder-deadline"
+                      defaultValue={toDateTimeLocal(reminder?.dueAt, user.planningTimezone)}
+                      name="dueAt"
+                      type="datetime-local"
+                    />
+                  </ShadcnField>
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="reminder-priority">Priority</ShadcnFieldLabel>
+                    <ShadcnNativeSelect
+                      id="reminder-priority"
+                      defaultValue={reminder?.priority ?? "medium"}
+                      name="priority"
+                    >
+                      <NativeSelectOption value="low">Low</NativeSelectOption>
+                      <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                      <NativeSelectOption value="high">High</NativeSelectOption>
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                </div>
+                <ActiveReminderField
+                  ownerId={user.id}
+                  {...(reminder ? { value: reminder.activeReminder ?? false } : {})}
                 />
-              </ShadcnField>
-            </ShadcnFieldGroup>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="reminder-notes">Notes</ShadcnFieldLabel>
+                  <ShadcnTextarea
+                    id="reminder-notes"
+                    defaultValue={reminder?.notes ?? ""}
+                    name="notes"
+                    rows={4}
+                  />
+                </ShadcnField>
+              </ShadcnFieldGroup>
+            </ResponsiveDialogBody>
             <ResponsiveDialogFooter className="mt-5">
               <Button disabled={mutation.isPending} type="submit">
                 {mutation.isPending ? "Saving…" : reminder ? "Save changes" : "Create reminder"}
               </Button>
             </ResponsiveDialogFooter>
           </FeedbackForm>
-        </ResponsiveDialogBody>
+        </div>
       </ResponsiveDialogContent>
     </ResponsiveDialog>
   );

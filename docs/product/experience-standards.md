@@ -2,7 +2,8 @@
 
 ## Purpose
 
-nohmi should feel like one coherent exoskeleton for a person and their agents.
+nohmi should feel like one coherent personal harness: context, tools, and controls built around
+the person, available to them directly and to the agents they authorize.
 Each core workspace should first behave like the familiar best-in-class product
 category it replaces for ordinary use: mail client, task manager, calendar, or
 budget and net-worth application. Intelligence simplifies and connects those

@@ -66,3 +66,17 @@ it("omits absent and empty history filters", async () => {
   await api.listRitualHistory("next", { kind: undefined, dateFrom: "2026-09-29" });
   expect(request).toHaveBeenLastCalledWith("/v1/rituals/history?dateFrom=2026-09-29&cursor=next");
 });
+
+it("sends server-side history search, filtering, sorting and page size", async () => {
+  const request = vi.fn().mockResolvedValue({ items: [], total: 0, nextCursor: null });
+  const api = createRitualsApiClient(request);
+  await api.listRitualHistory(undefined, {
+    status: "completed",
+    search: "quiet walk",
+    sort: "oldest",
+    limit: 10,
+  });
+  expect(request).toHaveBeenCalledWith(
+    "/v1/rituals/history?status=completed&search=quiet+walk&sort=oldest&limit=10",
+  );
+});

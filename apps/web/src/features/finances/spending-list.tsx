@@ -3,9 +3,19 @@ import type {
   FinanceSpendingGroup,
   FinanceSpendingMonthlyBudget,
 } from "@personal-os/domain";
-import { useState } from "react";
+import { useId, useState } from "react";
+import { SortIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Item, ItemGroup } from "@/components/ui/item";
 import { formatMoney } from "./format";
+import { spendingGroupVisual } from "./spending-visual";
 export function SpendingList({
   groups,
   onSelect,
@@ -15,6 +25,7 @@ export function SpendingList({
   onSelect: (group: FinanceSpendingGroup) => void;
   monthlyBudget?: FinanceSpendingMonthlyBudget;
 }) {
+  const descriptionId = useId();
   const [sort, setSort] = useState<"name" | "spent" | "budget">("spent");
   const [ascending, setAscending] = useState(false);
   const changeSort = (value: typeof sort) => {
@@ -54,50 +65,137 @@ export function SpendingList({
       return `${monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete" ? "Observed monthly" : "Monthly"} ${formatMoney(budget.usedCents / 100)} of ${formatMoney(0)} · ${budget.usedCents > 0 ? `Over budget ${formatMoney(budget.usedCents / 100)}` : "No utilization"}`;
     return `${monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete" ? "Observed monthly" : "Monthly"} ${formatMoney(budget.usedCents / 100)} of ${formatMoney(budget.budgetCents / 100)} · ${((budget.usedCents / budget.budgetCents) * 100).toFixed(1)}%${budget.usedCents > budget.budgetCents ? ` · Over budget ${formatMoney((budget.usedCents - budget.budgetCents) / 100)}` : ""}`;
   };
-  const row = (group: FinanceSpendingGroup) => (
-    <div className="flex flex-wrap items-center justify-between gap-3 py-3">
-      <Button variant="ghost" onClick={() => onSelect(group)}>
-        {group.label}
-      </Button>
-      <div className="text-right">
-        <p>{formatMoney(group.netCents / 100)}</p>
-        <p className="text-xs text-muted-foreground">
-          Pending {formatMoney(group.pendingCents / 100)}
-        </p>
-        <p className="text-xs text-muted-foreground">{budgetCopy(group.id)}</p>
-      </div>
-    </div>
-  );
+  const row = (group: FinanceSpendingGroup) => {
+    const budget = budgetFor(group.id);
+    const limit = budget?.budgetCents;
+    const used = budget?.usedCents ?? 0;
+    const remaining = limit == null ? null : limit - used;
+    const visual = spendingGroupVisual(group);
+    const Icon = visual.Icon;
+    const caption =
+      limit == null || limit === 0
+        ? budgetCopy(group.id)
+        : `${Math.round((used / limit) * 100)}% (${formatMoney(used / 100)}) of ${formatMoney(limit / 100)} used, ${formatMoney(Math.abs(remaining ?? 0) / 100)} ${(remaining ?? 0) < 0 ? "over" : "left"}`;
+    return (
+      <Item asChild size="sm">
+        <button
+          type="button"
+          aria-label={group.label}
+          aria-describedby={`${descriptionId}-${group.id}`}
+          onClick={() => onSelect(group)}
+          style={{ backgroundColor: visual.backgroundColor }}
+          className="relative isolate grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 overflow-hidden text-left"
+        >
+          {limit != null && limit > 0 ? (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 -z-10 transition-[width] duration-500 motion-reduce:transition-none"
+              style={{
+                backgroundColor: visual.fillColor,
+                width: `${Math.min(100, Math.max(0, (used / limit) * 100))}%`,
+              }}
+            />
+          ) : null}
+          <span className="flex min-w-0 items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-foreground/15 bg-background/40"
+            >
+              <Icon className="size-5 text-foreground" />
+            </span>
+            <span className="flex min-w-0 flex-col gap-1">
+              <span className="truncate text-sm font-medium">{group.label}</span>
+              <span
+                className="text-xs leading-relaxed text-muted-foreground tabular-nums"
+                title={budgetCopy(group.id)}
+              >
+                {caption}
+              </span>
+            </span>
+          </span>
+          <span className="text-xl font-semibold tracking-tight tabular-nums sm:text-2xl">
+            {formatMoney(group.netCents / 100)}
+          </span>
+          <span className="sr-only" id={`${descriptionId}-${group.id}`}>
+            Selected period {formatMoney(group.netCents / 100)}. {budgetCopy(group.id)}.
+          </span>
+        </button>
+      </Item>
+    );
+  };
   return (
-    <section aria-label="Spending list">
-      <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" onClick={() => changeSort("name")}>
-          Name {sort === "name" ? (ascending ? "↑" : "↓") : ""}
-        </Button>
-        <Button variant="ghost" onClick={() => changeSort("spent")}>
-          Spent {sort === "spent" ? (ascending ? "↑" : "↓") : ""}
-        </Button>
-        <Button variant="ghost" onClick={() => changeSort("budget")}>
-          Monthly budget used {sort === "budget" ? (ascending ? "↑" : "↓") : ""}
-        </Button>
+    <section aria-label="Spending list" className="flex min-w-0 flex-col gap-2">
+      <div className="flex items-center justify-between gap-3 px-1">
+        <h2 className="text-sm font-medium">Breakdown</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            Monthly budget
+            {monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete"
+              ? " · observed"
+              : ""}
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Sort breakdown"
+                title="Sort breakdown"
+              >
+                <SortIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuGroup>
+                {(
+                  [
+                    ["name", "Name"],
+                    ["spent", "Spent"],
+                    ["budget", "Monthly budget used"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <DropdownMenuItem
+                    key={value}
+                    aria-label={label}
+                    onSelect={() => changeSort(value)}
+                  >
+                    <SortIcon />
+                    {label}
+                    {sort === value ? (
+                      <span className="ml-auto text-muted-foreground">{ascending ? "↑" : "↓"}</span>
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
-      <ul>
-        {ordered.map((group) => (
-          <li key={group.id}>
-            {row(group)}
-            {group.categories.length ? (
-              <details className="pl-4">
-                <summary className="cursor-pointer text-sm">Categories in {group.label}</summary>
-                <ul>
-                  {[...group.categories].sort(compare).map((category) => (
-                    <li key={category.id}>{row(category)}</li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
-          </li>
-        ))}
-      </ul>
+      <ItemGroup role="presentation" className="gap-0">
+        <ul className="flex flex-col gap-3">
+          {ordered.map((group) => (
+            <li key={group.id} className="min-w-0">
+              {row(group)}
+              {group.kind !== "bucket" && group.categories.length ? (
+                <details className="px-3 pb-2">
+                  <summary
+                    aria-label={`Categories in ${group.label}`}
+                    className="cursor-pointer text-xs text-muted-foreground"
+                  >
+                    {group.categories.length}{" "}
+                    {group.categories.length === 1 ? "category" : "categories"}
+                  </summary>
+                  <ul className="mt-2 flex flex-col gap-1 pl-2">
+                    {[...group.categories].sort(compare).map((category) => (
+                      <li key={category.id}>{row(category)}</li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </ItemGroup>
     </section>
   );
 }

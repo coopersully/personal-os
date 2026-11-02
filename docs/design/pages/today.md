@@ -28,9 +28,6 @@ Decision queue (quiet rail)
 ├── Overdue material and tasks due or reserved today
 ├── Today and undated reminders
 └── Completion controls on each row
-
-History (collapsed)
-└── Done today, with the count visible before opening
 ```
 
 ## Block contracts
@@ -38,9 +35,8 @@ History (collapsed)
 | Block | Content and rules | Empty state |
 | --- | --- | --- |
 | `all-day markers` | A compact, unlabelled shadcn `ItemGroup` above the timed schedule for occasions that shape the day or span several days. Keep an accessible section label, but do not add visible category chrome. Use the distinct `OccasionCard`, composed from `Item`, not `EventCard`. Multi-day occasions show inclusive start and end dates joined by a quiet duration rail; same-day occasions collapse that metadata to one date plus “All day.” Source calendar color identifies the occasion without making it look like an appointment. Use normal sentence case and never show redundant midnight times. | Omit the strip. |
-| `schedule` | “Your timeline” is one minimal vertical timeline of every in-progress and upcoming timed event remaining today. Its description summarizes total visible events and those left to start; append the ongoing count only when nonzero. It begins at the most recent 15-minute mark, labels each full hour at its true position, marks unlabeled quarter hours with smaller dots, carries Calendar's connected live now badge and rule, and ends with the last event. Continue Calendar's solid hour and dotted subhour rules across the event track. Snap each event's visual bounds outward to the 15-minute grid and size its block by that duration. Content disclosure follows available height: a 15-minute block shows its title, a 30-minute block adds its exact time, and longer blocks may add location. Keep the time-axis gutter narrow and omit the redundant time column and accent rail inside spatial event cards. Place events by time and use compact columns for overlaps without reproducing Calendar's full grid. Each preview follows Calendar's title → exact time range → location hierarchy and pairs future titles with a small inline relative countdown without parentheses. The whole event surface opens a quick-action menu; its first action navigates to Calendar's week view and opens the native event inspector, followed only by contextually valid directions, meeting, or source-link actions. Never underline its title. | “The day is open.” Do not invent a next event. |
-| `queue` | “To take care of” is one quiet, bounded vertical `ItemGroup`, never separate category sections. Its description reports things left and appends the overdue count only when nonzero; planning-window capacity does not belong in this heading. Order overdue tasks first, then overdue reminders, today reminders, undated reminders, and tasks due or reserved today. Task relevance uses the canonical open lifecycle and excludes trashed tasks; recommendations never pull unrelated future or undated tasks into Today. Place single-select All, Overdue, Tasks, and Reminders filters above a height-bounded `ScrollArea`; paginate the filtered result with the shared `Pagination` below it. Today keeps task titles and timing but suppresses verbose descriptions and tags. A row with title only collapses to one vertically centered line; timing or useful metadata expands it. Overdue tasks use the semantic danger surface as a restrained row highlight. | “Nothing in this view” when a filter has no matches; “Nothing pulling at you” only when the complete queue is empty. |
-| `history` | A labelled collapsible for completed reminders and tasks. Count remains visible when closed. | Omit when there is no completion history. |
+| `schedule` | “schedule” is one minimal vertical timeline of every in-progress and upcoming timed event remaining today. Its description summarizes total visible events and those left to start; append the ongoing count only when nonzero. It begins at the most recent 15-minute mark, labels each full hour at its true position, marks unlabeled quarter hours with smaller dots, carries Calendar's connected live now badge and rule, and ends with the last event. Continue Calendar's solid hour and dotted subhour rules across the event track. Snap each event's visual bounds outward to the 15-minute grid and size its block by that duration. Content disclosure follows available height: a 15-minute block shows its title, a 30-minute block adds its exact time, and longer blocks may add location. Keep the time-axis gutter narrow and omit the redundant time column and accent rail inside spatial event cards. Place events by time and use compact columns for overlaps without reproducing Calendar's full grid. Each preview follows Calendar's title → exact time range → location hierarchy and pairs future titles with a small inline relative countdown without parentheses. The whole event surface opens a quick-action menu; its first action navigates to Calendar's week view and opens the native event inspector, followed only by contextually valid directions, meeting, or source-link actions. Never underline its title. | “nothing else scheduled today.” Do not invent a next event. |
+| `queue` | “up next” is one quiet, bounded vertical `ItemGroup`, never separate category sections. Its description reports things left and appends the overdue count only when nonzero; planning-window capacity does not belong in this heading. Order overdue tasks first, then overdue reminders, today reminders, undated reminders, and tasks due or reserved today. Task relevance uses the canonical open lifecycle and excludes trashed tasks; recommendations never pull unrelated future or undated tasks into Today. Place single-select All, Overdue, Tasks, and Reminders filters above a height-bounded `ScrollArea`; paginate the filtered result with the shared `Pagination` below it. Today keeps task titles and timing but suppresses verbose descriptions and tags. A row with title only collapses to one vertically centered line; timing or useful metadata expands it. Overdue tasks use the semantic danger surface as a restrained row highlight. | “Nothing in this view” when a filter has no matches; “Nothing pulling at you” only when the complete queue is empty. |
 
 ## Content budget
 
@@ -75,7 +71,7 @@ History (collapsed)
 | No open capacity | Queue summary reports no time before planning-window end | Calendar calculations |
 | Location/weather unavailable | Compact status row only while unresolved or unavailable | Setup mechanics; Account settings is linked only when saved location is needed |
 | Provider material is stale/failing | Affected item shows source/freshness and an actionable reconnect/retry state | Raw provider payload |
-| Completed material | Count is visible; content is in Done today, closed by default | Full completed list |
+| Completed material | Removed from Today immediately after confirmed completion | History in the owning workspace |
 
 ## Responsive contract
 
@@ -83,7 +79,7 @@ History (collapsed)
   a stable secondary rail, distinguished through spacing and hierarchy rather
   than a structural divider or second page-sized card.
 - **Narrow/mobile:** use one sequence: moment → day flow → decision queue →
-  history. Do not move urgent material behind horizontal scrolling or a tab.
+  the bottom app bar. Do not move urgent material behind horizontal scrolling or a tab.
 - All-day occasion content must shrink within its card at narrow widths. Long
   titles truncate visually while the full title remains in the accessible name
   and event details; they must never expand the layout viewport or displace the
@@ -110,17 +106,18 @@ History (collapsed)
 - An open task with time reserved today appears in the Today timeline using a
   neutral task treatment and opens the task editor. Its queue row may retain the
   reserved time, but does not repeat a Scheduled or Time reserved label.
-- Your timeline and To take care of use the same title and description hierarchy and
+- schedule and up next use the same title and description hierarchy and
   align at the top of equal-height desktop columns. Weather fallback and
   all-day context belong below the Today heading so optional states never shift
-  only one column's title. The empty-calendar quote is stable for the local day;
-  fully completed days may use completion-specific lines, while days with
-  remaining commitments use open-calendar lines.
-- Completing a row updates the queue and moves the item into Done today without
-  losing a direct reopen path.
-- Done today is a standard `Collapsible`, initially closed. Its trigger exposes
-  a label, count, expanded state, and icon rotation only as supplemental
-  feedback.
+  only one column's title. Empty schedules explicitly say nothing else is scheduled,
+  with a calendar icon and a quiet dashed empty-state surface.
+- The schedule is a standard `Collapsible`, expanded on desktop and collapsed by
+  default on mobile. The closed preview shows the current or next timed item and
+  its start time (or “now”), plus the number of all-day events. An explicit user
+  choice persists while the page is mounted, including through resizing.
+- Completing a row removes it from the queue. Today does not fetch or render a
+  completed-history section; history remains in the owning workspace.
+- Mobile uses one compact top row: workspace switcher, “today,” weather, and actions.
 - No route-level data is silently rearranged by an agent. Any planning proposal
   presents the candidate set and consequence before a user accepts it.
 
@@ -131,7 +128,6 @@ History (collapsed)
 | `all-day markers` | `TodayPage` + `.today-all-day-strip` + shared `OccasionCard` |
 | `schedule` | `TodayPage` + `.today-schedule` + shared compound `EventCard` |
 | `queue` | `TodayPage` + `.today-queue` and the unified commitment list |
-| `history` | `TodayPage` + `.today-history` using shadcn `Collapsible` |
 | orientation | `TodayNavigationTitle` and `TodayWeatherTopbar` |
 
 ## Verification
@@ -139,8 +135,8 @@ History (collapsed)
 1. Render no-event, active-event, later-event, task-only, overcommitted, and
    completed-material states.
 2. Verify no event is rendered both in Moment and Day flow.
-3. Verify Done today is closed initially, announces its count, and reveals
-   completed material when opened.
+3. Verify the schedule defaults closed on mobile, shows the next item/time, and
+   expands accessibly. Completed material must not appear in Today.
 4. Inspect desktop and narrow visual layouts with live data. Confirm the visual
    scan still reads Moment → Day flow → Decision queue.
 5. Confirm each event, task, and reminder retains the existing direct action
@@ -148,8 +144,56 @@ History (collapsed)
 
 ## Feedback contract
 
-Follow [feedback and validation](../feedback.md). Keep cached plan and completed
-material visible when a background refresh fails, with a contextual stale status
+Follow [feedback and validation](../feedback.md). Keep the cached plan visible when a background refresh fails, with a contextual stale status
 and Retry. An initial failure replaces only the unavailable region. Task and
 reminder actions use shared mutation feedback; irreversible deletion requires a
 named confirmation. Forms preserve values and show corrections at their inputs.
+
+## Device location lifetime
+
+The authenticated shell requests browser geolocation only on its first Today visit.
+It retains the result, denial, or unavailability in memory for that shell's lifetime;
+workspace revisits do not request permission again. A pending request may finish
+while another workspace is open. Sign-out or a full reload resets the attempt;
+coordinates are never persisted by this hook. Weather data continues its existing
+refresh cadence using that snapshot or the saved home location. This is a session
+location snapshot, not continuous movement tracking. The browser request remains
+bounded by its existing ten-second timeout and five-minute cached-position allowance.
+
+## Section surfaces
+
+Schedule and up next use the same small, muted section labels as Settings.
+Schedule has one summary Card; the task/reminder queue is an open list of native item surfaces. Schedule’s collapse control
+stays beside its label; its mobile default remains the next-event preview.
+
+Today uses a 16px gap between its sections without extra queue indentation. The
+schedule empty state sits directly in its card, without a nested dashed surface.
+The commitment section uses a Settings-sized sentence: “tasks and reminders for
+today.” Its type and date phrases select both types, tasks, or reminders and today,
+this week, this month, or an inclusive custom range using the shared Finance date
+picker. Presets retain overdue commitments; custom ranges match due or scheduled
+dates exactly in the planning timezone. Undated reminders are available in Tasks,
+not the date-scoped Today queue. Week boundaries follow Calendar preferences.
+Broader scopes read all pages of open native records, retain direct actions, and
+show loading or recovery rather than presenting an incomplete read as empty.
+
+### Compact sections
+
+Schedule and the editable tasks/reminders sentence use the Settings section-label
+scale, natural word spaces and no inline chevrons. The queue is an open ItemGroup
+with individual task/reminder surfaces, never a containing Card. Schedule retains
+its single Card; successful absence uses the shared centered-icon Empty inside it.
+Weather location remains a separate reachable map control on mobile.
+
+The top bar contains orientation and weather context, without a generic Add action.
+Weather and location use separate matching secondary pills. The schedule toggle
+is plain text with a transparent resting and expanded background.
+
+
+Today uses Tasks' `WorkspaceRow` for task and reminder records, including metadata,
+completion alignment, inspectors and options. Both center the checkbox on the first
+title line instead of the complete title/metadata block. The collapsed Schedule keeps
+all-day event cards and one timed event in the same shared Calendar grid/event styling.
+
+The shared Calendar grid on Today inherits the schedule card surface; retain the
+same time rules and event treatment without painting a body-colored rectangle.

@@ -32,9 +32,11 @@ export function baselineQualificationKind(
     month: "2-digit",
   }).formatToParts(now);
   const currentMonth = `${parts.find((part) => part.type === "year")?.value}-${parts.find((part) => part.type === "month")?.value}`;
-  return snapshot.month < currentMonth ||
-    snapshot.originalApproval.actorType !== "user" ||
-    snapshot.originalApproval.actorId !== ownerId
+  const approval = snapshot.originalApproval;
+  const currentAuthority =
+    approval.actorType === "agent" ||
+    (approval.actorType === "user" && approval.actorId === ownerId);
+  return snapshot.month < currentMonth || !currentAuthority
     ? ("retrospective" as const)
     : ("current" as const);
 }
@@ -110,7 +112,11 @@ export async function prepareBaselineEvidence(
       "The historical budget is incomplete; review a complete budget first.",
     );
   const accounts = await tx
-    .select()
+    .select({
+      id: financeAccounts.id,
+      currencyCode: financeAccounts.currencyCode,
+      updatedAt: financeAccounts.updatedAt,
+    })
     .from(financeAccounts)
     .where(and(eq(financeAccounts.userId, userId), inArray(financeAccounts.id, input.accountIds)))
     .orderBy(financeAccounts.id)

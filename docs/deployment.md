@@ -118,7 +118,7 @@ operational ledger. The historical AWS workflows/statuses are not release gates.
 | `MCP_PUBLIC_URL` | Canonical public MCP origin, for example `https://mcp.example.com` |
 | `MCP_RESOURCE_URL` | Canonical MCP resource URI, normally `https://mcp.example.com/mcp` |
 | `MCP_INTERNAL_SECRET` | Random 32+ character secret shared only by the API and MCP containers |
-| `AGENT_SKILL_SOURCE_URL` | Optional public source override for the Ilo setup compatibility reference. Blank derives the versioned website URL from `APP_BASE_URL`; an override must contain the configured immutable revision. |
+| `AGENT_SKILL_SOURCE_URL` | Optional public source override for the nohmi setup compatibility reference. Blank derives the versioned website URL from `APP_BASE_URL`; an override must contain the configured immutable revision. |
 | `AGENT_SKILL_VERSION` | Semantic version advertised for the exact optional setup reference |
 | `AGENT_SKILL_REVISION` | Immutable source identifier embedded in `AGENT_SKILL_SOURCE_URL`, such as a Git commit or release digest |
 | `REGISTRATION_MODE` | Must be `invite` in production; the API refuses to boot in open mode |
@@ -220,7 +220,7 @@ The authenticated connection-guide API derives its MCP URL from
 blank. It publishes `AGENT_SKILL_VERSION` and `AGENT_SKILL_REVISION` beside that
 link and refuses an override that does not contain its revision. The web build
 copies the repository-owned skill tree to
-`/skills/ilo-setup/v0.2.0/`, with `SKILL.md` as the advertised entrypoint. A
+`/skills/ilo-setup/v0.2.1/`, with `SKILL.md` as the advertised entrypoint. A
 self-contained release path is served read-only and cached as immutable by the
 production web edge; publishing changed bytes requires a new release path. A
 self-hosted deployment may publish its own public, immutable artifact URL and
@@ -238,7 +238,7 @@ for every release.
 
 Older local installs may retain either former authoritative GitHub URL in
 `.env`: the mutable `main` directory, the first commit-pinned directory, or the
-Ilo-hosted v0.1.0 path. Setup and Start recognize only those exact legacy
+nohmi-hosted v0.1.0 path. Setup and Start recognize only those exact legacy
 official values or a blank derived source paired with known legacy metadata.
 They remove the override and write the current manifest version/revision so the
 URL follows the environment's canonical `APP_BASE_URL`. The migration is
@@ -247,7 +247,7 @@ container or production process that does not use the Codex lifecycle can boot
 during rollout.
 
 Custom URLs, including custom URLs ending in `/main` or `/latest`, are never
-rewritten as an Ilo release. Deployments with a custom source must set all three
+rewritten as a nohmi release. Deployments with a custom source must set all three
 values to a matching immutable tuple; invalid or incomplete custom
 configuration continues to fail startup. A legacy official URL paired with
 explicit, conflicting version metadata is also preserved for validation rather
@@ -255,12 +255,12 @@ than silently overwritten.
 
 ### Optional setup-reference distribution boundary
 
-Ilo setup is driven by the authenticated `get_ilo_setup` MCP tool. The hosted
+nohmi setup is driven by the authenticated `get_ilo_setup` MCP tool. The hosted
 skill is an optional compatibility reference, not a prerequisite or completion
-signal. Ilo publishes its configured artifact identity but does not fetch or
+signal. nohmi publishes its configured artifact identity but does not fetch or
 install it. A host may read the versioned website tree over public HTTPS without
-an Ilo credential. A denied, unreachable, rate-limited, or malformed reference
-must not block a host that can call `get_ilo_setup`; it cannot grant more Ilo
+a nohmi credential. A denied, unreachable, rate-limited, or malformed reference
+must not block a host that can call `get_ilo_setup`; it cannot grant more nohmi
 scope or activate a profile or rule. The host owns its download timeout, cache,
 and installation error, while the deployment owner repairs the published
 artifact or advances to a new immutable release.

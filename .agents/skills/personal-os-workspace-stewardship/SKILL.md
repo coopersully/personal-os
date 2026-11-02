@@ -5,6 +5,9 @@ description: Use when designing, implementing, or reviewing a nohmi workspace st
 
 # nohmi workspace stewardship
 
+Apply the repository [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+to assigned durable work; pure read-only use of this skill creates no tracking work.
+
 Build each workspace as an expert, self-maintaining product domain rather than a collection of CRUD tools or
 client-authored prompts.
 

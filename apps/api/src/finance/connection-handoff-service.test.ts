@@ -1,6 +1,7 @@
 import type { Database, financeAccountConnections } from "@personal-os/database";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AppError } from "../errors.js";
 import { encryptJson } from "../security.js";
 import { createFinanceConnectionHandoffService } from "./connection-handoff-service.js";
 import type { FinanceMutationContext } from "./context.js";
@@ -155,6 +156,33 @@ function harness(changes: Partial<Connection> = {}) {
 }
 
 describe("Finance hosted connection completion unit contracts", () => {
+  it("refuses known duplicate hosted consent before exchanging its public token", async () => {
+    const test = harness();
+    test.getHostedLinkResult.mockResolvedValue({
+      publicTokens: ["duplicate-token"],
+      accountMetadata: {
+        "duplicate-token": {
+          institutionId: "ins-fixture",
+          accounts: [{ name: "Checking", mask: "0042" }],
+        },
+      },
+    });
+    const findDuplicateAccounts = vi.fn().mockResolvedValue(["local-existing-account"]);
+    const service = createFinanceConnectionHandoffService({
+      ...test.options,
+      findDuplicateAccounts,
+    });
+    await expect(service.complete(test.row.id, context)).rejects.toMatchObject({
+      code: "conflict",
+      details: { reason: "duplicate_bank_accounts" },
+    });
+    expect(test.exchangePublicToken).not.toHaveBeenCalled();
+    expect(test.row.status).toBe("failed");
+    expect(findDuplicateAccounts).toHaveBeenCalledWith(context.userId, [
+      { institutionId: "ins-fixture", name: "Checking", mask: "0042" },
+    ]);
+  });
+
   it("returns a provider URL only after storing its encrypted waiting state, and does not repeat the request on receipt replay", async () => {
     const test = harness({ externalHandoffUrl: null, encryptedHandoffState: null });
     test.createHostedLink.mockResolvedValue({
@@ -421,6 +449,28 @@ describe("Finance hosted connection completion unit contracts", () => {
     expect(test.row.encryptedHandoffState).toBeNull();
     expect(test.row.externalHandoffUrl).toBeNull();
     expect(test.getHostedLinkResult).not.toHaveBeenCalled();
+    expect(test.exchangePublicToken).not.toHaveBeenCalled();
+  });
+
+  it("retains exchanged credentials and reports a nonretryable authoritative duplicate conflict", async () => {
+    const test = harness({
+      encryptedHandoffState: encryptJson(
+        { phase: "exchanged", accessToken: "synthetic-access", itemId: "synthetic-item" },
+        key,
+      ),
+    });
+    test.preparePersistence.mockRejectedValue(
+      new AppError("conflict", "Already connected.", {
+        reason: "duplicate_bank_accounts",
+        accountIds: ["local-account"],
+      }),
+    );
+    await expect(test.service.complete(connectionId, context)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(test.row.status).toBe("failed");
+    expect(test.row.lastError).toMatchObject({ code: "duplicate_bank_accounts", retryable: false });
+    expect(test.row.encryptedHandoffState).not.toBeNull();
     expect(test.exchangePublicToken).not.toHaveBeenCalled();
   });
 

@@ -1,3 +1,4 @@
+import { weatherSnapshotSchema } from "@personal-os/domain";
 import { createWeatherService } from "./weather-service.js";
 
 const now = new Date("2026-07-21T16:00:00.000Z");
@@ -19,6 +20,192 @@ function reverseLocation() {
 }
 
 describe("weather service", () => {
+  const savedLocation = {
+    coordinates: { latitude: 40.7128, longitude: -74.006 },
+    label: "New York, New York, United States",
+  };
+  const seconds = (iso: string) => Date.parse(iso) / 1_000;
+
+  async function atmosphericSnapshot(forecast: unknown, clock = now) {
+    const fetch = weatherFetch([json(forecast), json({ current: {} })]);
+    const result = await createWeatherService({ fetch, now: () => clock }).current({
+      savedLocation,
+    });
+    return { fetch, result };
+  }
+
+  it("requests bounded atmospheric data and preserves the provider observation timestamp", async () => {
+    const { fetch, result } = await atmosphericSnapshot({
+      current: {
+        temperature_2m: 70,
+        weather_code: 63,
+        cloud_cover: 82,
+        wind_speed_10m: 12.5,
+        is_day: 1,
+        time: seconds("2026-07-21T15:45:00Z"),
+      },
+      daily: {
+        time: ["2026-07-20T04:00:00Z", "2026-07-21T04:00:00Z", "2026-07-22T04:00:00Z"].map(seconds),
+        sunrise: [null, seconds("2026-07-21T09:45:00Z"), null],
+        sunset: [null, seconds("2026-07-22T00:20:00Z"), null],
+      },
+    });
+    expect(result).toMatchObject({
+      observedAt: now.toISOString(),
+      atmosphere: {
+        weatherCode: 63,
+        cloudCoverPercent: 82,
+        windSpeedKmh: 12.5,
+        isDay: true,
+        sunriseAt: "2026-07-21T09:45:00.000Z",
+        sunsetAt: "2026-07-22T00:20:00.000Z",
+        observedAt: "2026-07-21T15:45:00.000Z",
+      },
+    });
+    expect(weatherSnapshotSchema.parse(result)).toEqual(result);
+    const params = new URL(String(fetch.mock.calls[0]?.[0])).searchParams;
+    expect(params.get("current")?.split(",")).toEqual([
+      "temperature_2m",
+      "precipitation",
+      "rain",
+      "showers",
+      "weather_code",
+      "cloud_cover",
+      "wind_speed_10m",
+      "is_day",
+    ]);
+    expect(Object.fromEntries(params)).toMatchObject({
+      daily: "sunrise,sunset",
+      timeformat: "unixtime",
+      timezone: "auto",
+      past_days: "1",
+      forecast_days: "2",
+      wind_speed_unit: "kmh",
+    });
+  });
+
+  it.each([
+    [
+      "2026-07-22T01:00:00Z",
+      ["2026-07-21T04:00:00Z", "2026-07-22T04:00:00Z"],
+      "2026-07-21T10:00:00Z",
+    ],
+    [
+      "2026-07-21T16:00:00Z",
+      ["2026-07-21T15:00:00Z", "2026-07-22T15:00:00Z"],
+      "2026-07-21T20:00:00Z",
+    ],
+    [
+      "2026-11-01T18:00:00Z",
+      ["2026-11-01T04:00:00Z", "2026-11-02T05:00:00Z"],
+      "2026-11-01T11:00:00Z",
+    ],
+  ])("selects the provider local-day window at %s", async (clock, boundaries, sunrise) => {
+    const { result } = await atmosphericSnapshot(
+      {
+        current: { temperature_2m: 70, weather_code: 0, time: seconds(clock) },
+        daily: { time: boundaries.map(seconds), sunrise: [seconds(sunrise), null] },
+      },
+      new Date(clock),
+    );
+    expect(result).toMatchObject({
+      atmosphere: { sunriseAt: new Date(sunrise).toISOString(), sunsetAt: null },
+    });
+  });
+
+  it.each([
+    undefined,
+    null,
+    "2026-07-21T16:00:00Z",
+    -1,
+    1.5,
+    253402300800,
+    1e100,
+  ])("omits atmosphere for invalid provider observation time %s", async (time) => {
+    const { result } = await atmosphericSnapshot({
+      current: { temperature_2m: 70, weather_code: 0, time },
+    });
+    expect(result).not.toHaveProperty("atmosphere");
+    expect(result.temperatureF).toBe(70);
+  });
+
+  it.each([
+    0.5, 1e100,
+  ])("omits atmosphere for a non-domain weather code %s", async (weather_code) => {
+    const { result } = await atmosphericSnapshot({
+      current: { temperature_2m: 70, weather_code, time: seconds(now.toISOString()) },
+    });
+    expect(result).not.toHaveProperty("atmosphere");
+  });
+
+  it("preserves polar night and unknown integer weather codes with missing solar data", async () => {
+    const { result } = await atmosphericSnapshot({
+      current: {
+        temperature_2m: 20,
+        weather_code: 999,
+        time: seconds(now.toISOString()),
+        is_day: 0,
+      },
+      daily: {
+        time: [seconds("2026-07-21T00:00:00Z"), seconds("2026-07-22T00:00:00Z")],
+        sunrise: [null],
+        sunset: [null],
+      },
+    });
+    expect(result).toMatchObject({
+      condition: "Current conditions",
+      atmosphere: {
+        weatherCode: 999,
+        cloudCoverPercent: null,
+        windSpeedKmh: null,
+        isDay: false,
+        sunriseAt: null,
+        sunsetAt: null,
+        observedAt: now.toISOString(),
+      },
+    });
+  });
+
+  it.each([
+    { cloud_cover: -1, wind_speed_10m: -1, is_day: 2 },
+    { cloud_cover: 101, wind_speed_10m: "12", is_day: true },
+    { cloud_cover: "82", wind_speed_10m: null, is_day: null },
+  ])("degrades malformed optional current values independently: %j", async (fields) => {
+    const { result } = await atmosphericSnapshot({
+      current: { temperature_2m: 70, weather_code: 0, time: seconds(now.toISOString()), ...fields },
+      daily: { time: "invalid", sunrise: {}, sunset: [1e100] },
+    });
+    expect(result).toMatchObject({
+      atmosphere: {
+        cloudCoverPercent: null,
+        windSpeedKmh: null,
+        isDay: null,
+        sunriseAt: null,
+        sunsetAt: null,
+      },
+    });
+  });
+
+  it("keeps valid optional fields when a solar event is malformed or outside the local day", async () => {
+    const { result } = await atmosphericSnapshot({
+      current: {
+        temperature_2m: 70,
+        weather_code: 0,
+        time: seconds(now.toISOString()),
+        cloud_cover: 0,
+        wind_speed_10m: 0,
+      },
+      daily: {
+        time: [seconds("2026-07-21T04:00:00Z"), seconds("2026-07-22T04:00:00Z")],
+        sunrise: ["invalid"],
+        sunset: [seconds("2026-07-23T00:20:00Z")],
+      },
+    });
+    expect(result).toMatchObject({
+      atmosphere: { cloudCoverPercent: 0, windSpeedKmh: 0, sunriseAt: null, sunsetAt: null },
+    });
+  });
+
   it("searches and deduplicates selectable saved weather locations", async () => {
     const fetch = weatherFetch([
       json({

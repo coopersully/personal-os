@@ -1,5 +1,6 @@
 import { getDefaultWorkspacePreferences } from "@personal-os/domain";
 import { MessageAttachments } from "@/components/message-attachments";
+import { useNavigationShortcuts } from "@/components/workspace-navigation-page";
 import { WorkspacePreferenceRecovery } from "../workspace-settings/save-recovery";
 
 export { formatAttachmentSize } from "@/components/message-attachments";
@@ -8,6 +9,7 @@ import type { MailAddress, MailDraft, MailMessage, MailThread, User } from "@per
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -18,7 +20,6 @@ import {
   EyeOffIcon,
   ForwardIcon,
   InboxIcon,
-  ListChecksIcon,
   MailIcon,
   MoreHorizontalIcon,
   ReplyIcon,
@@ -39,9 +40,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu.js";
@@ -63,7 +61,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "../../components/ui/sidebar.js";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarActions,
@@ -72,7 +69,7 @@ import {
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
-import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
+import { visibleConnectorRefreshInterval } from "../connections/health.js";
 import { type ComposeIntent, FloatingMailComposer } from "./floating-compose.js";
 import { useMailLayoutPreferences } from "./layout-preferences";
 
@@ -124,11 +121,6 @@ export function mailReplyRecipient(
   );
 }
 
-function inboxUnreadCount(items: Array<{ role: string; unreadCount: number }>) {
-  return items
-    .filter((mailbox) => mailbox.role === "inbox")
-    .reduce((sum, mailbox) => sum + mailbox.unreadCount, 0);
-}
 export const relative = formatRelativeTime;
 export const mailListDensities = ["compact", "comfortable", "expanded"] as const;
 export type MailListDensity = (typeof mailListDensities)[number];
@@ -229,7 +221,6 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
   );
-  const totalInboxUnread = inboxUnreadCount(mailboxes.data ?? []);
   const listScope = mailListScopeFromSearch(params);
   const selectedAccountIds = params.getAll("account");
   return (
@@ -240,11 +231,12 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
           <QueryFeedback query={accounts} title="Couldn’t refresh mail accounts." staleOnly />
           <QueryFeedback query={mailboxes} title="Couldn’t refresh mailboxes." staleOnly />
           {accounts.isPending || mailboxes.isPending ? (
-            <p className="context-sidebar__empty">Loading mailboxes…</p>
+            <ContentSkeleton label="Loading mailboxes…" shape="settings" rows={2} />
           ) : (accounts.isError && !accounts.data) || (mailboxes.isError && !mailboxes.data) ? (
             <QueryFeedback
-              query={accounts.isError ? accounts : mailboxes}
+              query={accounts.isError && !accounts.data ? accounts : mailboxes}
               title="Couldn’t load mailboxes."
+              toastOnly
             />
           ) : enabled.length === 0 ? (
             <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>
@@ -254,7 +246,6 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
                 listScope={listScope}
                 onNavigate={onNavigate}
                 selectedAccountIds={selectedAccountIds}
-                unreadCount={totalInboxUnread}
               />
             </SidebarMenu>
           )}
@@ -397,7 +388,7 @@ export function MailPage({ user }: { user: User }) {
             </EmptyHeader>
             <EmptyContent>
               <Button asChild>
-                <Link to="/settings?section=connections">Connect a mailbox</Link>
+                <Link to="/settings?page=connections">Connect a mailbox</Link>
               </Button>
             </EmptyContent>
           </Empty>
@@ -423,12 +414,6 @@ export function MailPage({ user }: { user: User }) {
             ? `${(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent").length} drafts`
             : `${threads.data?.length ?? 0} conversations`
         }
-        layoutDisabled={!layoutSettings.isSuccess || saveLayout.isPending || !!saveLayout.recovery}
-        conversationLayout={conversationLayout}
-        setConversationLayout={(mailConversationLayout) =>
-          saveLayout.mutate({ mailConversationLayout })
-        }
-        density={density}
         forward={() => {
           if (!selected) return;
           setComposeIntent({
@@ -459,9 +444,6 @@ export function MailPage({ user }: { user: User }) {
           });
         }}
         selected={selected}
-        setDensity={(nextDensity) => {
-          saveLayout.mutate({ mailListDensity: nextDensity });
-        }}
         snooze={() => {
           if (selected) snoozeThread.mutate(selected.id);
         }}
@@ -515,8 +497,11 @@ export function MailPage({ user }: { user: User }) {
           orientation="horizontal"
         >
           <ResizablePanel defaultSize="34%" id="mail-list" minSize="280px">
-            <section aria-label="Conversations" className="mail-thread-list">
-              <ConnectionRecoveryAlert accounts={enabled} />
+            <section
+              aria-label="Conversations"
+              data-workspace-scroll=""
+              className="mail-thread-list"
+            >
               {listScope === "drafts" ? (
                 drafts.isPending ? (
                   <PageLoading />
@@ -568,7 +553,7 @@ export function MailPage({ user }: { user: User }) {
             withHandle
           />
           <ResizablePanel defaultSize="66%" id="mail-reader" minSize="360px">
-            <section aria-label="Message reader" className="mail-reader">
+            <section aria-label="Message reader" data-workspace-scroll="" className="mail-reader">
               <QueryFeedback query={loaded} title="Couldn’t load the conversation." />
               <QueryFeedback query={messages} title="Couldn’t load conversation messages." />
               {selected ? (
@@ -674,16 +659,11 @@ function MailSecondaryNavigation({
   archive,
   back,
   countLabel,
-  conversationLayout,
-  setConversationLayout,
-  layoutDisabled,
-  density,
   pending,
   forward,
   listScope,
   reply,
   selected,
-  setDensity,
   snooze,
   toggleStar,
   toggleUnread,
@@ -692,23 +672,22 @@ function MailSecondaryNavigation({
   archive: () => void;
   back: () => void;
   countLabel: string;
-  conversationLayout: "split" | "single";
-  layoutDisabled: boolean;
-  setConversationLayout: (layout: "split" | "single") => void;
-  density: MailListDensity;
   pending: boolean;
   forward: () => void;
   listScope: MailListScope;
   reply: () => void;
   selected: MailThread | undefined;
-  setDensity: (density: MailListDensity) => void;
   snooze: () => void;
   toggleStar: () => void;
   toggleUnread: () => void;
   trash: () => void;
 }) {
   return (
-    <WorkspaceSecondaryAppBar aria-label="Mail controls" className="mail-secondary-nav">
+    <WorkspaceSecondaryAppBar
+      enabled={!!selected}
+      aria-label="Mail controls"
+      className="mail-secondary-nav"
+    >
       <WorkspaceSecondaryAppBarLeading className="mail-secondary-nav__leading">
         <span>{countLabel}</span>
         {listScope === "all" ? null : <Badge>{listScope}</Badge>}
@@ -831,46 +810,6 @@ function MailSecondaryNavigation({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  disabled={layoutDisabled}
-                  aria-label="Message list layout"
-                  className="mail-secondary-nav__density"
-                  size="icon"
-                  variant="ghost"
-                >
-                  <ListChecksIcon aria-hidden="true" />
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>Message list layout</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="mail-density-menu">
-            <DropdownMenuLabel>Conversation layout</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={conversationLayout}
-              onValueChange={(value) => setConversationLayout(value as "split" | "single")}
-            >
-              <DropdownMenuRadioItem value="split">Split view</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="single">Full-width view</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Conversation density</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              onValueChange={(value) => setDensity(value as MailListDensity)}
-              value={density}
-            >
-              {mailListDensities.map((option) => (
-                <DropdownMenuRadioItem key={option} value={option}>
-                  {option.charAt(0).toUpperCase() + option.slice(1)}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </WorkspaceSecondaryAppBarActions>
     </WorkspaceSecondaryAppBar>
   );
@@ -880,13 +819,30 @@ function UnifiedMailDestinations({
   listScope,
   onNavigate,
   selectedAccountIds,
-  unreadCount,
 }: {
   listScope: MailListScope;
   onNavigate: () => void;
   selectedAccountIds: string[];
-  unreadCount: number;
 }) {
+  const navigationShortcuts = useNavigationShortcuts();
+  const queryClient = useQueryClient();
+  useEffect(
+    () =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (
+          event.type === "updated" &&
+          event.query.queryKey[0] === "mail-drafts" &&
+          event.action.type === "success"
+        )
+          void queryClient.invalidateQueries({ queryKey: ["mail-threads", "navigation-counts"] });
+      }),
+    [queryClient],
+  );
+  const counts = useQuery({
+    queryKey: ["mail-threads", "navigation-counts", selectedAccountIds],
+    queryFn: () => api.getMailNavigationCounts(selectedAccountIds),
+    refetchInterval: 60_000,
+  });
   const isMailbox = useLocation().pathname === "/mail";
   const scopes: Array<{ icon: typeof MailIcon; label: string; value: MailListScope }> = [
     { icon: InboxIcon, label: "Inbox", value: "all" },
@@ -899,39 +855,38 @@ function UnifiedMailDestinations({
 
   return (
     <>
-      {scopes.map(({ icon: Icon, label, value }) => {
-        const query = new URLSearchParams();
-        const params = mailListScopeParams(value);
-        if (params.unread) query.set("unread", params.unread);
-        if (params.view) query.set("view", params.view);
-        for (const accountId of selectedAccountIds) query.append("account", accountId);
-        const suffix = query.size ? `?${query.toString()}` : "";
-        return (
-          <SidebarMenuItem key={value}>
-            <SidebarMenuButton
-              className={value === "all" && unreadCount > 0 ? "sidebar-item-with-meta" : undefined}
-              asChild
-              isActive={isMailbox && listScope === value}
-              tooltip={label}
-            >
-              <Link
-                aria-label={value === "all" && unreadCount > 0 ? `${label} ${unreadCount}` : label}
-                onClick={onNavigate}
-                to={`/mail${suffix}`}
+      {scopes
+        .filter(({ value }) => value !== "all" || !navigationShortcuts.includes("inbox"))
+        .map(({ icon: Icon, label, value }) => {
+          const query = new URLSearchParams();
+          const params = mailListScopeParams(value);
+          if (params.unread) query.set("unread", params.unread);
+          if (params.view) query.set("view", params.view);
+          for (const accountId of selectedAccountIds) query.append("account", accountId);
+          const suffix = query.size ? `?${query.toString()}` : "";
+          return (
+            <SidebarMenuItem key={value}>
+              <SidebarMenuButton
+                className="sidebar-item-with-meta"
+                asChild
+                isActive={isMailbox && listScope === value}
+                tooltip={label}
               >
-                <Icon
-                  aria-hidden="true"
-                  weight={isMailbox && listScope === value ? "Filled" : "Outline"}
-                />
-                <span>{label}</span>
-              </Link>
-            </SidebarMenuButton>
-            {value === "all" && unreadCount > 0 ? (
-              <SidebarItemMeta count={unreadCount} label="Unread inbox messages" />
-            ) : null}
-          </SidebarMenuItem>
-        );
-      })}
+                <Link aria-label={label} onClick={onNavigate} to={`/mail${suffix}`}>
+                  <Icon
+                    aria-hidden="true"
+                    weight={isMailbox && listScope === value ? "Filled" : "Outline"}
+                  />
+                  <span>{label}</span>
+                </Link>
+              </SidebarMenuButton>
+              <SidebarItemMeta
+                count={counts.data?.[value]}
+                label={value === "drafts" ? "Drafts" : `${label} conversations`}
+              />
+            </SidebarMenuItem>
+          );
+        })}
     </>
   );
 }

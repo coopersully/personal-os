@@ -1,8 +1,9 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { AgentAccessDomain } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { loadReviewSession, ReviewFlowHost } from "./flow.js";
@@ -125,9 +126,7 @@ it("reopens an answered Finance context link read-only after it leaves outstandi
     },
   });
   setup(`/finances?review=finance-contextual:${id}`, "finances");
-  expect(
-    await screen.findByText("Context saved. The financial review remains open."),
-  ).toBeVisible();
+  expect(await screen.findByText("Answered · financial review open")).toBeVisible();
   expect(mocks.getFinanceContextualQuestion).toHaveBeenCalledWith(id);
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   expect(screen.queryByText("Protect travel time")).not.toBeInTheDocument();

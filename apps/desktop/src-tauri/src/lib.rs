@@ -61,6 +61,7 @@ pub fn run() {
             updates::desktop_update_restart,
             ritual::ritual_state,
             ritual::ritual_ready,
+            ritual::ritual_sky_frame,
             ritual::ritual_preferences,
             ritual::ritual_open,
             ritual::ritual_preview,
@@ -83,7 +84,7 @@ pub fn run() {
             desktop_preview_environment
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build nohmi")
+        .expect("failed to build Personal OS")
         .run(|app, event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {

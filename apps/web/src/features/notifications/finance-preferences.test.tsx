@@ -133,13 +133,11 @@ it("retains the override after a failed reset", async () => {
     await screen.findByRole("button", { name: "Use global notification preferences" }),
   );
   expect(
-    await screen.findByText(
-      "Finance notification reset has not been confirmed. Review the latest settings before applying your change.",
-    ),
+    await screen.findByText("Finance notification reset has not been confirmed."),
   ).toBeInTheDocument();
   expect(screen.getByText("Overridden for Finances")).toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "Use global notification preferences" }),
+    screen.getByRole("button", { name: "Use global notification preferences", hidden: true }),
   ).toBeDisabled();
   expect(screen.getByRole("button", { name: "Refresh latest settings" })).toBeEnabled();
 });
@@ -298,7 +296,7 @@ it.each([
     await screen.findByText(
       kind === "uncertain"
         ? "The change may have been saved. Refresh checks the current values without writing."
-        : "Another editor changed these settings. Your attempted change was rejected.",
+        : "Another editor changed these settings. Review the latest values before applying your change.",
     ),
   ).toBeVisible();
   expect(mocks.resetFinanceNotificationPreferences).toHaveBeenLastCalledWith({
@@ -442,7 +440,7 @@ it.each([
       : new Error("Network interrupted");
   const message =
     outcome === "conflict"
-      ? "Another editor changed these settings. Your attempted change was rejected."
+      ? "Another editor changed these settings. Review the latest values before applying your change."
       : "The change may have been saved. Refresh checks the current values without writing.";
   let rejectReplay!: (error: Error) => void;
 

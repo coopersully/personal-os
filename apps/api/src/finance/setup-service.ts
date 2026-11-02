@@ -19,7 +19,7 @@ import {
   financeSetupPlanningSchema,
   financeWorkflowUnavailableSchema,
   financialProfileChangesSchema,
-  NOHMI_FINANCE_PLAYBOOK,
+  PERSONAL_OS_FINANCE_PLAYBOOK,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
@@ -245,7 +245,7 @@ export function setupResult(input: {
       headline: input.headline,
       ...(input.question ? { nextQuestion: input.question } : {}),
       optionalDetails: [
-        `Priorities follow approved nohmi Finance playbook ${NOHMI_FINANCE_PLAYBOOK.version}: cash-flow stability, resilience, risk protection, costly debt, retirement, diversified investing, and a sustainable good life.`,
+        `Priorities follow approved nohmi Finance playbook ${PERSONAL_OS_FINANCE_PLAYBOOK.version}: cash-flow stability, resilience, risk protection, costly debt, retirement, diversified investing, and a sustainable good life.`,
         ...(input.optionalDetails ?? []),
       ],
       requiredDisclosures: input.disclosures ?? [],

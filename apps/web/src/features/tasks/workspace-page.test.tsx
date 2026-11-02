@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { toast } from "sonner";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -167,6 +168,7 @@ it("creates tasks with placement and opens reminders from the shared plus", asyn
 });
 
 it("filters inactive sidebar containers and recovers each navigation dependency", async () => {
+  const notice = vi.spyOn(toast, "error");
   mocks.listTaskLists.mockResolvedValueOnce({
     items: [
       { id: "inbox", name: "Inbox", kind: "inbox", availability: "active" },
@@ -208,12 +210,17 @@ it("filters inactive sidebar containers and recovers each navigation dependency"
   mocks.listTaskLists.mockRejectedValueOnce(new Error("Lists offline"));
   mocks.listTaskProjects.mockRejectedValueOnce(new Error("Projects offline"));
   const user = setupSidebar();
-  expect(await screen.findByText("Couldn’t load lists.")).toBeVisible();
-  expect(screen.getByText("Couldn’t load projects.")).toBeVisible();
+  await waitFor(() => {
+    expect(notice).toHaveBeenCalledWith("Couldn’t load lists.", expect.any(Object));
+    expect(notice).toHaveBeenCalledWith("Couldn’t load projects.", expect.any(Object));
+  });
+  expect(screen.queryByText(/Couldn’t load/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Retry Lists" }));
   await user.click(screen.getByRole("button", { name: "Retry Projects" }));
   expect(mocks.listTaskLists).toHaveBeenCalledTimes(3);
   expect(mocks.listTaskProjects).toHaveBeenCalledTimes(3);
+  notice.mockRestore();
 });
 it("shows exact partial batch failures and never labels them all successful", async () => {
   mocks.completeTask.mockResolvedValue(task.record);
@@ -228,7 +235,7 @@ it("shows exact partial batch failures and never labels them all successful", as
       name: "Complete",
     }),
   );
-  expect(await screen.findByText("1 updated, 1 not changed.")).toBeInTheDocument();
+  expect(await screen.findByText("1 updated, 1 not changed")).toBeInTheDocument();
   expect(screen.getByText(/Call Sam: Couldn’t confirm/)).toBeInTheDocument();
 });
 

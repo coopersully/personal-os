@@ -37,6 +37,7 @@ import { secureHeaders } from "hono/secure-headers";
 import { z } from "zod";
 import { createActiveReminderService } from "./active-reminder-service.js";
 import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
+import { createAgentAccountService } from "./agent-account-service.js";
 import { createAssistantService } from "./assistant-service.js";
 import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
@@ -69,6 +70,8 @@ import { createFinanceMaintenanceIntentService } from "./finance/maintenance-int
 import { createFinanceOnboardingEvidenceLoader } from "./finance/onboarding-evidence.js";
 import { createFinanceOnboardingRepository } from "./finance/onboarding-repository.js";
 import { createFinancePositionService } from "./finance/position-service.js";
+import { createFinanceReviewBacklogService } from "./finance/review-backlog-service.js";
+import { createFinanceReviewBatchService } from "./finance/review-batch-service.js";
 import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
 import { createFinanceSmsApprovalService } from "./finance/sms-approval-service.js";
 import { createFinanceSmsContextDispatcher } from "./finance/sms-context-dispatcher.js";
@@ -104,6 +107,8 @@ import { createReminderService } from "./reminder-service.js";
 import { readBoundedRequestBody } from "./request-body.js";
 import { createRitualService } from "./ritual-service.js";
 import { registerActiveReminderRoutes } from "./routes/active-reminders.js";
+
+import { registerAgentAccountRoutes } from "./routes/agent-accounts.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
@@ -483,6 +488,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const finances = createFinanceService({
     db: dependencies.db,
+    plaidEnvironment: dependencies.config.plaidEnvironment,
     encryptionKey: dependencies.config.encryptionKey,
     ...(dependencies.log ? { log: dependencies.log } : {}),
     now,
@@ -1157,6 +1163,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       principal = await auth.authenticateAccessToken(
         authorization.slice(7),
         audience && internalKey === dependencies.config.mcpInternalSecret ? audience : undefined,
+        context.get("requestId"),
       );
     } else if (authorization?.startsWith("Session ")) {
       principal = await auth.authenticateSession(authorization.slice(8));
@@ -1204,6 +1211,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/rituals/*", authenticate);
   app.use("/v1/motives/*", authenticate);
   app.use("/v1/motives", authenticate);
+  app.use("/v1/agent-accounts", authenticate);
+  app.use("/v1/agent-accounts/*", authenticate);
   app.use("/v1/automation-hosts", authenticate);
   app.use("/v1/automation-hosts/*", authenticate);
   app.use("/v1/finances/*", authenticate);
@@ -1518,6 +1527,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
 
   registerFinanceRoutes({
+    reviewBacklog: createFinanceReviewBacklogService(dependencies.db, { now }),
+    reviewBatches: createFinanceReviewBatchService({ db: dependencies.db, now, finance: finances }),
     actions: financeActions,
     app,
     db: dependencies.db,
@@ -1571,10 +1582,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerTextingRoutes({
     app,
+    apiBaseUrl: dependencies.config.apiBaseUrl,
     texting,
     ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });
   registerTextingRecoveryRoutes({ app, recovery: textingRecovery });
+  registerAgentAccountRoutes({
+    app,
+    accounts: createAgentAccountService({ db: dependencies.db, now }),
+  });
   registerAutomationHostRoutes({
     app,
     hosts: createAutomationHostService({

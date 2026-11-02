@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  accessTokens,
   createDatabaseClient,
   type Database,
   type DatabaseClient,
@@ -47,6 +48,68 @@ describe.sequential("trusted Finance mutation context", () => {
   afterAll(async () => {
     await database.close();
     await container.stop();
+  });
+
+  it("rejects an agent whose token expires while waiting for the mutation lock", async () => {
+    const started = new Date();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId,
+        name: "Expiry boundary",
+        tokenHash: "expiry-boundary",
+        scopes: ["finances:write", "finances:execute"],
+        expiresAt: new Date(started.getTime() + 60_000),
+      })
+      .returning();
+    if (!token) throw new Error("Missing token");
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      requestId: "expiry-boundary",
+      principal: { userId, actorId: token.id, actorType: "agent", scopes: new Set(token.scopes) },
+    });
+    context.requiresApprovalBypass = true;
+    const blocker = await database.pool.connect();
+    const lock = `expiry-test:${userId}`;
+    const mutate = vi.fn(async () => ({ applied: true }));
+    let pending: Promise<unknown> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [lock]);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(started);
+      pending = executeFinanceIdempotently(
+        database.db,
+        context,
+        {
+          idempotencyKey: "expiry-boundary",
+          operation: "confirm_planning",
+          payload: {},
+          lockIdentities: [lock],
+        },
+        mutate,
+      ).catch((error: unknown) => error);
+      await vi.waitFor(async () => {
+        const waiting = await database.pool.query(
+          "SELECT 1 FROM pg_stat_activity WHERE wait_event = 'advisory' AND query LIKE '%pg_advisory_xact_lock%'",
+        );
+        expect(waiting.rowCount).toBeGreaterThan(0);
+      });
+      vi.setSystemTime(new Date(started.getTime() + 120_000));
+      await blocker.query("COMMIT");
+      expect(await pending).toMatchObject({ code: "forbidden" });
+      expect(mutate).not.toHaveBeenCalled();
+      expect(
+        await database.db.query.financeMutationRecords.findFirst({
+          where: eq(financeMutationRecords.idempotencyKey, "expiry-boundary"),
+        }),
+      ).toBeUndefined();
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+      await pending;
+      vi.useRealTimers();
+    }
   });
 
   it("allows scoped bookkeeping without conferring budget self-approval", async () => {

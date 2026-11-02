@@ -50,6 +50,7 @@ createRoot(root).render(
         </aside>
         <main>
           <SettingsPageLayout
+            section="active-cards"
             title="Active cards"
             description="Make room for what needs doing. Shape your cards and try them here."
             search={null}

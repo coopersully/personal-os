@@ -62,8 +62,7 @@ describe.sequential("immutable Finance host prompt issuance", () => {
         authorizationConnectionId: connectionId,
         tokenHash: randomUUID(),
         scopes: ["finances:maintain"],
-        // Grant snapshots also enforce the database clock, independently of the service clock.
-        expiresAt: new Date("2099-10-19T15:00:00Z"),
+        expiresAt: null,
       })
       .returning();
     if (!token) throw new Error("fixture token missing");

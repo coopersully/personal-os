@@ -67,6 +67,26 @@ validated IDs are derived in memory to match production observations. Premerge r
 satisfy postmerge production criteria. Canonical string-ID plans still require top-level
 `evidence`, with the existing non-runtime rules unchanged.
 
+For historical recovery retention, these same schemas select different reference fields: legacy
+string-ID plans retain top-level `evidence`; detailed plans retain `premerge_evidence`. A detailed
+plan's optional top-level `evidence` remains extra metadata and never becomes an alternative or
+additional freeze-reference list. Per-criterion evidence paths remain planned observation
+locations, not required premerge files or successful production evidence. Selection is nonmutating
+and candidate-bound; the exact original object, extra fields and digest remain intact. Entry and
+history replay use the same selector; see [execution and recovery](execution.md#reviewed-plan-recovery-before-merge).
+
+VERSION 8 recovery can explicitly retain typed per-file provenance without changing this
+independent acceptance schema or policy revision 4. Historically hash-attested files retain their
+original proof; freshly reviewed exact bytes with unavailable historical proof retain that distinct
+classification, actual aware review time, author/reviewer separation and continuity/path references.
+Neither class nor retained bytes satisfy readiness or production observations. Later retention
+preserves unavailable original origins; a historical claim for the same path/hash needs an explicit
+independently accepted newer predecessor-freeze binding, never flat relabeling of the old unknown
+freeze. The immutable earlier declaration remains unavailable. Entry/history share
+the versioned validation; pre-VERSION-8 history extras remain opaque and unchanged. See the
+[typed recovery contract](execution.md#typed-file-provenance-version-8). The acceptance owner must
+authenticate these underlying review/provenance assertions; helper validation cannot do so.
+
 Before final collection, save the independently reviewed plan into the PR checkpoint's
 `reviewedProductionPlan` with phase `final_check`. The checkpoint freezes that snapshot and refuses
 replacement, including after reopening a phase. Read it back into readiness/delivery state; do not

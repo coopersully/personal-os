@@ -1,7 +1,8 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { AddTransactionContext } from "./contextual-question.js";
@@ -56,7 +57,7 @@ it("answers the exact canonical work, preserves retry identity, and states the f
   await user.click(screen.getByRole("button", { name: "Save context" }));
   await screen.findByText(/Couldn’t .*transaction context|Couldn’t save this answer/);
   await user.click(screen.getByRole("button", { name: "Save context" }));
-  await screen.findByText(/Context saved/);
+  await screen.findByText("Answered · financial review open");
   expect(api.answerFinanceContextualQuestion.mock.calls[0]).toEqual(
     api.answerFinanceContextualQuestion.mock.calls[1],
   );
@@ -67,7 +68,7 @@ it("answers the exact canonical work, preserves retry identity, and states the f
       source: { kind: "app", messageId: null },
     }),
   );
-  expect(screen.getByText(/financial review remains open/)).toBeVisible();
+  expect(screen.getByText("Answered · financial review open")).toBeVisible();
   expect(api.getFinanceInbox).not.toHaveBeenCalled();
 });
 it("makes stale work read-only", async () => {

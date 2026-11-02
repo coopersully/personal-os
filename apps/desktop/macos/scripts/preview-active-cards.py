@@ -40,7 +40,7 @@ for name in ["sounds", "card-icons"]:
     "CFBundleName": "nohmi Active Card Preview", "CFBundlePackageType": "APPL", "LSUIElement": True,
 }))
 command = ["xcrun", "swiftc", "-module-name", "NohmiActiveCardPreview", str(ROOT / "apps/desktop/macos/preview/main.swift")]
-command += [str(p) for p in sorted((ROOT / "apps/desktop/macos/Sources/IloNative").glob("*.swift"))]
+command += [str(p) for p in sorted((ROOT / "apps/desktop/macos/Sources/PersonalOsNative").glob("*.swift"))]
 for framework in ["AppKit", "SwiftUI", "UserNotifications", "CoreGraphics", "Security", "ServiceManagement", "WidgetKit", "Carbon"]:
     command += ["-framework", framework]
 command += ["-o", str(EXECUTABLE)]

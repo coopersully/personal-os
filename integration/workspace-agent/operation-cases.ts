@@ -102,6 +102,12 @@ export const workspaceApiExceptions = {
     reason:
       "Web-only raw-token bootstrap; MCP returns a hosted provider URL. Provider login and MFA belong to the owner.",
   },
+  completePlaidReconnect: {
+    kind: "provider_consent",
+    tool: "start_finance_account_connection",
+    reason:
+      "Completes the owner's web-only existing-Item update-mode consent; provider login and MFA remain with the owner.",
+  },
   exchangePlaidToken: {
     kind: "equivalent",
     tool: "complete_finance_account_connection",

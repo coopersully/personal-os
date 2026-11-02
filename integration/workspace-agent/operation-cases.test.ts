@@ -326,3 +326,19 @@ it("requires every current execution grant for both recovery tools", async () =>
     expect(entry?.tool.inputSchema.properties).not.toHaveProperty("claimId");
   }
 });
+
+it("keeps complete Mail navigation counts available only with Mail read authority", async () => {
+  const entry = (await discoverToolDictionary()).find(
+    ({ tool }) => tool.name === "get_mail_navigation_counts",
+  );
+  expect(entry?.definition).toMatchObject({
+    readOnly: true,
+    requiredScopes: ["mail:read"],
+    domain: "mail",
+  });
+  if (!entry) throw new Error("Missing Mail navigation counts adapter.");
+  expect(canDiscoverTool(entry.definition, new Set(["mail:read"]), true)).toBe(true);
+  expect(canDiscoverTool(entry.definition, new Set(["tasks:read"]), false)).toBe(false);
+  expect(entry.tool.inputSchema.properties).toHaveProperty("accountIds");
+  expect(entry.tool.inputSchema.properties).not.toHaveProperty("userId");
+});

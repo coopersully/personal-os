@@ -5,6 +5,9 @@ description: Check whether personal-os main is live and nohmi is healthy in prod
 
 # nohmi deploy status
 
+Apply the repository [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+to assigned durable work; pure read-only use of this skill creates no tracking work.
+
 Prefer live evidence because deployment state changes quickly. This skill is read-only.
 
 ## Quick check

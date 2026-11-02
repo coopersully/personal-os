@@ -50,13 +50,18 @@ reviewed production criteria, then reconcile the full issue scope. Report merged
 blocked, shipped, or complete-without-runtime-deployment accurately. Completion requires the local
 production evaluator and inspected provider evidence. A saved checkpoint alone is not a wakeup.
 
-Only explicit merge intent (such as “ship it” or “get this merged”) permits normal protected merge
-and observation of the configured production deployment
-path within scope. It does not grant ad hoc production writes, provider effects, manual migrations,
+Cooper's standing oversight grant in `AGENTS.md` permits the assigned outcome owner to perform normal
+protected merge of assigned work and necessary bounded prerequisites after review and verification,
+without routine clarification or separate per-PR permission. Outside that assignment, explicit merge
+intent such as “ship it” or “get this merged” supplies the grant. Preserve self-review and applicable
+independent review as separate evidence. Merge authority includes observation of the configured
+production deployment path within scope. It does not grant ad hoc production writes, provider effects, manual migrations,
 rollback, secret changes or protection bypass. Prepare scoped recovery and route those operations
 to their existing authorized operator when needed. Never manufacture production traffic/effects
 for a smoke test without corresponding authorization.
 
-A request merely to transfer context or prepare a handoff does not grant merging. Preserve an existing
-explicit scoped grant without re-confirming it later; record it in the checkpoint. Without that grant,
-prepare reviewed work and report readiness. Later user pauses/revocations supersede earlier authority.
+A request merely to transfer context or prepare a handoff creates no new grant and does not remove
+an existing standing or explicit scoped grant. Record its source in the checkpoint and continue
+within it without re-confirmation. Explicit read-only, draft-only, no-merge or later pause/revocation
+instructions constrain that scope. Ask only for indispensable missing information or an explicit
+platform approval, not routine implementation or merge decisions. Assigned workers still never merge.

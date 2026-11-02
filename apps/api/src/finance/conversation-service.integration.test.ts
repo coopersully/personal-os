@@ -10,11 +10,14 @@ import {
   financeAnswerContinuations,
   financeConversationBatches,
   financeConversationBatchMessages,
+  financeConversationCapabilities,
   financeConversationMessages,
   financeConversationReadCursors,
   financeConversations,
   financeTransactions,
   migrateDatabase,
+  oauthClients,
+  oauthRefreshTokens,
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
@@ -23,6 +26,8 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { and, eq } from "drizzle-orm";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
+import { createOAuthService } from "../oauth-service.js";
+import { hashToken } from "../security.js";
 import type { Principal } from "../types.js";
 import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 import { createFinanceConversationService } from "./conversation-persistence.js";
@@ -170,18 +175,18 @@ describe.sequential("durable Finance conversation intake", () => {
       scopes: new Set(scopes),
     };
     const conversation = createFinanceConversationService({ db: database.db });
-    const verify = async () => {
+    const verify = async (principal = agent) => {
       const challenge = await conversation.issueChallenge(f.principal, scheduleId);
-      const fetched = await conversation.advanceChallenge(agent, challenge.challengeId, {
+      const fetched = await conversation.advanceChallenge(principal, challenge.challengeId, {
         kind: "fetch",
       });
       if (!fetched.nonce) throw new Error("nonce");
-      await conversation.advanceChallenge(agent, challenge.challengeId, {
+      await conversation.advanceChallenge(principal, challenge.challengeId, {
         kind: "acknowledge",
         challengeId: challenge.challengeId,
         nonce: fetched.nonce,
       });
-      await conversation.advanceChallenge(agent, challenge.challengeId, {
+      await conversation.advanceChallenge(principal, challenge.challengeId, {
         kind: "respond",
         challengeId: challenge.challengeId,
         response: "Finance message protocol ready",
@@ -191,6 +196,230 @@ describe.sequential("durable Finance conversation intake", () => {
     return { ...f, conversation, agent, scheduleId, connectionId, token, verify };
   }
 
+  async function refreshableHost() {
+    const f = await hostFixture();
+    const clientId = randomUUID();
+    const refreshToken = randomUUID();
+    const resource = "https://nohmi.test/mcp";
+    await database.db.insert(oauthClients).values({
+      id: clientId,
+      name: "Conversation host",
+      redirectUris: ["https://host.test/callback"],
+    });
+    await database.db
+      .update(accessTokens)
+      .set({
+        clientId,
+        audience: resource,
+        expiresAt: new Date(Date.now() - 60_000),
+      })
+      .where(eq(accessTokens.id, f.token.id));
+    const [refresh] = await database.db
+      .insert(oauthRefreshTokens)
+      .values({
+        accessTokenId: f.token.id,
+        clientId,
+        userId: f.userId,
+        tokenHash: hashToken(refreshToken),
+        expiresAt: new Date(Date.now() + 86_400_000),
+      })
+      .returning();
+    if (!refresh) throw new Error("refresh");
+    return { ...f, clientId, refreshToken, resource, refresh };
+  }
+  it("keeps Chat ready across bearer expiry and real OAuth rotation without accepting the expired bearer", async () => {
+    const f = await refreshableHost();
+    for (const result of [
+      await f.conversation.getReadiness(f.userId),
+      await f.conversation.getHostReadiness(f.userId, f.scheduleId),
+    ])
+      expect(result).toMatchObject({
+        canSend: true,
+        reason: "ready",
+        messageCapability: "verified",
+      });
+    const [proof] = await database.db
+      .select()
+      .from(financeConversationCapabilities)
+      .where(eq(financeConversationCapabilities.automationScheduleId, f.scheduleId));
+    if (!proof) throw new Error("proof");
+    await expect(
+      f.conversation.advanceChallenge(f.agent, proof.id, { kind: "fetch" }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    const oauth = createOAuthService({
+      db: database.db,
+      now: () => new Date(),
+      resource: f.resource,
+    });
+    const rotated = await oauth.refresh({
+      clientId: f.clientId,
+      refreshToken: f.refreshToken,
+      resource: f.resource,
+    });
+    expect(await f.conversation.getReadiness(f.userId)).toMatchObject({
+      canSend: true,
+      reason: "ready",
+    });
+    const challenge = await f.conversation.issueChallenge(f.principal, f.scheduleId);
+    await expect(
+      f.conversation.advanceChallenge(f.agent, challenge.challengeId, { kind: "fetch" }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    // A new challenge supersedes proof, independently of credential refresh.
+    expect(await f.conversation.getReadiness(f.userId)).toMatchObject({
+      canSend: false,
+      reason: "challenge_required",
+    });
+    const [renewed] = await database.db
+      .select()
+      .from(accessTokens)
+      .where(
+        and(
+          eq(accessTokens.authorizationConnectionId, f.connectionId),
+          eq(accessTokens.tokenHash, hashToken(rotated.access_token)),
+        ),
+      );
+    if (!renewed) throw new Error("renewed bearer");
+    await f.verify({ ...f.agent, actorId: renewed.id });
+    expect(await f.conversation.getHostReadiness(f.userId, f.scheduleId)).toMatchObject({
+      canSend: true,
+      reason: "ready",
+    });
+    expect(await f.conversation.history(f.userId, "0", 50)).toMatchObject({ messages: [] });
+  });
+  it("identifies the same eligible host across surfaces without borrowing another host's proof or run", async () => {
+    const f = await hostFixture();
+    const [original] = await database.db
+      .select()
+      .from(automationHostSchedules)
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    if (!original) throw new Error("original");
+    const otherId = randomUUID(),
+      otherConnection = randomUUID();
+    await database.db.insert(automationHostSchedules).values({
+      ...original,
+      id: otherId,
+      authorizationConnectionId: otherConnection,
+      updatedAt: new Date(Date.now() + 1000),
+      schedule: automationHostScheduleSchema.parse({
+        ...original.schedule,
+        id: otherId,
+        tenantAuthorizationConnectionId: otherConnection,
+        label: "Unavailable host",
+        hostAutomationId: "other",
+      }),
+    });
+    const run = await canonicalRun(f.userId);
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        automationScheduleId: f.scheduleId,
+        authorizationConnectionId: f.connectionId,
+        status: "blocked",
+        lastSafeError: {
+          code: "host_unavailable",
+          message: "Review the original host connection before retrying.",
+        },
+      })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const global = await f.conversation.getReadiness(f.userId);
+    const exact = await f.conversation.getHostReadiness(f.userId, f.scheduleId);
+    expect(global).toEqual(exact);
+    expect(global.host).toMatchObject({
+      scheduleId: f.scheduleId,
+      connectionId: f.connectionId,
+      label: "Conversation",
+      latestRun: {
+        id: run.id,
+        status: "blocked",
+        failureMessage: "Review the original host connection before retrying.",
+      },
+    });
+    expect(await f.conversation.getHostReadiness(f.userId, otherId)).toMatchObject({
+      canSend: false,
+      host: { scheduleId: otherId, latestRun: null },
+    });
+    const foreign = await fixture();
+    await expect(
+      f.conversation.getHostReadiness(foreign.userId, f.scheduleId),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+  it.each([
+    "expired_refresh",
+    "replaced_refresh",
+    "foreign_refresh_user",
+    "foreign_refresh_client",
+    "missing_audience",
+    "revoked",
+    "scope",
+    "bypass",
+  ] as const)("locks sending after %s even with verified messaging and an expired bearer", async (loss) => {
+    const f = await refreshableHost();
+    if (loss === "expired_refresh" || loss === "replaced_refresh")
+      await database.db
+        .update(oauthRefreshTokens)
+        .set(loss === "expired_refresh" ? { expiresAt: new Date(0) } : { replacedAt: new Date() })
+        .where(eq(oauthRefreshTokens.id, f.refresh.id));
+    if (loss === "foreign_refresh_user") {
+      const other = await fixture();
+      await database.db
+        .update(oauthRefreshTokens)
+        .set({ userId: other.userId })
+        .where(eq(oauthRefreshTokens.id, f.refresh.id));
+    }
+    if (loss === "foreign_refresh_client") {
+      const clientId = randomUUID();
+      await database.db.insert(oauthClients).values({
+        id: clientId,
+        name: "Other host",
+        redirectUris: ["https://other.test/callback"],
+      });
+      await database.db
+        .update(oauthRefreshTokens)
+        .set({ clientId })
+        .where(eq(oauthRefreshTokens.id, f.refresh.id));
+    }
+    if (loss === "missing_audience")
+      await database.db
+        .update(accessTokens)
+        .set({ audience: null })
+        .where(eq(accessTokens.id, f.token.id));
+    if (loss === "revoked")
+      await database.db
+        .update(accessTokens)
+        .set({ revokedAt: new Date() })
+        .where(eq(accessTokens.id, f.token.id));
+    if (loss === "scope")
+      await database.db
+        .update(accessTokens)
+        .set({ scopes: ["finances:maintain", "finances:read", "finances:write"] })
+        .where(eq(accessTokens.id, f.token.id));
+    if (loss === "bypass")
+      await database.db
+        .update(executionPolicySettings)
+        .set({ reviewBypassEnabled: false })
+        .where(eq(executionPolicySettings.userId, f.userId));
+    const reason =
+      loss === "scope" || loss === "bypass"
+        ? "execution_not_authorized"
+        : "connection_disconnected";
+    expect(await f.conversation.getReadiness(f.userId)).toMatchObject({
+      canSend: false,
+      reason,
+      messageCapability: "verified",
+    });
+    expect(await f.conversation.getHostReadiness(f.userId, f.scheduleId)).toMatchObject({
+      canSend: false,
+      reason,
+    });
+    await expect(
+      f.conversation.send(f.principal, {
+        text: "Do not accept",
+        idempotencyKey: randomUUID(),
+        caseId: null,
+        recordRefs: [],
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
   it("keeps protocol traffic outside history and freezes sending on original grant loss", async () => {
     const f = await hostFixture();
     expect((await f.conversation.getReadiness(f.userId)).canSend).toBe(true);

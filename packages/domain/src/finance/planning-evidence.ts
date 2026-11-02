@@ -69,8 +69,11 @@ export const financeConfirmGoalPlanningEvidenceInputSchema = z
 const commonEvidenceShape = {
   evidenceId: idSchema,
   ownerUserId: idSchema,
-  actor: z.object({ type: z.literal("user"), userId: idSchema }).strict(),
-  provenance: z.literal("explicit_user"),
+  actor: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("user"), userId: idSchema }).strict(),
+    z.object({ type: z.literal("agent"), userId: idSchema, id: idSchema }).strict(),
+  ]),
+  provenance: z.enum(["explicit_user", "agent_self_approval"]),
   currencyCode: financePlanningEvidenceCurrencySchema,
   asOf: dateSchema,
   /** Server receipt time only. This is never a claim of bank/provider freshness. */

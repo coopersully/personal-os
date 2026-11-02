@@ -108,6 +108,7 @@ describe("Finance activation through MCP", () => {
       expectedProfileVersionId: profile.data.id,
       idempotencyKey: crypto.randomUUID(),
     };
+    await f.setBypass(false);
     expect(
       (
         await client.callTool({

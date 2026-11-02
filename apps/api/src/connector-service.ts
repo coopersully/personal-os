@@ -37,6 +37,7 @@ import {
 import type {
   CalendarProvider,
   ConnectICloudInput,
+  ConnectorCapabilitySync,
   CreateEventInput,
   MailRuleAction,
   StartGoogleAuthorizationInput,
@@ -842,7 +843,7 @@ export function createConnectorService({
       triggered?: boolean;
       context?: { principal: Principal; requestId: string };
     } = {},
-  ): Promise<{ changed: number }> {
+  ): Promise<{ changed: number; pending?: boolean; nextSyncAt?: string }> {
     throwIfQuiescing();
     const startedAt = Date.now();
     const staleBefore = new Date(now().getTime() - CONNECTOR_SYNC_LEASE_MS);
@@ -922,18 +923,30 @@ export function createConnectorService({
     const capabilityErrors: unknown[] = [];
     const blockedCapabilityErrors = new Set<unknown>();
     let changed = 0;
+    let pendingMailState: ConnectorCapabilitySync | undefined;
+    let googleMailAttemptStarted = false;
     const provider = claimedAccount.provider === "icloud" ? "icloud" : "google";
     const runCapability = async (capability: "calendar" | "mail", work: () => Promise<void>) => {
       const previous = capabilityStates[capability];
-      if (
-        options.automatic &&
+      const googleMail = capability === "mail" && provider === "google";
+      const capabilityAttemptedAt = googleMail ? now() : attemptedAt;
+      const quotaCooling =
+        googleMail &&
         previous &&
-        (previous.health.recovery === "reconnect" ||
-          ((previous.errorCode || !options.triggered) &&
+        (Date.parse(previous.lastAttemptAt) + 65_000 > now().getTime() ||
+          ((previous.errorCode || previous.health.state === "syncing") &&
             previous.health.nextSyncAt &&
-            new Date(previous.health.nextSyncAt) > now()))
+            new Date(previous.health.nextSyncAt) > now()));
+      if (
+        quotaCooling ||
+        (options.automatic &&
+          previous &&
+          (previous.health.recovery === "reconnect" ||
+            ((previous.errorCode || !options.triggered) &&
+              previous.health.nextSyncAt &&
+              new Date(previous.health.nextSyncAt) > now())))
       ) {
-        if (previous.errorCode) {
+        if (previous?.errorCode) {
           const error = new ConnectorError({
             category: previous.errorCategory ?? "unknown",
             code: previous.errorCode,
@@ -947,9 +960,54 @@ export function createConnectorService({
             ...(previous.status === null ? {} : { status: previous.status }),
           });
           capabilityErrors.push(error);
-          if (previous.health.recovery === "reconnect") blockedCapabilityErrors.add(error);
+          blockedCapabilityErrors.add(error);
+        } else if (quotaCooling && previous) {
+          pendingMailState = {
+            ...previous,
+            health: {
+              state: "syncing",
+              recovery: null,
+              message: "Mail synchronization is waiting for its next permitted batch.",
+              nextSyncAt: new Date(
+                Math.max(Date.parse(previous.lastAttemptAt) + 65_000, now().getTime() + 5 * 60_000),
+              ).toISOString(),
+            },
+          };
+          capabilityStates.mail = pendingMailState;
+          await withConnectorSyncClaim(claimedAccount, syncClaim, async (transaction) => {
+            await transaction
+              .update(calendarAccounts)
+              .set({ syncCapabilities: capabilityStates })
+              .where(eq(calendarAccounts.id, accountId));
+          });
         }
         return;
+      }
+      if (googleMail) {
+        // Reserve the attempt before any provider reads, independently of the
+        // projection transaction. Failure, rollback, or process loss must not let
+        // a manual/push retry spend a second batch in the same quota window.
+        capabilityStates.mail = {
+          lastAttemptAt: capabilityAttemptedAt.toISOString(),
+          lastSyncedAt: previous?.lastSyncedAt ?? null,
+          failureCount: previous?.failureCount ?? 0,
+          errorCode: null,
+          errorCategory: null,
+          status: null,
+          health: {
+            state: "syncing",
+            recovery: null,
+            message: "Mail synchronization is in progress.",
+            nextSyncAt: new Date(capabilityAttemptedAt.getTime() + 65_000).toISOString(),
+          },
+        };
+        await withConnectorSyncClaim(claimedAccount, syncClaim, async (transaction) => {
+          await transaction
+            .update(calendarAccounts)
+            .set({ syncCapabilities: capabilityStates })
+            .where(eq(calendarAccounts.id, accountId));
+        });
+        googleMailAttemptStarted = true;
       }
       let failure: ConnectorSyncFailure | null = null;
       try {
@@ -961,6 +1019,7 @@ export function createConnectorService({
         capabilityErrors.push(error);
       }
       const settledAt = now();
+      const partial = !failure && capability === "mail" ? pendingMailState : undefined;
       const failureCount = failure ? (previous?.failureCount ?? 0) + 1 : 0;
       const nextSyncAt =
         failure?.recovery === "reconnect"
@@ -970,9 +1029,14 @@ export function createConnectorService({
                 accountId,
                 failureCount,
                 now: settledAt,
-                retryAfterMs: failure.retryAfterMs,
+                retryAfterMs:
+                  capability === "mail" && provider === "google"
+                    ? Math.max(failure.retryAfterMs ?? 0, 65_000)
+                    : failure.retryAfterMs,
               })
-            : new Date(settledAt.getTime() + 5 * 60_000);
+            : partial?.health.nextSyncAt
+              ? new Date(partial.health.nextSyncAt)
+              : new Date(settledAt.getTime() + 5 * 60_000);
       const stale =
         failure &&
         failure.recovery === "automatic" &&
@@ -982,26 +1046,29 @@ export function createConnectorService({
           ).getTime() >=
           24 * 60 * 60_000;
       capabilityStates[capability] = {
-        lastAttemptAt: attemptedAt.toISOString(),
-        lastSyncedAt: failure ? (previous?.lastSyncedAt ?? null) : settledAt.toISOString(),
+        lastAttemptAt: capabilityAttemptedAt.toISOString(),
+        lastSyncedAt:
+          failure || partial ? (previous?.lastSyncedAt ?? null) : settledAt.toISOString(),
         failureCount,
         errorCode: failure?.code ?? null,
         errorCategory: failure?.category ?? null,
         status: failure?.status ?? null,
         health: {
-          state: stale
-            ? "service_attention"
-            : failure?.recovery === "reconnect"
-              ? "reconnect"
-              : failure?.recovery === "operator"
-                ? "service_attention"
-                : failure
-                  ? "retrying"
-                  : "ready",
+          state: partial
+            ? "syncing"
+            : stale
+              ? "service_attention"
+              : failure?.recovery === "reconnect"
+                ? "reconnect"
+                : failure?.recovery === "operator"
+                  ? "service_attention"
+                  : failure
+                    ? "retrying"
+                    : "ready",
           recovery: failure?.recovery ?? null,
           message: stale
             ? `${capability === "mail" ? "Mail" : "Calendar"} has not synced successfully for over 24 hours. Service attention is needed; automatic retries continue.`
-            : (failure?.message ?? null),
+            : (partial?.health.message ?? failure?.message ?? null),
           nextSyncAt: nextSyncAt?.toISOString() ?? null,
         },
       };
@@ -1012,7 +1079,11 @@ export function createConnectorService({
           .where(eq(calendarAccounts.id, accountId));
       });
       log?.({
-        event: failure ? "connector_capability_failed" : "connector_capability_completed",
+        event: failure
+          ? "connector_capability_failed"
+          : partial
+            ? "connector_capability_progress"
+            : "connector_capability_completed",
         syncSource: options.triggered ? "triggered" : options.automatic ? "scheduled" : "manual",
         capability,
         accountId,
@@ -1171,6 +1242,28 @@ export function createConnectorService({
             });
           }
           throwIfQuiescing();
+          if (mail.continuation) {
+            const nextSyncAt = new Date(
+              Math.max(now().getTime() + 5 * 60_000, Date.parse(mail.continuation.notBefore)),
+            );
+            pendingMailState = {
+              lastAttemptAt: capabilityStates.mail?.lastAttemptAt ?? attemptedAt.toISOString(),
+              lastSyncedAt: capabilityStates.mail?.lastSyncedAt ?? null,
+              failureCount: 0,
+              errorCode: null,
+              errorCategory: null,
+              status: null,
+              health: {
+                state: "syncing",
+                recovery: null,
+                message: mail.continuation.deferred
+                  ? "Mail synchronization is waiting for its next permitted batch."
+                  : "Mail synchronization continues in batches; more conversations remain.",
+                nextSyncAt: nextSyncAt.toISOString(),
+              },
+            };
+            capabilityStates.mail = pendingMailState;
+          }
           const projected = await projectMail(
             account,
             mail,
@@ -1178,6 +1271,7 @@ export function createConnectorService({
             requestId,
             googleCredentials,
             syncClaim,
+            mail.continuation ? capabilityStates : undefined,
           );
           changed += projected.changed;
           mailCredentialsPersisted = mailCredentialsPersisted || projected.credentials !== null;
@@ -1200,17 +1294,29 @@ export function createConnectorService({
           }),
         );
       }
-      if (capabilityErrors.length) throw capabilityErrors[0];
+      // Prefer a failure from work performed now over a sibling's saved recovery state.
+      if (capabilityErrors.length)
+        throw (
+          capabilityErrors.find((error) => !blockedCapabilityErrors.has(error)) ??
+          capabilityErrors[0]
+        );
       throwIfQuiescing();
       const completedAt = now();
+      const mailPending = account.mailEnabled && capabilityStates.mail?.health.state === "syncing";
+      const nextSyncAt = new Date(completedAt.getTime() + 5 * 60_000);
+      if (mailPending && capabilityStates.mail?.health.nextSyncAt) {
+        nextSyncAt.setTime(
+          Math.max(nextSyncAt.getTime(), Date.parse(capabilityStates.mail.health.nextSyncAt)),
+        );
+      }
       const [completedAccount] = await db
         .update(calendarAccounts)
         .set({
           ...(googleCredentials && !mailCredentialsPersisted
             ? { encryptedCredentials: encryptJson(googleCredentials, encryptionKey) }
             : {}),
-          lastSyncedAt: completedAt,
-          nextSyncAt: new Date(completedAt.getTime() + 5 * 60_000),
+          lastSyncedAt: mailPending ? claimedAccount.lastSyncedAt : completedAt,
+          nextSyncAt,
           syncClaimId: null,
           syncError: null,
           syncErrorCategory: null,
@@ -1237,7 +1343,7 @@ export function createConnectorService({
       log?.({
         accountId: claimedAccount.id,
         durationMs: Date.now() - startedAt,
-        event: "connector_sync_completed",
+        event: mailPending ? "connector_sync_progress" : "connector_sync_completed",
         syncSource: options.triggered ? "triggered" : options.automatic ? "scheduled" : "manual",
         freshnessAgeMs: Math.max(
           0,
@@ -1249,7 +1355,7 @@ export function createConnectorService({
         requestId,
         status: 200,
       });
-      if (claimedAccount.syncFailureCount > 0) {
+      if (!mailPending && claimedAccount.syncFailureCount > 0) {
         log?.({
           accountId: claimedAccount.id,
           durationMs: Date.now() - startedAt,
@@ -1263,10 +1369,14 @@ export function createConnectorService({
           status: 200,
         });
       }
-      return { changed };
+      return {
+        changed,
+        ...(mailPending ? { pending: true, nextSyncAt: nextSyncAt.toISOString() } : {}),
+      };
     } catch (error) {
       const interrupted = shutdown?.signal.aborted === true;
-      const failureCount = claimedAccount.syncFailureCount + 1;
+      const waitingForRecovery = !interrupted && blockedCapabilityErrors.has(error);
+      const failureCount = claimedAccount.syncFailureCount + (waitingForRecovery ? 0 : 1);
       const provider = claimedAccount.provider === "icloud" ? "icloud" : "google";
       const failure: ConnectorSyncFailure = interrupted
         ? {
@@ -1279,6 +1389,19 @@ export function createConnectorService({
           }
         : classifyConnectorSyncFailure(error, provider);
       const failedAt = now();
+      const interruptedMail =
+        interrupted && googleMailAttemptStarted ? capabilityStates.mail : undefined;
+      if (interruptedMail) {
+        capabilityStates.mail = {
+          ...interruptedMail,
+          health: {
+            state: "syncing",
+            recovery: null,
+            message: "Mail synchronization was interrupted; it will continue after its cooldown.",
+            nextSyncAt: new Date(failedAt.getTime() + 65_000).toISOString(),
+          },
+        };
+      }
       const capabilityDueDates = capabilityErrors.includes(error)
         ? Object.entries(capabilityStates)
             .filter(([capability]) =>
@@ -1307,6 +1430,7 @@ export function createConnectorService({
           .update(calendarAccounts)
           .set({
             nextSyncAt,
+            ...(interruptedMail ? { syncCapabilities: capabilityStates } : {}),
             syncClaimId: null,
             syncError: failure.message,
             syncErrorCategory: failure.category,
@@ -1325,30 +1449,32 @@ export function createConnectorService({
           )
           .returning({ id: calendarAccounts.id });
         if (settledAccount) {
-          log?.({
-            accountId: claimedAccount.id,
-            category: failure.category,
-            code: failure.code,
-            transportCode: failure.transportCode,
-            transportPhase: failure.transportPhase,
-            disposition: failure.recovery,
-            durationMs: Date.now() - startedAt,
-            event: "connector_sync_failed",
-            syncSource: options.triggered
-              ? "triggered"
-              : options.automatic
-                ? "scheduled"
-                : "manual",
-            failureCount,
-            method: "CONNECTOR",
-            nextSyncAt: nextSyncAt?.toISOString() ?? null,
-            path: `/internal/connectors/${claimedAccount.id}/sync`,
-            provider,
-            requestId,
-            status: failure.status ?? 503,
-          });
+          if (!waitingForRecovery)
+            log?.({
+              accountId: claimedAccount.id,
+              category: failure.category,
+              code: failure.code,
+              transportCode: failure.transportCode,
+              transportPhase: failure.transportPhase,
+              disposition: failure.recovery,
+              durationMs: Date.now() - startedAt,
+              event: "connector_sync_failed",
+              syncSource: options.triggered
+                ? "triggered"
+                : options.automatic
+                  ? "scheduled"
+                  : "manual",
+              failureCount,
+              method: "CONNECTOR",
+              nextSyncAt: nextSyncAt?.toISOString() ?? null,
+              path: `/internal/connectors/${claimedAccount.id}/sync`,
+              provider,
+              requestId,
+              status: failure.status ?? 503,
+            });
           // A notification is consumed once every runnable capability succeeds. Keep
-          // reconnect health, but do not replay the same signal for a blocked sibling.
+          // failure health and scheduled recovery, but do not replay a signal while
+          // a sibling is blocked by reconnect or retry backoff.
           if (
             options.triggered &&
             !interrupted &&
@@ -1997,6 +2123,7 @@ export function createConnectorService({
     requestId: string,
     initialGoogleCredentials: GoogleCredentials | null,
     syncClaim: SyncClaim,
+    pendingCapabilities?: NonNullable<AccountRow["syncCapabilities"]>,
   ): Promise<{ changed: number; credentials: GoogleCredentials | null }> {
     const provider = account.provider === "icloud" ? "icloud" : "google";
     const mailboxIds = value.mailboxes.map((mailbox) => mailbox.id);
@@ -2018,7 +2145,7 @@ export function createConnectorService({
           .limit(1)
       )[0];
       if (!activeAccount) return false;
-      for (const mailbox of value.mailboxes) {
+      for (const mailbox of value.continuation?.deferred ? [] : value.mailboxes) {
         const [existingMailbox] = await transaction
           .select({ providerRevision: mailboxes.providerRevision })
           .from(mailboxes)
@@ -2087,10 +2214,12 @@ export function createConnectorService({
       if (mailboxIds.length > 0) {
         staleMailboxConditions.push(notInArray(mailboxes.remoteMailboxId, mailboxIds));
       }
-      await transaction
-        .update(mailboxes)
-        .set({ deletedAt: now(), updatedAt: now() })
-        .where(and(...staleMailboxConditions));
+      if (!value.continuation?.deferred) {
+        await transaction
+          .update(mailboxes)
+          .set({ deletedAt: now(), updatedAt: now() })
+          .where(and(...staleMailboxConditions));
+      }
 
       if (value.deletedThreadIds.length > 0) {
         await transaction
@@ -2210,7 +2339,18 @@ export function createConnectorService({
       }
       await transaction
         .update(calendarAccounts)
-        .set({ mailSyncToken: value.nextSyncToken, updatedAt: now() })
+        .set({
+          mailSyncToken: value.nextSyncToken,
+          ...(pendingCapabilities
+            ? {
+                syncCapabilities: pendingCapabilities,
+                nextSyncAt: pendingCapabilities.mail?.health.nextSyncAt
+                  ? new Date(pendingCapabilities.mail.health.nextSyncAt)
+                  : null,
+              }
+            : {}),
+          updatedAt: now(),
+        })
         .where(
           and(
             eq(calendarAccounts.id, account.id),

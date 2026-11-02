@@ -36,8 +36,9 @@ function stage(s, name) {
 test("docs get no iteration compiler but retain complete final gates", () => {
   const s = input();
   const p = buildPlan(s);
-  assert.deepEqual(p.verification.iteration.commands, []);
-  assert.deepEqual(p.verification.final.commands, [["pnpm", "verify"]]);
+  assert.deepEqual(p.verification.iteration.commands, [["pnpm", "check:repo"]]);
+  assert.deepEqual(p.verification.final.commands, []);
+  assert.match(p.verification.final.prerequisite, /Git proof fails/);
   assert.equal(p.mergeAuthorized, false);
   assert.equal(stage(s, "plan").status, "unnecessary");
 });
@@ -51,6 +52,7 @@ test("UI API shared-contract and tooling changes retain conservative scope", () 
     const p = buildPlan(input(paths));
     assert.ok(p.verification.iteration.commands.length);
     assert.deepEqual(p.verification.final.commands, [["pnpm", "verify"]]);
+    assert.match(p.verification.final.prerequisite, /Git proof fails/);
   }
   const p = buildPlan(input(["packages/domain/src/task.ts"]));
   assert.ok(p.verification.iteration.commands[0].includes("@personal-os/web"));

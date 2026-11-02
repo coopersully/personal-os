@@ -20,6 +20,9 @@ class FakeGitHub:
             return {"commit": {"sha": "base"}}
         return {}
 
+    def observe_source(self, repository, number, head, base, base_ref):
+        return {"state": "pending", "headSha": head, "baseSha": base, "number": number}
+
     def pages(self, endpoint, field=None):
         if "/check-runs" in endpoint:
             return [{"id": 1, "name": "CI", "head_sha": "a", "status": "completed",
@@ -73,6 +76,29 @@ class CollectorTest(unittest.TestCase):
                          [(1, "base"), (2, "base"), (1, "other-base")])
         self.assertTrue(all(r["pull_requests"][0]["head"]["sha"] == "a" for r in rows))
         self.assertNotIn("private", str(rows))
+
+    def test_source_observation_error_remains_named_gap(self):
+        client = FakeGitHub()
+        def unavailable(*args):
+            raise CollectionError("source_observation_failed")
+        client.observe_source = unavailable
+        result = collect(client, "owner/repo", 1)
+        self.assertIn("sourceObservation", [gap["source"] for gap in result["gaps"]])
+        self.assertNotIn("sourceObservation", result["sources"])
+
+    def test_body_is_hashed_and_concurrent_metadata_change_invalidates_collection(self):
+        client = FakeGitHub()
+        original = client.call
+        def call(*args):
+            value = original(*args)
+            if args[0] == "pr":
+                value["body"] = "private-first" if client.views == 1 else "private-second"
+            return value
+        client.call = call
+        result = collect(client, "owner/repo", 1)
+        self.assertFalse(result["stable"])
+        self.assertNotIn("private-first", str(result))
+        self.assertNotIn("private-second", str(result))
 
     def test_head_change_invalidates_collection(self):
         result = collect(FakeGitHub(changed=True), "owner/repo", 1)

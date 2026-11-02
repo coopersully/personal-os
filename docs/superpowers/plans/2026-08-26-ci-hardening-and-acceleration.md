@@ -1,8 +1,12 @@
 # CI Hardening and Acceleration Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Historical August implementation proposal. Unchecked boxes below are not live delivery status
+> or authority to implement every task. Use current code, Linear and the delivery contracts to
+> reconcile any selected slice. The [October follow-up](#current-follow-up-plan-october-23-2026)
+> is the current coordination/measurement plan; proposed optimizations remain unimplemented until
+> linked acceptance evidence establishes otherwise. Repository role boundaries govern execution.
 
-**Goal:** Make pull-request CI proportional to affected ilo surfaces while adding Terraform plans and closing validation gaps without reducing coverage or release confidence.
+**Goal:** Make pull-request CI proportional to affected nohmi surfaces while adding Terraform plans and closing validation gaps without reducing coverage or release confidence.
 
 **Architecture:** Keep one always-triggered CI workflow with a tested fail-closed change classifier, conditional validation lanes, and a stable aggregate required check. Preserve a full run on `main`, add a separate trusted Terraform speculative-plan boundary, and stage each optimization behind shadow-mode evidence.
 
@@ -625,3 +629,100 @@
   non-cancelling.
 - [ ] The audit contains measured before/after results rather than estimated
   savings.
+
+## Current follow-up plan October 23, 2026
+
+### Outcome, provenance and current boundary
+
+Carry agreed product intent into accountable implementation and independent acceptance with minimal
+repeated supervision. Reduce avoidable verification work and late regression discovery without
+weakening tests, coverage or merge gates. Keep this existing plan as the staged design; Linear owns
+live assignments and progress, and the existing private outcome record owns dispatch/evidence. This
+update launches no worker, monitor, verifier or CI change.
+
+The repository oversight skill mirrors the personal lifecycle and monitoring procedure. Verification
+principles also draw from the [Occupi fast-verification specification](https://github.com/Occupi-App/occupi/blob/development/docs/superpowers/specs/2026-10-16-fast-verification.md),
+read October 23: intended behavior, not shipped proof; no separate Occupi oversight skill was found.
+No Occupi command, tool version, merge restriction or permission is imported. See repository
+[verification efficiency](../../engineering/verification-efficiency.md) for the adopted boundaries.
+
+Current tools provide offline scope/step planning and conservative whole-step receipt matching,
+plus a shared local full-verifier lock. They do not prove semantic per-check reuse, prepared-runtime
+identity or safe narrower final acceptance. [Delivery verification](../../engineering/delivery-verification.md)
+continues to require complete final frozen-candidate evidence, including docs-only shipping work.
+The historical proposal to narrow coverage or dependency audit is not a waiver of current gates.
+
+### Evidence and actual failure patterns
+
+The originating oversight investigation reported 40 PR CI runs sampled October 19–23: 9 successful,
+17 failed, 13 canceled and 1 active. Eight broad successful runs had median elapsed **22m55s**
+(range **21m26s–28m01s**); one scoped documentation run took **23s**. Reported median jobs:
+Node quality 20m26s, mobile 19m57s, desktop 18m43s, Windows 6m05s, macOS 5m01s and lint 3m04s.
+These are supplied investigation observations, not a benchmark reproduced by this docs change.
+Parallel durations are not additive, and the successful subset does not describe all failure costs.
+
+Separately, [PR #289 — Shard browser acceptance across isolated CI runners](https://github.com/coopersully/personal-os/pull/289)
+reported one exact-base comparison: [baseline](https://github.com/coopersully/personal-os/actions/runs/39984008042)
+30m16s to [candidate](https://github.com/coopersully/personal-os/actions/runs/40029298743) 23m48s,
+about 21% shorter at about 19% more aggregate runner time. Coverage sharding was removed because
+post-conversion Istanbul aggregation falsely attributed nested branch hits; original coverage and
+thresholds were restored. At that observation the draft's complete acceptance remained blocked by
+an unchanged Zod production audit. This is limited unmerged evidence, not a shipped speedup, a
+multi-run median or achievement of the five-minute ordinary-PR aspiration. Preserve that draft and
+its measurements as a separate workstream; future coverage work must prove branch-hit equivalence.
+
+Reported chat investigations identify concrete work rather than a blanket retry problem:
+
+- Active Reminders: Node 26/jsdom browser-global mismatches and a persisted-message race; roughly
+  36-minute failed full verification and a later roughly 18-minute browser rerun.
+- Routines & Settings UX: timing failures that passed in isolation, Docker disk exhaustion, stale
+  recovery UI assertions and branch coverage 93.98% against the required 94%.
+- Finance UX: stale fixture counts, migration lists, Popover selectors, merchant names and header
+  controls, plus a test-port collision and integration timeout.
+
+Some reruns followed real changes and were justified; many repairs already used focused checks.
+Do not claim every subagent reran full verification. Separate script/fixture cost, late consumer
+regressions, resource/runtime incidents and evidence invalidation before choosing an optimization.
+
+### Staged owners and acceptance
+
+These are proposed bounded assignments, not dispatched or implemented features. At admission the
+existing outcome Lead resolves/reuses direct Nohmi issues, names actual workers and source/shared-path
+owners, records authority and exact dependency milestones, and updates this plan's evidence links.
+Do not create competing ledgers, extra supervisors or simultaneous edits to central verifier/docs.
+One worker may own several sequential stages; use a composition worker only when cross-owner
+integration actually requires one. Stable reviewed source can satisfy a source prerequisite without
+its own PR merging, unless the prerequisite explicitly requires merge, release or observation.
+
+| Stage and accountable role | Bounded next work | Measurable acceptance before adoption |
+| --- | --- | --- |
+| 1. Outcome Lead with one measurement worker | Inventory actual check scripts, fixtures, setup, late failures, consumer gaps and runner ownership; reconcile existing evidence first | Raw baseline/candidate contexts and cost breakdown; each repeated run classified as changed, failed, invalidated or avoidable; identify sustained bottleneck rather than infer from summed jobs |
+| 2. One verifier/evidence worker owns shared runner and receipt contracts | Propose per-check selection/retry and conservative identities using existing runner/planners; retain unaffected receipts without pretending partial selection is readiness | Tests for newer failure, missing/corrupt/stale receipt, dirty/untracked/deleted/renamed/symlink input, mid-run edits, command/config/runtime/environment changes and base-sensitive checks; unknown scope broadens; selected success visibly differs from full readiness |
+| 3. Affected-owner worker, after stable stage 2 contract where needed | Profile static/unit/script/fixture costs and test discovery; map transitive consumers and dynamic inputs before any narrowing | Differential selected/full evidence on representative owner/shared changes; existing consumer setup/teardown and negative paths pass; zero false reuse or omitted required tests; unchanged strictness and coverage, including branch-hit equivalence for any aggregation |
+| 4. Runtime/preparation worker with explicit resource owner | Diagnose disk/ports/tool-runtime mismatches and measure reusable owned preparation separately from suite execution; retain lifecycle commands | Collision/stale fixture/config/schema/build and cleanup cases fail safely; no other owner's DB/server touched; fresh tests where mutable state is unprovable; exact discovered/pass/skip counts and preparation/execution times |
+| 5. Independent read-only acceptance reviewer; Lead owns verdict | Inspect combined raw measurements, policy coverage and failure diagnostics, request only missing evidence from execution owner | Comparable before/after report with absolute time, median/range where repeated, runner work and regressions; all required gates current; no unsupported readiness or shipping claim |
+| 6. Separate classifier/policy worker only if explicitly admitted | Evaluate narrower final acceptance after prior identity/consumer proof; no exemption in this docs PR | Separately reviewed enforcement, fail-closed unknowns, differential full coverage, docs/agent contract checks, independent acceptance and explicit policy change; until then full final verification remains required |
+
+### Measurement protocol and stop conditions
+
+Record baseline/candidate revision and actual base, dirty-content identity where applicable, command,
+configuration/tool/runtime, hardware, dependency installation, cache state, worker counts, concurrent
+load and raw logs. Measure wall time separately from aggregate runner work; label cold/warm runs and
+split setup, execution and report/collection. Use disposable owned resources for benchmarks.
+
+Repeat cheap/warm scenarios three times and report median plus range. Reuse one comparable expensive
+baseline/candidate initially; repeat broad runs only for material changes, unexplained variance or a
+specific acceptance gap. Synthetic receipt tests establish semantics, not actual delivery speed.
+Scenarios include unchanged reuse, docs follow-up, owner-only repair, shared contract/config change,
+failed-check repair, targeted E2E with preparation reuse, and corrupted receipt/mid-run edits.
+
+Proposed measurement targets: warm unchanged readiness under 10 seconds and focused iteration under
+30 seconds on the measured host; materially lower cumulative work in a four-pass repair sequence.
+These are future acceptance objectives, not existing capabilities or promises about cold full E2E.
+The five-minute ordinary-PR aspiration remains unmet; agree a representative workload before claiming
+it. Report misses with the exact remaining bottleneck and owner; do not weaken gates or broaden into
+unrelated refactors. A baseline dependency failure remains a real separate acceptance blocker.
+
+Delivery stops at the authorized milestone. This docs assignment authorizes a reviewed draft only;
+implementation of these future stages, scheduling and merging require their own scoped assignments.
+No checklist or new receipt label grants that authority.

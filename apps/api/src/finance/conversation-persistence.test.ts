@@ -89,7 +89,24 @@ function fixture(active = false) {
     connectionId: connection,
     authorizationConnectionId: connection,
     updatedAt: now,
-    schedule: { state: "active" },
+    schedule: {
+      id: scheduleId,
+      tenantAuthorizationConnectionId: connection,
+      label: "Conversation host",
+      hostSurface: "codex_desktop",
+      hostAutomationId: "fixture" as string | null,
+      effectiveScopes: [...agent.scopes],
+      state: "active",
+      trigger: {
+        type: "recurring",
+        recurrence: { type: "interval", everyMinutes: 60, timeZone: "UTC" },
+      },
+      lastObservedAt: now.toISOString(),
+      nextExpectedAt: now.toISOString() as string | null,
+      version: 1,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
   };
   const rows = new Map<unknown, unknown[]>([
     [users, [{ id: owner }]],
@@ -272,6 +289,8 @@ describe("Finance conversation persisted boundaries", () => {
   ])("projects registration %s without treating enrollment as proof", async (state) => {
     const f = fixture(true);
     f.schedule.schedule.state = state;
+    if (state !== "active") f.schedule.schedule.nextExpectedAt = null;
+    if (state === "setup_pending") f.schedule.schedule.hostAutomationId = null;
     f.rows.set(financeConversationCapabilities, [
       {
         generation: 2n,

@@ -149,7 +149,7 @@ export async function createMcpWorkspaceFixture(
             }
           : {}),
       });
-      const context = await api.getIloContext();
+      const context = await api.getPersonalOsContext();
       const server = createPersonalOsMcpServer({
         api,
         scopes: new Set(context.access.grantedScopes),

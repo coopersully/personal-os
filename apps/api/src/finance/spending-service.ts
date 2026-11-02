@@ -11,6 +11,7 @@ import {
   financeReimbursementMatches,
   financeReimbursements,
   financeTransactionAllocations,
+  financeTransactionCoverage,
   financeTransactionRelationships,
   financeTransactions,
 } from "@personal-os/database";
@@ -21,6 +22,7 @@ import {
   type FinanceSpendingGroup,
   type FinanceSpendingQuery,
   type FinanceSpendingReferenceFilter,
+  financeGroupIcon,
   financeProvenanceSchema,
   financeSpendingDashboardSchema,
   financeSpendingQuerySchema,
@@ -28,6 +30,7 @@ import {
 } from "@personal-os/domain";
 import { eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
+import type { FinanceTransaction } from "./context.js";
 import { projectFinanceSpendingMonthlyBudget } from "./spending-budget.js";
 import { projectFinanceSpending, type SpendingEvidenceInput } from "./spending-contributions.js";
 
@@ -95,7 +98,7 @@ export function buildFinanceSpendingDashboard(
                 return color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
               })()
             : null,
-        icon: id === "uncategorized" ? "uncategorized" : kind,
+        icon: financeGroupIcon(label, id === "uncategorized" ? "uncategorized" : kind),
       },
       categoryIds,
       netCents,
@@ -252,14 +255,24 @@ export function createFinanceSpendingService(input: {
     | undefined;
 }) {
   return {
-    async readSpending(userId: string, requested: FinanceSpendingQuery) {
+    async readSpending(
+      userId: string,
+      requested: FinanceSpendingQuery,
+      executor?: FinanceTransaction,
+      qualifiedBaseline?: FinanceBudgetBaselineQualificationRead,
+    ) {
       const query = financeSpendingQuerySchema.parse(requested);
       const qualification =
-        input.readBudgetQualification &&
+        qualifiedBaseline ??
+        (input.readBudgetQualification &&
         query.scope.from.slice(0, 7) === query.scope.through.slice(0, 7)
           ? await input.readBudgetQualification(userId, query.scope.from.slice(0, 7))
-          : undefined;
-      return input.db.transaction(
+          : undefined);
+      const read = <T>(
+        fn: (tx: FinanceTransaction) => Promise<T>,
+        options: Parameters<Database["transaction"]>[1],
+      ) => (executor ? fn(executor) : input.db.transaction(fn, options));
+      return read(
         async (tx) => {
           const accounts = await tx
             .select()
@@ -269,6 +282,10 @@ export function createFinanceSpendingService(input: {
             .select()
             .from(financeProviderItems)
             .where(eq(financeProviderItems.userId, userId));
+          const coverageIntervals = await tx
+            .select()
+            .from(financeTransactionCoverage)
+            .where(eq(financeTransactionCoverage.userId, userId));
           const rawTransactions = await tx
             .select()
             .from(financeTransactions)
@@ -354,7 +371,7 @@ export function createFinanceSpendingService(input: {
             row.lastSyncedAt ? [row.lastSyncedAt.getTime()] : [],
           );
           const activeTaxonomy = taxonomies.find((row) => row.isActive);
-          return buildFinanceSpendingDashboard(
+          const dashboard = buildFinanceSpendingDashboard(
             {
               userId,
               asOf,
@@ -363,8 +380,8 @@ export function createFinanceSpendingService(input: {
               allocations,
               reimbursements,
               matches,
-              // Current source sync does not certify historical coverage. Manual imports likewise
-              // have no certified interval contract, so even a fully loaded DB remains unknown.
+              // Sync freshness cannot prove history; explicit statement intervals can.
+              coverageIntervals,
               coverage: unavailable || stale ? "partial" : "unknown",
               relationships: relationships.flatMap((row) => {
                 const event = eventById.get(row.economicEventId);
@@ -437,6 +454,11 @@ export function createFinanceSpendingService(input: {
             },
             qualification,
           );
+          if (dashboard.snapshot.coverage === "complete")
+            dashboard.source.reasons = dashboard.source.reasons.filter(
+              (reason) => reason !== "historical_coverage_not_certified",
+            );
+          return dashboard;
         },
         { isolationLevel: "repeatable read", accessMode: "read only" },
       );

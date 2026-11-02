@@ -1,8 +1,9 @@
 import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceReimbursement } from "@personal-os/domain";
-import { EmptyState, Spinner } from "@personal-os/ui";
+import { EmptyState } from "@personal-os/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { CircleCheckIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,7 +34,7 @@ export function FinanceReimbursementList() {
         Reimbursement access unavailable. Check your permissions before viewing receipt evidence.
       </p>
     );
-  if (query.isPending) return <Spinner label="Loading reimbursements" />;
+  if (query.isPending) return <ContentSkeleton label="Loading reimbursements" rows={3} />;
   if (query.error && !query.data)
     return <InlineError error={query.error} retry={() => query.refetch()} />;
   const items = query.data?.reimbursements ?? [];
@@ -42,7 +43,7 @@ export function FinanceReimbursementList() {
       <CardHeader>
         <CardTitle>Reimbursements</CardTitle>
         <CardDescription>
-          Expected money stays visible until it is matched, cancelled, or needs your judgment.
+          Track recorded receipts and what you still expect to recover.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -69,7 +70,7 @@ export function FinanceReimbursementList() {
                     </div>
                     <ItemDescription>
                       {reimbursementAmount(item.receivedAmount, item.sourceExpense?.currency)}{" "}
-                      received of{" "}
+                      recorded received of{" "}
                       {reimbursementAmount(item.expectedAmount, item.sourceExpense?.currency)} ·{" "}
                       {reimbursementAmount(remaining, item.sourceExpense?.currency)}{" "}
                       {item.status === "cancelled" ? "cancelled remainder" : "remaining"}
@@ -86,24 +87,30 @@ export function FinanceReimbursementList() {
                         comparable across currencies.
                       </p>
                     ) : null}
-                    {item.sourceExpense?.personalCostToDate?.state === "qualified" ? (
-                      <p className="text-sm">
-                        Personal cost to date (whole expense):{" "}
-                        {reimbursementAmount(
-                          item.sourceExpense.personalCostToDate.amount,
-                          item.sourceExpense.personalCostToDate.currency,
-                        )}
-                        . May repeat on related claims; do not add case cards together.
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        Personal cost to date unavailable
-                        {item.sourceExpense?.personalCostToDate?.state === "unavailable"
-                          ? `: ${item.sourceExpense.personalCostToDate.reason.replaceAll("_", " ")}`
-                          : ""}
-                        .
-                      </p>
-                    )}
+                    <details className="text-sm">
+                      <summary className="cursor-pointer">Expense basis and personal cost</summary>
+                      {item.sourceExpense?.personalCostToDate?.state === "qualified" ? (
+                        <p className="text-sm">
+                          Personal cost to date (whole expense):{" "}
+                          {reimbursementAmount(
+                            item.sourceExpense.personalCostToDate.amount,
+                            item.sourceExpense.personalCostToDate.currency,
+                          )}
+                          . May repeat on related claims; do not add case cards together.
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          Personal cost to date unavailable
+                          {item.sourceExpense?.personalCostToDate?.state === "unavailable"
+                            ? `: ${item.sourceExpense.personalCostToDate.reason.replaceAll("_", " ")}`
+                            : ""}
+                          .
+                        </p>
+                      )}
+                    </details>
+                    {item.matches.some((match) => match.creditTransaction?.pending) ? (
+                      <Badge variant="secondary">Includes pending credit</Badge>
+                    ) : null}
                     <Progress
                       aria-label={`Reimbursement from ${item.payer ?? "unknown payer"}`}
                       value={progress}

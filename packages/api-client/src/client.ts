@@ -31,11 +31,15 @@ import type {
 import {
   type ConnectedAccountHealth,
   type ConnectorCapabilities,
+  type ConnectorSyncResult,
   type ConnectorSyncStatus,
   connectedAccountHealthSchema,
   connectorAuthorizationOutcomeSchema,
+  connectorSyncResultSchema,
 } from "@personal-os/domain";
 import { createActiveReminderApiClient } from "./features/active-reminders.js";
+
+import { createAgentAccountApi } from "./features/agent-accounts.js";
 import { createAssistantApiClient } from "./features/assistant.js";
 import { createAutomationHostApi } from "./features/automation-hosts.js";
 import { createCalendarApiClient } from "./features/calendar.js";
@@ -45,6 +49,7 @@ import { createFinanceConversationApi } from "./features/finance-conversation.js
 import { createFinanceConversationEvidenceApi } from "./features/finance-conversation-evidence.js";
 import { createFinanceConversationUnreadApi } from "./features/finance-conversation-unread.js";
 import { createFinanceMaintenanceExecutionApi } from "./features/finance-maintenance-execution.js";
+import { createFinanceReviewBacklogApi } from "./features/finance-review-backlog.js";
 import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
 import { createMailApiClient } from "./features/mail.js";
@@ -215,12 +220,14 @@ export function createApiClient(options: ClientOptions) {
       );
     },
     ...createFinanceApi(request),
+    ...createFinanceReviewBacklogApi(request),
     ...createFinanceConversationApi(request),
     ...createFinanceConversationUnreadApi(request),
     ...createFinanceMaintenanceExecutionApi(request),
     ...createFinanceConversationEvidenceApi(request),
     ...createFinanceActivityApi(request),
     ...createAutomationHostApi(request),
+    ...createAgentAccountApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
     ...createRitualsApiClient(request),
@@ -509,11 +516,11 @@ export function createApiClient(options: ClientOptions) {
       await request<void>(`/v1/sessions/${id}`, { method: "DELETE" });
     },
 
-    async syncConnector(id: string): Promise<number> {
-      const response = await request<{ result: { changed: number } }>(`/v1/connectors/${id}/sync`, {
+    async syncConnector(id: string): Promise<ConnectorSyncResult> {
+      const response = await request<{ result: unknown }>(`/v1/connectors/${id}/sync`, {
         method: "POST",
       });
-      return response.result.changed;
+      return connectorSyncResultSchema.parse(response.result);
     },
 
     async selectXBookmarkFolder(folderId: string): Promise<number> {

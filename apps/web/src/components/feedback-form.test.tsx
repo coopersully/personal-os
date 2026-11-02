@@ -100,7 +100,7 @@ describe("FeedbackForm", () => {
     expect(screen.getByRole("textbox")).not.toHaveAttribute("aria-invalid");
     expect(screen.getByRole("textbox")).toHaveValue("draft");
   });
-  it("keeps unmapped errors in the form and supports custom constraints", () => {
+  it("announces unmapped errors through Sonner and retains custom constraints", () => {
     render(
       <FeedbackForm
         feedback={{
@@ -114,7 +114,8 @@ describe("FeedbackForm", () => {
         <button type="submit">Save</button>
       </FeedbackForm>,
     );
-    expect(screen.getByRole("status")).toHaveTextContent("Check the date range.");
+    expect(toast.error).toHaveBeenCalledWith("Check the date range.", expect.anything());
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     const input = screen.getByRole("textbox") as HTMLInputElement;
     input.setCustomValidity("End must be after start.");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

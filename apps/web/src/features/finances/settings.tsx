@@ -1,6 +1,6 @@
 import type { FinanceGuidedSetupContext } from "@personal-os/domain";
-import { Spinner } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,7 +77,7 @@ export function FinanceSettings() {
         queryClient.invalidateQueries({ queryKey: ["domain-profile", "finances"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-guided-setup"] }),
         queryClient.invalidateQueries({ queryKey: ["finances", "guided-setup"] }),
-        queryClient.invalidateQueries({ queryKey: ["ilo-setup-plan", "finances"] }),
+        queryClient.invalidateQueries({ queryKey: ["personal-os-setup-plan", "finances"] }),
         queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
       ]),
   });
@@ -154,7 +154,7 @@ function FinanceAgentGuidancePanel({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {loading ? <Spinner label="Loading Finance agent guidance" /> : null}
+        {loading ? <ContentSkeleton label="Loading Finance agent guidance" rows={3} /> : null}
         {error ? <InlineError error={error} /> : null}
         {setup ? (
           <ItemGroup>

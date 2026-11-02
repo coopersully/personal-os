@@ -38,6 +38,7 @@ beforeEach(() => {
 it("saves a versioned edit without dropping unrelated preferences and normalizes the saved draft", async () => {
   const user = userEvent.setup();
   mount();
+  await user.click(await screen.findByRole("button", { name: "Edit Guidance" }));
   const objective = await screen.findByRole("textbox", { name: "Objective" });
   expect(screen.getByRole("button", { name: "Save guidance" })).toBeDisabled();
   await user.clear(objective);
@@ -63,6 +64,7 @@ it("keeps drafts on failed writes and explicitly reloads the latest version", as
   mocks.upsertDomainProfile.mockRejectedValue(new Error("Version conflict"));
   const user = userEvent.setup();
   mount();
+  await user.click(await screen.findByRole("button", { name: "Edit Guidance" }));
   const objective = await screen.findByRole("textbox", { name: "Objective" });
   await user.clear(objective);
   await user.type(objective, "My unsaved draft");
@@ -95,6 +97,7 @@ it("edits typed Mail preferences with the profile version and preserves hidden f
   mocks.getDomainProfile.mockResolvedValue({ ...profile, domain: "mail" });
   const user = userEvent.setup();
   mount("mail");
+  await user.click(await screen.findByRole("button", { name: "Edit Guidance" }));
   await user.selectOptions(await screen.findByLabelText("Inbox style"), "signal_only");
   await user.selectOptions(screen.getByLabelText("Important email handling"), "inbox_only");
   await user.selectOptions(
@@ -132,6 +135,7 @@ it("preserves Mail preference drafts on conflicts and resets them only on explic
   mocks.upsertDomainProfile.mockRejectedValue(new Error("Version conflict"));
   const user = userEvent.setup();
   const cache = mount("mail");
+  await user.click(await screen.findByRole("button", { name: "Edit Guidance" }));
   const style = await screen.findByLabelText("Inbox style");
   await user.selectOptions(style, "balanced");
   mocks.getDomainProfile.mockResolvedValue({
@@ -178,6 +182,7 @@ it("requires a valid waiting period before saving Mail retention preferences", a
   mocks.getDomainProfile.mockResolvedValue({ ...profile, domain: "mail" });
   const user = userEvent.setup();
   mount("mail");
+  await user.click(await screen.findByRole("button", { name: "Edit Guidance" }));
   await user.selectOptions(
     await screen.findByLabelText("Low-priority email handling"),
     "trash_after_days",
@@ -223,6 +228,7 @@ it("edits Calendar profile defaults while preserving its version, approval and u
   ]);
   const user = userEvent.setup();
   mount("calendar");
+  await user.click(await screen.findByRole("button", { name: "Edit Guidance" }));
   const before = await screen.findByRole("spinbutton", { name: "Buffer before events (minutes)" });
   await user.clear(before);
   await user.type(before, "15");
@@ -233,7 +239,7 @@ it("edits Calendar profile defaults while preserving its version, approval and u
   );
   expect(
     screen.getByRole("link", { name: "Open Calendar setup to add a source." }),
-  ).toHaveAttribute("href", "/settings?section=calendar#calendar-setup");
+  ).toHaveAttribute("href", "/settings?page=calendar#calendar-setup");
   await user.selectOptions(screen.getByLabelText("Busy block privacy"), "details");
   await user.click(screen.getByRole("button", { name: "Save guidance" }));
   await waitFor(() =>
@@ -271,6 +277,7 @@ it("saves visible preferences on partial Calendar drafts without adding automati
   ]);
   const user = userEvent.setup();
   mount("calendar");
+  await user.click(await screen.findByRole("button", { name: "Edit Guidance" }));
   await user.type(
     await screen.findByRole("spinbutton", { name: "Buffer before events (minutes)" }),
     "15",

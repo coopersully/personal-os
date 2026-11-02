@@ -51,7 +51,7 @@ export const financePlaybookResponseSchema = z.object({
 });
 export type FinancePlaybookResponse = z.infer<typeof financePlaybookResponseSchema>;
 
-export const NOHMI_FINANCE_PLAYBOOK: FinancePlaybook = {
+export const PERSONAL_OS_FINANCE_PLAYBOOK: FinancePlaybook = {
   id: "nohmi-finance",
   version: "1.0.0",
   owner: "nohmi-finance",
@@ -239,6 +239,6 @@ export function assessFinancePlaybook(input: {
     nextActions,
     readiness: blockers.length === 0 ? "on_track" : input.profile ? "incomplete" : "not_ready",
     uncertainty,
-    playbookVersion: NOHMI_FINANCE_PLAYBOOK.version,
+    playbookVersion: PERSONAL_OS_FINANCE_PLAYBOOK.version,
   });
 }

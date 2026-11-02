@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  accessTokens,
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
@@ -34,7 +35,9 @@ import type {
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, inArray, sql } from "drizzle-orm";
+import { createAutomationHostService } from "./automation-host-service.js";
 import { AppError } from "./errors.js";
+import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
 import {
   createFinanceMaintenanceService,
   type FinanceMaintenanceOperations,
@@ -460,7 +463,10 @@ describe.sequential("Finance maintenance service", () => {
     };
   }
 
-  it("prepares one 47-item candidate without applying semantic categorization before challenge", async () => {
+  it.each([
+    "fresh",
+    "legacy routine",
+  ])("prepares one 47-item candidate from %s without applying semantic categorization before challenge", async (mode) => {
     const ownerId = await createUser("Real 47 Finance candidate");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
     const finances = createFinanceService({ db: database.db, now: () => now });
@@ -625,8 +631,115 @@ describe.sequential("Finance maintenance service", () => {
       now: () => now,
       status: financeStatus,
     });
-    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
-    await service.dispatchRun(run.id);
+    let run: Awaited<ReturnType<typeof service.startOrResume>>;
+    if (mode === "legacy routine") {
+      const connectionId = crypto.randomUUID();
+      const [token] = await database.db
+        .insert(accessTokens)
+        .values({
+          userId: ownerId,
+          name: "Recovery routine",
+          tokenHash: crypto.randomUUID(),
+          authorizationConnectionId: connectionId,
+          scopes: ["finances:maintain"],
+        })
+        .returning();
+      if (!token) throw new Error("Missing routine token");
+      const hosts = createAutomationHostService({
+        db: database.db,
+        now: () => now,
+        encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+      });
+      const schedule = await hosts.create(context.principal, {
+        tenantAuthorizationConnectionId: connectionId,
+        label: "Recovery routine",
+        requestedScopes: ["finances:maintain"],
+        hostSurface: "claude_code_routine",
+        trigger: { type: "event", expectedMaximumLatencyMinutes: 15 },
+      });
+      await hosts.bind(context.principal, schedule.schedule.id, {
+        expectedVersion: 1,
+        expectedState: "setup_pending",
+        hostSurface: "claude_code_routine",
+        hostAutomationId: "trig_01ABCDEFGHJKLMNOPQRSTUVW",
+      });
+      const [legacyRun] = await database.db
+        .insert(workspaceMaintenanceRuns)
+        .values({
+          userId: ownerId,
+          domain: "finances",
+          scope: { type: "all_outstanding" },
+          status: "blocked",
+          rulebookVersion: "legacy-v1",
+          checkpoint: { completedStep: "preflight" },
+          settledResult: {
+            verification: { state: "blocked", freshness: "partial" },
+            questions: { total: 10, created: 0 },
+          },
+        })
+        .returning();
+      if (!legacyRun) throw new Error("Missing legacy run");
+      await database.db.insert(workspaceMaintenanceSteps).values({
+        runId: legacyRun.id,
+        stepName: "preflight",
+        status: "completed",
+        attemptClaimId: crypto.randomUUID(),
+        idempotencyKey: "legacy:preflight",
+        safeResult: { freshness: "partial" },
+      });
+      // Simulate a scheduler yield after durable acceptance. The returned resume action must
+      // drive the real candidate engine, including synchronize and candidate preparation.
+      const dispatchRun = vi.fn(service.dispatchRun).mockResolvedValueOnce(null);
+      const intents = createFinanceMaintenanceIntentService({
+        db: database.db,
+        now: () => now,
+        status: financeStatus,
+        maintenance: { ...service, dispatchRun },
+        recoverHandoff: async () => null,
+      });
+      const principal = {
+        userId: ownerId,
+        actorId: token.id,
+        actorType: "agent" as const,
+        authorizationConnectionId: connectionId,
+        scopes: new Set(["finances:maintain" as const]),
+      };
+      const started = await intents.maintainFinances(
+        {
+          operation: "start",
+          automationScheduleId: schedule.schedule.id,
+          scope: { type: "all_outstanding" },
+        },
+        principal,
+      );
+      expect(started).toMatchObject({
+        nextAction: {
+          tool: "maintain_finances",
+          arguments: { operation: "resume", runId: legacyRun.id },
+        },
+      });
+      const resumed = await intents.maintainFinances(
+        started.nextAction?.arguments as { operation: "resume"; runId: string },
+        principal,
+      );
+      expect(resumed.data.run).toMatchObject({
+        id: legacyRun.id,
+        status: "awaiting_agent_challenge",
+      });
+      expect(
+        await database.db.query.workspaceMaintenanceRuns.findFirst({
+          where: eq(workspaceMaintenanceRuns.id, legacyRun.id),
+        }),
+      ).toMatchObject({
+        automationScheduleId: schedule.schedule.id,
+        authorizationConnectionId: connectionId,
+      });
+      if (!resumed.data.run) throw new Error("Missing resumed run");
+      run = resumed.data.run;
+    } else {
+      run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+      await service.dispatchRun(run.id);
+    }
     await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
       checkpoint: { phase: "challenge" },
       status: "awaiting_agent_challenge",

@@ -1,14 +1,11 @@
 import { z } from "zod";
-import { idSchema } from "../common.js";
+import { idSchema, isoDateTimeSchema } from "../common.js";
 
 const revision = z
   .string()
   .regex(/^[1-9]\d{0,18}$/)
   .refine((value) => value.length < 19 || value <= "9223372036854775807");
-const instant = z.iso
-  .datetime({ offset: true })
-  .transform((value) => new Date(value).toISOString())
-  .nullable();
+const instant = isoDateTimeSchema.transform((value) => new Date(value).toISOString()).nullable();
 export const financeContextTextSchema = z
   .string()
   .trim()

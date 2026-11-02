@@ -54,10 +54,27 @@ def _material_command(argv):
         command, arguments = script[0], script[1:]
     name = _name(command)
     if name in {"pnpm", "pnpm.cjs", "pnpm.mjs"}:
-        values = {"--filter", "-F", "--dir", "-C", "--prefix"}
+        values = {"--filter", "--filter-prod", "-F", "--dir", "-C", "--prefix"}
+        flags = {"--recursive", "-r", "--workspace-root", "-w"}
         index = 0
         while index < len(arguments) and arguments[index].startswith("-"):
-            index += 2 if arguments[index] in values else 1
+            option, equals, value = arguments[index].partition("=")
+            if option in values:
+                if equals:
+                    if not value:
+                        return None
+                    index += 1
+                else:
+                    if index + 1 >= len(arguments) or arguments[index + 1].startswith("-"):
+                        return None
+                    index += 2
+            elif option in flags and (
+                not equals or (option.startswith("--") and value in {"true", "false"})
+            ):
+                index += 1
+            else:
+                # Unknown arity/mode cannot establish where the command starts.
+                return None
         arguments = arguments[index:]
         if arguments and arguments[0] == "run":
             arguments = arguments[1:]

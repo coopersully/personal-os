@@ -53,6 +53,55 @@ class AdmissionClassificationTest(unittest.TestCase):
         ]
         self.assertEqual([row["pid"] for row in admission.material_verifier_processes(rows)], [1, 2, 3, 4])
 
+    def test_pnpm_filter_prod_values_do_not_become_verifier_commands(self):
+        for argv in [
+            ["pnpm", "--filter-prod", "test", "run", "build"],
+            ["pnpm", "--filter-prod", "test", "run", "dev"],
+            ["pnpm", "--filter-prod=test", "run", "dev"],
+            ["node", "/tools/pnpm.mjs", "--filter-prod", "verify:pr", "run", "dev"],
+        ]:
+            with self.subTest(argv=argv):
+                rows = [
+                    process(10, 0, argv),
+                    process(11, 10, ["node", "/tool/worker.mjs"]),
+                ]
+                self.assertEqual(admission.material_verifier_processes(rows), [])
+
+    def test_supported_pnpm_options_preserve_actual_verifier_commands(self):
+        for argv in [
+            ["pnpm", "--filter-prod", "@personal-os/web", "run", "verify:pr"],
+            ["pnpm", "--filter-prod=@personal-os/web", "run", "verify:pr"],
+            ["pnpm", "--filter=@personal-os/web", "run", "verify:pr"],
+            ["pnpm", "-F", "@personal-os/web", "-C", "/project", "run", "verify:pr"],
+            ["pnpm", "--dir=/project", "--prefix", "/project", "run", "verify:pr"],
+            ["pnpm", "--recursive", "--workspace-root", "run", "verify:pr"],
+            ["pnpm", "-r", "-w", "run", "verify:pr"],
+            ["pnpm", "--recursive=true", "--filter-prod", "@personal-os/web", "exec", "jest"],
+        ]:
+            with self.subTest(argv=argv):
+                classified = admission.material_verifier_processes([process(10, 0, argv)])
+                self.assertEqual([row["pid"] for row in classified], [10])
+                self.assertEqual(classified[0]["command"], "jest" if "exec" in argv else "verify:pr")
+
+    def test_unknown_or_malformed_pnpm_option_arity_remains_unknown(self):
+        for arguments in [
+            ["--unknown-option", "test", "run", "dev"],
+            ["--unknown-option=on", "run", "verify:pr"],
+            ["--filter-prod"],
+            ["--filter-prod="],
+            ["--filter-prod=", "run", "verify:pr"],
+            ["--filter-prod", "--recursive", "run", "verify:pr"],
+            ["--dir", "--filter", "test", "run", "dev"],
+            ["--recursive=test", "run", "verify:pr"],
+            ["-rw", "run", "verify:pr"],
+        ]:
+            with self.subTest(arguments=arguments):
+                rows = [
+                    process(10, 0, ["pnpm", *arguments]),
+                    process(11, 10, ["node", "/tool/worker.mjs"]),
+                ]
+                self.assertEqual(admission.material_verifier_processes(rows), [])
+
     def test_ancestry_is_snapshot_bound_and_cycles_terminate(self):
         rows = [
             process(5, 6, ["node", "/project/worker.mjs"]),

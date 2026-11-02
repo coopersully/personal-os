@@ -47,7 +47,9 @@ provider Item update revision, sync cutoff, and public freshness reasons. The te
 activity reference hashes the selected account references, ordered transaction projections,
 allocations, relationships, reimbursements, matches, and scope. No credentials, provider messages,
 rationale, or merchant text are included in the source references. The position revision hashes the
-ordered scope and validated facts; changing only the observation time does not change that revision.
+ordered scope and validated facts, including the coverage records and owner-local coverage horizon.
+Advancing observation time does not change the revision unless it changes freshness, admitted
+coverage, or the observed local date.
 Persisted reviews must retain their original evidence identity; rereading the current producer does
 not reproduce historical bank or correction state.
 
@@ -69,6 +71,17 @@ Posted spend and pending exposure use the canonical recognition oracle. Detailed
 qualifications map to F0b's stable codes: unresolved allocation, unresolved reimbursement,
 incomplete evidence, and unsupported account type. Expected repayments do not reduce posted spend
 or pending exposure. A pending relationship credit is not a received reimbursement.
+
+Observed transactions do not establish complete period history. Posted spend and pending exposure
+retain their observed cents but carry `incomplete_evidence` until explicit coverage spans every
+selected planning account and date, including accounts with no observed transactions. Coverage
+must match the owner, account, currency and planning timezone, retain a nonempty evidence reference,
+and have been recorded by the snapshot time. Adjacent intervals may jointly cover the period;
+an interior gap remains incomplete. The observed horizon ends at the earlier of the requested end
+and today's date in the owner's planning timezone, so future days are not claimed as observed
+history. This qualification does not degrade an independently verified cash balance or grant
+financial authority. Coverage changes participate in the position revision and invalidate an older
+position-dependent decision.
 
 Commitment and protection completeness are not established by an empty recurring-obligation list,
 a stated reserve target, or a missing record. The persistence producer therefore returns

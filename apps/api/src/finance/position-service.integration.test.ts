@@ -5,6 +5,7 @@ import {
   financeAccounts,
   financeEconomicEvents,
   financeProviderItems,
+  financeTransactionCoverage,
   financeTransactionRelationships,
   financeTransactions,
   migrateDatabase,
@@ -123,6 +124,125 @@ describe.sequential("Finance position persistence boundary", () => {
     await expect(
       readPosition(userId, { ...dates, accountIds: [foreignAccountId] }),
     ).rejects.toMatchObject({ code: "not_found" });
+  });
+  it("requires explicit full date coverage before treating observed spending as verified", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Coverage",
+        email: "position-coverage@example.com",
+        passwordHash: "unused",
+        planningTimezone: "America/New_York",
+      })
+      .returning();
+    const ownerId = required(owner).id;
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        userId: ownerId,
+        provider: "manual",
+        institution: "Synthetic",
+        name: "Covered cash",
+        kind: "cash",
+        balance: 10_000,
+        currencyCode: "USD",
+        ownershipType: "individual",
+        ownershipShareBps: 10_000,
+      })
+      .returning();
+    const accountId = required(account).id;
+    await database.db.insert(financeTransactions).values({
+      userId: ownerId,
+      accountId,
+      amount: 1_000,
+      currencyCode: "USD",
+      direction: "expense",
+      providerDirection: "expense",
+      merchant: "Synthetic",
+      pending: false,
+      transactionDate: "2026-09-12",
+    });
+    const unknown = await service.readPosition(ownerId, dates);
+    expect(unknown.postedSpend).toMatchObject({
+      cents: 1_000,
+      quality: "qualified",
+      reasons: ["incomplete_evidence"],
+    });
+    expect(unknown.cash.quality).toBe("verified");
+    const coverage = {
+      userId: ownerId,
+      accountId,
+      timezone: "America/New_York",
+      currencyCode: "USD",
+      evidenceRef: "statement:synthetic-coverage",
+      recordedAt: timestamp,
+    };
+    await database.db.insert(financeTransactionCoverage).values([
+      { ...coverage, fromDate: dates.from, throughDate: dates.through, timezone: "UTC" },
+      { ...coverage, fromDate: dates.from, throughDate: dates.through, currencyCode: "EUR" },
+      {
+        ...coverage,
+        fromDate: dates.from,
+        throughDate: dates.through,
+        recordedAt: new Date("2026-09-19T12:00:00Z"),
+      },
+      {
+        ...coverage,
+        userId: foreignId,
+        accountId: foreignAccountId,
+        fromDate: dates.from,
+        throughDate: dates.through,
+      },
+    ]);
+    const incompatible = await service.readPosition(ownerId, dates);
+    expect(incompatible.postedSpend).toMatchObject({
+      cents: 1_000,
+      quality: "qualified",
+      reasons: ["incomplete_evidence"],
+    });
+    await database.db.insert(financeTransactionCoverage).values([
+      { ...coverage, fromDate: dates.from, throughDate: "2026-09-08" },
+      { ...coverage, fromDate: "2026-09-10", throughDate: dates.through },
+    ]);
+    const gap = await service.readPosition(ownerId, dates);
+    expect(gap.postedSpend.quality).toBe("qualified");
+    expect(gap.postedSpend.cents).toBe(unknown.postedSpend.cents);
+    expect(gap.revision).not.toBe(unknown.revision);
+    await database.db.insert(financeTransactionCoverage).values({
+      ...coverage,
+      fromDate: "2026-09-09",
+      throughDate: "2026-09-09",
+    });
+    const complete = await service.readPosition(ownerId, dates);
+    expect(complete.postedSpend).toMatchObject({ cents: 1_000, quality: "verified", reasons: [] });
+    expect(complete.revision).not.toBe(gap.revision);
+    expect(complete.pendingExposure.quality).toBe("verified");
+    expect(complete.spendable.cents).toBeNull();
+    // A current month's future days are not claimed as observed history.
+    const currentMonth = await service.readPosition(ownerId, { ...dates, through: "2026-09-30" });
+    expect(currentMonth.postedSpend.quality).toBe("verified");
+    const late = createFinancePositionService({
+      db: database.db,
+      now: () => new Date("2026-09-19T02:00:00Z"),
+    });
+    expect(
+      (await late.readPosition(ownerId, { ...dates, through: "2026-09-30" })).postedSpend.quality,
+    ).toBe("verified");
+    await database.db.insert(financeAccounts).values({
+      userId: ownerId,
+      provider: "manual",
+      institution: "Synthetic",
+      name: "No observed transactions",
+      kind: "cash",
+      balance: 1_000,
+      currencyCode: "USD",
+      ownershipType: "individual",
+      ownershipShareBps: 10_000,
+    });
+    const missingAccountHistory = await service.readPosition(ownerId, dates);
+    expect(missingAccountHistory.postedSpend).toMatchObject({ cents: 1_000, quality: "qualified" });
+    const selected = await service.readPosition(ownerId, { ...dates, accountIds: [accountId] });
+    expect(selected.postedSpend.quality).toBe("verified");
   });
   it("treats explicit empty selection as none and checks ordered scope", async () => {
     const position = await service.readPosition(userId, { ...dates, accountIds: [] });

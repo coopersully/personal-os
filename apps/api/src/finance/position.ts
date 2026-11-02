@@ -23,6 +23,7 @@ export type PositionInput = Omit<RecognitionInput, "accounts"> & {
   activitySource: FinanceRevisionRef;
   committed?: FinanceMoneyFact;
   protected?: FinanceMoneyFact;
+  activityCoverageReasons?: FinanceMoneyFactReasonCode[];
 };
 
 export function positionRevision(value: unknown): string {
@@ -97,7 +98,10 @@ export function buildFinancePosition(input: PositionInput) {
       }),
     },
   ];
-  const activityReasons = activity.qualifications.map((q) => qualificationReasons[q.code]);
+  const activityReasons = [
+    ...activity.qualifications.map((q) => qualificationReasons[q.code]),
+    ...(input.activityCoverageReasons ?? []),
+  ];
   const sourceReasons = accounts.flatMap((account) => account.reasons);
   if (accounts.length === 0) sourceReasons.push("source_unavailable");
   const balanceFact = (kinds: PositionAccount["kind"][]) => {

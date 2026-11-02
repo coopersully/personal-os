@@ -6,8 +6,10 @@ import {
   financeReimbursementMatches,
   financeReimbursements,
   financeTransactionAllocations,
+  financeTransactionCoverage,
   financeTransactionRelationships,
   financeTransactions,
+  users,
 } from "@personal-os/database";
 import {
   type FinancePositionEvidence,
@@ -17,8 +19,10 @@ import {
 } from "@personal-os/domain";
 import { eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
+import { budgetPlanningDate } from "./budget-plan-projection.js";
 import { buildFinancePosition, type PositionAccount, positionRevision } from "./position.js";
 import type { RecognitionInput } from "./recognition.js";
+import { spendingDateCoverage } from "./spending-coverage.js";
 
 /** Read-only producer. Authenticated composition supplies userId, never a request payload. */
 export function createFinancePositionService(input: { db: Database; now: () => Date }) {
@@ -88,6 +92,17 @@ export function createFinancePositionService(input: { db: Database; now: () => D
               ? [...ownedIds].toSorted()
               : [...new Set(validatedScope.accountIds)].toSorted(),
         };
+        const [owner] = await tx
+          .select({ timezone: users.planningTimezone })
+          .from(users)
+          .where(eq(users.id, userId));
+        if (!owner) throw new AppError("not_found", "The position owner was not found.");
+        const today = budgetPlanningDate(new Date(asOf), owner.timezone);
+        const observedThrough = scope.through < today ? scope.through : today;
+        const coverageRows = await tx
+          .select()
+          .from(financeTransactionCoverage)
+          .where(eq(financeTransactionCoverage.userId, userId));
         const itemById = new Map(items.map((item) => [item.id, item]));
         const accounts: PositionAccount[] = accountRows.map((row) => {
           const item = row.providerItemRecordId
@@ -135,6 +150,53 @@ export function createFinancePositionService(input: { db: Database; now: () => D
             },
           };
         });
+        const planningAccounts = accounts.filter(
+          (account) => account.includeInPlanning && scope.accountIds.includes(account.id),
+        );
+        const planningIds = new Set(planningAccounts.map((account) => account.id));
+        const coverage = coverageRows.filter(
+          (row) =>
+            planningIds.has(row.accountId) &&
+            row.fromDate <= observedThrough &&
+            row.throughDate >= scope.from,
+        );
+        const coverageByAccount = new Map<string, typeof coverage>();
+        for (const row of coverage) {
+          const group = coverageByAccount.get(row.accountId) ?? [];
+          group.push(row);
+          coverageByAccount.set(row.accountId, group);
+        }
+        // Merge explicit intervals, without scanning every requested calendar day
+        // or repeatedly comparing every account against every coverage row.
+        const from = Date.parse(`${scope.from}T00:00:00Z`);
+        const through = Date.parse(`${observedThrough}T00:00:00Z`);
+        const completeCoverage =
+          scope.from <= observedThrough &&
+          planningAccounts.length > 0 &&
+          planningAccounts.every((account) => {
+            let coveredThrough = from - 86_400_000;
+            const intervals = (coverageByAccount.get(account.id) ?? []).toSorted((a, b) =>
+              a.fromDate.localeCompare(b.fromDate),
+            );
+            for (const row of intervals) {
+              if (
+                spendingDateCoverage({
+                  userId,
+                  accounts: [account],
+                  date: row.fromDate,
+                  timezone: owner.timezone,
+                  asOf,
+                  intervals: [row],
+                }) !== "complete"
+              )
+                continue;
+              const start = Date.parse(`${row.fromDate}T00:00:00Z`);
+              if (start > coveredThrough + 86_400_000) return false;
+              coveredThrough = Math.max(coveredThrough, Date.parse(`${row.throughDate}T00:00:00Z`));
+              if (coveredThrough >= through) return true;
+            }
+            return false;
+          });
         const eventById = new Map(events.map((event) => [event.id, event]));
         const relationships: RecognitionInput["relationships"] = rows.flatMap((row) => {
           const event = eventById.get(row.economicEventId);
@@ -220,6 +282,9 @@ export function createFinancePositionService(input: { db: Database; now: () => D
         // Sort all row sets before hashing so database ordering cannot create a new revision.
         const activityRevision = positionRevision({
           scope,
+          timezone: owner.timezone,
+          observedThrough,
+          coverage: coverage.toSorted((a, b) => a.id.localeCompare(b.id)),
           transactions: activityInput.transactions.toSorted((a, b) => a.id.localeCompare(b.id)),
           allocations: activityInput.allocations.toSorted((a, b) => a.id.localeCompare(b.id)),
           relationships: relationships.toSorted((a, b) => a.id.localeCompare(b.id)),
@@ -236,6 +301,7 @@ export function createFinancePositionService(input: { db: Database; now: () => D
           asOf,
           scope,
           activitySource: { id: userId, revision: activityRevision },
+          activityCoverageReasons: completeCoverage ? [] : ["incomplete_evidence"],
         });
       },
       { isolationLevel: "repeatable read", accessMode: "read only" },

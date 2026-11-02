@@ -1,10 +1,12 @@
 import type {
   ExecuteFinanceReviewBatchInput,
+  FinanceMaintenanceQualification,
   FinanceReviewBacklogAssessment,
   FinanceReviewBacklogPage,
   FinanceReviewBacklogQuery,
   FinanceReviewBatchRun,
   PreviewFinanceReviewBatchInput,
+  QualifyFinanceMaintenanceWorkInput,
 } from "@personal-os/domain";
 import type { FinanceRequest } from "./finances.js";
 
@@ -23,6 +25,11 @@ export function createFinanceReviewBacklogApi(request: FinanceRequest) {
         if (query[key] !== undefined) params.set(key, String(query[key]));
       }
       return request(`/v1/finances/review-backlog/items${params.size ? `?${params}` : ""}`);
+    },
+    qualifyFinanceMaintenanceWork(
+      input: QualifyFinanceMaintenanceWorkInput,
+    ): Promise<FinanceMaintenanceQualification> {
+      return request(`${batches}/qualification`, { method: "POST", body: JSON.stringify(input) });
     },
     previewFinanceReviewBatch(
       input: PreviewFinanceReviewBatchInput,

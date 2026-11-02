@@ -68,6 +68,14 @@ describe("Claude accepted-answer subscription transport", () => {
     });
     expect(f.fetch).toHaveBeenCalledTimes(1);
   });
+  it("does not present Response.error status0 as an observed HTTP receipt", async () => {
+    const f = fixture(Response.error());
+    expect(await f.adapter.invoke(input)).toEqual({
+      state: "uncertain",
+      reason: "provider_response",
+    });
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  });
   it.each([
     ["120", 120],
     ["999999", 86400],
@@ -166,6 +174,29 @@ describe("Claude accepted-answer subscription transport", () => {
     expect(await result).toEqual({ state: "uncertain", reason: "transport" });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+  it("ends a below-limit stalled reader at the same request deadline", async () => {
+    vi.useFakeTimers();
+    let canceled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"type":"routine_fire"'));
+      },
+      cancel() {
+        canceled = true;
+      },
+    });
+    const f = fixture(new Response(stream));
+    let settled = false;
+    const result = f.adapter.invoke(input).then((outcome) => {
+      settled = true;
+      return outcome;
+    });
+    await vi.advanceTimersByTimeAsync(14999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toEqual({ state: "uncertain", reason: "invalid_response", status: 200 });
+    expect(canceled).toBe(true);
+  });
   it("uses one deadline for body reads and never awaits an unending cancellation", async () => {
     vi.useFakeTimers();
     const stream = new ReadableStream<Uint8Array>({
@@ -181,11 +212,14 @@ describe("Claude accepted-answer subscription transport", () => {
     await vi.advanceTimersByTimeAsync(15000);
     expect(await result).toMatchObject({ state: "uncertain", reason: "invalid_response" });
   });
-  it("does not lose a parsed acknowledgement to cleanup-only cancellation failure", async () => {
-    vi.spyOn(ReadableStreamDefaultReader.prototype, "cancel").mockRejectedValue(
-      new Error("PRIVATE CLEANUP"),
-    );
+  it("retains a parsed acknowledgement when the invoked releaseLock cleanup throws", async () => {
+    const cleanup = vi
+      .spyOn(ReadableStreamDefaultReader.prototype, "releaseLock")
+      .mockImplementation(() => {
+        throw new Error("PRIVATE CLEANUP");
+      });
     const f = fixture();
     expect(await f.adapter.invoke(input)).toEqual({ state: "accepted", sessionId, status: 200 });
+    expect(cleanup).toHaveBeenCalledTimes(1);
   });
 });

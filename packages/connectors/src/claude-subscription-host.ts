@@ -89,8 +89,13 @@ export function createClaudeSubscriptionHostAdapter(options: {
             },
           ),
         );
-        status = response.status;
+        // Injected fetch can return Response.error() (status0), which is not an HTTP receipt.
+        status =
+          Number.isInteger(response.status) && response.status >= 100 && response.status <= 599
+            ? response.status
+            : undefined;
         reason = "provider_response";
+        if (status === undefined) return { state: "uncertain", reason };
         if (!response.ok) {
           if (
             status === 400 ||

@@ -24,6 +24,7 @@ import type { FinanceTransaction } from "./context.js";
 import { buildFinancePosition, type PositionAccount, positionRevision } from "./position.js";
 import type { RecognitionInput } from "./recognition.js";
 import { spendingDateCoverage } from "./spending-coverage.js";
+import { requireScopedLedgerScope, type ScopedFinanceLedger } from "./scoped-ledger-reader.js";
 
 /** Read-only producer. Authenticated composition supplies userId, never a request payload. */
 export function createFinancePositionService(input: { db: Database; now: () => Date }) {
@@ -31,6 +32,7 @@ export function createFinancePositionService(input: { db: Database; now: () => D
     userId: string,
     requestedScope: FinancePositionReadScope,
     executor?: FinanceTransaction,
+    ledger?: ScopedFinanceLedger,
   ) {
     const asOf = input.now().toISOString();
     const scopeResult = financePositionEvidenceSchema.shape.scope.safeParse({
@@ -46,6 +48,11 @@ export function createFinancePositionService(input: { db: Database; now: () => D
     if (validatedScope.from > validatedScope.through) {
       throw new AppError("invalid_request", "Position scope dates are reversed.");
     }
+    if (ledger) {
+      if (!executor)
+        throw new AppError("conflict", "A scoped ledger requires its caller transaction.");
+      requireScopedLedgerScope(ledger, userId, validatedScope);
+    }
     const read = <T>(
       fn: (tx: FinanceTransaction) => Promise<T>,
       options: Parameters<Database["transaction"]>[1],
@@ -60,30 +67,42 @@ export function createFinancePositionService(input: { db: Database; now: () => D
           .select()
           .from(financeProviderItems)
           .where(eq(financeProviderItems.userId, userId));
-        const transactions = await tx
-          .select()
-          .from(financeTransactions)
-          .where(eq(financeTransactions.userId, userId));
-        const allocations = await tx
-          .select()
-          .from(financeTransactionAllocations)
-          .where(eq(financeTransactionAllocations.userId, userId));
-        const reimbursements = await tx
-          .select()
-          .from(financeReimbursements)
-          .where(eq(financeReimbursements.userId, userId));
-        const matches = await tx
-          .select()
-          .from(financeReimbursementMatches)
-          .where(eq(financeReimbursementMatches.userId, userId));
-        const rows = await tx
-          .select()
-          .from(financeTransactionRelationships)
-          .where(eq(financeTransactionRelationships.userId, userId));
-        const events = await tx
-          .select()
-          .from(financeEconomicEvents)
-          .where(eq(financeEconomicEvents.userId, userId));
+        const transactions =
+          ledger?.transactions ??
+          (await tx
+            .select()
+            .from(financeTransactions)
+            .where(eq(financeTransactions.userId, userId)));
+        const allocations =
+          ledger?.allocations ??
+          (await tx
+            .select()
+            .from(financeTransactionAllocations)
+            .where(eq(financeTransactionAllocations.userId, userId)));
+        const reimbursements =
+          ledger?.reimbursements ??
+          (await tx
+            .select()
+            .from(financeReimbursements)
+            .where(eq(financeReimbursements.userId, userId)));
+        const matches =
+          ledger?.matches ??
+          (await tx
+            .select()
+            .from(financeReimbursementMatches)
+            .where(eq(financeReimbursementMatches.userId, userId)));
+        const rows =
+          ledger?.relationships ??
+          (await tx
+            .select()
+            .from(financeTransactionRelationships)
+            .where(eq(financeTransactionRelationships.userId, userId)));
+        const events =
+          ledger?.events ??
+          (await tx
+            .select()
+            .from(financeEconomicEvents)
+            .where(eq(financeEconomicEvents.userId, userId)));
         const ownedIds = new Set(accountRows.map((account) => account.id));
         if (validatedScope.accountIds.some((id) => !ownedIds.has(id))) {
           throw new AppError("not_found", "The position account was not found.");
@@ -297,6 +316,7 @@ export function createFinancePositionService(input: { db: Database; now: () => D
         };
         // Sort all row sets before hashing so database ordering cannot create a new revision.
         const activityRevision = positionRevision({
+          ...(ledger ? { scopedLedgerRevision: ledger.revision } : {}),
           scope,
           timezone: owner.timezone,
           observedThrough,
@@ -328,8 +348,9 @@ export function createFinancePositionService(input: { db: Database; now: () => D
     userId: string,
     scope: FinancePositionReadScope,
     executor?: FinanceTransaction,
+    ledger?: ScopedFinanceLedger,
   ): Promise<FinancePositionEvidence> {
-    return (await readSnapshot(userId, scope, executor)).position;
+    return (await readSnapshot(userId, scope, executor, ledger)).position;
   }
   return { readPosition, readSnapshot };
 }

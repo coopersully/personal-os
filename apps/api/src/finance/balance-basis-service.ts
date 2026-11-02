@@ -47,10 +47,11 @@ import { executeFinanceIdempotently, type FinanceMutationContext } from "./conte
 import { requirePlanningConfirmation } from "./planning-evidence-service.js";
 import { resolveFinanceSpendingEvidence } from "./recognition.js";
 import { type CashflowTransaction, cashflowResult } from "./recurring-schedule-service.js";
+import { financeScopedLedgerReadLimit, readScopedFinanceLedger } from "./scoped-ledger-reader.js";
 
 type Executor = Database | CashflowTransaction;
 /** Private source-read ceiling shared by composed Finance projections. */
-export const financeCashflowReadLimit = 1000;
+export const financeCashflowReadLimit = financeScopedLedgerReadLimit;
 const LIMIT = financeCashflowReadLimit;
 /** Matching exclusions do not remove cash already evidenced in the opening statement.
  * The caller still validates the complete basis, account scope, bounds and date horizon.
@@ -97,6 +98,7 @@ export async function readCashflowActuals(
   tx: Executor,
   userId: string,
   query: FinanceRecurringOccurrencesQuery,
+  scopedActuals = false,
 ) {
   const accounts = await tx
     .select()
@@ -109,64 +111,84 @@ export async function readCashflowActuals(
     )
     .orderBy(financeAccounts.id)
     .limit(101);
-  const transactions = await tx
-    .select()
-    .from(financeTransactions)
-    .where(
-      and(
-        eq(financeTransactions.userId, userId),
-        gte(financeTransactions.transactionDate, query.from),
-        lte(financeTransactions.transactionDate, query.to),
-        ...(query.accountIds !== undefined
-          ? [inArray(financeTransactions.accountId, query.accountIds)]
-          : []),
-      ),
-    )
-    .orderBy(financeTransactions.id)
-    .limit(LIMIT + 1);
+  const scoped = scopedActuals
+    ? await readScopedFinanceLedger(tx as CashflowTransaction, userId, {
+        from: query.from,
+        through: query.to,
+        accountIds: accounts.map((row) => row.id),
+      })
+    : null;
+  const ledger = scoped?.state === "complete" ? scoped.ledger : null;
+  const transactions = scopedActuals
+    ? (ledger?.transactions ?? [])
+    : await tx
+        .select()
+        .from(financeTransactions)
+        .where(
+          and(
+            eq(financeTransactions.userId, userId),
+            gte(financeTransactions.transactionDate, query.from),
+            lte(financeTransactions.transactionDate, query.to),
+            ...(query.accountIds !== undefined
+              ? [inArray(financeTransactions.accountId, query.accountIds)]
+              : []),
+          ),
+        )
+        .orderBy(financeTransactions.id)
+        .limit(LIMIT + 1);
   const ids = transactions.slice(0, LIMIT).map((row) => row.id);
-  const allocations = ids.length
-    ? await tx
-        .select()
-        .from(financeTransactionAllocations)
-        .where(
-          and(
-            eq(financeTransactionAllocations.userId, userId),
-            inArray(financeTransactionAllocations.transactionId, ids),
-          ),
-        )
-        .limit(5001)
-    : [];
-  const cases = await tx
-    .select()
-    .from(financeReimbursements)
-    .where(eq(financeReimbursements.userId, userId))
-    .limit(LIMIT + 1);
-  const matches = await tx
-    .select()
-    .from(financeReimbursementMatches)
-    .where(eq(financeReimbursementMatches.userId, userId))
-    .limit(LIMIT + 1);
-  const relationships = await tx
-    .select()
-    .from(financeTransactionRelationships)
-    .where(eq(financeTransactionRelationships.userId, userId))
-    .limit(LIMIT + 1);
-  const events = relationships.length
-    ? await tx
-        .select()
-        .from(financeEconomicEvents)
-        .where(
-          and(
-            eq(financeEconomicEvents.userId, userId),
-            inArray(
-              financeEconomicEvents.id,
-              relationships.map((row) => row.economicEventId),
+  const allocations = scopedActuals
+    ? (ledger?.allocations ?? [])
+    : ids.length
+      ? await tx
+          .select()
+          .from(financeTransactionAllocations)
+          .where(
+            and(
+              eq(financeTransactionAllocations.userId, userId),
+              inArray(financeTransactionAllocations.transactionId, ids),
             ),
-          ),
-        )
-        .limit(LIMIT + 1)
-    : [];
+          )
+          .limit(5001)
+      : [];
+  const cases = scopedActuals
+    ? (ledger?.reimbursements ?? [])
+    : await tx
+        .select()
+        .from(financeReimbursements)
+        .where(eq(financeReimbursements.userId, userId))
+        .limit(LIMIT + 1);
+  const matches = scopedActuals
+    ? (ledger?.matches ?? [])
+    : await tx
+        .select()
+        .from(financeReimbursementMatches)
+        .where(eq(financeReimbursementMatches.userId, userId))
+        .limit(LIMIT + 1);
+  const relationships = scopedActuals
+    ? (ledger?.relationships ?? [])
+    : await tx
+        .select()
+        .from(financeTransactionRelationships)
+        .where(eq(financeTransactionRelationships.userId, userId))
+        .limit(LIMIT + 1);
+  const events = scopedActuals
+    ? (ledger?.events ?? [])
+    : relationships.length
+      ? await tx
+          .select()
+          .from(financeEconomicEvents)
+          .where(
+            and(
+              eq(financeEconomicEvents.userId, userId),
+              inArray(
+                financeEconomicEvents.id,
+                relationships.map((row) => row.economicEventId),
+              ),
+            ),
+          )
+          .limit(LIMIT + 1)
+      : [];
   const eventById = new Map(events.map((row) => [row.id, row]));
   const projectedRelationships = relationships.flatMap((row) => {
     const event = eventById.get(row.economicEventId);
@@ -188,7 +210,7 @@ export async function readCashflowActuals(
   });
   const resolved = resolveFinanceSpendingEvidence({
     userId,
-    accounts,
+    accounts: ledger?.accounts ?? accounts,
     transactions,
     allocations,
     reimbursements: cases,
@@ -196,6 +218,7 @@ export async function readCashflowActuals(
     relationships: projectedRelationships,
   });
   const truncated =
+    (scopedActuals && scoped?.state !== "complete") ||
     accounts.length > 100 ||
     transactions.length > LIMIT ||
     allocations.length > 5000 ||
@@ -361,9 +384,11 @@ export function createFinanceBalanceBasisService({
   db,
   now,
   readOccurrences,
+  scopedActuals = false,
 }: {
   db: Database;
   now: () => Date;
+  scopedActuals?: boolean;
   readOccurrences: (
     userId: string,
     query: FinanceRecurringOccurrencesQuery,
@@ -721,11 +746,18 @@ export function createFinanceBalanceBasisService({
           });
           if (schedule.unavailableSources.some((source) => source.reason !== "irregular_cadence"))
             return unavailable("unconfirmed_schedule");
-          const data = await readCashflowActuals(tx, userId, {
-            ...query,
-            from: "0001-01-01",
-            to: "9999-12-31",
-          });
+          // Preserve full selected-account history for opening-balance reflection checks.
+          // A scoped closure overflow remains unavailable; never drop old unreviewed actuals.
+          const data = await readCashflowActuals(
+            tx,
+            userId,
+            {
+              ...query,
+              from: "0001-01-01",
+              to: "9999-12-31",
+            },
+            scopedActuals,
+          );
           const bases = await listFinanceBalanceBases(userId, query.accountIds, tx);
           const selected = data.accounts.filter((row) => row.includeInPlanning);
           if (

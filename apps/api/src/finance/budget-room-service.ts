@@ -8,20 +8,13 @@ import {
   financeBudgetVersions,
   financeCashBalanceBases,
   financeCategories,
-  financeEconomicEvents,
   financeIncomeStreams,
   financeOccurrenceMatchEvents,
   financeProviderItems,
   financeRecurringObligations,
   financeRecurringOccurrences,
   financeRecurringScheduleVersions,
-  financeReimbursementMatches,
-  financeReimbursements,
-  financeReviewCases,
-  financeTransactionAllocations,
   financeTransactionCoverage,
-  financeTransactionRelationships,
-  financeTransactions,
 } from "@personal-os/database";
 import type { FinanceBudgetPlanContext, FinanceBudgetVersion } from "@personal-os/domain";
 import { and, eq, inArray } from "drizzle-orm";
@@ -37,6 +30,7 @@ import type { FinanceTransaction } from "./context.js";
 import { createFinancePositionService } from "./position-service.js";
 import { createFinanceRecurringOccurrenceService } from "./recurring-occurrence-service.js";
 import { createFinanceSpendingService } from "./spending-service.js";
+import { readScopedFinanceLedger } from "./scoped-ledger-reader.js";
 
 /** Private read composition for canonical budget status. All ports use the caller's
  * transaction and one observation instant; no nested transaction or financial effect. */
@@ -87,18 +81,21 @@ export async function readFinanceBudgetRoom(input: {
     today.slice(0, 7) !== context.month
   )
     return projectFinanceBudgetRoom(sources);
-  // Existing loaders require complete owner evidence for relationship resolution. Refuse
-  // oversized inputs before loading any full row set; never silently truncate that evidence.
+  const scoped = await readScopedFinanceLedger(tx, userId, {
+    from: scope.period.from,
+    through: today,
+    accountIds: scope.accountIds,
+  });
+  if (scoped.state === "unavailable") {
+    sources.readUnavailableReasons = [scoped.reason];
+    return projectFinanceBudgetRoom(sources);
+  }
+  // Non-ledger metadata readers retain their existing complete-owner contracts and bounds.
+  // Ledger preflight and actual dependency loads share the scoped closure above.
   for (const table of [
-    financeTransactions,
-    financeTransactionAllocations,
     financeTransactionCoverage,
     financeAccounts,
     financeProviderItems,
-    financeReimbursements,
-    financeReimbursementMatches,
-    financeTransactionRelationships,
-    financeEconomicEvents,
     financeCategories,
     financeBudgetTaxonomies,
     financeBudgetBuckets,
@@ -110,7 +107,6 @@ export async function readFinanceBudgetRoom(input: {
     financeOccurrenceMatchEvents,
     financeCashBalanceBases,
     financeBalanceInclusions,
-    financeReviewCases,
   ]) {
     const rows = await tx
       .select({ owner: table.userId })
@@ -152,11 +148,13 @@ export async function readFinanceBudgetRoom(input: {
     },
     tx,
     qualification,
+    scoped.ledger,
   );
   sources.position = await createFinancePositionService({ db, now }).readPosition(
     userId,
     { from: scope.period.from, through: today, accountIds: scope.accountIds },
     tx,
+    scoped.ledger,
   );
   // Only the exact income identity explicitly attached to the approved resources is eligible.
   // Missing or multiple identities remain unknown; do not guess from a recent bank deposit.
@@ -164,11 +162,12 @@ export async function readFinanceBudgetRoom(input: {
   const identities = new Set(income.map((resource) => resource.sourceId));
   const selectedIncomeStreamId =
     income.length && identities.size === 1 ? (income[0]?.sourceId ?? null) : null;
-  const occurrences = createFinanceRecurringOccurrenceService({ db, now });
+  const occurrences = createFinanceRecurringOccurrenceService({ db, now, scopedActuals: true });
   sources.cashflow = await createFinanceBalanceBasisService({
     db,
     now,
     readOccurrences: occurrences.listFinanceRecurringOccurrences,
+    scopedActuals: true,
   }).getFinanceCashflowProjection(
     userId,
     {

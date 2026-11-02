@@ -31,6 +31,7 @@ import {
 import { eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { FinanceTransaction } from "./context.js";
+import { requireScopedLedgerScope, type ScopedFinanceLedger } from "./scoped-ledger-reader.js";
 import { projectFinanceSpendingMonthlyBudget } from "./spending-budget.js";
 import { projectFinanceSpending, type SpendingEvidenceInput } from "./spending-contributions.js";
 
@@ -260,8 +261,21 @@ export function createFinanceSpendingService(input: {
       requested: FinanceSpendingQuery,
       executor?: FinanceTransaction,
       qualifiedBaseline?: FinanceBudgetBaselineQualificationRead,
+      ledger?: ScopedFinanceLedger,
     ) {
       const query = financeSpendingQuerySchema.parse(requested);
+      if (ledger) {
+        if (!executor || !query.scope.accountIds)
+          throw new AppError(
+            "conflict",
+            "A scoped ledger requires its caller transaction and explicit accounts.",
+          );
+        requireScopedLedgerScope(ledger, userId, {
+          from: query.scope.from,
+          through: query.scope.through,
+          accountIds: query.scope.accountIds,
+        });
+      }
       const qualification =
         qualifiedBaseline ??
         (input.readBudgetQualification &&
@@ -286,30 +300,42 @@ export function createFinanceSpendingService(input: {
             .select()
             .from(financeTransactionCoverage)
             .where(eq(financeTransactionCoverage.userId, userId));
-          const rawTransactions = await tx
-            .select()
-            .from(financeTransactions)
-            .where(eq(financeTransactions.userId, userId));
-          const allocations = await tx
-            .select()
-            .from(financeTransactionAllocations)
-            .where(eq(financeTransactionAllocations.userId, userId));
-          const reimbursements = await tx
-            .select()
-            .from(financeReimbursements)
-            .where(eq(financeReimbursements.userId, userId));
-          const matches = await tx
-            .select()
-            .from(financeReimbursementMatches)
-            .where(eq(financeReimbursementMatches.userId, userId));
-          const relationships = await tx
-            .select()
-            .from(financeTransactionRelationships)
-            .where(eq(financeTransactionRelationships.userId, userId));
-          const events = await tx
-            .select()
-            .from(financeEconomicEvents)
-            .where(eq(financeEconomicEvents.userId, userId));
+          const rawTransactions =
+            ledger?.transactions ??
+            (await tx
+              .select()
+              .from(financeTransactions)
+              .where(eq(financeTransactions.userId, userId)));
+          const allocations =
+            ledger?.allocations ??
+            (await tx
+              .select()
+              .from(financeTransactionAllocations)
+              .where(eq(financeTransactionAllocations.userId, userId)));
+          const reimbursements =
+            ledger?.reimbursements ??
+            (await tx
+              .select()
+              .from(financeReimbursements)
+              .where(eq(financeReimbursements.userId, userId)));
+          const matches =
+            ledger?.matches ??
+            (await tx
+              .select()
+              .from(financeReimbursementMatches)
+              .where(eq(financeReimbursementMatches.userId, userId)));
+          const relationships =
+            ledger?.relationships ??
+            (await tx
+              .select()
+              .from(financeTransactionRelationships)
+              .where(eq(financeTransactionRelationships.userId, userId)));
+          const events =
+            ledger?.events ??
+            (await tx
+              .select()
+              .from(financeEconomicEvents)
+              .where(eq(financeEconomicEvents.userId, userId)));
           const categories = await tx
             .select()
             .from(financeCategories)
@@ -454,6 +480,10 @@ export function createFinanceSpendingService(input: {
             },
             qualification,
           );
+          if (ledger)
+            dashboard.referenceRevision = createHash("sha256")
+              .update(JSON.stringify([dashboard.referenceRevision, ledger.revision]))
+              .digest("hex");
           if (dashboard.snapshot.coverage === "complete")
             dashboard.source.reasons = dashboard.source.reasons.filter(
               (reason) => reason !== "historical_coverage_not_certified",

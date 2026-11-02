@@ -262,6 +262,9 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
                     <NativeSelectOption value="human_answer_decision">
                       Human decisions
                     </NativeSelectOption>
+                    <NativeSelectOption value="notification_delivery">
+                      Notification delivery
+                    </NativeSelectOption>
                     <NativeSelectOption value="financial_action">
                       Financial actions
                     </NativeSelectOption>
@@ -365,14 +368,14 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
                 width: 100,
                 value: (group) =>
                   sharedActivityAccount(group.entries)?.displayName ??
-                  group.entries[0]?.actor.type ??
-                  "",
+                  group.entries[0]?.actor?.type ??
+                  "Not recorded",
                 cell: (group) => {
                   const account = sharedActivityAccount(group.entries);
                   return account ? (
                     <AgentIdentity account={account} />
                   ) : (
-                    group.entries[0]?.actor.type
+                    (group.entries[0]?.actor?.type ?? "Not recorded")
                   );
                 },
               },

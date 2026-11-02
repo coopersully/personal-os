@@ -89,3 +89,57 @@ describe("Finance Activity read contract", () => {
     ).toBe(false);
   });
 });
+
+describe("Finance notification delivery Activity contract", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const at = "2026-11-01T12:00:00.000Z";
+  const entry = {
+    id,
+    occurredAt: at,
+    kind: "notification_delivery",
+    status: "accepted",
+    actor: null,
+    action: "Finance notification",
+    explanation: "Provider accepted; delivery is unconfirmed.",
+    caseId: null,
+    runId: null,
+    actionId: null,
+    sourceOperationId: null,
+    auditEventIds: [],
+    sourceMessages: [],
+    recordRefs: [],
+    changes: [],
+    targets: [],
+    delivery: {
+      attemptId: id,
+      attemptState: "accepted",
+      observedAt: at,
+      messageId: id,
+      messageStatus: "accepted",
+      submittedAt: at,
+      deliveredAt: null,
+      evidenceState: "complete",
+      work: [],
+    },
+  };
+  it("admits transport facts without inventing an actor or financial audit", async () => {
+    const { financeActivityEntrySchema } = await import("./activity.js");
+    expect(financeActivityEntrySchema.parse(entry)).toEqual(entry);
+    expect(financeActivityQuerySchema.parse({ type: "notification_delivery" }).type).toBe(
+      "notification_delivery",
+    );
+    for (const extra of [
+      { actor: { type: "system", id: null } },
+      { auditEventIds: [id] },
+      { delivery: { ...entry.delivery, providerMessageSid: "private" } },
+      { delivery: { ...entry.delivery, body: "private" } },
+    ])
+      expect(financeActivityEntrySchema.safeParse({ ...entry, ...extra }).success).toBe(false);
+  });
+  it("preserves required financial attribution and audit evidence", async () => {
+    const { financeActivityEntrySchema } = await import("./activity.js");
+    expect(
+      financeActivityEntrySchema.safeParse({ ...entry, kind: "financial_action" }).success,
+    ).toBe(false);
+  });
+});

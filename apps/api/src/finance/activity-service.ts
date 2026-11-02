@@ -11,6 +11,8 @@ import {
 } from "@personal-os/database";
 import {
   type FinanceActivityEntry,
+  type FinanceActivityKind,
+  financeActivityKindSchema,
   type FinanceActivityEvidenceQuery,
   type FinanceActivityPage,
   type FinanceActivityQuery,
@@ -27,6 +29,7 @@ import {
   listFinanceActivityEffects,
   readFinanceActivityEvidence,
 } from "./activity-effect-store.js";
+import { listFinanceNotificationActivity } from "./activity-notification-store.js";
 
 type Audit = typeof auditEvents.$inferSelect;
 type Message = typeof financeConversationMessages.$inferSelect;
@@ -44,7 +47,7 @@ const cursorSchema = z
     filtersHash: z.string().regex(/^[a-f0-9]{64}$/u),
     at: isoDateTimeSchema,
     id: idSchema,
-    kind: z.enum(["human_answer_decision", "financial_action"]).default("human_answer_decision"),
+    kind: financeActivityKindSchema.default("human_answer_decision"),
   })
   .strict();
 type Cursor = z.infer<typeof cursorSchema>;
@@ -64,7 +67,7 @@ function filterHash(query: FinanceActivityQuery) {
 export function encodeFinanceActivityCursor(
   userId: string,
   query: FinanceActivityQuery,
-  position: { at: string; id: string; kind?: "human_answer_decision" | "financial_action" },
+  position: { at: string; id: string; kind?: FinanceActivityKind },
   secret: string,
 ): string {
   const payload = Buffer.from(
@@ -203,6 +206,7 @@ function page(
       reasons: [
         "financial_actions_outside_committed_candidate_receipts_not_projected",
         "historical_decisions_without_causal_message_not_projected",
+        "notification_delivery_without_complete_owned_evidence_not_projected",
         ...(incompleteEvidence
           ? ["committed_receipts_with_incomplete_evidence_not_projected" as const]
           : []),
@@ -236,12 +240,22 @@ export function createFinanceActivityService({
       const query = financeActivityQuerySchema.parse(raw);
       const cursor = decodeFinanceActivityCursor(userId, query, cursorSecret);
       const effects =
-        query.type !== "human_answer_decision"
-          ? await listFinanceActivityEffects(db, userId, query, cursor, cursorSecret)
+        query.type === undefined || query.type === "financial_action"
+          ? await listFinanceActivityEffects(
+              db,
+              userId,
+              query,
+              cursor?.kind === "notification_delivery"
+                ? { ...cursor, kind: "human_answer_decision" }
+                : cursor,
+              cursorSecret,
+            )
           : [];
+      const notifications = await listFinanceNotificationActivity(db, userId, query, cursor);
       // Canonical receipt and audit remain after live question/answer deletion.
       const rows =
-        query.type !== "financial_action" && (!query.actor || query.actor === "user")
+        (query.type === undefined || query.type === "human_answer_decision") &&
+        (!query.actor || query.actor === "user")
           ? await db
               .select({
                 audit: auditEvents,
@@ -307,7 +321,12 @@ export function createFinanceActivityService({
                         sql`${auditEvents.createdAt} < ${cursor.at}::timestamptz`,
                         and(
                           sql`${auditEvents.createdAt} = ${cursor.at}::timestamptz`,
-                          lt(auditEvents.id, cursor.id),
+                          or(
+                            lt(auditEvents.id, cursor.id),
+                            cursor.kind === "notification_delivery"
+                              ? eq(auditEvents.id, cursor.id)
+                              : undefined,
+                          ),
                         ),
                       )
                     : undefined,
@@ -324,6 +343,7 @@ export function createFinanceActivityService({
           kind: "human_answer_decision" as const,
         })),
         ...effects,
+        ...notifications,
       ];
       // PostgreSQL microseconds remain in the cursor; do not collapse their order to JS milliseconds.
       const orderTime = (at: string) =>
@@ -341,11 +361,11 @@ export function createFinanceActivityService({
       const actorIds = entries
         .filter(
           (entry) =>
-            entry.actor.type === "agent" &&
-            entry.actor.id &&
-            idSchema.safeParse(entry.actor.id).success,
+            entry.actor?.type === "agent" &&
+            entry.actor?.id &&
+            idSchema.safeParse(entry.actor?.id).success,
         )
-        .map((entry) => entry.actor.id as string);
+        .map((entry) => entry.actor?.id as string);
       if (actorIds.length) {
         const actors = await db
           .select({ actorId: accessTokens.id, account: agentAccounts })
@@ -379,8 +399,8 @@ export function createFinanceActivityService({
           ]),
         );
         for (const entry of entries)
-          if (entry.actor.type === "agent" && entry.actor.id)
-            entry.agentAccount = profiles.get(entry.actor.id) ?? null;
+          if (entry.actor?.type === "agent" && entry.actor?.id)
+            entry.agentAccount = profiles.get(entry.actor?.id) ?? null;
       }
       const last = selected.at(-1);
       return page(

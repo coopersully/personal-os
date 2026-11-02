@@ -243,3 +243,43 @@ it("shows the supplied profile alongside the recorded actor without relabeling c
   fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
   expect(screen.getByText(/Budget activated · user/)).toBeVisible();
 });
+
+it("shows transport facts and missing attribution without inventing financial audit or delivery", async () => {
+  const value: FinanceActivityEntry = {
+    id: "notification",
+    occurredAt: "2026-11-01T12:00:00Z",
+    kind: "notification_delivery",
+    status: "accepted",
+    actor: null,
+    action: "Finance notification",
+    explanation: "The provider accepted this notification. Delivery is not confirmed.",
+    caseId: null,
+    runId: null,
+    actionId: null,
+    sourceOperationId: null,
+    auditEventIds: [],
+    sourceMessages: [],
+    recordRefs: [],
+    changes: [],
+    targets: [],
+    delivery: {
+      attemptId: "notification",
+      attemptState: "accepted",
+      observedAt: "2026-11-01T12:00:02Z",
+      messageId: "message",
+      messageStatus: "accepted",
+      submittedAt: null,
+      deliveredAt: null,
+      evidenceState: "partial",
+      work: [],
+    },
+  };
+  mount(value);
+  expect(screen.getByText(/Initiating actor not recorded/u)).toBeVisible();
+  expect(screen.getByText(/Delivery is not confirmed/u)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Inspect delivery evidence" }));
+  expect(await screen.findByText(/Delivery history is incomplete/u)).toBeVisible();
+  expect(screen.queryByText(/Audit events:/u)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /send|retry/iu })).not.toBeInTheDocument();
+  expect(toast.success).not.toHaveBeenCalled();
+});

@@ -680,3 +680,43 @@ it("fetches fresh profile attribution when returning from account settings for t
   expect(screen.getByRole("dialog")).toHaveTextContent("Updated Maple");
   expect(screen.getByRole("dialog")).toHaveTextContent("recorded-actor");
 });
+
+it("keeps notification attempts distinct from financial action groups and exposes their delivery history", async () => {
+  const notification: FinanceActivityEntry = {
+    id: "notification",
+    occurredAt: "2026-11-01T12:00:00Z",
+    kind: "notification_delivery",
+    status: "accepted",
+    actor: null,
+    action: "Finance notification",
+    explanation: "The provider accepted this notification. Delivery is not confirmed.",
+    caseId: null,
+    runId: null,
+    actionId: null,
+    sourceOperationId: null,
+    auditEventIds: [],
+    sourceMessages: [],
+    recordRefs: [],
+    changes: [],
+    targets: [],
+    delivery: {
+      attemptId: "notification",
+      attemptState: "accepted",
+      observedAt: "2026-11-01T12:00:02Z",
+      messageId: null,
+      messageStatus: null,
+      submittedAt: null,
+      deliveredAt: null,
+      evidenceState: "partial",
+      work: [],
+    },
+  };
+  expect(groupFinanceActivity([notification, { ...notification, id: "second" }])).toHaveLength(2);
+  const read = vi.fn().mockResolvedValue(page([notification]));
+  render(view(read));
+  expect(await screen.findByText("Finance notification")).toBeVisible();
+  openActivity();
+  expect(await screen.findByText(/Initiating actor not recorded/u)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Inspect delivery evidence" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /approve|retry send/iu })).not.toBeInTheDocument();
+});

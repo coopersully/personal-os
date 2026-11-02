@@ -553,16 +553,72 @@ describe.sequential("Canonical budget status category room", () => {
     expect(after).toMatchObject({
       state: "complete",
       ledger: {
-        relationships: expect.arrayContaining([
-          expect.objectContaining({ id: linked.row.id }),
-          expect.objectContaining({ transactionIds: [purchase.id, replacement.id] }),
-        ]),
+        relationships: [expect.objectContaining({ transactionIds: [purchase.id, replacement.id] })],
       },
     });
+    // The superseded refund remains history; it no longer changes this period's read.
+    expect(
+      await database.db.query.financeTransactionRelationships.findFirst({
+        where: eq(financeTransactionRelationships.id, linked.row.id),
+      }),
+    ).toBeDefined();
     expect((await readRoom(f)).categories[0]?.observedCents).toBe(0);
     if (before.state !== "complete" || after.state !== "complete")
       throw new Error("Missing closed graph");
     expect(after.ledger.revision).not.toBe(before.ledger.revision);
+  });
+  it("withholds malformed current evidence even when only its historical version mentions the scope", async () => {
+    const f = await qualifiedFixture();
+    const selected = await transaction(f);
+    const old = await transaction(f, { transactionDate: "2020-01-01" });
+    const linked = await relationship(f, [selected.id, old.id]);
+    await database.db.insert(financeTransactionRelationships).values({
+      userId: f.owner.id,
+      economicEventId: linked.event.id,
+      transactionIds: ["invalid-current-pointer"],
+      relationship: "reimbursement",
+      rationale: "Malformed superseding source",
+      provenance: {},
+      createdAt: now,
+    });
+    expect(await readLedger(f)).toEqual({
+      state: "unavailable",
+      reason: "ledger_evidence_incomplete",
+    });
+  });
+  it("does not count superseded relationship history as current dependency overflow", async () => {
+    const f = await qualifiedFixture();
+    const expense = await transaction(f);
+    const credit = await transaction(f, {
+      transactionDate: "2026-10-01",
+      amount: 500,
+      direction: "income",
+      providerDirection: "income",
+    });
+    const current = await relationship(f, [expense.id, credit.id]);
+    await database.db.insert(financeTransactionRelationships).values(
+      Array.from({ length: 1001 }, () => ({
+        userId: f.owner.id,
+        economicEventId: current.event.id,
+        relationship: "reimbursement" as const,
+        transactionIds: [expense.id, crypto.randomUUID()],
+        rationale: "Superseded historical pointer",
+        provenance: provenance(f.owner.id),
+        createdAt: new Date(now.getTime() - 2000),
+      })),
+    );
+    const closed = await readLedger(f);
+    expect(closed).toMatchObject({
+      state: "complete",
+      ledger: {
+        relationships: [expect.objectContaining({ id: current.row.id })],
+        transactions: expect.arrayContaining([
+          expect.objectContaining({ id: expense.id }),
+          expect.objectContaining({ id: credit.id }),
+        ]),
+      },
+    });
+    expect((await readRoom(f)).categories[0]?.observedCents).toBe(500);
   });
   it("follows reimbursement matches backwards from a selected credit to its historical allocation", async () => {
     const f = await qualifiedFixture();

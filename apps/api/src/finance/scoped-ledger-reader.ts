@@ -10,7 +10,7 @@ import {
   users,
 } from "@personal-os/database";
 import { financeProvenanceSchema } from "@personal-os/domain";
-import { and, eq, gte, inArray, lte, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { FinanceTransaction } from "./context.js";
 
@@ -248,22 +248,43 @@ export async function readScopedFinanceLedger(
             .limit(limit + 1)
         : [];
     if (ledger.matches.length > limit) return unavailable("ledger_bound_exceeded");
-    const eventIds = ids(ledger.events);
-    const related: SQL[] = [];
-    if (currentIds.length)
-      related.push(
-        sql`${financeTransactionRelationships.transactionIds} ?| ARRAY[${sql.join(
-          currentIds.map((id) => sql`${id}`),
-          sql`, `,
-        )}]::text[]`,
-      );
-    if (eventIds.length)
-      related.push(inArray(financeTransactionRelationships.economicEventId, eventIds));
-    ledger.relationships = related.length
+    // Discover distinct event identities through history, then load just their current
+    // versions. Otherwise an old pointer could hide a malformed superseding record,
+    // or 1,001 revisions of one event could incorrectly exhaust the current row bound.
+    const touchedEvents = currentIds.length
       ? await tx
-          .select()
+          .selectDistinct({ id: financeTransactionRelationships.economicEventId })
           .from(financeTransactionRelationships)
-          .where(and(eq(financeTransactionRelationships.userId, userId), or(...related)))
+          .where(
+            and(
+              eq(financeTransactionRelationships.userId, userId),
+              sql`${financeTransactionRelationships.transactionIds} ?| ARRAY[${sql.join(
+                currentIds.map((id) => sql`${id}`),
+                sql`, `,
+              )}]::text[]`,
+            ),
+          )
+          .limit(limit + 1)
+      : [];
+    if (touchedEvents.length > limit) return unavailable("ledger_bound_exceeded");
+    ledger.relationships = touchedEvents.length
+      ? await tx
+          .selectDistinctOn([financeTransactionRelationships.economicEventId])
+          .from(financeTransactionRelationships)
+          .where(
+            and(
+              eq(financeTransactionRelationships.userId, userId),
+              inArray(
+                financeTransactionRelationships.economicEventId,
+                touchedEvents.map((row) => row.id),
+              ),
+            ),
+          )
+          .orderBy(
+            financeTransactionRelationships.economicEventId,
+            desc(financeTransactionRelationships.createdAt),
+            desc(financeTransactionRelationships.id),
+          )
           .limit(limit + 1)
       : [];
     if (ledger.relationships.length > limit) return unavailable("ledger_bound_exceeded");

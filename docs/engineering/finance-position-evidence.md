@@ -117,9 +117,14 @@ one observation instant. Baseline qualification, personal-cost Spending, positio
 cashflow readers accept that caller-owned transaction rather than opening independent snapshots.
 The reader validates persisted budget ownership and version before projection. Its private scoped
 ledger reader seeds the qualified accounts and observed local posting days, then follows complete
-recognition dependencies: economic-event relationship history and supersession, pending/posted
+recognition dependencies: current latest-per-event relationship versions and transaction-set
+supersession, pending/posted
 provider identities, reconciled transfer groups, allocations, reimbursements and matched credits.
-Relevant peers remain included across account and period boundaries. Every query and closure set
+Historical links discover distinct event identities; only their latest versions consume the
+current relationship bound and supply peer references. This also prevents a malformed superseding
+version from disappearing merely because its historical pointer touched the selected scope.
+Superseded versions remain stored history and do not pull their obsolete peers into the closure. Relevant peers remain included across account and period boundaries.
+Every query and closure set
 uses the unchanged 1,000-row per-source ceiling plus one overflow row; overflow, malformed or
 missing required owned evidence withholds the new room context. No truncated graph is admitted as
 complete. Unrelated lifetime transaction history does not by itself suppress a small observed scope.

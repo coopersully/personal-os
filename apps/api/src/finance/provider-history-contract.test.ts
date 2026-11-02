@@ -275,6 +275,38 @@ describe("historical provider read data contracts (no runtime admission)", () =>
       ).toBe(false);
   });
 
+  it("rejects silently omitted targets from the exact requested group", () => {
+    const source = binding();
+    const omitted = historicalReadObservationBindingSchema.safeParse({
+      ...source,
+      observation: { ...source.observation, targets: [], held: [] },
+    });
+    expect(omitted.success).toBe(false);
+    if (!omitted.success)
+      expect(
+        omitted.error.issues.some(
+          (issue) =>
+            issue.message === "Every requested group target must be observed or explicitly held.",
+        ),
+      ).toBe(true);
+  });
+
+  it("accepts an explicit not-returned-in-page hold without claiming historical absence", () => {
+    const source = binding();
+    const held = historicalReadObservationBindingSchema.parse({
+      ...source,
+      observation: {
+        ...source.observation,
+        targets: [],
+        held: [{ transactionId: transaction, reason: "not_returned_in_page" }],
+      },
+    });
+    expect(held.observation.targets).toEqual([]);
+    expect(held.observation.held).toEqual([
+      { transactionId: transaction, reason: "not_returned_in_page" },
+    ]);
+  });
+
   it("checks target sign/cents and exact page group without treating hashes as authority", () => {
     const source = observation();
     expect(

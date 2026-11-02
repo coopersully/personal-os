@@ -484,6 +484,23 @@ export const historicalReadObservationBindingSchema = z
         code: "custom",
         message: "The observation is not bound to its exact request group.",
       });
+    // Per-page membership completeness is not proof of historical coverage or runtime authority.
+    const selectedTargets = group
+      ? manifest.targets.filter(
+          (target) =>
+            group.localAccountIds.includes(target.localAccountId) &&
+            target.date >= group.startDate &&
+            target.date <= group.endDate,
+        )
+      : [];
+    const accountedFor = new Set(
+      [...observation.targets, ...observation.held].map((row) => row.transactionId),
+    );
+    if (selectedTargets.some((target) => !accountedFor.has(target.transactionId)))
+      context.addIssue({
+        code: "custom",
+        message: "Every requested group target must be observed or explicitly held.",
+      });
     const held = (id: string, reason: HistoricalReadHeldReason) =>
       observation.held.some((row) => row.transactionId === id && row.reason === reason);
     for (const row of observation.targets) {

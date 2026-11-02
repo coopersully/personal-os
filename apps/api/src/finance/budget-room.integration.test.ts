@@ -840,7 +840,7 @@ describe.sequential("Canonical budget status category room", () => {
     const relevant = await transaction(f, { transactionDate: "2026-11-03T02:00:00Z" });
     await database.db
       .update(financeAccounts)
-      .set({ lastSyncedAt: now, syncState: "current" })
+      .set({ provider: "plaid", lastSyncedAt: now, syncState: "current" })
       .where(eq(financeAccounts.id, f.account.id));
     const before = await readRoom(f);
     expect(before.reasons).not.toContain("source_not_current");

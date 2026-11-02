@@ -347,4 +347,41 @@ describe("Qualified category room", () => {
     expect(room.reasons).toContain("income_scope_unqualified");
     expect(room.categories[0]?.estimatedUsableCents).toBeNull();
   });
+  it("keeps estimated communication qualified and exposes the shared-funding assumption", () => {
+    const room = projectFinanceBudgetRoom(fixture());
+    const message = budgetRoomCommunication(room);
+    expect(message.optionalDetails[0]).toContain("Estimated usable room before payday: $20.00");
+    expect(message.disclosures).toContain("Future cashflow is estimated, not permission to spend.");
+    expect(message.disclosures).toContain(
+      "Category estimates share the same funding and must not be added together.",
+    );
+    expect(message.disclosures.join(" ")).not.toContain("verified");
+  });
+  it("withholds room when the forecast belongs to another funding account scope", () => {
+    const input = fixture();
+    const forecast = required(input.cashflow).projection;
+    if (forecast.status !== "estimated") throw new Error("Missing forecast");
+    forecast.evidence.balances[0] = {
+      ...required(forecast.evidence.balances[0]),
+      accountId: id(99),
+    };
+    const room = projectFinanceBudgetRoom(input);
+    expect(room.reasons).toContain("payday_scope_mismatch");
+    expect(room.categories[0]?.estimatedUsableCents).toBeNull();
+  });
+  it("does not borrow observed spending from a differently qualified planning timezone", () => {
+    const input = fixture();
+    if (input.qualification.state !== "qualified") throw new Error("Missing qualification");
+    input.qualification.qualification.period.timezone = "UTC";
+    const room = projectFinanceBudgetRoom(input);
+    expect(room.reasons).toContain("scope_mismatch");
+    expect(room.categories[0]).toMatchObject({ observedCents: null, estimatedUsableCents: null });
+  });
+  it("withholds usable room when the source contains unsupported currency", () => {
+    const input = fixture();
+    required(input.spending).currency.unsupported = [{ code: "EUR", transactionIds: [id(99)] }];
+    const room = projectFinanceBudgetRoom(input);
+    expect(room.reasons).toContain("unsupported_currency");
+    expect(room.categories[0]?.estimatedUsableCents).toBeNull();
+  });
 });

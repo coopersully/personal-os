@@ -34,6 +34,7 @@ const reviewDecision = {
 };
 const preview = { idempotencyKey: "preview-1", decisions: [decision] };
 const readNames = [
+  "qualify_finance_maintenance_work",
   "get_finance_review_backlog",
   "list_finance_review_backlog_items",
   "get_finance_review_batch",
@@ -47,7 +48,23 @@ async function connect(scopes: AccessScope[] = allScopes, readOnly = false) {
     pendingCount: 2,
     outcomes: [{ status: "review_required", recovery: "new_preview" }],
   };
+  const qualification = {
+    asOf: "2026-10-24T12:00:00.000Z",
+    advisoryOnly: true,
+    previewRequired: true,
+    executionRevalidationRequired: true,
+    items: [
+      {
+        index: 0,
+        transactionId: id,
+        state: "awaiting_evidence",
+        reasons: ["decision_evidence_not_qualified"],
+        sourceRefs: [],
+      },
+    ],
+  };
   const api = {
+    qualifyFinanceMaintenanceWork: vi.fn(async () => qualification),
     getFinanceReviewBacklog: vi.fn(async () => result),
     listFinanceReviewBacklogItems: vi.fn(async () => result),
     previewFinanceReviewBatch: vi.fn(async () => result),
@@ -68,6 +85,7 @@ async function connect(scopes: AccessScope[] = allScopes, readOnly = false) {
     api,
     client,
     result,
+    qualification,
     close: async () => {
       await client.close();
       await server.close();
@@ -76,6 +94,67 @@ async function connect(scopes: AccessScope[] = allScopes, readOnly = false) {
 }
 
 describe("Finance review backlog MCP tools", () => {
+  it("qualifies read-only work without creating previews or executing, preserving reasons and native revisions", async () => {
+    const { client, api, qualification, close } = await connect(["finances:read"], true);
+    try {
+      const tool = (await client.listTools()).tools.find(
+        ({ name }) => name === "qualify_finance_maintenance_work",
+      );
+      expect(tool).toMatchObject({
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        _meta: { "ilo/domain": "finances" },
+      });
+      const input = { decisions: [decision] };
+      const result = await client.callTool({
+        name: "qualify_finance_maintenance_work",
+        arguments: input,
+      });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        result: qualification,
+        _ilo: { domain: "finances", policy: "read_only", stage: "prepare" },
+      });
+      expect(api.qualifyFinanceMaintenanceWork).toHaveBeenCalledExactlyOnceWith(input);
+      expect(api.previewFinanceReviewBatch).not.toHaveBeenCalled();
+      expect(api.executeFinanceReviewBatch).not.toHaveBeenCalled();
+      for (const invalid of [
+        { ...input, verified: true },
+        { decisions: [] },
+        { decisions: [decision, decision] },
+        { decisions: Array(26).fill(decision) },
+      ]) {
+        expect(
+          (await client.callTool({ name: "qualify_finance_maintenance_work", arguments: invalid }))
+            .isError,
+        ).toBe(true);
+      }
+      expect(api.qualifyFinanceMaintenanceWork).toHaveBeenCalledTimes(1);
+    } finally {
+      await close();
+    }
+  });
+  it("preserves qualification failures without turning them into approval or automatic preview", async () => {
+    const { client, api, close } = await connect(["finances:read"], true);
+    try {
+      const error = {
+        status: 409,
+        code: "conflict",
+        message: "Current qualification unavailable",
+        requestId: "qualification-request",
+      };
+      api.qualifyFinanceMaintenanceWork.mockRejectedValueOnce(new ApiClientError(error));
+      const output = await client.callTool({
+        name: "qualify_finance_maintenance_work",
+        arguments: { decisions: [decision] },
+      });
+      expect(output.isError).toBe(true);
+      expect(output.structuredContent).toMatchObject({ error });
+      expect(api.previewFinanceReviewBatch).not.toHaveBeenCalled();
+      expect(api.executeFinanceReviewBatch).not.toHaveBeenCalled();
+    } finally {
+      await close();
+    }
+  });
   it.each([
     { scopes: [], readOnly: false, preview: false, execute: false },
     { scopes: ["finances:read"], readOnly: false, preview: false, execute: false },

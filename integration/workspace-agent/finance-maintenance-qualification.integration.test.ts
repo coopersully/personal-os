@@ -24,6 +24,15 @@ it("admits qualification through real HTTP with only Finance read scope and crea
       ],
     };
     const result = await reader.api.qualifyFinanceMaintenanceWork(input);
+    const viaMcp = await reader.client.callTool({
+      name: "qualify_finance_maintenance_work",
+      arguments: input,
+    });
+    expect(viaMcp.isError).not.toBe(true);
+    expect(viaMcp.structuredContent).toMatchObject({
+      result,
+      _ilo: { domain: "finances", policy: "read_only", stage: "prepare" },
+    });
     await expect(
       reader.api.previewFinanceReviewBatch({ ...input, idempotencyKey: "must-not-write" }),
     ).rejects.toMatchObject({ code: "forbidden" });

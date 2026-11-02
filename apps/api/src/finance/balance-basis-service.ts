@@ -49,7 +49,9 @@ import { resolveFinanceSpendingEvidence } from "./recognition.js";
 import { type CashflowTransaction, cashflowResult } from "./recurring-schedule-service.js";
 
 type Executor = Database | CashflowTransaction;
-const LIMIT = 1000;
+/** Private source-read ceiling shared by composed Finance projections. */
+export const financeCashflowReadLimit = 1000;
+const LIMIT = financeCashflowReadLimit;
 /** Matching exclusions do not remove cash already evidenced in the opening statement.
  * The caller still validates the complete basis, account scope, bounds and date horizon.
  */
@@ -689,9 +691,14 @@ export function createFinanceBalanceBasisService({
     async getFinanceCashflowProjection(
       userId: string,
       raw: FinanceCashflowProjectionQuery,
+      executor?: CashflowTransaction,
     ): Promise<FinanceCashflowProjectionView> {
       const query = financeCashflowProjectionQuerySchema.parse(raw);
-      return db.transaction(
+      const read = <T>(
+        fn: (tx: CashflowTransaction) => Promise<T>,
+        options: Parameters<Database["transaction"]>[1],
+      ) => (executor ? fn(executor) : db.transaction(fn, options));
+      return read(
         async (tx) => {
           const schedule = await readOccurrences(
             userId,

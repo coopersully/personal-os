@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AgentIdentity } from "@/components/agent-identity";
 import { ContentSkeleton } from "@/components/content-skeleton";
-import { DataTable } from "@/components/data-table";
+import { type DataColumn, DataTable } from "@/components/data-table";
 import { DateDisplay } from "@/components/date-display";
 import { FilterIcon, RefreshIcon } from "@/components/icons";
 import {
@@ -51,7 +51,7 @@ export function groupFinanceActivity(entries: ActivityEntry[]) {
       entry.effect?.significance === "routine" &&
       entry.effect.actionFamilies.length === 1;
     const family = grouped ? (entry.effect?.actionFamilies[0] ?? null) : null;
-    const key = grouped ? `run:${entry.runId}:${family}` : entry.id;
+    const key = grouped ? `run:${entry.runId}:${family}` : `${entry.kind}:${entry.id}`;
     const existing = grouped ? result.find((group) => group.key === key) : undefined;
     if (existing) existing.entries.push(entry);
     else result.push({ key, entries: [entry], family, runId: entry.runId });
@@ -64,6 +64,67 @@ function sharedActivityAccount(entries: ActivityEntry[]) {
   return account && entries.every((entry) => entry.agentAccount?.id === account.id)
     ? account
     : null;
+}
+
+// Renderers depend only on their current row. Stable identities keep table cells
+// mounted when opening details; no permission or data snapshot is captured here.
+type ActivityGroup = ReturnType<typeof groupFinanceActivity>[number];
+const activityColumns: DataColumn<ActivityGroup>[] = [
+  {
+    id: "date",
+    label: "Date",
+    width: 140,
+    value: (group) => group.entries[0]?.occurredAt ?? "",
+    cell: (group) => <DateDisplay value={group.entries[0]?.occurredAt ?? ""} />,
+  },
+  {
+    id: "summary",
+    label: "Activity",
+    width: 500,
+    primary: true,
+    value: (group) =>
+      group.family && group.entries.length > 1
+        ? `${group.family.replaceAll("_", " ")} · ${group.entries.length} actions`
+        : (group.entries[0]?.action ?? ""),
+    cell: (group) => (
+      <span className="grid gap-1">
+        <span>
+          {group.family && group.entries.length > 1
+            ? `${group.family.replaceAll("_", " ")} · ${group.entries.length} actions`
+            : group.entries[0]?.action}
+        </span>
+        <span className="text-xs font-normal text-muted-foreground">
+          {group.entries[0]?.explanation}
+        </span>
+      </span>
+    ),
+  },
+  {
+    id: "actor",
+    label: "Actor",
+    width: 100,
+    value: (group) =>
+      sharedActivityAccount(group.entries)?.displayName ??
+      group.entries[0]?.actor?.type ??
+      "Not recorded",
+    cell: (group) => {
+      const account = sharedActivityAccount(group.entries);
+      return account ? (
+        <AgentIdentity account={account} />
+      ) : (
+        (group.entries[0]?.actor?.type ?? "Not recorded")
+      );
+    },
+  },
+  {
+    id: "status",
+    label: "Status",
+    width: 100,
+    value: (group) => group.entries[0]?.status ?? "",
+  },
+];
+function activityRowLabel(group: ActivityGroup) {
+  return `Open activity: ${group.entries[0]?.explanation ?? "Details"}`;
 }
 
 // Remount on ownership changes so neither old results nor in-flight reads cross owners.
@@ -85,12 +146,15 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
   const [passiveLoading, setPassiveLoading] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const alive = useRef(true);
+  const activityRoot = useRef<HTMLDivElement>(null);
+  const activityOpener = useRef<HTMLElement | null>(null);
   const generation = useRef(0);
   const actionToast = useRef<string | number | undefined>(undefined);
   const reader = useRef(readActivity);
   reader.current = readActivity;
 
   const clearAccess = useCallback(() => {
+    activityOpener.current = null;
     setPage(undefined);
     setSelected(null);
     setFiltersOpen(false);
@@ -113,7 +177,7 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
         : undefined;
       actionToast.current = toastId;
       try {
-        const result = await reader.current(next);
+        const result = await reader.current({ ...next, includeNotificationDeliveries: true });
         if (!alive.current || generation.current !== request) {
           if (toastId !== undefined) toast.dismiss(toastId);
           return;
@@ -161,6 +225,13 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
     };
   }, [load]);
 
+  const openActivity = useCallback((group: ReturnType<typeof groupFinanceActivity>[number]) => {
+    const target = document.activeElement;
+    activityOpener.current =
+      target instanceof HTMLElement && activityRoot.current?.contains(target) ? target : null;
+    setSelected(group);
+  }, []);
+
   const coverage = page ? (
     <Collapsible>
       <CollapsibleTrigger asChild>
@@ -194,7 +265,7 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
   ) : null;
 
   return (
-    <div className="grid min-w-0 gap-4">
+    <div ref={activityRoot} className="grid min-w-0 gap-4">
       <ResponsiveDialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <WorkspaceHeaderControls label="Activity controls">
           <ResponsiveDialogTrigger asChild>
@@ -261,6 +332,9 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
                     <NativeSelectOption value="">All types</NativeSelectOption>
                     <NativeSelectOption value="human_answer_decision">
                       Human decisions
+                    </NativeSelectOption>
+                    <NativeSelectOption value="notification_delivery">
+                      Notification delivery
                     </NativeSelectOption>
                     <NativeSelectOption value="financial_action">
                       Financial actions
@@ -329,63 +403,10 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
         <>
           <DataTable
             rows={groupFinanceActivity(page.entries)}
-            columns={[
-              {
-                id: "date",
-                label: "Date",
-                width: 140,
-                value: (group) => group.entries[0]?.occurredAt ?? "",
-                cell: (group) => <DateDisplay value={group.entries[0]?.occurredAt ?? ""} />,
-              },
-              {
-                id: "summary",
-                label: "Activity",
-                width: 500,
-                primary: true,
-                value: (group) =>
-                  group.family && group.entries.length > 1
-                    ? `${group.family.replaceAll("_", " ")} · ${group.entries.length} actions`
-                    : (group.entries[0]?.action ?? ""),
-                cell: (group) => (
-                  <span className="grid gap-1">
-                    <span>
-                      {group.family && group.entries.length > 1
-                        ? `${group.family.replaceAll("_", " ")} · ${group.entries.length} actions`
-                        : group.entries[0]?.action}
-                    </span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {group.entries[0]?.explanation}
-                    </span>
-                  </span>
-                ),
-              },
-              {
-                id: "actor",
-                label: "Actor",
-                width: 100,
-                value: (group) =>
-                  sharedActivityAccount(group.entries)?.displayName ??
-                  group.entries[0]?.actor.type ??
-                  "",
-                cell: (group) => {
-                  const account = sharedActivityAccount(group.entries);
-                  return account ? (
-                    <AgentIdentity account={account} />
-                  ) : (
-                    group.entries[0]?.actor.type
-                  );
-                },
-              },
-              {
-                id: "status",
-                label: "Status",
-                width: 100,
-                value: (group) => group.entries[0]?.status ?? "",
-              },
-            ]}
+            columns={activityColumns}
             rowId={(group) => group.key}
-            rowLabel={(group) => `Open activity: ${group.entries[0]?.explanation ?? "Details"}`}
-            onOpen={setSelected}
+            rowLabel={activityRowLabel}
+            onOpen={openActivity}
             storageKey={`${ownerId}:finance-activity`}
             label="Financial activity"
             fileName="finance-activity.csv"
@@ -430,7 +451,22 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
             if (!open) setSelected(null);
           }}
         >
-          <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
+          <ResponsiveDialogContent
+            data-finance-dialog
+            data-finance-size="default"
+            onCloseAutoFocus={(event) => {
+              const target = activityOpener.current;
+              activityOpener.current = null;
+              if (
+                target?.isConnected &&
+                activityRoot.current?.contains(target) &&
+                !target.matches(":disabled")
+              ) {
+                event.preventDefault();
+                target.focus({ preventScroll: true });
+              }
+            }}
+          >
             <ResponsiveDialogHeader>
               <ResponsiveDialogTitle>Activity details</ResponsiveDialogTitle>
               <ResponsiveDialogDescription>

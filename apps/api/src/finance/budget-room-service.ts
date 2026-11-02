@@ -29,8 +29,8 @@ import { type BudgetRoomSources, projectFinanceBudgetRoom } from "./budget-room.
 import type { FinanceTransaction } from "./context.js";
 import { createFinancePositionService } from "./position-service.js";
 import { createFinanceRecurringOccurrenceService } from "./recurring-occurrence-service.js";
-import { createFinanceSpendingService } from "./spending-service.js";
 import { readScopedFinanceLedger } from "./scoped-ledger-reader.js";
+import { createFinanceSpendingService } from "./spending-service.js";
 
 /** Private read composition for canonical budget status. All ports use the caller's
  * transaction and one observation instant; no nested transaction or financial effect. */

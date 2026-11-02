@@ -758,6 +758,7 @@ it("restores the actual owned Activity opener when keyboard dismissal closes det
   opener.focus();
   fireEvent.click(opener);
   const details = await screen.findByRole("dialog", { name: "Activity details" });
+  expect(opener).toBeInTheDocument();
   fireEvent.keyDown(details, { key: "Escape", code: "Escape" });
   await waitFor(() =>
     expect(screen.queryByRole("dialog", { name: "Activity details" })).not.toBeInTheDocument(),

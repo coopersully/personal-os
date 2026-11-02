@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AgentIdentity } from "@/components/agent-identity";
 import { ContentSkeleton } from "@/components/content-skeleton";
-import { DataTable } from "@/components/data-table";
+import { type DataColumn, DataTable } from "@/components/data-table";
 import { DateDisplay } from "@/components/date-display";
 import { FilterIcon, RefreshIcon } from "@/components/icons";
 import {
@@ -64,6 +64,67 @@ function sharedActivityAccount(entries: ActivityEntry[]) {
   return account && entries.every((entry) => entry.agentAccount?.id === account.id)
     ? account
     : null;
+}
+
+// Renderers depend only on their current row. Stable identities keep table cells
+// mounted when opening details; no permission or data snapshot is captured here.
+type ActivityGroup = ReturnType<typeof groupFinanceActivity>[number];
+const activityColumns: DataColumn<ActivityGroup>[] = [
+  {
+    id: "date",
+    label: "Date",
+    width: 140,
+    value: (group) => group.entries[0]?.occurredAt ?? "",
+    cell: (group) => <DateDisplay value={group.entries[0]?.occurredAt ?? ""} />,
+  },
+  {
+    id: "summary",
+    label: "Activity",
+    width: 500,
+    primary: true,
+    value: (group) =>
+      group.family && group.entries.length > 1
+        ? `${group.family.replaceAll("_", " ")} · ${group.entries.length} actions`
+        : (group.entries[0]?.action ?? ""),
+    cell: (group) => (
+      <span className="grid gap-1">
+        <span>
+          {group.family && group.entries.length > 1
+            ? `${group.family.replaceAll("_", " ")} · ${group.entries.length} actions`
+            : group.entries[0]?.action}
+        </span>
+        <span className="text-xs font-normal text-muted-foreground">
+          {group.entries[0]?.explanation}
+        </span>
+      </span>
+    ),
+  },
+  {
+    id: "actor",
+    label: "Actor",
+    width: 100,
+    value: (group) =>
+      sharedActivityAccount(group.entries)?.displayName ??
+      group.entries[0]?.actor?.type ??
+      "Not recorded",
+    cell: (group) => {
+      const account = sharedActivityAccount(group.entries);
+      return account ? (
+        <AgentIdentity account={account} />
+      ) : (
+        (group.entries[0]?.actor?.type ?? "Not recorded")
+      );
+    },
+  },
+  {
+    id: "status",
+    label: "Status",
+    width: 100,
+    value: (group) => group.entries[0]?.status ?? "",
+  },
+];
+function activityRowLabel(group: ActivityGroup) {
+  return `Open activity: ${group.entries[0]?.explanation ?? "Details"}`;
 }
 
 // Remount on ownership changes so neither old results nor in-flight reads cross owners.
@@ -342,62 +403,9 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
         <>
           <DataTable
             rows={groupFinanceActivity(page.entries)}
-            columns={[
-              {
-                id: "date",
-                label: "Date",
-                width: 140,
-                value: (group) => group.entries[0]?.occurredAt ?? "",
-                cell: (group) => <DateDisplay value={group.entries[0]?.occurredAt ?? ""} />,
-              },
-              {
-                id: "summary",
-                label: "Activity",
-                width: 500,
-                primary: true,
-                value: (group) =>
-                  group.family && group.entries.length > 1
-                    ? `${group.family.replaceAll("_", " ")} · ${group.entries.length} actions`
-                    : (group.entries[0]?.action ?? ""),
-                cell: (group) => (
-                  <span className="grid gap-1">
-                    <span>
-                      {group.family && group.entries.length > 1
-                        ? `${group.family.replaceAll("_", " ")} · ${group.entries.length} actions`
-                        : group.entries[0]?.action}
-                    </span>
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {group.entries[0]?.explanation}
-                    </span>
-                  </span>
-                ),
-              },
-              {
-                id: "actor",
-                label: "Actor",
-                width: 100,
-                value: (group) =>
-                  sharedActivityAccount(group.entries)?.displayName ??
-                  group.entries[0]?.actor?.type ??
-                  "Not recorded",
-                cell: (group) => {
-                  const account = sharedActivityAccount(group.entries);
-                  return account ? (
-                    <AgentIdentity account={account} />
-                  ) : (
-                    (group.entries[0]?.actor?.type ?? "Not recorded")
-                  );
-                },
-              },
-              {
-                id: "status",
-                label: "Status",
-                width: 100,
-                value: (group) => group.entries[0]?.status ?? "",
-              },
-            ]}
+            columns={activityColumns}
             rowId={(group) => group.key}
-            rowLabel={(group) => `Open activity: ${group.entries[0]?.explanation ?? "Details"}`}
+            rowLabel={activityRowLabel}
             onOpen={openActivity}
             storageKey={`${ownerId}:finance-activity`}
             label="Financial activity"

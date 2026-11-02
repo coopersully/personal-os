@@ -21,6 +21,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encryptJson } from "../security.js";
 import { createFinanceActivityService } from "./activity-service.js";
+
 /** AUTHORED NOT_RUN: owning read adapter and real schema/keyset; no provider invocation. */
 describe.sequential("Finance Activity notification tenant and cursor persistence", () => {
   let container: StartedPostgreSqlContainer;

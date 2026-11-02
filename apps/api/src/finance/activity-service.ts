@@ -11,13 +11,13 @@ import {
 } from "@personal-os/database";
 import {
   type FinanceActivityEntry,
-  type FinanceActivityKind,
-  financeActivityKindSchema,
   type FinanceActivityEvidenceQuery,
+  type FinanceActivityKind,
   type FinanceActivityPage,
   type FinanceActivityQuery,
   financeActivityEntrySchema,
   financeActivityEvidenceQuerySchema,
+  financeActivityKindSchema,
   financeActivityQuerySchema,
   idSchema,
   isoDateTimeSchema,

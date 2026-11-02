@@ -4,17 +4,17 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   migrateDatabase,
-  users,
-  textingConnections,
-  notificationDeliveryAttempts,
   notificationAttemptItems,
+  notificationDeliveryAttempts,
   notificationIntents,
-  workspaceMaintenanceRuns,
+  textingConnections,
   textMessages,
+  users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
-import { beforeAll, afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createFinanceActivityService } from "./activity-service.js";
 /** AUTHORED NOT_RUN: owning read adapter and real schema/keyset; no provider invocation. */
 describe.sequential("Finance Activity notification tenant and cursor persistence", () => {

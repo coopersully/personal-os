@@ -3,8 +3,8 @@ import { agentAccountSchema } from "../agent-account.js";
 import { actorTypeSchema, idSchema, isoDateTimeSchema } from "../common.js";
 import { notificationDeliveryStateSchema } from "../notification-policy.js";
 import { textMessageStatusSchema } from "../texting.js";
-import { financeHumanWorkRefSchema } from "./workflow-contracts.js";
 import { financeConversationSequenceSchema } from "./conversation.js";
+import { financeHumanWorkRefSchema } from "./workflow-contracts.js";
 
 export const financeActivityKindSchema = z.enum([
   "human_answer_decision",

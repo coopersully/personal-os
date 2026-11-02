@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  projectFinanceNotificationActivity,
   type NotificationActivitySource,
+  projectFinanceNotificationActivity,
 } from "./activity-notification-store.js";
 const owner = "11111111-1111-4111-8111-111111111111";
 const foreign = "22222222-2222-4222-8222-222222222222";

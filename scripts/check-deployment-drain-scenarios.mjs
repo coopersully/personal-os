@@ -31,7 +31,12 @@ function recordFixtureDiagnostic(event, details = {}) {
       parentPid: process.ppid,
       ...details,
     })}\n`;
-    if (size + Buffer.byteLength(line) <= diagnosticByteLimit) appendFileSync(path, line);
+    if (size + Buffer.byteLength(line) <= diagnosticByteLimit) {
+      appendFileSync(path, line);
+    } else {
+      // A rejected record may leave the trace shorter than the cap; retain explicit evidence.
+      writeFileSync(`${path}.overflow`, "1");
+    }
   } catch {
     // Diagnostics cannot change fake-AWS exit status or hide the original assertion.
   }
@@ -546,10 +551,11 @@ if (process.argv[2] === "--fake-aws") {
         const bounded = captured.subarray(0, diagnosticByteLimit).toString("utf8");
         const trace = bounded.slice(0, bounded.lastIndexOf("\n") + 1);
         diagnosticEvidence = {
-          capture: "bounded",
+          capture: "best_effort",
           byteLimit: diagnosticByteLimit,
           bytes: Buffer.byteLength(trace),
-          truncated: captured.length >= diagnosticByteLimit,
+          truncated:
+            existsSync(`${diagnosticTracePath}.overflow`) || captured.length >= diagnosticByteLimit,
           child: {
             pid: result.pid,
             status: result.status,
@@ -561,6 +567,14 @@ if (process.argv[2] === "--fake-aws") {
           events: trace.trim() ? trace.trim().split("\n").map((line) => JSON.parse(line)) : [],
           limits: "Readiness snapshots occur at fake-AWS completion, not every parent poll. Worker exit status is not observed. No PPID wrapper or protocol change.",
         };
+        // Bound the emitted JSON as well as input; aggregate metadata also consumes the budget.
+        while (
+          Buffer.byteLength(JSON.stringify(diagnosticEvidence)) > diagnosticByteLimit &&
+          diagnosticEvidence.events.length > 0
+        ) {
+          diagnosticEvidence.events.pop();
+          diagnosticEvidence.truncated = true;
+        }
       } catch {
         diagnosticEvidence = { capture: "unavailable" };
       }

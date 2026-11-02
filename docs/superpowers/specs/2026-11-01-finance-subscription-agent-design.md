@@ -34,7 +34,8 @@ promise that SMS, banking connections, or nohmi infrastructure cost nothing.
   personalized to the user's circumstances rather than a fixed dollar threshold.
 - Routine actions appear in a monthly confirmation digest; potentially fortnightly
   when volume grows. Important changes and useful budget guidance are timely.
-- Early corrections help calibration; long term, no supervision should be required.
+- Early corrections help calibration. In the long term, no supervision should be
+  required; this is an aspiration, not a shipped guarantee.
 
 ## Evidence and current state
 
@@ -64,12 +65,13 @@ These are dated observations, not a claim that all functionality is live today.
 - Maintenance-command and missing-host-binding corrections are in draft review;
   shared dependency audit remediation gates release. None proves the entire loop.
 
-Evidence records: finance-request-checklist.txt in this workspace; network reports
-finance-claude-recurring-blockers-diagnosis-20261101.md,
-finance-sms-agent-wake-options-20261101.md, and
-agent-parity/bypass-clarification-readonly-20261101.json under
-/Users/cooper/.codex/nohmi-network. Full backlog report is in the existing Finance
-worker's .context/coo153-recurring-blockers/backlog-report-20261101.json.
+Private evidence records retained by the assigned coordination owners:
+`finance-request-checklist.txt`,
+`finance-claude-recurring-blockers-diagnosis-20261101.md`,
+`finance-sms-agent-wake-options-20261101.md`, and
+`bypass-clarification-readonly-20261101.json`. The existing Finance owner retains
+`backlog-report-20261101.json` with its maintenance-backlog provenance. These are
+private handoff artifacts, not checked-in repository paths.
 
 ## Approaches and selection
 
@@ -204,7 +206,8 @@ alerts and replies to a user-initiated conversation.
 
 Persist receipt, routing, pending/claimed work, submitting, provider acceptance,
 uncertain submission, execution outcome and outbound status separately. Provider
-success means session start/completion, not verified financial success. SMS provider
+acceptance/session start is not observed session completion. Persist completion
+separately; neither state proves a verified financial outcome. SMS provider
 acceptance is not delivery, reading or answer consumption.
 
 Use domain idempotency, durable claims and serialization for conflicting work.

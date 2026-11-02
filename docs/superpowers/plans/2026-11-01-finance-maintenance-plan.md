@@ -36,7 +36,7 @@ resolveRun/nextAction/host binding; bounded review-batch service.
 **Proposed interface:** `selectFinanceMaintenanceWork(items:readonly {id:string;evidenceReady:boolean;approvalReady:boolean;sourceReady:boolean}[]):readonly {id:string;state:'eligible'|'awaiting_evidence'|'awaiting_approval'|'source_blocked'}[]`.
 
 - [ ] Consume accepted PR #330 — Issue valid Finance maintenance recovery commands and PR #331 — Distinguish missing Finance host bindings after accepted shared prerequisite; do not reimplement or repeat unchanged source review. Record actual release/host-adoption status.
-- [ ] Add failing selection tests with one eligible item and independent blocked items; all remain represented with exact state. A current compatible open run is reused; incompatible scope is explicit, not a duplicate run.
+- [ ] Add failing selection tests with one eligible item and independent blocked items; all remain represented with exact state. Test compatible open-run reuse and explicit incompatible-scope reporting in the existing maintenance intent service: `resolveRun` owns these checks through `createOrResume` under its per-user transaction lock. Do not add run identity or lease inputs to the pure item selector or create a duplicate run.
 - [ ] Run new focused selection test and observe failure; implement selection using current bounded review batch semantics. Any shared concurrency change goes to Integration, not a Finance workaround.
 - [ ] Run `pnpm exec vitest run apps/api/src/finance/maintenance-work-selection.test.ts apps/api/src/finance/automation-prompts.test.ts packages/domain/src/finance/maintenance.test.ts apps/api/src/finance/automation-registration.integration.test.ts --maxWorkers=1 --bail=1` in allocated environment. Reuse accepted evidence for unchanged correction tests.
 - [ ] Review/commit `feat: select eligible Finance maintenance work`; accept only after a natural run consumes legal commands and makes evidenced independent progress. Host success alone fails acceptance.
@@ -110,8 +110,8 @@ spending is an approved-period overspend without matching coverage.
 Finance's existing `apps/api/src/finance/answer-service.ts` exports answerContextualWork
 and answerSmsContextualWork. Accepted answer operation/question/case/transaction refs,
 result revision/audit and recordFinanceConversationAcceptedAnswer provide provenance;
-they are not a general learning API. A2 consumes an existing Memory-owner published
-record/retrieve/supersession contract. Do not invent Finance knowledge storage.
+they are not a general learning API. A2 consumes an existing record/retrieve/supersession
+contract published by the Memory owner. Do not invent Finance knowledge storage.
 Relevant regression entrypoint:
 `pnpm exec vitest run apps/api/src/finance/contextual-question-service.integration.test.ts apps/api/src/finance/context-service.integration.test.ts apps/api/src/finance/conversation-service.integration.test.ts --maxWorkers=1 --bail=1`.
 

@@ -126,8 +126,9 @@ operation gates still apply when reached.
 
 ## Planning evidence
 
-Retained Agent parity owner provided exact path/interface/test mapping in
-/Users/cooper/.codex/nohmi-network/agent-parity/finance-approved-design-planning-input-20261101.json.
+Retained Agent parity owner provided exact path/interface/test mapping in the
+private coordination artifact `finance-approved-design-planning-input-20261101.json`.
+That owner retains its provenance; it is not a checked-in repository path.
 Finance owner supplied bounded planning report from source5d311c9c/base307fa783.
 Neither planning request ran tests or altered product source. New contracts in these
 plans are proposals to be implemented behind shared owner boundaries, not fabricated

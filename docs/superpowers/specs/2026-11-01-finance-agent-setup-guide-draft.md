@@ -54,9 +54,12 @@ the next scheduled check and tell you if the existing routine cannot be adopted.
 
 ### 4. Enable conversation events
 
-For Claude, the supported provider flow adds an API trigger to the same cloud
-routine. This trigger uses Claude Code subscription usage; it is not a Claude
-Platform model API key.
+For Claude, the provider flow adds an API trigger to the same cloud routine.
+[Scheduled tasks are in research preview](https://code.claude.com/docs/en/routines),
+and the [fire API is experimental](https://platform.claude.com/docs/en/api/claude-code/routines-fire).
+Request and response shapes, limits, token semantics and availability may change.
+This trigger uses Claude Code subscription usage; it is not a Claude Platform
+model API key.
 
 Follow the provider's current enrollment instructions and transfer the scoped
 routine credential only through nohmi's protected setup surface. Never paste it
@@ -89,7 +92,7 @@ The guided check should distinguish:
 | Conversation verified | A real request was processed and its result returned |
 
 A saved credential or successful session start does not prove all six checks.
-Any test invocation/message must be clearly disclosed and user initiated; it must
+Any test invocation/message must be clearly disclosed and user-initiated; it must
 not mutate finances just to demonstrate connectivity. A real financial request
 must follow the user's permissions and review mode.
 

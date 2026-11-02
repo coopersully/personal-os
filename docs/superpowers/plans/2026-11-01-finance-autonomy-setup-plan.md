@@ -30,8 +30,9 @@ All constraints and verification/resource rules in 2026-11-01-finance-subscripti
 `apps/api/src/execution-policy-service.ts`, `apps/api/src/finance-action-service.ts`,
 `apps/web/src/features/settings/execution-policy.tsx`; add proposed
 `packages/domain/src/finance-action-decision.ts` and `.test.ts` only if the policy
-owner confirms a separate classifier is needed. Integrate every Finance mutation
-entrypoint via the existing central execution boundary, not only batch UI.
+owner confirms a separate classifier is needed. Integrate every agent-initiated
+Finance proposal producer via the existing central execution boundary, not only
+batch UI. Preserve direct human actions and exact already-approved effect handling.
 
 **Proposed interface:** `decideFinanceAction(input: { permitted: boolean; mutation: boolean; bypass: boolean; information: 'sufficient' | 'missing' | 'conflicting' }): 'deny' | 'ask' | 'propose' | 'execute'`.
 Permission failure wins; missing/conflicting information asks; a read executes when
@@ -41,7 +42,7 @@ explicitly excluded operations. This classifier cannot mint approval or grants.
 
 - [ ] Add failing table-driven tests for the decision matrix: `expect(decideFinanceAction({permitted:true,mutation:true,bypass:false,information:'sufficient'})).toBe('propose')`; corresponding ON expects execute, missing/conflicting expects ask, denied expects deny.
 - [ ] Run the domain focused test using the retained owner's supported runner; assert failure on the policy behavior rather than missing dependencies.
-- [ ] Implement the classifier/central gate and apply it to every Finance mutation producer. Retain original authority checks and fail closed for an unclassified mutation. Inventory bypass gaps in direct writers in the review receipt.
+- [ ] Implement the classifier/central gate and apply it to every agent-initiated Finance proposal producer. Preserve direct human actions and exact already-approved effect handling. Retain original authority checks and fail closed for an unclassified agent mutation. Inventory bypass gaps in direct writers in the review receipt.
 - [ ] Add tests that permission revocation between proposal and execution denies the effect, and an unrelated/stale yes does not approve it. Add a UI test proving permission breadth and review mode are separate controls.
 - [ ] Run focused domain/API consumers and web tests plus affected package types; require PASS. Independently review the exact candidate and commit `feat: make Finance approval mode consistent`.
 

@@ -523,6 +523,26 @@ export function RitualChecklist({
           ) : null}
         </>
       ) : null}
+      {!preview && mainScreen ? (
+        <div className="flex w-full gap-2">
+          <Button
+            variant="secondary"
+            className="flex-1"
+            disabled={busy || dirty}
+            onClick={() => void escapeAction("snooze")}
+          >
+            Snooze
+          </Button>
+          <Button
+            variant="secondary"
+            className="flex-1"
+            disabled={busy || dirty}
+            onClick={() => setConfirmSkip(true)}
+          >
+            Skip for Today
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
   const presentation = (
@@ -798,29 +818,6 @@ export function RitualChecklist({
                 }
               >
                 Retry saving
-              </Button>
-            </div>
-          ) : null}
-
-          {!preview && !challenge && !confirmSkip && !confirmComplete ? (
-            <div className="ritual-escapes flex shrink-0 justify-center gap-5 text-center">
-              <Button
-                size="sm"
-                variant="link"
-                className="ritual-support-text text-xs font-normal text-muted-foreground"
-                disabled={busy || dirty}
-                onClick={() => void escapeAction("snooze")}
-              >
-                Snooze
-              </Button>
-              <Button
-                size="sm"
-                variant="link"
-                className="ritual-support-text text-xs font-normal text-muted-foreground"
-                disabled={busy || dirty}
-                onClick={() => setConfirmSkip(true)}
-              >
-                Skip for Today
               </Button>
             </div>
           ) : null}

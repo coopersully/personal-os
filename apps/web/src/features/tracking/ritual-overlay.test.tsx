@@ -31,6 +31,14 @@ const state = {
   snoozeCount: 2,
 } as unknown as RitualState;
 afterEach(cleanup);
+it("keeps snooze and skip beside completion in the ritual card", () => {
+  render(<RitualChecklist state={state} saveResponse={vi.fn()} act={vi.fn()} />);
+  const done = screen.getByRole("button", { name: "Done" });
+  const footer = done.closest('[data-slot="card-footer"]');
+  expect(footer).toContainElement(screen.getByRole("button", { name: "Snooze" }));
+  expect(footer).toContainElement(screen.getByRole("button", { name: "Skip for Today" }));
+});
+
 it("autosaves text and shows counted snooze confirmation", async () => {
   const response = vi.fn().mockImplementation(async (stepId, input) => ({
     ...state,

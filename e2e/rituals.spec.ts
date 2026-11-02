@@ -473,6 +473,21 @@ test("browser snooze survives reload and another client can settle the same ritu
         );
       })
       .toBe(true);
+    await useProductionStyles(page);
+    for (const size of [
+      { width: 1440, height: 1000 },
+      { width: 320, height: 568 },
+    ]) {
+      await page.setViewportSize(size);
+      for (const name of ["Snooze", "Skip for Today"]) {
+        const escapeButton = ritual.getByRole("button", { name, exact: true });
+        await expect(
+          ritual.locator(".ritual-card").getByRole("button", { name, exact: true }),
+        ).toHaveCount(1);
+        await expect(escapeButton).toBeInViewport({ ratio: 1 });
+        await escapeButton.click({ trial: true });
+      }
+    }
     await ritual.getByRole("button", { name: "Snooze", exact: true }).click();
     await expect
       .poll(async () => {

@@ -226,6 +226,8 @@ function ActiveCardsSettingsForSession({ ownerId }: { ownerId: string }) {
       const identity = device.data ? desktopSettingsIdentity(device.data) : null;
       currentSession(captured);
       if (!identity) throw new Error("Desktop settings are still loading.");
+      if (device.data?.native.focusAvailable !== true)
+        throw new Error("Focus waiting is unavailable in this build.");
       await nativeAction("request_focus_permission");
       for (let attempt = 0; attempt < 120; attempt++) {
         const current = await getDesktopSettings();
@@ -283,17 +285,25 @@ function ActiveCardsSettingsForSession({ ownerId }: { ownerId: string }) {
           defaultsDisabled: !defaults.isSuccess || session.owner !== ownerId,
           deviceDisabled: onMac && !nativeAvailable,
           displays: device.data?.native.displays ?? [],
+          focusAvailable: onMac ? device.data?.native.focusAvailable === true : true,
           focusDetails: (
             <>
               <FieldDescription>
                 macOS does not report all screen-sharing sessions. Pause active cards here before
                 sharing private material.
               </FieldDescription>
-              {onMac && nativeAvailable ? (
+              {onMac && nativeAvailable && device.data?.native.focusAvailable !== true ? (
+                <FieldDescription>
+                  Focus waiting is unavailable in this build. Pause active cards manually when
+                  needed. Choose Keep cards visible to clear a previously saved wait preference.
+                </FieldDescription>
+              ) : null}
+              {onMac && nativeAvailable && device.data?.native.focusAvailable === true ? (
                 <>
                   <FieldDescription>
-                    Focus status: {device.data?.native.focusStatus ?? "unknown"}. When waiting for
-                    Focus, unknown status keeps cards hidden and ordinary notifications remain
+                    Shared Focus status: {device.data?.native.focusStatus ?? "unknown"}. This
+                    reports whether Focus silences nohmi, not every system Focus mode. Unknown
+                    status keeps cards hidden when waiting is enabled; ordinary notifications remain
                     available.
                   </FieldDescription>
                   <Button

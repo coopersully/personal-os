@@ -77,6 +77,8 @@ export type DesktopStatus = {
     accessibilityPermission?: boolean;
     dockGeometryAvailable?: boolean;
     activeRemindersAvailable?: boolean;
+    focusAvailable?: boolean;
+    focusUnavailableReason?: string;
     focusPermission?: "authorized" | "denied" | "restricted" | "notDetermined" | "unknown";
     focusStatus?: "on" | "off" | "unknown";
     focusPermissionPending?: boolean;

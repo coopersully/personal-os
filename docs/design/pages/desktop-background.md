@@ -498,7 +498,11 @@ title wrapping and countdown detail. Device choices update native presentation a
 settings defaults. Display inventory uses actual display UUIDs with primary/pointer fallbacks.
 The sample preview is synthetic and never mutates source items. Account defaults save in browsers;
 Mac presentation controls are clearly preview-only there. The simulated Dock is always sample-only.
-Optional Focus waiting uses public explicit authorization and conservative unknown state.
+Focus waiting remains unavailable in this build: the required Communication Notifications
+capability is unconfigured, and task/reminder-only eligibility and signed behavior are unverified.
+The public API reports app-relative notification silencing, not arbitrary system Focus mode. No OS
+permission request is offered. Existing wait preferences remain conservative on unknown status and
+can be cleared in settings; use manual pause in the meantime.
 General screen-sharing detection is unsupported; manually pause cards before sharing private material.
 No maximum-visible or automatic collapsing setting should silently hide unfinished items.
 Right-click always offers eight visible commands: Complete/Retry completion, View in nohmi, Snooze 15m; Separate this card, Move to edge, Reset to smallest; Gather all into stack, and Active card settings. Two separators divide these groups. AppKit alternate menu items track Shift live for group completion/snooze, Unlock this group, group edge placement and group reset. Native modifier swaps retain keyboard focus and menu geometry using platform behavior; they do not reproduce the browser’s CSS label animation. Pending or stale completion stays disabled, group completion sends individual acknowledged source operations, and a failed item keeps its own retry state. There is no per-card active-off action. Snooze persists a 15-minute account/occurrence-local deadline before removing the card and reuses ordinary notification scheduling for fallback; fresh return/delivery gates still apply.

@@ -81,6 +81,7 @@ export type ActiveCardSettingsSurface = {
   deviceDisabled: boolean;
   defaultsDisabled: boolean;
   displays?: Array<{ id: string; label: string; isPrimary: boolean }>;
+  focusAvailable?: boolean;
   focusDetails?: ReactNode;
 };
 /** Shared controls and sample-only preview; the domain adapter owns persistence. */
@@ -159,7 +160,7 @@ export function ActiveCardsSettingsPreview({
   const select = (
     key: KeysOfType<string>,
     label: string,
-    options: Array<[string, string]>,
+    options: Array<[string, string, boolean?]>,
     disabled = false,
   ) => (
     <Field data-disabled={disabled}>
@@ -170,8 +171,8 @@ export function ActiveCardsSettingsPreview({
         onChange={(event) => update(key, event.target.value)}
         disabled={Boolean(disabled || live?.deviceDisabled)}
       >
-        {options.map(([value, text]) => (
-          <NativeSelectOption key={value} value={value}>
+        {options.map(([value, text, unavailable]) => (
+          <NativeSelectOption key={value} value={value} disabled={unavailable}>
             {text}
           </NativeSelectOption>
         ))}
@@ -318,10 +319,14 @@ export function ActiveCardsSettingsPreview({
             )}
             {select(
               "focus",
-              "When Focus is on",
+              live ? "Shared Focus status" : "When Focus is on",
               [
                 ["show", "Keep cards visible"],
-                ["hide", "Wait until Focus ends"],
+                [
+                  "hide",
+                  live ? "Wait while Focus silences nohmi" : "Wait until Focus ends",
+                  live?.focusAvailable === false,
+                ],
               ],
               !prefs.enabled,
             )}

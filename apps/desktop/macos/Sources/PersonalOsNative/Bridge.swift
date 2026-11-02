@@ -87,6 +87,8 @@ final class NativeCompanion {
       "ok": true, "accessibilityPermission": PetDock.authorized,
       "activeRemindersActive": activeReminders.isActive,
       "activeRemindersAvailable": macActivity.sample().isAvailable,
+      "focusAvailable": ActiveReminderFocus.isAvailable,
+      "focusUnavailableReason": ActiveReminderFocus.unavailableReason,
       "focusPermission": ActiveReminderFocus.permission,
       "focusStatus": ActiveReminderFocus.status,
       "focusPermissionPending": ActiveReminderFocus.requestPending,
@@ -268,7 +270,7 @@ final class NativeCompanion {
       try PetDock.requestAccess()
       return ["ok": true]
     case "request_focus_permission":
-      ActiveReminderFocus.requestAuthorization()
+      try ActiveReminderFocus.requestAuthorization()
       return ["ok": true, "requestPending": ActiveReminderFocus.requestPending]
     case "request_notification_permission":
       notifications.requestPermission()

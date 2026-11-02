@@ -7,7 +7,10 @@ macOS presentation controls, with an interactive synthetic preview on desktop/mo
 use owner/revision or native server/account fencing, serialized patch saves, retained failed drafts
 and Sonner error/retry feedback. An append-only migration preserves both legacy default values.
 Native placement, grouping, appearance, countdown and Earshot levels respond to stored settings.
-Optional Focus waiting uses public, explicit authorization and conservative unknown-state behavior.
+Focus waiting is explicitly unavailable in the current build: its required communication capability
+is unconfigured, and reminder-only eligibility remains unverified. The guarded public API retains
+conservative unknown-state behavior; settings cannot enable waiting or request permission, but can
+clear an existing wait preference. Manual pause is the supported control.
 General screen-sharing detection is unavailable; manual pause remains explicit. The old editing
 surfaces link to the canonical page. Production preview routing includes the service-worker case.
 This is unmerged source work; signed installed-client, physical hardware and release acceptance

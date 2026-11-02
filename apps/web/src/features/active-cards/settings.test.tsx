@@ -218,13 +218,41 @@ it("serializes rapid defaults while preserving the newer visible draft", async (
   expect(mocks.save.mock.calls[1]![0]).toMatchObject({ defaultReminderActiveReminder: false });
   expect(screen.getByRole("switch", { name: "New reminders" })).not.toBeChecked();
 });
+it("does not offer unconfigured Focus waiting and can clear a saved wait preference", async () => {
+  mocks.desktop.mockReturnValue(true);
+  mocks.nativeGet.mockResolvedValue({
+    ...base,
+    settings: {
+      ...base.settings,
+      activeCardInteractions: { ...base.settings.activeCardInteractions, respectFocus: true },
+    },
+    native: { ...base.native, focusAvailable: false },
+  });
+  const { user } = mount();
+  const control = await screen.findByRole("combobox", { name: /Focus/ });
+  await waitFor(() => expect(control).toBeEnabled());
+  expect(screen.getByRole("option", { name: /Wait/ })).toBeDisabled();
+  expect(
+    screen.queryByRole("button", { name: "Allow Focus status access" }),
+  ).not.toBeInTheDocument();
+  await user.selectOptions(control, "show");
+  await waitFor(() => expect(mocks.nativeSave).toHaveBeenCalled());
+  expect(mocks.nativeSave.mock.calls[0]?.[0]).toMatchObject({
+    activeCardInteractions: { respectFocus: false },
+  });
+  expect(mocks.action).not.toHaveBeenCalled();
+});
 it("keeps Focus permission feedback pending until macOS confirms authorization", async () => {
   mocks.desktop.mockReturnValue(true);
+  const configured = { ...base, native: { ...base.native, focusAvailable: true } };
   mocks.action.mockResolvedValue({ ok: true });
   let resolve!: (value: unknown) => void;
   mocks.nativeGet
-    .mockResolvedValueOnce(base)
-    .mockResolvedValueOnce({ ...base, native: { ...base.native, focusPermissionPending: true } })
+    .mockResolvedValueOnce(configured)
+    .mockResolvedValueOnce({
+      ...configured,
+      native: { ...configured.native, focusPermissionPending: true },
+    })
     .mockImplementationOnce(
       () =>
         new Promise((done) => {
@@ -238,9 +266,9 @@ it("keeps Focus permission feedback pending until macOS confirms authorization",
   expect(mocks.success).not.toHaveBeenCalled();
   act(() =>
     resolve({
-      ...base,
+      ...configured,
       native: {
-        ...base.native,
+        ...configured.native,
         focusPermission: "authorized",
         focusStatus: "off",
         focusPermissionPending: false,

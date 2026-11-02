@@ -591,9 +591,12 @@ preview-only; on the Mac they persist. A simulated Dock changes only the preview
 While away, ordinary notifications continue and unfinished cards return only after fresh source
 confirmation. Completion waits for authoritative acknowledgement. Cards preserve notification
 source selection, permissions, quiet hours and preview privacy. By default cards can appear during
-Focus. Optional waiting for Focus uses the public macOS Focus-status API and explicit authorization;
-on/unknown status keeps overlays hidden without settling items, and return requires fresh material.
-The interface reports authorization separately from actual Focus status. No general screen-sharing
+Focus. Optional waiting requires legitimately configured public macOS Focus sharing and explicit
+authorization; its signal describes notification silencing for this app, not every system Focus mode.
+The current build leaves it unavailable because the required capability is unconfigured and
+task/reminder-only eligibility is unverified. Manual pause remains available; a stored wait preference
+can be cleared. On/unknown status keeps overlays hidden without settling items, and return requires
+fresh material. The interface must distinguish configuration, authorization and shared status. No general screen-sharing
 detector is claimed: pause cards manually before sharing private material. Card menus cannot turn
 individual items inactive. Quit, sleep and native-process lifecycle limits below still apply.
 

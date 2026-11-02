@@ -441,9 +441,16 @@ come from actual display inventory; the simulated Dock remains a sample control.
 `preview:active-cards` remains an API-free design harness, not a second settings store. The sample
 HTML ships as a production asset and is excluded from the service-worker SPA fallback.
 
-Optional Focus waiting uses explicit public macOS authorization and honest on/off/unknown state.
-The permission action retains one loading Sonner toast until macOS confirms authorization or the
-bounded wait fails. Unknown status conservatively keeps cards hidden when waiting is enabled.
+Focus waiting is capability-gated. This build does not configure Communication Notifications,
+which Apple's public Focus-sharing API requires; task/reminder-only eligibility and signed behavior
+remain unverified. The live page marks waiting unavailable and offers manual pause. It allows
+clearing a previously saved wait preference, but cannot enable it or request OS permission here.
+The API describes whether Focus silences this app, not every system Focus mode. A future legitimately
+configured build must obtain explicit authorization, retain one loading Sonner toast until the real
+result or bounded failure, and distinguish permission from on/off/unknown status. Unknown remains
+conservative for an existing wait preference; choosing Keep cards visible restores presentation.
+See [Apple's Focus sample](https://developer.apple.com/documentation/usernotifications/handling-communication-notifications-and-focus-status-updates)
+and [macOS capabilities](https://developer.apple.com/help/account/reference/supported-capabilities-macos).
 macOS does not expose a verified general screen-sharing signal here; the live surface omits that
 automatic control and explains manual device pause. Do not add a dummy setting for that capability.
 

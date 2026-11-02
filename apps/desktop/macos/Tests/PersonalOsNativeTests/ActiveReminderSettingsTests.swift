@@ -75,6 +75,20 @@ final class ActiveReminderSettingsTests: XCTestCase {
     preferences.textScale = "large"
     XCTAssertGreaterThan(preferences.minimumSize.height, 92)
   }
+  func testUnconfiguredBuildNeverRequestsFocusAccessOrClaimsKnownStatus() {
+    XCTAssertFalse(ActiveReminderFocus.isAvailable)
+    XCTAssertEqual(ActiveReminderFocus.permission, "unknown")
+    XCTAssertEqual(ActiveReminderFocus.status, "unknown")
+    XCTAssertFalse(ActiveReminderFocus.requestPending)
+    XCTAssertThrowsError(try ActiveReminderFocus.requestAuthorization()) { error in
+      XCTAssertEqual(error.localizedDescription, ActiveReminderFocus.unavailableReason)
+    }
+    XCTAssertFalse(ActiveReminderFocus.requestPending)
+    XCTAssertTrue(
+      ActiveReminderFocus.blocksCards(respectFocus: true, status: ActiveReminderFocus.status))
+    XCTAssertFalse(
+      ActiveReminderFocus.blocksCards(respectFocus: false, status: ActiveReminderFocus.status))
+  }
   func testFocusNeverInfersOffFromUnknownOrUnavailableConsent() {
     for status in ["on", "unknown"] {
       XCTAssertTrue(ActiveReminderFocus.blocksCards(respectFocus: true, status: status))

@@ -192,3 +192,22 @@ it("forwards device card preferences and public Focus authorization without an a
     action: "request_focus_permission",
   });
 });
+
+it("preserves unavailable Focus capability and surfaces a rejected permission request", async () => {
+  const { getDesktopSettings, nativeAction } = await import("./bridge.js");
+  const native = {
+    focusAvailable: false,
+    focusPermission: "unknown",
+    focusStatus: "unknown",
+    focusPermissionPending: false,
+    focusUnavailableReason: "The required macOS capability is not configured.",
+  };
+  invoke.mockResolvedValueOnce({ native });
+  expect((await getDesktopSettings()).native).toEqual(native);
+  expect(invoke).toHaveBeenCalledTimes(1);
+  expect(invoke).toHaveBeenLastCalledWith("desktop_settings");
+  invoke.mockRejectedValueOnce(new Error(native.focusUnavailableReason));
+  await expect(nativeAction("request_focus_permission")).rejects.toThrow(
+    native.focusUnavailableReason,
+  );
+});

@@ -20,13 +20,18 @@ import {
 import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { budgetPlanningDate } from "./budget-plan-projection.js";
+import type { FinanceTransaction } from "./context.js";
 import { buildFinancePosition, type PositionAccount, positionRevision } from "./position.js";
 import type { RecognitionInput } from "./recognition.js";
 import { spendingDateCoverage } from "./spending-coverage.js";
 
 /** Read-only producer. Authenticated composition supplies userId, never a request payload. */
 export function createFinancePositionService(input: { db: Database; now: () => Date }) {
-  async function readSnapshot(userId: string, requestedScope: FinancePositionReadScope) {
+  async function readSnapshot(
+    userId: string,
+    requestedScope: FinancePositionReadScope,
+    executor?: FinanceTransaction,
+  ) {
     const asOf = input.now().toISOString();
     const scopeResult = financePositionEvidenceSchema.shape.scope.safeParse({
       ...requestedScope,
@@ -41,7 +46,11 @@ export function createFinancePositionService(input: { db: Database; now: () => D
     if (validatedScope.from > validatedScope.through) {
       throw new AppError("invalid_request", "Position scope dates are reversed.");
     }
-    return input.db.transaction(
+    const read = <T>(
+      fn: (tx: FinanceTransaction) => Promise<T>,
+      options: Parameters<Database["transaction"]>[1],
+    ) => (executor ? fn(executor) : input.db.transaction(fn, options));
+    return read(
       async (tx) => {
         const accountRows = await tx
           .select()
@@ -318,8 +327,9 @@ export function createFinancePositionService(input: { db: Database; now: () => D
   async function readPosition(
     userId: string,
     scope: FinancePositionReadScope,
+    executor?: FinanceTransaction,
   ): Promise<FinancePositionEvidence> {
-    return (await readSnapshot(userId, scope)).position;
+    return (await readSnapshot(userId, scope, executor)).position;
   }
   return { readPosition, readSnapshot };
 }

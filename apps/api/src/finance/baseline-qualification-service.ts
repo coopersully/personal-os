@@ -27,6 +27,7 @@ import { requireBudgetApproval } from "./budget-authority.js";
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
+  type FinanceTransaction,
   requireFinanceExecution,
 } from "./context.js";
 
@@ -66,9 +67,14 @@ export function createFinanceBudgetBaselineQualificationService({
     async getQualification(
       userId: string,
       monthValue: string,
+      executor?: FinanceTransaction,
     ): Promise<FinanceBudgetBaselineQualificationRead> {
       const month = financeMonthSchema.parse(monthValue);
-      return db.transaction(
+      const read = <T>(
+        fn: (tx: FinanceTransaction) => Promise<T>,
+        options: Parameters<Database["transaction"]>[1],
+      ) => (executor ? fn(executor) : db.transaction(fn, options));
+      return read(
         async (tx) => {
           const row = await tx.query.financeBudgetBaselineQualifications.findFirst({
             where: and(

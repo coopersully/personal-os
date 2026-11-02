@@ -30,6 +30,7 @@ import {
 } from "@personal-os/domain";
 import { eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
+import type { FinanceTransaction } from "./context.js";
 import { projectFinanceSpendingMonthlyBudget } from "./spending-budget.js";
 import { projectFinanceSpending, type SpendingEvidenceInput } from "./spending-contributions.js";
 
@@ -254,14 +255,24 @@ export function createFinanceSpendingService(input: {
     | undefined;
 }) {
   return {
-    async readSpending(userId: string, requested: FinanceSpendingQuery) {
+    async readSpending(
+      userId: string,
+      requested: FinanceSpendingQuery,
+      executor?: FinanceTransaction,
+      qualifiedBaseline?: FinanceBudgetBaselineQualificationRead,
+    ) {
       const query = financeSpendingQuerySchema.parse(requested);
       const qualification =
-        input.readBudgetQualification &&
+        qualifiedBaseline ??
+        (input.readBudgetQualification &&
         query.scope.from.slice(0, 7) === query.scope.through.slice(0, 7)
           ? await input.readBudgetQualification(userId, query.scope.from.slice(0, 7))
-          : undefined;
-      return input.db.transaction(
+          : undefined);
+      const read = <T>(
+        fn: (tx: FinanceTransaction) => Promise<T>,
+        options: Parameters<Database["transaction"]>[1],
+      ) => (executor ? fn(executor) : input.db.transaction(fn, options));
+      return read(
         async (tx) => {
           const accounts = await tx
             .select()

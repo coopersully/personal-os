@@ -1,11 +1,13 @@
 import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +15,49 @@ import { delimiter, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const deployScript = resolve(root, ".github/scripts/deploy-api.sh");
+
+const diagnosticByteLimit = 16_384;
+
+// Synthetic fixture evidence only. Failure to capture must not change deployment behavior.
+function recordFixtureDiagnostic(event, details = {}) {
+  const path = process.env.FAKE_DRAIN_DIAGNOSTIC_TRACE;
+  if (!path) return;
+  try {
+    const size = existsSync(path) ? statSync(path).size : 0;
+    const line = `${JSON.stringify({
+      event,
+      monotonicNs: process.hrtime.bigint().toString(),
+      pid: process.pid,
+      parentPid: process.ppid,
+      ...details,
+    })}\n`;
+    if (size + Buffer.byteLength(line) <= diagnosticByteLimit) appendFileSync(path, line);
+  } catch {
+    // Diagnostics cannot change fake-AWS exit status or hide the original assertion.
+  }
+}
+
+function observeSyntheticWorkerReadiness() {
+  if (process.env.ILO_DEPLOYMENT_HEARTBEAT_WORKER !== "true") return undefined;
+  try {
+    // Read only this fake AWS caller's exact worker command, never general process/env data.
+    const command = readFileSync(`/proc/${process.ppid}/cmdline`, "utf8").split("\0");
+    const script = command.findIndex((part) => part.endsWith("deployment-heartbeat-worker.py"));
+    if (script < 0) return { available: false };
+    const state = (path) => ({
+      present: typeof path === "string" && existsSync(path),
+      bytes: typeof path === "string" && existsSync(path) ? statSync(path).size : null,
+    });
+    return {
+      available: true,
+      workerPid: process.ppid,
+      readyFile: state(command[script + 4]),
+      failureFile: state(command[script + 5]),
+    };
+  } catch {
+    return { available: false };
+  }
+}
 
 function readState(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -342,6 +387,19 @@ function fakeCurl(args) {
 }
 
 if (process.argv[2] === "--fake-aws") {
+  const fromHeartbeatWorker = process.env.ILO_DEPLOYMENT_HEARTBEAT_WORKER === "true";
+  recordFixtureDiagnostic("fake_aws_start", {
+    service: process.argv[3],
+    operation: process.argv[4],
+    fromHeartbeatWorker,
+  });
+  process.once("exit", (exitCode) => {
+    recordFixtureDiagnostic("fake_aws_exit", {
+      exitCode,
+      fromHeartbeatWorker,
+      workerReadiness: observeSyntheticWorkerReadiness(),
+    });
+  });
   fakeAws(process.argv.slice(3));
 } else if (process.argv[2] === "--fake-curl") {
   fakeCurl(process.argv.slice(3));
@@ -435,11 +493,13 @@ if (process.argv[2] === "--fake-aws") {
   function runScenarioInDirectory(directory, state, initialize = true) {
     const statePath = resolve(directory, "state.json");
     const heartbeatLogPath = resolve(directory, "heartbeat.log");
+    const diagnosticTracePath = resolve(directory, "diagnostic.jsonl");
     const bin = resolve(directory, "bin");
     if (initialize) {
       mkdirSync(bin);
       writeState(statePath, state);
       writeFileSync(heartbeatLogPath, "");
+      if (state.heartbeatBackgroundEnabled === true) writeFileSync(diagnosticTracePath, "");
       writeFileSync(
         resolve(bin, "aws"),
         `#!/bin/sh\nexec "${process.execPath}" "${import.meta.filename}" --fake-aws "$@"\n`,
@@ -456,6 +516,7 @@ if (process.argv[2] === "--fake-aws") {
         { mode: 0o755 },
       );
     }
+    const childStartedNs = process.hrtime.bigint();
     const result = spawnSync("bash", [deployScript], {
       encoding: "utf8",
       env: {
@@ -471,16 +532,51 @@ if (process.argv[2] === "--fake-aws") {
         ECS_CLUSTER: "ilo-production",
         FAKE_AWS_STATE: statePath,
         FAKE_HEARTBEAT_LOG: heartbeatLogPath,
+        FAKE_DRAIN_DIAGNOSTIC_TRACE:
+          state.heartbeatBackgroundEnabled === true ? diagnosticTracePath : "",
         FAKE_MAIN_SLEEP_SECONDS: state.heartbeatBackgroundEnabled === true ? "0.05" : "",
         PATH: `${bin}${delimiter}${process.env.PATH}`,
       },
     });
+    const childCompletedNs = process.hrtime.bigint();
+    let diagnosticEvidence = { capture: "disabled" };
+    if (state.heartbeatBackgroundEnabled === true) {
+      try {
+        const captured = readFileSync(diagnosticTracePath);
+        const bounded = captured.subarray(0, diagnosticByteLimit).toString("utf8");
+        const trace = bounded.slice(0, bounded.lastIndexOf("\n") + 1);
+        diagnosticEvidence = {
+          capture: "bounded",
+          byteLimit: diagnosticByteLimit,
+          bytes: Buffer.byteLength(trace),
+          truncated: captured.length >= diagnosticByteLimit,
+          child: {
+            pid: result.pid,
+            status: result.status,
+            signal: result.signal,
+            launchErrorCode: result.error?.code ?? null,
+            startedMonotonicNs: childStartedNs.toString(),
+            completedMonotonicNs: childCompletedNs.toString(),
+          },
+          events: trace.trim() ? trace.trim().split("\n").map((line) => JSON.parse(line)) : [],
+          limits: "Readiness snapshots occur at fake-AWS completion, not every parent poll. Worker exit status is not observed. No PPID wrapper or protocol change.",
+        };
+      } catch {
+        diagnosticEvidence = { capture: "unavailable" };
+      }
+    }
     const heartbeatValues = readFileSync(heartbeatLogPath, "utf8")
       .trim()
       .split("\n")
       .filter(Boolean)
       .map(Number);
-    return { completedAt: Date.now(), heartbeatValues, result, state: readState(statePath) };
+    return {
+      completedAt: Date.now(),
+      diagnosticEvidence,
+      heartbeatValues,
+      result,
+      state: readState(statePath),
+    };
   }
 
   function runScenario(name, state) {
@@ -756,7 +852,7 @@ if (process.argv[2] === "--fake-aws") {
     backgroundHeartbeat.result.status === 0 &&
       backgroundHeartbeat.heartbeatValues.filter((value) => value === 1).length >= 2 &&
       backgroundHeartbeat.heartbeatValues.includes(0),
-    `An enabled heartbeat must refresh during rollout and publish zero during cleanup (${JSON.stringify(backgroundHeartbeat.heartbeatValues)}; status=${backgroundHeartbeat.result.status}; stdout=${backgroundHeartbeat.result.stdout}; stderr=${backgroundHeartbeat.result.stderr}).`,
+    `An enabled heartbeat must refresh during rollout and publish zero during cleanup (${JSON.stringify(backgroundHeartbeat.heartbeatValues)}; status=${backgroundHeartbeat.result.status}; stdout=${backgroundHeartbeat.result.stdout}; stderr=${backgroundHeartbeat.result.stderr}; diagnostics=${JSON.stringify(backgroundHeartbeat.diagnosticEvidence)}).`,
   );
   const failedBackgroundHeartbeat = runScenario(
     "failed-background-heartbeat",

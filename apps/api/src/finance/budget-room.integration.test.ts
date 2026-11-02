@@ -847,11 +847,19 @@ describe.sequential("Canonical budget status category room", () => {
     expect(before.categories[0]?.observedCents).toBe(1000);
     await transaction(f, { transactionDate: "2020-01-01" });
     expect((await readRoom(f)).revision).toBe(before.revision);
-    await database.db
-      .update(financeTransactions)
-      .set({ contextualRevision: 2n })
-      .where(eq(financeTransactions.id, relevant.id));
-    expect((await readRoom(f)).revision).not.toBe(before.revision);
+    const revised = required(
+      (
+        await database.db
+          .update(financeTransactions)
+          .set({ merchant: "Corrected synthetic merchant" })
+          .where(eq(financeTransactions.id, relevant.id))
+          .returning({ contextualRevision: financeTransactions.contextualRevision })
+      )[0],
+    );
+    expect(revised.contextualRevision).toBe(relevant.contextualRevision + 1n);
+    const after = await readRoom(f);
+    expect(after.revision).not.toBe(before.revision);
+    expect(after.categories[0]?.observedCents).toBe(1000);
     await database.db
       .update(financeAccounts)
       .set({ syncState: "blocked" })

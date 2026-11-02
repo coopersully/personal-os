@@ -19,6 +19,7 @@ import type { FinanceConversationEffectReceipt } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { encryptJson } from "../security.js";
 import { createFinanceActivityService } from "./activity-service.js";
 /** AUTHORED NOT_RUN: owning read adapter and real schema/keyset; no provider invocation. */
 describe.sequential("Finance Activity notification tenant and cursor persistence", () => {
@@ -46,7 +47,10 @@ describe.sequential("Finance Activity notification tenant and cursor persistence
     await database.db.insert(textingConnections).values({
       id: connection,
       userId: owner,
-      encryptedPhoneNumber: "not-read",
+      encryptedPhoneNumber: encryptJson(
+        { e164: "+12125550123" },
+        Buffer.alloc(32, 7).toString("base64"),
+      ),
       phoneFingerprint: owner,
       phoneLastFour: "0123",
       country: "US",

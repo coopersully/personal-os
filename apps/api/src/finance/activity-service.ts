@@ -239,17 +239,22 @@ export function createFinanceActivityService({
     async listActivity(userId: string, raw: FinanceActivityQuery): Promise<FinanceActivityPage> {
       const query = financeActivityQuerySchema.parse(raw);
       const cursor = decodeFinanceActivityCursor(userId, query, cursorSecret);
+      // Notification sorts before both legacy kinds at equal time/ID. The effect
+      // reader's existing human cursor comparison includes that same financial row.
+      const effectCursor: {
+        at: string;
+        id: string;
+        kind: "human_answer_decision" | "financial_action";
+      } | null = cursor
+        ? {
+            at: cursor.at,
+            id: cursor.id,
+            kind: cursor.kind === "financial_action" ? "financial_action" : "human_answer_decision",
+          }
+        : null;
       const effects =
         query.type === undefined || query.type === "financial_action"
-          ? await listFinanceActivityEffects(
-              db,
-              userId,
-              query,
-              cursor?.kind === "notification_delivery"
-                ? { ...cursor, kind: "human_answer_decision" }
-                : cursor,
-              cursorSecret,
-            )
+          ? await listFinanceActivityEffects(db, userId, query, effectCursor, cursorSecret)
           : [];
       const notifications = await listFinanceNotificationActivity(db, userId, query, cursor);
       // Canonical receipt and audit remain after live question/answer deletion.

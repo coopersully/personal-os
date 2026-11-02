@@ -9797,7 +9797,85 @@ describe("Personal OS web app", () => {
     });
     const view = setup(`/settings?page=connections&connection_attempt=${id}`);
 
-    expect(await screen.findByText("Google is connected")).toBeInTheDocument();
+    try {
+      expect(await screen.findByText("Google is connected")).toBeInTheDocument();
+    } catch (error) {
+      // Private diagnostic: inspect only after the original lookup has failed.
+      try {
+        const route = new URL(view.location.value, "https://fixture.invalid");
+        const attempt = mocks.getConnectorAuthorizationAttempt.mock;
+        const labels = [
+          "Connections",
+          "Loading connections",
+          "Couldn’t load connections.",
+          "Connections unavailable",
+          "Confirming your connection",
+          "Google is connected",
+          "Restart the connection",
+        ];
+        const queries = [["connectors"], ["connector-authorization-attempt", id]].map(
+          (queryKey) => {
+            const state = view.queryClient.getQueryState(queryKey);
+            const outcome = (state?.data as { status?: unknown } | undefined)?.status;
+            return {
+              query: queryKey[0],
+              status: state?.status ?? "missing",
+              fetchStatus: state?.fetchStatus ?? "missing",
+              hasData: state?.data !== undefined,
+              hasError: state?.error != null,
+              outcome:
+                typeof outcome === "string" &&
+                [
+                  "connected",
+                  "pending",
+                  "cancelled",
+                  "expired",
+                  "permission_incomplete",
+                  "failed",
+                ].includes(outcome)
+                  ? outcome
+                  : "absent-or-other",
+            };
+          },
+        );
+        console.error(
+          "CALLBACK_LOOKUP_DIAGNOSTIC",
+          JSON.stringify({
+            route: {
+              isSettings: route.pathname === "/settings",
+              isConnections: route.searchParams.get("page") === "connections",
+              hasAttempt: route.searchParams.has("connection_attempt"),
+              attemptMatchesFixture: route.searchParams.get("connection_attempt") === id,
+              hasRestartResult: route.searchParams.get("connection_result") === "restart_required",
+            },
+            attempt: {
+              calls: Math.min(attempt.calls.length, 100),
+              callsTruncated: attempt.calls.length > 100,
+              lastCallMatchesFixture: attempt.calls.at(-1)?.[0] === id,
+              results: attempt.results.slice(-4).map((result) => result.type),
+              settledResults: attempt.settledResults.slice(-4).map((result) => result.type),
+            },
+            queries,
+            dom: Array.from(
+              view.container.querySelectorAll(
+                '[role="alert"], [data-slot="alert"], [data-slot="alert-title"], h1, h2, h3',
+              ),
+            )
+              .slice(0, 12)
+              .map((element) => ({
+                tag: element.tagName,
+                isAlert: element.getAttribute("role") === "alert",
+                labels: labels.filter((label) =>
+                  (element.textContent ?? "").slice(0, 256).includes(label),
+                ),
+              })),
+          }),
+        );
+      } catch {
+        // A failed capture must never replace the original lookup/assertion error.
+      }
+      throw error;
+    }
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(screen.queryByText("raw-provider-canary")).not.toBeInTheDocument();
     await waitFor(() => expect(view.location.value).toBe("/settings?page=connections"));

@@ -9,6 +9,7 @@ import {
   financeAccounts,
   financeCategories,
   financeClassificationDecisions,
+  financeProviderItems,
   financeReviewActionRequests,
   financeReviewBatchRuns,
   financeReviewCases,
@@ -229,6 +230,228 @@ describe.sequential("durable Finance review batches", () => {
       agentContext: await agent(f.userId),
     };
   }
+  async function qualifyFixture() {
+    const f = await transferFixture();
+    await database.db
+      .update(financeAccounts)
+      .set({ status: "manual" })
+      .where(eq(financeAccounts.userId, f.userId));
+    await database.db
+      .update(financeTransactions)
+      .set({ currencyCode: "USD" })
+      .where(eq(financeTransactions.id, f.following.transactionId));
+    f.following.expectedTransactionRevision = required(
+      await transaction(f.following.transactionId),
+    ).contextualRevision.toString();
+    return f;
+  }
+  it("qualifies an independent exact pair while retaining stale and inaccessible work without writes", async () => {
+    const f = await qualifyFixture();
+    const foreign = await fixture();
+    const stale = { ...f.following, expectedTransactionRevision: "999" };
+    const before = await transaction(f.decision.transactionId);
+    const result = await f.service.qualify(
+      { decisions: [f.decision, stale, required(foreign.decisions[0])] },
+      f.agentContext,
+    );
+    expect(result.items.map(({ state }) => state)).toEqual([
+      "eligible",
+      "awaiting_evidence",
+      "source_blocked",
+    ]);
+    expect(result.items[0]?.sourceRefs.map(({ transactionId }) => transactionId)).toEqual([
+      f.decision.transactionId,
+      f.counterpart.id,
+    ]);
+    expect(result.items[1]?.reasons).toContain("stale_decision");
+    expect(result.items[2]?.sourceRefs).toEqual([]);
+    expect(result).toMatchObject({
+      advisoryOnly: true,
+      previewRequired: true,
+      executionRevalidationRequired: true,
+    });
+    expect(await transaction(f.decision.transactionId)).toEqual(before);
+    expect(
+      await database.db
+        .select()
+        .from(financeReviewBatchRuns)
+        .where(eq(financeReviewBatchRuns.userId, f.userId)),
+    ).toEqual([]);
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.userId, f.userId)),
+    ).toEqual([]);
+  });
+  it("does not infer evidence readiness from valid current rows or confidence", async () => {
+    const f = await fixture();
+    await database.db
+      .update(financeAccounts)
+      .set({ status: "manual" })
+      .where(eq(financeAccounts.userId, f.userId));
+    await database.db
+      .update(financeTransactions)
+      .set({ currencyCode: "USD" })
+      .where(eq(financeTransactions.id, required(f.decisions[0]).transactionId));
+    const current = required(await transaction(required(f.decisions[0]).transactionId));
+    const result = await f.service.qualify(
+      {
+        decisions: [
+          {
+            ...required(f.decisions[0]),
+            expectedTransactionRevision: current.contextualRevision.toString(),
+            confidence: 1,
+          },
+        ],
+      },
+      await agent(f.userId),
+    );
+    expect(result.items[0]).toMatchObject({
+      state: "awaiting_evidence",
+      reasons: ["decision_evidence_not_qualified"],
+    });
+  });
+  it("checks the counterpart source rather than borrowing the primary account's readiness", async () => {
+    const f = await qualifyFixture();
+    await database.db
+      .update(financeAccounts)
+      .set({ status: "needs_reauth" })
+      .where(eq(financeAccounts.id, f.counterpart.accountId));
+    const result = await f.service.qualify({ decisions: [f.decision] }, f.agentContext);
+    expect(result.items[0]).toMatchObject({
+      state: "source_blocked",
+      reasons: ["counterpart_source_not_current"],
+    });
+  });
+  it("uses authoritative Item and account freshness without borrowing a healthy source", async () => {
+    const f = await qualifyFixture();
+    const primary = required(await transaction(f.decision.transactionId));
+    const [item] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        userId: f.userId,
+        provider: "plaid",
+        providerItemId: "qualification-item",
+        encryptedCredentials: { ciphertext: "unused", iv: "unused", tag: "unused", version: 1 },
+        syncState: "current",
+        lastSyncedAt: stamp,
+      })
+      .returning();
+    const provider = required(item);
+    await database.db
+      .update(financeAccounts)
+      .set({
+        provider: "plaid",
+        status: "connected",
+        providerItemRecordId: provider.id,
+        providerItemId: provider.providerItemId,
+        syncState: "current",
+        lastSyncedAt: stamp,
+      })
+      .where(eq(financeAccounts.id, primary.accountId));
+    expect(
+      (await f.service.qualify({ decisions: [f.decision] }, f.agentContext)).items[0]?.state,
+    ).toBe("eligible");
+    await database.db
+      .update(financeProviderItems)
+      .set({ lastSyncedAt: new Date("2026-10-20T00:00:00Z") })
+      .where(eq(financeProviderItems.id, provider.id));
+    expect(
+      (await f.service.qualify({ decisions: [f.decision] }, f.agentContext)).items[0],
+    ).toMatchObject({ state: "source_blocked", reasons: ["source_not_current"] });
+    await database.db
+      .update(financeProviderItems)
+      .set({ lastSyncedAt: stamp })
+      .where(eq(financeProviderItems.id, provider.id));
+    await database.db
+      .update(financeAccounts)
+      .set({ syncState: "stale" })
+      .where(eq(financeAccounts.id, primary.accountId));
+    expect(
+      (await f.service.qualify({ decisions: [f.decision] }, f.agentContext)).items[0]?.state,
+    ).toBe("source_blocked");
+  });
+  it.each([
+    "pending",
+    "currency",
+  ] as const)("retains unknown or pending %s source evidence", async (field) => {
+    const f = await qualifyFixture();
+    await database.db
+      .update(financeTransactions)
+      .set(field === "pending" ? { pending: true } : { currencyCode: null })
+      .where(eq(financeTransactions.id, f.decision.transactionId));
+    expect(
+      (await f.service.qualify({ decisions: [f.decision] }, f.agentContext)).items[0]?.state,
+    ).toBe("source_blocked");
+  });
+  it("keeps execution denial distinct from source failure and standing approval", async () => {
+    const f = await qualifyFixture();
+    const reader = await agent(f.userId, false);
+    expect((await f.service.qualify({ decisions: [f.decision] }, reader)).items[0]).toMatchObject({
+      state: "authorization_denied",
+      reasons: ["execution_not_authorized"],
+    });
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(executionPolicySettings.userId, f.userId));
+    expect(
+      (await f.service.qualify({ decisions: [f.decision] }, f.agentContext)).items[0],
+    ).toMatchObject({ state: "awaiting_approval", reasons: ["approval_required"] });
+    await database.db
+      .update(accessTokens)
+      .set({ revokedAt: now() })
+      .where(eq(accessTokens.id, f.agentContext.principal.actorId));
+    await expect(
+      f.service.qualify({ decisions: [f.decision] }, f.agentContext),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+  it("does not resolve repeated same-amount transfer ambiguity by selecting a preferred date", async () => {
+    const f = await qualifyFixture();
+    await database.db.insert(financeTransactions).values({
+      userId: f.userId,
+      accountId: f.counterpart.accountId,
+      merchant: "Internal movement",
+      amount: 1500,
+      direction: "transfer",
+      providerDirection: "income",
+      providerCategory: "TRANSFER_IN",
+      currencyCode: "USD",
+      transactionDate: "2026-10-25",
+    });
+    const result = await f.service.qualify({ decisions: [f.decision] }, f.agentContext);
+    expect(result.items[0]).toMatchObject({
+      state: "awaiting_evidence",
+      reasons: ["decision_evidence_not_qualified"],
+    });
+  });
+  it("does not use qualification as a capability after the source revision changes", async () => {
+    const f = await qualifyFixture();
+    expect(
+      (await f.service.qualify({ decisions: [f.decision] }, f.agentContext)).items[0]?.state,
+    ).toBe("eligible");
+    await database.db
+      .update(financeTransactions)
+      .set({ merchant: "Changed source" })
+      .where(eq(financeTransactions.id, f.decision.transactionId));
+    await expect(
+      f.service.preview({ idempotencyKey: randomUUID(), decisions: [f.decision] }, f.agentContext),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+  it("retains uncertainty when the bounded owner-wide counterpart scan is incomplete", async () => {
+    const f = await qualifyFixture();
+    await database.db.insert(financeTransactions).values(
+      Array.from({ length: 199 }, () => ({
+        userId: f.userId,
+        accountId: f.counterpart.accountId,
+        merchant: "Unrelated same amount",
+        amount: 1500,
+        direction: "expense" as const,
+        transactionDate: "2026-01-01",
+      })),
+    );
+    expect(
+      (await f.service.qualify({ decisions: [f.decision] }, f.agentContext)).items[0],
+    ).toMatchObject({ state: "awaiting_evidence", reasons: ["counterpart_evidence_limit"] });
+  });
   it.each([
     "confirm_transfer",
     "recategorize",

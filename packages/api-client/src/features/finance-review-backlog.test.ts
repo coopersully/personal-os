@@ -33,6 +33,30 @@ describe("Finance review backlog API client", () => {
     }
   });
 
+  it("qualifies a manifest without preview identity or automatic execution", async () => {
+    const { api, fetch, response } = fixture();
+    const input = {
+      decisions: [
+        {
+          kind: "categorization" as const,
+          transactionId: "transaction",
+          categoryId: "category",
+          expectedTransactionUpdatedAt: "2026-10-24T00:00:00.000Z",
+          expectedTransactionRevision: "9007199254740993",
+          rationale: "Inspect",
+          evidence: "Requires qualification",
+          confidence: 1,
+          learnMerchant: "never" as const,
+        },
+      ],
+    };
+    expect(await api.qualifyFinanceMaintenanceWork(input)).toEqual(response);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]?.[0]).toBe(
+      "https://example.test/v1/finances/review-batches/qualification",
+    );
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: "POST", body: JSON.stringify(input) });
+  });
   it("POSTs the exact preview and execution acceptance without local resolution or automatic looping", async () => {
     const { api, fetch, response } = fixture();
     const preview = {

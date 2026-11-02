@@ -231,6 +231,9 @@ export const personalOsToolCatalog = {
   search_finance: read("finances", ["finances:read"]),
   get_finance_review_backlog: read("finances", ["finances:read"]),
   list_finance_review_backlog_items: read("finances", ["finances:read"]),
+  qualify_finance_maintenance_work: read("finances", ["finances:read"], "prepare", {
+    openWorld: false,
+  }),
   get_finance_review_batch: read("finances", ["finances:read"], "verify"),
   list_finance_review_batches: read("finances", ["finances:read"], "recover"),
   preview_finance_review_batch: write("finances", ["finances:read", "finances:write"], {

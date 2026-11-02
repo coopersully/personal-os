@@ -12,7 +12,11 @@ def _name(value):
 
 
 def _node_script(arguments):
-    values = {"-r", "--require", "--import", "--loader", "--experimental-loader"}
+    values = {
+        "-r", "--require", "--import", "--loader", "--experimental-loader",
+        "--title", "--max-old-space-size",
+    }
+    flags = {"--no-warnings", "--trace-warnings", "--enable-source-maps"}
     index = 0
     while index < len(arguments):
         argument = arguments[index]
@@ -21,12 +25,23 @@ def _node_script(arguments):
             return []  # Inline code is not executable identity evidence.
         if argument == "--":
             return arguments[index + 1:]
-        if argument in values:
-            index += 2
-        elif argument.startswith("-"):
+        if not argument.startswith("-"):
+            return arguments[index:]
+        option, equals, value = argument.partition("=")
+        if option in values:
+            if equals:
+                if not value:
+                    return []
+                index += 1
+            else:
+                if index + 1 >= len(arguments) or arguments[index + 1].startswith("-"):
+                    return []
+                index += 2
+        elif argument in flags:
             index += 1
         else:
-            return arguments[index:]
+            # Unknown arity/mode cannot establish where the script starts.
+            return []
     return []
 
 

@@ -62,6 +62,23 @@ class AdmissionClassificationTest(unittest.TestCase):
         ]
         self.assertEqual(admission.material_verifier_processes(rows), [])
 
+    def test_node_option_values_and_unknown_options_are_not_script_identity(self):
+        rows = [
+            process(10, 0, ["node", "--title", "jest", "/tool/server.mjs"]),
+            process(11, 10, ["node", "/tool/worker.mjs"]),
+            process(12, 0, ["node", "--unknown-option", "jest", "/tool/server.mjs"]),
+            process(13, 0, ["node", "--unknown-option=on", "/project/node_modules/jest/bin/jest.js"]),
+        ]
+        self.assertEqual(admission.material_verifier_processes(rows), [])
+
+    def test_supported_node_value_options_preserve_actual_verifier_identity(self):
+        rows = [
+            process(10, 0, ["node", "--title", "worker", "/project/node_modules/jest/bin/jest.js"]),
+            process(11, 0, ["node", "--title=worker", "/project/scripts/verify-pr.mjs"]),
+            process(12, 0, ["node", "--require", "/project/preload.cjs", "/project/scripts/verify-pr.mjs"]),
+        ]
+        self.assertEqual([row["pid"] for row in admission.material_verifier_processes(rows)], [10, 11, 12])
+
     def test_malformed_live_identity_does_not_silently_pass(self):
         with self.assertRaises(ValueError):
             admission.material_verifier_processes([process(1, 0, "node jest")])

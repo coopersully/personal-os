@@ -25,7 +25,9 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { createFinanceService } from "../finance-service.js";
+import { createFinanceBalanceBasisService } from "./balance-basis-service.js";
 import { type FinanceMutationContext, loadFinanceAuthorization } from "./context.js";
+import { createFinanceRecurringOccurrenceService } from "./recurring-occurrence-service.js";
 
 describe.sequential("recurring schedule actual matching and explicit balance basis", () => {
   let container: StartedPostgreSqlContainer;
@@ -271,6 +273,142 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
       f.context,
     );
   }
+
+  it.each([
+    "retained",
+    "replaced",
+  ] as const)("keeps persisted matches valid across scoped relationship history reads (%s)", async (transactionSet) => {
+    const f = await fixture();
+    const [peerAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        userId: f.user.id,
+        provider: "manual",
+        name: "Excluded duplicate source",
+        institution: "Local fixture",
+        kind: "cash",
+        currencyCode: "USD",
+        ownershipType: "individual",
+        ownershipShareBps: 10000,
+        includeInPlanning: false,
+      })
+      .returning();
+    if (!peerAccount) throw new Error("Missing duplicate account");
+    const [peer, replacementPeer] = await database.db
+      .insert(financeTransactions)
+      .values(
+        Array.from({ length: 2 }, () => ({
+          userId: f.user.id,
+          accountId: peerAccount.id,
+          merchant: "Duplicate synthetic bill",
+          amount: 10000,
+          currencyCode: "USD",
+          providerDirection: "expense" as const,
+          direction: "expense" as const,
+          transactionDate: "2026-03-01",
+          category: "Rent",
+          categorySource: "user" as const,
+        })),
+      )
+      .returning();
+    const [event] = await database.db
+      .insert(financeEconomicEvents)
+      .values({ userId: f.user.id, kind: "duplicate", stableKey: randomUUID() })
+      .returning();
+    if (!peer || !replacementPeer || !event) throw new Error("Missing duplicate evidence");
+    const relationship = {
+      userId: f.user.id,
+      economicEventId: event.id,
+      relationship: "duplicate" as const,
+      transactionIds: [f.actual.id, peer.id],
+      provenance: {
+        actorId: f.user.id,
+        actorType: "user",
+        confidence: 1,
+        evidence: {},
+        maintenanceRunId: null,
+        observedAt: now().toISOString(),
+        requestId: randomUUID(),
+        sourceId: null,
+      },
+    };
+    // Both versions predate the match; the current duplicate representative is
+    // the selected planning account in both the legacy and scoped readers.
+    await database.db.insert(financeTransactionRelationships).values([
+      {
+        ...relationship,
+        rationale: "Initial duplicate evidence",
+        createdAt: new Date(now().getTime() - 2000),
+      },
+      {
+        ...relationship,
+        transactionIds:
+          transactionSet === "replaced"
+            ? [peer.id, replacementPeer.id]
+            : relationship.transactionIds,
+        rationale: "Reviewed duplicate evidence",
+        createdAt: new Date(now().getTime() - 1000),
+      },
+    ]);
+    const matched = await f.service.manageFinanceOccurrenceMatch(f.match, f.context);
+    await statement(f);
+    const stored = await database.db.query.financeOccurrenceMatchEvents.findFirst({
+      where: eq(financeOccurrenceMatchEvents.id, matched.data.id),
+    });
+    if (!stored) throw new Error("Missing immutable occurrence match");
+    const occurrences = createFinanceRecurringOccurrenceService({
+      db: database.db,
+      now,
+      scopedActuals: true,
+    });
+    const scoped = createFinanceBalanceBasisService({
+      db: database.db,
+      now,
+      readOccurrences: occurrences.listFinanceRecurringOccurrences,
+      scopedActuals: true,
+    });
+    const query = {
+      from: "2026-03-01",
+      to: "2026-04-30",
+      accountIds: [f.account.id],
+      selectedIncomeStreamId: f.income.id,
+    };
+    const legacy = await f.service.getFinanceCashflowProjection(f.user.id, query);
+    expect(legacy.projection).toMatchObject({
+      status: "estimated",
+      endingBalanceMinorUnits: 360000,
+    });
+    const current = await scoped.getFinanceCashflowProjection(f.user.id, query);
+    expect(
+      current.schedule.occurrences.find(
+        (row) => row.scheduleVersionId === f.cost.data.id && row.localDate === "2026-03-01",
+      ),
+    ).toMatchObject({ matchState: "matched", matchedAmountCents: 10000 });
+    expect(current.projection).toEqual(legacy.projection);
+    expect(
+      await database.db.query.financeOccurrenceMatchEvents.findFirst({
+        where: eq(financeOccurrenceMatchEvents.id, matched.data.id),
+      }),
+    ).toEqual(stored);
+
+    // A real post-match recognition change must still invalidate confirmation.
+    await database.db.insert(financeTransactionRelationships).values({
+      ...relationship,
+      relationship: "split",
+      rationale: "The actual is now a split parent",
+      createdAt: now(),
+    });
+    const changed = await scoped.getFinanceCashflowProjection(f.user.id, query);
+    expect(
+      changed.schedule.occurrences.find(
+        (row) => row.scheduleVersionId === f.cost.data.id && row.localDate === "2026-03-01",
+      ),
+    ).toMatchObject({ matchState: "invalidated" });
+    expect(changed.projection).toMatchObject({
+      status: "unavailable",
+      reasons: [{ code: "unknown_amount" }],
+    });
+  });
 
   it("reviews historical current revisions separately and refuses an incomplete balance statement", async () => {
     const f = await fixture();

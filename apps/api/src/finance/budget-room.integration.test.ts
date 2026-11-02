@@ -619,6 +619,16 @@ describe.sequential("Canonical budget status category room", () => {
       },
     });
     expect((await readRoom(f)).categories[0]?.observedCents).toBe(500);
+    const actuals = await database.db.transaction((tx) =>
+      readCashflowActuals(
+        tx,
+        f.owner.id,
+        { from: "2026-11-01", to: "2026-11-02", accountIds: [f.account.id] },
+        true,
+      ),
+    );
+    expect(actuals.truncated).toBe(true);
+    expect(actuals.eligibility(expense, "expense").eligible).toBe(false);
   });
   it("follows reimbursement matches backwards from a selected credit to its historical allocation", async () => {
     const f = await qualifiedFixture();

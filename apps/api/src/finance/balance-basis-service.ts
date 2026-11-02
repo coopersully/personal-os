@@ -165,13 +165,27 @@ export async function readCashflowActuals(
         .from(financeReimbursementMatches)
         .where(eq(financeReimbursementMatches.userId, userId))
         .limit(LIMIT + 1);
-  const relationships = scopedActuals
-    ? (ledger?.relationships ?? [])
-    : await tx
-        .select()
-        .from(financeTransactionRelationships)
-        .where(eq(financeTransactionRelationships.userId, userId))
-        .limit(LIMIT + 1);
+  // Persisted occurrence-match fingerprints bind raw relationship history.
+  // Reuse the closed ledger's bounded, owner-validated event discovery so that
+  // superseding rows remain included even when their transaction set changes.
+  const relationships =
+    scopedActuals && !ledger?.events.length
+      ? []
+      : await tx
+          .select()
+          .from(financeTransactionRelationships)
+          .where(
+            scopedActuals
+              ? and(
+                  eq(financeTransactionRelationships.userId, userId),
+                  inArray(
+                    financeTransactionRelationships.economicEventId,
+                    ledger?.events.map((event) => event.id) ?? [],
+                  ),
+                )
+              : eq(financeTransactionRelationships.userId, userId),
+          )
+          .limit(LIMIT + 1);
   const events = scopedActuals
     ? (ledger?.events ?? [])
     : relationships.length

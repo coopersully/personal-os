@@ -138,7 +138,12 @@ unchanged. Cashflow uses the same bounded graph mechanism for recognition, but r
 selected-funding-account history for opening-balance reflection checks. Historical funding overflow
 therefore keeps payday evidence unavailable instead of dropping unreviewed actuals. Closure
 completeness certifies only that these dependencies were read, not statement coverage, trustworthy
-financial facts, obligation completeness or authority. Spending covers the
+financial facts, obligation completeness or authority. Private cashflow reads additionally retain
+bounded owned relationship history touching the closed transaction set for the existing persisted
+match fingerprint and linked-eligibility contract. This history does not expand recognition edges;
+current/trusted recognition still uses the owning oracle. Historical relationship overflow withholds
+cashflow estimates without suppressing complete observed category amounts. Existing fingerprint
+bytes and standalone matching defaults remain unchanged. Spending covers the
 qualified budget accounts from the month's first day through the owner's current local date;
 future dates are not observed usage. Cashflow funding uses the owned cash-account subset, not debt
 or excluded accounts. A payday income identity must be explicitly attached to all income resources

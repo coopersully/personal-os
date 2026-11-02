@@ -76,6 +76,29 @@ describe("human Finance Activity route", () => {
     );
     expect(f.listActivity).toHaveBeenCalledTimes(1);
   });
+  it("parses aware-response booleans strictly and forwards false as false", async () => {
+    const f = fixture();
+    expect(
+      (await f.app.request("/v1/finances/activity?includeNotificationDeliveries=false")).status,
+    ).toBe(200);
+    expect(f.listActivity).toHaveBeenLastCalledWith(owner, {
+      limit: 50,
+      includeNotificationDeliveries: false,
+    });
+    expect(
+      (await f.app.request("/v1/finances/activity?includeNotificationDeliveries=true")).status,
+    ).toBe(200);
+    expect(f.listActivity).toHaveBeenLastCalledWith(owner, {
+      limit: 50,
+      includeNotificationDeliveries: true,
+    });
+    for (const value of ["0", "yes", "FALSE"])
+      expect(
+        (await f.app.request(`/v1/finances/activity?includeNotificationDeliveries=${value}`))
+          .status,
+      ).toBe(400);
+    expect(f.listActivity).toHaveBeenCalledTimes(2);
+  });
   it("keeps paginated evidence human-only and owner-bound without private caching", async () => {
     const f = fixture();
     const response = await f.app.request(

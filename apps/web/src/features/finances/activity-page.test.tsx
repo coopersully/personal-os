@@ -143,6 +143,7 @@ it("applies filters from scratch and refreshes the applied filters rather than d
   fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
   await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
   expect(read.mock.calls[1]?.[0]).toEqual({
+    includeNotificationDeliveries: true,
     limit: 50,
     actor: "agent",
     from: "2026-10-01T00:00:00.000Z",
@@ -244,7 +245,7 @@ it.each([
   expect(screen.queryByLabelText("Activity coverage")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Retry activity" }));
   await screen.findByText(/No recorded activity/);
-  expect(read.mock.calls[2]?.[0]).toEqual({ limit: 50 });
+  expect(read.mock.calls[2]?.[0]).toEqual({ limit: 50, includeNotificationDeliveries: true });
 });
 it.each([401, 403])("clears same-owner evidence on direct pagination %s denial", async (status) => {
   const read = vi
@@ -548,6 +549,7 @@ it("applies a complete bounded filter set and deduplicates overlapping action pa
   fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled());
   expect(read.mock.calls[1]?.[0]).toEqual({
+    includeNotificationDeliveries: true,
     limit: 50,
     type: "human_answer_decision",
     recordId: "11111111-1111-4111-8111-111111111111",
@@ -726,4 +728,39 @@ it("keeps notification attempts distinct from financial action groups and expose
   expect(await screen.findByText(/Initiating actor not recorded/u)).toBeVisible();
   expect(screen.getByRole("button", { name: "Inspect delivery evidence" })).toBeVisible();
   expect(screen.queryByRole("button", { name: /approve|retry send/iu })).not.toBeInTheDocument();
+});
+
+it("retains aware-response selection for initial load, paging, refresh and filters", async () => {
+  const read = vi.fn().mockResolvedValue(page([entry], "next"));
+  render(view(read));
+  await screen.findByText(entry.explanation);
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Refresh activity" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Refresh activity" }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+  fireEvent.click(screen.getByRole("button", { name: "Activity filters" }));
+  fireEvent.change(screen.getByLabelText("Event type"), {
+    target: { value: "notification_delivery" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(4));
+  for (const call of read.mock.calls)
+    expect(call[0]).toMatchObject({ includeNotificationDeliveries: true });
+});
+
+it("restores the actual owned Activity opener when keyboard dismissal closes details", async () => {
+  render(view(vi.fn().mockResolvedValue(page())));
+  await screen.findByText(entry.explanation);
+  const opener = screen.getByRole("button", { name: `Open activity: ${entry.explanation}` });
+  opener.focus();
+  fireEvent.click(opener);
+  const details = await screen.findByRole("dialog", { name: "Activity details" });
+  fireEvent.keyDown(details, { key: "Escape", code: "Escape" });
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Activity details" })).not.toBeInTheDocument(),
+  );
+  expect(opener).toHaveFocus();
 });

@@ -187,6 +187,15 @@ observation beyond preflight; these tests do not establish real provider recover
 
 ## Activity notification delivery history
 
+Notification history is an explicitly aware response shape: `includeNotificationDeliveries=true`
+or `type=notification_delivery` opts in. Only the new Activity loader requests the marker; the
+shared client merely forwards a supplied value. Boolean query strings accept only `true` or
+`false`; false is not coerced to true. Unaware callers retain the old entry variants, coverage
+reasons, ordering and exact filter-hash/signed-cursor serialization. Aware all-type continuations
+bind that mode and cannot be reused across response modes. This selects a read projection, not
+a grant or approval capability. Activity details restore focus only to the actual connected opener
+owned by that page; no global dialog primitive or focus policy changes.
+
 The owner Activity read projection distinguishes `notification_delivery` from accepted human
 answers and audited financial effects. It reads existing Finance attempt membership, safe message
 receipt fields and owned run metadata; it does not send, retry, approve or complete work. The

@@ -209,6 +209,10 @@ export const financeActivityQuerySchema = z
     cursor: z.string().min(1).max(3000).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     type: financeActivityKindSchema.optional(),
+    // Explicit response-shape awareness, never a permission or mutation capability.
+    includeNotificationDeliveries: z
+      .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
+      .optional(),
     actor: actorTypeSchema.optional(),
     recordId: idSchema.optional(),
     from: isoDateTimeSchema.optional(),
@@ -220,6 +224,12 @@ export const financeActivityQuerySchema = z
     "The date range must be ordered.",
   );
 export type FinanceActivityQuery = z.infer<typeof financeActivityQuerySchema>;
+export function isFinanceActivityNotificationAware(
+  query: Pick<FinanceActivityQuery, "type" | "includeNotificationDeliveries">,
+): boolean {
+  return query.includeNotificationDeliveries === true || query.type === "notification_delivery";
+}
+
 export const financeActivityPageSchema = z
   .object({
     entries: z.array(financeActivityEntrySchema).max(100),

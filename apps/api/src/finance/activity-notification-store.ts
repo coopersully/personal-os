@@ -12,6 +12,7 @@ import {
   financeActivityNotificationEntrySchema,
   financeHumanWorkRefSchema,
   idSchema,
+  isFinanceActivityNotificationAware,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 
@@ -144,7 +145,12 @@ export async function listFinanceNotificationActivity(
   query: FinanceActivityQuery,
   cursor: Position | null,
 ) {
-  if (query.actor || (query.type && query.type !== "notification_delivery")) return [];
+  if (
+    !isFinanceActivityNotificationAware(query) ||
+    query.actor ||
+    (query.type && query.type !== "notification_delivery")
+  )
+    return [];
   const attempts = await db
     .select({
       attempt: notificationDeliveryAttempts,

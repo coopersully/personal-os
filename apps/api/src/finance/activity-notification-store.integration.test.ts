@@ -203,6 +203,36 @@ describe.sequential("Finance Activity notification tenant and cursor persistence
       /PRIVATE MESSAGE CANARY|SMfixture|encryptedPhoneNumber|phoneFingerprint/u,
     );
   });
+  it("keeps legacy default entries and coverage unchanged until a reader explicitly opts in", async () => {
+    const f = await fixture();
+    await attempt(f, "2026-11-01T12:00:00Z");
+    const service = createFinanceActivityService({
+      db: database.db,
+      cursorSecret: "aware-fixture",
+    });
+    const legacy = await service.listActivity(f.owner, { limit: 10 });
+    expect(legacy.entries).toEqual([]);
+    expect(legacy.coverage.reasons).toEqual([
+      "financial_actions_outside_committed_candidate_receipts_not_projected",
+      "historical_decisions_without_causal_message_not_projected",
+    ]);
+    expect(
+      await service.listActivity(f.owner, { limit: 10, includeNotificationDeliveries: false }),
+    ).toEqual(legacy);
+    const aware = await service.listActivity(f.owner, {
+      limit: 10,
+      includeNotificationDeliveries: true,
+    });
+    expect(aware.entries.map((entry) => entry.kind)).toEqual(["notification_delivery"]);
+    expect(aware.coverage.reasons).toContain(
+      "notification_delivery_without_complete_owned_evidence_not_projected",
+    );
+    const explicit = await service.listActivity(f.owner, {
+      limit: 10,
+      type: "notification_delivery",
+    });
+    expect(explicit.entries).toEqual(aware.entries);
+  });
   it("paginates all three kinds at the exact same PostgreSQL microsecond and UUID without loss or repetition", async () => {
     const f = await fixture();
     const stamp = "2026-11-01T12:00:00.000001Z";
@@ -301,9 +331,15 @@ describe.sequential("Finance Activity notification tenant and cursor persistence
       cursorSecret: "mixed-kind-fixture",
     });
     const found: string[] = [];
+    let firstAwareCursor: string | null = null;
     let cursor: string | undefined;
     for (let n = 0; n < 3; n++) {
-      const page = await service.listActivity(f.owner, { limit: 1, ...(cursor ? { cursor } : {}) });
+      const page = await service.listActivity(f.owner, {
+        limit: 1,
+        includeNotificationDeliveries: true,
+        ...(cursor ? { cursor } : {}),
+      });
+      if (n === 0) firstAwareCursor = page.nextCursor;
       expect(page.entries).toHaveLength(1);
       expect(page.entries[0]?.id).toBe(id);
       const entry = page.entries[0];
@@ -314,6 +350,29 @@ describe.sequential("Finance Activity notification tenant and cursor persistence
     }
     expect(found).toEqual(["notification_delivery", "human_answer_decision", "financial_action"]);
     expect(cursor).toBeUndefined();
+    if (!firstAwareCursor) throw new Error("Expected aware mixed-kind continuation");
+    await expect(
+      service.listActivity(f.owner, { limit: 1, cursor: firstAwareCursor }),
+    ).rejects.toThrow("exact filters");
+    const legacyFirst = await service.listActivity(f.owner, { limit: 1 });
+    expect(legacyFirst.entries.map((entry) => entry.kind)).toEqual(["human_answer_decision"]);
+    expect(legacyFirst.coverage.reasons).not.toContain(
+      "notification_delivery_without_complete_owned_evidence_not_projected",
+    );
+    if (!legacyFirst.nextCursor) throw new Error("Expected legacy financial continuation");
+    await expect(
+      service.listActivity(f.owner, {
+        limit: 1,
+        includeNotificationDeliveries: true,
+        cursor: legacyFirst.nextCursor,
+      }),
+    ).rejects.toThrow("exact filters");
+    const legacyNext = await service.listActivity(f.owner, {
+      limit: 1,
+      cursor: legacyFirst.nextCursor,
+    });
+    expect(legacyNext.entries.map((entry) => entry.kind)).toEqual(["financial_action"]);
+    expect(legacyNext.nextCursor).toBeNull();
   });
   it("uses immutable microsecond creation order after status updates and signs owner/filter cursors", async () => {
     const f = await fixture();

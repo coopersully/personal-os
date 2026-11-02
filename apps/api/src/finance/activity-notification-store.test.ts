@@ -3,6 +3,8 @@ import {
   type NotificationActivitySource,
   projectFinanceNotificationActivity,
 } from "./activity-notification-store.js";
+import { decodeFinanceActivityCursor, encodeFinanceActivityCursor } from "./activity-service.js";
+
 const owner = "11111111-1111-4111-8111-111111111111";
 const foreign = "22222222-2222-4222-8222-222222222222";
 const attemptId = "33333333-3333-4333-8333-333333333333";
@@ -119,5 +121,66 @@ describe("owner notification Activity projection", () => {
       (item): item is NonNullable<typeof item> => Boolean(item),
     );
     expect(projectFinanceNotificationActivity(owner, large)).toBeNull();
+  });
+});
+
+describe("legacy Activity cursor byte compatibility", () => {
+  // Golden derives from accepted main49fee's original ordered JSON and HMAC contract,
+  // independently of the aware-reader implementation under test.
+  const golden =
+    "eyJvd25lciI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsImZpbHRlcnNIYXNoIjoiYjkxOTM0OTZmZWEzMzcxYmYwZDhhMzhlZTAzNDUyNDIxOTk1NmM3ZWFlNjEyOGEyZmY2MDQ3MDUyNzg1ZDg5NCIsImF0IjoiMjAyNi0xMS0wMVQxMjowMDowMC4wMDBaIiwiaWQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJraW5kIjoiaHVtYW5fYW5zd2VyX2RlY2lzaW9uIn0.c508d338e98708b3af400b93e7f34043b2d2f023c129163cec5d727ab4996cfd";
+  const position: { at: string; id: string; kind: "human_answer_decision" } = {
+    at: "2026-11-01T12:00:00.000Z",
+    id: attemptId,
+    kind: "human_answer_decision",
+  };
+  it("preserves the exact old signature/payload for omitted and false awareness", () => {
+    expect(
+      encodeFinanceActivityCursor(owner, { limit: 50 }, position, "legacy-activity-fixture"),
+    ).toBe(golden);
+    expect(
+      encodeFinanceActivityCursor(
+        owner,
+        { limit: 50, includeNotificationDeliveries: false },
+        position,
+        "legacy-activity-fixture",
+      ),
+    ).toBe(golden);
+    expect(
+      decodeFinanceActivityCursor(owner, { limit: 50, cursor: golden }, "legacy-activity-fixture"),
+    ).toMatchObject(position);
+  });
+  it("binds aware all-type cursors to that response mode without weakening owner/filter checks", () => {
+    const aware = encodeFinanceActivityCursor(
+      owner,
+      { limit: 50, includeNotificationDeliveries: true },
+      position,
+      "legacy-activity-fixture",
+    );
+    expect(aware).not.toBe(golden);
+    expect(() =>
+      decodeFinanceActivityCursor(
+        owner,
+        { limit: 50, includeNotificationDeliveries: true, cursor: golden },
+        "legacy-activity-fixture",
+      ),
+    ).toThrow("exact filters");
+    expect(() =>
+      decodeFinanceActivityCursor(owner, { limit: 50, cursor: aware }, "legacy-activity-fixture"),
+    ).toThrow("exact filters");
+    expect(() =>
+      decodeFinanceActivityCursor(
+        foreign,
+        { limit: 50, includeNotificationDeliveries: true, cursor: aware },
+        "legacy-activity-fixture",
+      ),
+    ).toThrow("exact filters");
+    expect(() =>
+      decodeFinanceActivityCursor(
+        owner,
+        { limit: 50, includeNotificationDeliveries: true, actor: "agent", cursor: aware },
+        "legacy-activity-fixture",
+      ),
+    ).toThrow("exact filters");
   });
 });

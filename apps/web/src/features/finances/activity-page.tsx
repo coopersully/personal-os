@@ -85,12 +85,15 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
   const [passiveLoading, setPassiveLoading] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const alive = useRef(true);
+  const activityRoot = useRef<HTMLDivElement>(null);
+  const activityOpener = useRef<HTMLElement | null>(null);
   const generation = useRef(0);
   const actionToast = useRef<string | number | undefined>(undefined);
   const reader = useRef(readActivity);
   reader.current = readActivity;
 
   const clearAccess = useCallback(() => {
+    activityOpener.current = null;
     setPage(undefined);
     setSelected(null);
     setFiltersOpen(false);
@@ -113,7 +116,7 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
         : undefined;
       actionToast.current = toastId;
       try {
-        const result = await reader.current(next);
+        const result = await reader.current({ ...next, includeNotificationDeliveries: true });
         if (!alive.current || generation.current !== request) {
           if (toastId !== undefined) toast.dismiss(toastId);
           return;
@@ -161,6 +164,13 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
     };
   }, [load]);
 
+  const openActivity = useCallback((group: ReturnType<typeof groupFinanceActivity>[number]) => {
+    const target = document.activeElement;
+    activityOpener.current =
+      target instanceof HTMLElement && activityRoot.current?.contains(target) ? target : null;
+    setSelected(group);
+  }, []);
+
   const coverage = page ? (
     <Collapsible>
       <CollapsibleTrigger asChild>
@@ -194,7 +204,7 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
   ) : null;
 
   return (
-    <div className="grid min-w-0 gap-4">
+    <div ref={activityRoot} className="grid min-w-0 gap-4">
       <ResponsiveDialog open={filtersOpen} onOpenChange={setFiltersOpen}>
         <WorkspaceHeaderControls label="Activity controls">
           <ResponsiveDialogTrigger asChild>
@@ -388,7 +398,7 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
             ]}
             rowId={(group) => group.key}
             rowLabel={(group) => `Open activity: ${group.entries[0]?.explanation ?? "Details"}`}
-            onOpen={setSelected}
+            onOpen={openActivity}
             storageKey={`${ownerId}:finance-activity`}
             label="Financial activity"
             fileName="finance-activity.csv"
@@ -433,7 +443,22 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
             if (!open) setSelected(null);
           }}
         >
-          <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
+          <ResponsiveDialogContent
+            data-finance-dialog
+            data-finance-size="default"
+            onCloseAutoFocus={(event) => {
+              const target = activityOpener.current;
+              activityOpener.current = null;
+              if (
+                target?.isConnected &&
+                activityRoot.current?.contains(target) &&
+                !target.matches(":disabled")
+              ) {
+                event.preventDefault();
+                target.focus({ preventScroll: true });
+              }
+            }}
+          >
             <ResponsiveDialogHeader>
               <ResponsiveDialogTitle>Activity details</ResponsiveDialogTitle>
               <ResponsiveDialogDescription>

@@ -143,3 +143,29 @@ describe("Finance notification delivery Activity contract", () => {
     ).toBe(false);
   });
 });
+
+describe("Activity response-shape awareness", () => {
+  it("strictly parses optional boolean query values without changing legacy defaults", async () => {
+    const { isFinanceActivityNotificationAware } = await import("./activity.js");
+    expect(financeActivityQuerySchema.parse({})).toEqual({ limit: 50 });
+    for (const value of [false, "false"]) {
+      const query = financeActivityQuerySchema.parse({ includeNotificationDeliveries: value });
+      expect(query.includeNotificationDeliveries).toBe(false);
+      expect(isFinanceActivityNotificationAware(query)).toBe(false);
+    }
+    for (const value of [true, "true"]) {
+      const query = financeActivityQuerySchema.parse({ includeNotificationDeliveries: value });
+      expect(isFinanceActivityNotificationAware(query)).toBe(true);
+    }
+    for (const value of ["FALSE", "0", "yes", "", 0, 1, null, {}])
+      expect(
+        financeActivityQuerySchema.safeParse({ includeNotificationDeliveries: value }).success,
+      ).toBe(false);
+    expect(
+      isFinanceActivityNotificationAware({
+        type: "notification_delivery",
+        includeNotificationDeliveries: false,
+      }),
+    ).toBe(true);
+  });
+});

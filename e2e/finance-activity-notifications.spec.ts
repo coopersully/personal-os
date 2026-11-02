@@ -106,6 +106,7 @@ test("Activity separates transport evidence from financial history with keyboard
     nextCursor: null,
   });
   const queries: Array<string | null> = [];
+  const responseModes: Array<string | null> = [];
   const mutations: string[] = [];
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname;
@@ -120,6 +121,9 @@ test("Activity separates transport evidence from financial history with keyboard
   await page.route(/\/v1\/finances\/activity(?:\?.*)?$/, async (route) => {
     const type = new URL(route.request().url()).searchParams.get("type");
     queries.push(type);
+    responseModes.push(
+      new URL(route.request().url()).searchParams.get("includeNotificationDeliveries"),
+    );
     await route.fulfill({
       json: {
         ...material,
@@ -193,5 +197,7 @@ test("Activity separates transport evidence from financial history with keyboard
     page.getByRole("button", { name: `Open activity: ${financial.explanation}`, exact: true }),
   ).toHaveCount(0);
   expect(queries).toContain("notification_delivery");
+  expect(responseModes.length).toBeGreaterThan(0);
+  expect(responseModes.every((mode) => mode === "true")).toBe(true);
   expect(mutations).toEqual([]);
 });

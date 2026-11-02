@@ -20,6 +20,7 @@ import {
   financeActivityKindSchema,
   financeActivityQuerySchema,
   idSchema,
+  isFinanceActivityNotificationAware,
   isoDateTimeSchema,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
@@ -60,6 +61,9 @@ function filterHash(query: FinanceActivityQuery) {
         recordId: query.recordId ?? null,
         from: query.from ?? null,
         through: query.through ?? null,
+        ...(isFinanceActivityNotificationAware(query)
+          ? { includeNotificationDeliveries: true }
+          : {}),
       }),
     )
     .digest("hex");
@@ -193,6 +197,7 @@ function page(
   entries: FinanceActivityEntry[],
   nextCursor: string | null,
   incompleteEvidence = false,
+  includeNotificationDeliveries = false,
 ): FinanceActivityPage {
   return {
     entries,
@@ -206,7 +211,9 @@ function page(
       reasons: [
         "financial_actions_outside_committed_candidate_receipts_not_projected",
         "historical_decisions_without_causal_message_not_projected",
-        "notification_delivery_without_complete_owned_evidence_not_projected",
+        ...(includeNotificationDeliveries
+          ? ["notification_delivery_without_complete_owned_evidence_not_projected" as const]
+          : []),
         ...(incompleteEvidence
           ? ["committed_receipts_with_incomplete_evidence_not_projected" as const]
           : []),
@@ -256,7 +263,10 @@ export function createFinanceActivityService({
         query.type === undefined || query.type === "financial_action"
           ? await listFinanceActivityEffects(db, userId, query, effectCursor, cursorSecret)
           : [];
-      const notifications = await listFinanceNotificationActivity(db, userId, query, cursor);
+      const includeNotificationDeliveries = isFinanceActivityNotificationAware(query);
+      const notifications = includeNotificationDeliveries
+        ? await listFinanceNotificationActivity(db, userId, query, cursor)
+        : [];
       // Canonical receipt and audit remain after live question/answer deletion.
       const rows =
         (query.type === undefined || query.type === "human_answer_decision") &&
@@ -419,6 +429,7 @@ export function createFinanceActivityService({
             )
           : null,
         candidates.some((source) => source.kind === "financial_action" && source.entry === null),
+        includeNotificationDeliveries,
       );
     },
   };

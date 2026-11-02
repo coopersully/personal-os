@@ -564,8 +564,14 @@ if (process.argv[2] === "--fake-aws") {
             startedMonotonicNs: childStartedNs.toString(),
             completedMonotonicNs: childCompletedNs.toString(),
           },
-          events: trace.trim() ? trace.trim().split("\n").map((line) => JSON.parse(line)) : [],
-          limits: "Readiness snapshots occur at fake-AWS completion, not every parent poll. Worker exit status is not observed. No PPID wrapper or protocol change.",
+          events: trace.trim()
+            ? trace
+                .trim()
+                .split("\n")
+                .map((line) => JSON.parse(line))
+            : [],
+          limits:
+            "Readiness snapshots occur at fake-AWS completion, not every parent poll. Worker exit status is not observed. No PPID wrapper or protocol change.",
         };
         // Bound the emitted JSON as well as input; aggregate metadata also consumes the budget.
         while (

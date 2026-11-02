@@ -307,6 +307,7 @@ export function createFinancePositionService(input: { db: Database; now: () => D
           accounts,
           asOf,
           scope,
+          period: { from: scope.from, through: observedThrough },
           activitySource: { id: userId, revision: activityRevision },
           activityCoverageReasons: completeCoverage ? [] : ["incomplete_evidence"],
         });

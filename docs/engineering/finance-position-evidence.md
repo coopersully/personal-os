@@ -79,7 +79,9 @@ must match the owner, account, currency and planning timezone, retain a nonempty
 and have been recorded by the snapshot time. Adjacent intervals may jointly cover the period;
 an interior gap remains incomplete. The observed horizon ends at the earlier of the requested end
 and today's date in the owner's planning timezone, so future days are not claimed as observed
-history. This qualification does not degrade an independently verified cash balance or grant
+history. Recognition uses that same observed posting window while retaining the full transaction
+set for transfer and pending-replacement evidence. This qualification does not degrade an
+independently verified cash balance or grant
 financial authority. Coverage changes participate in the position revision and invalidate an older
 position-dependent decision.
 

@@ -218,16 +218,30 @@ describe.sequential("Finance position persistence boundary", () => {
     expect(complete.revision).not.toBe(gap.revision);
     expect(complete.pendingExposure.quality).toBe("verified");
     expect(complete.spendable.cents).toBeNull();
+    await database.db.insert(financeTransactions).values(
+      [false, true].map((pending) => ({
+        userId: ownerId,
+        accountId,
+        amount: pending ? 3_000 : 2_000,
+        currencyCode: "USD",
+        direction: "expense" as const,
+        providerDirection: "expense" as const,
+        merchant: "Future synthetic expense",
+        pending,
+        transactionDate: "2026-09-19",
+      })),
+    );
     // A current month's future days are not claimed as observed history.
     const currentMonth = await service.readPosition(ownerId, { ...dates, through: "2026-09-30" });
-    expect(currentMonth.postedSpend.quality).toBe("verified");
+    expect(currentMonth.postedSpend).toMatchObject({ cents: 1_000, quality: "verified" });
+    expect(currentMonth.pendingExposure.cents).toBe(0);
     const late = createFinancePositionService({
       db: database.db,
       now: () => new Date("2026-09-19T02:00:00Z"),
     });
     expect(
-      (await late.readPosition(ownerId, { ...dates, through: "2026-09-30" })).postedSpend.quality,
-    ).toBe("verified");
+      (await late.readPosition(ownerId, { ...dates, through: "2026-09-30" })).postedSpend,
+    ).toMatchObject({ cents: 1_000, quality: "verified" });
     await database.db.insert(financeAccounts).values({
       userId: ownerId,
       provider: "manual",

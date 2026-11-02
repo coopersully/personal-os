@@ -86,7 +86,7 @@ export function buildFinancePosition(input: PositionInput) {
     transactions,
     allocations,
     reimbursements,
-    period: scope,
+    period: input.period ?? scope,
   });
   const activitySources = [
     {

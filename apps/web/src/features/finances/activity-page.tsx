@@ -51,7 +51,7 @@ export function groupFinanceActivity(entries: ActivityEntry[]) {
       entry.effect?.significance === "routine" &&
       entry.effect.actionFamilies.length === 1;
     const family = grouped ? (entry.effect?.actionFamilies[0] ?? null) : null;
-    const key = grouped ? `run:${entry.runId}:${family}` : entry.id;
+    const key = grouped ? `run:${entry.runId}:${family}` : `${entry.kind}:${entry.id}`;
     const existing = grouped ? result.find((group) => group.key === key) : undefined;
     if (existing) existing.entries.push(entry);
     else result.push({ key, entries: [entry], family, runId: entry.runId });

@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
+  auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  financeConversationMessages,
+  financeMutationRecords,
   migrateDatabase,
   notificationAttemptItems,
   notificationDeliveryAttempts,
@@ -12,6 +15,7 @@ import {
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
+import type { FinanceConversationEffectReceipt } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -33,37 +37,31 @@ describe.sequential("Finance Activity notification tenant and cursor persistence
     const owner = randomUUID(),
       run = randomUUID(),
       connection = randomUUID();
-    await database.db
-      .insert(users)
-      .values({
-        id: owner,
-        email: `${owner}@example.test`,
-        displayName: "Activity fixture",
-        passwordHash: "unused",
-      });
-    await database.db
-      .insert(textingConnections)
-      .values({
-        id: connection,
-        userId: owner,
-        encryptedPhoneNumber: "not-read",
-        phoneFingerprint: owner,
-        phoneLastFour: "0123",
-        country: "US",
-        state: "active",
-        consentVersion: "fixture",
-        verifiedAt: new Date(),
-      });
-    await database.db
-      .insert(workspaceMaintenanceRuns)
-      .values({
-        id: run,
-        userId: owner,
-        domain: "finances",
-        scope: { type: "all_outstanding" },
-        status: "blocked",
-        rulebookVersion: "fixture",
-      });
+    await database.db.insert(users).values({
+      id: owner,
+      email: `${owner}@example.test`,
+      displayName: "Activity fixture",
+      passwordHash: "unused",
+    });
+    await database.db.insert(textingConnections).values({
+      id: connection,
+      userId: owner,
+      encryptedPhoneNumber: "not-read",
+      phoneFingerprint: owner,
+      phoneLastFour: "0123",
+      country: "US",
+      state: "active",
+      consentVersion: "fixture",
+      verifiedAt: new Date(),
+    });
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      id: run,
+      userId: owner,
+      domain: "finances",
+      scope: { type: "all_outstanding" },
+      status: "blocked",
+      rulebookVersion: "fixture",
+    });
     return { owner, run, connection };
   }
   async function attempt(f: Awaited<ReturnType<typeof fixture>>, stamp: string, revision = f.run) {
@@ -79,19 +77,17 @@ describe.sequential("Finance Activity notification tenant and cursor persistence
     await database.db
       .insert(notificationIntents)
       .values({ id: intentId, userId: f.owner, domain: "finances", workId: work.id, work });
-    await database.db
-      .insert(notificationDeliveryAttempts)
-      .values({
-        id,
-        userId: f.owner,
-        state: "claimed",
-        connectionId: f.connection,
-        consentEpoch: 1,
-        claimId: randomUUID(),
-        leaseUntil: new Date("2026-11-02T00:00:00Z"),
-        createdAt: sql`${stamp}::timestamptz`,
-        updatedAt: sql`${stamp}::timestamptz`,
-      });
+    await database.db.insert(notificationDeliveryAttempts).values({
+      id,
+      userId: f.owner,
+      state: "claimed",
+      connectionId: f.connection,
+      consentEpoch: 1,
+      claimId: randomUUID(),
+      leaseUntil: new Date("2026-11-02T00:00:00Z"),
+      createdAt: sql`${stamp}::timestamptz`,
+      updatedAt: sql`${stamp}::timestamptz`,
+    });
     await database.db
       .insert(notificationAttemptItems)
       .values({ userId: f.owner, attemptId: id, intentId, work });
@@ -150,40 +146,36 @@ describe.sequential("Finance Activity notification tenant and cursor persistence
       revision: f.run,
       actionRevision: "r1",
     };
-    await database.db
-      .insert(textMessages)
-      .values({
-        id: messageId,
-        userId: f.owner,
-        connectionId: f.connection,
-        direction: "outbound",
-        status: "accepted",
-        providerMessageSid: `SMfixture${randomUUID()}`,
-        body: "PRIVATE MESSAGE CANARY",
-        occurredAt: stamp,
-        occurredAtSource: "provider",
-        providerSubmittedAt: stamp,
-      });
+    await database.db.insert(textMessages).values({
+      id: messageId,
+      userId: f.owner,
+      connectionId: f.connection,
+      direction: "outbound",
+      status: "accepted",
+      providerMessageSid: `SMfixture${randomUUID()}`,
+      body: "PRIVATE MESSAGE CANARY",
+      occurredAt: stamp,
+      occurredAtSource: "provider",
+      providerSubmittedAt: stamp,
+    });
     await database.db
       .insert(notificationIntents)
       .values({ id: intentId, userId: f.owner, domain: "finances", workId: work.id, work });
-    await database.db
-      .insert(notificationDeliveryAttempts)
-      .values({
-        id,
-        userId: f.owner,
-        state: "accepted",
-        connectionId: f.connection,
-        consentEpoch: 1,
-        claimId: randomUUID(),
-        leaseUntil: stamp,
-        messageId,
-        submittedAt: stamp,
-        timeZone: "UTC",
-        timezoneRevision: stamp,
-        createdAt: stamp,
-        updatedAt: stamp,
-      });
+    await database.db.insert(notificationDeliveryAttempts).values({
+      id,
+      userId: f.owner,
+      state: "accepted",
+      connectionId: f.connection,
+      consentEpoch: 1,
+      claimId: randomUUID(),
+      leaseUntil: stamp,
+      messageId,
+      submittedAt: stamp,
+      timeZone: "UTC",
+      timezoneRevision: stamp,
+      createdAt: stamp,
+      updatedAt: stamp,
+    });
     await database.db
       .insert(notificationAttemptItems)
       .values({ userId: f.owner, attemptId: id, intentId, work });
@@ -206,6 +198,118 @@ describe.sequential("Finance Activity notification tenant and cursor persistence
     expect(JSON.stringify(page)).not.toMatch(
       /PRIVATE MESSAGE CANARY|SMfixture|encryptedPhoneNumber|phoneFingerprint/u,
     );
+  });
+  it("paginates all three kinds at the exact same PostgreSQL microsecond and UUID without loss or repetition", async () => {
+    const f = await fixture();
+    const stamp = "2026-11-01T12:00:00.000001Z";
+    const notification = await attempt(f, stamp);
+    const id = notification.id,
+      operationId = randomUUID(),
+      questionId = randomUUID();
+    await database.db.insert(auditEvents).values({
+      id,
+      userId: f.owner,
+      actorType: "user",
+      actorId: f.owner,
+      requestId: "mixed-kind-answer",
+      action: "finance.contextual_answer.accepted",
+      entityType: "finance_contextual_question",
+      entityId: questionId,
+      before: { revision: "1" },
+      after: { answerId: randomUUID(), revision: "2", operationId, state: "accepted" },
+      createdAt: sql`${stamp}::timestamptz`,
+    });
+    await database.db.insert(financeConversationMessages).values({
+      userId: f.owner,
+      sequence: 1n,
+      authorKind: "user",
+      text: "Exact historical answer",
+      recordRefs: [{ kind: "contextual_question", id: questionId }],
+      sourceOperationId: operationId,
+      idempotencyKey: `answer:${operationId}`,
+      createdAt: sql`${stamp}::timestamptz`,
+    });
+    await database.db.insert(financeMutationRecords).values({
+      id: operationId,
+      userId: f.owner,
+      idempotencyKey: operationId,
+      operation: "answer_contextual_question_v1",
+      requestHash: "fixture",
+      actorType: "user",
+      actorId: f.owner,
+      status: "completed",
+      response: { state: "accepted", operationId, resultRevision: "2" },
+      completedAt: new Date(stamp),
+    });
+    const auditId = randomUUID(),
+      transactionId = randomUUID(),
+      candidateId = randomUUID();
+    const requestId = `finance-candidate-effect:${id}`;
+    await database.db.insert(auditEvents).values({
+      id: auditId,
+      userId: f.owner,
+      actorType: "user",
+      actorId: f.owner,
+      requestId,
+      action: "finance.transaction.classified",
+      entityType: "finance_transaction",
+      entityId: transactionId,
+      before: { category: null },
+      after: { category: "Food" },
+      createdAt: sql`${stamp}::timestamptz`,
+    });
+    const receipt: FinanceConversationEffectReceipt = {
+      id,
+      runId: f.run,
+      candidateId,
+      candidateRevision: `sha256:${"a".repeat(64)}`,
+      automationScheduleId: null,
+      authorizationConnectionId: null,
+      committedAt: stamp,
+      requestId,
+      originRequestId: "mixed-kind-fixture",
+      actor: { type: "user", id: f.owner },
+      authorityBasis: "authenticated_owner",
+      humanApproval: null,
+      sourceMessageIds: [],
+      explanation: "Exact committed fixture",
+      auditEventIds: [auditId],
+      recordRefs: [{ kind: "finance_transaction", id: transactionId }],
+      outcome: "committed",
+      actionFamilies: ["transaction"],
+      status: "applied",
+      significance: "routine",
+    };
+    await database.db.insert(financeMutationRecords).values({
+      id,
+      userId: f.owner,
+      idempotencyKey: `finance-candidate-effect:${candidateId}:${receipt.candidateRevision}`,
+      operation: "commit_finance_candidate_effect_v1",
+      requestHash: "fixture",
+      actorType: "user",
+      actorId: f.owner,
+      status: "completed",
+      response: { financeEffectReceipt: receipt },
+      completedAt: new Date(stamp),
+    });
+    const service = createFinanceActivityService({
+      db: database.db,
+      cursorSecret: "mixed-kind-fixture",
+    });
+    const found: string[] = [];
+    let cursor: string | undefined;
+    for (let n = 0; n < 3; n++) {
+      const page = await service.listActivity(f.owner, { limit: 1, ...(cursor ? { cursor } : {}) });
+      expect(page.entries).toHaveLength(1);
+      expect(page.entries[0]?.id).toBe(id);
+      const entry = page.entries[0];
+      if (!entry) throw new Error("Missing mixed-kind entry");
+      found.push(entry.kind);
+      cursor = page.nextCursor ?? undefined;
+      if (n < 2) expect(cursor).toBeDefined();
+    }
+    expect(found).toEqual(["notification_delivery", "human_answer_decision", "financial_action"]);
+    expect(cursor).toBeUndefined();
   });
   it("uses immutable microsecond creation order after status updates and signs owner/filter cursors", async () => {
     const f = await fixture();

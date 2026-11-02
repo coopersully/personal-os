@@ -712,6 +712,8 @@ it("keeps notification attempts distinct from financial action groups and expose
     },
   };
   expect(groupFinanceActivity([notification, { ...notification, id: "second" }])).toHaveLength(2);
+  const sameIdGroups = groupFinanceActivity([notification, { ...entry, id: notification.id }]);
+  expect(new Set(sameIdGroups.map((group) => group.key)).size).toBe(2);
   const read = vi.fn().mockResolvedValue(page([notification]));
   render(view(read));
   expect(await screen.findByText("Finance notification")).toBeVisible();

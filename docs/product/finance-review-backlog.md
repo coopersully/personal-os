@@ -73,3 +73,14 @@ stale revisions, partial failure, concurrent resume, lost responses, owner isola
 agents. App and MCP results describe the same work. Approval failures identify recovery and a
 request ID through the standard feedback surface; production success requires production
 evidence and is never inferred from local tests.
+
+
+## Qualify independent maintenance work before preview
+
+The read-only `POST /v1/finances/review-batches/qualification` operation accepts up to 25 explicit decisions, with the same current revision and timestamp bindings as preview. It creates no run, durable preview, question, approval, audit or ledger effect. The typed client exposes `qualifyFinanceMaintenanceWork`. Existing preview remains all-or-nothing and execute retains its original current-authorization and source revalidation; qualification is never an execution capability.
+
+Results retain every supplied item in order. Source checks use the owned transaction/account and, for connected Plaid sources, both account and authoritative Provider Item freshness. Unknown currency, pending data, unavailable topology or stale sources stay blocked. Transfer confirmation additionally uses the existing unique reciprocal counterpart validator and checks the counterpart account/source. A scan reaching 201 same-amount rows is incomplete and cannot establish uniqueness. Requests have a 25-item bound, a 1-second SQL statement bound and a 5-second work window checked between items; an unexpected storage failure aborts the read rather than inventing partial success.
+
+The first evidence adapter qualifies exact reciprocal transfer confirmations only. Other decisions remain `awaiting_evidence` until their owning evidence adapter establishes sufficiency; caller explanations, confidence, routing groups and `current_record` do not establish it. Missing execute permission is reported as `authorization_denied`, separately from source failure. Valid permission without standing approval remains `awaiting_approval`. A human inspection request itself does not grant approval. Independent qualified items remain visible alongside all held items, so a caller can prepare a separate exact preview for justified work without creating another maintenance run.
+
+The response includes canonical source references and an observation time, plus explicit `advisoryOnly`, `previewRequired` and `executionRevalidationRequired` markers. Re-read or requalify after source changes; the strict existing preview and execution paths remain authoritative. This slice exposes HTTP and the typed client; an MCP tool requires separately coordinated registration in the shared tool catalog. Natural-host consumption and useful independent progress remain outcome acceptance, not a consequence of passing source tests.

@@ -862,7 +862,14 @@ describe.sequential("Canonical budget status category room", () => {
     expect(after.categories[0]?.observedCents).toBe(1000);
     await database.db
       .update(financeAccounts)
-      .set({ syncState: "blocked" })
+      .set({
+        syncState: "blocked",
+        syncFailureCount: 1,
+        syncError: "Synthetic source authorization expired",
+        syncErrorCode: "ITEM_LOGIN_REQUIRED",
+        syncErrorCategory: "authorization",
+        syncRecovery: "reconnect",
+      })
       .where(eq(financeAccounts.id, f.account.id));
     const stale = await readRoom(f);
     expect(stale.reasons).toContain("source_not_current");

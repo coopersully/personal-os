@@ -30,6 +30,8 @@ import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { requireBudgetApproval } from "./budget-authority.js";
 import { readBudgetPlanContext } from "./budget-plan-projection.js";
+import { budgetRoomCommunication } from "./budget-room.js";
+import { readFinanceBudgetRoom } from "./budget-room-service.js";
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
@@ -660,7 +662,8 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     async getFinanceBudgetStatus(userId: string) {
       return db.transaction(
         async (tx) => {
-          const planContext = await readBudgetPlanContext(tx, userId, now());
+          const asOf = now();
+          const planContext = await readBudgetPlanContext(tx, userId, asOf);
           const row = planContext.current
             ? await tx.query.financeBudgetVersions.findFirst({
                 where: and(
@@ -670,16 +673,28 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
               })
             : null;
           const data = row ? await budgetValue(row, tx) : null;
+          const room = data
+            ? budgetRoomCommunication(
+                await readFinanceBudgetRoom({
+                  db,
+                  tx,
+                  userId,
+                  asOf,
+                  context: planContext,
+                  budget: data,
+                }),
+              )
+            : { optionalDetails: [], disclosures: [] };
+          const status = result({
+            data,
+            disclosures: [...(data ? budgetDisclosures(data) : []), ...room.disclosures],
+            headline: data
+              ? `Your approved budget for ${planContext.month} is balanced.`
+              : `There is no approved budget for ${planContext.month}.`,
+          });
+          status.communication.optionalDetails.push(...room.optionalDetails);
           return {
-            ...withFinanceBudgetPresentation(
-              result({
-                data,
-                disclosures: data ? budgetDisclosures(data) : [],
-                headline: data
-                  ? `Your approved budget for ${planContext.month} is balanced.`
-                  : `There is no approved budget for ${planContext.month}.`,
-              }),
-            ),
+            ...withFinanceBudgetPresentation(status),
             planContext,
           };
         },

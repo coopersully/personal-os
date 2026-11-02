@@ -35,23 +35,45 @@ private struct ActiveReminderDueLabel: View {
   var detail: String?
   var scale: CGFloat = 1
   var countdown = "minutes"
-  var body: some View {
+  private var countdownText: String {
+    status
+      ?? ActiveReminderDueText.compact(
+        due, now: clock.now, seconds: countdown == "seconds")
+  }
+  private var countdownColor: Color {
+    due < clock.now || status == "Retry completion"
+      ? CommitmentColors.danger : CommitmentColors.muted
+  }
+  private var metadataFont: Font {
+    .system(size: 11 * scale, design: .monospaced)
+  }
+  private var fullDueText: String {
+    due.formatted(date: .complete, time: .complete)
+  }
+  private var helpText: String {
+    guard let detail else { return fullDueText }
+    return detail + "\n" + fullDueText
+  }
+  private var accessibilityText: String {
+    let description: String =
+      detail ?? status ?? ActiveReminderDueText.relative(due, now: clock.now)
+    return "Due " + fullDueText + ", " + description
+  }
+  private var labelRow: some View {
     HStack(spacing: 6) {
-      Text(clock.absoluteLabel(for: due)).foregroundStyle(CommitmentColors.muted)
+      Text(clock.absoluteLabel(for: due))
+        .foregroundStyle(CommitmentColors.muted)
       Spacer(minLength: 0)
-      Text(status ?? ActiveReminderDueText.compact(due, now: clock.now, seconds: countdown == "seconds"))
-        .foregroundStyle(
-          due < clock.now || status == "Retry completion"
-            ? CommitmentColors.danger : CommitmentColors.muted)
+      Text(countdownText)
+        .foregroundStyle(countdownColor)
     }
-    .font(.system(size: 11 * scale, design: .monospaced)).lineLimit(1)
-    .help(
-      [detail, due.formatted(date: .complete, time: .complete)].compactMap { $0 }.joined(
-        separator: "\n")
-    )
-    .accessibilityLabel(
-      "Due " + due.formatted(date: .complete, time: .complete) + ", "
-        + (detail ?? status ?? ActiveReminderDueText.relative(due, now: clock.now)))
+  }
+  var body: some View {
+    labelRow
+      .font(metadataFont)
+      .lineLimit(1)
+      .help(helpText)
+      .accessibilityLabel(accessibilityText)
   }
 }
 struct ActiveReminderCompletionShape: Shape {

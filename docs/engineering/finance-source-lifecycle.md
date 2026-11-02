@@ -152,6 +152,12 @@ schedule when it becomes runnable. Existing host bindings retain their original 
 schedule authority. Recovery neither adopts another host's work nor reinterprets prepared/effected
 work under new policy. Later-stage recovery continues through its existing owning workflow.
 
+Message-proof requests for a saved run missing either its schedule or connection binding return
+`run_host_binding_missing` with `owner_inspection_required` and the run ID. Inspect the saved run
+and use only its eligible owning recovery workflow; this diagnostic does not bind or adopt it.
+Fully bound runs still require their original active host and current verified message protocol.
+This distinction alone does not diagnose a particular host rejection or prove Chat or SMS delivery.
+
 Planning exclusion is not maintenance exclusion: `includeInPlanning=false` changes planning totals,
 not provider authorization or ledger evidence requirements. A replacement connected account does
 not repair an older account's authorization. Legacy unverified financial effects still require

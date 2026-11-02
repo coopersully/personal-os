@@ -95,6 +95,14 @@ GitHub issue as a substitute for required Nohmi Linear coverage.
 - Run focused checks while implementing.
 - Run changed-file formatting/lint and affected contract checks before pushing; retain full lint
   in final verification. See `docs/engineering/verification-efficiency.md`.
+- **Before hosted publication:** retain completed applicable native formatting/import checks for
+  the final file bytes, using the existing pinned tool and own configuration. A planned or late
+  check is not proof. Validate the exact body with `.codex/scripts/check-pr-body.sh` and reconcile
+  its live Nohmi Project/direct issues before PR creation. Bundle fixture invariant review with
+  this pass where applicable; do not add a review panel. If formatting writes, check the final file.
+- Reuse unchanged command/file/tool/config authoring evidence; do not demand fresh lint solely for
+  a new commit or base. Refresh changed or comparison-sensitive inputs and preserve newer failures.
+  This does not narrow full frozen-candidate acceptance or grant publication outside assigned scope.
 - Early review and draft publication need focused evidence with gaps recorded. After convergence,
   freeze/commit and obtain complete local or equivalent hosted verification before merge.
 - Fix failures and rerun the relevant stage, then the required verifier.

@@ -50,6 +50,7 @@ node --test \
   ./.codex/scripts/compose-runtime-manager.test.mjs
 bash ./.codex/scripts/environment.test.sh
 PYTHONDONTWRITEBYTECODE=1 python3 .codex/scripts/verification-runner.test.py
+PYTHONDONTWRITEBYTECODE=1 python3 .codex/scripts/verification-admission.test.py
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ./.agents/skills/ship-it/scripts -p '*_test.py'
 
 grep -Eq '^## Work map$' .github/pull_request_template.md &&

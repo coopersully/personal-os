@@ -17,7 +17,7 @@ import {
   financePositionEvidenceSchema,
   financeProvenanceSchema,
 } from "@personal-os/domain";
-import { eq } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { budgetPlanningDate } from "./budget-plan-projection.js";
 import { buildFinancePosition, type PositionAccount, positionRevision } from "./position.js";
@@ -102,7 +102,14 @@ export function createFinancePositionService(input: { db: Database; now: () => D
         const coverageRows = await tx
           .select()
           .from(financeTransactionCoverage)
-          .where(eq(financeTransactionCoverage.userId, userId));
+          .where(
+            and(
+              eq(financeTransactionCoverage.userId, userId),
+              inArray(financeTransactionCoverage.accountId, scope.accountIds),
+              lte(financeTransactionCoverage.fromDate, observedThrough),
+              gte(financeTransactionCoverage.throughDate, scope.from),
+            ),
+          );
         const itemById = new Map(items.map((item) => [item.id, item]));
         const accounts: PositionAccount[] = accountRows.map((row) => {
           const item = row.providerItemRecordId

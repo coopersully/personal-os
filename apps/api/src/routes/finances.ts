@@ -203,6 +203,7 @@ export function registerFinanceRoutes({
           "/v1/finances/categorizations/propose",
           "/v1/finances/scenarios/compare",
           "/v1/finances/budget-policies/preview",
+          "/v1/finances/review-batches/qualification",
         ].includes(context.req.path))
     ) {
       await requireFinanceRead(context, next);

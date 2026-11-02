@@ -28,12 +28,67 @@ function setup(scopes: AccessScope[] = ["finances:read", "finances:write"]) {
     list: vi.fn(async () => []),
     get: vi.fn(async () => ({ id })),
     preview: vi.fn(async () => ({ id })),
+    qualify: vi.fn(async () => ({ advisoryOnly: true, items: [] })),
     execute: vi.fn(async () => ({ id })),
   };
   registerFinanceReviewBacklogRoutes({ app, backlog: backlog as never, batches: batches as never });
   return { app, backlog, batches, principal };
 }
 describe("Finance backlog routes", () => {
+  it("qualifies bounded work under read authority without creating a preview or executing", async () => {
+    const { app, batches, principal } = setup(["finances:read"]);
+    const input = {
+      decisions: [
+        {
+          kind: "categorization",
+          transactionId: id,
+          categoryId: id,
+          expectedTransactionUpdatedAt: "2026-10-24T00:00:00.000Z",
+          expectedTransactionRevision: "1",
+          confidence: 1,
+          rationale: "Inspect",
+          evidence: "Not itself proof",
+          learnMerchant: "never",
+        },
+      ],
+    };
+    const response = await app.request("/v1/finances/review-batches/qualification", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(batches.qualify).toHaveBeenCalledWith(input, { principal, requestId: "request-1" });
+    expect(batches.preview).not.toHaveBeenCalled();
+    expect(batches.execute).not.toHaveBeenCalled();
+    for (const invalid of [
+      { ...input, verified: true },
+      { decisions: Array(26).fill(input.decisions[0]) },
+      { decisions: Array(2).fill(input.decisions[0]) },
+    ]) {
+      expect(
+        (
+          await app.request("/v1/finances/review-batches/qualification", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(invalid),
+          })
+        ).status,
+      ).toBe(400);
+    }
+    const denied = setup([]);
+    expect(
+      (
+        await denied.app.request("/v1/finances/review-batches/qualification", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input),
+        })
+      ).status,
+    ).toBe(403);
+    expect(denied.batches.qualify).not.toHaveBeenCalled();
+  });
   it("uses authenticated ownership and never caches historical evidence", async () => {
     const { app, backlog, batches, principal } = setup();
     const response = await app.request("/v1/finances/review-backlog");

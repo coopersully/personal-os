@@ -4,6 +4,7 @@ import {
   idSchema,
   listFinanceReviewBatchesInputSchema,
   previewFinanceReviewBatchInputSchema,
+  qualifyFinanceMaintenanceWorkInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createFinanceReviewBacklogService } from "../finance/review-backlog-service.js";
@@ -46,6 +47,14 @@ export function registerFinanceReviewBacklogRoutes({
   app.get("/v1/finances/review-batches", requireScope("finances:read"), async (c) =>
     c.json(
       await batches.list(context(c), listFinanceReviewBatchesInputSchema.parse(c.req.query())),
+    ),
+  );
+  app.post("/v1/finances/review-batches/qualification", requireScope("finances:read"), async (c) =>
+    c.json(
+      await batches.qualify(
+        await parseBody(c, qualifyFinanceMaintenanceWorkInputSchema),
+        context(c),
+      ),
     ),
   );
   app.post("/v1/finances/review-batches", requireScope("finances:write"), async (c) =>

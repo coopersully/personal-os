@@ -4,22 +4,27 @@ import {
   accessTokens,
   auditEvents,
   type Database,
+  executionPolicySettings,
   financeAccounts,
   financeCategories,
+  financeProviderItems,
   financeReviewBatchRuns,
   financeReviewCases,
   financeTransactions,
 } from "@personal-os/database";
 import {
   executeFinanceReviewBatchInputSchema,
+  type FinanceMaintenanceQualification,
   type FinanceReviewBatchDecision,
   type FinanceReviewBatchOutcome,
   type FinanceReviewBatchRun,
+  financeMaintenanceQualificationSchema,
   financeReviewBatchDecisionSchema,
   financeReviewBatchOutcomeSchema,
   idSchema,
   listFinanceReviewBatchesInputSchema,
   previewFinanceReviewBatchInputSchema,
+  qualifyFinanceMaintenanceWorkInputSchema,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -27,9 +32,14 @@ import type { Pool, PoolClient, QueryConfig, QueryResultRow } from "pg";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { type createFinanceService, isProviderTransfer } from "../finance-service.js";
+import { effectiveSynchronization } from "../finance-status-service.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
 import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
+import {
+  type FinanceMaintenanceWork,
+  selectFinanceMaintenanceWork,
+} from "./maintenance-work-selection.js";
 
 type Context = { principal: Principal; requestId: string; signal?: AbortSignal };
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -155,6 +165,7 @@ export function createFinanceReviewBatchService({
     userId: string,
     lock: boolean,
     agent = false,
+    counterpartLimit?: number,
   ) {
     // Reconciliation/provider sync lock accounts before their transaction evidence.
     if (lock && decision.kind === "review" && decision.action === "confirm_transfer")
@@ -247,7 +258,15 @@ export function createFinanceReviewBatchService({
             );
           const rows = await (lock
             ? evidenceQuery.for("share", { of: financeTransactions })
-            : evidenceQuery);
+            : counterpartLimit
+              ? evidenceQuery.limit(counterpartLimit)
+              : evidenceQuery);
+          if (counterpartLimit && rows.length >= counterpartLimit)
+            throw new AppError(
+              "conflict",
+              "Counterpart evidence exceeds the qualification bound.",
+              { qualificationReason: "counterpart_evidence_limit" },
+            );
           const evidenceIds = rows.map((row) => row.transaction.id);
           const confirmations = evidenceIds.length
             ? await tx
@@ -377,6 +396,180 @@ export function createFinanceReviewBatchService({
     }
   }
   return {
+    async qualify(raw: unknown, context: Context): Promise<FinanceMaintenanceQualification> {
+      const input = qualifyFinanceMaintenanceWorkInputSchema.parse(raw);
+      const deadline = elapsedNow() + 5_000;
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`set transaction isolation level repeatable read`);
+        await tx.execute(sql`set local statement_timeout = '1000ms'`);
+        await authorize(tx, context, "read");
+        const asOf = now();
+        const principal = context.principal;
+        if (principal.actorType !== "user" && principal.actorType !== "agent")
+          throw new AppError(
+            "forbidden",
+            "Qualification requires an authenticated Finance reader.",
+          );
+        const [policy] = await tx
+          .select({ bypass: executionPolicySettings.reviewBypassEnabled })
+          .from(executionPolicySettings)
+          .where(eq(executionPolicySettings.userId, principal.userId));
+        const [grant] =
+          principal.actorType === "agent"
+            ? await tx
+                .select()
+                .from(accessTokens)
+                .where(eq(accessTokens.id, principal.actorId))
+                .limit(1)
+            : [];
+        // Inspection permission is distinct from standing approval and effect permission.
+        const executionDenied =
+          !principal.scopes.has("finances:write") ||
+          (principal.actorType === "agent" &&
+            (!principal.scopes.has("finances:execute") ||
+              !grant?.scopes.includes("finances:write") ||
+              !grant.scopes.includes("finances:execute")));
+        const approvalReady =
+          !executionDenied && principal.actorType === "agent" && policy?.bypass === true;
+        type Item = FinanceMaintenanceQualification["items"][number];
+        async function source(transactionId: string) {
+          const [transaction] = await tx
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.id, transactionId),
+                eq(financeTransactions.userId, principal.userId),
+              ),
+            )
+            .limit(1);
+          if (!transaction) return null;
+          const [account] = await tx
+            .select()
+            .from(financeAccounts)
+            .where(
+              and(
+                eq(financeAccounts.id, transaction.accountId),
+                eq(financeAccounts.userId, principal.userId),
+              ),
+            )
+            .limit(1);
+          if (!account) return null;
+          const [item] = account.providerItemRecordId
+            ? await tx
+                .select()
+                .from(financeProviderItems)
+                .where(
+                  and(
+                    eq(financeProviderItems.id, account.providerItemRecordId),
+                    eq(financeProviderItems.userId, principal.userId),
+                  ),
+                )
+                .limit(1)
+            : [];
+          const ready =
+            !transaction.pending &&
+            transaction.currencyCode !== null &&
+            (account.provider === "manual"
+              ? account.status === "manual" &&
+                account.providerItemRecordId === null &&
+                account.providerItemId === null &&
+                account.providerAccountId === null
+              : account.status === "connected" &&
+                item?.provider === "plaid" &&
+                item.providerItemId !== null &&
+                account.providerItemId === item.providerItemId &&
+                account.lastSyncedAt !== null &&
+                account.lastSyncedAt <= asOf &&
+                item.lastSyncedAt !== null &&
+                item.lastSyncedAt <= asOf &&
+                effectiveSynchronization(account, asOf).state === "current" &&
+                effectiveSynchronization(item, asOf).state === "current");
+          return {
+            ready,
+            ref: {
+              transactionId: transaction.id,
+              transactionRevision: transaction.contextualRevision.toString(),
+              accountId: account.id,
+              accountRevision: account.contextualRevision.toString(),
+              providerItemId: item?.id ?? null,
+              providerItemUpdatedAt: item?.updatedAt.toISOString() ?? null,
+            },
+          };
+        }
+        const items: Item[] = [];
+        const work: FinanceMaintenanceWork[] = [];
+        for (const [index, decision] of input.decisions.entries()) {
+          if (elapsedNow() >= deadline)
+            throw new AppError(
+              "service_unavailable",
+              "Qualification exceeded its bounded read window.",
+            );
+          const item: Item = {
+            index,
+            transactionId: decision.transactionId,
+            state: "awaiting_evidence",
+            reasons: [],
+            sourceRefs: [],
+          };
+          const primary = await source(decision.transactionId);
+          let sourceReady = primary?.ready === true;
+          let evidenceReady = false;
+          if (!primary) item.reasons.push("source_unavailable");
+          else {
+            item.sourceRefs.push(primary.ref);
+            if (!primary.ready) item.reasons.push("source_not_current");
+            else
+              try {
+                // Reuse the real reciprocal evidence/revision rules; caller prose is not proof.
+                const checked = await validate(tx, decision, principal.userId, false, true, 201);
+                if (checked?.transferCounterpart) {
+                  const counterpart = await source(checked.transferCounterpart.transactionId);
+                  if (counterpart) item.sourceRefs.push(counterpart.ref);
+                  sourceReady = counterpart?.ready === true;
+                  if (!sourceReady) item.reasons.push("counterpart_source_not_current");
+                  else
+                    evidenceReady =
+                      counterpart?.ref.transactionRevision === checked.transferCounterpart.revision;
+                }
+                // Other action families need their owning evidence adapter; do not infer from confidence.
+                if (sourceReady && !evidenceReady)
+                  item.reasons.push("decision_evidence_not_qualified");
+              } catch (error) {
+                if (
+                  !(error instanceof AppError) ||
+                  !["conflict", "invalid_request", "not_found"].includes(error.code)
+                )
+                  throw error;
+                const detail = error.details as { qualificationReason?: string } | undefined;
+                item.reasons.push(
+                  detail?.qualificationReason === "counterpart_evidence_limit"
+                    ? "counterpart_evidence_limit"
+                    : error.code === "conflict"
+                      ? "stale_decision"
+                      : "decision_evidence_not_qualified",
+                );
+              }
+          }
+          if (executionDenied) item.reasons.push("execution_not_authorized");
+          else if (!approvalReady) item.reasons.push("approval_required");
+          work.push({ id: String(index), sourceReady, evidenceReady, approvalReady });
+          items.push(item);
+        }
+        const selected = selectFinanceMaintenanceWork(work);
+        for (const [index, item] of items.entries())
+          item.state = executionDenied
+            ? "authorization_denied"
+            : (selected[index]?.state ?? "source_blocked");
+        return financeMaintenanceQualificationSchema.parse({
+          asOf: asOf.toISOString(),
+          advisoryOnly: true,
+          previewRequired: true,
+          executionRevalidationRequired: true,
+          items,
+        });
+      });
+    },
     async preview(raw: unknown, context: Context): Promise<FinanceReviewBatchRun> {
       const input = previewFinanceReviewBatchInputSchema.parse(raw);
       const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify(input.decisions)).digest("hex")}`;

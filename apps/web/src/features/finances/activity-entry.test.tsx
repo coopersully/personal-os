@@ -21,7 +21,9 @@ const toast = vi.hoisted(() => ({
 vi.mock("sonner", () => ({ toast }));
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
-function entry(): FinanceActivityEntry {
+function entry(): Exclude<FinanceActivityEntry, { kind: "notification_delivery" }> & {
+  kind: "financial_action";
+} {
   return {
     id: "receipt",
     occurredAt: "2026-10-18T10:00:00Z",

@@ -41,7 +41,10 @@ const entry: FinanceActivityEntry = {
     },
   ],
 };
-const page = (entries = [entry], nextCursor: string | null = null): Page => ({
+const page = (
+  entries: FinanceActivityEntry[] = [entry],
+  nextCursor: string | null = null,
+): Page => ({
   entries,
   nextCursor,
   capabilities: {
@@ -309,7 +312,9 @@ it("cannot restore denied evidence from an older in-flight response", async () =
   expect(screen.queryByRole("button", { name: "Next page" })).not.toBeInTheDocument();
 });
 
-function financialEntry(): FinanceActivityEntry {
+function financialEntry(): Exclude<FinanceActivityEntry, { kind: "notification_delivery" }> & {
+  kind: "financial_action";
+} {
   const changes = Array.from({ length: 100 }, (_, i) => ({
     id: `audit-${i}`,
     recordRef: { kind: "transaction", id: `record-${i}` },

@@ -23,7 +23,7 @@ import { budgetPlanningDate } from "./budget-plan-projection.js";
 import type { FinanceTransaction } from "./context.js";
 import { buildFinancePosition, type PositionAccount, positionRevision } from "./position.js";
 import type { RecognitionInput } from "./recognition.js";
-import { type ScopedFinanceLedger, requireScopedLedgerScope } from "./scoped-ledger-reader.js";
+import { requireScopedLedgerScope, type ScopedFinanceLedger } from "./scoped-ledger-reader.js";
 import { spendingDateCoverage } from "./spending-coverage.js";
 
 /** Read-only producer. Authenticated composition supplies userId, never a request payload. */

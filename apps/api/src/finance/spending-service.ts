@@ -31,7 +31,7 @@ import {
 import { eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { FinanceTransaction } from "./context.js";
-import { type ScopedFinanceLedger, requireScopedLedgerScope } from "./scoped-ledger-reader.js";
+import { requireScopedLedgerScope, type ScopedFinanceLedger } from "./scoped-ledger-reader.js";
 import { projectFinanceSpendingMonthlyBudget } from "./spending-budget.js";
 import { projectFinanceSpending, type SpendingEvidenceInput } from "./spending-contributions.js";
 

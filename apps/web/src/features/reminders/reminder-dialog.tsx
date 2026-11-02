@@ -122,6 +122,7 @@ export function ReminderDialog({
                   </ShadcnField>
                 </div>
                 <ActiveReminderField
+                  kind="reminder"
                   ownerId={user.id}
                   {...(reminder ? { value: reminder.activeReminder ?? false } : {})}
                 />

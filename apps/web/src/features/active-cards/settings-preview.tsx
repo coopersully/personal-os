@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   CheckIcon,
@@ -10,7 +10,7 @@ import {
 } from "@/components/icons";
 import { Field } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
-import { FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -46,7 +46,7 @@ export const initialCardPreferences = {
   sharing: "hide",
 };
 export type CardPreferences = typeof initialCardPreferences;
-type PreferenceKey = keyof CardPreferences;
+export type PreferenceKey = keyof CardPreferences;
 type KeysOfType<T> = {
   [K in PreferenceKey]: CardPreferences[K] extends T ? K : never;
 }[PreferenceKey];
@@ -66,25 +66,43 @@ function Toggle({
 }) {
   const id = useId();
   return (
-    <Field orientation="horizontal" data-disabled={disabled}>
-      <div className="active-card-field-copy">
+    <Field orientation="horizontal" controlWidth="compact" data-disabled={disabled}>
+      <FieldContent className="active-card-field-copy">
         <FieldLabel htmlFor={id}>{label}</FieldLabel>
         {description && <FieldDescription>{description}</FieldDescription>}
-      </div>
+      </FieldContent>
       <Switch id={id} checked={checked} onCheckedChange={onChange} disabled={disabled} />
     </Field>
   );
 }
 
-/** Browser-only design sandbox. No account or desktop preference writes. */
-export function ActiveCardsSettingsPreview() {
-  const [prefs, setPrefs] = useState(initialCardPreferences);
+export type ActiveCardSettingsSurface = {
+  onMac: boolean;
+  deviceDisabled: boolean;
+  defaultsDisabled: boolean;
+  displays?: Array<{ id: string; label: string; isPrimary: boolean }>;
+  focusDetails?: ReactNode;
+};
+/** Shared controls and sample-only preview; the domain adapter owns persistence. */
+export function ActiveCardsSettingsPreview({
+  value,
+  onChange,
+  live,
+}: {
+  value?: CardPreferences;
+  onChange?: (key: PreferenceKey, value: CardPreferences[PreferenceKey], commit?: boolean) => void;
+  live?: ActiveCardSettingsSurface;
+} = {}) {
+  const [localPrefs, setPrefs] = useState(initialCardPreferences);
+  const prefs = value ?? localPrefs;
   const [presence, setPresence] = useState("active");
   const [readyVersion, setReadyVersion] = useState(0);
   const ready = readyVersion > 0;
   const frame = useRef<HTMLIFrameElement>(null);
-  const update = <K extends PreferenceKey>(key: K, value: CardPreferences[K]) =>
-    setPrefs((old) => ({ ...old, [key]: value }));
+  const update = <K extends PreferenceKey>(key: K, value: CardPreferences[K], commit = true) => {
+    if (onChange) onChange(key, value, commit);
+    else setPrefs((old) => ({ ...old, [key]: value }));
+  };
   const send = (command: string, extra: Record<string, unknown> = {}) =>
     frame.current?.contentWindow?.postMessage(
       { type: "nohmi:active-cards-preview", command, ...extra },
@@ -130,7 +148,12 @@ export function ActiveCardsSettingsPreview() {
       checked={Boolean(prefs[key])}
       onChange={(value) => update(key, value)}
       {...(description === undefined ? {} : { description })}
-      disabled={disabled}
+      disabled={Boolean(
+        disabled ||
+          (key === "defaultTasks" || key === "defaultReminders"
+            ? live?.defaultsDisabled
+            : live?.deviceDisabled),
+      )}
     />
   );
   const select = (
@@ -145,7 +168,7 @@ export function ActiveCardsSettingsPreview() {
         id={`cards-${key}`}
         value={String(prefs[key])}
         onChange={(event) => update(key, event.target.value)}
-        disabled={disabled}
+        disabled={Boolean(disabled || live?.deviceDisabled)}
       >
         {options.map(([value, text]) => (
           <NativeSelectOption key={value} value={value}>
@@ -177,14 +200,17 @@ export function ActiveCardsSettingsPreview() {
         max={max}
         step={1}
         value={[Number(prefs[key])]}
-        onValueChange={(values) => update(key, values[0] ?? 0)}
-        disabled={disabled}
+        onValueChange={(values) => update(key, values[0] ?? 0, false)}
+        onValueCommit={(values) => update(key, values[0] ?? 0)}
+        disabled={Boolean(disabled || live?.deviceDisabled)}
       />
     </Field>
   );
 
   return (
-    <div className="active-card-settings">
+    <div
+      className={live ? "active-card-settings active-card-settings--live" : "active-card-settings"}
+    >
       <div className="active-card-preview-column">
         <SettingsSection
           title="Try your cards"
@@ -250,8 +276,11 @@ export function ActiveCardsSettingsPreview() {
             </Field>
           </FieldGroup>
           <p className="active-card-preview-note">
-            Sample cards only. Changes stay in this preview; your account and Mac preferences are
-            untouched.
+            {live
+              ? live.onMac
+                ? "Sample cards only. Settings save to your account and this Mac; preview actions never change real items."
+                : "Creation defaults save to your account. Layout, sound and appearance controls are previews here; open nohmi on your Mac to save them on that device."
+              : "Sample cards only. Changes stay in this preview; your account and Mac preferences are untouched."}
           </p>
         </SettingsSection>
         <div className="active-card-preview-principle">
@@ -265,19 +294,17 @@ export function ActiveCardsSettingsPreview() {
       </div>
       <div className="active-card-controls-column">
         <SettingsSection
+          layout={live ? "rows" : "content"}
           title="Defaults"
           description="Choose what starts active. Existing items keep their setting."
         >
           <FieldGroup>
-            {toggle("defaultTasks", "New tasks", "Use active cards for newly created tasks.")}
-            {toggle(
-              "defaultReminders",
-              "New reminders",
-              "Use active cards for newly created reminders.",
-            )}
+            {toggle("defaultTasks", "New tasks")}
+            {toggle("defaultReminders", "New reminders", undefined)}
           </FieldGroup>
         </SettingsSection>
         <SettingsSection
+          layout={live ? "rows" : "content"}
           title="On this Mac"
           description="Cards stay until completed. Manage availability here, not from a card’s menu."
         >
@@ -286,7 +313,7 @@ export function ActiveCardsSettingsPreview() {
             {toggle(
               "returnCards",
               "Return with unfinished cards",
-              "While away, send a normal notification. Bring unfinished cards back when you return.",
+              "Show unfinished cards after returning; send normal notifications while away.",
               !prefs.enabled,
             )}
             {select(
@@ -298,18 +325,21 @@ export function ActiveCardsSettingsPreview() {
               ],
               !prefs.enabled,
             )}
-            {select(
-              "sharing",
-              "When screen sharing",
-              [
-                ["hide", "Hide until sharing ends"],
-                ["show", "Keep cards visible"],
-              ],
-              !prefs.enabled,
-            )}
+            {live?.focusDetails}
+            {!live &&
+              select(
+                "sharing",
+                "When screen sharing",
+                [
+                  ["hide", "Hide until sharing ends"],
+                  ["show", "Keep cards visible"],
+                ],
+                !prefs.enabled,
+              )}
           </FieldGroup>
         </SettingsSection>
         <SettingsSection
+          layout={live ? "rows" : "content"}
           title="Placement"
           description="Each card starts at its smallest size. Drag and resize it whenever you need."
         >
@@ -317,10 +347,19 @@ export function ActiveCardsSettingsPreview() {
             {select(
               "monitor",
               "Start on",
-              [
-                ["primary", "Main display"],
-                ["external", "External display · preview"],
-              ],
+              live
+                ? [
+                    ["pointer", "Display with the pointer"],
+                    ["primary", "Main display"],
+                    ...(live.displays ?? []).map((display): [string, string] => [
+                      display.id,
+                      display.label,
+                    ]),
+                  ]
+                : [
+                    ["primary", "Main display"],
+                    ["external", "External display · preview"],
+                  ],
               !prefs.enabled,
             )}
             {select(
@@ -363,6 +402,7 @@ export function ActiveCardsSettingsPreview() {
           </FieldGroup>
         </SettingsSection>
         <SettingsSection
+          layout={live ? "rows" : "content"}
           title="Grouping"
           description="Click a divider to lock a pair. Shift-click affects every connected card."
         >
@@ -397,8 +437,9 @@ export function ActiveCardsSettingsPreview() {
           </Button>
         </SettingsSection>
         <SettingsSection
+          layout={live ? "rows" : "content"}
           title="Sound & motion"
-          description="The same minimal Earshot sound family as the desktop pet and rituals."
+          description="Minimal Earshot cues from nohmi’s shared desktop sound pack."
         >
           <FieldGroup>
             {toggle("sounds", "Play card sounds")}
@@ -439,6 +480,7 @@ export function ActiveCardsSettingsPreview() {
           </div>
         </SettingsSection>
         <SettingsSection
+          layout={live ? "rows" : "content"}
           title="Appearance"
           description="Uses nohmi’s theme. Exact due times remain visible in every format."
         >
@@ -458,19 +500,21 @@ export function ActiveCardsSettingsPreview() {
             ])}
           </FieldGroup>
         </SettingsSection>
-        <Button
-          className="self-start"
-          variant="ghost"
-          onClick={() => {
-            setPrefs(initialCardPreferences);
-            setPresence("active");
-            send("reset");
-            toast("Preview preferences restored");
-          }}
-        >
-          <RefreshIcon />
-          Restore preview defaults
-        </Button>
+        {!live && (
+          <Button
+            className="self-start"
+            variant="ghost"
+            onClick={() => {
+              setPrefs(initialCardPreferences);
+              setPresence("active");
+              send("reset");
+              toast("Preview preferences restored");
+            }}
+          >
+            <RefreshIcon />
+            Restore preview defaults
+          </Button>
+        )}
       </div>
     </div>
   );

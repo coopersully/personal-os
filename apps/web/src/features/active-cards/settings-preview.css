@@ -179,3 +179,10 @@
     background: var(--sidebar);
   }
 }
+
+.active-card-settings--live .active-card-controls-column [data-slot="field-group"] {
+  gap: 0;
+}
+.active-card-settings--live .active-card-controls-column [data-slot="field-content"] {
+  min-width: 0;
+}

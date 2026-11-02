@@ -83,3 +83,43 @@ mod active_card_tests {
         assert!(value.validate().is_err());
     }
 }
+
+#[cfg(test)]
+mod expanded_active_card_tests {
+    use crate::desktop::DesktopSettings;
+    #[test]
+    fn old_preferences_keep_values_and_new_fields_validate() {
+        let mut settings: DesktopSettings =
+            serde_json::from_str(r#"{"activeCardInteractions":{"shake":false,"volume":0.7}}"#)
+                .unwrap();
+        assert!(!settings.active_card_interactions.shake);
+        assert_eq!(settings.active_card_interactions.volume, 0.7);
+        assert_eq!(settings.active_card_interactions.anchor, "top-right");
+        assert_eq!(settings.active_card_interactions.magnet, "eager");
+        assert!(!settings.active_card_interactions.respect_focus);
+        settings.active_card_interactions.starting_display =
+            "11111111-2222-3333-4444-555555555555".into();
+        settings.active_card_interactions.edge_spacing = 40.0;
+        settings.active_card_interactions.completion_volume = 0.0;
+        settings.validate().unwrap();
+        let value = serde_json::to_value(&settings).unwrap();
+        assert_eq!(value["activeCardInteractions"]["edgeSpacing"], 40.0);
+        for (field, invalid) in [
+            ("edgeSpacing", serde_json::json!(41)),
+            ("arrivalVolume", serde_json::json!(-0.1)),
+            ("completionVolume", serde_json::json!(1.1)),
+            ("interactionVolume", serde_json::json!(-1)),
+            ("anchor", serde_json::json!("invalid")),
+            ("magnet", serde_json::json!("invalid")),
+            ("textScale", serde_json::json!("invalid")),
+            ("titleLines", serde_json::json!("invalid")),
+            ("countdown", serde_json::json!("invalid")),
+            ("startingDisplay", serde_json::json!("fake-display")),
+        ] {
+            let mut candidate = value.clone();
+            candidate["activeCardInteractions"][field] = invalid;
+            let mut candidate: DesktopSettings = serde_json::from_value(candidate).unwrap();
+            assert!(candidate.validate().is_err(), "{field}");
+        }
+    }
+}

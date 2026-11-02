@@ -13,6 +13,7 @@ import {
   updateTaskInputSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { createActiveReminderService } from "./active-reminder-service.js";
 import { createReminderService } from "./reminder-service.js";
 import { createTaskService } from "./task-service.js";
 import type { Principal } from "./types.js";
@@ -138,6 +139,66 @@ describe.sequential("active reminder defaults and item contracts", () => {
     await expect(
       tasks.create({ ...input, activeReminder: false }, context()),
     ).rejects.toMatchObject({ code: "conflict" });
+  });
+  it("uses each independent default for new items and leaves prior items unchanged", async () => {
+    const preferences = createActiveReminderService({
+      db: database.db,
+      now: () => new Date(),
+      cursorSecret: "defaults-test",
+    });
+    const priorTask = await tasks.create(
+      createTaskInputSchema.parse({ title: "Prior task", activeReminder: false }),
+      context(),
+    );
+    const priorReminder = await reminders.create(
+      createReminderInputSchema.parse({ title: "Prior reminder", activeReminder: true }),
+      context(),
+    );
+    for (const [taskDefault, reminderDefault] of [
+      [true, false],
+      [false, true],
+    ] as const) {
+      const before = await preferences.getPreferences(owner);
+      await preferences.savePreferences(
+        owner,
+        {
+          defaultTaskActiveReminder: taskDefault,
+          defaultReminderActiveReminder: reminderDefault,
+          expectedRevision: before.revision,
+        },
+        context(),
+      );
+      expect(
+        await tasks.create(createTaskInputSchema.parse({ title: "Independent task" }), context()),
+      ).toMatchObject({ activeReminder: taskDefault });
+      expect(
+        await reminders.create(
+          createReminderInputSchema.parse({ title: "Independent reminder" }),
+          context(),
+        ),
+      ).toMatchObject({ activeReminder: reminderDefault });
+      expect(
+        await tasks.create(
+          createTaskInputSchema.parse({ title: "Explicit task", activeReminder: !taskDefault }),
+          context(),
+        ),
+      ).toMatchObject({ activeReminder: !taskDefault });
+      expect(
+        await reminders.create(
+          createReminderInputSchema.parse({
+            title: "Explicit reminder",
+            activeReminder: !reminderDefault,
+          }),
+          context(),
+        ),
+      ).toMatchObject({ activeReminder: !reminderDefault });
+    }
+    const rows = await database.pool.query(
+      "SELECT id, active_reminder FROM reminders WHERE id = ANY($1::uuid[])",
+      [[priorTask.id, priorReminder.id]],
+    );
+    expect(rows.rows.find((row) => row.id === priorTask.id)?.active_reminder).toBe(false);
+    expect(rows.rows.find((row) => row.id === priorReminder.id)?.active_reminder).toBe(true);
   });
   it("uses normal concurrency and owner checks for flag updates and audits the flag", async () => {
     const reminder = await reminders.create(

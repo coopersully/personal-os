@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
   createDatabaseClient,
@@ -13,6 +15,8 @@ import type { Principal } from "./types.js";
 
 const owner = randomUUID();
 const other = randomUUID();
+const legacyEnabled = randomUUID();
+const legacyDisabled = randomUUID();
 const instant = new Date("2026-10-22T12:00:00Z");
 const principal: Principal = {
   userId: owner,
@@ -27,15 +31,35 @@ describe.sequential("active reminder API persistence", () => {
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine").start();
     database = createDatabaseClient(container.getConnectionUri());
-    await migrateDatabase(database.db, resolve("packages/database/migrations"));
+    const priorMigrations = await mkdtemp(resolve(tmpdir(), "active-reminder-migration-"));
+    try {
+      await cp(resolve("packages/database/migrations"), priorMigrations, { recursive: true });
+      const journalPath = resolve(priorMigrations, "meta/_journal.json");
+      const journal = JSON.parse(await readFile(journalPath, "utf8"));
+      journal.entries = journal.entries.filter(
+        (entry: { tag: string }) => entry.tag !== "0132_active_reminder_creation_defaults",
+      );
+      await writeFile(journalPath, JSON.stringify(journal));
+      await migrateDatabase(database.db, priorMigrations);
+    } finally {
+      await rm(priorMigrations, { recursive: true, force: true });
+    }
     await database.db.insert(users).values(
-      [owner, other].map((id) => ({
+      [owner, other, legacyEnabled, legacyDisabled].map((id) => ({
         id,
         email: `${id}@example.test`,
         displayName: "Active fixture",
         passwordHash: "unused",
       })),
     );
+    await database.pool.query(
+      "INSERT INTO active_reminder_preferences(user_id, default_active_reminder, revision) VALUES ($1,true,7),($2,false,2)",
+      [legacyEnabled, legacyDisabled],
+    );
+    await database.db
+      .insert(reminders)
+      .values({ userId: legacyEnabled, title: "Existing item", activeReminder: false });
+    await migrateDatabase(database.db, resolve("packages/database/migrations"));
     service = createActiveReminderService({
       db: database.db,
       now: () => instant,
@@ -46,9 +70,30 @@ describe.sequential("active reminder API persistence", () => {
     await database?.close();
     await container?.stop();
   });
+  it("preserves pre-migration enabled and disabled defaults without changing existing items or revisions", async () => {
+    expect(await service.getPreferences(legacyEnabled)).toEqual({
+      defaultActiveReminder: true,
+      defaultTaskActiveReminder: true,
+      defaultReminderActiveReminder: true,
+      revision: 7,
+    });
+    expect(await service.getPreferences(legacyDisabled)).toEqual({
+      defaultActiveReminder: false,
+      defaultTaskActiveReminder: false,
+      defaultReminderActiveReminder: false,
+      revision: 2,
+    });
+    const result = await database.pool.query(
+      "SELECT active_reminder FROM reminders WHERE user_id=$1",
+      [legacyEnabled],
+    );
+    expect(result.rows).toEqual([{ active_reminder: false }]);
+  });
   it("atomically saves owner preferences with revision conflicts and an audit", async () => {
     expect(await service.getPreferences(owner)).toEqual({
       defaultActiveReminder: false,
+      defaultTaskActiveReminder: false,
+      defaultReminderActiveReminder: false,
       revision: 0,
     });
     const context = { principal, requestId: randomUUID() };
@@ -58,7 +103,12 @@ describe.sequential("active reminder API persistence", () => {
         { defaultActiveReminder: true, expectedRevision: 0 },
         context,
       ),
-    ).toEqual({ defaultActiveReminder: true, revision: 1 });
+    ).toEqual({
+      defaultActiveReminder: true,
+      defaultTaskActiveReminder: true,
+      defaultReminderActiveReminder: true,
+      revision: 1,
+    });
     const concurrent = await Promise.allSettled(
       [true, false].map((defaultActiveReminder) =>
         service.savePreferences(owner, { defaultActiveReminder, expectedRevision: 1 }, context),
@@ -71,6 +121,8 @@ describe.sequential("active reminder API persistence", () => {
     ).rejects.toMatchObject({ code: "forbidden" });
     expect(await service.getPreferences(other)).toEqual({
       defaultActiveReminder: false,
+      defaultTaskActiveReminder: false,
+      defaultReminderActiveReminder: false,
       revision: 0,
     });
     expect(
@@ -81,6 +133,52 @@ describe.sequential("active reminder API persistence", () => {
         )
       ).rows[0]?.n,
     ).toBe(2);
+  });
+  it("saves independent defaults, rejects stale writes, and lets legacy callers set both", async () => {
+    const context = { principal, requestId: randomUUID() };
+    const before = await service.getPreferences(owner);
+    expect(
+      await service.savePreferences(
+        owner,
+        {
+          defaultTaskActiveReminder: true,
+          defaultReminderActiveReminder: false,
+          expectedRevision: before.revision,
+        },
+        context,
+      ),
+    ).toEqual({
+      defaultActiveReminder: false,
+      defaultTaskActiveReminder: true,
+      defaultReminderActiveReminder: false,
+      revision: before.revision + 1,
+    });
+    await expect(
+      service.savePreferences(
+        owner,
+        {
+          defaultTaskActiveReminder: false,
+          defaultReminderActiveReminder: true,
+          expectedRevision: before.revision,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(
+      await service.savePreferences(
+        owner,
+        { defaultActiveReminder: true, expectedRevision: before.revision + 1 },
+        { ...context, requestId: randomUUID() },
+      ),
+    ).toMatchObject({ defaultTaskActiveReminder: true, defaultReminderActiveReminder: true });
+    const audit = await database.pool.query(
+      "SELECT after FROM audit_events WHERE request_id=$1 ORDER BY created_at LIMIT 1",
+      [context.requestId],
+    );
+    expect(audit.rows[0]?.after).toMatchObject({
+      defaultTaskActiveReminder: true,
+      defaultReminderActiveReminder: false,
+    });
   });
   it("pages beyond pet limits with a fixed cutoff and owner-bound signed cursors", async () => {
     const { rows: lists } = await database.pool.query(

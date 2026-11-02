@@ -10,6 +10,7 @@ import {
   type ActiveReminderPreferences,
   idSchema,
   isoDateTimeSchema,
+  type SaveActiveReminderPreferences,
 } from "@personal-os/domain";
 import { and, asc, eq, gt, isNull, lte, ne, or } from "drizzle-orm";
 import { z } from "zod";
@@ -63,16 +64,26 @@ export function createActiveReminderService({
     },
     async savePreferences(
       userId: string,
-      input: { defaultActiveReminder: boolean; expectedRevision: number },
+      input: SaveActiveReminderPreferences,
       context: { principal: Principal; requestId: string },
     ): Promise<ActiveReminderPreferences> {
       if (context.principal.actorType !== "user" || context.principal.userId !== userId)
         throw new AppError("forbidden", "Sign in to change active reminder preferences.");
       return db.transaction(async (tx) => {
         const before = await readActiveReminderPreferences(tx, userId);
+        const defaultTaskActiveReminder =
+          "defaultActiveReminder" in input
+            ? input.defaultActiveReminder
+            : input.defaultTaskActiveReminder;
+        const defaultReminderActiveReminder =
+          "defaultActiveReminder" in input
+            ? input.defaultActiveReminder
+            : input.defaultReminderActiveReminder;
         const value = {
           userId,
-          defaultActiveReminder: input.defaultActiveReminder,
+          defaultActiveReminder: defaultTaskActiveReminder && defaultReminderActiveReminder,
+          defaultTaskActiveReminder,
+          defaultReminderActiveReminder,
           revision: input.expectedRevision + 1,
           updatedAt: now(),
         };
@@ -100,6 +111,8 @@ export function createActiveReminderService({
           );
         const after = {
           defaultActiveReminder: saved.defaultActiveReminder,
+          defaultTaskActiveReminder,
+          defaultReminderActiveReminder,
           revision: saved.revision,
         };
         await tx.insert(auditEvents).values(

@@ -1278,22 +1278,13 @@ it.each([
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
-describe("active card interactions", () => {
-  it("autosaves device controls while preserving delivery and account defaults", async () => {
+describe("active card settings ownership", () => {
+  it("links to the canonical editor without duplicating active card controls", async () => {
     mount({ section: "notifications" });
-    const shake = await screen.findByRole("switch", { name: "Shake to gather" });
-    expect(shake).toBeChecked();
-    await userEvent.click(shake);
-    await userEvent.click(screen.getByRole("switch", { name: "Lock new joins automatically" }));
-    fireEvent.change(screen.getByLabelText(/Card volume/), { target: { value: "50" } });
-    const saved = await save();
-    expect(saved.activeCardInteractions).toMatchObject({
-      shake: false,
-      autoLock: true,
-      volume: 0.5,
-    });
-    expect(saved.notifications).toEqual(settings.notifications);
-    expect(saved.activeRemindersEnabled ?? true).toBe(true);
-    expect(screen.getByLabelText("Shake sensitivity")).toBeDisabled();
+    expect(await screen.findByRole("link", { name: /Active cards/ })).toHaveAttribute(
+      "href",
+      "/settings?page=active-cards",
+    );
+    expect(screen.queryByRole("switch", { name: "Shake to gather" })).not.toBeInTheDocument();
   });
 });

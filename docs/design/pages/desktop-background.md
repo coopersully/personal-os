@@ -436,12 +436,13 @@ boundaries retain their date-only meaning through the native snapshot; local all
 account time zone. An all-day occasion remains visible through the end of its local calendar day.
 
 
-## Active reminders (2026-10-22 source implementation)
+## Active reminders (source implementation)
 
-Tasks and reminders store an `activeReminder` flag. The account creation default starts off and is
-available in Tasks settings on web and desktop. A new item can inherit that default or explicitly
-select On/Off; changing the default leaves existing items alone. Desktop Notifications separately
-pauses cards on the current Mac while ordinary system notification preferences continue to apply.
+Tasks and reminders store an `activeReminder` flag. Settings → Active cards owns separate
+account creation defaults for Tasks and Reminders, initially off. A new item inherits its kind's
+default unless explicitly set On/Off; changing defaults leaves existing items alone. The same page
+pauses cards on the current Mac while ordinary notification preferences remain authoritative.
+Tasks and Notifications link here rather than maintaining duplicate editors.
 
 The native companion presents each due task or reminder in its own compact, non-activating window.
 Match the shared TaskItem/ReminderItem rows: a filled 16-point completion control (rounded square for a task, circle for a reminder), medium
@@ -486,10 +487,19 @@ wrapping only when screen height requires it. Gather is also available as a menu
 Enablement and Low/Medium/High sensitivity mirror the pet’s shoo gesture thresholds; the gesture
 requires a held drag and never completes or dismisses an item. New joins default to unlocked.
 The browser playground is `apps/web/active-cards-playground.html`, served by `python3 apps/web/scripts/preview-active-cards.py` (loopback only, sample HTML only)
-or the worktree’s development runtime; it is not a production build entry. It uses sample records and simulated
+or the worktree’s development runtime. The same sample-only HTML ships as the settings preview
+asset; standalone controls do not save real preferences. It uses synthetic records and simulated
 presence/Dock geometry, not native Accessibility or real notification delivery.
 
-Settings live in Settings → Notifications → Active reminder cards, with device-local card enablement/pause, return behavior, shake enablement/sensitivity, snapping/slot guides, new-join locking, sound/volume and Reduce Motion. The existing account creation default and delivery controls remain unchanged; separate task/reminder defaults remain a browser proposal. Placement restoration uses the existing persistent display UUID. Screen-sharing privacy and automatic Focus suppression remain outside this card-interaction refinement; the existing preview and permission controls remain authoritative.
+Settings live in Settings → Active cards, with device-local availability/return behavior,
+starting display and anchor, spacing, position memory, snapping/slot guides and magnet strength,
+new-join locking, shake sensitivity, master/semantic Earshot levels, reduced motion, text size,
+title wrapping and countdown detail. Device choices update native presentation and preserve legacy
+settings defaults. Display inventory uses actual display UUIDs with primary/pointer fallbacks.
+The sample preview is synthetic and never mutates source items. Account defaults save in browsers;
+Mac presentation controls are clearly preview-only there. The simulated Dock is always sample-only.
+Optional Focus waiting uses public explicit authorization and conservative unknown state.
+General screen-sharing detection is unsupported; manually pause cards before sharing private material.
 No maximum-visible or automatic collapsing setting should silently hide unfinished items.
 Right-click always offers eight visible commands: Complete/Retry completion, View in nohmi, Snooze 15m; Separate this card, Move to edge, Reset to smallest; Gather all into stack, and Active card settings. Two separators divide these groups. AppKit alternate menu items track Shift live for group completion/snooze, Unlock this group, group edge placement and group reset. Native modifier swaps retain keyboard focus and menu geometry using platform behavior; they do not reproduce the browser’s CSS label animation. Pending or stale completion stays disabled, group completion sends individual acknowledged source operations, and a failed item keeps its own retry state. There is no per-card active-off action. Snooze persists a 15-minute account/occurrence-local deadline before removing the card and reuses ordinary notification scheduling for fallback; fresh return/delivery gates still apply.
 
@@ -510,7 +520,9 @@ short fade without scaling. Never retire a card or play success audio on an unac
 Elapsed input under 120 seconds is only one activity signal: session, loginwindow/lock and display
 state also gate presentation. Quiet hours, source enablement, OS permission, and preview privacy
 remain authoritative. With previews off, titles are hidden. Custom cards can appear during macOS
-Focus; do not imply they automatically inherit Focus suppression. Existing cards may remain during
+Focus by default; optional Focus waiting hides them when Focus is on or status is unknown after
+explicit authorization. Permission state and Focus state are separate. Restoration and new ordinary
+fallback handoffs require a fresh inventory. Existing cards may remain during
 quiet hours, but hidden/new cards wait for the window to end.
 
 While away, ordinary OS delivery remains scheduled. Returning reveals a still-incomplete opted-in

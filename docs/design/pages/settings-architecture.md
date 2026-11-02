@@ -12,7 +12,7 @@ history distinct. Preserve a single canonical editor for each value and all exis
 | Account | Profile, Connections, Security & access, Activity log |
 | Personal | Goals, Motives, Rituals |
 | Workspaces | Calendar, Tasks, Mail, Finances |
-| App | Appearance, Wallpaper (native), Notifications (where supported), Texting, Desktop app, Desktop pet (native) |
+| App | Appearance, Active cards, Wallpaper (native), Notifications (where supported), Texting, Desktop app, Desktop pet (native) |
 
 Connections owns external-account management and links to connected-assistant credentials.
 Security & access owns password/session controls, approval policy and the cross-workspace access

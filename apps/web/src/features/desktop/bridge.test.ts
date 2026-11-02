@@ -159,3 +159,36 @@ describe("desktop API transport", () => {
     ).rejects.toThrow("Request cancelled");
   });
 });
+
+it("forwards device card preferences and public Focus authorization without an account store", async () => {
+  const { saveDesktopSettings, nativeAction } = await import("./bridge.js");
+  const settings = {
+    serverUrl: "https://custom.test",
+    activeCardInteractions: {
+      startingDisplay: "11111111-2222-3333-4444-555555555555",
+      anchor: "bottom-center",
+      edgeSpacing: 28,
+      rememberPositions: false,
+      magnet: "gentle",
+      arrivalVolume: 0.2,
+      completionVolume: 0.7,
+      interactionVolume: 0,
+      textScale: "large",
+      titleLines: "two",
+      countdown: "seconds",
+      respectFocus: true,
+    },
+  } as import("./bridge.js").DesktopSettings;
+  const identity = { serverUrl: settings.serverUrl, accountId: "owner" };
+  invoke.mockResolvedValue({ settings });
+  await saveDesktopSettings(settings, identity);
+  expect(invoke).toHaveBeenLastCalledWith("desktop_save_settings", {
+    settings,
+    expectedIdentity: identity,
+    preservePetAppearance: true,
+  });
+  await nativeAction("request_focus_permission");
+  expect(invoke).toHaveBeenLastCalledWith("desktop_native_action", {
+    action: "request_focus_permission",
+  });
+});

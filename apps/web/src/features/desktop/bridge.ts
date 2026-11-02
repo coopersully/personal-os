@@ -43,7 +43,26 @@ export type DesktopSettings = {
     sounds: boolean;
     volume: number;
     reducedMotion: boolean;
+    respectFocus: boolean;
     returnCards: boolean;
+    startingDisplay: string;
+    anchor:
+      | "top-left"
+      | "top-center"
+      | "top-right"
+      | "center"
+      | "bottom-left"
+      | "bottom-center"
+      | "bottom-right";
+    edgeSpacing: number;
+    rememberPositions: boolean;
+    magnet: "gentle" | "eager";
+    arrivalVolume: number;
+    completionVolume: number;
+    interactionVolume: number;
+    textScale: "small" | "standard" | "large";
+    titleLines: "one" | "two";
+    countdown: "minutes" | "seconds";
   };
   notifications: NotificationSettings;
 };
@@ -58,6 +77,10 @@ export type DesktopStatus = {
     accessibilityPermission?: boolean;
     dockGeometryAvailable?: boolean;
     activeRemindersAvailable?: boolean;
+    focusPermission?: "authorized" | "denied" | "restricted" | "notDetermined" | "unknown";
+    focusStatus?: "on" | "off" | "unknown";
+    focusPermissionPending?: boolean;
+    displays?: { id: string; label: string; isPrimary: boolean }[];
     activeRemindersError?: string;
     notificationPermission?: string;
     notificationPermissionPending?: boolean;

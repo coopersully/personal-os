@@ -885,3 +885,91 @@ extension ActiveReminderLifecycleTests {
     XCTAssertTrue(presenter.pending.isEmpty)
   }
 }
+
+extension ActiveReminderLifecycleTests {
+  @MainActor
+  func testFocusHidesAndRestoresUnfinishedCardsWithoutCompletion() throws {
+    let time = Date()
+    var focus = "off"
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sink = ActiveTestSink()
+    let presenter = ActiveTestPresenter()
+    let router = ActiveReminderRouter(
+      notifications: sink, presenter: presenter,
+      activity: { MacActivityState(isActive: true, isAvailable: true, shouldHide: false) },
+      now: { time },
+      makeStore: {
+        try ActiveReminderStore(url: root.appendingPathComponent("state"), identity: $0)
+      },
+      startTimer: false, focusStatus: { focus })
+    var preferences = NotificationPreferences()
+    preferences.enabled = true
+    router.configure(preferences: preferences, calendar: .current, enabled: true)
+    var interactions = ActiveReminderInteractions()
+    interactions.respectFocus = true
+    router.configureInteractions(interactions)
+    let item = ActiveReminderCandidate(
+      id: UUID().uuidString, kind: "task", title: "Focus fixture",
+      dueAt: ISO8601DateFormatter().string(from: time), activeReminder: true, revision: 1)
+    try router.ingest(
+      ActiveReminderInventory(
+        serverUrl: "https://fixture.test", accountId: "owner", generation: 1,
+        generatedAt: ISO8601DateFormatter().string(from: time), items: [item]))
+    XCTAssertTrue(presenter.isVisible)
+    focus = "on"
+    router.tick()
+    XCTAssertFalse(presenter.isVisible)
+    XCTAssertTrue(presenter.completedIDs.isEmpty)
+    focus = "unknown"
+    router.tick()
+    XCTAssertFalse(presenter.isVisible)
+    focus = "off"
+    router.tick()
+    XCTAssertTrue(presenter.isVisible)
+    XCTAssertEqual(presenter.items.map(\.cardID), [item.cardID])
+  }
+}
+
+extension ActiveReminderLifecycleTests {
+  @MainActor
+  func testFocusNeverHandsOffStaleUnshownInventoryAndFreshHandoffIsNotRepeated() throws {
+    let time = Date()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sink = ActiveTestSink()
+    let presenter = ActiveTestPresenter()
+    let router = ActiveReminderRouter(
+      notifications: sink, presenter: presenter,
+      activity: { MacActivityState(isActive: true, isAvailable: true, shouldHide: false) },
+      now: { time },
+      makeStore: {
+        try ActiveReminderStore(url: root.appendingPathComponent("state"), identity: $0)
+      },
+      startTimer: false, focusStatus: { "on" })
+    var preferences = NotificationPreferences()
+    preferences.enabled = true
+    router.configure(preferences: preferences, calendar: .current, enabled: true)
+    var interactions = ActiveReminderInteractions()
+    interactions.respectFocus = true
+    router.configureInteractions(interactions)
+    let item = ActiveReminderCandidate(
+      id: UUID().uuidString, kind: "task", title: "Focus stale fixture",
+      dueAt: ISO8601DateFormatter().string(from: time.addingTimeInterval(-600)),
+      activeReminder: true, revision: 1)
+    func inventory(_ generated: Date) -> ActiveReminderInventory {
+      ActiveReminderInventory(
+        serverUrl: "https://fixture.test", accountId: "owner", generation: 1,
+        generatedAt: ISO8601DateFormatter().string(from: generated), items: [item])
+    }
+    try router.ingest(inventory(time.addingTimeInterval(-600)))
+    router.tick()
+    XCTAssertTrue(sink.handedOff.isEmpty)
+    XCTAssertFalse(presenter.isVisible)
+    try router.ingest(inventory(time))
+    XCTAssertEqual(sink.handedOff.map(\.cardID), [item.cardID])
+    router.tick()
+    XCTAssertEqual(sink.handedOff.count, 1)
+    XCTAssertFalse(presenter.isVisible)
+  }
+}

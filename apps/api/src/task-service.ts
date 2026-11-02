@@ -587,7 +587,7 @@ export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOpt
           const activeReminder =
             input.activeReminder ??
             (await readActiveReminderPreferences(transaction, context.principal.userId))
-              .defaultActiveReminder;
+              .defaultTaskActiveReminder;
           const changedAt = now();
           const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
           const created = requireDatabaseRecord(

@@ -27,6 +27,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocked.getActiveReminderPreferences.mockResolvedValue({
     defaultActiveReminder: true,
+    defaultTaskActiveReminder: true,
+    defaultReminderActiveReminder: true,
     revision: 1,
   });
   mocked.createReminder.mockResolvedValue({ id: "created" } as Reminder);
@@ -70,4 +72,19 @@ it("edits the item flag using the loaded reminder revision", async () => {
     ),
   );
   await waitFor(() => expect(close).toHaveBeenCalled());
+});
+
+it("shows the Reminder account default and submits inheritance without an explicit item flag", async () => {
+  mocked.getActiveReminderPreferences.mockResolvedValue({
+    defaultActiveReminder: false,
+    defaultTaskActiveReminder: true,
+    defaultReminderActiveReminder: false,
+    revision: 1,
+  });
+  const { user } = setup();
+  await screen.findByRole("option", { name: "Use account default (off)" });
+  await user.type(screen.getByLabelText("What needs attention?"), "Inherited reminder");
+  await user.click(screen.getByRole("button", { name: "Create reminder" }));
+  await waitFor(() => expect(mocked.createReminder).toHaveBeenCalled());
+  expect(mocked.createReminder.mock.calls[0]?.[0]).not.toHaveProperty("activeReminder");
 });

@@ -1,5 +1,5 @@
 import { settingsPath } from "@/features/settings/settings-routes";
-import { ActiveCardsSettingsPreview } from "./features/active-cards/settings-preview.js";
+import { ActiveCardsSettings } from "./features/active-cards/settings.js";
 import {
   DayTimeline,
   formatTimelineClock,
@@ -12,7 +12,6 @@ import {
   timelineLaneStyle,
 } from "./features/calendar/day-timeline.js";
 import { calendarEventColorStyle } from "./features/calendar/event-color.js";
-import { ActiveReminderSettings } from "./features/notifications/active-reminder-settings.js";
 import { LoginDestination } from "./features/public-site/login-destination";
 import { ReminderDialog } from "./features/reminders/reminder-dialog.js";
 import { GoalProgressEditor } from "./features/settings/goal-progress-editor.js";
@@ -6038,9 +6037,7 @@ const settingsNavigation: Array<{
     items: [
       { icon: PaintBrushIcon, id: "appearance", label: "Appearance" },
       { icon: PulseIcon, id: "notifications", label: "Notifications" },
-      ...(import.meta.env.DEV
-        ? [{ icon: ListChecksIcon, id: "active-cards" as const, label: "Active cards" }]
-        : []),
+      { icon: ListChecksIcon, id: "active-cards", label: "Active cards" },
       { ...textingSettingsNavigationItem, id: "texting", label: "Texting" },
       { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
       { icon: MonitorIcon, id: "desktop", label: "Desktop App" },
@@ -6380,10 +6377,19 @@ function SettingsPageContent({
       {section === "setup" ? <SetupSettings user={user} /> : null}
       {section === "invitations" ? <InvitationsSettings /> : null}
       {section === "sessions" ? <SessionsSettings /> : null}
-      {section === "tasks" || section === "notifications" ? (
-        <ActiveReminderSettings ownerId={user.id} />
+      {section === "tasks" || (section === "notifications" && !isTauri()) ? (
+        <RelatedSettings
+          title="Active cards"
+          items={[
+            {
+              section: "active-cards",
+              label: "Active cards",
+              description: "Set creation defaults, placement, grouping, sounds, and appearance.",
+            },
+          ]}
+        />
       ) : null}
-      {section === "active-cards" && import.meta.env.DEV ? <ActiveCardsSettingsPreview /> : null}
+      {section === "active-cards" ? <ActiveCardsSettings ownerId={user.id} /> : null}
       {section === "texting" ? <TextingSettings /> : null}
       {section === "desktop" && !isTauri() ? <DesktopDownloads /> : null}
       {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}

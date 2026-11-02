@@ -12,11 +12,37 @@ struct ActiveReminderCardGeometry: Codable {
   var height: Double
 }
 struct ActiveReminderPlacement {
+  static func initial(in geometry: PetGeometry, occupied: [CGRect], anchor: String, size: CGSize)
+    -> CGRect
+  {
+    let index =
+      [
+        "top-left": 0, "top-center": 1, "top-right": 2, "bottom-right": 4,
+        "bottom-center": 5, "bottom-left": 6, "center": 16,
+      ][anchor] ?? 2
+    let area = geometry.conservativeCardBounds ?? geometry.bounds
+    let preferred =
+      anchor == "center"
+      ? geometry.fitCard(
+        CGRect(
+          x: area.midX - size.width / 2, y: area.midY - size.height / 2, width: size.width,
+          height: size.height)) : anchors(in: geometry, size: size)[index]
+    if !occupied.contains(where: { ActiveReminderDocking.overlaps($0, preferred) }) {
+      return preferred
+    }
+    let taken = Dictionary(
+      uniqueKeysWithValues: occupied.enumerated().map { (String($0.offset), $0.element) })
+    return ActiveReminderDocking.nearest(
+      to: preferred,
+      slots: ActiveReminderDocking.slots(size: size, geometry: geometry, occupied: taken),
+      radius: .greatestFiniteMagnitude)?.frame ?? unoccupied(in: geometry, occupied: occupied)
+  }
   static func anchors(in area: CGRect, size: CGSize) -> [CGRect] {
     anchors(in: PetGeometry(bounds: area, obstacles: []), size: size)
   }
   static func anchors(in geometry: PetGeometry, size: CGSize) -> [CGRect] {
-    let bounds = (geometry.conservativeCardBounds ?? geometry.bounds).insetBy(dx: 12, dy: 12)
+    let bounds = (geometry.conservativeCardBounds ?? geometry.bounds).insetBy(
+      dx: geometry.margin, dy: geometry.margin)
     let width = min(size.width, bounds.width)
     let height = min(size.height, bounds.height)
     let points: [(CGFloat, CGFloat)] = [

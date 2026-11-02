@@ -620,3 +620,7 @@ value track can overlap the adjacent pair despite no document-level overflow.
   not only recovery states. Flat presentation must preserve authority boundaries:
   server changes require the existing tested Connect flow; color edits retain live
   preview/coalesced saves inside a bounded popover.
+
+For a fixed compact trailing control, use `Field controlWidth="compact"` rather than
+reserving a scalar editor column. The shared Field owns this explicit row composition;
+retain standard padding/dividers, center the control against its label block, and verify narrow bounds.

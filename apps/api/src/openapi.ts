@@ -634,7 +634,29 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: {
           security: [{ cookieAuth: [] }, { sessionAuth: [] }],
           responses: {
-            200: { description: "Account active reminder creation default and revision" },
+            200: {
+              description:
+                "Independent account creation defaults and revision. The legacy default is true only when both defaults are true.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: [
+                      "defaultActiveReminder",
+                      "defaultTaskActiveReminder",
+                      "defaultReminderActiveReminder",
+                      "revision",
+                    ],
+                    properties: {
+                      defaultActiveReminder: { type: "boolean", deprecated: true },
+                      defaultTaskActiveReminder: { type: "boolean" },
+                      defaultReminderActiveReminder: { type: "boolean" },
+                      revision: { type: "integer", minimum: 0 },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
         patch: {
@@ -644,13 +666,32 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             content: {
               "application/json": {
                 schema: {
-                  type: "object",
-                  required: ["defaultActiveReminder", "expectedRevision"],
-                  additionalProperties: false,
-                  properties: {
-                    defaultActiveReminder: { type: "boolean" },
-                    expectedRevision: { type: "integer", minimum: 0 },
-                  },
+                  oneOf: [
+                    {
+                      type: "object",
+                      required: [
+                        "defaultTaskActiveReminder",
+                        "defaultReminderActiveReminder",
+                        "expectedRevision",
+                      ],
+                      additionalProperties: false,
+                      properties: {
+                        defaultTaskActiveReminder: { type: "boolean" },
+                        defaultReminderActiveReminder: { type: "boolean" },
+                        expectedRevision: { type: "integer", minimum: 0 },
+                      },
+                    },
+                    {
+                      type: "object",
+                      description: "Legacy writes set both creation defaults.",
+                      required: ["defaultActiveReminder", "expectedRevision"],
+                      additionalProperties: false,
+                      properties: {
+                        defaultActiveReminder: { type: "boolean" },
+                        expectedRevision: { type: "integer", minimum: 0 },
+                      },
+                    },
+                  ],
                 },
               },
             },

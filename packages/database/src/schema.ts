@@ -2166,6 +2166,9 @@ export const activeReminderPreferences = pgTable(
       .primaryKey()
       .references(() => users.id, { onDelete: "cascade" }),
     defaultActiveReminder: boolean("default_active_reminder").notNull().default(false),
+    // NULL inherits the legacy shared default until this account next saves.
+    defaultTaskActiveReminder: boolean("default_task_active_reminder"),
+    defaultReminderActiveReminder: boolean("default_reminder_active_reminder"),
     revision: integer("revision").notNull(),
     ...timestamps,
   },

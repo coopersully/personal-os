@@ -9,9 +9,21 @@ export async function readActiveReminderPreferences(
   const [row] = await db
     .select({
       defaultActiveReminder: activeReminderPreferences.defaultActiveReminder,
+      defaultTaskActiveReminder: activeReminderPreferences.defaultTaskActiveReminder,
+      defaultReminderActiveReminder: activeReminderPreferences.defaultReminderActiveReminder,
       revision: activeReminderPreferences.revision,
     })
     .from(activeReminderPreferences)
     .where(eq(activeReminderPreferences.userId, userId));
-  return row ?? { defaultActiveReminder: false, revision: 0 };
+  const defaultTaskActiveReminder =
+    row?.defaultTaskActiveReminder ?? row?.defaultActiveReminder ?? false;
+  const defaultReminderActiveReminder =
+    row?.defaultReminderActiveReminder ?? row?.defaultActiveReminder ?? false;
+  return {
+    // Legacy readers see enabled only when both creation defaults are enabled.
+    defaultActiveReminder: defaultTaskActiveReminder && defaultReminderActiveReminder,
+    defaultTaskActiveReminder,
+    defaultReminderActiveReminder,
+    revision: row?.revision ?? 0,
+  };
 }

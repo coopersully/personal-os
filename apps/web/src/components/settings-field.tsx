@@ -17,10 +17,22 @@ export {
 /** Settings owns row geometry; editors and domain adapters still own behavior. */
 export function Field({
   layout = "row",
+  controlWidth,
   ...props
-}: ComponentProps<typeof BaseField> & { layout?: "row" | "stack" }) {
+}: ComponentProps<typeof BaseField> & { layout?: "row" | "stack"; controlWidth?: "compact" }) {
   const settings = useContext(SettingsControlsContext);
-  return <BaseField {...props} data-settings-row={settings && layout === "row" ? "" : undefined} />;
+  return (
+    <BaseField
+      {...props}
+      style={
+        controlWidth === "compact"
+          ? { ...props.style, display: "flex", flexDirection: "row", alignItems: "center" }
+          : props.style
+      }
+      data-settings-row={settings && layout === "row" ? "" : undefined}
+      data-settings-control-width={controlWidth}
+    />
+  );
 }
 
 /** An effective/read-only value is content, never a disabled imitation input. */

@@ -226,7 +226,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         const activeReminder =
           input.activeReminder ??
           (await readActiveReminderPreferences(transaction, context.principal.userId))
-            .defaultActiveReminder;
+            .defaultReminderActiveReminder;
         const created = requireDatabaseRecord(
           (
             await transaction

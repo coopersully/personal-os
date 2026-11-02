@@ -32,7 +32,6 @@ export const settingsFields: SettingsField[] = [
     ["Show active cards on this Mac", "Show active cards on this Mac", "enable pause"],
     ["Return with unfinished cards", "Return with unfinished cards", "away notification"],
     ["When Focus is on", "cards-focus", "interruptions"],
-    ["When screen sharing", "cards-sharing", "presentation privacy"],
     ["Start on", "cards-monitor", "monitor display"],
     ["Starting position", "cards-anchor", "active reminder card anchor edges"],
     ["Preview Dock position", "cards-dock", "left right bottom"],
@@ -63,11 +62,6 @@ export const settingsFields: SettingsField[] = [
     ],
   ]),
   ...fields("tasks", [
-    [
-      "Use active reminders for new items",
-      "Use active reminders for new items",
-      "active reminder default persistent card overlay",
-    ],
     ["Default capture list", "tasks-default-capture-list", "inbox new task"],
     ["Show completed tasks in lists and projects", "tasks-show-completed", "visibility done"],
     [

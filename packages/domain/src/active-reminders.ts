@@ -1,13 +1,37 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
-export const activeReminderPreferencesSchema = z.object({
-  defaultActiveReminder: z.boolean(),
-  revision: z.number().int().nonnegative(),
-});
+// Older responses contain only the shared default. Normalize them at the contract
+// boundary so clients always receive independent defaults.
+export const activeReminderPreferencesSchema = z
+  .object({
+    defaultActiveReminder: z.boolean(),
+    defaultTaskActiveReminder: z.boolean().optional(),
+    defaultReminderActiveReminder: z.boolean().optional(),
+    revision: z.number().int().nonnegative(),
+  })
+  .transform((value) => ({
+    ...value,
+    defaultTaskActiveReminder: value.defaultTaskActiveReminder ?? value.defaultActiveReminder,
+    defaultReminderActiveReminder:
+      value.defaultReminderActiveReminder ?? value.defaultActiveReminder,
+  }));
 export type ActiveReminderPreferences = z.infer<typeof activeReminderPreferencesSchema>;
-export const saveActiveReminderPreferencesSchema = z
-  .object({ defaultActiveReminder: z.boolean(), expectedRevision: z.number().int().nonnegative() })
-  .strict();
+export const saveActiveReminderPreferencesSchema = z.union([
+  z
+    .object({
+      defaultActiveReminder: z.boolean(),
+      expectedRevision: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      defaultTaskActiveReminder: z.boolean(),
+      defaultReminderActiveReminder: z.boolean(),
+      expectedRevision: z.number().int().nonnegative(),
+    })
+    .strict(),
+]);
+export type SaveActiveReminderPreferences = z.infer<typeof saveActiveReminderPreferencesSchema>;
 const candidateFields = {
   id: idSchema,
   title: z.string(),

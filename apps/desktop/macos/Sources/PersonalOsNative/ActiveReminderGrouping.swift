@@ -25,7 +25,60 @@ struct ActiveReminderInteractions: Codable, Equatable {
   var volume = 0.35
   var reducedMotion = false
   var returnCards = true
+  var startingDisplay: String = "pointer"
+  var anchor: String = "top-right"
+  var edgeSpacing: Double = 12
+  var rememberPositions: Bool = true
+  var magnet: String = "eager"
+  var arrivalVolume: Double = 1
+  var completionVolume: Double = 1
+  var interactionVolume: Double = 1
+  var textScale: String = "standard"
+  var titleLines: String = "one"
+  var respectFocus = false
+  var countdown: String = "minutes"
+  init() {}
+  enum CodingKeys: String, CodingKey {
+    case respectFocus, shake, sensitivity, snapping, guides, autoLock, sounds, volume,
+      reducedMotion, returnCards, startingDisplay, anchor, edgeSpacing, rememberPositions, magnet,
+      arrivalVolume, completionVolume, interactionVolume, textScale, titleLines, countdown
+  }
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    respectFocus = try values.decodeIfPresent(Bool.self, forKey: .respectFocus) ?? false
+    shake = try values.decodeIfPresent(Bool.self, forKey: .shake) ?? true
+    sensitivity = try values.decodeIfPresent(String.self, forKey: .sensitivity) ?? "medium"
+    snapping = try values.decodeIfPresent(Bool.self, forKey: .snapping) ?? true
+    guides = try values.decodeIfPresent(Bool.self, forKey: .guides) ?? true
+    autoLock = try values.decodeIfPresent(Bool.self, forKey: .autoLock) ?? false
+    sounds = try values.decodeIfPresent(Bool.self, forKey: .sounds) ?? true
+    volume = try values.decodeIfPresent(Double.self, forKey: .volume) ?? 0.35
+    reducedMotion = try values.decodeIfPresent(Bool.self, forKey: .reducedMotion) ?? false
+    returnCards = try values.decodeIfPresent(Bool.self, forKey: .returnCards) ?? true
+    startingDisplay = try values.decodeIfPresent(String.self, forKey: .startingDisplay) ?? "pointer"
+    anchor = try values.decodeIfPresent(String.self, forKey: .anchor) ?? "top-right"
+    edgeSpacing = try values.decodeIfPresent(Double.self, forKey: .edgeSpacing) ?? 12
+    rememberPositions = try values.decodeIfPresent(Bool.self, forKey: .rememberPositions) ?? true
+    magnet = try values.decodeIfPresent(String.self, forKey: .magnet) ?? "eager"
+    arrivalVolume = try values.decodeIfPresent(Double.self, forKey: .arrivalVolume) ?? 1
+    completionVolume = try values.decodeIfPresent(Double.self, forKey: .completionVolume) ?? 1
+    interactionVolume = try values.decodeIfPresent(Double.self, forKey: .interactionVolume) ?? 1
+    textScale = try values.decodeIfPresent(String.self, forKey: .textScale) ?? "standard"
+    titleLines = try values.decodeIfPresent(String.self, forKey: .titleLines) ?? "one"
+    countdown = try values.decodeIfPresent(String.self, forKey: .countdown) ?? "minutes"
+  }
+  var magnetRadius: CGFloat { magnet == "eager" ? 40 : 16 }
+  var minimumSize: CGSize {
+    CGSize(width: 240, height: titleLines == "two" ? 92 * fontScale : 64 * max(1, fontScale))
+  }
+  var fontScale: CGFloat { textScale == "small" ? 0.85 : textScale == "large" ? 1.2 : 1 }
+  func geometry(_ base: PetGeometry) -> PetGeometry {
+    var next = base
+    next.margin = edgeSpacing
+    return next
+  }
 }
+
 struct ActiveReminderEdge: Hashable, Codable {
   let a: String
   let b: String
@@ -78,13 +131,17 @@ enum ActiveReminderGrouping {
         && !values.dropFirst(i + 1).contains { ActiveReminderDocking.overlaps(frame, $0) }
     }
   }
-  static func candidate(_ frames: [String: CGRect], slots: [ActiveReminderSlot])
+  static func candidate(
+    _ frames: [String: CGRect], slots: [ActiveReminderSlot], radius: CGFloat = 40,
+    footprint: Bool = true
+  )
     -> ActiveReminderSlot?
   {
     let box = bounds(frames)
     return slots.filter { slot in
-      hypot(slot.frame.minX - box.minX, slot.frame.minY - box.minY) < 40
-        || frames.values.contains { $0.intersects(slot.frame.insetBy(dx: -0.5, dy: -0.5)) }
+      hypot(slot.frame.minX - box.minX, slot.frame.minY - box.minY) < radius
+        || (footprint
+          && frames.values.contains { $0.intersects(slot.frame.insetBy(dx: -0.5, dy: -0.5)) })
     }.min {
       hypot($0.frame.minX - box.minX, $0.frame.minY - box.minY)
         < hypot($1.frame.minX - box.minX, $1.frame.minY - box.minY)
@@ -171,7 +228,8 @@ enum ActiveReminderGrouping {
       if !progress { return nil }
     }
     let box = bounds(next)
-    let edgeArea = (geometry.conservativeCardBounds ?? geometry.bounds).insetBy(dx: 12, dy: 12)
+    let edgeArea = (geometry.conservativeCardBounds ?? geometry.bounds).insetBy(
+      dx: geometry.margin, dy: geometry.margin)
     let x = abs(old.maxX - edgeArea.maxX) < 2 ? old.maxX - box.width : old.minX
     let y = abs(old.maxY - edgeArea.maxY) < 2 ? old.maxY - box.height : old.minY
     let fitted = geometry.fitCard(CGRect(origin: CGPoint(x: x, y: y), size: box.size))

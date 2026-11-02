@@ -3,12 +3,12 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
+
+vi.spyOn(toast, "error");
+
 import { api } from "../../api.js";
-import {
-  ActiveReminderField,
-  ActiveReminderSettings,
-  activeReminderInput,
-} from "./active-reminder-settings.js";
+import { ActiveReminderField, activeReminderInput } from "./active-reminder-settings.js";
 
 vi.mock("../../api.js", () => ({
   api: { getActiveReminderPreferences: vi.fn(), saveActiveReminderPreferences: vi.fn() },
@@ -26,10 +26,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocked.getActiveReminderPreferences.mockResolvedValue({
     defaultActiveReminder: true,
+    defaultTaskActiveReminder: true,
+    defaultReminderActiveReminder: true,
     revision: 1,
   });
   mocked.saveActiveReminderPreferences.mockResolvedValue({
     defaultActiveReminder: false,
+    defaultTaskActiveReminder: false,
+    defaultReminderActiveReminder: false,
     revision: 2,
   });
 });
@@ -47,29 +51,41 @@ it("displays the creation default while preserving explicit false as a different
   form.set("activeReminder", "true");
   expect(activeReminderInput(form)).toEqual({ activeReminder: true });
 });
-it("keeps edits explicit and saves defaults with revision and owner binding", async () => {
-  const user = setup(
-    <>
-      <ActiveReminderField ownerId="owner" value={false} />
-      <ActiveReminderSettings ownerId="owner" />
-    </>,
-  );
+it("retains an existing explicit false without looking up or changing defaults", () => {
+  setup(<ActiveReminderField ownerId="owner" kind="task" value={false} />);
   expect(screen.getByRole("combobox", { name: "Active reminder" })).toHaveValue("false");
-  const control = await screen.findByRole("switch", { name: "Use active reminders for new items" });
-  await waitFor(() => expect(control).toBeChecked());
-  await user.click(control);
-  await waitFor(() =>
-    expect(mocked.saveActiveReminderPreferences).toHaveBeenCalledWith(
-      { defaultActiveReminder: false, expectedRevision: 1 },
-      "owner",
-    ),
-  );
+  expect(mocked.getActiveReminderPreferences).not.toHaveBeenCalled();
+  expect(mocked.saveActiveReminderPreferences).not.toHaveBeenCalled();
 });
 it("lets a failed default lookup recover without converting inheritance to false", async () => {
   mocked.getActiveReminderPreferences.mockRejectedValueOnce(new Error("offline"));
   const user = setup(<ActiveReminderField ownerId="owner" />);
   const retry = await screen.findByRole("button", { name: "Retry active reminder default" });
   expect(screen.getByRole("combobox", { name: "Active reminder" })).toHaveValue("inherit");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Couldn’t load the active reminder default.",
+      expect.any(Object),
+    ),
+  );
+  expect(screen.queryByText("Couldn’t load the active reminder default.")).not.toBeInTheDocument();
+  expect(screen.queryByText("offline")).not.toBeInTheDocument();
   await user.click(retry);
   await screen.findByRole("option", { name: "Use account default (on)" });
+});
+
+it.each([
+  ["task", "on"],
+  ["reminder", "off"],
+] as const)("shows the independent %s default while retaining inheritance", async (kind, state) => {
+  mocked.getActiveReminderPreferences.mockResolvedValue({
+    defaultActiveReminder: false,
+    defaultTaskActiveReminder: true,
+    defaultReminderActiveReminder: false,
+    revision: 1,
+  });
+  setup(<ActiveReminderField ownerId="owner" kind={kind} />);
+  await screen.findByRole("option", { name: `Use account default (${state})` });
+  expect(screen.getByRole("combobox", { name: "Active reminder" })).toHaveValue("inherit");
+  expect(mocked.getActiveReminderPreferences).toHaveBeenCalledWith("owner");
 });

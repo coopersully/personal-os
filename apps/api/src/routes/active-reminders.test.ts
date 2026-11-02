@@ -10,10 +10,20 @@ it("admits user sessions, validates bodies and rejects agents before reading pri
     actorType: "user",
     scopes: new Set(),
   };
-  const preferences = { defaultActiveReminder: false, revision: 0 };
+  const preferences = {
+    defaultActiveReminder: false,
+    defaultTaskActiveReminder: false,
+    defaultReminderActiveReminder: false,
+    revision: 0,
+  };
   const service = {
     getPreferences: vi.fn(async () => preferences),
-    savePreferences: vi.fn(async () => ({ defaultActiveReminder: true, revision: 1 })),
+    savePreferences: vi.fn(async () => ({
+      defaultActiveReminder: true,
+      defaultTaskActiveReminder: true,
+      defaultReminderActiveReminder: true,
+      revision: 1,
+    })),
     listCandidates: vi.fn(async () => ({
       generatedAt: "2026-10-22T12:00:00Z",
       items: [],
@@ -49,6 +59,25 @@ it("admits user sessions, validates bodies and rejects agents before reading pri
     { defaultActiveReminder: true, expectedRevision: 0 },
     { principal, requestId: "test" },
   );
+  const independent = {
+    defaultTaskActiveReminder: true,
+    defaultReminderActiveReminder: false,
+    expectedRevision: 1,
+  };
+  expect((await app.request("/v1/active-reminders/preferences", patch(independent))).status).toBe(
+    200,
+  );
+  expect(service.savePreferences).toHaveBeenLastCalledWith(principal.userId, independent, {
+    principal,
+    requestId: "test",
+  });
+  for (const body of [
+    { ...independent, defaultActiveReminder: true },
+    { defaultTaskActiveReminder: true, expectedRevision: 1 },
+    { defaultReminderActiveReminder: false, expectedRevision: 1 },
+  ]) {
+    expect((await app.request("/v1/active-reminders/preferences", patch(body))).status).toBe(400);
+  }
   expect(
     (await app.request("/v1/active-reminders/preferences", patch({ defaultActiveReminder: true })))
       .status,

@@ -15,7 +15,8 @@ struct PetGeometry: Equatable {
   var bounds: CGRect
   var obstacles: [CGRect]
   var conservativeCardBounds: CGRect?
-  var inset: CGRect { bounds.insetBy(dx: 12, dy: 12) }
+  var margin: CGFloat = 12
+  var inset: CGRect { bounds.insetBy(dx: margin, dy: margin) }
   func compactHitFrame(
     compact: CGRect, visible: CGRect, tucked: CGRect, keepWakeArea: Bool
   ) -> CGRect {
@@ -86,7 +87,7 @@ struct PetGeometry: Equatable {
     return fit(CGRect(origin: frame.origin, size: size))
   }
   func fitCard(_ rect: CGRect) -> CGRect {
-    PetGeometry(bounds: conservativeCardBounds ?? bounds, obstacles: obstacles).fit(rect)
+    PetGeometry(bounds: conservativeCardBounds ?? bounds, obstacles: obstacles, margin: margin).fit(rect)
   }
   func card(size: CGSize, anchor: Int?, near: CGPoint) -> CGRect {
     if let conservativeCardBounds {

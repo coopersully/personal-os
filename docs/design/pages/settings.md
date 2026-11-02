@@ -425,16 +425,27 @@ pair locks, Shift group actions and shake gathering. Show full-size card slots, 
 joined groups when refitting, and use the shared Earshot family with overall and per-action
 levels. Placement includes display/anchor, edge spacing, snap strength, position memory,
 and a simulated Dock. Appearance offers text scale, title wrapping after resizing, and
-countdown precision. Focus/screen-sharing behavior is an explicit preference with a
-preview situation selector.
+countdown precision. Focus behavior is explicit; the design harness can also simulate screen sharing without claiming native detection.
 
-Current refinement is intentionally browser-only: the development Settings destination
-and `pnpm --filter @personal-os/web preview:active-cards` render the same component with
-sample cards. Changes remain in memory, make no account/native writes, and reset on reload.
-The standalone preview does not require a login or API. Native delivery, stored account
-creation defaults and existing device settings retain their current implementation until
-browser refinement is accepted and the integration is explicitly implemented. External
-displays and presence are simulations here, not a capability check of the actual Mac.
+The canonical `?page=active-cards` destination now uses the same controls with a domain adapter.
+Independent Task/Reminder creation defaults persist account-wide with owner/revision fencing;
+historical item flags are unchanged. On macOS, device controls merge patches into the latest
+native preferences under server/account identity checks. Autosaves are silent on success, retain
+failed drafts, and report errors through Sonner with explicit retry controls. Numeric sliders
+preview during movement and persist on commit. Old Tasks/Notifications editors are replaced by
+links to this one surface. All preferences have stable Settings search destinations.
+
+The preview contains synthetic cards only. In browser/mobile, account defaults persist while
+layout/sound/appearance controls remain clearly labelled device previews. Native display choices
+come from actual display inventory; the simulated Dock remains a sample control. The standalone
+`preview:active-cards` remains an API-free design harness, not a second settings store. The sample
+HTML ships as a production asset and is excluded from the service-worker SPA fallback.
+
+Optional Focus waiting uses explicit public macOS authorization and honest on/off/unknown state.
+The permission action retains one loading Sonner toast until macOS confirms authorization or the
+bounded wait fails. Unknown status conservatively keeps cards hidden when waiting is enabled.
+macOS does not expose a verified general screen-sharing signal here; the live surface omits that
+automatic control and explains manual device pause. Do not add a dummy setting for that capability.
 
 ## Ritual step configuration
 

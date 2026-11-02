@@ -1,5 +1,18 @@
 # nohmi — Implementation Log
 
+## 2026-11-02 — Active cards settings (branch implementation)
+
+The Active cards Settings destination now owns independent account creation defaults and real
+macOS presentation controls, with an interactive synthetic preview on desktop/mobile. Preferences
+use owner/revision or native server/account fencing, serialized patch saves, retained failed drafts
+and Sonner error/retry feedback. An append-only migration preserves both legacy default values.
+Native placement, grouping, appearance, countdown and Earshot levels respond to stored settings.
+Optional Focus waiting uses public, explicit authorization and conservative unknown-state behavior.
+General screen-sharing detection is unavailable; manual pause remains explicit. The old editing
+surfaces link to the canonical page. Production preview routing includes the service-worker case.
+This is unmerged source work; signed installed-client, physical hardware and release acceptance
+remain separate from automated source checks.
+
 ## 2026-10-22 — Active reminders implemented on a development branch
 
 The `cooper/active-reminders` branch adds a resolved active-reminder flag to tasks and reminders,

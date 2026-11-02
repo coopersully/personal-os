@@ -87,7 +87,13 @@ final class NativeCompanion {
       "ok": true, "accessibilityPermission": PetDock.authorized,
       "activeRemindersActive": activeReminders.isActive,
       "activeRemindersAvailable": macActivity.sample().isAvailable,
+      "focusPermission": ActiveReminderFocus.permission,
+      "focusStatus": ActiveReminderFocus.status,
+      "focusPermissionPending": ActiveReminderFocus.requestPending,
       "activeRemindersError": activeReminders.lastError ?? "",
+      "displays": NSScreen.screens.enumerated().map { index, screen in
+        ["id": PetDisplays.id(screen), "label": screen.localizedName, "isPrimary": index == 0] as [String: Any]
+      },
       "dockGeometryAvailable": PetDock.shared.frame().map { rect in
         NSScreen.screens.contains {
           PetDock.resolve(rect, screen: $0.frame, desktopTop: NSScreen.screens.first?.frame.maxY ?? 0) != nil
@@ -261,6 +267,9 @@ final class NativeCompanion {
     case "request_accessibility_permission":
       try PetDock.requestAccess()
       return ["ok": true]
+    case "request_focus_permission":
+      ActiveReminderFocus.requestAuthorization()
+      return ["ok": true, "requestPending": ActiveReminderFocus.requestPending]
     case "request_notification_permission":
       notifications.requestPermission()
       return ["ok": true, "requestPending": true]

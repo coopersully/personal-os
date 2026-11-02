@@ -28,6 +28,10 @@ enum ActiveReminderAudio {
   private static var lastEvent = Date.distantPast
   private static var lastArrival = Date.distantPast
   static var volume: Float = 0.35
+  static var interactions = ActiveReminderInteractions()
+  static func gain(for event: ActiveReminderFeedback) -> Float {
+    Float(event == .arrival ? interactions.arrivalVolume : event == .completion ? interactions.completionVolume : interactions.interactionVolume)
+  }
   static func preload() {
     for event in [
       ActiveReminderFeedback.arrival, .completion, .grab, .slot, .snap, .detach, .resize, .failure,
@@ -60,7 +64,7 @@ enum ActiveReminderAudio {
     }
     playing?.stop()
     playing = cache[event.asset]
-    playing?.volume = min(1, max(0, volume))
+    playing?.volume = min(1, max(0, volume * gain(for: event)))
     playing?.play()
   }
 }

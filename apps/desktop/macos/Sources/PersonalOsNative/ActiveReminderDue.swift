@@ -20,12 +20,16 @@ final class ActiveReminderClock: ObservableObject {
   }
 }
 enum ActiveReminderDueText {
-  static func compact(_ due: Date, now: Date) -> String {
+  static func compact(_ due: Date, now: Date, seconds showSeconds: Bool = true) -> String {
     let delta = Int(ceil(due.timeIntervalSince(now)))
     let seconds = abs(delta)
     let h = seconds / 3600
     let m = seconds % 3600 / 60
     let s = seconds % 60
+    if !showSeconds && seconds < 3600 {
+      if seconds < 60 { return delta == 0 ? "now" : delta < 0 ? "<1m late" : "in <1m" }
+      return delta < 0 ? "\(seconds / 60)m late" : "in \(Int(ceil(Double(seconds) / 60)))m"
+    }
     let duration =
       h >= 24
       ? "\(h / 24)d \(h % 24)h"

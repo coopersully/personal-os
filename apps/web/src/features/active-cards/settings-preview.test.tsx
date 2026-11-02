@@ -105,7 +105,7 @@ it("indexes every preference control for Settings search", () => {
   for (const control of document.querySelectorAll<HTMLElement>(
     'select, [role="switch"], [data-slot="slider"]',
   )) {
-    if (control.id === "cards-presence") continue;
+    if (["cards-presence", "cards-sharing"].includes(control.id)) continue;
     const label = [...document.querySelectorAll<HTMLLabelElement>("label")].find(
       (label) => label.htmlFor === control.id,
     )?.textContent;

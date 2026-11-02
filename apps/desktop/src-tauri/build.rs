@@ -21,6 +21,7 @@ fn main() {
             println!("cargo:rustc-link-search=native={}", products.display());
         }
         for framework in [
+            "Intents",
             "AppKit",
             "SwiftUI",
             "UserNotifications",

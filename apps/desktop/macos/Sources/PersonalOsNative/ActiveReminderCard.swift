@@ -23,6 +23,9 @@ private enum CommitmentColors {
 final class ActiveReminderAppearance: ObservableObject {
   @Published var seams = ActiveReminderSeams()
   @Published var reducedMotion = false
+  @Published var textScale: CGFloat = 1
+  @Published var titleLines = 1
+  @Published var countdown = "minutes"
   var cornerAnimationDuration: Double { reducedMotion ? 0 : 0.12 }
 }
 private struct ActiveReminderDueLabel: View {
@@ -30,16 +33,18 @@ private struct ActiveReminderDueLabel: View {
   @ObservedObject var clock: ActiveReminderClock
   var status: String?
   var detail: String?
+  var scale: CGFloat = 1
+  var countdown = "minutes"
   var body: some View {
     HStack(spacing: 6) {
       Text(clock.absoluteLabel(for: due)).foregroundStyle(CommitmentColors.muted)
       Spacer(minLength: 0)
-      Text(status ?? ActiveReminderDueText.compact(due, now: clock.now))
+      Text(status ?? ActiveReminderDueText.compact(due, now: clock.now, seconds: countdown == "seconds"))
         .foregroundStyle(
           due < clock.now || status == "Retry completion"
             ? CommitmentColors.danger : CommitmentColors.muted)
     }
-    .font(.system(size: 11, design: .monospaced)).lineLimit(1)
+    .font(.system(size: 11 * scale, design: .monospaced)).lineLimit(1)
     .help(
       [detail, due.formatted(date: .complete, time: .complete)].compactMap { $0 }.joined(
         separator: "\n")
@@ -90,8 +95,8 @@ struct ActiveReminderCard: View {
           VStack(alignment: .leading, spacing: 4) {
             Button(action: open) {
               Text(preview ? item.title : "A \(item.kind) is due")
-                .font(.system(size: 14, weight: .medium)).lineSpacing(2)
-                .multilineTextAlignment(.leading).lineLimit(bounds.size.height < 84 ? 1 : 2)
+                .font(.system(size: 14 * appearance.textScale, weight: .medium)).lineSpacing(2)
+                .multilineTextAlignment(.leading).lineLimit(appearance.titleLines)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
             }.buttonStyle(.plain).help("Open \(item.kind) in nohmi")
@@ -100,7 +105,7 @@ struct ActiveReminderCard: View {
                 due: due, clock: clock,
                 status: error != nil
                   ? "Retry completion" : stale ? "Sync needed" : pending ? "Saving…" : nil,
-                detail: error)
+                detail: error, scale: appearance.textScale, countdown: appearance.countdown)
             }
           }
         }.padding(.horizontal, 10).padding(.vertical, 10)

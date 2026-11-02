@@ -565,29 +565,40 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 
-The macOS companion implements active reminder cards for timed tasks and reminders. An item’s
-`activeReminder` flag controls its own compact, persistent, draggable and resizable card, with an account creation default
-(initially off) in Tasks settings. New items inherit that default unless explicitly overridden;
-existing items retain their flag. All due items appear independently without pagination; completing
-one reclaims its screen area while the other cards keep their positions and sizes. Desktop
-Notifications settings separately pause cards on one Mac. Cards follow the app's task/reminder row
-styling and use free perimeter/neighbor slots with the pet's Dock-aware placement. Occupied anchors
-are unavailable; faded card-sized placeholders preview the destination. Adjacent cards snap into a
-shared-looking surface with flat contacting corners and a divider, and can be pulled apart
-individually. The browser-first target refinement adds smallest-size arrivals, clickable lockable
-joins (locked connected cards move together), and configurable shake-to-gather into an all-visible
-locked stack that stays attached to the pointer. These grouping refinements are being evaluated in
-a local browser playground before native implementation. The left checkbox aligns with the first title line. A live relative due label always
-retains the absolute local date/time, and right-click exposes the existing source actions. Arrival and acknowledged
-completion use short pop animations and sound effects, respecting sound and Reduce Motion settings.
-While the person is away, ordinary system delivery continues. Returning reveals a card only after
-fresh confirmation that the item remains incomplete; successful completion on another client also
-retires it. Cards respect native notification enablement, source selection, permission, quiet hours,
-and preview privacy. They can appear during macOS Focus, which is disclosed in settings. The native
-process must remain running; Quit and sleep retain the lifecycle limits below. See the
-[active-reminders design](../superpowers/specs/2026-10-22-active-reminders-design.md) and
+The macOS companion implements active cards for timed Tasks and Reminders. Each item's
+`activeReminder` flag controls its own compact, persistent, draggable and resizable card. The
+first-class **Active cards** Settings destination owns independent account defaults for new Tasks
+and Reminders, both initially off; existing items retain their flags. Legacy shared defaults retain
+their values during migration. Account defaults are editable on browser/mobile; device controls
+save only through the authenticated desktop bridge on that Mac. Tasks and Notifications link here
+instead of duplicating editable preferences.
+
+All due active items appear independently without pagination or a visible-card cap. Cards start
+at minimum size; completing one reclaims its area while siblings retain placement. Dock-aware
+perimeter/neighbor slots exclude occupied anchors and preview full card footprints. Touching cards
+flatten contacting corners with one divider. Pair locks, Shift group actions, locked group dragging,
+shake gathering, and group-preserving size reset are implemented natively. Exact local due times
+remain visible alongside configurable minute/second countdowns and title wrapping/text size.
+
+Device preferences control availability, return behavior, starting display/anchor, spacing,
+position memory, snapping/guides/magnet strength, grouping/shake sensitivity, cached Earshot master
+and semantic volumes, and reduced motion. A sample-only interactive preview shows those choices
+without creating, completing, snoozing, or moving real records. Browser device controls are clearly
+preview-only; on the Mac they persist. A simulated Dock changes only the preview, never macOS.
+
+While away, ordinary notifications continue and unfinished cards return only after fresh source
+confirmation. Completion waits for authoritative acknowledgement. Cards preserve notification
+source selection, permissions, quiet hours and preview privacy. By default cards can appear during
+Focus. Optional waiting for Focus uses the public macOS Focus-status API and explicit authorization;
+on/unknown status keeps overlays hidden without settling items, and return requires fresh material.
+The interface reports authorization separately from actual Focus status. No general screen-sharing
+detector is claimed: pause cards manually before sharing private material. Card menus cannot turn
+individual items inactive. Quit, sleep and native-process lifecycle limits below still apply.
+
+This describes source implementation, not a production release or signed-app certification. See
+[Desktop background](../design/pages/desktop-background.md) and
 [native evidence](../superpowers/specs/2026-10-22-active-reminders-native-evidence.md) for delivery
-safeguards and the distinction between local source verification and release certification.
+safeguards and the remaining release-equivalence/hardware checks.
 
 Closing the main desktop window keeps enabled pet, routine presentation, and notification
 refresh active in the menu-bar process. Explicit **Quit nohmi** stops that process until the next

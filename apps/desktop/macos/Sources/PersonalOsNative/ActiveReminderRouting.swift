@@ -36,6 +36,7 @@ final class ActiveReminderRouter {
   private let presenter: ActiveReminderPresenting
   private let activity: () -> MacActivityState
   private let now: () -> Date
+  private let focusStatus: () -> String
   private let makeStore: (String) throws -> ActiveReminderStore
   private var store: ActiveReminderStore?
   private var inventory: ActiveReminderInventory?
@@ -53,6 +54,8 @@ final class ActiveReminderRouter {
   private var routingEpoch = 0
   private var needsRevalidation = false
   private var previousActivity = false
+  private var previousFocusBlocked = false
+  private var focusHandoffs = Set<String>()
   private var interactions = ActiveReminderInteractions()
   private var deferredWhileAway = Set<String>()
   var action: (([String: Any]) -> Void)?
@@ -61,19 +64,21 @@ final class ActiveReminderRouter {
   init(
     notifications: ActiveReminderNotificationSink, presenter: ActiveReminderPresenting,
     activity: @escaping () -> MacActivityState, now: @escaping () -> Date = Date.init,
-    makeStore: @escaping (String) throws -> ActiveReminderStore, startTimer: Bool = true
+    makeStore: @escaping (String) throws -> ActiveReminderStore, startTimer: Bool = true,
+    focusStatus: @escaping () -> String = { ActiveReminderFocus.status }
   ) {
     self.notifications = notifications
     self.presenter = presenter
     self.activity = activity
     self.now = now
+    self.focusStatus = focusStatus
     self.makeStore = makeStore
     if let panel = presenter as? ActiveReminderPanelController {
       panel.complete = { [weak self] item in self?.complete(item) }
       panel.open = { [weak self] item in self?.open(item) }
       panel.snooze = { [weak self] item in self?.snooze(item) }
       panel.settings = { [weak self] in
-        self?.action?(["action": "open", "path": "/settings?section=notifications"])
+        self?.action?(["action": "open", "path": "/settings?page=active-cards"])
       }
     }
     if startTimer {
@@ -87,7 +92,10 @@ final class ActiveReminderRouter {
     interactions = value
     (presenter as? ActiveReminderPanelController)?.interactions = value
     ActiveReminderAudio.volume = Float(value.volume)
+    ActiveReminderAudio.interactions = value
+    presenter.setSoundEnabled(preferences.sound && value.sounds)
     ActiveReminderAudio.preload()
+    tick()
   }
   func configure(preferences: NotificationPreferences, calendar: Calendar, enabled: Bool) {
     let changed =
@@ -200,6 +208,7 @@ final class ActiveReminderRouter {
     failedPreparation = []
     shown = []
     deferredWhileAway = []
+    focusHandoffs = []
     acknowledged = []
     pending = [:]
     errors = [:]
@@ -235,7 +244,16 @@ final class ActiveReminderRouter {
   }
   func tick() {
     let state = activity()
-    if state.shouldHide { needsRevalidation = true }
+    let focusBlocked = ActiveReminderFocus.blocksCards(
+      respectFocus: interactions.respectFocus, status: focusStatus())
+    if focusBlocked != previousFocusBlocked {
+      routingEpoch += 1
+      preparing = []
+      claimed = []
+      focusHandoffs = []
+      previousFocusBlocked = focusBlocked
+    }
+    if state.shouldHide || focusBlocked { needsRevalidation = true }
     if state.isActive && !previousActivity { action?(["action": "active_reminders_refresh"]) }
     previousActivity = state.isActive
     guard let inventory else {
@@ -255,11 +273,19 @@ final class ActiveReminderRouter {
       }
       let allowed =
         enabled && preferences.enabled && sourceEnabled(item)
-        && notifications.permission == "authorized" && !state.shouldHide
+        && notifications.permission == "authorized" && !state.shouldHide && !focusBlocked
       if !preferences.enabled || !sourceEnabled(item) {
         notifications.retireActiveOccurrence(id)
         claimed.remove(id)
         shown.remove(id)
+        continue
+      }
+      if focusBlocked && !shown.contains(id) {
+        let signature = "\(id)|\(item.sourceRevision)|\(planned.fireAt.timeIntervalSince1970)"
+        if fresh && focusHandoffs.insert(signature).inserted {
+          notifications.handoffActiveOrdinary(
+            planned, item: item, inventory: inventory, preferences: preferences)
+        }
         continue
       }
       if fresh && planned.fireAt > time {
@@ -311,7 +337,7 @@ final class ActiveReminderRouter {
       case .wait: break
       }
     }
-    if !enabled || !preferences.enabled || state.shouldHide {
+    if !enabled || !preferences.enabled || state.shouldHide || focusBlocked {
       presenter.hide()
     } else if !needsRevalidation || (state.isActive && fresh && !quiet) {
       needsRevalidation = false

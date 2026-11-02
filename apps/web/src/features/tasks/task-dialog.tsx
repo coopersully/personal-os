@@ -358,6 +358,7 @@ export function TaskDialog({
                   </Field>
                 </FieldGroup>
                 <ActiveReminderField
+                  kind="task"
                   ownerId={user.id}
                   {...(task ? { value: task.activeReminder ?? false } : {})}
                 />

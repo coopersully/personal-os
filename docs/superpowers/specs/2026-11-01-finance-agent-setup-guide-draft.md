@@ -80,18 +80,20 @@ send repeated reminders without an applicable preference.
 
 ### 6. Check the connection
 
-The guided check should distinguish:
+The planned guided check should distinguish the following states. Before publication,
+verify each row against the actual released protected setup controls:
 
 | Check | What it establishes |
 |---|---|
 | Agent registered | nohmi recognizes the authorized host |
-| Connector and Chat ready | The agent can access the required context |
+| Connector access | The host has the required authorized connector access |
+| Chat readiness | The authorized host can consume the required conversation context |
 | Schedule ready | The next maintenance run is configured |
 | Event trigger verified | nohmi can invoke the connected host on demand |
 | Texting ready | The authorized texting route is configured |
 | Conversation verified | A real request was processed and its result returned |
 
-A saved credential or successful session start does not prove all six checks.
+A saved credential or successful session start does not prove all seven checks.
 Any test invocation/message must be clearly disclosed and user-initiated; it must
 not mutate finances just to demonstrate connectivity. A real financial request
 must follow the user's permissions and review mode.

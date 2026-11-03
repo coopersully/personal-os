@@ -98,6 +98,7 @@ describe("unconsumed agent operation contracts", () => {
     "eager",
   ] as const)("requires records, access and external for duplicate resolution in %s", (mode) => {
     const definition = agentOperationDefinitions.resolve_finance_account_duplicate;
+    expect(definition.capabilities).toEqual(["records", "access", "external"]);
     const action = {
       ownerId: "owner",
       operation: "resolve_finance_account_duplicate",
@@ -112,17 +113,19 @@ describe("unconsumed agent operation contracts", () => {
       allowed: true,
       confirmationRequired: mode === "cautious",
     });
-    expect(
-      resolveAgentPermission(
-        { ...policy, mode, capabilities: { ...capabilities, records: false } },
-        connection,
-        action,
-      ),
-    ).toMatchObject({
-      allowed: false,
-      reason: "missing_capability",
-      missingCapabilities: ["records"],
-    });
+    for (const missing of ["records", "access", "external"] as const) {
+      expect(
+        resolveAgentPermission(
+          { ...policy, mode, capabilities: { ...capabilities, [missing]: false } },
+          connection,
+          action,
+        ),
+      ).toMatchObject({
+        allowed: false,
+        reason: "missing_capability",
+        missingCapabilities: [missing],
+      });
+    }
   });
 
   it("preserves legacy adoption instead of converting the saved default into live authority", () => {

@@ -742,6 +742,14 @@ function TestLocationObserver({ current }: { current: { value: string } }) {
   return null;
 }
 
+// Navigation counts use limit1 without page sorting/grouping. Exclude only that role,
+// so a newer page read with wrong filters (or limit) still fails exact equality.
+function latestTaskPageRequest() {
+  return mocks.listTaskWorkspace.mock.calls
+    .filter(([query]) => query.limit !== 1 || query.sort !== undefined || query.group !== undefined)
+    .at(-1)?.[0];
+}
+
 async function findSettingsLink(name: string) {
   return within(
     await screen.findByRole("complementary", { name: "Account utility navigation" }),
@@ -3352,7 +3360,7 @@ describe("Personal OS web app", () => {
     await browser.selectOptions(screen.getByLabelText("Type"), "reminder");
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(await screen.findByText("Test reminder")).toBeInTheDocument();
-    expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+    expect(latestTaskPageRequest()).toEqual({
       sort: "default",
       group: "none",
       view: "all",
@@ -3613,7 +3621,7 @@ describe("Personal OS web app", () => {
     expect(screen.getByText("Release the new workspace")).toBeInTheDocument();
     expect(screen.getByText(/Target Aug 1, 2026/)).toBeInTheDocument();
     await waitFor(() =>
-      expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+      expect(latestTaskPageRequest()).toEqual({
         sort: "default",
         group: "none",
         view: "all",
@@ -3730,7 +3738,7 @@ describe("Personal OS web app", () => {
     await browser.selectOptions(screen.getByLabelText("Deadline", { exact: true }), "tomorrow");
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() =>
-      expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect(latestTaskPageRequest()).toEqual(
         expect.objectContaining({
           listId: secondId,
           query: "draft",
@@ -3846,7 +3854,7 @@ describe("Personal OS web app", () => {
     });
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() =>
-      expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+      expect(latestTaskPageRequest()).toEqual({
         sort: "default",
         group: "none",
         dueAfter: "2026-07-13T09:00:00.000Z",
@@ -3874,7 +3882,7 @@ describe("Personal OS web app", () => {
     expect(screen.getByLabelText("Show")).toHaveValue("completed");
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(systemView.location.value).toBe("/tasks?view=today&status=completed");
-    expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+    expect(latestTaskPageRequest()).toEqual({
       sort: "default",
       group: "none",
       limit: 50,
@@ -5163,9 +5171,7 @@ describe("Personal OS web app", () => {
     const mixed = setup(`/tasks?view=today&list=${secondId}&project=${thirdId}`);
     await screen.findByText("Draft brief");
     expect(mixed.location.value).toBe(`/tasks?view=today&list=${secondId}&project=${thirdId}`);
-    expect(
-      mocks.listTaskWorkspace.mock.calls.filter(([query]) => query.limit === 50).at(-1)?.[0],
-    ).toEqual({
+    expect(latestTaskPageRequest()).toEqual({
       sort: "default",
       group: "none",
       view: "today",

@@ -1,6 +1,6 @@
 import { localDateToIso, type SearchableWorkspace } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/api";
 import { ActionButton as Button } from "@/components/action-button";
@@ -82,7 +82,15 @@ function FinderInput({
   compact: boolean;
 }) {
   const navigate = useNavigate();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const restoreInputFocus = useRef(false);
+  const registerInput = useCallback((input: HTMLInputElement | null) => {
+    if (!input) {
+      // Capture ownership before a breakpoint removes the currently focused input.
+      restoreInputFocus.current = inputRef.current === document.activeElement;
+    }
+    inputRef.current = input;
+  }, []);
   const anchorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (activation) {
@@ -99,7 +107,9 @@ function FinderInput({
   const recordKind = filter === "content" ? "content" : filter === "reviews" ? "reviews" : "all";
   const [open, setOpen] = useState(false);
   useEffect(() => {
-    if (compact && open) inputRef.current?.focus();
+    const shouldFocus = open && (compact || restoreInputFocus.current);
+    restoreInputFocus.current = false;
+    if (shouldFocus) inputRef.current?.focus();
   }, [compact, open]);
   const preferences = useWorkspacePreferences(workspace);
   const [archiveOverride, setArchiveOverride] = useState<boolean | null>(null);
@@ -310,7 +320,7 @@ function FinderInput({
   );
   const searchInput = (
     <ComboboxInput
-      ref={inputRef}
+      ref={registerInput}
       aria-label={label}
       placeholder=""
       showTrigger={false}

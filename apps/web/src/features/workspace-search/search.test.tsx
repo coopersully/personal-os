@@ -3,7 +3,7 @@ import { resolveWorkspaceSettings } from "@personal-os/domain";
 
 import type { WorkspaceSearchPage } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { api } from "@/api";
@@ -182,6 +182,47 @@ it("opens compact mobile search from a named button and restores keyboard focus"
     await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
     expect(screen.getByLabelText("Current route")).toHaveTextContent("/tasks?review=open");
   } finally {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+  }
+});
+
+it.each([
+  true,
+  false,
+])("preserves mobile-to-desktop search focus only when the input owned it (focused=%s)", async (focused) => {
+  const originalWidth = window.innerWidth;
+  const media = new EventTarget();
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+    matches: window.innerWidth < 768,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: media.addEventListener.bind(media),
+    removeEventListener: media.removeEventListener.bind(media),
+    dispatchEvent: media.dispatchEvent.bind(media),
+  }));
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  const outside = document.createElement("button");
+  outside.textContent = "Keep keyboard focus";
+  document.body.append(outside);
+  try {
+    renderSearch("tasks");
+    const mobile = await screen.findByRole("combobox", { name: "Search Tasks" });
+    await waitFor(() => expect(mobile).toHaveFocus());
+    fireEvent.change(mobile, { target: { value: "reviews" } });
+    act(() => {
+      if (!focused) outside.focus();
+      expect(focused ? mobile : outside).toHaveFocus();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1100 });
+      media.dispatchEvent(new Event("change"));
+    });
+    const desktop = screen.getByRole("combobox", { name: "Search Tasks" });
+    expect(desktop).not.toBe(mobile);
+    expect(desktop).toHaveValue("reviews");
+    await waitFor(() => expect(focused ? desktop : outside).toHaveFocus());
+  } finally {
+    outside.remove();
     Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
   }
 });

@@ -60,6 +60,15 @@ function SessionFinanceAutomationsPage() {
       return result;
     },
   });
+  const connections = useQuery({
+    queryKey: ["finance-host-connections", session.owner, session.epoch],
+    enabled: !!session.owner,
+    queryFn: async () => {
+      const result = await api.listAutomationHostConnections();
+      if (!sameSession(client, session)) throw new Error("Your account session changed.");
+      return result;
+    },
+  });
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
   const perform: AutomationAction = async (action, message) => {
@@ -127,6 +136,9 @@ function SessionFinanceAutomationsPage() {
             <Automation
               key={status.schedule.id}
               status={status}
+              connections={
+                connections.isSuccess && !connections.isError ? connections.data : undefined
+              }
               pending={pending}
               perform={perform}
               returnTo={returnTo}
@@ -140,17 +152,30 @@ function SessionFinanceAutomationsPage() {
 
 function Automation({
   status,
+  connections,
   pending,
   perform,
   returnTo,
 }: {
   status: HostStatus;
+  connections: Awaited<ReturnType<typeof api.listAutomationHostConnections>> | undefined;
   pending: boolean;
   perform: AutomationAction;
   returnTo: string | null;
 }) {
   const { schedule, health } = status;
   const readiness = useFinanceConversationReadiness(schedule.id);
+  const originalConnection =
+    status.connectionAvailable === false
+      ? undefined
+      : connections?.find(
+          (connection) => connection.id === schedule.tenantAuthorizationConnectionId,
+        );
+  const missingReadScopes = originalConnection
+    ? (["texting:read", "finances:read"] as const).filter(
+        (scope) => !originalConnection.scopes.includes(scope),
+      )
+    : null;
 
   const timeZone = schedule.trigger.type === "scheduled" ? schedule.trigger.timeZone : undefined;
   const [label, setLabel] = useState(schedule.label);
@@ -199,6 +224,27 @@ function Automation({
           {date(health.nextExpectedAt, timeZone)}
         </p>
       ) : null}
+      <div role="group" aria-label="Notification delivery evidence access">
+        <p>
+          {missingReadScopes === null
+            ? "Notification delivery evidence access is unknown for this host. Original connection metadata is unavailable."
+            : missingReadScopes.length
+              ? `Missing notification evidence read permissions on the original host connection: ${missingReadScopes.join(", ")}.`
+              : "The original host connection includes notification evidence read permissions."}
+        </p>
+        <p>
+          Read permissions allow inspection of delivery evidence. They do not confirm sending,
+          delivery or host processing.
+        </p>
+        {missingReadScopes?.length ? (
+          <p>
+            View{" "}
+            <Link to="/settings?page=connections&subpage=agent-connections">Connected agents</Link>{" "}
+            for connection details. This release has no control to add permissions to the original
+            connection. Refreshing a connection cannot add permissions.
+          </p>
+        ) : null}
+      </div>
       <AutomationHostReadiness scheduleId={schedule.id} returnTo={returnTo} />
       <div className="flex flex-wrap gap-2">
         <AutomationVerification

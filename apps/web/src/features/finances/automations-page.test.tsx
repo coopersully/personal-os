@@ -880,3 +880,131 @@ it.each([
   expect(toast.dismiss).not.toHaveBeenCalledWith("ordinary-refresh");
   expect(screen.queryByText(message)).not.toBeInTheDocument();
 });
+
+it.each([
+  ["texting:read", ["finances:read"]],
+  ["finances:read", ["texting:read"]],
+] as const)("shows missing %s only from this host's exact original connection", async (missing, granted) => {
+  api.listAutomationHostConnections.mockResolvedValue([
+    {
+      id: "unrelated-connection",
+      label: "Another host",
+      scopes: ["texting:read", "finances:read"],
+    },
+    {
+      id: "connection-original",
+      label: "Original host",
+      scopes: ["finances:maintain", ...granted],
+    },
+  ]);
+  open();
+  await waitFor(() =>
+    expect(
+      screen.getByRole("group", { name: "Notification delivery evidence access" }),
+    ).toHaveTextContent(
+      `Missing notification evidence read permissions on the original host connection: ${missing}.`,
+    ),
+  );
+  expect(screen.getByRole("link", { name: "Connected agents" })).toHaveAttribute(
+    "href",
+    "/settings?page=connections&subpage=agent-connections",
+  );
+  expect(screen.getByText(/Refreshing a connection cannot add permissions/)).toBeInTheDocument();
+  expect(screen.getByText(/This release has no control to add permissions/)).toBeInTheDocument();
+  expect(api.createAutomationHostSchedule).not.toHaveBeenCalled();
+  expect(api.bindAutomationHostSchedule).not.toHaveBeenCalled();
+  expect(api.issueFinanceConversationChallenge).not.toHaveBeenCalled();
+  expect(api.exchangeFinanceConversationChallenge).not.toHaveBeenCalled();
+});
+
+it("keeps notification read access separate from Chat readiness and delivery", async () => {
+  api.listAutomationHostConnections.mockResolvedValue([
+    {
+      id: "connection-original",
+      label: "Original host",
+      scopes: ["texting:read", "finances:read"],
+    },
+  ]);
+  open();
+  await screen.findByText(
+    "The original host connection includes notification evidence read permissions.",
+  );
+  expect(await screen.findByText("Not ready for Chat")).toBeInTheDocument();
+  expect(
+    screen.getByText(/They do not confirm sending, delivery or host processing/),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Connected agents" })).not.toBeInTheDocument();
+  expect(api.updateAutomationHostSchedule).not.toHaveBeenCalled();
+  expect(api.revokeAutomationHostSchedule).not.toHaveBeenCalled();
+  expect(api.cancelAutomationHostSchedule).not.toHaveBeenCalled();
+});
+
+it.each([
+  "missing",
+  "unreadable",
+  "unavailable",
+] as const)("keeps %s original connection evidence unknown instead of inferring missing scopes", async (mode) => {
+  if (mode === "unreadable")
+    api.listAutomationHostConnections.mockRejectedValue(new Error("Read unavailable"));
+  else
+    api.listAutomationHostConnections.mockResolvedValue([
+      {
+        id: mode === "missing" ? "another-connection" : "connection-original",
+        label: "Host",
+        scopes: [],
+      },
+    ]);
+  if (mode === "unavailable")
+    api.listAutomationHostSchedules.mockResolvedValue([
+      { ...status(), connectionAvailable: false },
+    ]);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  open(undefined, "/finances/automations", client);
+  await waitFor(() => {
+    expect(client.getQueryState(["finance-host-connections", "owner-a", 0])).toMatchObject({
+      fetchStatus: "idle",
+      status: mode === "unreadable" ? "error" : "success",
+    });
+    expect(
+      screen.getByRole("group", { name: "Notification delivery evidence access" }),
+    ).toHaveTextContent("Notification delivery evidence access is unknown for this host.");
+  });
+  expect(
+    screen.getByRole("group", { name: "Notification delivery evidence access" }),
+  ).not.toHaveTextContent("Missing notification evidence read permissions");
+  expect(screen.queryByRole("link", { name: "Connected agents" })).not.toBeInTheDocument();
+});
+
+it("discards a pending original-connection read across owner and epoch changes", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let finish!: (rows: { id: string; label: string; scopes: string[] }[]) => void;
+  const oldConnection = new Promise<{ id: string; label: string; scopes: string[] }[]>(
+    (resolve) => {
+      finish = resolve;
+    },
+  );
+  api.listAutomationHostConnections.mockReturnValueOnce(oldConnection).mockResolvedValue([]);
+  open(undefined, "/finances/automations", client);
+  await screen.findByRole("group", { name: "Notification delivery evidence access" });
+  api.listAutomationHostSchedules.mockResolvedValue([]);
+  act(() => client.setQueryData(["me"], { id: "owner-b" }));
+  await screen.findByText("No Finance automations registered.");
+  await act(async () => {
+    finish([
+      {
+        id: "connection-original",
+        label: "Original host",
+        scopes: ["texting:read", "finances:read"],
+      },
+    ]);
+    await oldConnection;
+  });
+  await waitFor(() =>
+    expect(client.getQueryData(["finance-host-connections", "owner-b", 1])).toEqual([]),
+  );
+  expect(
+    screen.queryByText(
+      "The original host connection includes notification evidence read permissions.",
+    ),
+  ).not.toBeInTheDocument();
+});

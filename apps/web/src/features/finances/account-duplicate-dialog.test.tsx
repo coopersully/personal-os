@@ -178,8 +178,8 @@ it("uses complete record references when shortened identifiers collide", () => {
   const first = { ...kept, id: "11111111-1111-4111-8111-aaaaaaaaaaaa" };
   const second = { ...kept, id: "22222222-2222-4222-8222-aaaaaaaaaaaa" };
   mount([first, second]);
-  expect(screen.getByRole("option", { name: `Record ${first.id}`, exact: false })).toBeVisible();
-  expect(screen.getByRole("option", { name: `Record ${second.id}`, exact: false })).toBeVisible();
+  expect(screen.getByRole("option", { name: new RegExp(`^Record ${first.id} ·`) })).toBeVisible();
+  expect(screen.getByRole("option", { name: new RegExp(`^Record ${second.id} ·`) })).toBeVisible();
   expect(api.getFinanceAccountDuplicatePreview).not.toHaveBeenCalled();
 });
 it("preserves the reviewed comparison and idempotency key for an uncertain retry, with Sonner only", async () => {

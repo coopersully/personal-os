@@ -7,13 +7,18 @@ import {
 
 type ScheduledClaudeReadSchedule = AutomationHostSchedule & {
   hostSurface: "claude_code_routine";
+  hostAutomationId: string;
   trigger: z.infer<typeof scheduledAutomationHostTriggerSchema>;
 };
 
 function isScheduledClaudeSchedule(
   schedule: AutomationHostSchedule,
 ): schedule is ScheduledClaudeReadSchedule {
-  return schedule.hostSurface === "claude_code_routine" && schedule.trigger.type === "scheduled";
+  return (
+    schedule.hostSurface === "claude_code_routine" &&
+    schedule.trigger.type === "scheduled" &&
+    schedule.hostAutomationId !== null
+  );
 }
 
 /** Read projection only. It is neither a persisted trigger nor a create/upgrade input.

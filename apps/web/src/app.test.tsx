@@ -12,7 +12,7 @@ import {
   type UpdateAccountSetupInput,
   type User,
 } from "@personal-os/domain";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   createEvent,
@@ -1818,6 +1818,10 @@ function dragLeaveCalendarEvent(target: HTMLElement, relatedTarget: EventTarget 
 }
 
 beforeEach(() => {
+  // Completed query notifications must commit React updates (including route redirects)
+  // before the next assertion. Otherwise cold-page checks race unflushed app bootstrap.
+  // Keep the default scheduler and assertion deadlines; only provide React's test boundary.
+  notifyManager.setNotifyFunction((callback) => act(callback));
   // Test-specific `mockResolvedValueOnce` and pending promises must not leak into
   // the next rendered route. `clearAllMocks` only clears call history; it keeps
   // queued one-off implementations, which made later calendar tests render an
@@ -1881,6 +1885,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  notifyManager.setNotifyFunction((callback) => callback());
   toast.dismiss();
   vi.unstubAllGlobals();
 });

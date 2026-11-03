@@ -239,3 +239,10 @@ server protection: work must remain pending/blocked rather than imply it is merg
 Full verification admission, equivalence, candidate freezing, and invalidation follow
 [delivery verification](../../../../docs/engineering/delivery-verification.md). An exit 75 from the
 shared verifier is queue waiting, not a failed attempt. Record the checked-in VERSION in every claim.
+
+Before any hosted source event, complete the applicable final-file native format/import checks,
+fixture invariant review and exact live-backed Work-map validation required by
+[verification efficiency](../../../../docs/engineering/verification-efficiency.md#complete-authoring-checks-before-hosted-publication).
+Reuse matching completed authoring receipts; commit/base identity alone does not invalidate their
+unchanged inputs. Allocate finite conditional stages together, preserving fresh admission, locks,
+bounds and failure stops rather than repeated per-stage approval or duplicate full local/hosted gates.

@@ -2,8 +2,19 @@ import { z } from "zod";
 import {
   type AutomationHostSchedule,
   automationHostScheduleSchema,
-  scheduledAutomationHostTriggerSchema,
+  type scheduledAutomationHostTriggerSchema,
 } from "./automation-host-continuation.js";
+
+type ScheduledClaudeReadSchedule = AutomationHostSchedule & {
+  hostSurface: "claude_code_routine";
+  trigger: z.infer<typeof scheduledAutomationHostTriggerSchema>;
+};
+
+function isScheduledClaudeSchedule(
+  schedule: AutomationHostSchedule,
+): schedule is ScheduledClaudeReadSchedule {
+  return schedule.hostSurface === "claude_code_routine" && schedule.trigger.type === "scheduled";
+}
 
 /** Read projection only. It is neither a persisted trigger nor a create/upgrade input.
  * The existing schedule retains its original opaque host identity and declared cadence.
@@ -12,14 +23,13 @@ export const automationHostCombinedReadProjectionSchema = z
   .object({
     formatVersion: z.literal(2),
     kind: z.literal("combined_read_projection"),
-    schedule: automationHostScheduleSchema.and(
-      z
-        .object({
-          hostSurface: z.literal("claude_code_routine"),
-          trigger: scheduledAutomationHostTriggerSchema,
-        })
-        .passthrough(),
-    ),
+    schedule: automationHostScheduleSchema.transform((schedule, context) => {
+      if (!isScheduledClaudeSchedule(schedule)) {
+        context.addIssue({ code: "custom", message: "Use an existing scheduled Claude host." });
+        return z.NEVER;
+      }
+      return schedule;
+    }),
     event: z
       .object({
         kind: z.literal("accepted_answer"),

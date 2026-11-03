@@ -61,6 +61,25 @@ describe("unconsumed automation host reader compatibility", () => {
     expect(JSON.stringify(result.value)).toBe(before);
   });
 
+  it("normalizes the schedule once without throwing from safeParse or merging raw fields", () => {
+    const value = combined();
+    value.schedule.label = " Finance ";
+    value.schedule.hostAutomationId = " original-opaque-host-identity ";
+    value.schedule.effectiveScopes = ["finances:maintain", "finances:maintain"];
+    const canonical = automationHostScheduleSchema.parse(value.schedule);
+    expect(() => automationHostCombinedReadProjectionSchema.safeParse(value)).not.toThrow();
+    const parsed = automationHostCombinedReadProjectionSchema.safeParse(value);
+    if (!parsed.success) throw new Error("Expected a canonicalizable scheduled host");
+    expect(parsed.data.schedule).toEqual(canonical);
+    expect(parsed.data.schedule.label).toBe("Finance");
+    expect(parsed.data.schedule.hostAutomationId).toBe("original-opaque-host-identity");
+    expect(parsed.data.schedule.effectiveScopes).toEqual(["finances:maintain"]);
+    expect(selectAutomationHostReadProtocol("combined-v2", value)).toEqual({
+      state: "combined_v2",
+      value: { ...value, schedule: canonical },
+    });
+  });
+
   it.each(["event", "recurring"])("retains legacy %s schedules", (kind) => {
     const value = {
       ...scheduled,
@@ -164,6 +183,10 @@ describe("unconsumed automation host reader compatibility", () => {
         event: { ...value.event, [field]: "x" },
       }).success,
     ).toBe(false);
+    const nested = { ...value, schedule: { ...value.schedule, [field]: "x" } };
+    expect(() => automationHostCombinedReadProjectionSchema.safeParse(nested)).not.toThrow();
+    expect(automationHostCombinedReadProjectionSchema.safeParse(nested).success).toBe(false);
+    expect(() => selectAutomationHostReadProtocol("combined-v2", nested)).toThrow();
   });
 
   it.each([0, 61, 1.5, Number.NaN])("rejects invalid event latency %s", (latency) => {

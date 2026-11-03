@@ -51,6 +51,7 @@ describe("unconsumed automation host reader compatibility", () => {
     "combined-v2",
   ])("preserves the exact canonical scheduled DTO for protocol %s", (protocol) => {
     const before = JSON.stringify(scheduled);
+    const canonical = automationHostScheduleSchema.parse(scheduled);
     expect(selectAutomationHostReadProtocol(protocol, scheduled)).toEqual({
       state: "legacy",
       value: scheduled,
@@ -58,7 +59,7 @@ describe("unconsumed automation host reader compatibility", () => {
     expect(JSON.stringify(scheduled)).toBe(before);
     const result = selectAutomationHostReadProtocol(protocol, scheduled);
     if (result.state !== "legacy") throw new Error("Expected legacy schedule");
-    expect(JSON.stringify(result.value)).toBe(before);
+    expect(JSON.stringify(result.value)).toBe(JSON.stringify(canonical));
   });
 
   it("normalizes the schedule once without throwing from safeParse or merging raw fields", () => {

@@ -120,22 +120,22 @@ describe("unconsumed automation host reader compatibility", () => {
     expect(value.schedule.nextExpectedAt).toBe(scheduled.nextExpectedAt);
   });
 
-  it.each(["setup_pending", "cancelled"])(
-    "rejects an unbound %s combined projection while preserving the legacy schedule",
-    (state) => {
-      const unbound = { ...scheduled, state, hostAutomationId: null, nextExpectedAt: null };
-      const canonical = automationHostScheduleSchema.parse(unbound);
-      expect(selectAutomationHostReadProtocol("combined-v2", unbound)).toEqual({
-        state: "legacy",
-        value: canonical,
-      });
-      const value = { ...combined(), schedule: unbound };
-      expect(() => automationHostCombinedReadProjectionSchema.safeParse(value)).not.toThrow();
-      expect(automationHostCombinedReadProjectionSchema.safeParse(value).success).toBe(false);
-      expect(() => selectAutomationHostReadProtocol("combined-v2", value)).toThrow();
-      expect(() => describeAutomationHostReadCapabilities(value)).toThrow();
-    },
-  );
+  it.each([
+    "setup_pending",
+    "cancelled",
+  ])("rejects an unbound %s combined projection while preserving the legacy schedule", (state) => {
+    const unbound = { ...scheduled, state, hostAutomationId: null, nextExpectedAt: null };
+    const canonical = automationHostScheduleSchema.parse(unbound);
+    expect(selectAutomationHostReadProtocol("combined-v2", unbound)).toEqual({
+      state: "legacy",
+      value: canonical,
+    });
+    const value = { ...combined(), schedule: unbound };
+    expect(() => automationHostCombinedReadProjectionSchema.safeParse(value)).not.toThrow();
+    expect(automationHostCombinedReadProjectionSchema.safeParse(value).success).toBe(false);
+    expect(() => selectAutomationHostReadProtocol("combined-v2", value)).toThrow();
+    expect(() => describeAutomationHostReadCapabilities(value)).toThrow();
+  });
 
   it.each([
     "",

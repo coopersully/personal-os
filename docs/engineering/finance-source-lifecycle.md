@@ -184,3 +184,40 @@ Synthetic coverage exercises scheduled start followed by its returned resume act
 real dispatcher to candidate challenge, with no semantic categorization effects. Production
 acceptance separately requires current blocker inspection, authorized source/effect repair, and
 observation beyond preflight; these tests do not establish real provider recovery or final settlement.
+
+## Activity notification delivery history
+
+Notification history is an explicitly aware response shape: `includeNotificationDeliveries=true`
+or `type=notification_delivery` opts in. Only the new Activity loader requests the marker; the
+shared client merely forwards a supplied value. Boolean query strings accept only `true` or
+`false`; false is not coerced to true. Unaware callers retain the old entry variants, coverage
+reasons, ordering and exact filter-hash/signed-cursor serialization. Aware all-type continuations
+bind that mode and cannot be reused across response modes. This selects a read projection, not
+a grant or approval capability. Activity details restore focus only to the actual connected opener
+owned by that page; no global dialog primitive or focus policy changes.
+
+The owner Activity read projection distinguishes `notification_delivery` from accepted human
+answers and audited financial effects. It reads existing Finance attempt membership, safe message
+receipt fields and owned run metadata; it does not send, retry, approve or complete work. The
+existing human-only `finances:read` route remains unchanged. Message bodies, phone numbers,
+provider identifiers, credentials and claim/lease details are not exposed. Historical attempts do
+not establish the initiating actor: the projection records attribution as unavailable and does not
+invent an audit event or weaken the attribution required for financial entries.
+
+Attempt items preserve the frozen work and action revisions, rather than replacing history with
+current intent state. A repair's semantic work ID is not its run ID: a run link requires its UUID
+revision and an actual same-owner Finance run. Missing message/run history is explicitly partial;
+attempts without owned Finance membership and malformed or oversized membership are outside the
+stated coverage. Membership is never silently truncated into a complete record.
+
+Provider acceptance is not delivery. A delivery observation requires both the owned outbound
+message's delivered status and recorded delivery time; it does not prove reading, reply consumption
+or financial completion. Uncertain submissions remain uncertain and offer no resend action.
+History ordering uses immutable attempt creation time, preserving PostgreSQL microseconds and the
+`(time, ID, kind)` continuation order. Updated transport observations have a separate timestamp;
+status changes do not move an old attempt across page boundaries. Signed cursors remain bound to
+the authenticated owner and exact filters, and UI row identity includes the entry kind.
+
+This source slice adds a read projection and fixtures, not end-to-end SMS acceptance. Focused unit,
+UI, type and PostgreSQL execution evidence must be recorded separately; authored fixtures and
+transport metadata alone do not establish production delivery or original-host consumption.

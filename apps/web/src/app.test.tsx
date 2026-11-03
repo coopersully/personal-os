@@ -9845,7 +9845,85 @@ describe("Personal OS web app", () => {
     });
     const view = setup(`/settings?page=connections&connection_attempt=${id}`);
 
-    expect(await screen.findByText("Google is connected")).toBeInTheDocument();
+    try {
+      expect(await screen.findByText("Google is connected")).toBeInTheDocument();
+    } catch (error) {
+      // Private diagnostic: inspect only after the original lookup has failed.
+      try {
+        const route = new URL(view.location.value, "https://fixture.invalid");
+        const attempt = mocks.getConnectorAuthorizationAttempt.mock;
+        const labels = [
+          "Connections",
+          "Loading connections",
+          "Couldn’t load connections.",
+          "Connections unavailable",
+          "Confirming your connection",
+          "Google is connected",
+          "Restart the connection",
+        ];
+        const queries = [["connectors"], ["connector-authorization-attempt", id]].map(
+          (queryKey) => {
+            const state = view.queryClient.getQueryState(queryKey);
+            const outcome = (state?.data as { status?: unknown } | undefined)?.status;
+            return {
+              query: queryKey[0],
+              status: state?.status ?? "missing",
+              fetchStatus: state?.fetchStatus ?? "missing",
+              hasData: state?.data !== undefined,
+              hasError: state?.error != null,
+              outcome:
+                typeof outcome === "string" &&
+                [
+                  "connected",
+                  "pending",
+                  "cancelled",
+                  "expired",
+                  "permission_incomplete",
+                  "failed",
+                ].includes(outcome)
+                  ? outcome
+                  : "absent-or-other",
+            };
+          },
+        );
+        console.error(
+          "CALLBACK_LOOKUP_DIAGNOSTIC",
+          JSON.stringify({
+            route: {
+              isSettings: route.pathname === "/settings",
+              isConnections: route.searchParams.get("page") === "connections",
+              hasAttempt: route.searchParams.has("connection_attempt"),
+              attemptMatchesFixture: route.searchParams.get("connection_attempt") === id,
+              hasRestartResult: route.searchParams.get("connection_result") === "restart_required",
+            },
+            attempt: {
+              calls: Math.min(attempt.calls.length, 100),
+              callsTruncated: attempt.calls.length > 100,
+              lastCallMatchesFixture: attempt.calls.at(-1)?.[0] === id,
+              results: attempt.results.slice(-4).map((result) => result.type),
+              settledResults: attempt.settledResults.slice(-4).map((result) => result.type),
+            },
+            queries,
+            dom: Array.from(
+              view.container.querySelectorAll(
+                '[role="alert"], [data-slot="alert"], [data-slot="alert-title"], h1, h2, h3',
+              ),
+            )
+              .slice(0, 12)
+              .map((element) => ({
+                tag: element.tagName,
+                isAlert: element.getAttribute("role") === "alert",
+                labels: labels.filter((label) =>
+                  (element.textContent ?? "").slice(0, 256).includes(label),
+                ),
+              })),
+          }),
+        );
+      } catch {
+        // A failed capture must never replace the original lookup/assertion error.
+      }
+      throw error;
+    }
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(screen.queryByText("raw-provider-canary")).not.toBeInTheDocument();
     await waitFor(() => expect(view.location.value).toBe("/settings?page=connections"));
@@ -10395,9 +10473,81 @@ describe("Personal OS web app", () => {
 
   it("keeps Pinterest wallpaper desktop-only and exposes its desktop controls intentionally", async () => {
     const webView = setup("/settings?page=wallpaper");
-    expect(
-      await screen.findByRole("heading", { name: "Appearance", level: 2 }),
-    ).toBeInTheDocument();
+    try {
+      expect(
+        await screen.findByRole("heading", { name: "Appearance", level: 2 }),
+      ).toBeInTheDocument();
+    } catch (error) {
+      // Inspect only after the original lookup fails; retain no application data or full DOM.
+      try {
+        const route = new URL(webView.location.value, "https://fixture.invalid");
+        const page = route.searchParams.get("page");
+        const labels = ["Appearance", "Wallpaper", "Pinterest wallpaper", "Connections"];
+        const queries = [["me"], ["connectors"], ["pinterest-wallpaper"]].map((queryKey) => {
+          const state = webView.queryClient.getQueryState(queryKey);
+          return {
+            query: queryKey[0],
+            status: state?.status ?? "missing",
+            fetchStatus: state?.fetchStatus ?? "missing",
+            hasData: state?.data !== undefined,
+            hasError: state?.error != null,
+          };
+        });
+        const calls = [
+          ["getMe", mocks.getMe.mock],
+          ["getPinterestWallpaperSettings", mocks.getPinterestWallpaperSettings.mock],
+          ["listPinterestPins", mocks.listPinterestPins.mock],
+        ] as const;
+        console.error(
+          "WALLPAPER_FALLBACK_DIAGNOSTIC",
+          JSON.stringify({
+            route: {
+              isSettings: route.pathname === "/settings",
+              page: page === "wallpaper" || page === "appearance" ? page : "missing-or-other",
+            },
+            native: {
+              calls: Math.min(mocks.isTauri.mock.calls.length, 100),
+              callsTruncated: mocks.isTauri.mock.calls.length > 100,
+              results: mocks.isTauri.mock.results.slice(-4).map((result) => ({
+                type: result.type,
+                value: typeof result.value === "boolean" ? result.value : "other",
+              })),
+            },
+            calls: calls.map(([name, mock]) => ({
+              name,
+              count: Math.min(mock.calls.length, 100),
+              truncated: mock.calls.length > 100,
+              results: mock.results.slice(-4).map((result) => result.type),
+              settledResults: mock.settledResults.slice(-4).map((result) => result.type),
+            })),
+            queries,
+            render: {
+              containerConnected: webView.container.isConnected,
+              hasSettingsWorkspace: !!webView.container.querySelector(
+                '[data-workspace="settings"]',
+              ),
+              exposedAppearanceHeadings: Math.min(
+                screen.queryAllByRole("heading", { name: "Appearance", level: 2 }).length,
+                100,
+              ),
+              hasRecoveryDialog:
+                screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length > 0,
+              headings: Array.from(webView.container.querySelectorAll("h1, h2, h3"))
+                .slice(0, 12)
+                .map((element) => ({
+                  tag: element.tagName,
+                  labels: labels.filter((label) => (element.textContent ?? "").trim() === label),
+                  ariaHiddenAncestor: !!element.closest('[aria-hidden="true"]'),
+                  inertAncestor: !!element.closest("[inert]"),
+                })),
+            },
+          }),
+        );
+      } catch {
+        // A failed capture must never replace the original lookup/assertion error.
+      }
+      throw error;
+    }
     expect(
       within(screen.getByRole("complementary", { name: "Account utility navigation" })).queryByRole(
         "link",

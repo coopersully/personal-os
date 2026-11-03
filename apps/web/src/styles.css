@@ -7623,11 +7623,6 @@ html.pet-window #root {
   transition: width 220ms ease-out;
   pointer-events: none;
 }
-.ritual-escapes {
-  position: fixed;
-  inset-inline: 0;
-  bottom: max(12px, env(safe-area-inset-bottom));
-}
 .ritual-follow-up { color: var(--ritual-chrome); }
 @media (prefers-reduced-motion: reduce) {
   .ritual-button-progress { transition: none; }
@@ -8995,11 +8990,7 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
 .ritual-browser-preview:has(.ritual-scene[data-sky-top-dark="true"]) .ritual-logo { --ritual-chrome-muted: var(--ritual-evening-content); }
 .ritual-surface:has(.ritual-scene[data-sky-top-dark="false"]) .ritual-logo,
 .ritual-browser-preview:has(.ritual-scene[data-sky-top-dark="false"]) .ritual-logo { --ritual-chrome-muted: var(--ritual-morning-content); }
-.ritual-surface:has(.ritual-scene[data-sky-bottom-dark="true"]) .ritual-escapes,
-.ritual-browser-preview:has(.ritual-scene[data-sky-bottom-dark="true"]) .ritual-escapes,
 .ritual-surface:has(.ritual-scene[data-sky-bottom-dark="true"]) .ritual-support { --ritual-chrome: var(--ritual-evening-content); --ritual-chrome-muted: var(--ritual-evening-content); }
-.ritual-surface:has(.ritual-scene[data-sky-bottom-dark="false"]) .ritual-escapes,
-.ritual-browser-preview:has(.ritual-scene[data-sky-bottom-dark="false"]) .ritual-escapes,
 .ritual-surface:has(.ritual-scene[data-sky-bottom-dark="false"]) .ritual-support { --ritual-chrome: var(--ritual-morning-content); --ritual-chrome-muted: var(--ritual-morning-content); }
 /* Provider identity is shared by account selection, setup, settings, and recovery. */
 .connection-card__profile { flex: 1 1 14rem; min-width: 0; }

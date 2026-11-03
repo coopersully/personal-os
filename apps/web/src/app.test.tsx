@@ -10425,9 +10425,81 @@ describe("Personal OS web app", () => {
 
   it("keeps Pinterest wallpaper desktop-only and exposes its desktop controls intentionally", async () => {
     const webView = setup("/settings?page=wallpaper");
-    expect(
-      await screen.findByRole("heading", { name: "Appearance", level: 2 }),
-    ).toBeInTheDocument();
+    try {
+      expect(
+        await screen.findByRole("heading", { name: "Appearance", level: 2 }),
+      ).toBeInTheDocument();
+    } catch (error) {
+      // Inspect only after the original lookup fails; retain no application data or full DOM.
+      try {
+        const route = new URL(webView.location.value, "https://fixture.invalid");
+        const page = route.searchParams.get("page");
+        const labels = ["Appearance", "Wallpaper", "Pinterest wallpaper", "Connections"];
+        const queries = [["me"], ["connectors"], ["pinterest-wallpaper"]].map((queryKey) => {
+          const state = webView.queryClient.getQueryState(queryKey);
+          return {
+            query: queryKey[0],
+            status: state?.status ?? "missing",
+            fetchStatus: state?.fetchStatus ?? "missing",
+            hasData: state?.data !== undefined,
+            hasError: state?.error != null,
+          };
+        });
+        const calls = [
+          ["getMe", mocks.getMe.mock],
+          ["getPinterestWallpaperSettings", mocks.getPinterestWallpaperSettings.mock],
+          ["listPinterestPins", mocks.listPinterestPins.mock],
+        ] as const;
+        console.error(
+          "WALLPAPER_FALLBACK_DIAGNOSTIC",
+          JSON.stringify({
+            route: {
+              isSettings: route.pathname === "/settings",
+              page: page === "wallpaper" || page === "appearance" ? page : "missing-or-other",
+            },
+            native: {
+              calls: Math.min(mocks.isTauri.mock.calls.length, 100),
+              callsTruncated: mocks.isTauri.mock.calls.length > 100,
+              results: mocks.isTauri.mock.results.slice(-4).map((result) => ({
+                type: result.type,
+                value: typeof result.value === "boolean" ? result.value : "other",
+              })),
+            },
+            calls: calls.map(([name, mock]) => ({
+              name,
+              count: Math.min(mock.calls.length, 100),
+              truncated: mock.calls.length > 100,
+              results: mock.results.slice(-4).map((result) => result.type),
+              settledResults: mock.settledResults.slice(-4).map((result) => result.type),
+            })),
+            queries,
+            render: {
+              containerConnected: webView.container.isConnected,
+              hasSettingsWorkspace: !!webView.container.querySelector(
+                '[data-workspace="settings"]',
+              ),
+              exposedAppearanceHeadings: Math.min(
+                screen.queryAllByRole("heading", { name: "Appearance", level: 2 }).length,
+                100,
+              ),
+              hasRecoveryDialog:
+                screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length > 0,
+              headings: Array.from(webView.container.querySelectorAll("h1, h2, h3"))
+                .slice(0, 12)
+                .map((element) => ({
+                  tag: element.tagName,
+                  labels: labels.filter((label) => (element.textContent ?? "").trim() === label),
+                  ariaHiddenAncestor: !!element.closest('[aria-hidden="true"]'),
+                  inertAncestor: !!element.closest("[inert]"),
+                })),
+            },
+          }),
+        );
+      } catch {
+        // A failed capture must never replace the original lookup/assertion error.
+      }
+      throw error;
+    }
     expect(
       within(screen.getByRole("complementary", { name: "Account utility navigation" })).queryByRole(
         "link",

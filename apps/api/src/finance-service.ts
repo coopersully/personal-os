@@ -17,6 +17,7 @@ import {
   financeCategories,
   financeCategoryRules,
   financeClassificationDecisions,
+  financeContextualQuestions,
   financeEconomicEvents,
   financeEventTransactions,
   financeIncomeStreams,
@@ -143,6 +144,10 @@ import {
   loadFinanceAuthorization,
   requireFinanceExecution,
 } from "./finance/context.js";
+import {
+  contextualSubtype,
+  lockContextualTransaction,
+} from "./finance/contextual-question-store.js";
 import { mirrorNewMaintenanceReviewQuestion } from "./finance/conversation-review-mirror.js";
 import type { FinanceExecutionFence } from "./finance/execution-binding.js";
 import { assertFinanceDerivedCompletionClaim } from "./finance/execution-claim-fence.js";
@@ -2605,8 +2610,9 @@ export function createFinanceService({
     executor: FinanceReviewExecutor = db,
     context?: MutationContext,
     source?: MaterialSourceReference,
+    reviewPolicy?: "preserve_open_context_rationale",
   ) {
-    const [existing] = await executor
+    const existingQuery = executor
       .select()
       .from(financeReviewCases)
       .where(
@@ -2618,6 +2624,7 @@ export function createFinanceService({
       )
       .orderBy(desc(financeReviewCases.updatedAt))
       .limit(1);
+    const [existing] = await (reviewPolicy ? existingQuery.for("update") : existingQuery);
     if (existing) {
       if (
         existing.reason === reason &&
@@ -2625,6 +2632,37 @@ export function createFinanceService({
         existing.rationale === rationale
       ) {
         return existing;
+      }
+      if (
+        reviewPolicy === "preserve_open_context_rationale" &&
+        existing.reason === reason &&
+        existing.suggestedCategoryId === suggestedCategoryId
+      ) {
+        // The background caller already holds owner/account/transaction locks in canonical order.
+        // Hold review and exact native ownership through commit, including the absent-question case.
+        const [openContext] = await executor
+          .select({ id: financeContextualQuestions.id })
+          .from(financeContextualQuestions)
+          .innerJoin(
+            financeTransactions,
+            and(
+              eq(financeTransactions.id, transactionId),
+              eq(financeTransactions.userId, userId),
+              eq(financeContextualQuestions.accountId, financeTransactions.accountId),
+            ),
+          )
+          .where(
+            and(
+              eq(financeContextualQuestions.userId, userId),
+              eq(financeContextualQuestions.transactionId, transactionId),
+              eq(financeContextualQuestions.reviewCaseId, existing.id),
+              eq(financeContextualQuestions.subtype, contextualSubtype),
+              eq(financeContextualQuestions.state, "open"),
+            ),
+          )
+          .limit(1)
+          .for("share");
+        if (openContext) return existing;
       }
       const [updated] = await executor
         .update(financeReviewCases)
@@ -7848,6 +7886,36 @@ export function createFinanceService({
         .where(or(isNull(financeTransactions.merchantId), isNull(financeTransactions.categoryId)))
         .orderBy(desc(financeTransactions.createdAt))
         .limit(limit);
+      class BusyContextualParent extends Error {
+        constructor(cause: unknown) {
+          super("The Finance learning parent is busy.", { cause });
+        }
+      }
+      function isKnownParentBusy(error: unknown): boolean {
+        const seen = new Set<object>();
+        let current: unknown = error;
+        let busy = false;
+        try {
+          for (let depth = 0; depth < 16; depth += 1) {
+            if (typeof current !== "object" || current === null || seen.has(current)) return false;
+            seen.add(current);
+            if ("code" in current) {
+              const code: unknown = current.code;
+              if (code !== "55P03") return false;
+              busy = true;
+            }
+            const cause: unknown = "cause" in current ? current.cause : undefined;
+            if (cause === undefined) return busy;
+            current = cause;
+          }
+        } catch {
+          return false;
+        }
+        return false;
+      }
+      const selected = rows.length;
+      let completed = 0;
+      let deferred = 0;
       for (const row of rows) {
         const enriched = await persistTransactionEnrichment(row);
         if (enriched.merchantId !== row.merchantId || enriched.categoryId !== row.categoryId) {
@@ -7871,16 +7939,44 @@ export function createFinanceService({
             }),
           );
         }
-        if (enriched.categoryId === null)
-          await putInReview(
-            row.id,
-            row.userId,
-            "unknown_merchant",
-            null,
-            "Backfilled without a confident category.",
-          );
+        if (enriched.categoryId === null) {
+          try {
+            await db.transaction(async (tx) => {
+              await guardFinanceExecutionTransaction(tx, row.userId, { hostSchedules: true });
+              const parent = await (async () => {
+                try {
+                  return await lockContextualTransaction(tx, row.userId, row.id, true);
+                } catch (error) {
+                  if (isKnownParentBusy(error)) throw new BusyContextualParent(error);
+                  throw error;
+                }
+              })();
+              if (!parent)
+                throw new AppError("not_found", "The Finance transaction is unavailable.");
+              return putInReview(
+                row.id,
+                row.userId,
+                "unknown_merchant",
+                null,
+                "Backfilled without a confident category.",
+                tx,
+                undefined,
+                undefined,
+                "preserve_open_context_rationale",
+              );
+            });
+          } catch (error) {
+            // A rejected native transaction has rolled back before this boundary.
+            if (!(error instanceof BusyContextualParent)) throw error;
+            deferred += 1;
+            continue;
+          }
+        }
+        completed += 1;
       }
-      return { processed: rows.length };
+      if (completed + deferred !== selected)
+        throw new Error("Finance learning completion accounting is inconsistent.");
+      return { processed: completed };
     },
     async createAccount(input: CreateFinanceAccountInput, context: MutationContext) {
       const row = await db.transaction(async (tx) => {

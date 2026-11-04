@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { expect, test } from "@playwright/test";
 import { qaFixtureAccounts } from "../apps/api/src/qa-fixtures.js";
-import type {
-  FinanceAnswer,
-  FinanceContextualQuestionResult,
+import {
+  type FinanceAnswer,
+  type FinanceContextualQuestionResult,
+  financeContextualQuestionResultSchema,
 } from "../packages/domain/src/index.js";
 
 const owner = qaFixtureAccounts.find((account) => account.key === "demo-full");
@@ -66,7 +67,81 @@ test("saved manual context survives reload without changing the ledger and stays
         expect(result.state).toBe("available");
         if (result.state !== "available") throw new Error("Manual context question unavailable.");
         const question = result.question;
-        await page.goto(`/finances/review?contextualQuestion=${question.id}`);
+        const fixtureOrigin = new URL(page.url()).origin;
+        const [questionRead] = await Promise.all([
+          page.waitForResponse((response) => {
+            const url = new URL(response.url());
+            return (
+              url.origin === fixtureOrigin &&
+              url.pathname === `/v1/finances/contextual-questions/${question.id}` &&
+              url.search === "" &&
+              response.request().method() === "GET"
+            );
+          }),
+          page.goto(`/finances/review?contextualQuestion=${question.id}`),
+        ]);
+        let readBody: unknown;
+        try {
+          readBody = await questionRead.json();
+        } catch {
+          // Do not retain raw response contents or decode errors.
+          readBody = undefined;
+        }
+        const parsedRead = financeContextualQuestionResultSchema.safeParse(readBody);
+        const readQuestion =
+          parsedRead.success && parsedRead.data.state === "available"
+            ? parsedRead.data.question
+            : null;
+        const identityMatches = readQuestion
+          ? readQuestion.id === question.id &&
+            readQuestion.reviewCaseId === question.reviewCaseId &&
+            readQuestion.transactionId === question.transactionId
+          : null;
+        const workIdentityMatches = readQuestion
+          ? readQuestion.work.id === question.work.id &&
+            readQuestion.work.domain === question.work.domain &&
+            readQuestion.work.kind === question.work.kind
+          : null;
+        const workRevisionMatches = readQuestion
+          ? readQuestion.work.revision === question.work.revision
+          : null;
+        const actionRevisionMatches = readQuestion
+          ? readQuestion.work.actionRevision === question.work.actionRevision
+          : null;
+        try {
+          console.info(
+            JSON.stringify({
+              event: "finance-context-question-read",
+              phase: "ui_exact_lookup",
+              retry: testInfo.retry,
+              httpStatus: questionRead.status(),
+              resultState: parsedRead.success ? parsedRead.data.state : "malformed",
+              questionStatus: readQuestion?.status ?? null,
+              questionIdentityMatchesCreated: identityMatches,
+              questionWorkIdentityMatchesCreated: workIdentityMatches,
+              questionWorkRevisionMatchesCreated: workRevisionMatches,
+              questionActionRevisionMatchesCreated: actionRevisionMatches,
+              parentGenerations: {
+                state: "unavailable",
+                reason: "not_exposed_by_existing_question_read",
+              },
+              parentEligibility: {
+                state: "unavailable",
+                reason: "not_exposed_by_existing_question_read",
+              },
+            }),
+          );
+        } catch {
+          // Best-effort safe metadata must never replace the body assertion.
+        }
+        expect(questionRead.ok()).toBe(true);
+        expect(parsedRead.success).toBe(true);
+        expect(parsedRead.success ? parsedRead.data.state : "malformed").toBe("available");
+        expect(identityMatches).toBe(true);
+        expect(workIdentityMatches).toBe(true);
+        expect(workRevisionMatches).toBe(true);
+        expect(actionRevisionMatches).toBe(true);
+        expect(readQuestion?.status).toBe("open");
         await expect(
           page.getByRole("heading", { name: "Acceptance manual purchase" }),
         ).toBeVisible();
@@ -149,6 +224,14 @@ test("saved manual context survives reload without changing the ledger and stays
     const guardedBodyMs = Math.max(0, Math.round(cleanupStartedAt - guardedBodyStartedAt));
     let cleanupOutcome: "pending" | "passed" | "threw" = "pending";
     let cleanupStatus: number | null = null;
+    let cleanupFailureKind:
+      | "context_closed"
+      | "timeout"
+      | "http_status"
+      | "assertion"
+      | "error"
+      | "non_error"
+      | null = null;
     const observeCleanup = (phase: "start" | "end") => {
       try {
         console.info(
@@ -159,6 +242,7 @@ test("saved manual context survives reload without changing the ledger and stays
             stepOutcome: stepFailed ? "threw" : "passed",
             cleanupOutcome,
             cleanupStatus,
+            cleanupFailureKind,
             guardedBodyMs,
             cleanupMs: Math.max(0, Math.round(performance.now() - cleanupStartedAt)),
             retry: testInfo.retry,
@@ -173,12 +257,32 @@ test("saved manual context survives reload without changing the ledger and stays
     try {
       const removed = await page.request.delete(`/v1/finances/accounts/${account.id}`, { headers });
       cleanupStatus = removed.status();
+      if (cleanupStatus !== 204) cleanupFailureKind = "http_status";
       expect(removed.status()).toBe(204);
       cleanupOutcome = "passed";
     } catch (error) {
       cleanupOutcome = "threw";
       cleanupThrew = true;
       cleanupError = error;
+      try {
+        if (cleanupFailureKind === null) {
+          if (!(error instanceof Error)) cleanupFailureKind = "non_error";
+          else {
+            const message = error.message.slice(0, 512);
+            cleanupFailureKind =
+              /(?:context|browser|page).*(?:closed|disposed)|Target.*closed/i.test(message)
+                ? "context_closed"
+                : error.name === "TimeoutError" || /(?:test )?timeout.*exceeded/i.test(message)
+                  ? "timeout"
+                  : error.name === "AssertionError" || message.startsWith("expect(")
+                    ? "assertion"
+                    : "error";
+          }
+        }
+      } catch {
+        // Classification cannot replace the retained cleanup/body error.
+        cleanupFailureKind = "error";
+      }
     } finally {
       observeCleanup("end");
     }

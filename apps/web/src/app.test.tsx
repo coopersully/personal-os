@@ -9842,14 +9842,29 @@ describe("Personal OS web app", () => {
   });
 
   it("shows one safe callback outcome and removes callback state from the URL", async () => {
-    mocks.getConnectorAuthorizationAttempt.mockResolvedValue({
+    type Outcome = import("@personal-os/domain").ConnectorAuthorizationOutcome;
+    const connected = {
       accountId: id,
       provider: "google",
       providerMessage: "raw-provider-canary",
       retryable: false,
       status: "connected",
+    } satisfies Outcome & { providerMessage: string };
+    let finish: (outcome: Outcome) => void = () => {
+      throw new Error("Callback fixture resolver was not initialized.");
+    };
+    const pending = new Promise<Outcome>((resolve) => {
+      finish = resolve;
     });
+    mocks.getConnectorAuthorizationAttempt.mockReturnValue(pending);
     const view = setup(`/settings?page=connections&connection_attempt=${id}`);
+    expect(await screen.findByText("Confirming your connection")).toBeInTheDocument();
+    expect(mocks.getConnectorAuthorizationAttempt).toHaveBeenCalledTimes(1);
+    expect(mocks.getConnectorAuthorizationAttempt).toHaveBeenCalledWith(id);
+    await act(async () => {
+      finish(connected);
+      await pending;
+    });
 
     try {
       expect(await screen.findByText("Google is connected")).toBeInTheDocument();

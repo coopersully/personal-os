@@ -500,6 +500,28 @@ preference cannot expand the permitted context. Sensitive or oversized content f
 short review summary. Notification rows contain references and delivery state, not copies of SMS
 bodies, phone numbers, domain results, or host credentials.
 
+### Exact notification-attempt inspection
+
+The current branch adds an authored read contract: `GET /v1/texting/notifications/attempts/:id`,
+`getNotificationAttempt(attemptId)` in the typed client, and `get_notification_attempt` in MCP.
+Inspection requires both `finances:read` and `texting:read` on the actual authenticated principal.
+The owner comes from that principal, never a caller-supplied owner ID. Native attempt, membership,
+intent and outbound-message evidence is read in one owner-scoped, read-only repeatable snapshot.
+The GET and client request use `no-store`; inspection does not call the existing reconciliation-writing
+status method, resolve business work, send a message, or grant retry or financial authority.
+
+Membership is ordered deterministically and bounded to 100 items. Overflow, missing or inconsistent
+sources report partial or unavailable coverage rather than a complete history or no-send result.
+Frozen work revisions remain distinct from current intent state. Recorded attempt consent/timezone
+fields remain distinct from current policy revisions and connection epochs; absent historical
+preference snapshots, callback provenance and initiating actors stay unavailable. No phone number,
+message body, provider SID, credential or fabricated approval is returned. Delivery evidence does
+not establish reading, answer consumption or a financial outcome.
+
+This subsection records authored branch source. Verification and deployment acceptance are pending
+at this checkpoint; the contract does not establish a currently released or accessible reader.
+Supported owned read access and actual runtime acceptance remain separate prerequisites.
+
 ### Durable send and recovery boundary
 
 Texting owns the existing Twilio HTTPS submission and its bounded timeout. Configuration, sender

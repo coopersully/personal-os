@@ -283,9 +283,26 @@ describe("existing connection scope consent DTOs (not runtime authorization)", (
     expect(connectionScopeListQuerySchema.safeParse({ cursor: "a".repeat(513) }).success).toBe(
       false,
     );
+    const distinctConnections = Array.from({ length: 21 }, (_, index) => ({
+      ...metadata,
+      connectionId: `${(index + 1).toString(16).padStart(8, "0")}-1111-4111-8111-111111111111`,
+    }));
+    expect(new Set(distinctConnections.map((connection) => connection.connectionId)).size).toBe(21);
     expect(
       connectionScopeMetadataListSchema.safeParse({
-        connections: Array.from({ length: 21 }, () => metadata),
+        connections: distinctConnections.slice(0, 20),
+        nextCursor: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      connectionScopeMetadataListSchema.safeParse({
+        connections: distinctConnections,
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      connectionScopeMetadataListSchema.safeParse({
+        connections: [metadata, metadata],
         nextCursor: null,
       }).success,
     ).toBe(false);

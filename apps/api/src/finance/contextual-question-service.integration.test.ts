@@ -14,9 +14,13 @@ import {
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
-import type { FinanceHumanWorkRef } from "@personal-os/domain";
+import {
+  createFinanceTransactionInputSchema,
+  type FinanceContextualQuestion,
+  type FinanceHumanWorkRef,
+} from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { errorResponse } from "../errors.js";
 import { createFinanceService } from "../finance-service.js";
@@ -25,6 +29,11 @@ import type { AppEnv, Principal } from "../types.js";
 import { type FinanceTransaction, loadFinanceAuthorization } from "./context.js";
 import { readFinanceContextualWork } from "./contextual-question-projection.js";
 import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
+import {
+  currentContextualParents,
+  eligibleContextualTransaction,
+  lockContextualQuestion,
+} from "./contextual-question-store.js";
 import { createInboxService } from "./inbox-service.js";
 import { resolveContextualWorks, resolveSmsQuestion } from "./work-resolver.js";
 
@@ -1270,5 +1279,289 @@ describe.sequential("real contextual question producer", () => {
         )
       ).rows,
     ).toEqual([]);
+  });
+  // Native values remain private in this closure; only finite states/derived predicates escape.
+  async function mechanismSnapshot(userId: string, question: FinanceContextualQuestion) {
+    const baseline = await database.db.transaction(async (tx) => {
+      const locked = await lockContextualQuestion(tx, userId, question.id, false);
+      if (!locked) throw new Error("Mechanism fixture question unavailable.");
+      return locked;
+    });
+    return async (
+      phase: "before" | "after_backfill" | "after_noop",
+      writerCompletionObserved = false,
+    ) =>
+      database.db.transaction(async (tx) => {
+        const locked = await lockContextualQuestion(tx, userId, question.id, false);
+        if (!locked) throw new Error("Mechanism fixture question unavailable.");
+        const selected = await tx
+          .select({ id: financeTransactions.id })
+          .from(financeTransactions)
+          .where(or(isNull(financeTransactions.merchantId), isNull(financeTransactions.categoryId)))
+          .orderBy(desc(financeTransactions.createdAt))
+          .limit(100);
+        const activeReviews = await tx
+          .select({ id: financeReviewCases.id, updatedAt: financeReviewCases.updatedAt })
+          .from(financeReviewCases)
+          .where(
+            and(
+              eq(financeReviewCases.userId, userId),
+              eq(financeReviewCases.transactionId, locked.transaction.id),
+              inArray(financeReviewCases.status, ["deferred", "open"]),
+            ),
+          )
+          .orderBy(desc(financeReviewCases.updatedAt))
+          .limit(2);
+        const answers = await tx
+          .select({ id: financeContextualAnswers.id })
+          .from(financeContextualAnswers)
+          .where(
+            and(
+              eq(financeContextualAnswers.userId, userId),
+              eq(financeContextualAnswers.questionId, question.id),
+            ),
+          )
+          .limit(1);
+        const current = currentContextualParents(locked);
+        const safe = {
+          targetSelected: selected.some((row) => row.id === locked.transaction.id),
+          uniqueLatestActiveReview:
+            activeReviews[0]?.id === locked.review.id &&
+            (activeReviews.length === 1 ||
+              activeReviews[0]?.updatedAt.getTime() !== activeReviews[1]?.updatedAt.getTime()),
+          questionState: locked.question.state,
+          questionStatus:
+            locked.question.state === "answered"
+              ? "answered"
+              : locked.question.state === "open" && current
+                ? "open"
+                : "stale",
+          sameQuestionAndWork:
+            locked.question.id === question.id &&
+            locked.question.workRevision.toString() === question.work.revision &&
+            locked.question.actionRevision.toString() === question.work.actionRevision &&
+            locked.question.state === baseline.question.state &&
+            locked.question.accountRevision === baseline.question.accountRevision &&
+            locked.question.transactionRevision === baseline.question.transactionRevision &&
+            locked.question.reviewRevision === baseline.question.reviewRevision,
+          accountGenerationUnchanged:
+            locked.account.contextualRevision === baseline.account.contextualRevision,
+          transactionGenerationUnchanged:
+            locked.transaction.contextualRevision === baseline.transaction.contextualRevision,
+          reviewGenerationUnchanged:
+            locked.review.contextualRevision === baseline.review.contextualRevision,
+          reviewGenerationAdvancedOne:
+            locked.review.contextualRevision === baseline.review.contextualRevision + 1n,
+          sameReview: locked.review.id === baseline.review.id,
+          accountMatchesFrozen:
+            locked.question.accountRevision === locked.account.contextualRevision,
+          transactionMatchesFrozen:
+            locked.question.transactionRevision === locked.transaction.contextualRevision,
+          reviewMatchesFrozen: locked.question.reviewRevision === locked.review.contextualRevision,
+          transactionEligible: eligibleContextualTransaction(locked),
+          merchantPersisted: locked.transaction.merchantId !== null,
+          categoryAbsent:
+            locked.transaction.category === null && locked.transaction.categoryId === null,
+          needsReview: locked.transaction.needsReview,
+          pending: locked.transaction.pending,
+          reviewStructurallyEligible:
+            locked.review.status === "open" &&
+            locked.review.economicEventId === null &&
+            locked.review.suggestedCategoryId === null &&
+            locked.review.reopenedFromId === null &&
+            locked.review.proposedResolution === null &&
+            locked.review.resolution === null &&
+            Object.keys(locked.review.evidence).length === 0,
+          rationaleUnchanged: locked.review.rationale === baseline.review.rationale,
+          rationaleChanged: locked.review.rationale !== baseline.review.rationale,
+          rationaleIsContextRequest: locked.review.rationale === "Context requested by the person.",
+          rationaleIsCanonicalBackfill:
+            locked.review.rationale === "Backfilled without a confident category.",
+          allContextualParentsCurrent: current,
+          noAnswer: answers.length === 0,
+        };
+        console.info(
+          JSON.stringify({
+            event: "finance-context-backfill-mechanism",
+            phase,
+            ...safe,
+            writerCompletionObserved,
+          }),
+        );
+        return safe;
+      });
+  }
+
+  it("keeps a canonically created manual question current under repeated authorized reads without learning backfill", async () => {
+    const f = await fixture();
+    const writer = createFinanceService({ db: database.db, now: () => new Date() });
+    const target = await writer.createTransaction(
+      createFinanceTransactionInputSchema.parse({
+        accountId: f.account.id,
+        amount: 120,
+        date: "2026-09-15",
+        direction: "expense",
+        merchant: `Unclassified fixture ${randomUUID()}`,
+      }),
+      f.context,
+    );
+    const service = createFinanceContextualQuestionService({ db: database.db });
+    const created = await service.createQuestion(
+      target.id,
+      { operationId: randomUUID() },
+      f.context,
+    );
+    expect(created.state).toBe("available");
+    if (created.state !== "available") throw new Error("Mechanism fixture question unavailable.");
+    const question = created.question;
+    expect(question.status).toBe("open");
+    const observe = await mechanismSnapshot(f.userId, question);
+    expect(await observe("before")).toMatchObject({
+      questionState: "open",
+      questionStatus: "open",
+      sameQuestionAndWork: true,
+      accountMatchesFrozen: true,
+      transactionMatchesFrozen: true,
+      reviewMatchesFrozen: true,
+      transactionEligible: true,
+      reviewStructurallyEligible: true,
+      merchantPersisted: true,
+      categoryAbsent: true,
+      needsReview: true,
+      pending: false,
+      rationaleIsContextRequest: true,
+      noAnswer: true,
+    });
+    for (let read = 0; read < 2; read++) {
+      const result = await service.getQuestion(question.id, f.context);
+      expect(result.state).toBe("available");
+      if (result.state !== "available") throw new Error("Mechanism fixture question unavailable.");
+      expect(result.question.status).toBe("open");
+      expect(
+        result.question.id === question.id &&
+          result.question.work.id === question.work.id &&
+          result.question.work.domain === question.work.domain &&
+          result.question.work.kind === question.work.kind &&
+          result.question.work.revision === question.work.revision &&
+          result.question.work.actionRevision === question.work.actionRevision,
+      ).toBe(true);
+      expect(await observe("before")).toMatchObject({
+        accountGenerationUnchanged: true,
+        transactionGenerationUnchanged: true,
+        reviewGenerationUnchanged: true,
+        rationaleUnchanged: true,
+        allContextualParentsCurrent: true,
+        noAnswer: true,
+      });
+    }
+  });
+
+  it("makes an otherwise eligible frozen manual question stale when canonical learning backfill revises its review rationale", async () => {
+    const f = await fixture();
+    const writer = createFinanceService({ db: database.db, now: () => new Date() });
+    const target = await writer.createTransaction(
+      createFinanceTransactionInputSchema.parse({
+        accountId: f.account.id,
+        amount: 120,
+        date: "2026-09-15",
+        direction: "expense",
+        merchant: `Unclassified fixture ${randomUUID()}`,
+      }),
+      f.context,
+    );
+    const service = createFinanceContextualQuestionService({ db: database.db });
+    const created = await service.createQuestion(
+      target.id,
+      { operationId: randomUUID() },
+      f.context,
+    );
+    expect(created.state).toBe("available");
+    if (created.state !== "available") throw new Error("Mechanism fixture question unavailable.");
+    const question = created.question;
+    const observe = await mechanismSnapshot(f.userId, question);
+    const initialRead = await service.getQuestion(question.id, f.context);
+    expect(initialRead.state).toBe("available");
+    if (initialRead.state !== "available")
+      throw new Error("Mechanism fixture question unavailable.");
+    expect(initialRead.question.status).toBe("open");
+    expect(await observe("before")).toMatchObject({
+      targetSelected: true,
+      uniqueLatestActiveReview: true,
+      questionState: "open",
+      questionStatus: "open",
+      sameQuestionAndWork: true,
+      accountMatchesFrozen: true,
+      transactionMatchesFrozen: true,
+      reviewMatchesFrozen: true,
+      transactionEligible: true,
+      reviewStructurallyEligible: true,
+      merchantPersisted: true,
+      categoryAbsent: true,
+      needsReview: true,
+      pending: false,
+      rationaleIsContextRequest: true,
+      noAnswer: true,
+    });
+    await writer.backfillLearning(100);
+    const afterRead = await service.getQuestion(question.id, f.context);
+    expect(afterRead.state).toBe("available");
+    if (afterRead.state !== "available") throw new Error("Mechanism fixture question unavailable.");
+    expect(afterRead.question.status).toBe("stale");
+    expect(
+      afterRead.question.id === question.id &&
+        afterRead.question.work.id === question.work.id &&
+        afterRead.question.work.domain === question.work.domain &&
+        afterRead.question.work.kind === question.work.kind &&
+        afterRead.question.work.revision === question.work.revision &&
+        afterRead.question.work.actionRevision === question.work.actionRevision,
+    ).toBe(true);
+    expect(await observe("after_backfill", true)).toMatchObject({
+      targetSelected: true,
+      uniqueLatestActiveReview: true,
+      questionState: "open",
+      questionStatus: "stale",
+      sameQuestionAndWork: true,
+      accountGenerationUnchanged: true,
+      transactionGenerationUnchanged: true,
+      reviewGenerationAdvancedOne: true,
+      sameReview: true,
+      accountMatchesFrozen: true,
+      transactionMatchesFrozen: true,
+      reviewMatchesFrozen: false,
+      transactionEligible: true,
+      reviewStructurallyEligible: true,
+      merchantPersisted: true,
+      categoryAbsent: true,
+      rationaleChanged: true,
+      rationaleIsCanonicalBackfill: true,
+      allContextualParentsCurrent: false,
+      noAnswer: true,
+    });
+    const observeNoop = await mechanismSnapshot(f.userId, question);
+    await writer.backfillLearning(100);
+    const noopRead = await service.getQuestion(question.id, f.context);
+    expect(noopRead.state).toBe("available");
+    if (noopRead.state !== "available") throw new Error("Mechanism fixture question unavailable.");
+    expect(noopRead.question.status).toBe("stale");
+    expect(await observeNoop("after_noop", true)).toMatchObject({
+      questionState: "open",
+      questionStatus: "stale",
+      sameQuestionAndWork: true,
+      accountGenerationUnchanged: true,
+      transactionGenerationUnchanged: true,
+      reviewGenerationUnchanged: true,
+      rationaleUnchanged: true,
+      sameReview: true,
+      accountMatchesFrozen: true,
+      transactionMatchesFrozen: true,
+      reviewMatchesFrozen: false,
+      transactionEligible: true,
+      reviewStructurallyEligible: true,
+      merchantPersisted: true,
+      categoryAbsent: true,
+      rationaleIsCanonicalBackfill: true,
+      allContextualParentsCurrent: false,
+      noAnswer: true,
+    });
   });
 });

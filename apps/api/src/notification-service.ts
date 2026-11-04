@@ -30,6 +30,8 @@ import {
   notificationResolutionSchema,
   publishNotificationInputSchema,
   resetFinanceNotificationPreferencesSchema,
+  textMessageStatusSchema,
+  textingConnectionStateSchema,
   validateNotificationResolution,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
@@ -913,11 +915,23 @@ export function createNotificationService(options: Options) {
         if (!membership.length) reasons.push("membership_unavailable");
         if (intentUnavailable) reasons.push("intent_unavailable");
         if (attempt.messageId && !message) reasons.push("message_unavailable");
+        const connectionState = connection
+          ? textingConnectionStateSchema.safeParse(connection.state)
+          : null;
+        const messageStatus = message ? textMessageStatusSchema.safeParse(message.status) : null;
+        const projectedConnectionState = connectionState?.success
+          ? connectionState.data
+          : "unknown";
+        const projectedMessageStatus = messageStatus?.success ? messageStatus.data : "unknown";
+        if (connectionState && !connectionState.success)
+          reasons.push("connection_state_unrecognized");
+        if (messageStatus && !messageStatus.success) reasons.push("message_status_unrecognized");
         const inspectDelivery =
+          (connectionState !== null && !connectionState.success) ||
           ["submitting", "uncertain", "accepted"].includes(attempt.state) ||
           (message &&
             ["accepted", "queued", "sending", "sent", "delivered", "unknown"].includes(
-              message.status,
+              projectedMessageStatus,
             ));
         return notificationAttemptDetailSchema.parse({
           id: attempt.id,
@@ -950,6 +964,7 @@ export function createNotificationService(options: Options) {
               connection: connection
                 ? {
                     ...connection,
+                    state: projectedConnectionState,
                     updatedAt: connection.updatedAt.toISOString(),
                     matchesRecordedEpoch:
                       attempt.consentEpoch === null
@@ -963,6 +978,7 @@ export function createNotificationService(options: Options) {
             message: message
               ? {
                   ...message,
+                  status: projectedMessageStatus,
                   providerSubmittedAt: message.providerSubmittedAt?.toISOString() ?? null,
                   sentAt: message.sentAt?.toISOString() ?? null,
                   deliveredAt: message.deliveredAt?.toISOString() ?? null,

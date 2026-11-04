@@ -488,4 +488,98 @@ describe("strict notification attempt detail", () => {
       }).success,
     ).toBe(false);
   });
+  it("accepts only finite unknown detail labels and rejects raw values or nested private fields", () => {
+    const value = detail();
+    const connection = {
+      id: value.policy.recordedAttempt.connectionId,
+      state: "unknown",
+      consentEpoch: 1,
+      updatedAt: now.toISOString(),
+      matchesRecordedEpoch: true,
+    };
+    const message = {
+      id: value.id,
+      status: "unknown",
+      providerSubmittedAt: null,
+      sentAt: null,
+      deliveredAt: null,
+      updatedAt: now.toISOString(),
+    };
+    const diagnostic = {
+      ...value,
+      policy: { ...value.policy, current: { ...value.policy.current, connection } },
+      transport: { ...value.transport, message },
+      coverage: {
+        ...value.coverage,
+        reasons: [
+          ...value.coverage.reasons,
+          "connection_state_unrecognized",
+          "message_status_unrecognized",
+        ],
+      },
+    };
+    expect(notificationAttemptDetailSchema.safeParse(diagnostic).success).toBe(true);
+    for (const extra of [
+      { state: "reader-state-canary" },
+      { rawState: "private" },
+      { token: "private" },
+    ]) {
+      expect(
+        notificationAttemptDetailSchema.safeParse({
+          ...diagnostic,
+          policy: {
+            ...diagnostic.policy,
+            current: { ...diagnostic.policy.current, connection: { ...connection, ...extra } },
+          },
+        }).success,
+      ).toBe(false);
+    }
+    for (const extra of [
+      { status: "reader-status-canary" },
+      { rawStatus: "private" },
+      { body: "private" },
+    ]) {
+      expect(
+        notificationAttemptDetailSchema.safeParse({
+          ...diagnostic,
+          transport: { ...diagnostic.transport, message: { ...message, ...extra } },
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...diagnostic,
+        coverage: {
+          ...diagnostic.coverage,
+          reasons: [...diagnostic.coverage.reasons, "reader-state-canary"],
+        },
+      }).success,
+    ).toBe(false);
+  });
+  it("bounds all nine allowlisted partial-coverage reasons without widening arbitrary evidence", () => {
+    const value = detail();
+    const reasons = [
+      "historical_policy_unavailable",
+      "callback_provenance_unavailable",
+      "membership_unavailable",
+      "membership_inconsistent",
+      "membership_limit",
+      "message_unavailable",
+      "intent_unavailable",
+      "connection_state_unrecognized",
+      "message_status_unrecognized",
+    ];
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        coverage: { ...value.coverage, reasons },
+      }).success,
+    ).toBe(true);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        coverage: { ...value.coverage, reasons: [...reasons, reasons[0]] },
+      }).success,
+    ).toBe(false);
+  });
 });

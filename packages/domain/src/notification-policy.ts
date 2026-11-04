@@ -378,7 +378,14 @@ export const notificationAttemptDetailSchema = z
             connection: z
               .object({
                 id: z.uuid(),
-                state: z.enum(["active", "opted_out", "sync_error", "suspended", "disconnected"]),
+                state: z.enum([
+                  "active",
+                  "opted_out",
+                  "sync_error",
+                  "suspended",
+                  "disconnected",
+                  "unknown",
+                ]),
                 consentEpoch: z.int().positive(),
                 updatedAt: isoDateTimeSchema,
                 matchesRecordedEpoch: z.boolean().nullable(),
@@ -433,10 +440,12 @@ export const notificationAttemptDetailSchema = z
               "membership_limit",
               "message_unavailable",
               "intent_unavailable",
+              "connection_state_unrecognized",
+              "message_status_unrecognized",
             ]),
           )
           .min(2)
-          .max(7),
+          .max(9),
       })
       .strict(),
     recovery: z.enum(["inspect_delivery_do_not_resend", "review_in_app"]),

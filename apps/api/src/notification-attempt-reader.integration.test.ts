@@ -17,7 +17,7 @@ import {
   notificationAttemptDetailSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { errorResponse } from "./errors.js";
 import { createNotificationService } from "./notification-service.js";
@@ -359,5 +359,97 @@ describe.sequential("strict native notification attempt reader", () => {
     expect(result.transport.message?.deliveredAt).toBe(current.toISOString());
     expect(JSON.stringify(result)).not.toContain("PRIVATE");
     expect(result.recovery).toBe("inspect_delivery_do_not_resend");
+  });
+  it.each([
+    { connectionInvalid: true, messageInvalid: false },
+    { connectionInvalid: false, messageInvalid: true },
+    { connectionInvalid: true, messageInvalid: true },
+  ])("projects unknown stored enums without losing evidence or granting resend: %j", async ({
+    connectionInvalid,
+    messageInvalid,
+  }) => {
+    await database.db
+      .update(notificationDeliveryAttempts)
+      .set({ state: "failed" })
+      .where(eq(notificationDeliveryAttempts.id, uuid(4)));
+    await database.db
+      .update(textMessages)
+      .set({ status: "failed" })
+      .where(eq(textMessages.id, uuid(3)));
+    // Neither attempt nor known message selects inspect-delivery; unknown projection must cause it.
+    expect((await inspect()).recovery).toBe("review_in_app");
+    if (connectionInvalid)
+      await database.db.execute(
+        sql`UPDATE texting_connections SET state = ${"reader-state-canary"} WHERE id = ${uuid(1)}`,
+      );
+    if (messageInvalid)
+      await database.db.execute(
+        sql`UPDATE text_messages SET status = ${"reader-status-canary"} WHERE id = ${uuid(3)}`,
+      );
+    const before = {
+      connections: await database.db.select().from(textingConnections),
+      messages: await database.db.select().from(textMessages),
+      attempts: await database.db.select().from(notificationDeliveryAttempts),
+    };
+    const result = await inspect();
+    expect(result.membership.map((item) => item.intentId)).toEqual([uuid(101), uuid(102)]);
+    expect(result.policy.current.connection).toMatchObject({
+      id: uuid(1),
+      state: connectionInvalid ? "unknown" : "active",
+      consentEpoch: 1,
+      updatedAt: current.toISOString(),
+      matchesRecordedEpoch: true,
+    });
+    expect(result.transport.message).toMatchObject({
+      id: uuid(3),
+      status: messageInvalid ? "unknown" : "failed",
+      providerSubmittedAt: current.toISOString(),
+      updatedAt: current.toISOString(),
+    });
+    expect(result.coverage.reasons.includes("connection_state_unrecognized")).toBe(
+      connectionInvalid,
+    );
+    expect(result.coverage.reasons.includes("message_status_unrecognized")).toBe(messageInvalid);
+    expect(result.recovery).toBe("inspect_delivery_do_not_resend");
+    expect(JSON.stringify(result)).not.toMatch(
+      /reader-state-canary|reader-status-canary|PRIVATE|SMaaaaaaaa/,
+    );
+    expect({
+      connections: await database.db.select().from(textingConnections),
+      messages: await database.db.select().from(textMessages),
+      attempts: await database.db.select().from(notificationDeliveryAttempts),
+    }).toEqual(before);
+  });
+  it.each([
+    { connectionState: "active", messageStatus: "accepted" },
+    { connectionState: "opted_out", messageStatus: "delivered" },
+    { connectionState: "active", messageStatus: "unknown" },
+  ] as const)("preserves known stored enum facts without invalid-value coverage: %j", async ({
+    connectionState,
+    messageStatus,
+  }) => {
+    await database.db
+      .update(textingConnections)
+      .set({ state: connectionState })
+      .where(eq(textingConnections.id, uuid(1)));
+    await database.db
+      .update(textMessages)
+      .set({ status: messageStatus, deliveredAt: messageStatus === "delivered" ? current : null })
+      .where(eq(textMessages.id, uuid(3)));
+    const result = await inspect();
+    expect(result.policy.current.connection).toMatchObject({
+      id: uuid(1),
+      state: connectionState,
+      consentEpoch: 1,
+      updatedAt: current.toISOString(),
+    });
+    expect(result.transport.message).toMatchObject({
+      id: uuid(3),
+      status: messageStatus,
+      providerSubmittedAt: current.toISOString(),
+      deliveredAt: messageStatus === "delivered" ? current.toISOString() : null,
+    });
+    expect(result.coverage.reasons).not.toContain("connection_state_unrecognized");
+    expect(result.coverage.reasons).not.toContain("message_status_unrecognized");
   });
 });

@@ -7,12 +7,10 @@ import { ConnectionCard } from "./connection-card";
 
 describe("ConnectionCard", () => {
   const requiredProps = {
-    identity: <span>EX</span>,
+    account: { label: "Example", provider: "google", email: "person@example.com" },
     state: "ready" as const,
     status: <span>Connected</span>,
-    subtitle: "person@example.com",
     summary: "Ready to sync",
-    title: "Example",
   };
 
   it("renders connection identity and health without optional slots", () => {

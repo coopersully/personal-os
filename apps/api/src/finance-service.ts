@@ -874,8 +874,11 @@ export function createFinanceService({
     }
   }
 
-  async function serializeAccounts(rows: Array<typeof financeAccounts.$inferSelect>) {
-    return serializeFinanceAccountRows(db, rows);
+  async function serializeAccounts(
+    rows: Array<typeof financeAccounts.$inferSelect>,
+    includeArtwork = false,
+  ) {
+    return serializeFinanceAccountRows(db, rows, includeArtwork);
   }
   async function reimbursementProjection(
     userId: string,
@@ -4286,7 +4289,10 @@ export function createFinanceService({
         );
       }
     },
-    async getGuidedSetupContext(userId: string): Promise<FinanceGuidedSetupContext> {
+    async getGuidedSetupContext(
+      userId: string,
+      includeArtwork = false,
+    ): Promise<FinanceGuidedSetupContext> {
       const snapshotTime = now();
       const [user] = await db
         .select({ planningTimezone: users.planningTimezone })
@@ -4394,7 +4400,7 @@ export function createFinanceService({
         unavailableReason: available ? null : unavailableReason,
       });
       return {
-        accountSources: await serializeAccounts(accountRows),
+        accountSources: await serializeAccounts(accountRows, includeArtwork),
         alertSummary: {
           open: alerts.length,
           warnings: alerts.filter((item) => item.severity === "warning").length,

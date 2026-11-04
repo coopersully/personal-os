@@ -275,7 +275,10 @@ describe("finance routes", () => {
     expect(get).toHaveBeenCalledWith(id);
   });
 
-  it("parses account discovery filters and returns the structured account list", async () => {
+  it.each([
+    "user",
+    "agent",
+  ] as const)("parses account discovery and selects artwork for %s", async (actorType) => {
     const app = new Hono<AppEnv>();
     const listFinanceAccounts = vi.fn(async () => ({
       accounts: [],
@@ -290,7 +293,7 @@ describe("finance routes", () => {
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
-        actorType: "agent",
+        actorType,
         scopes: new Set(["finances:read"]),
         userId: id,
       });
@@ -313,20 +316,27 @@ describe("finance routes", () => {
     );
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ totals: { netWorth: 0 } });
-    expect(listFinanceAccounts).toHaveBeenCalledWith(id, {
-      includeExcluded: false,
-      kind: "investment",
-      query: "IRA",
-    });
+    expect(listFinanceAccounts).toHaveBeenCalledWith(
+      id,
+      {
+        includeExcluded: false,
+        kind: "investment",
+        query: "IRA",
+      },
+      actorType === "user",
+    );
   });
 
-  it("returns read-only Finance status for a parsed maintenance scope", async () => {
+  it.each([
+    "user",
+    "agent",
+  ] as const)("returns Finance status with appropriate artwork for %s", async (actorType) => {
     const app = new Hono<AppEnv>();
     const getFinanceStatus = vi.fn(async () => ({ domain: "finances" }));
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
-        actorType: "agent",
+        actorType,
         scopes: new Set(["finances:read"]),
         userId: id,
       });
@@ -351,11 +361,16 @@ describe("finance routes", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: { domain: "finances" } });
-    expect(getFinanceStatus).toHaveBeenCalledWith(id, {
-      type: "window",
-      start: "2026-08-01",
-      end: "2026-08-15",
-    });
+    expect(getFinanceStatus).toHaveBeenCalledWith(
+      id,
+      {
+        type: "window",
+        start: "2026-08-01",
+        end: "2026-08-15",
+      },
+      undefined,
+      actorType === "user",
+    );
   });
 
   it("compares scenarios on the read scope and forwards a complete budget plan", async () => {
@@ -535,7 +550,7 @@ describe("finance routes", () => {
       expect.objectContaining({ category: "Housing" }),
       expect.objectContaining({ requestId: "request-1" }),
     );
-    expect(finances.getGuidedSetupContext).toHaveBeenCalledWith(id);
+    expect(finances.getGuidedSetupContext).toHaveBeenCalledWith(id, false);
     expect(finances.proposeCategorizations).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ limit: 50, review: "all" }),

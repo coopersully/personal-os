@@ -5,6 +5,7 @@ import {
   type DatabaseClient,
   financeAccounts,
   financeContextualAnswers,
+  financeCategories,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMutationRecords,
@@ -20,7 +21,7 @@ import {
   type FinanceHumanWorkRef,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { errorResponse } from "../errors.js";
 import { createFinanceService } from "../finance-service.js";
@@ -1456,7 +1457,7 @@ describe.sequential("real contextual question producer", () => {
     }
   });
 
-  it("makes an otherwise eligible frozen manual question stale when canonical learning backfill revises its review rationale", async () => {
+  it("preserves an open contextual review against rationale-only learning backfill and still fences genuine edits", async () => {
     const f = await fixture();
     const writer = createFinanceService({ db: database.db, now: () => new Date() });
     const target = await writer.createTransaction(
@@ -1506,7 +1507,7 @@ describe.sequential("real contextual question producer", () => {
     const afterRead = await service.getQuestion(question.id, f.context);
     expect(afterRead.state).toBe("available");
     if (afterRead.state !== "available") throw new Error("Mechanism fixture question unavailable.");
-    expect(afterRead.question.status).toBe("stale");
+    expect(afterRead.question.status).toBe("open");
     expect(
       afterRead.question.id === question.id &&
         afterRead.question.work.id === question.work.id &&
@@ -1519,22 +1520,25 @@ describe.sequential("real contextual question producer", () => {
       targetSelected: true,
       uniqueLatestActiveReview: true,
       questionState: "open",
-      questionStatus: "stale",
+      questionStatus: "open",
       sameQuestionAndWork: true,
       accountGenerationUnchanged: true,
       transactionGenerationUnchanged: true,
-      reviewGenerationAdvancedOne: true,
+      reviewGenerationUnchanged: true,
+      reviewGenerationAdvancedOne: false,
       sameReview: true,
       accountMatchesFrozen: true,
       transactionMatchesFrozen: true,
-      reviewMatchesFrozen: false,
+      reviewMatchesFrozen: true,
       transactionEligible: true,
       reviewStructurallyEligible: true,
       merchantPersisted: true,
       categoryAbsent: true,
-      rationaleChanged: true,
-      rationaleIsCanonicalBackfill: true,
-      allContextualParentsCurrent: false,
+      rationaleUnchanged: true,
+      rationaleChanged: false,
+      rationaleIsContextRequest: true,
+      rationaleIsCanonicalBackfill: false,
+      allContextualParentsCurrent: true,
       noAnswer: true,
     });
     const observeNoop = await mechanismSnapshot(f.userId, question);
@@ -1542,10 +1546,10 @@ describe.sequential("real contextual question producer", () => {
     const noopRead = await service.getQuestion(question.id, f.context);
     expect(noopRead.state).toBe("available");
     if (noopRead.state !== "available") throw new Error("Mechanism fixture question unavailable.");
-    expect(noopRead.question.status).toBe("stale");
+    expect(noopRead.question.status).toBe("open");
     expect(await observeNoop("after_noop", true)).toMatchObject({
       questionState: "open",
-      questionStatus: "stale",
+      questionStatus: "open",
       sameQuestionAndWork: true,
       accountGenerationUnchanged: true,
       transactionGenerationUnchanged: true,
@@ -1554,14 +1558,176 @@ describe.sequential("real contextual question producer", () => {
       sameReview: true,
       accountMatchesFrozen: true,
       transactionMatchesFrozen: true,
-      reviewMatchesFrozen: false,
+      reviewMatchesFrozen: true,
       transactionEligible: true,
       reviewStructurallyEligible: true,
       merchantPersisted: true,
       categoryAbsent: true,
-      rationaleIsCanonicalBackfill: true,
-      allContextualParentsCurrent: false,
+      rationaleIsContextRequest: true,
+      rationaleIsCanonicalBackfill: false,
+      allContextualParentsCurrent: true,
       noAnswer: true,
     });
+    await writer.updateTransaction(target.id, { notes: "Meaningful owning source edit" }, f.context);
+    const changed = await service.getQuestion(question.id, f.context);
+    expect(changed.state).toBe("available");
+    if (changed.state !== "available") throw new Error("Protected fixture question unavailable.");
+    expect(changed.question.status).toBe("stale");
+    expect(await observe("after_noop", true)).toMatchObject({ transactionGenerationUnchanged: false, allContextualParentsCurrent: false, noAnswer: true });
+    expect((await service.answerWork({ operationId: randomUUID(), work: question.work, text: "Old work must not be accepted", source: { kind: "app", messageId: null } }, f.context)).state).toBe("blocked");
+    expect(await observe("after_noop", true)).toMatchObject({ noAnswer: true });
   });
+  it("keeps ordinary unbound reviews eligible for the real learning rationale refresh", async () => {
+    const f = await fixture();
+    const writer = createFinanceService({ db: database.db, now: () => new Date() });
+    const target = await writer.createTransaction(createFinanceTransactionInputSchema.parse({ accountId: f.account.id, amount: 120, date: "2026-09-15", direction: "expense", merchant: `Unclassified fixture ${randomUUID()}` }), f.context);
+    const [ordinary] = await database.db.insert(financeReviewCases).values({ userId: f.userId, transactionId: target.id, reason: "unknown_merchant", rationale: "Ordinary unbound review" }).returning();
+    if (!ordinary) throw new Error("Ordinary fixture review unavailable.");
+    const eligibleRows = await database.db.select().from(financeTransactions).where(eq(financeTransactions.id, target.id));
+    expect(eligibleRows.length === 1 && eligibleRows[0]?.merchantId !== null && eligibleRows[0]?.categoryId === null && eligibleRows[0]?.category === null && eligibleRows[0]?.needsReview === true && eligibleRows[0]?.pending === false).toBe(true);
+    const selected = await database.db.select({ id: financeTransactions.id }).from(financeTransactions).where(or(isNull(financeTransactions.merchantId), isNull(financeTransactions.categoryId))).orderBy(desc(financeTransactions.createdAt)).limit(100);
+    expect(selected.some((row) => row.id === target.id)).toBe(true);
+    const absent = await database.pool.query("SELECT EXISTS (SELECT 1 FROM finance_contextual_questions WHERE user_id=$1 AND transaction_id=$2) AS present", [f.userId, target.id]);
+    expect(absent.rows[0]?.present === false).toBe(true);
+    await writer.backfillLearning(100);
+    const [after] = await database.db.select().from(financeReviewCases).where(eq(financeReviewCases.id, ordinary.id));
+    if (!after) throw new Error("Ordinary fixture review unavailable.");
+    expect(after.contextualRevision === ordinary.contextualRevision + 1n).toBe(true);
+    expect(after.rationale === "Backfilled without a confident category.").toBe(true);
+  });
+
+  it.each(["reason", "suggested category"] as const)("retains meaningful %s review refreshes even with an open native question", async (change) => {
+    const f = await fixture();
+    const writer = createFinanceService({ db: database.db, now: () => new Date() });
+    const target = await writer.createTransaction(createFinanceTransactionInputSchema.parse({ accountId: f.account.id, amount: 120, date: "2026-09-15", direction: "expense", merchant: `Unclassified fixture ${randomUUID()}` }), f.context);
+    const service = createFinanceContextualQuestionService({ db: database.db });
+    const created = await service.createQuestion(target.id, { operationId: randomUUID() }, f.context);
+    if (created.state !== "available") throw new Error("Protected fixture question unavailable.");
+    if (change === "reason") {
+      await database.db.update(financeReviewCases).set({ reason: "low_confidence" }).where(eq(financeReviewCases.id, created.question.reviewCaseId));
+    } else {
+      const [category] = await database.db.insert(financeCategories).values({ userId: f.userId, name: "Fixture suggestion", slug: "fixture-suggestion", group: "needs" }).returning();
+      if (!category) throw new Error("Fixture category unavailable.");
+      await database.db.update(financeReviewCases).set({ suggestedCategoryId: category.id }).where(eq(financeReviewCases.id, created.question.reviewCaseId));
+    }
+    const [before] = await database.db.select().from(financeReviewCases).where(eq(financeReviewCases.id, created.question.reviewCaseId));
+    if (!before) throw new Error("Protected fixture review unavailable.");
+    expect(change === "reason" ? before.reason !== "unknown_merchant" : before.suggestedCategoryId !== null).toBe(true);
+    await writer.backfillLearning(100);
+    const [after] = await database.db.select().from(financeReviewCases).where(eq(financeReviewCases.id, before.id));
+    if (!after) throw new Error("Protected fixture review unavailable.");
+    expect(after.contextualRevision === before.contextualRevision + 1n).toBe(true);
+    expect(after.reason === "unknown_merchant" && after.suggestedCategoryId === null && after.rationale === "Backfilled without a confident category.").toBe(true);
+    const result = await service.getQuestion(created.question.id, f.context);
+    expect(result.state).toBe("available");
+    if (result.state !== "available") throw new Error("Protected fixture question unavailable.");
+    expect(result.question.status).toBe("stale");
+  });
+
+  it("serializes background refresh behind an uncommitted contextual owner without clobbering it", async () => {
+    const f = await fixture();
+    const writer = createFinanceService({ db: database.db, now: () => new Date() });
+    const target = await writer.createTransaction(createFinanceTransactionInputSchema.parse({ accountId: f.account.id, amount: 120, date: "2026-09-15", direction: "expense", merchant: `Unclassified fixture ${randomUUID()}` }), f.context);
+    const top = await database.db.select({ id: financeTransactions.id }).from(financeTransactions).where(or(isNull(financeTransactions.merchantId), isNull(financeTransactions.categoryId))).orderBy(desc(financeTransactions.createdAt)).limit(100);
+    expect(top[0]?.id === target.id).toBe(true);
+    const service = createFinanceContextualQuestionService({ db: database.db });
+    let ready!: () => void;
+    let release!: () => void;
+    let blockerPid: number | undefined;
+    const reached = new Promise<void>((resolve) => { ready = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const creating = database.db.transaction(async (tx) => {
+      const created = await service.createQuestion(target.id, { operationId: randomUUID() }, f.context, tx);
+      if (created.state !== "available") throw new Error("Atomic fixture question unavailable.");
+      blockerPid = (await tx.execute<{ pid: number }>(sql`SELECT pg_backend_pid() AS pid`)).rows[0]?.pid;
+      if (typeof blockerPid !== "number") throw new Error("Atomic fixture lock identity unavailable.");
+      ready();
+      await gate;
+      return created.question;
+    });
+    const operations: Promise<unknown>[] = [creating];
+    let drain = Promise.allSettled(operations);
+    try {
+      await Promise.race([reached, creating.then(() => { throw new Error("Atomic creator did not hold its commit gate."); })]);
+      const backfill = writer.backfillLearning(100);
+      operations.push(backfill);
+      drain = Promise.allSettled(operations);
+      await vi.waitFor(async () => {
+        const blocked = await database.pool.query("SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid)) AND wait_event_type='Lock' AND query ILIKE '%users%') AS blocked", [blockerPid]);
+        expect(blocked.rows[0]?.blocked === true).toBe(true);
+      });
+    } finally {
+      release();
+      await drain;
+    }
+    await Promise.all(operations);
+    const question = await creating;
+    const result = await service.getQuestion(question.id, f.context);
+    expect(result.state).toBe("available");
+    if (result.state !== "available") throw new Error("Atomic fixture question unavailable.");
+    expect(result.question.status).toBe("open");
+    const observe = await mechanismSnapshot(f.userId, question);
+    expect(await observe("after_backfill", true)).toMatchObject({ rationaleIsContextRequest: true, allContextualParentsCurrent: true, noAnswer: true });
+  });
+
+  it("lets a contextual creator observe committed background refresh without an inverse lock order", async () => {
+    const f = await fixture();
+    const writer = createFinanceService({ db: database.db, now: () => new Date() });
+    const target = await writer.createTransaction(createFinanceTransactionInputSchema.parse({ accountId: f.account.id, amount: 120, date: "2026-09-15", direction: "expense", merchant: `Unclassified fixture ${randomUUID()}` }), f.context);
+    const top = await database.db.select({ id: financeTransactions.id }).from(financeTransactions).where(or(isNull(financeTransactions.merchantId), isNull(financeTransactions.categoryId))).orderBy(desc(financeTransactions.createdAt)).limit(100);
+    expect(top[0]?.id === target.id).toBe(true);
+    let ready!: () => void;
+    let release!: () => void;
+    let blockerPid: number | undefined;
+    let gated = false;
+    const reached = new Promise<void>((resolve) => { ready = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const wrapped = new Proxy(database.db, {
+      get(targetDb, key, receiver) {
+        if (key === "transaction") return <T>(run: (tx: FinanceTransaction) => Promise<T>) => targetDb.transaction(async (tx) => {
+          const result = await run(tx);
+          if (!gated) {
+            gated = true;
+            const [review] = await tx.select({ id: financeReviewCases.id }).from(financeReviewCases).where(and(eq(financeReviewCases.userId, f.userId), eq(financeReviewCases.transactionId, target.id))).orderBy(desc(financeReviewCases.updatedAt)).limit(1);
+            expect(typeof result === "object" && result !== null && "id" in result && result.id === review?.id).toBe(true);
+            blockerPid = (await tx.execute<{ pid: number }>(sql`SELECT pg_backend_pid() AS pid`)).rows[0]?.pid;
+            if (typeof blockerPid !== "number") throw new Error("Atomic fixture lock identity unavailable.");
+            ready();
+            await gate;
+          }
+          return result;
+        });
+        return Reflect.get(targetDb, key, receiver);
+      },
+    });
+    const background = createFinanceService({ db: wrapped, now: () => new Date() }).backfillLearning(100);
+    const operations: Promise<unknown>[] = [background];
+    let drain = Promise.allSettled(operations);
+    const service = createFinanceContextualQuestionService({ db: database.db });
+    let creating: ReturnType<typeof service.createQuestion> | undefined;
+    try {
+      await Promise.race([reached, background.then(() => { throw new Error("Atomic background did not hold its commit gate."); })]);
+      creating = service.createQuestion(target.id, { operationId: randomUUID() }, f.context);
+      operations.push(creating);
+      drain = Promise.allSettled(operations);
+      await vi.waitFor(async () => {
+        const blocked = await database.pool.query("SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid)) AND wait_event_type='Lock' AND query ILIKE '%users%') AS blocked", [blockerPid]);
+        expect(blocked.rows[0]?.blocked === true).toBe(true);
+      });
+    } finally {
+      release();
+      await drain;
+    }
+    await Promise.all(operations);
+    if (!creating) throw new Error("Atomic creator was not started.");
+    const created = await creating;
+    if (created.state !== "available") throw new Error("Atomic fixture question unavailable.");
+    const result = await service.getQuestion(created.question.id, f.context);
+    expect(result.state).toBe("available");
+    if (result.state !== "available") throw new Error("Atomic fixture question unavailable.");
+    expect(result.question.status).toBe("open");
+    const observe = await mechanismSnapshot(f.userId, created.question);
+    expect(await observe("after_backfill", true)).toMatchObject({ rationaleIsContextRequest: true, allContextualParentsCurrent: true, noAnswer: true });
+  });
+
 });

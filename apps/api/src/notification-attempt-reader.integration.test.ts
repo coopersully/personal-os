@@ -320,18 +320,16 @@ describe.sequential("strict native notification attempt reader", () => {
     expect(result.recovery).toBe("inspect_delivery_do_not_resend");
   });
   it("does not turn an inbound native message into outbound delivery evidence", async () => {
-    await database.db
-      .insert(textMessages)
-      .values({
-        id: uuid(6),
-        userId: owner,
-        connectionId: uuid(1),
-        direction: "inbound",
-        status: "sent",
-        body: "PRIVATE inbound",
-        occurredAt: current,
-        occurredAtSource: "provider",
-      });
+    await database.db.insert(textMessages).values({
+      id: uuid(6),
+      userId: owner,
+      connectionId: uuid(1),
+      direction: "inbound",
+      status: "sent",
+      body: "PRIVATE inbound",
+      occurredAt: current,
+      occurredAtSource: "provider",
+    });
     await database.db
       .update(notificationDeliveryAttempts)
       .set({ messageId: uuid(6) })

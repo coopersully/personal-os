@@ -30,8 +30,8 @@ import {
   notificationResolutionSchema,
   publishNotificationInputSchema,
   resetFinanceNotificationPreferencesSchema,
-  textMessageStatusSchema,
   textingConnectionStateSchema,
+  textMessageStatusSchema,
   validateNotificationResolution,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";

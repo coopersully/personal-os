@@ -183,11 +183,7 @@ describe("unconsumed agent operation contracts", () => {
     }
     const contradictory = { ...action, workspace: null, risk: "dangerous" as const };
     expect(
-      resolveAgentPermission(
-        { ...currentPolicy, adoption: "legacy" },
-        tasksOnly,
-        contradictory,
-      ),
+      resolveAgentPermission({ ...currentPolicy, adoption: "legacy" }, tasksOnly, contradictory),
     ).toMatchObject({ allowed: false, reason: "legacy_policy" });
     const rootPolicy = {
       ...currentPolicy,

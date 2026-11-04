@@ -7185,6 +7185,33 @@ Read conversation disposition, obligations and related questions. Requires mail:
 }
 ```
 
+## get_notification_attempt
+
+Inspect one exact owned notification attempt and bounded native membership. Requires BOTH finances:read and texting:read. Current policy is labeled current; missing historical basis and callback provenance remain unavailable. This read never reconciles, sends or grants retry authority.
+
+- Domain: texting; stage: inspect; policy: read_only.
+- Grants (all): texting:read, finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/workspace-notifications.ts); typed API methods: `getNotificationAttempt`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "attemptId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "attemptId"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## get_notification_settings
 
 Read global and Finance notification preferences, revisions, inheritance, quiet hours and effective disclosure limits. Requires texting:read and finances:read.

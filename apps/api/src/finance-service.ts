@@ -144,7 +144,10 @@ import {
   loadFinanceAuthorization,
   requireFinanceExecution,
 } from "./finance/context.js";
-import { contextualSubtype, lockContextualTransaction } from "./finance/contextual-question-store.js";
+import {
+  contextualSubtype,
+  lockContextualTransaction,
+} from "./finance/contextual-question-store.js";
 import { mirrorNewMaintenanceReviewQuestion } from "./finance/conversation-review-mirror.js";
 import type { FinanceExecutionFence } from "./finance/execution-binding.js";
 import { assertFinanceDerivedCompletionClaim } from "./finance/execution-claim-fence.js";

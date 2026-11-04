@@ -215,12 +215,17 @@ describe.sequential("strict native notification attempt reader", () => {
     expect(result.id).toBe(uuid(4));
   });
   it.each([
-    ["texting:read"],
-    ["finances:read"],
-    [],
-  ] as const)("denies missing material read scopes %j without writer/provider calls", async (scopes) => {
+    { scopes: ["texting:read"] },
+    { scopes: ["finances:read"] },
+    { scopes: [] },
+  ] as const)("denies missing material read scopes %j without writer/provider calls", async ({
+    scopes,
+  }) => {
     await expect(
-      service.getAttempt({ ...principal, scopes: new Set(scopes) }, uuid(4)),
+      service.getAttempt(
+        { ...principal, scopes: new Set<"texting:read" | "finances:read">(scopes) },
+        uuid(4),
+      ),
     ).rejects.toMatchObject({ code: "forbidden" });
     expect(sendNotification).not.toHaveBeenCalled();
     expect(resolveWork).not.toHaveBeenCalled();

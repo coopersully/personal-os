@@ -1166,8 +1166,8 @@ utility, and attention placement across Finance, Tasks, Calendar, Mail, and Toda
 Independent workspace overrides previously produced different title scales, hit areas,
 and extra toolbar rows. The common header makes scope and actions predictable.
 
-- Desktop places identity, title sentence, flexible search, and actions on one row.
-  Below 768px the utility row comes first and the title sentence spans the second row.
+- Desktop places identity and the title sentence above flexible search and page controls.
+  At 900px and below the utility row comes first and the title sentence spans the second row.
 - Header action targets are 32px on desktop and 44px on mobile, with 16px icons,
   4px action gaps, shared pill geometry, and 12px labeled-action horizontal padding.
   Controls in the mobile View options popover retain the same mobile geometry.
@@ -1230,16 +1230,17 @@ creation retains the bottom-right floating anchor described above.
 
 The lower navigation here means the lower header row, not the viewport-bottom
 section tabs. Shared header slots separate workspace controls from page controls;
-keep the page title start-aligned and its controls end-aligned in that lower row.
+keep the page title start-aligned and its controls end-aligned. Desktop titles occupy
+the upper row, with search and page controls in the lower row; mobile preserves the reverse order.
 Compact linked ancestor breadcrumbs sit above the page title within the existing
-44px lower header row. Show workspace and applicable section/parent destinations;
+44px title row. Show workspace and applicable section/parent destinations;
 the title identifies the current page without repeating it in the breadcrumb. Settings
-uses the same search-above-title arrangement. Breadcrumbs use the tertiary content
+uses the same responsive title/search arrangement. Breadcrumbs use the tertiary content
 tone and normal weight so they remain subordinate to the title. Links retain hover
 feedback and use a foreground/secondary-surface cue for visible keyboard focus.
 Breadcrumbs never increase bar height.
 When the rail is hidden without a sidebar, reserve the floating workspace icon in
-the upper search row only; keep the lower title row equally inset.
+the search row only; keep the title row equally inset.
 Spatial calendar axes and mail message actions retain their domain context below
 the shared header. Today may retain its compact single-row orientation.
 
@@ -1375,3 +1376,49 @@ Sidebar workspace changes reuse the page entry direction, duration, and easing.
 Sidebar and workspace-rail selection use one persistent translated highlight per
 surface, with workspace color and reduced-motion support. Selection must remain
 aligned after resizing, async navigation loading, and scrolling.
+
+### Shared account identity
+
+Connected provider accounts use `ConnectedAccount` and its `ConnectedAccountIdentity` visual in
+recovery dialogs/drawers, selection popovers, setup, and Settings. Keep the profile picture (initials
+when absent or unavailable), a visible service mark, account name, service name and email together.
+Do not rely on a name alone to distinguish accounts. Long identities wrap within their available width.
+
+Finance accounts use `BankAccount` in recovery, setup, account inventories, scope selection and
+configuration. Its compact identity uses the shared institution logo, while credit-card carousels use the full
+`FinancialAccountCard`. Cached Plaid institution metadata supplies available logos and primary
+colors; approved marks or monograms and theme tokens cover missing metadata. Display the reported
+product subtype and safe masked account identifier when known. Unknown credit products remain
+Debt accounts rather than confirmed cards. Institution branding does not establish exact physical
+card artwork; never manufacture a network, expiration, CVC or card-number claim.
+
+On desktop, shared page titles occupy the top header row and discovery/search follows below.
+The Reviews entry stays collapsed at every width, retaining its exact accessible count and tooltip.
+Its compact count badge grows horizontally for values such as `1.3k` and `12k`, including a collapsed sidebar.
+
+### Pinned table actions
+
+Tables with row commands declare one `DataColumn` with `kind: "actions"`. The shared `DataTable`
+labels it **Actions**, places it last and keeps it visible at the logical trailing edge while data
+columns scroll horizontally. Saved layouts cannot hide it or move it into the data. It has an
+opaque surface that follows row hover/selection and a subtle boundary so scrolling text never
+shows through the command area. Read-only event/action descriptions are ordinary data columns.
+
+Compose commands with `DataTableActions`: use icon-only buttons/links with per-record accessible
+names and shared action tooltips; use overflow only for secondary commands. Keep the column as
+narrow as its controls permit (80px for two standard icon buttons, 112px for three). Actions
+columns do not offer resizing or retain legacy wide saved sizes. Keep per-record accessible names, disabled/pending
+states and existing permissions. Clicking a command must not open or select its row. Mobile uses
+one full-width Actions field after the record details, with compact icon buttons instead of sticky
+positioning. Command columns are omitted from CSV exports. Accounts is the initial consumer,
+with direct Edit, Transactions, and applicable reconnect/sync actions.
+
+
+Institution artwork from authenticated provider metadata is rendered by `BrandMark` through its
+validated PNG image source and shared fallback. Approved bundled marks cover Chase, American
+Express, Bank of America, Wells Fargo and Discover when provider artwork is unavailable. Finance owns `InstitutionLogo` and
+`FinancialAccountCard`; reuse them for compact and full account presentations. Provider brand
+colors are data, validated as hex and paired with a contrast-aware black/white foreground;
+application surfaces without provider branding continue to use semantic theme tokens.
+
+On mobile, workspace discovery collapses to a circular named search button with the same square hit target as neighbouring header controls. Opening it places focus in the existing searchable result popup; Escape returns focus to its trigger. Desktop retains the inline finder.

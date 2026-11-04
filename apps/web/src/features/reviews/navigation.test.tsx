@@ -28,6 +28,8 @@ it.each([
   [1, "1 item needs review"],
   [3, "3 items need review"],
   [1200, "1,200 items need review"],
+  [1300, "1,300 items need review"],
+  [12000, "12,000 items need review"],
 ])("shows an honest count of %s", async (count, label) => {
   mocks.listAgentAccessWorkItems.mockResolvedValue({
     summary: { byDomain: { calendar: count } },
@@ -36,8 +38,9 @@ it.each([
   renderEntry();
   const link = await screen.findByRole("button", { name: label as string });
   expect(link.querySelector(".review-navigation__count")).toHaveTextContent(
-    count === 1200 ? "1.2k" : String(count),
+    count === 1200 ? "1.2k" : count === 1300 ? "1.3k" : count === 12000 ? "12k" : String(count),
   );
+  expect(link.querySelector(".review-navigation__label")).toBeNull();
   if (count) expect(link).toHaveAttribute("data-attention", "true");
   else expect(link).not.toHaveAttribute("data-attention");
 });

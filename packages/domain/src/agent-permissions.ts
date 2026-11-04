@@ -87,6 +87,12 @@ export type AgentPermissionDecision = {
   missingCapabilities: AgentCapability[];
 };
 
+function isRegisteredAgentOperation(
+  operation: string,
+): operation is keyof typeof agentOperationDefinitions {
+  return Object.hasOwn(agentOperationDefinitions, operation);
+}
+
 /** Capability resolution does not waive record revisions, provider capability or human confirmation. */
 export function resolveAgentPermission(
   policy: AgentPermissionPolicy,
@@ -101,6 +107,11 @@ export function resolveAgentPermission(
   if (connection.ownerId !== action.ownerId) return deny("different_owner");
   if (!policy.fullAccess) {
     if (policy.adoption === "legacy") return deny("legacy_policy");
+    if (isRegisteredAgentOperation(action.operation)) {
+      const workspace = agentOperationDefinitions[action.operation].workspace;
+      if (workspace !== null && action.workspace !== workspace)
+        return deny("workspace_not_selected");
+    }
     if (action.workspace && !connection.selectedWorkspaces.includes(action.workspace))
       return deny("workspace_not_selected");
     const missing = action.requiredCapabilities.filter((key) => !policy.capabilities[key]);

@@ -128,6 +128,92 @@ describe("unconsumed agent operation contracts", () => {
     }
   });
 
+  it.each(["cautious", "eager"] as const)(
+    "binds registered workspace metadata without changing unrelated authority in %s",
+    (mode) => {
+      const currentPolicy = { ...policy, mode };
+      const definition = agentOperationDefinitions.apply_finance_provider_snapshot;
+      const action = {
+        ownerId: "owner",
+        operation: "apply_finance_provider_snapshot",
+        requiredCapabilities: definition.capabilities,
+        workspace: definition.workspace,
+        risk: definition.risk,
+      };
+      const tasksOnly = { ...connection, selectedWorkspaces: ["tasks"] as const };
+      for (const workspace of [null, "tasks"] as const) {
+        expect(
+          resolveAgentPermission(currentPolicy, tasksOnly, { ...action, workspace }),
+        ).toMatchObject({ allowed: false, reason: "workspace_not_selected" });
+        expect(
+          resolveAgentPermission(currentPolicy, connection, { ...action, workspace }),
+        ).toMatchObject({ allowed: false, reason: "workspace_not_selected" });
+      }
+      expect(resolveAgentPermission(currentPolicy, tasksOnly, action)).toMatchObject({
+        allowed: false,
+        reason: "workspace_not_selected",
+      });
+      expect(resolveAgentPermission(currentPolicy, connection, action)).toMatchObject({
+        allowed: true,
+        confirmationRequired: false,
+      });
+      expect(
+        resolveAgentPermission(
+          { ...currentPolicy, capabilities: { ...policy.capabilities, records: false } },
+          connection,
+          action,
+        ),
+      ).toMatchObject({ allowed: false, reason: "missing_capability" });
+      const unscoped = {
+        ...action,
+        operation: "get_agent_permission_policy",
+        requiredCapabilities: [],
+        workspace: null,
+      };
+      expect(resolveAgentPermission(currentPolicy, tasksOnly, unscoped).allowed).toBe(true);
+      for (const operation of ["task.update", "toString", "__proto__"]) {
+        expect(
+          resolveAgentPermission(currentPolicy, tasksOnly, {
+            ...action,
+            operation,
+            workspace: "tasks",
+          }).allowed,
+        ).toBe(true);
+      }
+      const contradictory = { ...action, workspace: null, risk: "dangerous" as const };
+      expect(
+        resolveAgentPermission(
+          { ...currentPolicy, adoption: "legacy" },
+          tasksOnly,
+          contradictory,
+        ),
+      ).toMatchObject({ allowed: false, reason: "legacy_policy" });
+      const rootPolicy = {
+        ...currentPolicy,
+        adoption: "legacy" as const,
+        fullAccess: true,
+        capabilities: { ...policy.capabilities, records: false },
+      };
+      expect(resolveAgentPermission(rootPolicy, tasksOnly, contradictory)).toMatchObject({
+        allowed: true,
+        confirmationRequired: mode === "cautious",
+      });
+      for (const fullAccess of [false, true]) {
+        const identityPolicy = { ...currentPolicy, adoption: "legacy" as const, fullAccess };
+        expect(
+          resolveAgentPermission(
+            identityPolicy,
+            { ...tasksOnly, active: false, ownerId: "other" },
+            contradictory,
+          ),
+        ).toMatchObject({ allowed: false, reason: "inactive_connection" });
+        expect(
+          resolveAgentPermission(identityPolicy, { ...tasksOnly, ownerId: "other" }, contradictory),
+        ).toMatchObject({ allowed: false, reason: "different_owner" });
+      }
+    },
+  );
+
   it("preserves legacy adoption instead of converting the saved default into live authority", () => {
     const action = {
       ownerId: "owner",

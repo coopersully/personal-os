@@ -1,9 +1,9 @@
 import type {
   CheckTextingVerificationInput,
   FinanceTextReplyStatus,
+  NotificationAttemptDetail,
   NotificationPreferences,
   NotificationStatus,
-  NotificationAttemptDetail,
   SendTextMessageInput,
   StartTextingVerificationInput,
   TextConversationPage,

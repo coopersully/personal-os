@@ -1,8 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import {
-  notificationScopeSchema,
   notificationAttemptLookupSchema,
+  notificationScopeSchema,
   resetFinanceNotificationPreferencesSchema,
   saveNotificationPreferencesSchema,
 } from "@personal-os/domain";

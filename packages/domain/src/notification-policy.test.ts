@@ -2,8 +2,8 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   composeNotification,
   defaultNotificationPreferences,
-  notificationEligibility,
   notificationAttemptDetailSchema,
+  notificationEligibility,
   notificationPreferencesSchema,
   notificationWorkSchema,
   type PublishNotificationResult,

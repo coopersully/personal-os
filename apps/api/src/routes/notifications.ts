@@ -1,13 +1,13 @@
 import {
-  notificationScopeSchema,
   idSchema,
+  notificationScopeSchema,
   resetFinanceNotificationPreferencesSchema,
   saveNotificationPreferencesSchema,
 } from "@personal-os/domain";
 import type { Hono } from "hono";
+import { AppError } from "../errors.js";
 import type { createNotificationService } from "../notification-service.js";
 import type { AppEnv } from "../types.js";
-import { AppError } from "../errors.js";
 import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
 
 /** Explicit bounded invocations only; external hosts retain cadence ownership. */

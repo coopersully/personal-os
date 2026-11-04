@@ -20,8 +20,8 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { errorResponse } from "./errors.js";
-import { registerNotificationRoutes } from "./routes/notifications.js";
 import { createNotificationService } from "./notification-service.js";
+import { registerNotificationRoutes } from "./routes/notifications.js";
 import { encryptJson } from "./security.js";
 import type { AppEnv, Principal } from "./types.js";
 
@@ -80,16 +80,14 @@ describe.sequential("strict native notification attempt reader", () => {
     sendNotification.mockClear();
     resolveWork.mockClear();
     for (const id of [owner, foreign]) {
-      await database.db
-        .insert(users)
-        .values({
-          id,
-          email: `${id}@example.test`,
-          displayName: "Reader fixture",
-          passwordHash: "unused",
-          planningTimezone: "UTC",
-          updatedAt: current,
-        });
+      await database.db.insert(users).values({
+        id,
+        email: `${id}@example.test`,
+        displayName: "Reader fixture",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+        updatedAt: current,
+      });
       await database.db.insert(textingConnections).values({
         id: id === owner ? uuid(1) : uuid(2),
         userId: id,
@@ -140,16 +138,14 @@ describe.sequential("strict native notification attempt reader", () => {
   });
   async function addMembership(count: number, start = 1) {
     for (let n = start; n < start + count; n++) {
-      await database.db
-        .insert(notificationIntents)
-        .values({
-          id: uuid(n + 100),
-          userId: owner,
-          domain: "finances",
-          workId: work(n).id,
-          work: work(n),
-          state: "pending",
-        });
+      await database.db.insert(notificationIntents).values({
+        id: uuid(n + 100),
+        userId: owner,
+        domain: "finances",
+        workId: work(n).id,
+        work: work(n),
+        state: "pending",
+      });
       await database.db
         .insert(notificationAttemptItems)
         .values({ userId: owner, attemptId: uuid(4), intentId: uuid(n + 100), work: work(n) });
@@ -262,22 +258,18 @@ describe.sequential("strict native notification attempt reader", () => {
     expect(result.membership[1]?.work).toEqual(work(2));
   });
   it("labels current preferences/timezone/consent separately from absent historical policy and old recorded epochs", async () => {
-    await database.db
-      .insert(notificationPreferences)
-      .values({
-        userId: owner,
-        scope: "global",
-        revision: 3,
-        preferences: { ...defaultNotificationPreferences, enabled: false, detail: "minimal" },
-      });
-    await database.db
-      .insert(notificationPreferences)
-      .values({
-        userId: owner,
-        scope: "finances",
-        revision: 5,
-        preferences: { ...defaultNotificationPreferences, enabled: true, detail: "context" },
-      });
+    await database.db.insert(notificationPreferences).values({
+      userId: owner,
+      scope: "global",
+      revision: 3,
+      preferences: { ...defaultNotificationPreferences, enabled: false, detail: "minimal" },
+    });
+    await database.db.insert(notificationPreferences).values({
+      userId: owner,
+      scope: "finances",
+      revision: 5,
+      preferences: { ...defaultNotificationPreferences, enabled: true, detail: "context" },
+    });
     await database.db
       .update(textingConnections)
       .set({ consentEpoch: 2, state: "opted_out" })

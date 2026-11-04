@@ -9424,12 +9424,11 @@ describe("Personal OS web app", () => {
             main: cap(screen.queryAllByRole("main").length),
             mainIncludingHidden: cap(screen.queryAllByRole("main", { hidden: true }).length),
             connectionsHeading: cap(
-              screen.queryAllByRole("heading", { name: "Connections", exact: true }).length,
+              screen.queryAllByRole("heading", { name: "Connections" }).length,
             ),
             connectionsHeadingIncludingHidden: cap(
               screen.queryAllByRole("heading", {
                 name: "Connections",
-                exact: true,
                 hidden: true,
               }).length,
             ),

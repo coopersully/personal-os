@@ -940,3 +940,5 @@ chevron and the existing safe-default confirmation. Keep pending/error feedback 
 Sonner and preserve the existing web/native session reset behavior.
 
 Mobile account navigation uses Account, Personal, Workspaces, and App section landing pages. Each reuses the sidebar permission rules, attention indicators, and destination rows; the active child keeps its owning app-bar section selected. There is no generic More drawer.
+
+Provider account records reuse `ConnectedAccount` for the profile picture, service badge, name and email in connection settings, calendar groups and recovery surfaces. Keep health, capability toggles and repair actions beside the shared identity.

@@ -1,3 +1,7 @@
+import {
+  type FinanceInstitutionBranding,
+  financeInstitutionBrandingSchema,
+} from "@personal-os/domain";
 import { z } from "zod";
 import { ConnectorError, connectorHttpError } from "./failures.js";
 import { providerFetch } from "./http.js";
@@ -20,9 +24,9 @@ export type PlaidAccountSnapshot = {
   accountId: string;
   balanceCurrent: number | null;
   currencyCode: string | null;
-  institutionId?: string | null;
-  mask?: string | null;
   name: string;
+  mask?: string | null;
+  institutionId?: string | null;
   officialName: string | null;
   persistentAccountId?: string | null;
   /** Always populated by the real connector; optional only for injected test connectors. */
@@ -80,6 +84,7 @@ export type PlaidConnector = {
   }>;
   exchangePublicToken(publicToken: string): Promise<PlaidItemToken>;
   getItem(accessToken: string): Promise<PlaidItemSnapshot>;
+  getInstitutionBranding?(institutionId: string): Promise<FinanceInstitutionBranding>;
   getAccounts(accessToken: string): Promise<PlaidAccountSnapshot[]>;
   syncTransactions(input: {
     accessToken: string;
@@ -89,6 +94,7 @@ export type PlaidConnector = {
 
 type PlaidConnectorOptions = {
   clientId: string;
+  countryCodes?: readonly string[];
   environment: "sandbox" | "development" | "production";
   fetch?: typeof globalThis.fetch;
   secret: string;
@@ -212,7 +218,11 @@ async function isInvalidCursorResponse(response: Response): Promise<boolean> {
 export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConnector {
   const baseUrl = `https://${options.environment}.plaid.com`;
 
-  async function plaidRequest(path: string, body: Record<string, unknown>): Promise<unknown> {
+  async function plaidRequest(
+    path: string,
+    body: Record<string, unknown>,
+    maxBytes?: number,
+  ): Promise<unknown> {
     let response: Response;
     try {
       response = await providerFetch(options.fetch ?? globalThis.fetch, `${baseUrl}${path}`, {
@@ -237,7 +247,23 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
       throw await connectorHttpError(response, "plaid");
     }
     try {
-      return await response.json();
+      if (!maxBytes) return await response.json();
+      const reader = response.body?.getReader();
+      if (!reader) throw invalidResponse();
+      let size = 0;
+      const chunks: Uint8Array[] = [];
+      try {
+        while (true) {
+          const part = await reader.read();
+          if (part.done) break;
+          size += part.value.byteLength;
+          if (size > maxBytes) throw invalidResponse();
+          chunks.push(part.value);
+        }
+        return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
     } catch {
       throw invalidResponse();
     }
@@ -274,7 +300,7 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
     async validateCredentials() {
       await plaidRequest("/institutions/get", {
         count: 1,
-        country_codes: ["US"],
+        country_codes: options.countryCodes ?? ["US"],
         offset: 0,
       });
     },
@@ -437,6 +463,58 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
       );
       return { itemId: value.item.item_id, institutionId: value.item.institution_id ?? null };
     },
+    async getInstitutionBranding(institutionId) {
+      const value = parse(
+        z.object({
+          institution: z.object({
+            institution_id: z.string().min(1).max(160),
+            logo: z.string().max(43_950).nullable().catch(null),
+            primary_color: z.string().nullable().catch(null),
+            url: z.string().nullable().catch(null),
+          }),
+        }),
+        await plaidRequest(
+          "/institutions/get_by_id",
+          {
+            institution_id: institutionId,
+            country_codes: options.countryCodes ?? ["US"],
+            options: { include_optional_metadata: true },
+          },
+          96_000,
+        ),
+      );
+      if (value.institution.institution_id !== institutionId) throw invalidResponse();
+      const field = <T>(schema: z.ZodType<T>, value: unknown): T | null => {
+        const result = schema.safeParse(value);
+        return result.success ? result.data : null;
+      };
+      let logo = field(
+        financeInstitutionBrandingSchema.shape.logo,
+        value.institution.logo ? `data:image/png;base64,${value.institution.logo}` : null,
+      );
+      if (logo) {
+        const png = Buffer.from(logo.slice("data:image/png;base64,".length), "base64");
+        // Bound decoded dimensions as well as transfer size; tiny compressed input can claim huge images.
+        if (
+          png.length < 33 ||
+          png.toString("ascii", 12, 16) !== "IHDR" ||
+          png.readUInt32BE(16) < 1 ||
+          png.readUInt32BE(16) > 512 ||
+          png.readUInt32BE(20) < 1 ||
+          png.readUInt32BE(20) > 512
+        )
+          logo = null;
+      }
+      return {
+        institutionId,
+        logo,
+        primaryColor: field(
+          financeInstitutionBrandingSchema.shape.primaryColor,
+          value.institution.primary_color,
+        ),
+        url: field(financeInstitutionBrandingSchema.shape.url, value.institution.url),
+      };
+    },
     async getAccounts(accessToken) {
       const value = parse(
         z.object({
@@ -449,9 +527,9 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
         accountId: account.account_id,
         balanceCurrent: account.balances.current,
         currencyCode: account.balances.iso_currency_code ?? null,
-        institutionId: value.item?.institution_id ?? null,
         mask: account.mask ?? null,
         name: account.name,
+        institutionId: value.item?.institution_id ?? null,
         officialName: account.official_name,
         persistentAccountId: account.persistent_account_id ?? null,
         subtype: account.subtype,

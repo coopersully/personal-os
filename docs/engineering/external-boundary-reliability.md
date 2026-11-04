@@ -188,3 +188,41 @@ window only until expiry, expose Sonner retry feedback without repeated polling 
 claim completion. Mutation failures preserve the shared checklist's correction/retry behavior.
 Shared revisions resolve races with other tabs and desktop; refresh settles the other view.
 Actual browser background scheduling and native macOS window delivery still require runtime checks.
+
+
+## Finance institution branding
+
+The Plaid connector owns read-only `/institutions/get_by_id` with optional metadata. Existing
+Plaid client/secret, environment and US institution coverage authorize it; existing HTTPS/443
+provider egress applies. The response is bounded to 96 KB and a request uses the shared 15-second
+transport deadline without inline retries. Only bounded PNG data, strict six-digit hex colors and
+HTTPS website metadata enter the domain. No browser logo-service request or new external service
+is introduced. Official account names already feed display names; the provider-reported account
+mask is preserved through the shared bounded (32-character) identity contract. This work does
+not request full account/card numbers.
+
+The existing owner-scoped Provider Item sync lease owns branding acceptance. Its PostgreSQL row
+stores institution identity, safe metadata, next refresh and a fixed redacted failure code. One
+lookup serves the Item's linked accounts. Cache successes, including unavailable artwork, for
+seven days; retry failures after one hour during the next eligible ordinary sync. A crash before
+commit leaves the existing due work recoverable; a lost/replaced sync or maintenance claim cannot
+commit metadata. Account/transaction synchronization proceeds after optional branding failures.
+Preserve last-good metadata only for the same institution; a verified identity change clears old
+branding. No callback waits for branding, separate scheduler or migration-time provider backfill
+is introduced. Existing connected Items fill the cache through normal sync without reconnecting.
+
+Public account serializers expose branding through the existing owner-checked Item relation and
+`accountMask` through the shared `provider_account_mask` account field. Bitmap artwork is omitted
+by default from service and agent/context projections; authenticated human account/status/setup
+routes explicitly request it for display. Other institution metadata remains available without
+copying decorative base64 into agent prompts. List, status and connection completion use the same cached
+source; metadata is not an independent ledger. The additive nullable migration preserves existing
+accounts and requires no synchronous data rewrite. A failed logo decode uses the shared mark or
+monogram. Branding failure does not change financial freshness or claim that sync failed.
+
+Connector and database tests prove sanitization, cache timing, failure isolation, owner separation,
+and fencing. They do not prove production credential authority or deployed reachability. After
+release, the deployment owner must observe one ordinary Item sync, confirm safe cached metadata
+and logo display, and inspect `branding_failure_code` / `branding_next_refresh_at` on failures.
+Green local tests can still coexist with missing bank artwork, Plaid configuration rejection,
+provider downtime or browser image-decoder failures. These retain honest fallbacks.

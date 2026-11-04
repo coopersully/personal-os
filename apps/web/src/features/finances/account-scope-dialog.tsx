@@ -15,6 +15,7 @@ import {
   FieldLabel as ShadcnFieldLabel,
 } from "@/components/settings-field";
 import { Checkbox as ShadcnCheckbox } from "@/components/ui/checkbox";
+import { BankAccount } from "./bank-account";
 import { formatMoney } from "./format";
 
 export function AccountScopeDialog({
@@ -89,13 +90,14 @@ export function AccountScopeDialog({
               return (
                 <ShadcnField key={account.id} orientation="horizontal">
                   <ShadcnCheckbox
+                    aria-label={account.name}
                     disabled={disabled}
                     checked={selectedIds.includes(account.id)}
                     id={`scope-${scope}-${account.id}`}
                     onCheckedChange={(checked) => onChange(scope, account.id, checked === true)}
                   />
                   <ShadcnFieldLabel htmlFor={`scope-${scope}-${account.id}`}>
-                    {account.name}
+                    <BankAccount account={account} />
                     {viewOnly ? null : ` · ${formatMoney(value)}`}
                   </ShadcnFieldLabel>
                 </ShadcnField>

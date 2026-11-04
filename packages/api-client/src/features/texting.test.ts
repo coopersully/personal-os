@@ -84,3 +84,24 @@ it("resets only the Finance notification override with its revision", async () =
     body: JSON.stringify({ expectedRevision: 3 }),
   });
 });
+
+it("uses a separate exact notification GET with no-store and cannot turn the ID into owner/query authority", async () => {
+  const { createApiClient } = await import("../client.js");
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValue(Response.json({ id: "safe-reference" }));
+  const api = createApiClient({
+    baseUrl: "https://api.example.test",
+    token: "inspection-token",
+    fetch,
+  });
+  await api.getNotificationAttempt("11111111-1111-4111-8111-111111111111?ownerId=foreign/record");
+  expect(fetch).toHaveBeenCalledTimes(1);
+  const [url, init] = fetch.mock.calls[0] ?? [];
+  expect(url).toBe(
+    "https://api.example.test/v1/texting/notifications/attempts/11111111-1111-4111-8111-111111111111%3FownerId%3Dforeign%2Frecord",
+  );
+  expect(init?.cache).toBe("no-store");
+  expect(init?.method ?? "GET").toBe("GET");
+  expect(init?.body).toBeUndefined();
+});

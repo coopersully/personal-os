@@ -3,6 +3,7 @@ import {
   composeNotification,
   defaultNotificationPreferences,
   notificationEligibility,
+  notificationAttemptDetailSchema,
   notificationPreferencesSchema,
   notificationWorkSchema,
   type PublishNotificationResult,
@@ -361,5 +362,130 @@ describe("run attention delivery policy", () => {
         attempts: [failure],
       }),
     ).toBe("resolved");
+  });
+});
+
+describe("strict notification attempt detail", () => {
+  const detail = () => ({
+    id: "11111111-1111-4111-8111-111111111111",
+    state: "uncertain",
+    reason: "delivery_uncertain",
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    dispatchRecordedAt: now.toISOString(),
+    initiatingActor: { basis: "unavailable" },
+    membership: [
+      { intentId: "22222222-2222-4222-8222-222222222222", work: work.work, currentIntent: null },
+    ],
+    policy: {
+      historicalPreferences: { basis: "unavailable", reason: "not_persisted" },
+      recordedAttempt: {
+        basis: "attempt_record",
+        connectionId: "33333333-3333-4333-8333-333333333333",
+        consentEpoch: 1,
+        timeZone: "UTC",
+        timezoneRevision: now.toISOString(),
+      },
+      current: {
+        basis: "current",
+        timeZone: "UTC",
+        timezoneRevision: now.toISOString(),
+        preferences: [],
+        effective: preferences,
+        connection: null,
+      },
+    },
+    transport: {
+      message: null,
+      callbackProvenance: { basis: "unavailable", reason: "not_persisted" },
+    },
+    coverage: {
+      state: "partial",
+      membership: "complete",
+      limit: 100,
+      returnedItems: 1,
+      hasMore: false,
+      reasons: [
+        "historical_policy_unavailable",
+        "callback_provenance_unavailable",
+        "message_unavailable",
+        "intent_unavailable",
+      ],
+    },
+    recovery: "inspect_delivery_do_not_resend",
+  });
+  it("keeps actual frozen work and current/historical basis distinct without granting retry", () => {
+    const parsed = notificationAttemptDetailSchema.parse(detail());
+    expect(parsed.membership[0]?.work).toEqual(work.work);
+    expect(parsed.policy.historicalPreferences.basis).toBe("unavailable");
+    expect(parsed.policy.current.basis).toBe("current");
+    expect(parsed.recovery).toBe("inspect_delivery_do_not_resend");
+  });
+  it.each([
+    "ownerId",
+    "phone",
+    "body",
+    "providerSid",
+    "token",
+    "authority",
+  ])("rejects extra private %s fields", (field) => {
+    const value = detail();
+    expect(
+      notificationAttemptDetailSchema.safeParse({ ...value, [field]: "private" }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        policy: { ...value.policy, [field]: "private" },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        transport: { ...value.transport, [field]: "private" },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        membership: [{ ...value.membership[0], [field]: "private" }],
+      }).success,
+    ).toBe(false);
+  });
+  it("rejects overflow presented as complete or inconsistent returned counts", () => {
+    const value = detail();
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        coverage: { ...value.coverage, hasMore: true },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        coverage: { ...value.coverage, returnedItems: 0 },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        membership: Array.from({ length: 101 }, () => value.membership[0]),
+      }).success,
+    ).toBe(false);
+  });
+  it("does not accept current preference data disguised as historical submission evidence", () => {
+    const value = detail();
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        policy: { ...value.policy, historicalPreferences: { basis: "historical", preferences } },
+      }).success,
+    ).toBe(false);
+    expect(
+      notificationAttemptDetailSchema.safeParse({
+        ...value,
+        reason: "raw provider or message contents",
+      }).success,
+    ).toBe(false);
   });
 });

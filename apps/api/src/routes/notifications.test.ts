@@ -116,3 +116,63 @@ it("maps bounded notification operations and rejects authority and input expansi
       .status,
   ).toBe(403);
 });
+
+it("reads an exact attempt with both read scopes, strict path input and no-store without invoking reconciliation or writers", async () => {
+  type Service = ReturnType<typeof createNotificationService>;
+  const principal: Principal = {
+    userId: "11111111-1111-4111-8111-111111111111",
+    actorId: "inspection-agent",
+    actorType: "agent",
+    scopes: new Set(["texting:read", "finances:read"]),
+  };
+  const notifications = {
+    getAttempt: vi.fn<Service["getAttempt"]>(),
+    status: vi.fn<Service["status"]>(),
+    savePreferences: vi.fn<Service["savePreferences"]>(),
+    resetFinancePreferences: vi.fn<Service["resetFinancePreferences"]>(),
+    publish: vi.fn<Service["publish"]>(),
+    claim: vi.fn<Service["claim"]>(),
+    deliver: vi.fn<Service["deliver"]>(),
+    drain: vi.fn<Service["drain"]>(),
+  } satisfies Service;
+  const { AppError } = await import("../errors.js");
+  notifications.getAttempt.mockRejectedValue(
+    new AppError("not_found", "Notification attempt not found."),
+  );
+  const app = new Hono<AppEnv>();
+  app.onError(errorResponse);
+  app.use("*", async (context, next) => {
+    context.set("principal", principal);
+    context.set("requestId", "attempt-read");
+    await next();
+  });
+  registerNotificationRoutes({ app, notifications });
+  const id = "22222222-2222-4222-8222-222222222222";
+  const path = `/v1/texting/notifications/attempts/${id}`;
+  const result = await app.request(path);
+  expect(result.status).toBe(404);
+  expect(result.headers.get("Cache-Control")).toBe("no-store");
+  expect(notifications.getAttempt).toHaveBeenLastCalledWith(principal, id);
+  for (const invalid of [
+    "invalid-id",
+    `${id}?ownerId=${principal.userId}`,
+    `${id}?attemptId=${principal.userId}`,
+  ]) {
+    expect((await app.request(`/v1/texting/notifications/attempts/${invalid}`)).status).toBe(400);
+  }
+  for (const scopes of [["texting:read"], ["finances:read"]] as const) {
+    principal.scopes = new Set(scopes);
+    expect((await app.request(path)).status).toBe(403);
+  }
+  expect(notifications.getAttempt).toHaveBeenCalledTimes(1);
+  for (const name of [
+    "status",
+    "publish",
+    "claim",
+    "deliver",
+    "drain",
+    "savePreferences",
+    "resetFinancePreferences",
+  ] as const)
+    expect(notifications[name]).not.toHaveBeenCalled();
+});

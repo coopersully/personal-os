@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { agentOperationDefinitions } from "./agent-operation-definitions.js";
+import {
+  agentOperationDefinitions,
+  agentOperationRequiredCapabilities,
+} from "./agent-operation-definitions.js";
 import { accessScopeSchema } from "./auth.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 
@@ -105,21 +108,34 @@ export function resolveAgentPermission(
   ) => ({ allowed: false, confirmationRequired: false, reason, missingCapabilities });
   if (!connection.active) return deny("inactive_connection");
   if (connection.ownerId !== action.ownerId) return deny("different_owner");
+  const definition = isRegisteredAgentOperation(action.operation)
+    ? agentOperationDefinitions[action.operation]
+    : undefined;
   if (!policy.fullAccess) {
     if (policy.adoption === "legacy") return deny("legacy_policy");
-    if (isRegisteredAgentOperation(action.operation)) {
-      const workspace = agentOperationDefinitions[action.operation].workspace;
+    if (definition) {
+      const workspace = definition.workspace;
       if (workspace !== null && action.workspace !== workspace)
         return deny("workspace_not_selected");
     }
     if (action.workspace && !connection.selectedWorkspaces.includes(action.workspace))
       return deny("workspace_not_selected");
-    const missing = action.requiredCapabilities.filter((key) => !policy.capabilities[key]);
+    const requiredCapabilities = definition
+      ? [
+          ...new Set([
+            ...agentOperationRequiredCapabilities(definition, policy),
+            ...action.requiredCapabilities,
+          ]),
+        ]
+      : action.requiredCapabilities;
+    const missing = requiredCapabilities.filter((key) => !policy.capabilities[key]);
     if (missing.length) return deny("missing_capability", [...missing]);
   }
   return {
     allowed: true,
-    confirmationRequired: policy.mode === "cautious" && action.risk === "dangerous",
+    confirmationRequired:
+      policy.mode === "cautious" &&
+      (action.risk === "dangerous" || definition?.risk === "dangerous"),
     reason: "allowed",
     missingCapabilities: [],
   };

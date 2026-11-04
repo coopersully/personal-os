@@ -210,6 +210,188 @@ describe("unconsumed agent operation contracts", () => {
     }
   });
 
+  it.each([
+    "cautious",
+    "eager",
+  ] as const)("enforces the canonical capability and risk floor in %s", (mode) => {
+    const action = {
+      ownerId: "owner",
+      operation: "update_execution_policy_settings",
+      workspace: null,
+      requiredCapabilities: [],
+      risk: "ordinary" as const,
+    };
+    expect(resolveAgentPermission({ ...policy, mode }, connection, action)).toMatchObject({
+      allowed: false,
+      reason: "missing_capability",
+      missingCapabilities: ["access"],
+    });
+    expect(
+      resolveAgentPermission(
+        { ...policy, mode, capabilities: { ...policy.capabilities, access: true } },
+        connection,
+        action,
+      ),
+    ).toMatchObject({ allowed: true, confirmationRequired: mode === "cautious" });
+  });
+
+  it.each([
+    "cautious",
+    "eager",
+  ] as const)("preserves stronger descriptor constraints in %s", (mode) => {
+    const action = {
+      ownerId: "owner",
+      operation: "apply_finance_provider_snapshot",
+      workspace: "finances" as const,
+      requiredCapabilities: ["external"] as const,
+      risk: "dangerous" as const,
+    };
+    expect(resolveAgentPermission({ ...policy, mode }, connection, action)).toMatchObject({
+      allowed: false,
+      reason: "missing_capability",
+      missingCapabilities: ["external"],
+    });
+    const allowedPolicy = {
+      ...policy,
+      mode,
+      capabilities: { ...policy.capabilities, external: true },
+    };
+    expect(resolveAgentPermission(allowedPolicy, connection, action)).toMatchObject({
+      allowed: true,
+      confirmationRequired: mode === "cautious",
+    });
+    expect(
+      resolveAgentPermission(
+        { ...allowedPolicy, capabilities: { ...allowedPolicy.capabilities, records: false } },
+        connection,
+        action,
+      ),
+    ).toMatchObject({ allowed: false, missingCapabilities: ["records"] });
+  });
+
+  it.each([
+    "cautious",
+    "eager",
+  ] as const)("keeps supporting read alternatives and explicit extras in %s", (mode) => {
+    const action = {
+      ownerId: "owner",
+      operation: "get_execution_policy_settings",
+      workspace: null,
+      requiredCapabilities: [],
+      risk: "ordinary" as const,
+    };
+    expect(resolveAgentPermission({ ...policy, mode }, connection, action)).toMatchObject({
+      allowed: false,
+      reason: "missing_capability",
+      missingCapabilities: ["settings"],
+    });
+    for (const alternative of ["settings", "access"] as const) {
+      const readPolicy = {
+        ...policy,
+        mode,
+        capabilities: { ...policy.capabilities, [alternative]: true },
+      };
+      expect(resolveAgentPermission(readPolicy, connection, action)).toMatchObject({
+        allowed: true,
+        confirmationRequired: false,
+      });
+      const constrained = { ...action, requiredCapabilities: ["external"] as const };
+      expect(resolveAgentPermission(readPolicy, connection, constrained)).toMatchObject({
+        allowed: false,
+        missingCapabilities: ["external"],
+      });
+      expect(
+        resolveAgentPermission(
+          { ...readPolicy, capabilities: { ...readPolicy.capabilities, external: true } },
+          connection,
+          constrained,
+        ),
+      ).toMatchObject({ allowed: true });
+    }
+    expect(
+      resolveAgentPermission(
+        { ...policy, mode, capabilities: { ...policy.capabilities, access: true } },
+        connection,
+        { ...action, requiredCapabilities: ["settings"] },
+      ),
+    ).toMatchObject({ allowed: false, missingCapabilities: ["settings"] });
+  });
+
+  it.each([
+    "cautious",
+    "eager",
+  ] as const)("preserves identity, legacy and full access ordering in %s", (mode) => {
+    const action = {
+      ownerId: "owner",
+      operation: "update_execution_policy_settings",
+      workspace: "tasks" as const,
+      requiredCapabilities: ["external"] as const,
+      risk: "ordinary" as const,
+    };
+    const legacy = { ...policy, mode, adoption: "legacy" as const };
+    expect(resolveAgentPermission(legacy, connection, action)).toMatchObject({
+      allowed: false,
+      reason: "legacy_policy",
+      confirmationRequired: false,
+    });
+    const rootPolicy = { ...legacy, fullAccess: true };
+    expect(resolveAgentPermission(rootPolicy, connection, action)).toMatchObject({
+      allowed: true,
+      confirmationRequired: mode === "cautious",
+    });
+    for (const fullAccess of [false, true]) {
+      const identityPolicy = { ...legacy, fullAccess };
+      expect(
+        resolveAgentPermission(
+          identityPolicy,
+          { ...connection, active: false, ownerId: "other" },
+          action,
+        ),
+      ).toMatchObject({ allowed: false, reason: "inactive_connection" });
+      expect(
+        resolveAgentPermission(identityPolicy, { ...connection, ownerId: "other" }, action),
+      ).toMatchObject({ allowed: false, reason: "different_owner" });
+    }
+    for (const operation of ["task.update", "toString", "__proto__"]) {
+      const unknown = {
+        ...action,
+        operation,
+        workspace: null,
+        requiredCapabilities: [],
+        risk: "dangerous" as const,
+      };
+      expect(resolveAgentPermission({ ...policy, mode }, connection, unknown)).toMatchObject({
+        allowed: true,
+        confirmationRequired: mode === "cautious",
+      });
+      expect(
+        resolveAgentPermission({ ...policy, mode }, connection, {
+          ...unknown,
+          requiredCapabilities: ["external"],
+        }),
+      ).toMatchObject({ allowed: false, missingCapabilities: ["external"] });
+    }
+  });
+
+  it.each([
+    "cautious",
+    "eager",
+  ] as const)("deduplicates canonical and explicit requirements in %s", (mode) => {
+    expect(
+      resolveAgentPermission(
+        { ...policy, mode, capabilities: { ...policy.capabilities, records: false } },
+        connection,
+        {
+          ownerId: "owner",
+          operation: "apply_finance_provider_snapshot",
+          workspace: "finances",
+          requiredCapabilities: ["records", "records", "external"],
+          risk: "ordinary",
+        },
+      ),
+    ).toMatchObject({ allowed: false, missingCapabilities: ["records", "external"] });
+  });
+
   it("preserves legacy adoption instead of converting the saved default into live authority", () => {
     const action = {
       ownerId: "owner",

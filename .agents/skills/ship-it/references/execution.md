@@ -59,9 +59,46 @@ Supply a sanitized payload containing:
   SHA-256. Do not derive a historical freeze hash merely from files as they exist now. The explicit
   VERSION 8 typed mode below can instead preserve fresh exact-byte acceptance with unavailable
   historical proof; it never turns that acceptance into an original freeze attestation.
-  Both modes support retained local files only: at most 32 files and 256 KiB total raw bytes.
+  Both provenance modes support retained local files only: at most 32 files. Default retention
+  remains base64 with 256 KiB total raw bytes. VERSION 9 adds the explicit compressed mode below;
+  neither provenance classification nor compressibility enables it automatically.
   Missing, remote, incomplete, changed or oversized evidence blocks recovery. Original files and
   reviewed plans must remain untouched; never omit a path to evade unavailable historical proof.
+
+### VERSION 9 opt-in lossless retention
+
+After independently accepted policy/distribution and explicit owner release, a VERSION 9 recovery
+request may set `retentionEncodingVersion: 1` (an exact integer, never a boolean). This selects
+one fixed zlib-wrapped stream per retained file for the entire entry. All its rows use
+`encoding: zlib-base64`, `rawLength` (exact nonnegative integer), and `bytes` (canonical strict
+base64 of that stream), alongside the unchanged original `path`, raw-file `sha256` and provenance.
+No gzip, raw-deflate, dictionaries, alternate algorithm, mixed encoding or automatic fallback is
+supported. A request without this field keeps the legacy raw mode, including its 256 KiB limit.
+Unknown encoding versions or compressed-mode writer policies other than 9 reject.
+
+The new mode has distinct aggregate budgets per entry: at most **1,048,576 original decoded
+bytes**, **262,144 binary compressed bytes** before base64, and **32 selected files**. Base64 text
+adds up to roughly one third, plus JSON/provenance overhead; the checkpoint JSON is not limited
+to 256 KiB. This explicitly versioned decoded-budget policy is not a change to the legacy raw
+budget. Input reads, compressor chunks and compressed accumulation are bounded. Creation and
+history replay use the same bounded decoder: strict base64/input-size checks precede decoding;
+each incremental output is limited to remaining decoded budget plus one. Output overflow,
+wrong raw length/hash, noncanonical padding, incomplete stream, trailing bytes, concatenated
+stream or dictionary requirement rejects without an unbounded decompression/flush operation.
+Empty files are supported. Each file consumes the entry's shared actual raw and compressed
+budgets; declarations cannot reset them. Selected path/order/set, original raw bytes/hashes and
+provenance remain exact, with no upgrade of unknown historical proof.
+
+Existing VERSION 7/8 history retains its recorded raw semantics and literal prefix unchanged;
+new fields coincidentally present in old requests do not reinterpret old raw rows. VERSION 9
+entries explicitly dispatch their recorded mode on replay. A legacy writer cannot emit compressed
+rows. Normal owner, fresh whole-checkpoint CAS, frozen plan, policy/review, pending/merge claim,
+provenance/continuity and history reconstruction checks remain mandatory before atomic replacement.
+Codec or file errors reject safely without printing evidence contents or changing any registry,
+evidence or history bytes. A successful codec test supplies no source/recovery/runtime acceptance.
+An actual consumer's complete selected set must fit both budgets under a separately bounded
+verification allocation; otherwise stop without trimming, splitting, substituting hashes or
+increasing a budget. Protected helper delivery and exact consumer acceptance precede canonical use.
 
 Historical freeze references are selected without changing the predecessor object. A valid legacy
 string-criterion plan uses its top-level `evidence`; a valid candidate-bound detailed object-criterion
@@ -76,8 +113,9 @@ Per-criterion detailed `evidence` may name future production observation destina
 inside the exact retained plan but are not historical local freeze files: recovery never requires
 them to exist, generates their hashes or infers successful production acceptance from retention.
 The acceptance owner still authenticates every asserted provenance fact and the separately
-reviewed successor's exact claim-owner identity. Reload policy VERSION 8 and the matching helper
-and contracts before using typed provenance. Earlier checkpoints and history keep their original
+reviewed successor's exact claim-owner identity. Reload the current checked-in policy, helper and
+contracts (VERSION 9 for compressed retention, preserving historical VERSION 8 provenance semantics)
+before using typed provenance. Earlier checkpoints and history keep their original
 versions and objects. A version reload alone grants no recovery authority or readiness.
 
 #### Typed file provenance (VERSION 8)

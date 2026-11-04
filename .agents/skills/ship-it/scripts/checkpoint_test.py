@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import unittest
+import zlib
 from unittest.mock import patch
 from pathlib import Path
 
@@ -17,6 +18,214 @@ from checkpoint import operate, locked
 class CheckpointTest(unittest.TestCase):
     policy_version = int((Path(__file__).resolve().parents[1] / "VERSION").read_text().strip())
     recovery_key = "https://github.com/owner/repo/pull/1"
+
+    def compressed_fixture(self, contents=None):
+        old, payload, _ = self.typed_recovery_fixture()
+        contents = contents if contents is not None else [b"safe synthetic log line\n" * 24000, b""] + [
+            f"accepted evidence {index}\n".encode() for index in range(14)]
+        paths, rows = [], {}
+        for index, raw in enumerate(contents):
+            path = self.root / f"compressed-{index}.txt"
+            path.write_bytes(raw)
+            paths.append(str(path))
+            rows[str(path)] = {"sha256": hashlib.sha256(raw).hexdigest(),
+                              "classification": "historical_hash_attested", "historicalProofAvailable": True,
+                              "bindingEvidence": ["original-freeze-paths.json"],
+                              "historicalReviewEvidence": ["original-independent-hash-review.json"]}
+        old["reviewedProductionPlan"]["premerge_evidence"] = paths
+        payload["reviewedProductionPlan"]["premerge_evidence"] = paths[:]
+        self.checkpoint_path().write_text(json.dumps(old))
+        payload.update(expectedCheckpointDigest=self.digest(old), expectedPlanDigest=self.digest(old["reviewedProductionPlan"]),
+                       expectedEvidenceFiles=rows, retentionEncodingVersion=1)
+        return old, payload, [Path(path) for path in paths]
+
+    def test_compressed_sixteen_files_roundtrip_and_next_history_replay(self):
+        from checkpoint import decode_retained, validate_recovery_history
+        old, payload, paths = self.compressed_fixture()
+        originals = [path.read_bytes() for path in paths]
+        self.assertGreater(len(originals[0]), 526671)
+        result = self.typed_recovery(payload)
+        retained = result["recoveryHistory"][0]["retainedEvidence"]
+        self.assertEqual([row["path"] for row in retained], [str(path) for path in paths])
+        remaining, stored_remaining = 1024 * 1024, 256 * 1024
+        for row, raw in zip(retained, originals):
+            decoded, stored_size = decode_retained(row, True, remaining, stored_remaining)
+            self.assertEqual(decoded, raw)
+            self.assertEqual(row["rawLength"], len(raw))
+            self.assertEqual(row["sha256"], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(row["provenance"], payload["expectedEvidenceFiles"][row["path"]])
+            remaining -= len(decoded)
+            stored_remaining -= stored_size
+        prefix = json.dumps(result["recoveryHistory"], sort_keys=True)
+        current = self.call("save", {"phase": "repair"}, key=self.recovery_key)
+        payload.update(expectedCheckpointDigest=self.digest(current), expectedHeadSha=current["headSha"],
+                       expectedPlanDigest=self.digest(current["reviewedProductionPlan"]), headSha="d" * 40)
+        payload["livePr"]["headSha"] = "d" * 40
+        payload["reviewedProductionPlan"]["candidateHead"] = "d" * 40
+        second = self.typed_recovery(payload)
+        self.assertEqual(json.dumps(second["recoveryHistory"][:-1], sort_keys=True), prefix)
+        for path in paths:
+            path.unlink()
+        validate_recovery_history(second["recoveryHistory"])
+        self.assertEqual(second["recoveryHistory"][0]["predecessor"], old)
+
+    def test_compressed_raw_aggregate_bound_and_no_legacy_fallback(self):
+        _, payload, _ = self.compressed_fixture([b"a" * (1024 * 1024 - 1), b"b"])
+        self.typed_recovery(payload)
+        self.setUp()
+        _, payload, _ = self.compressed_fixture([b"a" * (1024 * 1024), b"b"])
+        self.reject_recovery_unchanged(payload)
+        self.setUp()
+        _, payload, _ = self.compressed_fixture([b"a" * (256 * 1024)])
+        payload.pop("retentionEncodingVersion")
+        self.typed_recovery(payload)
+        self.setUp()
+        _, payload, _ = self.compressed_fixture([b"a" * (256 * 1024 + 1)])
+        payload.pop("retentionEncodingVersion")
+        self.reject_recovery_unchanged(payload)
+
+    def test_compressed_append_preserves_recorded_version_eight_prefix(self):
+        from checkpoint import validate_recovery_history
+        _, payload, _ = self.typed_recovery_fixture()
+        legacy = self.typed_recovery(payload)
+        # A synthetic existing VERSION8 history, whose original raw representation is unchanged.
+        legacy["policyVersion"] = 8
+        legacy["recoveryHistory"][0]["request"]["policyVersion"] = 8
+        legacy["recoveryHistory"][0]["successor"]["policyVersion"] = 8
+        legacy["phase"] = "repair"
+        self.checkpoint_path().write_text(json.dumps(legacy))
+        prefix = json.dumps(legacy["recoveryHistory"], sort_keys=True)
+        payload.update(expectedCheckpointDigest=self.digest(legacy), expectedHeadSha=legacy["headSha"],
+                       expectedPlanDigest=self.digest(legacy["reviewedProductionPlan"]),
+                       headSha="d" * 40, retentionEncodingVersion=1)
+        payload["livePr"]["headSha"] = "d" * 40
+        payload["reviewedProductionPlan"]["candidateHead"] = "d" * 40
+        result = self.typed_recovery(payload)
+        self.assertEqual(json.dumps(result["recoveryHistory"][:-1], sort_keys=True), prefix)
+        validate_recovery_history(result["recoveryHistory"])
+
+    def test_compressed_mode_dispatch_rejects_invalid_types_and_mixtures_atomically(self):
+        _, payload, _ = self.compressed_fixture()
+        for version in [None, True, False, 0, 2, "1", 1.0, {}, []]:
+            with self.subTest(version=version):
+                self.reject_recovery_unchanged({**payload, "retentionEncodingVersion": version})
+        for policy in [8, 10, True]:
+            self.reject_recovery_unchanged({**payload, "policyVersion": policy})
+
+    def test_compressed_replay_rejects_malformed_streams_sizes_and_base64(self):
+        from checkpoint import decode_retained
+        raw = b"safe retained bytes" * 50
+        stored = zlib.compress(raw)
+        row = {"encoding": "zlib-base64", "rawLength": len(raw), "bytes": base64.b64encode(stored).decode()}
+        for length in [-1, True, 1.0, "950", len(raw) - 1, len(raw) + 1, 1024 * 1024 + 1]:
+            with self.subTest(length=length), self.assertRaises(ValueError):
+                decode_retained({**row, "rawLength": length}, True, 1024 * 1024, 256 * 1024)
+        gzip_encoder = zlib.compressobj(wbits=31)
+        raw_encoder = zlib.compressobj(wbits=-15)
+        dictionary_encoder = zlib.compressobj(zdict=b"safe retained bytes")
+        for corrupted in [stored[:-1], stored + b"trailing", stored + stored,
+                          stored[:-1] + bytes([stored[-1] ^ 1]),
+                          gzip_encoder.compress(raw) + gzip_encoder.flush(),
+                          raw_encoder.compress(raw) + raw_encoder.flush(),
+                          dictionary_encoder.compress(raw) + dictionary_encoder.flush(), b""]:
+            with self.subTest(size=len(corrupted)), self.assertRaises(ValueError):
+                decode_retained({**row, "bytes": base64.b64encode(corrupted).decode()}, True, 1024 * 1024, 256 * 1024)
+        for encoded in [row["bytes"] + "\n", "!" + row["bytes"], row["bytes"] + "=", "AA==" * (256 * 1024)]:
+            with self.assertRaises(ValueError):
+                decode_retained({**row, "bytes": encoded}, True, 1024 * 1024, 256 * 1024)
+        with self.assertRaises(ValueError):
+            decode_retained({**row, "bytes": base64.b64encode(zlib.compress(b"x" * (1024 * 1024 + 1))).decode()},
+                            True, 1024 * 1024, 256 * 1024)
+        with self.assertRaises(ValueError):
+            decode_retained(row, False, 256 * 1024, 256 * 1024)
+
+    def test_compressed_binary_budget_exact_boundary_and_incompressible_rejection(self):
+        from checkpoint import decode_retained
+        # A stored-block zlib stream of this exact size exercises the binary (not JSON/base64) bound.
+        import random
+        noise = random.Random(202).randbytes(262144)
+        stored = next(zlib.compress(noise[:size], level=0) for size in range(262000, 262144)
+                      if len(zlib.compress(noise[:size], level=0)) == 262144)
+        raw = zlib.decompress(stored)
+        row = {"encoding": "zlib-base64", "rawLength": len(raw), "bytes": base64.b64encode(stored).decode()}
+        self.assertEqual(decode_retained(row, True, 1024 * 1024, 262144)[0], raw)
+        with self.assertRaises(ValueError):
+            decode_retained(row, True, 1024 * 1024, 262143)
+        larger = zlib.compress(noise[:len(raw) + 1], level=0)
+        self.assertEqual(len(larger), 262145)
+        with self.assertRaises(ValueError):
+            decode_retained({**row, "rawLength": len(raw) + 1, "bytes": base64.b64encode(larger).decode()},
+                            True, 1024 * 1024, 262144)
+        _, payload, _ = self.compressed_fixture([noise + noise[:4096]])
+        self.reject_recovery_unchanged(payload)
+
+    def test_compressed_shared_binary_budget_across_files_creation_and_replay(self):
+        import random
+        from checkpoint import encode_retained, validate_recovery_history
+        noise = random.Random(353).randbytes(280000)
+        below = [noise[:131000], noise[140000:271000]]
+        self.assertLess(sum(len(zlib.compress(raw)) for raw in below), 262144)
+        _, payload, _ = self.compressed_fixture(below)
+        positive = self.typed_recovery(payload)
+        validate_recovery_history(positive["recoveryHistory"])
+
+        above = [noise[:140000], noise[140000:]]
+        self.assertTrue(all(len(zlib.compress(raw)) < 262144 for raw in above))
+        self.assertGreater(sum(len(zlib.compress(raw)) for raw in above), 262144)
+        history = copy.deepcopy(positive["recoveryHistory"])
+        for item, raw in zip(history[0]["retainedEvidence"], above):
+            encoded, _ = encode_retained(raw, True, 1048576, 262144)
+            item.update(encoded, sha256=hashlib.sha256(raw).hexdigest())
+            item["provenance"]["sha256"] = item["sha256"]
+            history[0]["request"]["expectedEvidenceFiles"][item["path"]]["sha256"] = item["sha256"]
+        before = copy.deepcopy(history)
+        with self.assertRaises(ValueError):
+            validate_recovery_history(history)
+        self.assertEqual(history, before)
+        self.setUp()
+        _, payload, _ = self.compressed_fixture(above)
+        self.reject_recovery_unchanged(payload)
+
+    def test_compressed_history_rejects_identity_provenance_order_and_policy_tampering(self):
+        from checkpoint import validate_recovery_history
+        _, payload, _ = self.compressed_fixture()
+        result = self.typed_recovery(payload)
+        original = copy.deepcopy(result["recoveryHistory"])
+        for target, field, value in [("item", "sha256", "0" * 64), ("item", "path", "unselected"),
+                                     ("item", "rawLength", 1), ("item", "encoding", "base64"),
+                                     ("request", "retentionEncodingVersion", True),
+                                     ("request", "retentionEncodingVersion", 2),
+                                     ("provenance", "historicalProofAvailable", False)]:
+            history = copy.deepcopy(original)
+            item = history[0]["retainedEvidence"][0]
+            obj = history[0]["request"] if target == "request" else item["provenance"] if target == "provenance" else item
+            obj[field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                validate_recovery_history(history)
+        for mutation in [lambda rows: rows.reverse(), lambda rows: rows.pop(), lambda rows: rows.append(copy.deepcopy(rows[0]))]:
+            history = copy.deepcopy(original)
+            mutation(history[0]["retainedEvidence"])
+            with self.assertRaises(ValueError):
+                validate_recovery_history(history)
+        history = copy.deepcopy(original)
+        history[0]["request"]["policyVersion"] = 8
+        history[0]["successor"]["policyVersion"] = 8
+        with self.assertRaises(ValueError):
+            validate_recovery_history(history)
+
+    def test_compressed_authentication_failures_and_file_errors_are_atomic(self):
+        _, payload, paths = self.compressed_fixture()
+        self.reject_recovery_unchanged(payload, owner="other")
+        for changes in [{"expectedCheckpointDigest": "0" * 64}, {"expectedHeadSha": "f" * 40},
+                        {"expectedPlanDigest": "0" * 64}, {"reviewers": ["worker"]},
+                        {"reviewEvidence": []}, {"livePr": {**payload["livePr"], "merged": True}}]:
+            self.reject_recovery_unchanged({**payload, **changes})
+        with patch("checkpoint.zlib.compressobj", side_effect=zlib.error("synthetic codec failure")):
+            self.reject_recovery_unchanged(payload)
+        with patch("checkpoint.os.open", side_effect=OSError("synthetic file failure")):
+            self.reject_recovery_unchanged(payload)
+        self.call("begin", {"id": "pending", "action": "push", "headSha": "c" * 40, "baseSha": "b" * 40}, key=self.recovery_key)
+        self.reject_recovery_unchanged(payload)
 
     @staticmethod
     def digest(value):

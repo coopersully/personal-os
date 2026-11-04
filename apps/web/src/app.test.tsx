@@ -9351,8 +9351,115 @@ describe("Personal OS web app", () => {
       pending,
       nextSyncAt: pending ? now : null,
     });
-    setup("/settings?page=connections");
-    await userEvent.setup().click(await screen.findByRole("button", { name: "Sync Google" }));
+    const view = setup("/settings?page=connections");
+    const user = userEvent.setup();
+    let syncButton: HTMLElement;
+    try {
+      syncButton = await screen.findByRole("button", { name: "Sync Google" });
+    } catch (lookupError) {
+      // Inspect only after the unchanged default lookup fails; never replace its error.
+      try {
+        const cap = (count: number) => Math.min(count, 20);
+        const route = new URL(view.location.value, "https://fixture.invalid");
+        const calls = [
+          ["getMe", mocks.getMe.mock],
+          ["listConnectors", mocks.listConnectors.mock],
+          ["syncConnector", mocks.syncConnector.mock],
+        ] as const;
+        const connectorData = view.queryClient.getQueryData(["connectors"]);
+        const queries = [["me"], ["connectors"]].map((queryKey) => {
+          const state = view.queryClient.getQueryState(queryKey);
+          return {
+            query: queryKey[0],
+            status: state?.status ?? "missing",
+            fetchStatus: state?.fetchStatus ?? "missing",
+            hasData: state?.data !== undefined,
+            hasError: state?.error != null,
+            errorClass:
+              state?.error == null
+                ? "none"
+                : state.error instanceof TypeError
+                  ? "type_error"
+                  : state.error instanceof Error
+                    ? "error"
+                    : "non_error",
+          };
+        });
+        const diagnostic = {
+          pending,
+          route: {
+            isSettings: route.pathname === "/settings",
+            isConnections: route.searchParams.get("page") === "connections",
+          },
+          queries,
+          calls: calls.map(([name, mock]) => ({
+            name,
+            count: cap(mock.calls.length),
+            truncated: mock.calls.length > 20,
+            results: mock.results.slice(-4).map((result) => result.type),
+            settledResults: mock.settledResults.slice(-4).map((result) => result.type),
+          })),
+          fixture: {
+            connectorArray: Array.isArray(connectorData),
+            connectorCount: Array.isArray(connectorData) ? cap(connectorData.length) : 0,
+            truncated: Array.isArray(connectorData) && connectorData.length > 20,
+            expectedGoogle:
+              Array.isArray(connectorData) &&
+              connectorData
+                .slice(0, 20)
+                .some(
+                  (account) =>
+                    typeof account === "object" &&
+                    account !== null &&
+                    "id" in account &&
+                    account.id === secondId &&
+                    "provider" in account &&
+                    account.provider === "google" &&
+                    "label" in account &&
+                    account.label === "Google",
+                ),
+          },
+          render: {
+            containerConnected: view.container.isConnected,
+            main: cap(screen.queryAllByRole("main").length),
+            mainIncludingHidden: cap(screen.queryAllByRole("main", { hidden: true }).length),
+            connectionsHeading: cap(
+              screen.queryAllByRole("heading", { name: "Connections", exact: true }).length,
+            ),
+            connectionsHeadingIncludingHidden: cap(
+              screen.queryAllByRole("heading", {
+                name: "Connections",
+                exact: true,
+                hidden: true,
+              }).length,
+            ),
+            loadingLabel: cap(screen.queryAllByText("Loading connections", { exact: true }).length),
+            recoveryTitle: cap(
+              screen.queryAllByText("Couldn’t load connections.", { exact: true }).length,
+            ),
+            recoveryDialog: cap(
+              screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length,
+            ),
+            recoveryDialogIncludingHidden: cap(
+              screen.queryAllByRole("dialog", { name: "Let’s reconnect", hidden: true }).length,
+            ),
+            exactButton: cap(screen.queryAllByRole("button", { name: "Sync Google" }).length),
+            exactButtonIncludingHidden: cap(
+              screen.queryAllByRole("button", { name: "Sync Google", hidden: true }).length,
+            ),
+          },
+        };
+        const serialized = JSON.stringify(diagnostic);
+        console.error(
+          "SETTINGS_SYNC_LOOKUP_DIAGNOSTIC",
+          serialized.length <= 4096 ? serialized : "bounded_snapshot_unavailable",
+        );
+      } catch {
+        // Diagnostic collection must not hide or replace the original lookup failure.
+      }
+      throw lookupError;
+    }
+    await user.click(syncButton);
     const message = pending
       ? "Updates saved. Mail synchronization will continue automatically."
       : "Connection synced.";

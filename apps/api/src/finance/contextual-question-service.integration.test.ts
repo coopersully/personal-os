@@ -1929,7 +1929,9 @@ describe.sequential("real contextual question producer", () => {
   async function backfillBusyFixture() {
     const f = await fixture();
     // Remove only this fixture's raw seed so the two canonical targets are the actual global top two.
-    await database.db.delete(financeTransactions).where(eq(financeTransactions.id, f.transaction.id));
+    await database.db
+      .delete(financeTransactions)
+      .where(eq(financeTransactions.id, f.transaction.id));
     const writer = createFinanceService({ db: database.db, now: () => new Date() });
     const target = await writer.createTransaction(
       createFinanceTransactionInputSchema.parse({
@@ -1945,8 +1947,11 @@ describe.sequential("real contextual question producer", () => {
     return { ...f, target, writer };
   }
   async function backfillReviewSnapshot(transactionId: string) {
-    return database.db.select().from(financeReviewCases)
-      .where(eq(financeReviewCases.transactionId, transactionId)).orderBy(financeReviewCases.id);
+    return database.db
+      .select()
+      .from(financeReviewCases)
+      .where(eq(financeReviewCases.transactionId, transactionId))
+      .orderBy(financeReviewCases.id);
   }
   function hasNativeCode(error: unknown, expected: string): boolean {
     const seen = new Set<object>();
@@ -1960,73 +1965,121 @@ describe.sequential("real contextual question producer", () => {
     return false;
   }
   async function assertBusySelection(busyId: string, laterId: string) {
-    const top = await database.db.select({ id: financeTransactions.id }).from(financeTransactions)
+    const top = await database.db
+      .select({ id: financeTransactions.id })
+      .from(financeTransactions)
       .where(or(isNull(financeTransactions.merchantId), isNull(financeTransactions.categoryId)))
-      .orderBy(desc(financeTransactions.createdAt)).limit(2);
+      .orderBy(desc(financeTransactions.createdAt))
+      .limit(2);
     expect(top.length === 2 && top[0]?.id === busyId && top[1]?.id === laterId).toBe(true);
   }
   it("defers only a genuinely locked parent after rollback and processes a later selected owner", async () => {
     const later = await backfillBusyFixture();
-    await database.db.delete(financeReviewCases).where(eq(financeReviewCases.transactionId, later.target.id));
-    const [ordinary] = await database.db.insert(financeReviewCases).values({
-      userId: later.userId, transactionId: later.target.id, reason: "unknown_merchant",
-      rationale: "Unbound fixture before background processing",
-    }).returning();
+    await database.db
+      .delete(financeReviewCases)
+      .where(eq(financeReviewCases.transactionId, later.target.id));
+    const [ordinary] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        userId: later.userId,
+        transactionId: later.target.id,
+        reason: "unknown_merchant",
+        rationale: "Unbound fixture before background processing",
+      })
+      .returning();
     if (!ordinary) throw new Error("Busy fixture ordinary review unavailable.");
     const busy = await backfillBusyFixture();
     const service = createFinanceContextualQuestionService({ db: database.db });
-    const created = await service.createQuestion(busy.target.id, { operationId: randomUUID() }, busy.context);
+    const created = await service.createQuestion(
+      busy.target.id,
+      { operationId: randomUUID() },
+      busy.context,
+    );
     if (created.state !== "available") throw new Error("Busy fixture question unavailable.");
     const observe = await mechanismSnapshot(busy.userId, created.question);
     await assertBusySelection(busy.target.id, later.target.id);
     const snapshot = async () => ({
-      transactions: await database.db.select().from(financeTransactions).where(eq(financeTransactions.id, busy.target.id)),
+      transactions: await database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, busy.target.id)),
       reviews: await backfillReviewSnapshot(busy.target.id),
-      questions: await database.db.select().from(financeContextualQuestions).where(eq(financeContextualQuestions.id, created.question.id)),
+      questions: await database.db
+        .select()
+        .from(financeContextualQuestions)
+        .where(eq(financeContextualQuestions.id, created.question.id)),
     });
     const before = await snapshot();
     let ready!: () => void;
     let release!: () => void;
-    const reached = new Promise<void>((resolve) => { ready = resolve; });
-    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const reached = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const holder = database.db.transaction(async (tx) => {
-      await tx.select().from(financeTransactions).where(eq(financeTransactions.id, busy.target.id)).for("update");
+      await tx
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, busy.target.id))
+        .for("update");
       ready();
       await gate;
     });
     const drained = Promise.allSettled([holder]);
     try {
-      await Promise.race([reached, holder.then(() => { throw new Error("Busy fixture lock gate was not held."); })]);
+      await Promise.race([
+        reached,
+        holder.then(() => {
+          throw new Error("Busy fixture lock gate was not held.");
+        }),
+      ]);
       let nativeBusy = false;
       try {
         await database.db.transaction(async (tx) => {
           await guardFinanceExecutionTransaction(tx, busy.userId, { hostSchedules: true });
           await lockContextualTransaction(tx, busy.userId, busy.target.id, true);
         });
-      } catch (error) { nativeBusy = hasNativeCode(error, "55P03"); }
+      } catch (error) {
+        nativeBusy = hasNativeCode(error, "55P03");
+      }
       expect(nativeBusy).toBe(true);
       expect(await busy.writer.backfillLearning(2)).toEqual({ processed: 1 });
       expect(isDeepStrictEqual(before, await snapshot())).toBe(true);
       const [advanced] = await backfillReviewSnapshot(later.target.id);
-      expect(advanced?.id === ordinary.id && advanced.contextualRevision === ordinary.contextualRevision + 1n &&
-        advanced.rationale === "Backfilled without a confident category.").toBe(true);
+      expect(
+        advanced?.id === ordinary.id &&
+          advanced.contextualRevision === ordinary.contextualRevision + 1n &&
+          advanced.rationale === "Backfilled without a confident category.",
+      ).toBe(true);
     } finally {
       release();
       await drained;
     }
     await holder;
     expect(await observe("after_backfill", true)).toMatchObject({
-      transactionEligible: true, allContextualParentsCurrent: true, rationaleUnchanged: true, noAnswer: true,
+      transactionEligible: true,
+      allContextualParentsCurrent: true,
+      rationaleUnchanged: true,
+      noAnswer: true,
     });
     expect(await busy.writer.backfillLearning(2)).toEqual({ processed: 2 });
     expect(await observe("after_noop", true)).toMatchObject({
-      allContextualParentsCurrent: true, rationaleUnchanged: true, reviewGenerationUnchanged: true,
+      allContextualParentsCurrent: true,
+      rationaleUnchanged: true,
+      reviewGenerationUnchanged: true,
     });
   });
 
   it.each([
-    "logical conflict", "different owner", "native busy at entry", "native busy at review",
-    "serialization at parent", "constraint at parent", "missing parent",
+    "logical conflict",
+    "different owner",
+    "native busy at entry",
+    "native busy at review",
+    "serialization at parent",
+    "constraint at parent",
+    "missing parent",
   ] as const)("does not defer %s outside the proven parent-busy boundary", async (failure) => {
     const later = await backfillBusyFixture();
     const busy = await backfillBusyFixture();
@@ -2037,45 +2090,67 @@ describe.sequential("real contextual question producer", () => {
     const original = client.query.bind(client);
     let injected = false;
     let parentAcquired = false;
-    const query = vi.spyOn(client, "query").mockImplementation(new Proxy(original, {
-      apply(target, thisArg, argumentsList) {
-        const input: unknown = argumentsList[0];
-        const text = typeof input === "string" ? input :
-          typeof input === "object" && input !== null && "text" in input && typeof input.text === "string" ? input.text : "";
-        const parentQuery = /from "finance_transactions"/i.test(text) && /for update nowait/i.test(text);
-        const reviewQuery = /from "finance_review_cases"/i.test(text) && /for update/i.test(text);
-        if (!injected && ((failure === "native busy at review" && reviewQuery) ||
-          ((failure === "serialization at parent" || failure === "constraint at parent") && parentQuery))) {
-          injected = true;
-          if (failure === "native busy at review") return original("DO $$ BEGIN RAISE SQLSTATE '55P03'; END $$");
-          if (failure === "serialization at parent") return original("DO $$ BEGIN RAISE SQLSTATE '40001'; END $$");
-          return original("DO $$ BEGIN RAISE SQLSTATE '23514'; END $$");
-        }
-        const result = Reflect.apply(target, thisArg, argumentsList);
-        if (parentQuery && result instanceof Promise)
-          return result.then((value) => { parentAcquired = true; return value; });
-        return result;
-      },
-    }));
+    const query = vi.spyOn(client, "query").mockImplementation(
+      new Proxy(original, {
+        apply(target, thisArg, argumentsList) {
+          const input: unknown = argumentsList[0];
+          const text =
+            typeof input === "string"
+              ? input
+              : typeof input === "object" &&
+                  input !== null &&
+                  "text" in input &&
+                  typeof input.text === "string"
+                ? input.text
+                : "";
+          const parentQuery =
+            /from "finance_transactions"/i.test(text) && /for update nowait/i.test(text);
+          const reviewQuery = /from "finance_review_cases"/i.test(text) && /for update/i.test(text);
+          if (
+            !injected &&
+            ((failure === "native busy at review" && reviewQuery) ||
+              ((failure === "serialization at parent" || failure === "constraint at parent") &&
+                parentQuery))
+          ) {
+            injected = true;
+            if (failure === "native busy at review")
+              return original("DO $$ BEGIN RAISE SQLSTATE '55P03'; END $$");
+            if (failure === "serialization at parent")
+              return original("DO $$ BEGIN RAISE SQLSTATE '40001'; END $$");
+            return original("DO $$ BEGIN RAISE SQLSTATE '23514'; END $$");
+          }
+          const result = Reflect.apply(target, thisArg, argumentsList);
+          if (parentQuery && result instanceof Promise)
+            return result.then((value) => {
+              parentAcquired = true;
+              return value;
+            });
+          return result;
+        },
+      }),
+    );
     client.release();
     const conflict = new AppError("conflict", "Unrelated owning fixture conflict.");
     let entered = false;
     const wrapped = new Proxy(single.db, {
       get(target, key, receiver) {
-        if (key === "transaction") return <T>(run: (tx: FinanceTransaction) => Promise<T>) =>
-          target.transaction(async (tx) => {
-            if (!entered) {
-              entered = true;
-              if (failure === "logical conflict") throw conflict;
-              if (failure === "different owner")
-                await guardFinanceExecutionTransaction(tx, later.userId, { hostSchedules: true });
-              if (failure === "native busy at entry")
-                await tx.execute(sql`DO $$ BEGIN RAISE SQLSTATE '55P03'; END $$`);
-              if (failure === "missing parent")
-                await database.db.delete(financeTransactions).where(eq(financeTransactions.id, busy.target.id));
-            }
-            return run(tx);
-          });
+        if (key === "transaction")
+          return <T>(run: (tx: FinanceTransaction) => Promise<T>) =>
+            target.transaction(async (tx) => {
+              if (!entered) {
+                entered = true;
+                if (failure === "logical conflict") throw conflict;
+                if (failure === "different owner")
+                  await guardFinanceExecutionTransaction(tx, later.userId, { hostSchedules: true });
+                if (failure === "native busy at entry")
+                  await tx.execute(sql`DO $$ BEGIN RAISE SQLSTATE '55P03'; END $$`);
+                if (failure === "missing parent")
+                  await database.db
+                    .delete(financeTransactions)
+                    .where(eq(financeTransactions.id, busy.target.id));
+              }
+              return run(tx);
+            });
         return Reflect.get(target, key, receiver);
       },
     });
@@ -2083,18 +2158,27 @@ describe.sequential("real contextual question producer", () => {
     try {
       try {
         await createFinanceService({ db: wrapped, now: () => new Date() }).backfillLearning(2);
-      } catch (error) { caught = error; }
+      } catch (error) {
+        caught = error;
+      }
       expect(entered && caught !== undefined).toBe(true);
       if (failure === "logical conflict") expect(caught === conflict).toBe(true);
       else if (failure === "different owner") expect(hasNativeCode(caught, "forbidden")).toBe(true);
       else if (failure === "missing parent") expect(hasNativeCode(caught, "not_found")).toBe(true);
       else {
-        const code = failure === "serialization at parent" ? "40001" : failure === "constraint at parent" ? "23514" : "55P03";
+        const code =
+          failure === "serialization at parent"
+            ? "40001"
+            : failure === "constraint at parent"
+              ? "23514"
+              : "55P03";
         expect(hasNativeCode(caught, code)).toBe(true);
         if (failure !== "native busy at entry") expect(injected).toBe(true);
         if (failure === "native busy at review") expect(parentAcquired).toBe(true);
       }
-      expect(isDeepStrictEqual(laterBefore, await backfillReviewSnapshot(later.target.id))).toBe(true);
+      expect(isDeepStrictEqual(laterBefore, await backfillReviewSnapshot(later.target.id))).toBe(
+        true,
+      );
     } finally {
       query.mockRestore();
       await single.close();

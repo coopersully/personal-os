@@ -7951,7 +7951,8 @@ export function createFinanceService({
                   throw error;
                 }
               })();
-              if (!parent) throw new AppError("not_found", "The Finance transaction is unavailable.");
+              if (!parent)
+                throw new AppError("not_found", "The Finance transaction is unavailable.");
               return putInReview(
                 row.id,
                 row.userId,

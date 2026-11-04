@@ -224,7 +224,7 @@ function Automation({
           {date(health.nextExpectedAt, timeZone)}
         </p>
       ) : null}
-      <div role="group" aria-label="Notification delivery evidence access">
+      <fieldset aria-label="Notification delivery evidence access" className="min-w-0">
         <p>
           {missingReadScopes === null
             ? "Notification delivery evidence access is unknown for this host. Original connection metadata is unavailable."
@@ -244,7 +244,7 @@ function Automation({
             connection. Refreshing a connection cannot add permissions.
           </p>
         ) : null}
-      </div>
+      </fieldset>
       <AutomationHostReadiness scheduleId={schedule.id} returnTo={returnTo} />
       <div className="flex flex-wrap gap-2">
         <AutomationVerification

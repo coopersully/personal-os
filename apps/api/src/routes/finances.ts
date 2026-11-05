@@ -33,6 +33,7 @@ import {
   financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
   financePositionReadScopeSchema,
+  financeProviderTransactionEvidenceInputSchema,
   financeReceiptReviewInputSchema,
   financeRecurringOccurrencesQuerySchema,
   financeReviewDecisionInputSchema,
@@ -72,6 +73,7 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
+import { AppError } from "../errors.js";
 import type { createFinanceBudgetBaselineQualificationService } from "../finance/baseline-qualification-service.js";
 import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import { loadFinanceAuthorization } from "../finance/context.js";
@@ -93,6 +95,7 @@ import type { createFinancePlaybookService } from "../finance-playbook-service.j
 import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
+import { hashToken } from "../security.js";
 import type { AppEnv, Principal } from "../types.js";
 import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
 import { registerFinanceBaselineQualificationRoutes } from "./finance-baseline-qualification.js";
@@ -153,6 +156,25 @@ export function registerFinanceRoutes({
   };
   const requireFinanceScope = requireFeatureAccess("finances");
   const requireFinanceRead = requireScope("finances:read");
+  app.post("/v1/finances/provider-transaction-evidence", requireFinanceRead, async (context) => {
+    context.header("Cache-Control", "no-store");
+    const principal = context.get("principal");
+    const authorization = context.req.header("authorization");
+    if (
+      principal.actorType === "user" &&
+      (!authorization?.startsWith("Session ") || authorization.length <= 8)
+    )
+      throw new AppError("forbidden", "This read requires the authenticated Session header.");
+    const sessionTokenHash =
+      principal.actorType === "user" && authorization?.startsWith("Session ")
+        ? hashToken(authorization.slice(8))
+        : undefined;
+    const input = await parseBody(context, financeProviderTransactionEvidenceInputSchema);
+    return context.json(
+      await finances.readFinanceProviderTransactionEvidence(principal, input, sessionTokenHash),
+    );
+  });
+
   const requireFinanceMaintenance = requireScope("finances:maintain");
   const requireActions = () => {
     if (!actions) throw new Error("Finance action service is required for Finance mutations.");

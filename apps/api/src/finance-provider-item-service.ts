@@ -1,4 +1,8 @@
-import type { PlaidAccountSnapshot } from "@personal-os/connectors";
+import type {
+  PlaidAccountSnapshot,
+  PlaidConnector,
+  PlaidTransactionHistoryInput,
+} from "@personal-os/connectors";
 import {
   auditEvents,
   type Database,
@@ -51,6 +55,7 @@ type Options = {
   db: Database;
   encryptionKey?: string;
   now: () => Date;
+  plaid?: PlaidConnector;
 };
 
 type UpsertConnectionInput = {
@@ -123,7 +128,7 @@ function validatedAccessToken(value: unknown): string | null {
   return value.accessToken;
 }
 
-export function createFinanceProviderItemService({ db, encryptionKey, now }: Options) {
+export function createFinanceProviderItemService({ db, encryptionKey, now, plaid }: Options) {
   function getEncryptionKey(): string {
     if (!encryptionKey) {
       throw new AppError("service_unavailable", "Finance credential encryption is not configured.");
@@ -132,6 +137,63 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
   }
 
   return {
+    /** Internal port: snapshots originate in the native owner-checked reader, never public input. */
+    async readTransactionHistory(
+      input: {
+        userId: string;
+        itemRecordId: string;
+        expectedUpdatedAt: string;
+        targets: PlaidTransactionHistoryInput["targets"];
+        startDate: string;
+        endDate: string;
+      },
+      historyConnector: PlaidConnector | undefined = plaid,
+    ) {
+      if (!historyConnector?.readTransactionHistory)
+        throw new AppError("service_unavailable", "Historical provider evidence is unavailable.");
+      const [item] = await db
+        .select()
+        .from(financeProviderItems)
+        .where(
+          and(
+            eq(financeProviderItems.id, input.itemRecordId),
+            eq(financeProviderItems.userId, input.userId),
+          ),
+        )
+        .limit(1);
+      if (
+        item?.provider !== "plaid" ||
+        !item.providerItemId ||
+        item.updatedAt.toISOString() !== input.expectedUpdatedAt
+      )
+        throw new AppError(
+          "conflict",
+          "The Finance source changed; read the native selection again.",
+        );
+      let accessToken: string | null = null;
+      try {
+        accessToken = validatedAccessToken(
+          decryptJson<unknown>(item.encryptedCredentials, getEncryptionKey()),
+        );
+      } catch {
+        throw new AppError("service_unavailable", "Historical provider evidence is unavailable.");
+      }
+      if (!accessToken)
+        throw new AppError("service_unavailable", "Historical provider evidence is unavailable.");
+      // Connector performs real /item/get + initialized transactions preflight before /transactions/get.
+      // No synchronization, initialization, refresh or credential mutation is permitted here.
+      try {
+        return await historyConnector.readTransactionHistory({
+          accessToken,
+          itemId: item.providerItemId,
+          targets: input.targets,
+          startDate: input.startDate,
+          endDate: input.endDate,
+        });
+      } catch {
+        throw new AppError("service_unavailable", "Historical provider evidence is unavailable.");
+      }
+    },
     async findDuplicateAccounts(userId: string, metadata: PlaidAccountIdentityMetadata[]) {
       const accounts = await db
         .select()

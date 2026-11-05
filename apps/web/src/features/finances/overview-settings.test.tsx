@@ -17,7 +17,15 @@ const configuration = (name = "Everyday checking") =>
     accounts: {
       state: "loaded",
       value: {
-        accounts: [{ id: "00000000-0000-4000-8000-000000000123", name, kind: "cash", balance: 20 }],
+        accounts: [
+          {
+            id: "00000000-0000-4000-8000-000000000123",
+            name,
+            institution: "Fixture Credit Union",
+            kind: "cash",
+            balance: 20,
+          },
+        ],
       },
     },
   }) as unknown as FinanceConfiguration;

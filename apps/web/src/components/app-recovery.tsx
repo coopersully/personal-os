@@ -11,7 +11,9 @@ import {
   problemKey,
   readConnectionSnoozes,
 } from "../features/connections/recovery-policy";
+import { BankAccount } from "../features/finances/bank-account";
 import { canRetryRead, ReadRecoveryContext, useReadRecovery } from "../lib/read-recovery";
+import { ConnectedAccount } from "./connected-account";
 import { ArrowRightIcon } from "./icons";
 import { ModalRecoveryPriority } from "./modal-recovery-priority";
 import { RecoveryQueue } from "./recovery-request";
@@ -222,27 +224,41 @@ function SessionRecovery({
       }
     >
       <ItemGroup className="max-h-64 overflow-y-auto">
-        {due.map((problem) => (
-          <Item key={problem.id} variant="muted" size="sm" asChild>
-            <Link to={problem.href} onClick={snooze}>
-              <ItemContent>
-                <ItemTitle>{problem.label}</ItemTitle>
-                <ItemDescription>
-                  {problem.state === "reconnect"
-                    ? "Reconnect this account to resume syncing."
-                    : problem.state === "retrying"
-                      ? "Sync is delayed. nohmi is retrying automatically."
-                      : problem.state === "stale"
-                        ? "Updates are out of date. Review this account’s sync status."
-                        : "A service issue is preventing updates. Review its status."}
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <ArrowRightIcon aria-hidden="true" className="size-4" />
-              </ItemActions>
-            </Link>
-          </Item>
-        ))}
+        {due.map((problem) => {
+          const connector = accounts.data?.find(
+            (account) => `connector:${account.id}` === problem.id,
+          );
+          const bank = finance.data?.accounts.find(
+            (account) => `finance:${account.id}` === problem.id,
+          );
+          return (
+            <Item key={problem.id} variant="muted" size="sm" asChild>
+              <Link to={problem.href} onClick={snooze}>
+                <ItemContent>
+                  {connector ? (
+                    <ConnectedAccount account={{ ...connector, label: problem.label }} />
+                  ) : bank ? (
+                    <BankAccount account={bank} />
+                  ) : (
+                    <ItemTitle>{problem.label}</ItemTitle>
+                  )}
+                  <ItemDescription>
+                    {problem.state === "reconnect"
+                      ? "Reconnect this account to resume syncing."
+                      : problem.state === "retrying"
+                        ? "Sync is delayed. nohmi is retrying automatically."
+                        : problem.state === "stale"
+                          ? "Updates are out of date. Review this account’s sync status."
+                          : "A service issue is preventing updates. Review its status."}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <ArrowRightIcon aria-hidden="true" className="size-4" />
+                </ItemActions>
+              </Link>
+            </Item>
+          );
+        })}
       </ItemGroup>
     </RecoverySurface>
   );

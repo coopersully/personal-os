@@ -14,6 +14,7 @@ import type {
   FinanceToolResult,
   ResolveFinanceAccountDuplicateInput,
 } from "@personal-os/domain";
+import { projectFinanceInstitutionBranding } from "@personal-os/domain";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
@@ -56,19 +57,24 @@ function result<T>(
 function account(
   row: typeof financeAccounts.$inferSelect,
   item?: typeof financeProviderItems.$inferSelect,
+  includeArtwork = false,
 ): FinanceAccount {
   // A healthy Item cannot certify an account absent from its latest snapshot.
   // Item-wide failures still take precedence so repair targets the connection.
   const synchronization =
     item?.syncState === "current" && row.syncState === "blocked" ? row : (item ?? row);
   return {
-    accountMask: row.providerAccountMask,
     balance: row.balance === null ? null : row.balance / 100,
     createdAt: row.createdAt.toISOString(),
     currencyCode: row.currencyCode,
     id: row.id,
     includeInPlanning: row.includeInPlanning,
     institution: row.institution,
+    accountMask: row.providerAccountMask,
+    institutionBranding: projectFinanceInstitutionBranding(
+      item?.institutionBranding,
+      includeArtwork,
+    ),
     kind: row.kind,
     kindSource: row.kindSource,
     lastSyncedAt: synchronization.lastSyncedAt?.toISOString() ?? null,
@@ -120,7 +126,10 @@ type AccountWithProviderItem = {
   item: typeof financeProviderItems.$inferSelect | null;
 };
 
-function serializeAccountPairs(pairs: AccountWithProviderItem[]): FinanceAccount[] {
+function serializeAccountPairs(
+  pairs: AccountWithProviderItem[],
+  includeArtwork = false,
+): FinanceAccount[] {
   if (
     pairs.some(
       ({ account: row, item }) =>
@@ -133,12 +142,13 @@ function serializeAccountPairs(pairs: AccountWithProviderItem[]): FinanceAccount
   ) {
     throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
   }
-  return pairs.map(({ account: row, item }) => account(row, item ?? undefined));
+  return pairs.map(({ account: row, item }) => account(row, item ?? undefined, includeArtwork));
 }
 
 export async function serializeFinanceAccountRows(
   executor: Pick<Database, "select">,
   rows: Array<typeof financeAccounts.$inferSelect>,
+  includeArtwork = false,
 ): Promise<FinanceAccount[]> {
   if (rows.length === 0) return [];
   const pairs = await executor
@@ -160,6 +170,7 @@ export async function serializeFinanceAccountRows(
       const pair = pairById.get(row.id);
       return pair ? [pair] : [];
     }),
+    includeArtwork,
   );
 }
 
@@ -384,7 +395,11 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
   }
 
   return {
-    async list(userId: string, query: FinanceAccountQuery): Promise<FinanceAccountList> {
+    async list(
+      userId: string,
+      query: FinanceAccountQuery,
+      includeArtwork = false,
+    ): Promise<FinanceAccountList> {
       const pairs = await db
         .select({ account: financeAccounts, item: financeProviderItems })
         .from(financeAccounts)
@@ -393,7 +408,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
           eq(financeAccounts.providerItemRecordId, financeProviderItems.id),
         )
         .where(eq(financeAccounts.userId, userId));
-      const matching = serializeAccountPairs(pairs).filter((item) =>
+      const matching = serializeAccountPairs(pairs, includeArtwork).filter((item) =>
         accountMatchesQuery(item, query),
       );
       const { accountSemantics, totals } = summarizeFinanceAccounts(
@@ -489,7 +504,11 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
               "conflict",
               "This account changed. Reload it before saving your changes.",
             );
-          const [serialized] = await serializeFinanceAccountRows(tx, [updated]);
+          const [serialized] = await serializeFinanceAccountRows(
+            tx,
+            [updated],
+            context.actorType === "user",
+          );
           if (!serialized) {
             throw new AppError("internal_error", "The financial account could not be loaded.");
           }

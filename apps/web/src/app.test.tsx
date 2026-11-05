@@ -12,7 +12,7 @@ import {
   type UpdateAccountSetupInput,
   type User,
 } from "@personal-os/domain";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   createEvent,
@@ -740,6 +740,14 @@ function TestLocationObserver({ current }: { current: { value: string } }) {
   const location = useLocation();
   current.value = `${location.pathname}${location.search}${location.hash}`;
   return null;
+}
+
+// Navigation counts use limit1 without page sorting/grouping. Exclude only that role,
+// so a newer page read with wrong filters (or limit) still fails exact equality.
+function latestTaskPageRequest() {
+  return mocks.listTaskWorkspace.mock.calls
+    .filter(([query]) => query.limit !== 1 || query.sort !== undefined || query.group !== undefined)
+    .at(-1)?.[0];
 }
 
 async function findSettingsLink(name: string) {
@@ -1818,6 +1826,10 @@ function dragLeaveCalendarEvent(target: HTMLElement, relatedTarget: EventTarget 
 }
 
 beforeEach(() => {
+  // Completed query notifications must commit React updates (including route redirects)
+  // before the next assertion. Otherwise cold-page checks race unflushed app bootstrap.
+  // Keep the default scheduler and assertion deadlines; only provide React's test boundary.
+  notifyManager.setNotifyFunction((callback) => act(callback));
   // Test-specific `mockResolvedValueOnce` and pending promises must not leak into
   // the next rendered route. `clearAllMocks` only clears call history; it keeps
   // queued one-off implementations, which made later calendar tests render an
@@ -1881,6 +1893,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  notifyManager.setNotifyFunction((callback) => callback());
   toast.dismiss();
   vi.unstubAllGlobals();
 });
@@ -2672,7 +2685,7 @@ describe("Personal OS web app", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect your Google accounts" }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("test@example.com")).toBeInTheDocument();
+    expect(await screen.findByText("Google · test@example.com")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Back" }));
     expect(
       await screen.findByRole("heading", { name: "What should nohmi help with?" }),
@@ -2985,7 +2998,9 @@ describe("Personal OS web app", () => {
     const browser = userEvent.setup();
 
     expect(await screen.findByText("Connected")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Apple" })).toBeInTheDocument();
+    expect(
+      screen.getByText("iCloud", { selector: ".account-profile__details" }),
+    ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Continue" }));
     expect(await screen.findByText("1 account connected")).toBeInTheDocument();
   });
@@ -3345,7 +3360,7 @@ describe("Personal OS web app", () => {
     await browser.selectOptions(screen.getByLabelText("Type"), "reminder");
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(await screen.findByText("Test reminder")).toBeInTheDocument();
-    expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+    expect(latestTaskPageRequest()).toEqual({
       sort: "default",
       group: "none",
       view: "all",
@@ -3606,7 +3621,7 @@ describe("Personal OS web app", () => {
     expect(screen.getByText("Release the new workspace")).toBeInTheDocument();
     expect(screen.getByText(/Target Aug 1, 2026/)).toBeInTheDocument();
     await waitFor(() =>
-      expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+      expect(latestTaskPageRequest()).toEqual({
         sort: "default",
         group: "none",
         view: "all",
@@ -3723,7 +3738,7 @@ describe("Personal OS web app", () => {
     await browser.selectOptions(screen.getByLabelText("Deadline", { exact: true }), "tomorrow");
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() =>
-      expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect(latestTaskPageRequest()).toEqual(
         expect.objectContaining({
           listId: secondId,
           query: "draft",
@@ -3839,7 +3854,7 @@ describe("Personal OS web app", () => {
     });
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() =>
-      expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+      expect(latestTaskPageRequest()).toEqual({
         sort: "default",
         group: "none",
         dueAfter: "2026-07-13T09:00:00.000Z",
@@ -3867,7 +3882,7 @@ describe("Personal OS web app", () => {
     expect(screen.getByLabelText("Show")).toHaveValue("completed");
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(systemView.location.value).toBe("/tasks?view=today&status=completed");
-    expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+    expect(latestTaskPageRequest()).toEqual({
       sort: "default",
       group: "none",
       limit: 50,
@@ -5156,9 +5171,7 @@ describe("Personal OS web app", () => {
     const mixed = setup(`/tasks?view=today&list=${secondId}&project=${thirdId}`);
     await screen.findByText("Draft brief");
     expect(mixed.location.value).toBe(`/tasks?view=today&list=${secondId}&project=${thirdId}`);
-    expect(
-      mocks.listTaskWorkspace.mock.calls.filter(([query]) => query.limit === 50).at(-1)?.[0],
-    ).toEqual({
+    expect(latestTaskPageRequest()).toEqual({
       sort: "default",
       group: "none",
       view: "today",
@@ -5737,7 +5750,7 @@ describe("Personal OS web app", () => {
     const browser = userEvent.setup();
     const view = setup("/finances/accounts");
     expect(
-      await screen.findByRole("list", { name: "Financial accounts" }, { timeout: 5_000 }),
+      await screen.findByRole("table", { name: "Accounts" }, { timeout: 5_000 }),
     ).toHaveTextContent("Checking");
     await browser.click(screen.getByRole("button", { name: "Add account" }));
     await browser.click(screen.getByRole("button", { name: "Connect bank" }));
@@ -8397,7 +8410,48 @@ describe("Personal OS web app", () => {
   it("keeps Activity search results and URL state aligned", async () => {
     const view = setup("/settings?section=activity");
     const browser = userEvent.setup();
-    expect(await screen.findByText("Reminder · created")).toBeInTheDocument();
+    try {
+      expect(await screen.findByText("Reminder · created")).toBeInTheDocument();
+    } catch (error) {
+      let diagnostic = "diagnostic-unavailable";
+      try {
+        const [pathname, search = ""] = (view.location.value.split("#")[0] ?? "").split("?");
+        const params = new URLSearchParams(search);
+        const state = view.queryClient
+          .getQueryCache()
+          .findAll({ queryKey: ["activity"], exact: true })[0]?.state;
+        const status = state?.status;
+        const fetchStatus = state?.fetchStatus;
+        const serialized = JSON.stringify({
+          canonicalActivity:
+            pathname === "/settings" && params.get("page") === "activity" && !params.has("section"),
+          legacyActivity: pathname === "/settings" && params.get("section") === "activity",
+          hasSearch: params.has("q"),
+          query: {
+            status: status && ["pending", "success", "error"].includes(status) ? status : "absent",
+            fetchStatus:
+              fetchStatus && ["fetching", "paused", "idle"].includes(fetchStatus)
+                ? fetchStatus
+                : "absent",
+            errorPresent: state?.error != null,
+            dataCount: Array.isArray(state?.data) ? Math.min(999, state.data.length) : 0,
+          },
+          listActivityCalls: Math.min(999, mocks.listActivity.mock.calls.length),
+          activityRegionPresent: !!view.container.querySelector('[aria-label="Activity history"]'),
+          loadingPresent: !!view.container.querySelector('[aria-label="Loading activity"]'),
+          recoveryPresent: screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length > 0,
+        });
+        if (serialized.length <= 1024) diagnostic = serialized;
+      } catch {
+        // Preserve the original assertion if bounded observation fails.
+      }
+      try {
+        console.error("activity-readiness-v1", diagnostic);
+      } catch {
+        // Diagnostic delivery must not replace the original assertion error.
+      }
+      throw error;
+    }
     const activitySearch = screen.getByRole("searchbox", { name: "Search activity" });
     await browser.type(activitySearch, "system");
     expect(view.location.value).toBe("/settings?page=activity&q=system");
@@ -9788,14 +9842,29 @@ describe("Personal OS web app", () => {
   });
 
   it("shows one safe callback outcome and removes callback state from the URL", async () => {
-    mocks.getConnectorAuthorizationAttempt.mockResolvedValue({
+    type Outcome = import("@personal-os/domain").ConnectorAuthorizationOutcome;
+    const connected = {
       accountId: id,
       provider: "google",
       providerMessage: "raw-provider-canary",
       retryable: false,
       status: "connected",
+    } satisfies Outcome & { providerMessage: string };
+    let finish: (outcome: Outcome) => void = () => {
+      throw new Error("Callback fixture resolver was not initialized.");
+    };
+    const pending = new Promise<Outcome>((resolve) => {
+      finish = resolve;
     });
+    mocks.getConnectorAuthorizationAttempt.mockReturnValue(pending);
     const view = setup(`/settings?page=connections&connection_attempt=${id}`);
+    expect(await screen.findByText("Confirming your connection")).toBeInTheDocument();
+    expect(mocks.getConnectorAuthorizationAttempt).toHaveBeenCalledTimes(1);
+    expect(mocks.getConnectorAuthorizationAttempt).toHaveBeenCalledWith(id);
+    await act(async () => {
+      finish(connected);
+      await pending;
+    });
 
     try {
       expect(await screen.findByText("Google is connected")).toBeInTheDocument();
@@ -10680,9 +10749,59 @@ describe("Personal OS web app", () => {
       });
       const browser = userEvent.setup();
       const view = setup("/settings?page=wallpaper");
-      await waitFor(() =>
-        expect(mocks.invoke).toHaveBeenCalledWith("preview_pinterest_wallpaper", expect.anything()),
-      );
+      try {
+        await waitFor(() =>
+          expect(mocks.invoke).toHaveBeenCalledWith(
+            "preview_pinterest_wallpaper",
+            expect.anything(),
+          ),
+        );
+      } catch (error) {
+        // Failure-only readiness evidence; never serialize query keys, payloads or errors.
+        let diagnostic = '{"captureFailed":true}';
+        try {
+          const states = (prefix: string) =>
+            view.queryClient
+              .getQueryCache()
+              .findAll({ queryKey: [prefix] })
+              .slice(0, 3)
+              .map(({ state }) => ({
+                status: state.status,
+                fetchStatus: state.fetchStatus,
+                isInvalidated: state.isInvalidated,
+                error: Boolean(state.error),
+              }));
+          const countInvocations = (command: string) =>
+            Math.min(999, mocks.invoke.mock.calls.filter(([name]) => name === command).length);
+          const pinData = view.queryClient
+            .getQueryCache()
+            .findAll({ queryKey: ["pinterest-wallpaper-preview"] })[0]?.state.data;
+          const serialized = JSON.stringify({
+            settings: states("pinterest-wallpaper"),
+            pins: states("pinterest-wallpaper-preview"),
+            preview: states("native-wallpaper-preview"),
+            boardReady:
+              view.container.querySelector<HTMLInputElement>("#pinterest-board-url")?.value ===
+              "https://www.pinterest.com/",
+            pinsCount: Array.isArray(pinData) ? Math.min(999, pinData.length) : 0,
+            tauri: mocks.isTauri.mock.results.at(-1)?.value === true,
+            invocations: {
+              environment: countInvocations("desktop_preview_environment"),
+              preview: countInvocations("preview_pinterest_wallpaper"),
+              apply: countInvocations("apply_pinterest_wallpaper"),
+            },
+          });
+          if (serialized.length <= 2048) diagnostic = serialized;
+        } catch {
+          // Keep the fixed fallback when diagnostic capture itself fails.
+        }
+        try {
+          console.error("wallpaper-readiness-v1", diagnostic);
+        } catch {
+          // A diagnostic sink failure must not replace the original assertion error.
+        }
+        throw error;
+      }
       const refresh = within(view.container).getByRole("button", { name: "Refresh wallpaper" });
       expect(refresh).toBeDisabled();
       expect(

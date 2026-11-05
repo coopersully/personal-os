@@ -70,7 +70,16 @@ it("preserves native cursor handoff through scrolling, controls, pointer changes
       expect(second.style.getPropertyValue("cursor")).toBe("");
       expect(second.style.getPropertyPriority("cursor")).toBe("");
     }
+    first.style.setProperty("cursor", "pointer", "important");
     hit = first;
+    movePointer("mouse");
+    flushFrame();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));
+    expect(overlay()?.hasAttribute("data-visible")).toBe(true);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+    expect(overlay()?.hasAttribute("data-visible")).toBe(false);
+    expect(first.style.getPropertyValue("cursor")).toBe("pointer");
+    expect(first.style.getPropertyPriority("cursor")).toBe("important");
     movePointer("mouse");
     flushFrame();
     unmount();

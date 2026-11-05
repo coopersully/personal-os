@@ -967,6 +967,13 @@
       "when": 1793289422144,
       "tag": "0130_finance_provider_account_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1793300055681,
+      "tag": "0131_finance_institution_branding",
+      "breakpoints": true
     }
   ]
 }

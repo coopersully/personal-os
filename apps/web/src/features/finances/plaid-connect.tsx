@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { ActionButton as Button } from "@/components/action-button";
+import { RefreshIcon } from "@/components/icons";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
@@ -14,7 +15,9 @@ export function PlaidConnectButton({
   label = "Connect bank",
   onConnected,
   accountId,
+  iconOnly = false,
 }: {
+  iconOnly?: boolean;
   label?: string;
   accountId?: string;
   onConnected: () => Promise<unknown>;
@@ -23,11 +26,27 @@ export function PlaidConnectButton({
 
   if (status.isPending) {
     return (
-      <Button disabled size="sm" variant="outline">
-        Checking Plaid
+      <Button
+        disabled
+        size={iconOnly ? "icon-sm" : "sm"}
+        variant="outline"
+        aria-label="Checking bank connection availability"
+      >
+        {iconOnly ? <RefreshIcon aria-hidden="true" /> : "Checking Plaid"}
       </Button>
     );
   }
+  if (status.isError && iconOnly)
+    return (
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label="Retry checking bank connection availability"
+        onClick={() => status.refetch()}
+      >
+        <RefreshIcon aria-hidden="true" />
+      </Button>
+    );
   if (status.isError)
     return (
       <InlineError
@@ -38,8 +57,13 @@ export function PlaidConnectButton({
     );
   if (!status.data.available) {
     return (
-      <Button disabled size="sm" variant="outline">
-        Plaid needs keys
+      <Button
+        disabled
+        size={iconOnly ? "icon-sm" : "sm"}
+        variant="outline"
+        aria-label="Bank connection unavailable: Plaid needs keys"
+      >
+        {iconOnly ? <RefreshIcon aria-hidden="true" /> : "Plaid needs keys"}
       </Button>
     );
   }
@@ -54,6 +78,7 @@ export function PlaidConnectButton({
       {...(accountId ? { accountId } : {})}
       label={environmentLabel ? `${label} · ${environmentLabel}` : label}
       onConnected={onConnected}
+      iconOnly={iconOnly}
     />
   );
 }
@@ -62,9 +87,11 @@ function AvailablePlaidConnectButton({
   accountId,
   label,
   onConnected,
+  iconOnly,
 }: {
   accountId?: string;
   label: string;
+  iconOnly: boolean;
   onConnected: () => Promise<unknown>;
 }) {
   const [token, setToken] = useState<string | null>(null);
@@ -135,11 +162,21 @@ function AvailablePlaidConnectButton({
         onClick={() => {
           linkToken.mutate();
         }}
-        size="sm"
+        size={iconOnly ? "icon-sm" : "sm"}
+        variant={iconOnly ? "ghost" : "default"}
+        aria-label={
+          linkToken.isPending || exchange.isPending || reconnect.isPending
+            ? "Connecting bank"
+            : label
+        }
       >
-        {linkToken.isPending || exchange.isPending || reconnect.isPending
-          ? "Connecting bank"
-          : label}
+        {iconOnly ? (
+          <RefreshIcon aria-hidden="true" />
+        ) : linkToken.isPending || exchange.isPending || reconnect.isPending ? (
+          "Connecting bank"
+        ) : (
+          label
+        )}
       </Button>
       <MutationFeedback feedback={linkToken.feedback} />
       <MutationFeedback feedback={exchange.feedback} />

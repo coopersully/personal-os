@@ -15,16 +15,23 @@ import {
   composeNotification,
   defaultNotificationPreferences,
   type FinanceHumanWorkRef,
+  financeHumanWorkRefSchema,
+  idSchema,
+  type NotificationAttemptDetail,
   type NotificationAttemptHistory,
   type NotificationPreferences,
   type NotificationResolution,
   type NotificationStatus,
   type NotificationWork,
+  notificationAttemptDetailSchema,
+  notificationDiagnosticReasonSchema,
   notificationEligibility,
   notificationPreferencesSchema,
   notificationResolutionSchema,
   publishNotificationInputSchema,
   resetFinanceNotificationPreferencesSchema,
+  textingConnectionStateSchema,
+  textMessageStatusSchema,
   validateNotificationResolution,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
@@ -774,6 +781,228 @@ export function createNotificationService(options: Options) {
     }
     return status(principal);
   }
+  /** Snapshot-only diagnostic. Never reconcile or resolve work while inspecting delivery evidence. */
+  async function getAttempt(
+    principal: Principal,
+    attemptId: string,
+  ): Promise<NotificationAttemptDetail> {
+    authorize(principal, false);
+    const id = idSchema.parse(attemptId);
+    return options.db.transaction(
+      async (tx) => {
+        const [source] = await tx
+          .select({
+            attempt: notificationDeliveryAttempts,
+            user: { timeZone: users.planningTimezone, updatedAt: users.updatedAt },
+          })
+          .from(notificationDeliveryAttempts)
+          .innerJoin(
+            users,
+            and(eq(users.id, notificationDeliveryAttempts.userId), eq(users.id, principal.userId)),
+          )
+          .where(
+            and(
+              eq(notificationDeliveryAttempts.userId, principal.userId),
+              eq(notificationDeliveryAttempts.id, id),
+            ),
+          )
+          .limit(1);
+        if (!source) throw new AppError("not_found", "Notification attempt not found.");
+        const { attempt, user } = source;
+        const items = await tx
+          .select({ item: notificationAttemptItems, intent: notificationIntents })
+          .from(notificationAttemptItems)
+          .leftJoin(
+            notificationIntents,
+            and(
+              eq(notificationIntents.userId, principal.userId),
+              eq(notificationIntents.id, notificationAttemptItems.intentId),
+              eq(notificationIntents.userId, notificationAttemptItems.userId),
+            ),
+          )
+          .where(
+            and(
+              eq(notificationAttemptItems.userId, principal.userId),
+              eq(notificationAttemptItems.attemptId, attempt.id),
+            ),
+          )
+          .orderBy(asc(notificationAttemptItems.intentId))
+          .limit(101);
+        const safeReason = (value: string | null) => {
+          if (value === null) return null;
+          const parsed = notificationDiagnosticReasonSchema.safeParse(value);
+          return parsed.success ? parsed.data : "unknown_reason";
+        };
+        let inconsistent = false;
+        let intentUnavailable = false;
+        const membership = items.slice(0, 100).flatMap(({ item, intent }) => {
+          const frozen = financeHumanWorkRefSchema.safeParse(item.work);
+          if (
+            !frozen.success ||
+            (intent && (intent.domain !== frozen.data.domain || intent.workId !== frozen.data.id))
+          ) {
+            inconsistent = true;
+            return [];
+          }
+          const current = intent ? financeHumanWorkRefSchema.safeParse(intent.work) : null;
+          let currentIntent: NotificationAttemptDetail["membership"][number]["currentIntent"] =
+            null;
+          if (
+            intent &&
+            current?.success &&
+            (intent.state === "pending" ||
+              intent.state === "deferred" ||
+              intent.state === "blocked" ||
+              intent.state === "resolved")
+          ) {
+            currentIntent = {
+              basis: "current",
+              work: current.data,
+              state: intent.state,
+              reason: safeReason(intent.reason),
+            };
+          }
+          if (!currentIntent) intentUnavailable = true;
+          return [{ intentId: item.intentId, work: frozen.data, currentIntent }];
+        });
+        const [message] =
+          attempt.messageId && attempt.connectionId
+            ? await tx
+                .select({
+                  id: textMessages.id,
+                  status: textMessages.status,
+                  providerSubmittedAt: textMessages.providerSubmittedAt,
+                  sentAt: textMessages.sentAt,
+                  deliveredAt: textMessages.deliveredAt,
+                  updatedAt: textMessages.updatedAt,
+                })
+                .from(textMessages)
+                .where(
+                  and(
+                    eq(textMessages.userId, principal.userId),
+                    eq(textMessages.id, attempt.messageId),
+                    eq(textMessages.connectionId, attempt.connectionId),
+                    eq(textMessages.direction, "outbound"),
+                  ),
+                )
+                .limit(1)
+            : [];
+        const [connection] = attempt.connectionId
+          ? await tx
+              .select({
+                id: textingConnections.id,
+                state: textingConnections.state,
+                consentEpoch: textingConnections.consentEpoch,
+                updatedAt: textingConnections.updatedAt,
+              })
+              .from(textingConnections)
+              .where(
+                and(
+                  eq(textingConnections.userId, principal.userId),
+                  eq(textingConnections.id, attempt.connectionId),
+                ),
+              )
+              .limit(1)
+          : [];
+        const { rows, effective } = await preferences(tx, principal.userId);
+        const reasons: NotificationAttemptDetail["coverage"]["reasons"] = [
+          "historical_policy_unavailable",
+          "callback_provenance_unavailable",
+        ];
+        const hasMore = items.length > 100;
+        if (hasMore) reasons.push("membership_limit");
+        if (inconsistent) reasons.push("membership_inconsistent");
+        if (!membership.length) reasons.push("membership_unavailable");
+        if (intentUnavailable) reasons.push("intent_unavailable");
+        if (attempt.messageId && !message) reasons.push("message_unavailable");
+        const connectionState = connection
+          ? textingConnectionStateSchema.safeParse(connection.state)
+          : null;
+        const messageStatus = message ? textMessageStatusSchema.safeParse(message.status) : null;
+        const projectedConnectionState = connectionState?.success
+          ? connectionState.data
+          : "unknown";
+        const projectedMessageStatus = messageStatus?.success ? messageStatus.data : "unknown";
+        if (connectionState && !connectionState.success)
+          reasons.push("connection_state_unrecognized");
+        if (messageStatus && !messageStatus.success) reasons.push("message_status_unrecognized");
+        const inspectDelivery =
+          (connectionState !== null && !connectionState.success) ||
+          ["submitting", "uncertain", "accepted"].includes(attempt.state) ||
+          (message &&
+            ["accepted", "queued", "sending", "sent", "delivered", "unknown"].includes(
+              projectedMessageStatus,
+            ));
+        return notificationAttemptDetailSchema.parse({
+          id: attempt.id,
+          state: attempt.state,
+          reason: safeReason(attempt.reason),
+          createdAt: attempt.createdAt.toISOString(),
+          updatedAt: attempt.updatedAt.toISOString(),
+          dispatchRecordedAt: attempt.submittedAt?.toISOString() ?? null,
+          initiatingActor: { basis: "unavailable" },
+          membership,
+          policy: {
+            historicalPreferences: { basis: "unavailable", reason: "not_persisted" },
+            recordedAttempt: {
+              basis: "attempt_record",
+              connectionId: attempt.connectionId,
+              consentEpoch: attempt.consentEpoch,
+              timeZone: attempt.timeZone,
+              timezoneRevision: attempt.timezoneRevision?.toISOString() ?? null,
+            },
+            current: {
+              basis: "current",
+              timeZone: user.timeZone,
+              timezoneRevision: user.updatedAt.toISOString(),
+              preferences: rows.map((row) => ({
+                scope: row.scope,
+                revision: row.revision,
+                preferences: row.preferences,
+              })),
+              effective,
+              connection: connection
+                ? {
+                    ...connection,
+                    state: projectedConnectionState,
+                    updatedAt: connection.updatedAt.toISOString(),
+                    matchesRecordedEpoch:
+                      attempt.consentEpoch === null
+                        ? null
+                        : connection.consentEpoch === attempt.consentEpoch,
+                  }
+                : null,
+            },
+          },
+          transport: {
+            message: message
+              ? {
+                  ...message,
+                  status: projectedMessageStatus,
+                  providerSubmittedAt: message.providerSubmittedAt?.toISOString() ?? null,
+                  sentAt: message.sentAt?.toISOString() ?? null,
+                  deliveredAt: message.deliveredAt?.toISOString() ?? null,
+                  updatedAt: message.updatedAt.toISOString(),
+                }
+              : null,
+            callbackProvenance: { basis: "unavailable", reason: "not_persisted" },
+          },
+          coverage: {
+            state: "partial",
+            membership:
+              hasMore || inconsistent ? "partial" : membership.length ? "complete" : "unavailable",
+            limit: 100,
+            returnedItems: membership.length,
+            hasMore,
+            reasons,
+          },
+          recovery: inspectDelivery ? "inspect_delivery_do_not_resend" : "review_in_app",
+        });
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
+  }
+
   async function status(principal: Principal): Promise<NotificationStatus> {
     authorize(principal, false);
     return options.db.transaction(async (tx) => {
@@ -831,5 +1060,14 @@ export function createNotificationService(options: Options) {
     const claimed = await claim(principal);
     return claimed.state === "claimed" ? deliver(principal, claimed) : claimed;
   }
-  return { savePreferences, resetFinancePreferences, publish, claim, deliver, drain, status };
+  return {
+    savePreferences,
+    resetFinancePreferences,
+    publish,
+    claim,
+    deliver,
+    drain,
+    status,
+    getAttempt,
+  };
 }

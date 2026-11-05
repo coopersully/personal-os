@@ -225,3 +225,43 @@ the authenticated owner and exact filters, and UI row identity includes the entr
 This source slice adds a read projection and fixtures, not end-to-end SMS acceptance. Focused unit,
 UI, type and PostgreSQL execution evidence must be recorded separately; authored fixtures and
 transport metadata alone do not establish production delivery or original-host consumption.
+
+## Historical transaction evidence reader
+
+The Plaid connector implements an optional `readTransactionHistory` adapter for exact provider
+Item, account and transaction identities within a requested date window. This source capability
+has no server, API or MCP consumer yet. It does not grant production access or repair stored
+transactions. Synthetic connector tests establish the bounded adapter behavior; they do not
+establish production entitlement, institution retention or availability of any historical ID.
+
+Before `/transactions/get`, the adapter reads `/item/get` and requires the exact Item ID,
+Transactions in `billed_products`, a recorded successful Transactions update and no Item error.
+Missing initialization evidence stops the read rather than initializing Transactions. The adapter
+never refreshes, syncs, resets a cursor, reconnects, initializes a product or writes ledger fields.
+The Item's successful update time remains separate from the adapter's observation time.
+
+One call permits at most five accounts, 100 unique transaction targets and 366 inclusive calendar
+days. It requests at most five pages of 100 transactions, with a 15-second aggregate deadline
+covering metadata, fetch and response-body reads. Each response is capped at 128 KiB and the whole
+operation at 512 KiB, including metadata. Caller cancellation uses the same bounded read boundary;
+there are no inline retries. Inputs and provider identities are validated, and evidence entries
+project only the requested IDs and declared evidence fields, without credentials or extra input
+metadata.
+
+Evidence preserves the provider's signed source amount: positive is outflow, negative is inflow
+and zero has unknown direction. Only supported explicit transaction currency permits a normalized
+amount; missing or invalid currency stays unresolved without an account-currency fallback.
+Duplicate IDs or changing totals produce conflicting coverage. An Item/account/window mismatch
+rejects the evidence, including values observed on earlier pages.
+
+Coverage describes a non-atomic provider-available window. Exhausting that window permits a
+requested absent ID to be labeled missing; hitting a cap or a later read failure leaves absent
+IDs unobserved and any retained observations explicitly partial. Complete window enumeration
+never proves complete institution history or that an absent transaction never existed. Conflicts
+and partial observations are not authority to repair financial records.
+
+A future consumer must separately verify the authenticated owner, current Item/account topology,
+exact target transaction identities and current revisions before provider access and again before
+any separately authorized effect. It must preserve partial, missing, invalid-currency and conflict
+states and reject stale evidence. Provider reads, previews and financial field repairs remain
+separate allocations; this adapter performs none of the latter two operations.

@@ -77,8 +77,9 @@ bounded prerequisite is part of the assigned outcome, not a reason to ask for me
   maps and assigns work; orchestrators own acceptance and merging; implementation workers own
   every code change, fix, test, and conflict resolution.
 - Keep the head and outcome orchestrators in persistent tasks; use implementation and independent
-  read-only review subagents by default, with explicit worktree isolation for writable work.
-  Standalone workers are exceptions for independent scheduling, user collaboration, or host needs.
+  read-only review subagents, with one dedicated implementation chat per direct issue and explicit
+  worktree isolation for writable work.
+  Scoped subagents assist the issue owner; new user-owned chats still require explicit creation authority.
 - A head or orchestrator never implements, and a worker never merges or enables auto-merge.
   These boundaries remain in force when invoking another skill, including `ship-it`.
 - Only an assigned orchestrator with user-authorized merge scope may merge after all documented

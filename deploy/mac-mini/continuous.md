@@ -64,6 +64,49 @@ A later merge does not inherit the allowance. Success consumes it, and all later
 updates require normal ancestry. The source reader can fetch the original public
 migration commit by its full SHA to verify ancestry after a squash merge.
 
+## Attended one-release CI exception
+
+The normal exact-main CI gate is unchanged. For COO-208 — One-release deployment,
+there is one supported exception pinned in source to
+`76de239aa764cc0642c4b0a15375766353213c16`. Only an explicitly authorized production
+operator may install the independently reviewed controller source and authorize it:
+
+```sh
+node /Users/nohmi-production/controller/deploy/mac-mini/continuous-cli.mjs override-ci /Users/nohmi-production/nohmi-production/config.json /Users/nohmi-production/releases/continuous.git EXPECTED_RUNNING_SHA 76de239aa764cc0642c4b0a15375766353213c16 --attended-ci-override "Cooper-authorized one-release CI exception; COO-208"
+```
+
+Replace `EXPECTED_RUNNING_SHA` with the inspected full serving revision. This is
+an attended production write, not part of source review or a read-only check. Do
+not include secrets or personal data in the bounded reason. Authorization holds
+the normal operation lock, requires matching state/config/activation revisions,
+idle/non-maintenance operation, exact current main and normal descendant history,
+and checks the existing prepared runtime. It refuses an already recorded override
+and refuses when exact-main CI already succeeded: use the normal path then.
+
+The private state retains expected/target revisions, reason, authorization time
+and CI observation. No run or CI result is invented or changed. The next eligible
+tick checks CI normally; success takes precedence. Otherwise only that exact
+unused allowance may satisfy eligibility, including bounded CI transport failure.
+It is durably consumed **before** runtime checking or building, so failure, crash
+or lost response cannot authorize another attempt. `status` exposes its receipt
+and the transaction's actual eligibility source. A later target, changed serving
+revision, or replay does not inherit it. No automatic retry/reset or new target
+allowance is provided; preserve the receipt for attended diagnosis.
+
+All existing build/image checks, maintenance gates, current-main rechecks, writer
+drain, encrypted backup, health/start/publication and blocked failure recovery
+remain active. There is still no automatic schema/config rollback. Authorization
+changes neither serving revision nor runtime configuration. Confirm the actual
+deployed revision and public/provider acceptance separately after completion.
+
+**Release ordering:** target `76de239a` must still be current main at authorization
+and both switch rechecks. Merging this controller change first advances main and
+correctly invalidates the allowance. A separately authorized attended installation
+from reviewed source may precede that release; do not weaken the main checks to
+compensate. If the original CI succeeds first, stop this exception path and let the
+normal controller deploy. Installation, capacity and real transaction behavior
+remain production evidence gaps until the assigned operator verifies them.
+
 Install `me.coopersully.nohmi.continuous.plist` in the existing operator's
 `/Users/anchor/Library/LaunchAgents/`. Verify UID and executable paths before
 bootstrapping, as for the Colima supervisor:

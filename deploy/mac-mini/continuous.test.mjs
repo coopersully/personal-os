@@ -3,11 +3,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { authorizeAdoption, eligibleRelease, healthDecision, tick } from "./continuous.mjs";
+import {
+  authorizeAdoption,
+  authorizeCiOverride,
+  eligibleRelease,
+  healthDecision,
+  tick,
+} from "./continuous.mjs";
 import { privateFile, withLock, writePrivate } from "./safety.mjs";
 
 const old = "a".repeat(40),
-  candidate = "b".repeat(40);
+  candidate = "76de239aa764cc0642c4b0a15375766353213c16";
 const image = `sha256:${"c".repeat(64)}`;
 const successfulRun = {
   id: 20,
@@ -415,4 +421,128 @@ test("adoption cannot authorize a different candidate, existing ancestor, stale 
   await tick(f.configPath, f.io, 1_000_000);
   assert.deepEqual(f.calls, []);
   assert.equal(f.state().deployed, old);
+});
+
+test("attended CI override consumes one exact release attempt and retains normal transaction", async (t) => {
+  const f = fixture(t);
+  f.io.ci = async () => [];
+  await authorizeCiOverride(
+    f.configPath,
+    f.io,
+    old,
+    candidate,
+    "--attended-ci-override",
+    "Cooper authorized one release",
+  );
+  assert.equal(f.state().deployed, old);
+  assert.equal(f.state().ciOverride.consumedAt, undefined);
+  f.io.build = async () => {
+    assert.ok(f.state().ciOverride.consumedAt);
+    f.calls.push("build");
+    return { revision: candidate, images: { api: image, mcp: image, web: image } };
+  };
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.deepEqual(f.calls, ["build", "stop", "drained", "backup", "start", "publish"]);
+  assert.equal(f.state().deployed, candidate);
+  assert.equal(f.state().ciOverride.target, candidate);
+  assert.equal(f.state().ciOverride.reason, "Cooper authorized one release");
+  assert.equal(f.state().releaseEligibility, "attended-ci-override");
+  f.io.main = async () => "e".repeat(40);
+  await tick(f.configPath, f.io, 2_000_000);
+  assert.equal(f.state().error, "awaiting-successful-main-ci");
+  await assert.rejects(
+    authorizeCiOverride(
+      f.configPath,
+      f.io,
+      candidate,
+      "e".repeat(40),
+      "--attended-ci-override",
+      "Another attempt",
+    ),
+  );
+});
+
+test("override cannot authorize stale activation, maintenance, non-descendant or missing acknowledgement", async (t) => {
+  for (const invalid of [
+    "activation",
+    "maintenance",
+    "history",
+    "ack",
+    "expected",
+    "target",
+    "reason",
+    "phase",
+  ]) {
+    const f = fixture(t);
+    f.io.ci = async () => [];
+    if (invalid === "activation")
+      writePrivate(join(f.root, "activation.json"), JSON.stringify({ revision: candidate }));
+    if (invalid === "maintenance") writePrivate(join(f.root, "maintenance.json"), "{}");
+    if (invalid === "history") f.io.history = async () => false;
+    if (invalid === "phase")
+      writePrivate(
+        join(f.root, "continuous-state.json"),
+        JSON.stringify({ version: 1, deployed: old, phase: "blocked" }),
+      );
+    await assert.rejects(
+      authorizeCiOverride(
+        f.configPath,
+        f.io,
+        invalid === "expected" ? "e".repeat(40) : old,
+        invalid === "target" ? "e".repeat(40) : candidate,
+        invalid === "ack" ? "" : "--attended-ci-override",
+        invalid === "reason" ? "" : "Explicit one release",
+      ),
+    );
+    assert.deepEqual(f.calls, []);
+    assert.equal(JSON.parse(privateFile(f.configPath)).revision, old);
+  }
+});
+
+test("normal CI wins and an override cannot retry a failed build or follow changing main", async (t) => {
+  const normal = fixture(t);
+  await assert.rejects(
+    authorizeCiOverride(
+      normal.configPath,
+      normal.io,
+      old,
+      candidate,
+      "--attended-ci-override",
+      "Already eligible",
+    ),
+  );
+  for (const mode of ["failed-build", "changed-main", "ci-now-green", "network"]) {
+    const f = fixture(t);
+    f.io.ci = async () => [];
+    await authorizeCiOverride(
+      f.configPath,
+      f.io,
+      old,
+      candidate,
+      "--attended-ci-override",
+      "Explicit one release",
+    );
+    if (mode === "failed-build")
+      f.io.build = async () => {
+        f.calls.push("failed-build");
+        throw new Error("build failed");
+      };
+    if (mode === "changed-main") f.io.main = async () => "e".repeat(40);
+    if (mode === "ci-now-green") f.io.ci = async () => [successfulRun];
+    if (mode === "network")
+      f.io.ci = async () => {
+        throw new Error("network");
+      };
+    await tick(f.configPath, f.io, 1_000_000);
+    if (mode === "failed-build") {
+      await tick(f.configPath, f.io, 2_000_000);
+      assert.deepEqual(f.calls, ["failed-build"]);
+      assert.equal(f.state().error, "awaiting-successful-main-ci");
+    } else if (mode === "changed-main") assert.deepEqual(f.calls, []);
+    else
+      assert.equal(
+        f.state().releaseEligibility,
+        mode === "ci-now-green" ? "successful-main-ci" : "attended-ci-override",
+      );
+  }
 });

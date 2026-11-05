@@ -1,40 +1,13 @@
 # Provenance and evaluation cases
 
-This replacement models the personal `oversight` skill and its `references/lifecycle.md` and
-`references/monitoring.md`, read October 23, 2026. Baseline mapping, bounded authority, one next-step
-lifecycle, dispatch deduplication, incremental observation, evidence reuse and safe reset are adapted
-here with nohmi role, tracking, review and reporting contracts. The personal installation is neither
-modified nor required at execution time; the repository references contain the needed mechanics.
-
-The other verified source is Occupi's
-[Fast, trustworthy agent verification specification](https://github.com/Occupi-App/occupi/blob/development/docs/superpowers/specs/2026-10-16-fast-verification.md),
-read October 23, 2026. It describes intended behavior, not proof of shipped capability. No separate
-Occupi oversight skill was found in the source search; this is not a copy of one. Adopted principles
-are single-owner heavy work, focused repair, complete readiness distinct from selected execution,
-safe evidence identity, preparation distinct from result reuse, resource isolation and independent
-measurement. Occupi commands, framework versions, merge rules and labels are not nohmi policy.
-
-nohmi's [verification efficiency](../../../../docs/engineering/verification-efficiency.md) and
-[existing acceleration plan](../../../../docs/superpowers/plans/2026-08-26-ci-hardening-and-acceleration.md)
-own the adapted verification policy and staged future work. The plan keeps reported chat failure
-patterns, multi-run measurements and a single experimental CI comparison separate. Historical evidence
-does not prove current readiness or justify blanket claims that retries or subagents are wasteful.
-
-Cooper's subsequent kickoff correction makes context, outcome-section reuse/creation, direct issue
-linking, dedicated-chat naming/placement and verified continuity receipts a mandatory first gate.
-This repository-specific bounded setup grant supplements the personal procedure; it does not expand
-new-chat, unrelated/shared-chat, scheduling or cleanup authority. This is procedural guidance, not
-a claim that a host automatically enforces the gate.
-
-The later tracking/heartbeat correction makes `work-context.md` the lifecycle owner for all assigned
-durable work and requires live presentation checks on every oversight heartbeat. The subsequent human
-October 26 correction supersedes subject-only titles with `ISSUE-ID - Issue name` from verified
-Nohmi issue or parent mappings. Cooper’s October 27 exception now names oversight chats exactly
-`👀 - <epic name>` from their verified parent while ordinary children retain the issue-prefix rule.
-Prefer concise durable issue subjects, preserve phase stability and the exact `Nohmi project manager`
-exception, and use the current project-manager checklist for reconciliation. Repository instructions
-are the authority; installed wrappers delegating here must reload them. This change does not claim
-those external installations have been edited or that a scheduled pass has executed.
+Rebuilt November 5, 2026 from Cooper's installed personal oversight workflow, itself adapted from
+`/Users/cooper/.codex-occupi/skills/oversight`. The repository carries its own required references;
+neither personal installation is a runtime dependency. Adapted: whole-outcome coverage, bounded
+handoffs, ownership, evidence recovery, every-heartbeat reporting, naming and safe archival.
+Retained Nohmi kickoff receipts, direct tracking, role boundaries, protected merge protocol and
+current verification admission. No Occupi executable queue, label, model or scheduler was copied.
+Product grounding comes from current master design, workspace stewardship and User Knowledge;
+those contracts define targets, while implementation and release evidence establish shipped truth.
 
 ## Evaluate the instructions without launching work
 
@@ -44,7 +17,7 @@ runtime tests or proof a host tool works.
 | Scenario | Required decision/evidence |
 | --- | --- |
 | Unchanged oversight heartbeat | Read live section name/membership/order, dedicated titles and direct issue coverage anyway; retain checked-at/readback in the existing setup entry; no redundant mutation, duplicate issue or status comment |
-| Dedicated epic section retains an old name | Verify stable section ID/membership and current parent issue; rename only proven stale dedicated name to the epic name, preserving ID; shared or user-protected names remain excluded with evidence |
+| Dedicated epic section retains an old name | Verify stable section ID/membership and current parent issue; rename only proven stale dedicated name to `<repo> - <epic>`, preserving ID; shared or user-protected names remain excluded with evidence |
 | Dedicated implementation changes phase or assigned issue | Verify the direct issue mapping and owner; use `ISSUE-ID - Issue name`, keeping phases out of titles; reconcile changed issue names and preserve later exceptions/shared chats |
 | Oversight coordinates several children | Verify the epic parent and keep its mapping; name the oversight exactly `👀 - <epic name>` on kickoff and every heartbeat, without replacing the manager's exact name or touching shared chats |
 | Older installed wrapper prescribes subject-only names or universal Lead prefixes | Load current repository owner through agent-context/AGENTS; use current naming and record installed adoption separately; do not edit generic personal skills |
@@ -72,6 +45,14 @@ runtime tests or proof a host tool works.
 | Focused check passes but full stages are absent | Report partial execution unless the canonical Git-verified prose exception is proven; selected jobs cannot skip and all other readiness gates remain |
 | New failure after older pass or input changed mid-run | Reject stale evidence; diagnose and rerun affected checks; do not mask failure with cached green |
 | Runtime is healthy but fixture state cannot be fingerprinted | Preparation may be reusable after identity checks; test results need fresh execution |
-| Scheduled wake unchanged, or user muted it | Default short nohmi report; preserve explicit mute/quiet and existing cadence; no new schedule |
+| Scheduled wake unchanged, or user muted it | Every-heartbeat nohmi report; preserve explicit mute/quiet and existing cadence; no new schedule |
 | No saved monitor exists when yielding | State bounded wait or user-driven follow-up; never promise automatic monitoring |
 | Source unavailable during reset | Partial reset; preserve decisions, grants, pauses, last verified state and unfinished obligations |
+
+| Two chats claim one issue | Preserve work, reconcile live ownership and stop/acknowledge transfer before replacement; never dispatch a duplicate writer |
+| One implementation chat spans issues | Recover checkpoints and split ownership safely into one chat per issue under explicit creation authority; no active work is discarded |
+| Evidence is stale | Refresh source and owner receipts now; bounded failure reports concrete recovery and next trigger, never generic Unverified or invented success |
+| Verification gate is pending | Put it in Status/Next; Dependencies contains only prerequisite workstreams/issues/PRs/branches |
+| Verification runner exits 75 | Record capacity wait and release trigger; no competing queue, killed owner or claimed FIFO ticket |
+| Full child acceptance and preservation proven | Archive its dedicated chat with the supported tool; preserve branches/worktrees and unfinished epic obligations |
+| Master design names an unshipped feature | Track target-versus-implementation gap and observable acceptance; do not report it shipped |

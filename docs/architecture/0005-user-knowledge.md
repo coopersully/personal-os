@@ -128,3 +128,20 @@ Source scope requirements propagate to derived records, which cannot broaden wor
 or allowed purposes. Knowledge writes emit redacted audit metadata and never alter domain policy.
 Lifecycle mutations, retrieval indexes, context packs and user controls remain follow-up work;
 see the [current implementation boundary](../product/user-knowledge.md#relationship-to-current-implementation).
+
+## Forward migration recovery
+
+Published `0130_persistent_knowledge` remains immutable. The composed journal retains it before
+the separately published Finance `0130` and Accounts `0131`; historical duplicate journal index
+135 is preserved. `0132_persistent_knowledge_recovery` appends index 137 at `1793300055682`.
+Its transaction requires the exact Finance and Accounts timestamp/hash receipts before inspecting
+the five Knowledge relations. If all are absent, it creates the original-equivalent schema; if
+all are present, it validates columns/defaults, owner keys, foreign keys, indexes and relation
+behavior. Partial or incompatible catalogs fail without repair or an advanced recovery receipt.
+The original Knowledge receipt may remain absent on a skipped-cursor upgrade; recovery never
+fabricates it or rewrites existing records. Later migrations retain the caller's search path.
+
+Real PostgreSQL fixtures exercise fresh and upgraded published histories, preservation, retry,
+owner isolation and rollback. These establish source behavior, not deployed catalog acceptance.
+Deployment still requires one migration-capable writer, the reviewed backup/recovery procedure,
+actual deployed revision/ledger/catalog evidence and authenticated save/read observations.

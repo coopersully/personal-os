@@ -526,6 +526,7 @@ describe("database schema contracts", () => {
       "0130_persistent_knowledge",
       "0130_finance_provider_account_identity",
       "0131_finance_institution_branding",
+      "0132_persistent_knowledge_recovery",
     ]);
   });
 

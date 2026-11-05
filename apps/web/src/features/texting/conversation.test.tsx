@@ -91,6 +91,7 @@ it("requires billing and prompt confirmation and delivers save errors through So
   });
   mocks.configureTextingAgent.mockRejectedValue(new Error("Cannot save right now"));
   mount(<TextingAgentSettings userId="one" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Automatic replies" }));
   const button = await screen.findByRole("button", { name: "Enable automatic replies" });
   expect(button).toBeDisabled();
   fireEvent.change(screen.getByLabelText("Claude routine"), { target: { value: "routine" } });
@@ -262,6 +263,7 @@ it("enables a chosen routine, clears billing confirmation, and turns replies off
     .mockResolvedValueOnce(status)
     .mockResolvedValueOnce({ ...status, enabled: false, scheduleId: null });
   mount(<TextingAgentSettings userId="one" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Automatic replies" }));
   fireEvent.change(await screen.findByLabelText("Claude routine"), {
     target: { value: "routine" },
   });
@@ -289,11 +291,14 @@ it("directs accounts without a registered routine to Automations", async () => {
     routines: [],
   });
   mount(<TextingAgentSettings userId="one" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Automatic replies" }));
   expect(await screen.findByRole("link", { name: "Automations" })).toHaveAttribute(
     "href",
     "/finances/automations",
   );
-  expect(screen.getByRole("button", { name: "Enable automatic replies" })).toBeDisabled();
+  expect(
+    screen.queryByRole("button", { name: "Enable automatic replies" }),
+  ).not.toBeInTheDocument();
 });
 
 it("retries an explicitly rejected start and reports recovery failures through Sonner", async () => {

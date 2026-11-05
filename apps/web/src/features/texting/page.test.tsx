@@ -20,7 +20,7 @@ vi.mock("../../api.js", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Unknown error"),
 }));
 
-function renderSettings(mutationRetry: false | number = false, profile = false) {
+function renderSettings(mutationRetry: false | number = false, profile = false, inline = false) {
   const queryClient = new QueryClient({
     defaultOptions: {
       mutations: { retry: mutationRetry, retryDelay: 0 },
@@ -30,7 +30,7 @@ function renderSettings(mutationRetry: false | number = false, profile = false) 
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <TextingSettings profile={profile} />
+        <TextingSettings profile={profile} inline={inline} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -268,4 +268,45 @@ describe("Texting settings", () => {
     renderSettings();
     expect(await screen.findByLabelText("Mobile number")).toBeInTheDocument();
   });
+});
+
+it("adds a profile phone using the selected country without assuming consent", async () => {
+  mocks.getTextingConnection.mockResolvedValue({
+    id: null,
+    country: null,
+    state: null,
+    providerReady: true,
+  });
+  mocks.startTextingVerification.mockResolvedValue({ id: "canadian-challenge" });
+  const user = userEvent.setup();
+  renderSettings(false, true);
+  await user.click(await screen.findByRole("button", { name: "Add phone number" }));
+  expect(screen.getByRole("switch")).not.toBeChecked();
+  await user.selectOptions(screen.getByLabelText("Country"), "CA");
+  await user.type(screen.getByLabelText("Mobile number"), "4165550199");
+  await user.click(screen.getByRole("switch"));
+  await user.click(screen.getByRole("button", { name: "Send verification code" }));
+  expect(await screen.findByLabelText("Verification code")).toBeVisible();
+  expect(mocks.startTextingVerification).toHaveBeenLastCalledWith({
+    country: "CA",
+    phoneNumber: "4165550199",
+    consentAccepted: true,
+    consentVersion: textingConsentVersion,
+  });
+});
+
+it("dismisses inline phone editing and resets consent before reopening", async () => {
+  vi.clearAllMocks();
+  mocks.getTextingConnection.mockResolvedValue({ id: null, state: null, providerReady: true });
+  const user = userEvent.setup();
+  renderSettings(false, true, true);
+  await user.click(await screen.findByRole("button", { name: "Edit Phone" }));
+  await user.selectOptions(screen.getByLabelText("Country"), "CA");
+  await user.click(screen.getByRole("switch"));
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Edit Phone" }));
+  expect(screen.getByRole("switch")).not.toBeChecked();
+  expect(screen.getByLabelText("Country")).toHaveValue("US");
+  expect(mocks.startTextingVerification).not.toHaveBeenCalled();
 });

@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router-dom";
 import { renderWithFeedback as render } from "@/test-utils/feedback";
 import { TextingAgentSettings } from "./agent-settings.js";
 import { TextConversation } from "./conversation.js";
+import { TextingRunRecovery } from "./run-recovery.js";
 
 const mocks = vi.hoisted(() => ({
   getTextConversation: vi.fn(),
@@ -253,4 +254,172 @@ it("retrieves a deep-linked old message directly and focuses it after rendering"
     afterCursor: "old-target",
   });
   expect(scroll).toHaveBeenCalledOnce();
+});
+
+it("enables a chosen routine, clears billing confirmation, and turns replies off", async () => {
+  mocks.getTextingAgentStatus.mockResolvedValue({ ...status, enabled: false, scheduleId: null });
+  mocks.configureTextingAgent
+    .mockResolvedValueOnce(status)
+    .mockResolvedValueOnce({ ...status, enabled: false, scheduleId: null });
+  mount(<TextingAgentSettings userId="one" />);
+  fireEvent.change(await screen.findByLabelText("Claude routine"), {
+    target: { value: "routine" },
+  });
+  fireEvent.click(screen.getByRole("switch"));
+  fireEvent.click(screen.getByRole("button", { name: "Enable automatic replies" }));
+  const off = await screen.findByRole("button", { name: "Turn off" });
+  expect(mocks.configureTextingAgent).toHaveBeenCalledWith({
+    scheduleId: "routine",
+    subscriptionOnlyConfirmed: true,
+  });
+  expect(screen.getByRole("switch")).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "Enable automatic replies" })).toBeDisabled();
+  fireEvent.click(off);
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Turn off" })).not.toBeInTheDocument(),
+  );
+  expect(mocks.configureTextingAgent).toHaveBeenLastCalledWith({ scheduleId: null });
+});
+
+it("directs accounts without a registered routine to Automations", async () => {
+  mocks.getTextingAgentStatus.mockResolvedValue({
+    ...status,
+    enabled: false,
+    scheduleId: null,
+    routines: [],
+  });
+  mount(<TextingAgentSettings userId="one" />);
+  expect(await screen.findByRole("link", { name: "Automations" })).toHaveAttribute(
+    "href",
+    "/finances/automations",
+  );
+  expect(screen.getByRole("button", { name: "Enable automatic replies" })).toBeDisabled();
+});
+
+it("retries an explicitly rejected start and reports recovery failures through Sonner", async () => {
+  const recovered = vi.fn();
+  mocks.recoverTextingAgentRun
+    .mockRejectedValueOnce(new Error("Routine unavailable"))
+    .mockResolvedValueOnce(status);
+  mount(
+    <TextingRunRecovery
+      run={run("rejected", "blocked", "host_rejected", "2026-11-05T12:00:00Z")}
+      onRecovered={recovered}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Review this run" }));
+  expect(screen.getByRole("link", { name: /Inspect the session/ })).toHaveAttribute(
+    "href",
+    "https://claude.ai/code/routines",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Retry saved request" }));
+  const feedback = await screen.findByText(/Couldn’t.*recover this conversation/);
+  expect(feedback.closest("[data-sonner-toast]")).not.toBeNull();
+  expect(
+    within(screen.getByRole("dialog")).queryByText(/Couldn’t.*recover this conversation/),
+  ).not.toBeInTheDocument();
+  expect(recovered).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Retry saved request" }));
+  await waitFor(() => expect(recovered).toHaveBeenCalledWith(status));
+  expect(mocks.recoverTextingAgentRun).toHaveBeenLastCalledWith("rejected", { action: "retry" });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("requires the old session to be stopped before closing an interrupted run", async () => {
+  const recovered = vi.fn();
+  mocks.recoverTextingAgentRun.mockResolvedValue(status);
+  mount(
+    <TextingRunRecovery
+      run={{
+        ...run("interrupted", "blocked", "host_timeout", "2026-11-05T12:00:00Z"),
+        hostSessionId: "session/one",
+      }}
+      onRecovered={recovered}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Review this run" }));
+  expect(screen.getByRole("link", { name: /Inspect the session/ })).toHaveAttribute(
+    "href",
+    "https://claude.ai/code/session%2Fone",
+  );
+  const close = screen.getByRole("button", { name: "Close interrupted run" });
+  expect(close).toBeDisabled();
+  const checked = screen.getByRole("checkbox");
+  fireEvent.click(checked);
+  expect(close).toBeEnabled();
+  fireEvent.click(checked);
+  expect(close).toBeDisabled();
+  fireEvent.click(checked);
+  fireEvent.click(close);
+  await waitFor(() => expect(recovered).toHaveBeenCalledWith(status));
+  expect(mocks.recoverTextingAgentRun).toHaveBeenCalledWith("interrupted", {
+    action: "close",
+    hostStopped: true,
+  });
+});
+
+it("shows queued and deferred runs without inviting unsafe manual recovery", async () => {
+  mocks.getTextConversation.mockResolvedValue({ messages: [], hasEarlierMessages: false });
+  mocks.getTextingAgentStatus.mockResolvedValue({
+    ...status,
+    pendingCount: 2,
+    runs: [
+      run("retry", "blocked", "retry_requested", "2026-11-05T12:00:00Z"),
+      run("limited", "blocked", "rate_limited", "2026-11-05T12:01:00Z"),
+      run("shutdown", "blocked", "shutdown_deferred", "2026-11-05T12:02:00Z"),
+    ],
+  });
+  mount(<TextConversation userId="one" timeZone="UTC" />);
+  expect(await screen.findByText("2 messages waiting for your agent.")).toBeVisible();
+  fireEvent.click(screen.getByText("Agent runs", { selector: "summary" }));
+  expect(screen.getByText(/Saved request queued again/)).toBeVisible();
+  expect(screen.getByText(/Waiting for the usage limit to reset/)).toBeVisible();
+  expect(screen.getByText(/Waiting for nohmi to resume/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Review this run" })).not.toBeInTheDocument();
+});
+
+it("shows only unfinished work in the selected workspace while preserving the pending count", async () => {
+  mocks.getTextConversation.mockResolvedValue({ messages: [], hasEarlierMessages: false });
+  mocks.getTextingAgentStatus.mockResolvedValue({
+    ...status,
+    pendingCount: 1,
+    runs: [
+      {
+        ...run("work", "blocked", "host_rejected", "2026-11-05T12:00:00Z"),
+        work: [
+          {
+            key: "task",
+            domain: "tasks",
+            state: "pending",
+            references: [],
+            note: "Review proposal",
+          },
+          {
+            key: "finance",
+            domain: "finances",
+            state: "pending",
+            references: [],
+            note: "Inspect spending",
+          },
+          {
+            key: "done",
+            domain: "tasks",
+            state: "completed",
+            references: [],
+            note: "Already finished",
+          },
+        ],
+      },
+    ],
+  });
+  mount(<TextConversation userId="one" timeZone="UTC" />, "/messages?workspace=tasks");
+  expect(await screen.findByText("1 message waiting for your agent.")).toBeVisible();
+  fireEvent.click(screen.getByText("Agent runs", { selector: "summary" }));
+  expect(screen.getByRole("list", { name: "Pending work" })).toHaveTextContent("Review proposal");
+  expect(screen.queryByText(/Inspect spending/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Already finished/)).not.toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: "View all messages" })).toHaveAttribute(
+    "href",
+    "/messages",
+  );
 });

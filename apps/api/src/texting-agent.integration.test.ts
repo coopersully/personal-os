@@ -156,6 +156,384 @@ describe.sequential("Texting agent lifecycle", () => {
       fetch,
     };
   }
+  async function runningFixture() {
+    const f = await fixture();
+    await f.inbound();
+    current = new Date(current.getTime() + 6000);
+    await f.dispatch();
+    const run = (await f.service.status(f.human)).runs[0];
+    if (!run) throw new Error("Missing run");
+    const invocationId = crypto.randomUUID();
+    const batch = await f.service.claim(f.agent, run.id, { invocationId });
+    const message = batch.messages[0];
+    if (!message) throw new Error("Missing input");
+    return { ...f, run, invocationId, message };
+  }
+
+  it("rejects unqualified setup without replacing the owner's existing binding", async () => {
+    const f = await fixture();
+    await expect(f.service.configure(f.agent, { scheduleId: null })).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await expect(
+      f.service.configure(f.human, {
+        scheduleId: crypto.randomUUID(),
+        subscriptionOnlyConfirmed: true,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(executionPolicySettings.userId, f.userId));
+    await expect(
+      f.service.configure(f.human, { scheduleId: f.scheduleId, subscriptionOnlyConfirmed: true }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect((await f.service.status(f.human)).scheduleId).toBe(f.scheduleId);
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: true })
+      .where(eq(executionPolicySettings.userId, f.userId));
+    await database.db
+      .update(automationHostSchedules)
+      .set({ encryptedFireCredentials: null })
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    await expect(
+      f.service.configure(f.human, { scheduleId: f.scheduleId, subscriptionOnlyConfirmed: true }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("requires the exact agent invocation for writes and owner identity for recovery", async () => {
+    const f = await runningFixture();
+    const principals: Principal[] = [f.human, { ...f.agent, scopes: new Set(["texting:read"]) }];
+    for (const principal of principals) {
+      await expect(
+        f.service.claim(principal, f.run.id, { invocationId: f.invocationId }),
+      ).rejects.toMatchObject({ code: "forbidden" });
+    }
+    await expect(
+      f.service.checkpoint(f.agent, f.run.id, { invocationId: crypto.randomUUID(), work: [] }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      f.service.recover(f.agent, f.run.id, { action: "close", hostStopped: true }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      f.service.recover(f.human, crypto.randomUUID(), { action: "retry" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(f.twilio.sendMessage).not.toHaveBeenCalled();
+    expect((await f.service.status(f.human)).runs[0]?.state).toBe("running");
+  });
+
+  it("rejects duplicate classifications and self references atomically", async () => {
+    const f = await runningFixture();
+    const annotation = { messageId: f.message.id, workspaces: ["tasks"] };
+    await expect(
+      f.service.checkpoint(f.agent, f.run.id, {
+        invocationId: f.invocationId,
+        work: [],
+        annotations: [annotation, annotation],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      f.service.checkpoint(f.agent, f.run.id, {
+        invocationId: f.invocationId,
+        work: [],
+        annotations: [{ ...annotation, replyToMessageIds: [f.message.id] }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const [stored] = await database.db
+      .select()
+      .from(textMessages)
+      .where(eq(textMessages.id, f.message.id));
+    expect(stored?.classifiedAt).toBeNull();
+    expect(stored?.workspaces).toEqual([]);
+  });
+
+  it("requires complete input classification and valid topic references before sending", async () => {
+    const f = await runningFixture();
+    const reply = {
+      invocationId: f.invocationId,
+      body: "Task result",
+      workspaces: ["tasks"],
+      replyToMessageIds: [f.message.id],
+    };
+    await expect(
+      f.service.reply(f.agent, f.run.id, {
+        ...reply,
+        replyToMessageIds: [f.message.id, f.message.id],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      f.service.reply(f.agent, f.run.id, { ...reply, replyToMessageIds: [crypto.randomUUID()] }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(f.service.reply(f.agent, f.run.id, reply)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await f.service.checkpoint(f.agent, f.run.id, {
+      invocationId: f.invocationId,
+      work: [],
+      annotations: [{ messageId: f.message.id, workspaces: [] }],
+    });
+    await expect(f.service.reply(f.agent, f.run.id, reply)).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    expect(f.twilio.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("bounds topic replies and rejects changed retries without duplicating delivery", async () => {
+    const f = await runningFixture();
+    await f.service.checkpoint(f.agent, f.run.id, {
+      invocationId: f.invocationId,
+      work: [],
+      annotations: [{ messageId: f.message.id, workspaces: ["tasks"] }],
+    });
+    const reply = {
+      invocationId: f.invocationId,
+      body: "Task result",
+      workspaces: ["tasks"],
+      replyToMessageIds: [f.message.id],
+      final: false,
+    };
+    for (let i = 0; i < 3; i++)
+      await f.service.reply(f.agent, f.run.id, { ...reply, replyKey: `topic-${i}` });
+    await expect(
+      f.service.reply(f.agent, f.run.id, { ...reply, replyKey: "topic-0", body: "Changed result" }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      f.service.reply(f.agent, f.run.id, { ...reply, replyKey: "topic-3" }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await f.service.reply(f.agent, f.run.id, { ...reply, replyKey: "topic-3", final: true });
+    await expect(
+      f.service.checkpoint(f.agent, f.run.id, { invocationId: f.invocationId, work: [] }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      f.service.reply(f.agent, f.run.id, { ...reply, replyKey: "extra", final: true }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      f.service.recover(f.human, f.run.id, { action: "close", hostStopped: true }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(f.twilio.sendMessage).toHaveBeenCalledTimes(4);
+  });
+
+  it("makes completed work immutable across checkpoints and new sessions", async () => {
+    const f = await runningFixture();
+    const completed = {
+      domain: "tasks",
+      key: "immutable-work",
+      state: "completed",
+      note: "Saved task",
+      references: ["task:fixture"],
+    };
+    await f.service.checkpoint(f.agent, f.run.id, {
+      invocationId: f.invocationId,
+      work: [completed],
+    });
+    await expect(
+      f.service.checkpoint(f.agent, f.run.id, {
+        invocationId: f.invocationId,
+        work: [{ ...completed, state: "pending" }],
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await f.service.recover(f.human, f.run.id, { action: "close", hostStopped: true });
+    await f.inbound("Continue safely");
+    current = new Date(current.getTime() + 6000);
+    await f.dispatch();
+    const next = (await f.service.status(f.human)).runs[0];
+    if (!next) throw new Error("Missing next run");
+    const invocationId = crypto.randomUUID();
+    await f.service.claim(f.agent, next.id, { invocationId });
+    await expect(
+      f.service.checkpoint(f.agent, next.id, {
+        invocationId,
+        work: [{ ...completed, state: "pending" }],
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect((await f.service.status(f.human)).runs.find((run) => run.id === f.run.id)?.work).toEqual(
+      [completed],
+    );
+  });
+
+  it("preserves pending work as uncertain on owner close and pages it across sessions", async () => {
+    const f = await runningFixture();
+    const work = Array.from({ length: 100 }, (_, i) => ({
+      domain: "tasks",
+      key: `pending-${String(i).padStart(3, "0")}`,
+      state: "pending",
+      note: "Read domain state before retry",
+      references: [],
+    }));
+    for (let offset = 0; offset < work.length; offset += 20)
+      await f.service.checkpoint(f.agent, f.run.id, {
+        invocationId: f.invocationId,
+        work: work.slice(offset, offset + 20),
+      });
+    await expect(
+      f.service.checkpoint(f.agent, f.run.id, {
+        invocationId: f.invocationId,
+        work: [{ ...work[0], key: "overflow" }],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await f.service.recover(f.human, f.run.id, { action: "close", hostStopped: true });
+    expect(
+      (await f.service.status(f.human)).runs[0]?.work.every((item) => item.state === "uncertain"),
+    ).toBe(true);
+    await f.inbound("Continue the remaining work");
+    current = new Date(current.getTime() + 6000);
+    await f.dispatch();
+    const next = (await f.service.status(f.human)).runs[0];
+    if (!next) throw new Error("Missing next run");
+    const invocationId = crypto.randomUUID();
+    await f.service.claim(f.agent, next.id, { invocationId });
+    await f.service.checkpoint(f.agent, next.id, {
+      invocationId,
+      work: [{ ...work[0], key: "pending-100" }],
+    });
+    const first = await f.service.claim(f.agent, next.id, { invocationId });
+    expect(first.pendingWork).toHaveLength(100);
+    expect(first.nextPendingWorkCursor).toEqual({ domain: "tasks", key: "pending-099" });
+    const last = await f.service.claim(f.agent, next.id, {
+      invocationId,
+      pendingWorkAfter: first.nextPendingWorkCursor,
+    });
+    expect(last.pendingWork.map(({ item }) => item.key)).toEqual(["pending-100"]);
+    expect(last.nextPendingWorkCursor).toBeNull();
+  });
+
+  it("blocks an active stale host binding before dispatching later input", async () => {
+    const f = await runningFixture();
+    await database.db
+      .update(automationHostSchedules)
+      .set({
+        encryptedFireCredentials: encryptJson(
+          { token: "replacement-fixture-token" },
+          encryptionKey,
+        ),
+      })
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    await f.inbound("Use the newly configured host");
+    current = new Date(current.getTime() + 6000);
+    await f.dispatch();
+    const runs = (await f.service.status(f.human)).runs;
+    expect(runs.find((run) => run.id === f.run.id)).toMatchObject({
+      state: "blocked",
+      reason: "authority_changed",
+    });
+    expect(runs[0]?.state).toBe("started");
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+    await expect(
+      f.service.claim(f.agent, f.run.id, { invocationId: f.invocationId }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+
+  it("fences corrupt stored credentials without exposing them or retrying transport", async () => {
+    const f = await fixture();
+    await database.db
+      .update(automationHostSchedules)
+      .set({
+        encryptedFireCredentials: encryptJson(
+          { token: "fixture-routine-token" },
+          Buffer.alloc(32, 8).toString("base64"),
+        ),
+      })
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    await f.inbound();
+    current = new Date(current.getTime() + 6000);
+    await f.dispatch();
+    await f.dispatch();
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect((await f.service.status(f.human)).runs[0]).toMatchObject({
+      state: "uncertain",
+      reason: "host_uncertain",
+    });
+  });
+
+  it("does not reserve queued work while dispatch is disabled or stopped", async () => {
+    const f = await fixture();
+    await f.inbound();
+    current = new Date(current.getTime() + 6000);
+    const disabled = createTextingAgentDispatcher({
+      db: database.db,
+      enabled: () => false,
+      now,
+      encryptionKey,
+      fetch: f.fetch,
+    });
+    await disabled();
+    await f.dispatch(() => false);
+    expect((await f.service.status(f.human)).runs).toEqual([]);
+    expect(f.fetch).not.toHaveBeenCalled();
+    await f.dispatch();
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("limits starts within the rolling hour while preserving queued input for later", async () => {
+    const f = await runningFixture();
+    await f.service.recover(f.human, f.run.id, { action: "close", hostStopped: true });
+    const [historical] = await database.db
+      .select()
+      .from(textingAgentRuns)
+      .where(eq(textingAgentRuns.id, f.run.id));
+    if (!historical) throw new Error("Missing historical run");
+    await database.db.insert(textingAgentRuns).values(
+      Array.from({ length: 24 }, () => ({
+        ...historical,
+        id: crypto.randomUUID(),
+        invocationId: null,
+      })),
+    );
+    await f.inbound("Wait for capacity");
+    current = new Date(current.getTime() + 6000);
+    await f.dispatch();
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+    expect((await f.service.status(f.human)).pendingCount).toBe(1);
+    current = new Date(current.getTime() + 3_600_001);
+    await f.dispatch();
+    expect(f.fetch).toHaveBeenCalledTimes(2);
+    expect((await f.service.status(f.human)).pendingCount).toBe(0);
+  });
+
+  it("refuses rejected-run retries after credentials or execution permission changes", async () => {
+    const f = await fixture();
+    f.fetch.mockResolvedValue(new Response(null, { status: 403 }));
+    await f.inbound();
+    current = new Date(current.getTime() + 6000);
+    await f.dispatch();
+    const run = (await f.service.status(f.human)).runs[0];
+    if (!run) throw new Error("Missing rejected run");
+    const [originalHost] = await database.db
+      .select({ encryptedFireCredentials: automationHostSchedules.encryptedFireCredentials })
+      .from(automationHostSchedules)
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    if (!originalHost) throw new Error("Missing original host");
+    await database.db
+      .update(automationHostSchedules)
+      .set({
+        encryptedFireCredentials: encryptJson(
+          { token: "replacement-fixture-token" },
+          encryptionKey,
+        ),
+      })
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    await expect(f.service.recover(f.human, run.id, { action: "retry" })).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await database.db
+      .update(automationHostSchedules)
+      .set({ encryptedFireCredentials: originalHost.encryptedFireCredentials })
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(executionPolicySettings.userId, f.userId));
+    await expect(f.service.recover(f.human, run.id, { action: "retry" })).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect((await f.service.status(f.human)).runs[0]).toMatchObject({
+      id: run.id,
+      reason: "host_rejected",
+    });
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("waits for the latest message in a staggered five-second burst", async () => {
     const f = await fixture();
     await f.inbound("Check my calendar");

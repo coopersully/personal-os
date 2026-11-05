@@ -2209,25 +2209,46 @@ function WorkspaceRail({
           );
         })}
       </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <ShadcnButton
-            asChild
-            className="workspace-rail__link workspace-rail__settings"
-            size="icon"
-            variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
-          >
-            <Link
-              aria-current={owner.kind === "account-utility" ? "page" : undefined}
-              aria-label="Settings"
-              to="/settings"
+      <div className="workspace-rail__settings flex flex-col gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ShadcnButton
+              asChild
+              className="workspace-rail__link"
+              size="icon"
+              variant={owner.kind === "shared-channel" ? "secondary" : "ghost"}
             >
-              <SettingsIcon aria-hidden="true" />
-            </Link>
-          </ShadcnButton>
-        </TooltipTrigger>
-        <TooltipContent side="right">Settings</TooltipContent>
-      </Tooltip>
+              <Link
+                aria-current={owner.kind === "shared-channel" ? "page" : undefined}
+                aria-label="Messages"
+                to="/messages"
+              >
+                <ReplyIcon aria-hidden="true" />
+              </Link>
+            </ShadcnButton>
+          </TooltipTrigger>
+          <TooltipContent side="right">Messages</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ShadcnButton
+              asChild
+              className="workspace-rail__link"
+              size="icon"
+              variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
+            >
+              <Link
+                aria-current={owner.kind === "account-utility" ? "page" : undefined}
+                aria-label="Settings"
+                to="/settings"
+              >
+                <SettingsIcon aria-hidden="true" />
+              </Link>
+            </ShadcnButton>
+          </TooltipTrigger>
+          <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
+      </div>
     </nav>
   );
 }

@@ -71,6 +71,92 @@ describe.sequential("texting service", () => {
     await container.stop();
   });
 
+  it("loads an old anchor with bounded neighbors and rejects foreign or missing anchors", async () => {
+    const ownerId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: ownerId,
+      displayName: "Anchor owner",
+      email: `${ownerId}@example.com`,
+      passwordHash: "unused",
+    });
+    const service = createTextingService({
+      apiBaseUrl: "https://api.example.com",
+      db: database.db,
+      enabled: true,
+      encryptionKey,
+      senderPhoneNumber: "+18885550100",
+      twilio,
+    });
+    const challenge = await service.startVerification(ownerId, {
+      consentAccepted: true,
+      consentVersion: textingConsentVersion,
+      country: "US",
+      phoneNumber: "+12125550999",
+    });
+    await service.checkVerification(ownerId, challenge.id, "123456");
+    const connection = await database.db.query.textingConnections.findFirst({
+      where: eq(textingConnections.userId, ownerId),
+    });
+    if (!connection) throw new Error("Expected verified connection");
+    const ids = Array.from({ length: 120 }, () => crypto.randomUUID());
+    await database.db.insert(textMessages).values(
+      ids.map((id, index) => ({
+        id,
+        body: `Anchor fixture ${index}`,
+        connectionId: connection.id,
+        direction: "inbound" as const,
+        occurredAt: new Date(current.getTime() + index * 1000),
+        occurredAtSource: "nohmi" as const,
+        status: "unknown" as const,
+        userId: ownerId,
+        workspaces: ["tasks" as const],
+      })),
+    );
+    const owner = { ...principal, userId: ownerId };
+    const latest = await service.conversation(owner, "UTC", { limit: 50 });
+    expect(latest.messages.some((message) => message.id === ids[30])).toBe(false);
+    const around = await service.conversation(owner, "UTC", { limit: 50, aroundCursor: ids[30] });
+    expect(around.messages.map((message) => message.id)).toEqual(ids.slice(6, 56));
+    expect(around).toMatchObject({
+      conversationReceipt: null,
+      hasEarlierMessages: true,
+      earlierCursor: ids[6],
+      newerCursor: ids[55],
+    });
+    const newest = await service.conversation(owner, "UTC", { limit: 50, aroundCursor: ids[119] });
+    expect(newest.messages.at(-1)?.id).toBe(ids[119]);
+    expect(newest.newerCursor).toBeNull();
+    const single = await service.conversation(owner, "UTC", { limit: 1, aroundCursor: ids[30] });
+    expect(single.messages.map((message) => message.id)).toEqual([ids[30]]);
+    await expect(
+      service.conversation(owner, "UTC", { limit: 50, aroundCursor: ids[30], workspace: "mail" }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.conversation(owner, "UTC", { limit: 50, aroundCursor: crypto.randomUUID() }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    // A second verified owner cannot retrieve the first owner's anchor.
+    const otherId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: otherId,
+      displayName: "Other anchor owner",
+      email: `${otherId}@example.com`,
+      passwordHash: "unused",
+    });
+    const otherChallenge = await service.startVerification(otherId, {
+      consentAccepted: true,
+      consentVersion: textingConsentVersion,
+      country: "US",
+      phoneNumber: "+12125550888",
+    });
+    await service.checkVerification(otherId, otherChallenge.id, "123456");
+    await expect(
+      service.conversation({ ...principal, userId: otherId }, "UTC", {
+        limit: 50,
+        aroundCursor: ids[30],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
   it.each([
     undefined,
     "2026-09-12",

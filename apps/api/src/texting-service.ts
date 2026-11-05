@@ -344,6 +344,8 @@ export function createTextingService(options: Options) {
   ): Promise<TextConversationPage> {
     const row = await connectionRow(principal.userId);
     const current = now();
+    if (!row && (query.aroundCursor || query.beforeCursor || query.afterCursor))
+      throw new AppError("invalid_request", "Conversation cursor not found.");
     if (!row)
       return {
         asOf: current.toISOString(),
@@ -356,7 +358,7 @@ export function createTextingService(options: Options) {
         newerCursor: null,
         timeZone,
       };
-    const cursorId = query.beforeCursor ?? query.afterCursor;
+    const cursorId = query.beforeCursor ?? query.afterCursor ?? query.aroundCursor;
     const cursor = cursorId
       ? await options.db.query.textMessages.findFirst({
           where: and(eq(textMessages.connectionId, row.id), eq(textMessages.id, cursorId)),
@@ -383,24 +385,57 @@ export function createTextingService(options: Options) {
         : undefined,
       query.beforeCursor ? beforeCondition : query.afterCursor ? afterCondition : undefined,
     );
-    const messages = query.afterCursor
-      ? await options.db
-          .select()
-          .from(textMessages)
-          .where(conditions)
-          .orderBy(asc(textMessages.occurredAt), asc(textMessages.id))
-          .limit(query.limit + 1)
-      : await options.db
-          .select()
-          .from(textMessages)
-          .where(conditions)
-          .orderBy(desc(textMessages.occurredAt), desc(textMessages.id))
-          .limit(query.limit + 1);
+    const messages = query.aroundCursor
+      ? []
+      : query.afterCursor
+        ? await options.db
+            .select()
+            .from(textMessages)
+            .where(conditions)
+            .orderBy(asc(textMessages.occurredAt), asc(textMessages.id))
+            .limit(query.limit + 1)
+        : await options.db
+            .select()
+            .from(textMessages)
+            .where(conditions)
+            .orderBy(desc(textMessages.occurredAt), desc(textMessages.id))
+            .limit(query.limit + 1);
     const selected = messages.slice(0, query.limit);
-    const visible = query.afterCursor ? selected : selected.reverse();
+    let visible = query.afterCursor ? selected : selected.reverse();
+    let aroundHasEarlier = false;
+    let aroundHasNewer = false;
+    if (query.aroundCursor && cursor) {
+      if (query.workspace && !cursor.workspaces.includes(query.workspace))
+        throw new AppError("invalid_request", "Conversation cursor not found.");
+      const olderLimit = Math.floor((query.limit - 1) / 2);
+      const newerLimit = query.limit - olderLimit - 1;
+      const [older, newer] = await Promise.all([
+        options.db
+          .select()
+          .from(textMessages)
+          .where(and(conditions, beforeCondition))
+          .orderBy(desc(textMessages.occurredAt), desc(textMessages.id))
+          .limit(olderLimit + 1),
+        options.db
+          .select()
+          .from(textMessages)
+          .where(and(conditions, afterCondition))
+          .orderBy(asc(textMessages.occurredAt), asc(textMessages.id))
+          .limit(newerLimit + 1),
+      ]);
+      aroundHasEarlier = older.length > olderLimit;
+      aroundHasNewer = newer.length > newerLimit;
+      visible = [...older.slice(0, olderLimit).reverse(), cursor, ...newer.slice(0, newerLimit)];
+    }
     const firstVisible = visible[0];
     const lastVisible = visible.at(-1);
     const hasExtra = messages.length > query.limit;
+    const hasEarlier = query.aroundCursor
+      ? aroundHasEarlier
+      : Boolean((query.afterCursor && firstVisible) || hasExtra);
+    const hasNewer = query.aroundCursor
+      ? aroundHasNewer
+      : Boolean((query.beforeCursor && lastVisible) || (query.afterCursor && hasExtra));
     const receipt =
       cursorId || query.workspace
         ? null
@@ -421,9 +456,8 @@ export function createTextingService(options: Options) {
       connection: publicConnection(row),
       conversationReceipt: receipt,
       currentLocalDateTime: formatTextLocalTime(current, timeZone),
-      earlierCursor:
-        (query.afterCursor && firstVisible) || hasExtra ? (firstVisible?.id ?? null) : null,
-      hasEarlierMessages: Boolean((query.afterCursor && firstVisible) || hasExtra),
+      earlierCursor: hasEarlier ? (firstVisible?.id ?? null) : null,
+      hasEarlierMessages: hasEarlier,
       messages: visible.map((message) => ({
         workspaces: message.workspaces,
         senderKind: message.senderKind ?? (message.direction === "inbound" ? "human" : "system"),
@@ -445,10 +479,7 @@ export function createTextingService(options: Options) {
         status: message.status,
         text: message.body,
       })),
-      newerCursor:
-        (query.beforeCursor && lastVisible) || (query.afterCursor && hasExtra)
-          ? (lastVisible?.id ?? null)
-          : null,
+      newerCursor: hasNewer ? (lastVisible?.id ?? null) : null,
       timeZone,
     };
   }

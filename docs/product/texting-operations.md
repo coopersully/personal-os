@@ -771,3 +771,10 @@ Reply references sit outside message bubbles. An adjacent reply uses a small lin
 without quoting the immediately preceding message; replies to earlier messages show a compact
 external excerpt linking back to the original. System events use subdued text and a timestamp,
 without speaker, bubble, or delivery-status framing.
+
+Messages remains a standalone account-level destination, available in the workspace selector
+and beside Settings in the expanded desktop rail, never as an individual workspace page.
+A Full conversation deep link resolves its owner-scoped message directly in a bounded window
+(up to 100 records, including the anchor), then scrolls and focuses it after rendering.
+Older and newer history remain explicitly paginated; opening an old link never backfills
+all intervening history. Missing, foreign-owner, or out-of-filter anchors cannot reveal messages.

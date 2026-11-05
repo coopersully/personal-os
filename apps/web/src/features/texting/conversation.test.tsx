@@ -224,3 +224,33 @@ it("hides cached history immediately when verification is revoked", async () => 
   expect(await screen.findByText("Connect your agent to unlock Messages")).toBeVisible();
   expect(screen.queryByText("Saved private message")).not.toBeInTheDocument();
 });
+
+it("retrieves a deep-linked old message directly and focuses it after rendering", async () => {
+  const scroll = vi.fn();
+  HTMLElement.prototype.scrollIntoView = scroll;
+  mocks.getTextConversation.mockImplementation((_tz, query) =>
+    Promise.resolve({
+      messages: query.afterCursor
+        ? [message("newer", "outbound", "Later reply")]
+        : [message("old-target", "inbound", "Original mixed request")],
+      hasEarlierMessages: false,
+      earlierCursor: null,
+      newerCursor: query.afterCursor ? null : "old-target",
+    }),
+  );
+  mount(<TextConversation userId="one" timeZone="UTC" />, "/messages#message-old-target");
+  await screen.findByText("Original mixed request");
+  expect(mocks.getTextConversation).toHaveBeenCalledExactlyOnceWith("UTC", {
+    limit: 50,
+    aroundCursor: "old-target",
+  });
+  expect(document.getElementById("message-old-target")).toHaveFocus();
+  expect(scroll).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Load newer messages" }));
+  expect(await screen.findByText("Later reply")).toBeVisible();
+  expect(mocks.getTextConversation).toHaveBeenLastCalledWith("UTC", {
+    limit: 50,
+    afterCursor: "old-target",
+  });
+  expect(scroll).toHaveBeenCalledOnce();
+});

@@ -3185,7 +3185,22 @@ describe("Personal OS web app", () => {
       within(rail)
         .getAllByRole("link")
         .map((link) => link.getAttribute("aria-label")),
-    ).toEqual(["Today at a Glance", "Calendar", "Tasks", "Mail", "Finances", "Settings"]);
+    ).toEqual([
+      "Today at a Glance",
+      "Calendar",
+      "Tasks",
+      "Mail",
+      "Finances",
+      "Messages",
+      "Settings",
+    ]);
+    expect(within(rail).getByRole("link", { name: "Messages" })).toHaveAttribute(
+      "href",
+      "/messages",
+    );
+    expect(within(rail).getByRole("link", { name: "Messages" })).not.toHaveAttribute(
+      "data-workspace",
+    );
     expect(screen.queryByRole("button", { name: "Switch workspace" })).not.toBeInTheDocument();
     expect(within(rail).getByRole("link", { name: "Today at a Glance" })).toHaveAttribute(
       "aria-current",

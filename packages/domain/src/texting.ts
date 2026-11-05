@@ -235,12 +235,17 @@ export const textConversationQuerySchema = z
   .object({
     workspace: textWorkspaceSchema.optional(),
     afterCursor: z.string().min(1).optional(),
+    aroundCursor: z.string().min(1).optional(),
     beforeCursor: z.string().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(100),
   })
-  .refine((value) => !(value.afterCursor && value.beforeCursor), {
-    message: "Use either afterCursor or beforeCursor, not both.",
-  });
+  .refine(
+    (value) =>
+      [value.afterCursor, value.beforeCursor, value.aroundCursor].filter(Boolean).length <= 1,
+    {
+      message: "Use only one conversation cursor.",
+    },
+  );
 export const textConversationPageSchema = z.object({
   asOf: isoDateTimeSchema,
   connection: textingConnectionSchema,

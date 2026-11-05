@@ -150,6 +150,7 @@ export function ConversationView({
             )}
             <li
               id={`message-${message.id}`}
+              tabIndex={-1}
               aria-label={system ? "System event" : undefined}
               className={cn(
                 "flex min-w-0 flex-col gap-1.5 scroll-mt-24",

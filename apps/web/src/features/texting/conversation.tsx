@@ -1,7 +1,7 @@
 import { ApiClientError } from "@personal-os/api-client";
 import type { TextingAgentRun } from "@personal-os/domain";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { workspaceIds } from "@/components/workspace-identity";
 import { api } from "../../api.js";
@@ -37,6 +37,8 @@ const denied = (error: unknown) =>
   error instanceof ApiClientError && [401, 403].includes(error.status);
 const polling = () => (document.hidden ? false : 10_000);
 
+type HistoryCursor = { aroundCursor?: string; beforeCursor?: string; afterCursor?: string };
+
 type Props = { userId: string; timeZone: string; workspace?: ConversationWorkspace | undefined };
 export function TextConversation(props: Props) {
   const location = useLocation();
@@ -58,6 +60,9 @@ export function TextConversation(props: Props) {
 
 function LiveConversation({ userId, timeZone, workspace }: Props) {
   const mount = useId();
+  const { hash } = useLocation();
+  const target = hash.startsWith("#message-") ? hash.slice("#message-".length) : undefined;
+  const scrolledTarget = useRef<string | undefined>(undefined);
   const client = useQueryClient();
   const agentQueryKey = ["texting-agent", userId, mount];
   const agent = useInfiniteQuery({
@@ -76,17 +81,21 @@ function LiveConversation({ userId, timeZone, workspace }: Props) {
   const status = denied(agent.error) ? undefined : agent.data?.pages[0];
   const chatReady = status?.chatReady === true && !denied(connectionQuery.error);
   const history = useInfiniteQuery({
-    queryKey: ["text-conversation", userId, mount, timeZone, workspace ?? "all"],
+    queryKey: ["text-conversation", userId, mount, timeZone, workspace ?? "all", target],
     enabled: chatReady,
-    initialPageParam: undefined as string | undefined,
+    initialPageParam: (target ? { aroundCursor: target } : {}) as HistoryCursor,
     queryFn: ({ pageParam }) =>
       api.getTextConversation(timeZone, {
         limit: 50,
         ...(workspace ? { workspace } : {}),
-        ...(pageParam ? { beforeCursor: pageParam } : {}),
+        ...pageParam,
       }),
-    getNextPageParam: (page) =>
-      page.hasEarlierMessages ? (page.earlierCursor ?? undefined) : undefined,
+    getNextPageParam: (page): HistoryCursor | undefined =>
+      page.hasEarlierMessages && page.earlierCursor
+        ? { beforeCursor: page.earlierCursor }
+        : undefined,
+    getPreviousPageParam: (page): HistoryCursor | undefined =>
+      page.newerCursor ? { afterCursor: page.newerCursor } : undefined,
     refetchInterval: polling,
   });
   const privateDenied =
@@ -102,6 +111,20 @@ function LiveConversation({ userId, timeZone, workspace }: Props) {
           ).values(),
         ].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id))
       : [];
+  useEffect(() => {
+    if (!target) {
+      scrolledTarget.current = undefined;
+      return;
+    }
+    if (scrolledTarget.current === target || !messages.some((message) => message.id === target))
+      return;
+    const element = document.getElementById(`message-${target}`);
+    if (element) {
+      element.scrollIntoView({ block: "center" });
+      element.focus({ preventScroll: true });
+      scrolledTarget.current = target;
+    }
+  }, [messages, target]);
   const runs = privateDenied
     ? []
     : [
@@ -144,6 +167,15 @@ function LiveConversation({ userId, timeZone, workspace }: Props) {
                 </Button>
               )}
               <ConversationView messages={messages} workspace={workspace} timeZone={timeZone} />
+              {history.hasPreviousPage && (
+                <Button
+                  variant="ghost"
+                  disabled={history.isFetchingPreviousPage}
+                  onClick={() => void history.fetchPreviousPage()}
+                >
+                  Load newer messages
+                </Button>
+              )}
             </>
           )}
           {Boolean(status.pendingCount) && (

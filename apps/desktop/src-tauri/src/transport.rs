@@ -198,6 +198,10 @@ pub async fn send(app: &tauri::AppHandle, request: ApiRequest) -> Result<ApiResp
             crate::wallpaper::settings_changed();
         }
         if request.method != "GET" {
+            if let Some(runtime) = app.try_state::<crate::active_reminders::ActiveReminderRuntime>()
+            {
+                runtime.refresh.notify_one();
+            }
             state.refresh.notify_one();
             if pathname == "/v1/rituals" || pathname.starts_with("/v1/rituals/") {
                 app.state::<crate::ritual::RitualRuntime>()

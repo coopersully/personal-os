@@ -56,3 +56,70 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 }
+
+#[cfg(test)]
+mod active_card_tests {
+    use crate::desktop::DesktopSettings;
+    #[test]
+    fn active_card_preferences_default_validate_and_round_trip() {
+        let mut value: DesktopSettings = serde_json::from_str("{}").unwrap();
+        assert!(value.active_card_interactions.shake);
+        assert!(value.active_card_interactions.snapping);
+        assert!(!value.active_card_interactions.auto_lock);
+        value.active_card_interactions.sensitivity = "high".into();
+        value.active_card_interactions.volume = 0.5;
+        value.validate().unwrap();
+        let restored: DesktopSettings =
+            serde_json::from_value(serde_json::to_value(&value).unwrap()).unwrap();
+        assert_eq!(restored.active_card_interactions.sensitivity, "high");
+        assert_eq!(restored.active_card_interactions.volume, 0.5);
+        assert_eq!(restored.notifications.preview, value.notifications.preview);
+        for volume in [-0.1, 1.1, f64::NAN] {
+            value.active_card_interactions.volume = volume;
+            assert!(value.validate().is_err());
+        }
+        value.active_card_interactions.volume = 0.35;
+        value.active_card_interactions.sensitivity = "invalid".into();
+        assert!(value.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod expanded_active_card_tests {
+    use crate::desktop::DesktopSettings;
+    #[test]
+    fn old_preferences_keep_values_and_new_fields_validate() {
+        let mut settings: DesktopSettings =
+            serde_json::from_str(r#"{"activeCardInteractions":{"shake":false,"volume":0.7}}"#)
+                .unwrap();
+        assert!(!settings.active_card_interactions.shake);
+        assert_eq!(settings.active_card_interactions.volume, 0.7);
+        assert_eq!(settings.active_card_interactions.anchor, "top-right");
+        assert_eq!(settings.active_card_interactions.magnet, "eager");
+        assert!(!settings.active_card_interactions.respect_focus);
+        settings.active_card_interactions.starting_display =
+            "11111111-2222-3333-4444-555555555555".into();
+        settings.active_card_interactions.edge_spacing = 40.0;
+        settings.active_card_interactions.completion_volume = 0.0;
+        settings.validate().unwrap();
+        let value = serde_json::to_value(&settings).unwrap();
+        assert_eq!(value["activeCardInteractions"]["edgeSpacing"], 40.0);
+        for (field, invalid) in [
+            ("edgeSpacing", serde_json::json!(41)),
+            ("arrivalVolume", serde_json::json!(-0.1)),
+            ("completionVolume", serde_json::json!(1.1)),
+            ("interactionVolume", serde_json::json!(-1)),
+            ("anchor", serde_json::json!("invalid")),
+            ("magnet", serde_json::json!("invalid")),
+            ("textScale", serde_json::json!("invalid")),
+            ("titleLines", serde_json::json!("invalid")),
+            ("countdown", serde_json::json!("invalid")),
+            ("startingDisplay", serde_json::json!("fake-display")),
+        ] {
+            let mut candidate = value.clone();
+            candidate["activeCardInteractions"][field] = invalid;
+            let mut candidate: DesktopSettings = serde_json::from_value(candidate).unwrap();
+            assert!(candidate.validate().is_err(), "{field}");
+        }
+    }
+}

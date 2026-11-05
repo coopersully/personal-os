@@ -11,11 +11,19 @@ const api = vi.hoisted(() => ({
   listTaskLists: vi.fn(),
   listTaskProjects: vi.fn(),
   restoreTask: vi.fn(),
+  createTask: vi.fn(),
+  getActiveReminderPreferences: vi.fn(),
   getWorkspaceSettings: vi.fn(),
 }));
 vi.mock("../../api", () => ({ api, errorMessage: (error: Error) => error.message }));
 beforeEach(() => {
   vi.clearAllMocks();
+  api.getActiveReminderPreferences.mockResolvedValue({
+    defaultActiveReminder: false,
+    defaultTaskActiveReminder: true,
+    defaultReminderActiveReminder: false,
+    revision: 1,
+  });
   api.getWorkspaceSettings.mockResolvedValue({
     workspace: "tasks",
     revision: 0,
@@ -153,4 +161,15 @@ it("waits for a saved capture destination instead of locking in Inbox", async ()
     preferences: { defaultCaptureListId: "work" },
   });
   await waitFor(() => expect(screen.getByRole("combobox", { name: "List" })).toHaveValue("work"));
+});
+
+it("shows the Task account default and submits inheritance without an explicit item flag", async () => {
+  api.createTask.mockResolvedValue({ id: "created" });
+  const { user } = setup("/tasks");
+  await screen.findByRole("option", { name: "Use account default (on)" });
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "List" })).toHaveValue("work"));
+  await user.type(screen.getByRole("textbox", { name: "Task" }), "Inherited task");
+  await user.click(screen.getByRole("button", { name: "Create task" }));
+  await waitFor(() => expect(api.createTask).toHaveBeenCalled());
+  expect(api.createTask.mock.calls[0]?.[0]).not.toHaveProperty("activeReminder");
 });

@@ -8,7 +8,7 @@ let package = Package(
     .target(
       name: "PersonalOsNative",
       linkerSettings: [
-        .linkedFramework("AppKit"), .linkedFramework("SwiftUI"),
+        .linkedFramework("Intents"), .linkedFramework("AppKit"), .linkedFramework("SwiftUI"),
         .linkedFramework("ServiceManagement"), .linkedFramework("Security"),
         .linkedFramework("UserNotifications"), .linkedFramework("WidgetKit"),
       ]), .testTarget(name: "PersonalOsNativeTests", dependencies: ["PersonalOsNative"]),

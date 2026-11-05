@@ -23,6 +23,11 @@ test("real Git release reservations retry, skip docs, include cumulative changes
     mkdirSync(bin);
     execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
     git("init", "-b", "main");
+    // Detached maintenance can recreate objects/pack while fixture cleanup removes it.
+    for (const directory of [repo, remote]) {
+      execFileSync("git", ["-C", directory, "config", "maintenance.auto", "false"]);
+      execFileSync("git", ["-C", directory, "config", "gc.auto", "0"]);
+    }
     git("config", "user.name", "Test");
     git("config", "user.email", "test@example.com");
     git("remote", "add", "origin", remote);
@@ -98,6 +103,6 @@ test("real Git release reservations retry, skip docs, include cumulative changes
     assert.equal(invoke(second).tag, "v0.2.0");
     assert.equal(git("rev-parse", "origin/main"), second);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

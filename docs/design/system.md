@@ -871,6 +871,12 @@ Explicit URL choices remain temporary overrides. Device-specific shell geometry 
 Tasks can save a default capture list and whether completed tasks appear in container views; explicit
 placement, lifecycle views, and URL filters take precedence.
 
+## Sound outside the app
+
+Desktop overlays, active cards, pets, and rituals must use the shared Earshot
+sound pack and interaction semantics in [feedback.md](feedback.md#shared-desktop-sound-pack).
+Treat audio, motion, mute, and volume as shared frontend behavior, not feature-specific decoration.
+
 ### Card surfaces and action hierarchy
 
 Nested shadcn Items use the secondary surface, visibly distinct from their containing Card

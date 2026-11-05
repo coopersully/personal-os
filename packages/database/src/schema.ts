@@ -2160,6 +2160,22 @@ export const calendarReviews = pgTable(
   ],
 );
 
+export const activeReminderPreferences = pgTable(
+  "active_reminder_preferences",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    defaultActiveReminder: boolean("default_active_reminder").notNull().default(false),
+    // NULL inherits the legacy shared default until this account next saves.
+    defaultTaskActiveReminder: boolean("default_task_active_reminder"),
+    defaultReminderActiveReminder: boolean("default_reminder_active_reminder"),
+    revision: integer("revision").notNull(),
+    ...timestamps,
+  },
+  (table) => [check("active_reminder_preferences_revision_check", sql`${table.revision} > 0`)],
+);
+
 export const reminders = pgTable(
   "reminders",
   {
@@ -2167,6 +2183,7 @@ export const reminders = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    activeReminder: boolean("active_reminder").notNull().default(false),
     title: text("title").notNull(),
     notes: text("notes"),
     dueAt: timestamp("due_at", { withTimezone: true }),
@@ -2193,6 +2210,11 @@ export const reminders = pgTable(
     ...timestamps,
   },
   (table) => [
+    index("reminders_active_owner_due_idx")
+      .on(table.userId, table.dueAt, table.id)
+      .where(
+        sql`${table.activeReminder} = true AND ${table.completedAt} IS NULL AND ${table.deletedAt} IS NULL`,
+      ),
     index("reminders_user_due_idx").on(table.userId, table.completedAt, table.dueAt),
     index("reminders_user_task_idx").on(table.userId, table.kind, table.status, table.scheduledAt),
     index("reminders_task_list_idx")

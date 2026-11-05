@@ -37,6 +37,8 @@ import {
   connectorAuthorizationOutcomeSchema,
   connectorSyncResultSchema,
 } from "@personal-os/domain";
+import { createActiveReminderApiClient } from "./features/active-reminders.js";
+
 import { createAgentAccountApi } from "./features/agent-accounts.js";
 import { createAssistantApiClient } from "./features/assistant.js";
 import { createAutomationHostApi } from "./features/automation-hosts.js";
@@ -232,6 +234,7 @@ export function createApiClient(options: ClientOptions) {
     ...createDesktopReleaseApiClient(request),
     ...createMailApiClient(request, toQuery),
     ...createMailStewardshipApiClient(request),
+    ...createActiveReminderApiClient(request, toQuery),
     ...createReminderApiClient(request, toQuery),
     ...createTaskApiClient(request, toQuery),
     ...createTaskWorkspaceApiClient(request, toQuery),

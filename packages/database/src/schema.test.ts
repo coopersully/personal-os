@@ -517,6 +517,7 @@ describe("database schema contracts", () => {
       "0121_oauth_access_token_rotations",
       "0122_finance_reimbursement_relationship_generation",
       "0123_finance_maintenance_execution_binding",
+      "0124_active_reminders",
       "0124_finance_transaction_coverage",
       "0125_finance_bypass_confirmation_provenance",
       "0126_finance_spending_list_default",
@@ -525,6 +526,9 @@ describe("database schema contracts", () => {
       "0129_finance_review_batches",
       "0130_finance_provider_account_identity",
       "0131_finance_institution_branding",
+      "0131_active_reminders_reconcile",
+      "0132_active_reminder_creation_defaults",
+      "0133_finance_branding_reconcile",
     ]);
   });
 

@@ -1,5 +1,64 @@
 # nohmi — Implementation Log
 
+## 2026-11-05 — Active cards migration catchup (branch implementation)
+
+Catching the Active cards branch up with Finance institution branding preserves both published
+0131 histories and the independent-default migration unchanged. The append-only 0133 expansion
+adds missing nullable branding columns for preview databases already past Finance's timestamp;
+existing branding, reminder flags and preference revisions remain unchanged. Historical migration
+fixtures cover main, the original active-reminder branch and the later independent-default branch.
+
+## 2026-11-02 — Active cards settings (branch implementation)
+
+The Active cards Settings destination now owns independent account creation defaults and real
+macOS presentation controls, with an interactive synthetic preview on desktop/mobile. Preferences
+use owner/revision or native server/account fencing, serialized patch saves, retained failed drafts
+and Sonner error/retry feedback. An append-only migration preserves both legacy default values.
+Native placement, grouping, appearance, countdown and Earshot levels respond to stored settings.
+Focus waiting is explicitly unavailable in the current build: its required communication capability
+is unconfigured, and reminder-only eligibility remains unverified. The guarded public API retains
+conservative unknown-state behavior; settings cannot enable waiting or request permission, but can
+clear an existing wait preference. Manual pause is the supported control.
+General screen-sharing detection is unavailable; manual pause remains explicit. The old editing
+surfaces link to the canonical page. Production preview routing includes the service-worker case.
+This is unmerged source work; signed installed-client, physical hardware and release acceptance
+remain separate from automated source checks.
+
+## 2026-10-22 — Active reminders implemented on a development branch
+
+The `cooper/active-reminders` branch adds a resolved active-reminder flag to tasks and reminders,
+a revision-bound account default for new items, and a device pause switch. Historical items remain
+off. The separate owner-bound desktop feed pages beyond the daily brief and pet limits. macOS
+routes eligible due items to independent compact, draggable and resizable native cards while preserving ordinary system
+delivery when away; an incomplete item can appear after return. Completion waits for the existing
+API's revision-bound acknowledgement. The October 23 presentation refinement removes the extra
+header, follows the task/reminder checkbox, medium-title and overdue-date styling, shares the pet's
+16 anchor guides, uses the pet's measured Dock geometry, and preserves an attached anchor during resizing
+and Dock changes. The whole card accepts dragging, checkboxes align at the top, and resizing has no
+drawn corner grip. The later refinement filters occupied anchors, offers card-sized perimeter and
+neighbor drop slots, joins touching cards with flat corners/dividers, and restores corners when
+pulled apart. A shared live countdown retains local date/time, the checkbox aligns to the first
+baseline, and native menus retain pending/stale completion guards. The completed native port adds pair-edge locks, locked group movement, held-shake gathering using pet sensitivity, footprint slots, partial-join separators and accessible seam controls. Minimum-size reset preserves contact topology and edge docking. Eight stable context commands include durable 15-minute snooze and live AppKit Shift group alternatives. Device-local movement, sounds/volume and reduced-motion settings preserve existing account defaults and notification delivery. Reproducible bundled Earshot audio and shared reicon artwork are used by native cards. Cached interaction
+sounds and short feedback animations avoid per-frame and per-tick playback. Arrival and acknowledged
+completion use brief pop effects and sounds, with muted and reduced-motion behavior.
+
+Native delivery prepares a delayed OS fallback before presentation and cancels it only after the
+card appears and its receipt is persisted. Removed feed items receive authoritative source reads
+before retirement or handoff to ordinary delivery. Account/server generations fence refreshes and
+actions. Settings explain the away/return behavior and that cards can appear during macOS Focus.
+
+Focused persistence, API, browser and native tests cover the implementation. Development-host
+smoke established background presentation, lock-state detection, process-death fallback, actual
+full-screen visibility and saved dragging with disposable synthetic items. See the
+[native evidence and remaining certification limits](../superpowers/specs/2026-10-22-active-reminders-native-evidence.md).
+Physical display sleep, the release-signed app, minimum-supported macOS and a real installed-client
+API journey still need release certification. This records branch-local implementation, not a
+merged or deployed release. The native parity suite passes (77 Rust/147 Swift), as do type checks,
+lint and production builds. Browser acceptance records 151 passed, two skipped and one Finance
+chat-history failure; the active-reminder desktop/mobile cases pass. The full verifier remains
+unsuccessful because of the recorded Finance/database-test failures, so this branch is not release
+certified. The native evidence document records exact boundaries and failures.
+
 ## 2026-10-22 — Native settings and populated source rows
 
 - Shipping review added audited profile-zone reconciliation, serialized first/last-name edits,

@@ -9,6 +9,7 @@ import {
   UserIcon,
 } from "@/components/icons";
 import { ProfileRow, ProfileSection } from "./profile-rows";
+import { settingsPath } from "./settings-routes";
 
 const icons: Record<string, Icon> = {
   setup: SparklesIcon,
@@ -42,7 +43,7 @@ export function RelatedSettings({
                 <Icon weight="Filled" />
               </span>
             }
-            to={`/settings?${new URLSearchParams({ section: item.section, ...(item.workspace ? { workspace: item.workspace } : {}) })}`}
+            to={`${settingsPath(item.section)}${item.workspace ? `&workspace=${encodeURIComponent(item.workspace)}` : ""}`}
           />
         );
       })}

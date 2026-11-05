@@ -630,6 +630,96 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/access-tokens/{id}": {
         delete: { security, responses: { 204: { description: "Agent token revoked" } } },
       },
+      "/v1/active-reminders/preferences": {
+        get: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          responses: {
+            200: {
+              description:
+                "Independent account creation defaults and revision. The legacy default is true only when both defaults are true.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: [
+                      "defaultActiveReminder",
+                      "defaultTaskActiveReminder",
+                      "defaultReminderActiveReminder",
+                      "revision",
+                    ],
+                    properties: {
+                      defaultActiveReminder: { type: "boolean", deprecated: true },
+                      defaultTaskActiveReminder: { type: "boolean" },
+                      defaultReminderActiveReminder: { type: "boolean" },
+                      revision: { type: "integer", minimum: 0 },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        patch: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      required: [
+                        "defaultTaskActiveReminder",
+                        "defaultReminderActiveReminder",
+                        "expectedRevision",
+                      ],
+                      additionalProperties: false,
+                      properties: {
+                        defaultTaskActiveReminder: { type: "boolean" },
+                        defaultReminderActiveReminder: { type: "boolean" },
+                        expectedRevision: { type: "integer", minimum: 0 },
+                      },
+                    },
+                    {
+                      type: "object",
+                      description: "Legacy writes set both creation defaults.",
+                      required: ["defaultActiveReminder", "expectedRevision"],
+                      additionalProperties: false,
+                      properties: {
+                        defaultActiveReminder: { type: "boolean" },
+                        expectedRevision: { type: "integer", minimum: 0 },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: "Saved active reminder preference" },
+            409: { description: "Preference revision conflict" },
+          },
+        },
+      },
+      "/v1/desktop/active-reminders": {
+        get: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          description:
+            "Human-session-only paginated inventory of opted-in incomplete tasks/reminders, including all overdue ages and the next 24 hours. Cursors are owner-bound and expire after five minutes.",
+          parameters: [
+            { name: "cursor", in: "query", schema: { type: "string" } },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 100, default: 100 },
+            },
+          ],
+          responses: {
+            200: { description: "Active reminder candidate page with source concurrency tokens" },
+          },
+        },
+      },
       "/v1/desktop/activity": {
         get: {
           security: [{ cookieAuth: [] }, { sessionAuth: [] }],

@@ -4249,6 +4249,10 @@ Create one reminder immediately. dueAt is a due or attention time; it does not s
 {
   "type": "object",
   "properties": {
+    "activeReminder": {
+      "description": "Show a persistent Mac card when due. Omission inherits the account creation default.",
+      "type": "boolean"
+    },
     "dueAt": {
       "default": null,
       "anyOf": [
@@ -4432,6 +4436,9 @@ Create one executable Task, optionally organized in a List and Project with due 
 {
   "type": "object",
   "properties": {
+    "activeReminder": {
+      "type": "boolean"
+    },
     "dueAt": {
       "default": null,
       "anyOf": [
@@ -11757,19 +11764,20 @@ Read historical provider evidence for up to 20 exact owned native Finance transa
   "type": "object",
   "properties": {
     "transactionIds": {
+      "minItems": 1,
+      "maxItems": 20,
       "type": "array",
       "items": {
         "type": "string",
         "format": "uuid",
         "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-      },
-      "minItems": 1,
-      "maxItems": 20
+      }
     }
   },
   "required": [
     "transactionIds"
   ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false
 }
 ```
@@ -18118,6 +18126,9 @@ Change one reminder after reading it. Pass expectedUpdatedAt from get_reminder s
 {
   "type": "object",
   "properties": {
+    "activeReminder": {
+      "type": "boolean"
+    },
     "dueAt": {
       "anyOf": [
         {
@@ -18218,6 +18229,9 @@ Update one loaded Task's executable content or timing. Lifecycle changes use com
 {
   "type": "object",
   "properties": {
+    "activeReminder": {
+      "type": "boolean"
+    },
     "dueAt": {
       "anyOf": [
         {

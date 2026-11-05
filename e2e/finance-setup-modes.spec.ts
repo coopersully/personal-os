@@ -164,7 +164,12 @@ test.describe("durable Finance manual setup", () => {
       await chat.getByLabel("Message", { exact: true }).fill(message);
       await expect(chat.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
       await chat.getByRole("button", { name: "Send message", exact: true }).click();
-      await expect(chat.getByText(message, { exact: true })).toBeVisible();
+      // The composer still contains the text until the server confirms persistence.
+      await expect(
+        chat
+          .getByRole("article", { name: "Your message", exact: true })
+          .getByText(message, { exact: true }),
+      ).toBeVisible();
       await expect
         .poll(async () =>
           (await human.getFinanceConversationHistory()).messages.map((item) => item.text),

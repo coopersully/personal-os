@@ -82,11 +82,14 @@ const reminderFieldsSchema = z.object({
   priority: reminderPrioritySchema.default("medium"),
 });
 
-export const createReminderInputSchema = reminderFieldsSchema;
+export const createReminderInputSchema = reminderFieldsSchema.extend({
+  activeReminder: z.boolean().optional(),
+});
 export type CreateReminderInput = z.infer<typeof createReminderInputSchema>;
 
 export const updateReminderInputSchema = z
   .object({
+    activeReminder: z.boolean().optional(),
     expectedUpdatedAt: isoDateTimeSchema.optional(),
     title: z.string().trim().min(1).max(240).optional(),
     notes: z.string().trim().max(10_000).nullable().optional(),
@@ -111,6 +114,7 @@ export const completeReminderInputSchema = reminderRevisionInputSchema.extend({
 export type CompleteReminderInput = z.infer<typeof completeReminderInputSchema>;
 
 export const reminderSchema = reminderFieldsSchema.extend({
+  activeReminder: z.boolean().default(false),
   id: idSchema,
   completedAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,

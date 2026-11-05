@@ -26,6 +26,33 @@ const fields = (
   }));
 
 export const settingsFields: SettingsField[] = [
+  ...fields("active-cards", [
+    ["New tasks", "New tasks", "active default creation"],
+    ["New reminders", "New reminders", "active default creation"],
+    ["Show active cards on this Mac", "Show active cards on this Mac", "enable pause"],
+    ["Return with unfinished cards", "Return with unfinished cards", "away notification"],
+    ["When Focus is on", "cards-focus", "interruptions"],
+    ["Start on", "cards-monitor", "monitor display"],
+    ["Starting position", "cards-anchor", "active reminder card anchor edges"],
+    ["Preview Dock position", "cards-dock", "left right bottom"],
+    ["Edge spacing", "cards-spacing", "padding distance"],
+    ["Remember card positions", "Remember card positions", "layout"],
+    ["Snap to edges and other cards", "Snap to edges and other cards", "placement"],
+    ["Snap strength", "cards-magnet", "magnet eager gentle"],
+    ["Show placement slots", "Show placement slots", "guides"],
+    ["Lock new joins automatically", "Lock new joins automatically", "grouping"],
+    ["Shake to gather", "Shake to gather", "stack"],
+    ["Shake sensitivity", "cards-sensitivity", "gather stack"],
+    ["Play card sounds", "Play card sounds", "earshot mute"],
+    ["Overall volume", "cards-volume", "earshot sounds"],
+    ["New card sound", "cards-arrivalVolume", "arrival volume"],
+    ["Completion sound", "cards-completionVolume", "volume"],
+    ["Movement & grouping sound", "cards-interactionVolume", "volume"],
+    ["Reduce motion", "Reduce motion", "animation accessibility"],
+    ["Text size", "cards-textScale", "appearance font scale"],
+    ["Title lines", "cards-titleLines", "appearance wrapping compact"],
+    ["Countdown detail", "cards-countdown", "due time seconds"],
+  ]),
   ...fields("finances", [
     ["Transaction view", "financeTransactionView", "table cards saved default"],
     [
@@ -256,6 +283,11 @@ export const settingsFields: SettingsField[] = [
     ["Show in quick access", "Show in quick access", "workspace shortcuts"],
   ]),
   ...fields("notifications", [
+    [
+      "Pause active reminders on this Mac",
+      "Pause active reminders on this Mac",
+      "active reminder pause overlay card",
+    ],
     ["Enable notifications", "Enable notifications", "alerts"],
     ["Play notification sounds", "Play notification sounds", "audio mute"],
     ["Show message previews", "Show message previews", "privacy"],

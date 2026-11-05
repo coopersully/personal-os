@@ -80,6 +80,7 @@ export function serializeAttentionItem(row: AttentionItemRow): AttentionItem {
 
 export function serializeReminder(row: ReminderRow): Reminder {
   return {
+    activeReminder: row.activeReminder,
     completedAt: row.completedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     dueAt: row.dueAt?.toISOString() ?? null,
@@ -104,6 +105,7 @@ export function serializeTask(row: ReminderRow): Task {
     throw new Error("Cannot serialize a Task without canonical lifecycle, List, and revision.");
   }
   return {
+    activeReminder: row.activeReminder,
     cancelledAt: row.taskCancelledAt?.toISOString() ?? null,
     completedAt: row.completedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),

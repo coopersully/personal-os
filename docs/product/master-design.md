@@ -567,6 +567,44 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 
+The macOS companion implements active cards for timed Tasks and Reminders. Each item's
+`activeReminder` flag controls its own compact, persistent, draggable and resizable card. The
+first-class **Active cards** Settings destination owns independent account defaults for new Tasks
+and Reminders, both initially off; existing items retain their flags. Legacy shared defaults retain
+their values during migration. Account defaults are editable on browser/mobile; device controls
+save only through the authenticated desktop bridge on that Mac. Tasks and Notifications link here
+instead of duplicating editable preferences.
+
+All due active items appear independently without pagination or a visible-card cap. Cards start
+at minimum size; completing one reclaims its area while siblings retain placement. Dock-aware
+perimeter/neighbor slots exclude occupied anchors and preview full card footprints. Touching cards
+flatten contacting corners with one divider. Pair locks, Shift group actions, locked group dragging,
+shake gathering, and group-preserving size reset are implemented natively. Exact local due times
+remain visible alongside configurable minute/second countdowns and title wrapping/text size.
+
+Device preferences control availability, return behavior, starting display/anchor, spacing,
+position memory, snapping/guides/magnet strength, grouping/shake sensitivity, cached Earshot master
+and semantic volumes, and reduced motion. A sample-only interactive preview shows those choices
+without creating, completing, snoozing, or moving real records. Browser device controls are clearly
+preview-only; on the Mac they persist. A simulated Dock changes only the preview, never macOS.
+
+While away, ordinary notifications continue and unfinished cards return only after fresh source
+confirmation. Completion waits for authoritative acknowledgement. Cards preserve notification
+source selection, permissions, quiet hours and preview privacy. By default cards can appear during
+Focus. Optional waiting requires legitimately configured public macOS Focus sharing and explicit
+authorization; its signal describes notification silencing for this app, not every system Focus mode.
+The current build leaves it unavailable because the required capability is unconfigured and
+task/reminder-only eligibility is unverified. Manual pause remains available; a stored wait preference
+can be cleared. On/unknown status keeps overlays hidden without settling items, and return requires
+fresh material. The interface must distinguish configuration, authorization and shared status. No general screen-sharing
+detector is claimed: pause cards manually before sharing private material. Card menus cannot turn
+individual items inactive. Quit, sleep and native-process lifecycle limits below still apply.
+
+This describes source implementation, not a production release or signed-app certification. See
+[Desktop background](../design/pages/desktop-background.md) and
+[native evidence](../superpowers/specs/2026-10-22-active-reminders-native-evidence.md) for delivery
+safeguards and the remaining release-equivalence/hardware checks.
+
 Closing the main desktop window keeps enabled pet, routine presentation, and notification
 refresh active in the menu-bar process. Explicit **Quit nohmi** stops that process until the next
 launch; it does not create a separate companion that survives Quit. Already scheduled operating

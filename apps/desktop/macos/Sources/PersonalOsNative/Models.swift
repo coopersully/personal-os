@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-struct NotificationPreferences: Codable {
+struct NotificationPreferences: Codable, Equatable {
   var enabled = false
   var tasks = true
   var reminders = true
@@ -15,6 +15,61 @@ struct NotificationPreferences: Codable {
   var mailAccountIds: [String] = []
   var calendarIds: [String] = []
 }
+/// Device-local settings shared with the WidgetKit snapshot reader.
+struct ActiveReminderInteractions: Codable, Equatable {
+  var shake = true
+  var sensitivity = "medium"
+  var snapping = true
+  var guides = true
+  var autoLock = false
+  var sounds = true
+  var volume = 0.35
+  var reducedMotion = false
+  var returnCards = true
+  var startingDisplay: String = "pointer"
+  var anchor: String = "top-right"
+  var edgeSpacing: Double = 12
+  var rememberPositions: Bool = true
+  var magnet: String = "eager"
+  var arrivalVolume: Double = 1
+  var completionVolume: Double = 1
+  var interactionVolume: Double = 1
+  var textScale: String = "standard"
+  var titleLines: String = "one"
+  var respectFocus = false
+  var countdown: String = "minutes"
+  init() {}
+  enum CodingKeys: String, CodingKey {
+    case respectFocus, shake, sensitivity, snapping, guides, autoLock, sounds, volume,
+      reducedMotion, returnCards, startingDisplay, anchor, edgeSpacing, rememberPositions, magnet,
+      arrivalVolume, completionVolume, interactionVolume, textScale, titleLines, countdown
+  }
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    respectFocus = try values.decodeIfPresent(Bool.self, forKey: .respectFocus) ?? false
+    shake = try values.decodeIfPresent(Bool.self, forKey: .shake) ?? true
+    sensitivity = try values.decodeIfPresent(String.self, forKey: .sensitivity) ?? "medium"
+    snapping = try values.decodeIfPresent(Bool.self, forKey: .snapping) ?? true
+    guides = try values.decodeIfPresent(Bool.self, forKey: .guides) ?? true
+    autoLock = try values.decodeIfPresent(Bool.self, forKey: .autoLock) ?? false
+    sounds = try values.decodeIfPresent(Bool.self, forKey: .sounds) ?? true
+    volume = try values.decodeIfPresent(Double.self, forKey: .volume) ?? 0.35
+    reducedMotion = try values.decodeIfPresent(Bool.self, forKey: .reducedMotion) ?? false
+    returnCards = try values.decodeIfPresent(Bool.self, forKey: .returnCards) ?? true
+    startingDisplay = try values.decodeIfPresent(String.self, forKey: .startingDisplay) ?? "pointer"
+    anchor = try values.decodeIfPresent(String.self, forKey: .anchor) ?? "top-right"
+    edgeSpacing = try values.decodeIfPresent(Double.self, forKey: .edgeSpacing) ?? 12
+    rememberPositions = try values.decodeIfPresent(Bool.self, forKey: .rememberPositions) ?? true
+    magnet = try values.decodeIfPresent(String.self, forKey: .magnet) ?? "eager"
+    arrivalVolume = try values.decodeIfPresent(Double.self, forKey: .arrivalVolume) ?? 1
+    completionVolume = try values.decodeIfPresent(Double.self, forKey: .completionVolume) ?? 1
+    interactionVolume = try values.decodeIfPresent(Double.self, forKey: .interactionVolume) ?? 1
+    textScale = try values.decodeIfPresent(String.self, forKey: .textScale) ?? "standard"
+    titleLines = try values.decodeIfPresent(String.self, forKey: .titleLines) ?? "one"
+    countdown = try values.decodeIfPresent(String.self, forKey: .countdown) ?? "minutes"
+  }
+}
+
 struct NativeSettings: Codable {
   var serverUrl: String
   var launchAtLogin: Bool
@@ -33,6 +88,8 @@ struct NativeSettings: Codable {
   var petSleepAfterSeconds: Double? = nil
   var petWorkspaces: [String]
   var widgetWorkspaces: [String]?
+  var activeRemindersEnabled: Bool? = nil
+  var activeCardInteractions: ActiveReminderInteractions? = nil
   var notifications: NotificationPreferences
 }
 struct WorkItem: Codable, Identifiable {

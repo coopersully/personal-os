@@ -767,3 +767,7 @@ inspect populated records and actual native controls too.
 
 Native UI inspection does not certify signed widget installation, OS permission
 delivery, login registration, or production/provider operation.
+
+Rows with a fixed compact control may declare `Field controlWidth="compact"` so the label uses
+the remaining width at every container size. This is explicit row composition, not descendant
+inspection, and preserves the shared rhythm, separators, control alignment and domain save contract.

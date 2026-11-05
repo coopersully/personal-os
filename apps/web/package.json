@@ -9,7 +9,8 @@
     "dev:container": "pnpm dev",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "public:generate": "tsx --tsconfig tsconfig.json scripts/generate-public-documents.tsx"
+    "public:generate": "tsx --tsconfig tsconfig.json scripts/generate-public-documents.tsx",
+    "preview:active-cards": "tsx scripts/preview-active-card-settings.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

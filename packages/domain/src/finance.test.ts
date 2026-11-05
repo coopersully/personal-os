@@ -172,6 +172,13 @@ describe("canonical Finance contracts", () => {
       mode: "write",
       requiredScope: "finances:write",
     });
+    expect(financeCapabilityManifest).toContainEqual({
+      capability: "ledger.provider_transaction_evidence",
+      apiOperation: "readFinanceProviderTransactionEvidence",
+      mcpTool: "read_finance_provider_transaction_evidence",
+      mode: "read",
+      requiredScope: "finances:read",
+    });
     expect(new Set(financeCapabilityManifest.map((item) => item.capability)).size).toBe(
       financeCapabilityManifest.length,
     );

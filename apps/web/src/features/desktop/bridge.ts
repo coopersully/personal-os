@@ -33,6 +33,37 @@ export type DesktopSettings = {
   petSleepAfterSeconds?: number;
   petWorkspaces: string[];
   widgetWorkspaces: string[];
+  activeRemindersEnabled?: boolean;
+  activeCardInteractions?: {
+    shake: boolean;
+    sensitivity: "low" | "medium" | "high";
+    snapping: boolean;
+    guides: boolean;
+    autoLock: boolean;
+    sounds: boolean;
+    volume: number;
+    reducedMotion: boolean;
+    respectFocus: boolean;
+    returnCards: boolean;
+    startingDisplay: string;
+    anchor:
+      | "top-left"
+      | "top-center"
+      | "top-right"
+      | "center"
+      | "bottom-left"
+      | "bottom-center"
+      | "bottom-right";
+    edgeSpacing: number;
+    rememberPositions: boolean;
+    magnet: "gentle" | "eager";
+    arrivalVolume: number;
+    completionVolume: number;
+    interactionVolume: number;
+    textScale: "small" | "standard" | "large";
+    titleLines: "one" | "two";
+    countdown: "minutes" | "seconds";
+  };
   notifications: NotificationSettings;
 };
 export type DesktopStatus = {
@@ -45,6 +76,14 @@ export type DesktopStatus = {
     error?: string;
     accessibilityPermission?: boolean;
     dockGeometryAvailable?: boolean;
+    activeRemindersAvailable?: boolean;
+    focusAvailable?: boolean;
+    focusUnavailableReason?: string;
+    focusPermission?: "authorized" | "denied" | "restricted" | "notDetermined" | "unknown";
+    focusStatus?: "on" | "off" | "unknown";
+    focusPermissionPending?: boolean;
+    displays?: { id: string; label: string; isPrimary: boolean }[];
+    activeRemindersError?: string;
     notificationPermission?: string;
     notificationPermissionPending?: boolean;
     testNotificationStatus?: "idle" | "sending" | "accepted" | "failed";
@@ -123,6 +162,9 @@ export const desktopFetch: typeof fetch = async (input, init) => {
         path: `${url.pathname}${url.search}`,
         method: request.method,
         body: requestBody,
+        ...(request.headers.has("X-Nohmi-Account")
+          ? { expectedAccountId: request.headers.get("X-Nohmi-Account") }
+          : {}),
       },
     }),
     request.signal,

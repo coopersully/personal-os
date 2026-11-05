@@ -31,12 +31,17 @@ import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import {
+  ActiveReminderField,
+  activeReminderInput,
+} from "../notifications/active-reminder-settings.js";
 import { useWorkspacePreferences } from "../workspace-settings/preferences";
 import { taskCaptureList } from "./capture-default";
 import { TaskCreationProgress } from "./creation-progress";
 import { listAllTaskLists, listAllTaskProjects } from "./page.js";
 
 type TaskFields = {
+  activeReminder?: boolean;
   dueAt: string | null;
   estimateMinutes: number | null;
   notes: string | null;
@@ -223,6 +228,7 @@ export function TaskDialog({
     const estimate = String(form.get("estimateMinutes") ?? "");
     save.mutate({
       fields: {
+        ...activeReminderInput(form),
         dueAt: dueAt ? dateTimeLocalToIso(dueAt, user.planningTimezone) : null,
         estimateMinutes: estimate ? Number(estimate) : null,
         notes: nullable(form.get("notes")),
@@ -351,6 +357,11 @@ export function TaskDialog({
                     </NativeSelect>
                   </Field>
                 </FieldGroup>
+                <ActiveReminderField
+                  kind="task"
+                  ownerId={user.id}
+                  {...(task ? { value: task.activeReminder ?? false } : {})}
+                />
                 <FieldGroup className="grid gap-5 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="task-due-at">Deadline</FieldLabel>

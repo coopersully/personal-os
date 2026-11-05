@@ -100,6 +100,12 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       annotations: annotations.create,
       description: `Create one reminder immediately. dueAt is a due or attention time; it does not schedule a separate notification. Include an IANA timezone when local-time meaning matters. ${directMutation}`,
       inputSchema: z.object({
+        activeReminder: z
+          .boolean()
+          .optional()
+          .describe(
+            "Show a persistent Mac card when due. Omission inherits the account creation default.",
+          ),
         dueAt: isoDateTime.nullable().default(null),
         notes: z.string().max(10_000).nullable().default(null),
         priority: reminderPrioritySchema.default("medium"),
@@ -133,6 +139,7 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       annotations: annotations.update,
       description: `Change one reminder after reading it. Pass expectedUpdatedAt from get_reminder so a concurrent change returns a structured conflict instead of being overwritten. ${directMutation}`,
       inputSchema: z.object({
+        activeReminder: z.boolean().optional(),
         dueAt: isoDateTime.nullable().optional(),
         expectedUpdatedAt: isoDateTime,
         id,

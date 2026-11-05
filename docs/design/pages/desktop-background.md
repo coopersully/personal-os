@@ -47,7 +47,7 @@ Use actual macOS login status, not the requested preference, as evidence of star
 approval. Pending approval offers **Open Login Items** with the next instruction;
 missing installation and unavailable status stay explicit. Enabling startup saves only
 that preference and preserves unrelated settings. Native preference writes are serialized with
-startup registration. Global Notifications contains only OS permissions, master enablement,
+startup registration. Global Notifications contains device-local active-card pause, OS permissions, master enablement,
 sound, previews, and quiet hours; workspace links open and focus the owning notification card. Notification readiness
 requires both the nohmi setting and OS alert permission. The notification page offers
 permission, system settings, and a test alert; permission is not proof of delivery.
@@ -434,3 +434,140 @@ completion and stale-data guards remain the pet's action boundary.
 Calendar colors in quick access are scoped to the snapshot's server and account. Provider all-day
 boundaries retain their date-only meaning through the native snapshot; local all-day events use the
 account time zone. An all-day occasion remains visible through the end of its local calendar day.
+
+
+## Active reminders (source implementation)
+
+Tasks and reminders store an `activeReminder` flag. Settings → Active cards owns separate
+account creation defaults for Tasks and Reminders, initially off. A new item inherits its kind's
+default unless explicitly set On/Off; changing defaults leaves existing items alone. The same page
+pauses cards on the current Mac while ordinary notification preferences remain authoritative.
+Tasks and Notifications link here rather than maintaining duplicate editors.
+
+The native companion presents each due task or reminder in its own compact, non-activating window.
+Match the shared TaskItem/ReminderItem rows: a filled 16-point completion control (rounded square for a task, circle for a reminder), medium
+14-point title, the app's neutral paper/ink palette, compact padding, and red overdue metadata.
+Align the left checkbox with the first title baseline, including wrapped titles. Both kinds use one compact 11-point monospaced metadata row: exact local time on the left and an abbreviated live countdown on the right (for example, “in 15m 03s” or “2h 00m late”). Update once per second with one shared visible-card clock; cache
+absolute labels until the day/time zone/locale changes. At minimum height use one title line so the
+time remains visible; larger cards allow two. The complete timestamp remains available as help. Keep the
+full card drag surface without a separate Task/Reminder/nohmi header. Align both completion controls
+to the top/start of the title row. A click opens the source or completes it; crossing a small drag
+threshold moves the card instead, including when starting over a title or checkbox. The title opens the source; completion stays pending until acknowledgement.
+There is no pagination, hidden-item stack, or dismissal control. Every pending item occupies its own
+screen area, so completing an item reclaims space without rearranging the others.
+
+Cards start at their smallest supported size, 240 × 64, with new arrivals placed in free visible space. Each can be dragged and resized independently from any invisible edge or the corner target; do not draw a resize grip.
+Use 16 corner, midpoint and quarter-edge targets plus available slots beside other cards. Exclude
+occupied footprints, including when restoring saved positions or resizing. A drop on an occupied
+anchor moves only the grabbed card into the nearest free slot. Guides are faded, card-sized
+placeholder footprints behind the grabbed card, with a stronger candidate highlight; never dots.
+In the browser trial, reveal at most three nearby, mutually non-overlapping footprints. Keep all
+valid anchors available for snapping without drawing the entire candidate map simultaneously.
+New sample cards use aligned rows with consistent 12-pixel gutters; the shared divider remains
+quiet with an icon button revealed on hover/focus. Unlocked dividers stop 12 pixels short of
+each end; locking animates them to full length. Dividers use the same one-pixel stroke and color
+as the card outline, with no doubled shared borders. Shift-clicking a join applies its lock or unlock action to every
+join in its geometrically connected component. Connected destination previews square only the
+corners that will touch neighbors; free destinations retain rounded corners.
+Preserve the grabbed card's size and reject slots that would move through the Dock or another card.
+Resolve placement through the pet's screen/Dock geometry, including its cached Accessibility Dock
+measurement, window metadata and conservative fallback when precise measurements are unavailable.
+Use clear corner lanes beside a measured Dock and avoid its actual footprint; keep the menu bar safe.
+Highlight the candidate while dragging and align on release with the pet's 12-point inset. Free
+placement remains available away from anchors; resizing an anchored card preserves that anchor, and Dock changes reposition attached cards safely.
+Cards released beside one another snap flush. Square only the contacting corners and draw one
+subtle divider along each shared edge, making them read as one surface. Each remains independently
+draggable when its join is unlocked; a short pull separates it and restores exposed corners without moving its neighbors.
+
+Native and browser behavior: clicking a shared border toggles that join’s lock.
+Dragging any member moves its connected locked group; unlocked neighbors stay put. Shaking a
+grabbed card gathers all visible active tasks and reminders into one locked, compact stack while
+keeping the pointer attached. Every item remains visible, with a compact column arrangement
+wrapping only when screen height requires it. Gather is also available as a menu command.
+Enablement and Low/Medium/High sensitivity mirror the pet’s shoo gesture thresholds; the gesture
+requires a held drag and never completes or dismisses an item. New joins default to unlocked.
+The browser playground is `apps/web/active-cards-playground.html`, served by `python3 apps/web/scripts/preview-active-cards.py` (loopback only, sample HTML only)
+or the worktree’s development runtime. The same sample-only HTML ships as the settings preview
+asset; standalone controls do not save real preferences. It uses synthetic records and simulated
+presence/Dock geometry, not native Accessibility or real notification delivery.
+
+Settings live in Settings → Active cards, with device-local availability/return behavior,
+starting display and anchor, spacing, position memory, snapping/slot guides and magnet strength,
+new-join locking, shake sensitivity, master/semantic Earshot levels, reduced motion, text size,
+title wrapping and countdown detail. Device choices update native presentation and preserve legacy
+settings defaults. Display inventory uses actual display UUIDs with primary/pointer fallbacks.
+The sample preview is synthetic and never mutates source items. Account defaults save in browsers;
+Mac presentation controls are clearly preview-only there. The simulated Dock is always sample-only.
+Focus waiting remains unavailable in this build: the required Communication Notifications
+capability is unconfigured, and task/reminder-only eligibility and signed behavior are unverified.
+The public API reports app-relative notification silencing, not arbitrary system Focus mode. No OS
+permission request is offered. Existing wait preferences remain conservative on unknown status and
+can be cleared in settings; use manual pause in the meantime.
+General screen-sharing detection is unsupported; manually pause cards before sharing private material.
+No maximum-visible or automatic collapsing setting should silently hide unfinished items.
+Right-click always offers eight visible commands: Complete/Retry completion, View in nohmi, Snooze 15m; Separate this card, Move to edge, Reset to smallest; Gather all into stack, and Active card settings. Two separators divide these groups. AppKit alternate menu items track Shift live for group completion/snooze, Unlock this group, group edge placement and group reset. Native modifier swaps retain keyboard focus and menu geometry using platform behavior; they do not reproduce the browser’s CSS label animation. Pending or stale completion stays disabled, group completion sends individual acknowledged source operations, and a failed item keeps its own retry state. There is no per-card active-off action. Snooze persists a 15-minute account/occurrence-local deadline before removing the card and reuses ordinary notification scheduling for fallback; fresh return/delivery gates still apply.
+
+Save size/normalized position per account, item, and persistent display UUID. Refreshes and sibling completion preserve existing windows and geometry. When a display
+vanishes, fit the card onto an available display. If the screen fills, retain all windows with
+reachable drag handles rather than hiding items behind pagination. Lock/display sleep hides all
+cards; return requires fresh confirmation. Failure/conflict remains on the originating card with an
+actionable completion retry. Settings failures use Sonner.
+
+New cards pop in with the bundled Earshot arrival sample; acknowledged completion pops out with the bundled completion pluck. Respect the Notifications sound preference and system mute.
+Coalesce arrival audio for simultaneous cards. Grab, slot selection, docking, release, separation,
+resize endpoints, menu/open and completion-pending transitions use quiet cached samples and brief
+pulses; a completion failure uses a short low tone and shake with the retry still visible. Do not
+replay audio per pointer frame, countdown tick, routine refresh, screen lock/unlock, policy hiding or feed
+removal. Explicit join lock/unlock commands play their semantic switch cue. Success audio remains reserved for acknowledged completion. Reduce Motion uses a
+short fade without scaling. Never retire a card or play success audio on an unacknowledged click.
+
+Elapsed input under 120 seconds is only one activity signal: session, loginwindow/lock and display
+state also gate presentation. Quiet hours, source enablement, OS permission, and preview privacy
+remain authoritative. With previews off, titles are hidden. Custom cards can appear during macOS
+Focus by default; optional Focus waiting hides them when Focus is on or status is unknown after
+explicit authorization. Permission state and Focus state are separate. Restoration and new ordinary
+fallback handoffs require a fresh inventory. Existing cards may remain during
+quiet hours, but hidden/new cards wait for the window to end.
+
+While away, ordinary OS delivery remains scheduled. Returning reveals a still-incomplete opted-in
+item after authenticated refresh. A prepared active delivery retains an OS fallback at eligible
+fire time plus five seconds until the card is visible on the active Space and its receipt is saved.
+Rare crash/cancellation duplicates remain possible; exactly-once delivery is not promised. The
+[design](../../superpowers/specs/2026-10-22-active-reminders-design.md) and
+[native probe evidence](../../superpowers/specs/2026-10-22-active-reminders-native-evidence.md)
+record the contract and distinguish local observations from signed-release certification.
+
+Browser trial refinement: active cards use a compact two-line layout, a 14-pixel title and an
+11-pixel monospace metadata row. Exact local time stays visible on the left (tomorrow or an
+explicit date when needed), with an abbreviated live countdown on the right; the complete local
+date/time is exposed as help and accessible text. Pending/error states never remove the timestamp.
+Context commands use semantic icons from the shared reicon registry. Earshot is a pinned optional
+authoring tool under `tools/audio`; the trial preloads the checked-in local WAVs, respects master
+sound controls, throttles repeated slot sounds, and does not sound on hover or countdown updates.
+See `tools/audio/README.md` for reproducibility, licensing, action mapping, and evidence limits.
+
+### Connected-card refinements
+
+Connected cards share one outline-weight separator, including partial joins
+between different sizes. Shared corners square off where a neighbor covers the
+corner. Placement engages when a dragged card's footprint touches a valid slot;
+the closest valid slot wins. Occupied slots remain unavailable.
+
+While a card menu is open, Shift targets its entire geometrically connected group
+(including unlocked joins): completion, snooze, unlocking, edge placement, and
+resetting sizes. Releasing Shift restores single-card actions. Resizing to minimum
+preserves joins and edge alignment and must not detach the card. Active delivery
+cannot be disabled from a card menu; manage that deliberately in desktop settings.
+Desktop sounds follow the shared contract in `../feedback.md`.
+
+### Native active-card parity checkpoint (2026-10-23)
+
+The native controller owns a pair-edge lock graph, independently of geometric contact. Shift-click applies a seam’s lock action across its geometric component. Pair intent and card geometry are scoped to the existing account/server store; source retirement prunes affected pairs and account reset clears them. A held drag uses the pet’s Low/Medium/High reversal thresholds to gather visible cards into a compact locked stack, preserving the continuing pointer gesture. Group slots exclude their members from occupancy, use the whole footprint, and show at most three nearby disjoint suggestions. Shared-edge buttons are accessible while their glyph appears only on hover or keyboard focus. Locking animates the one-pixel divider from inset to full length; Reduce Motion makes the change immediate. The device preference updates existing cards’ corner animation immediately without needing a new source revision.
+
+Gathering and minimum-size reset use the configured text size/title wrapping minimum. Growing those settings reflows connected cards atomically without shrinking custom dimensions. If the scene cannot safely expand, existing scrollable cards retain their accepted geometry and locks; a later refresh retries growth when space becomes available.
+
+Single and group minimum-size reset reflows the original contact graph and retains valid pair locks and docked outer edges. A geometry change is accepted only if every card remains on the display, outside Dock obstacles and other cards, with the original contacts preserved; an impossible reset retains the previous layout. Group edge attachment refits the component together when Dock geometry changes, including before hidden cards return. A held drag selects its destination display from the current pointer, including over the Dock, and fits the unchanged locked footprint within that display’s safe geometry. Rejected resize proposals preserve the accepted pair graph until the resize transaction settles.
+
+Earshot audio is bundled locally and preloaded/cached, honors notification mute plus card mute/volume, coalesces arrivals and throttles repeated slot feedback. Missing samples are silent; no unrelated system-sound fallback is used. `tools/audio/render-active-cards.py` reproduces the shared browser/native pack. `apps/web/scripts/generate-active-card-native-icons.ts` generates the packaged monochrome artwork from the shared reicon registry.
+
+The disposable sample-only app is built with `python3 apps/desktop/macos/scripts/preview-active-cards.py --build-only`; it compiles the production controller and bundles its resources without connecting to an account. Native controller, geometry, persistence, snooze, held-shake, menu and lifecycle tests establish source parity. This is branch-local implementation evidence; signed-release, real OS notification, physical sleep/display and live account certification retain their existing release gates.

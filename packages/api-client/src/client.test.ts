@@ -176,6 +176,7 @@ const user: User = {
   updatedAt: now,
 };
 const reminder: Reminder = {
+  activeReminder: false,
   id,
   title: "Test",
   notes: null,
@@ -194,6 +195,7 @@ const reminder: Reminder = {
   updatedAt: now,
 };
 const task: Task = {
+  activeReminder: false,
   cancelledAt: null,
   completedAt: null,
   id,

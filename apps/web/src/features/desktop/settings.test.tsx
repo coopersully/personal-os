@@ -1277,3 +1277,14 @@ it.each([
   expect(screen.queryByText("Temporary write failure")).not.toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
+
+describe("active card settings ownership", () => {
+  it("links to the canonical editor without duplicating active card controls", async () => {
+    mount({ section: "notifications" });
+    expect(await screen.findByRole("link", { name: /Active cards/ })).toHaveAttribute(
+      "href",
+      "/settings?page=active-cards",
+    );
+    expect(screen.queryByRole("switch", { name: "Shake to gather" })).not.toBeInTheDocument();
+  });
+});

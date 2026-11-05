@@ -455,6 +455,7 @@ function personalOsSetupFixture() {
 const mocks = vi.hoisted(() => ({
   searchWorkspace: vi.fn(),
   getWorkspaceSettings: vi.fn(),
+  getActiveReminderPreferences: vi.fn(),
   updateWorkspaceSettings: vi.fn(),
   listAgentAccessWorkItems: vi.fn(),
   getDesktopRelease: vi.fn(),
@@ -783,6 +784,12 @@ function defaults() {
   mocks.listFinanceMerchants.mockRejectedValue(unavailableCapability);
   mocks.getNotificationStatus.mockRejectedValue(unavailableCapability);
   mocks.searchWorkspace.mockResolvedValue({ items: [], nextOffset: null, coverage: "synced" });
+  mocks.getActiveReminderPreferences.mockResolvedValue({
+    defaultActiveReminder: false,
+    defaultTaskActiveReminder: false,
+    defaultReminderActiveReminder: true,
+    revision: 1,
+  });
   mocks.getWorkspaceSettings.mockImplementation(async (workspace) => ({
     workspace,
     revision: 0,
@@ -3637,6 +3644,10 @@ describe("Personal OS web app", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await browser.click(screen.getByRole("button", { name: "Continue" }));
     expect(await screen.findByRole("dialog")).toHaveTextContent("Capture a task");
+    expect(mocks.getActiveReminderPreferences).toHaveBeenCalledWith(user.id);
+    expect(
+      await screen.findByRole("option", { name: "Use account default (off)" }),
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText("Status")).not.toBeInTheDocument();
     expect(screen.getByLabelText("List")).toHaveValue(secondId);
     expect(screen.getByLabelText("Project")).toHaveValue(thirdId);

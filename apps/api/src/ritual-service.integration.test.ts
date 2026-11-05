@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  activeReminderPreferences,
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
@@ -1078,13 +1079,16 @@ describe.sequential("ritual account lifecycle", () => {
       .set({ planningTimezone: "America/New_York" })
       .where(eq(users.id, userId));
   });
-  it("snapshots weekday steps and atomically creates only opted-in optional reminders once", async () => {
+  it.each([
+    true,
+    false,
+  ])("inherits Reminder default %s and creates opted-in optional reminders only once", async (activeReminder) => {
     const [owner] = await database.db
       .insert(users)
       .values({
         planningTimezone: "America/New_York",
         displayName: "Optional",
-        email: "optional@example.com",
+        email: `optional-${activeReminder}@example.com`,
         passwordHash: "unused",
       })
       .returning();
@@ -1092,6 +1096,13 @@ describe.sequential("ritual account lifecycle", () => {
       ...context(),
       principal: { ...context().principal, userId: owner!.id, actorId: owner!.id },
     };
+    await database.db.insert(activeReminderPreferences).values({
+      userId: owner!.id,
+      defaultActiveReminder: false,
+      defaultTaskActiveReminder: !activeReminder,
+      defaultReminderActiveReminder: activeReminder,
+      revision: 1,
+    });
     clock = new Date("2026-10-16T12:00:00Z"); // Friday, 08:00 New York
     await service.saveDefinition(
       "morning",
@@ -1159,11 +1170,17 @@ describe.sequential("ritual account lifecycle", () => {
       stepIds: ["optional"],
       dueAt: "2026-10-16T17:00:00.000Z",
     });
-    await service.act(id, action, ctx);
+    // Replays retain the accepted follow-up even after its creation default changes.
+    await database.db
+      .update(activeReminderPreferences)
+      .set({ defaultReminderActiveReminder: !activeReminder, revision: 2 })
+      .where(eq(activeReminderPreferences.userId, owner!.id));
+    expect(await service.act(id, action, ctx)).toEqual(result);
     const rows = await database.db.select().from(reminders).where(eq(reminders.userId, owner!.id));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       title: "Optional journal",
+      activeReminder,
       timezone: "America/New_York",
       dueAt: new Date(action.optionalReminderAt),
     });

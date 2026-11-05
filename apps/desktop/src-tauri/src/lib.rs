@@ -1,3 +1,4 @@
+mod active_reminders;
 mod coordinator;
 mod desktop;
 mod lifecycle;
@@ -24,6 +25,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(desktop::DesktopState::load(app.handle()).map_err(std::io::Error::other)?);
             app.manage(ritual::RitualRuntime::default());
+            app.manage(active_reminders::ActiveReminderRuntime::default());
             updates::setup(app.handle());
             #[cfg(target_os = "macos")]
             {

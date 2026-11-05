@@ -45,6 +45,58 @@ impl Default for NotificationSettings {
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActiveCardInteractions {
+    pub shake: bool,
+    pub sensitivity: String,
+    pub snapping: bool,
+    pub guides: bool,
+    pub auto_lock: bool,
+    pub sounds: bool,
+    pub volume: f64,
+    pub reduced_motion: bool,
+    pub respect_focus: bool,
+    pub return_cards: bool,
+    pub starting_display: String,
+    pub anchor: String,
+    pub edge_spacing: f64,
+    pub remember_positions: bool,
+    pub magnet: String,
+    pub arrival_volume: f64,
+    pub completion_volume: f64,
+    pub interaction_volume: f64,
+    pub text_scale: String,
+    pub title_lines: String,
+    pub countdown: String,
+}
+impl Default for ActiveCardInteractions {
+    fn default() -> Self {
+        Self {
+            shake: true,
+            sensitivity: "medium".into(),
+            snapping: true,
+            guides: true,
+            auto_lock: false,
+            sounds: true,
+            volume: 0.35,
+            reduced_motion: false,
+            respect_focus: false,
+            return_cards: true,
+            starting_display: "pointer".into(),
+            anchor: "top-right".into(),
+            edge_spacing: 12.0,
+            remember_positions: true,
+            magnet: "eager".into(),
+            arrival_volume: 1.0,
+            completion_volume: 1.0,
+            interaction_volume: 1.0,
+            text_scale: "standard".into(),
+            title_lines: "one".into(),
+            countdown: "minutes".into(),
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct DesktopSettings {
     pub server_url: String,
     pub launch_at_login: bool,
@@ -63,6 +115,8 @@ pub struct DesktopSettings {
     pub pet_sleep_after_seconds: f64,
     pub pet_workspaces: Vec<String>,
     pub widget_workspaces: Vec<String>,
+    pub active_reminders_enabled: bool,
+    pub active_card_interactions: ActiveCardInteractions,
     pub notifications: NotificationSettings,
 }
 impl Default for DesktopSettings {
@@ -85,6 +139,8 @@ impl Default for DesktopSettings {
             pet_sleep_after_seconds: 3.0,
             pet_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
             widget_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
+            active_reminders_enabled: true,
+            active_card_interactions: ActiveCardInteractions::default(),
             notifications: NotificationSettings::default(),
         }
     }
@@ -92,6 +148,57 @@ impl Default for DesktopSettings {
 impl DesktopSettings {
     pub fn validate(&mut self) -> Result<(), String> {
         self.server_url = canonical_server(&self.server_url)?;
+        if !["low", "medium", "high"].contains(&self.active_card_interactions.sensitivity.as_str())
+        {
+            return Err("Choose Low, Medium, or High card shake sensitivity.".into());
+        }
+        if !self.active_card_interactions.volume.is_finite()
+            || !(0.0..=1.0).contains(&self.active_card_interactions.volume)
+        {
+            return Err("Choose a card sound volume between 0% and 100%.".into());
+        }
+        let cards = &self.active_card_interactions;
+        for gain in [
+            cards.arrival_volume,
+            cards.completion_volume,
+            cards.interaction_volume,
+        ] {
+            if !gain.is_finite() || !(0.0..=1.0).contains(&gain) {
+                return Err("Choose card sound levels between 0% and 100%.".into());
+            }
+        }
+        if !cards.edge_spacing.is_finite() || !(0.0..=40.0).contains(&cards.edge_spacing) {
+            return Err("Choose card edge spacing between 0 and 40 points.".into());
+        }
+        if !["gentle", "eager"].contains(&cards.magnet.as_str())
+            || !["small", "standard", "large"].contains(&cards.text_scale.as_str())
+            || !["one", "two"].contains(&cards.title_lines.as_str())
+            || !["minutes", "seconds"].contains(&cards.countdown.as_str())
+            || ![
+                "top-left",
+                "top-center",
+                "top-right",
+                "center",
+                "bottom-left",
+                "bottom-center",
+                "bottom-right",
+            ]
+            .contains(&cards.anchor.as_str())
+        {
+            return Err("Choose supported active card appearance and placement options.".into());
+        }
+        if !["primary", "pointer"].contains(&cards.starting_display.as_str())
+            && !(cards.starting_display.len() == 36
+                && cards.starting_display.chars().enumerate().all(|(i, c)| {
+                    if [8, 13, 18, 23].contains(&i) {
+                        c == '-'
+                    } else {
+                        c.is_ascii_hexdigit()
+                    }
+                }))
+        {
+            return Err("Choose a display or a valid display identifier.".into());
+        }
         let windows = ["today", "week", "month", "next7", "next30", "allUpcoming"];
         if !windows.contains(&self.pet_task_window.as_str())
             || !windows.contains(&self.pet_reminder_window.as_str())
@@ -519,6 +626,7 @@ pub async fn desktop_native_action(
     action: String,
 ) -> Result<serde_json::Value, String> {
     if ![
+        "request_focus_permission",
         "request_notification_permission",
         "request_accessibility_permission",
         "test_notification",

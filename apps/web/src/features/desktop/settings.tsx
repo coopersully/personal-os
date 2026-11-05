@@ -44,6 +44,7 @@ import { SettingsFeedbackContext, useSettingsError } from "../../lib/settings-fe
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { workspaceDefinitions } from "../../navigation/manifest.js";
 import { ProfileRow } from "../settings/profile-rows.js";
+import { RelatedSettings } from "../settings/related-settings.js";
 import { SettingsBento, SettingsSection } from "../settings/settings-layout.js";
 import { RitualLocal } from "../tracking/ritual-local.js";
 import { BackgroundSetup } from "./background-setup.js";
@@ -353,6 +354,11 @@ function DesktopSettingsContent({
     enabled: isDesktop() && section === "calendar" && !connectionOnly,
   });
   useSettingsError(query.data?.native.error, query.data?.native.error ?? "macOS needs attention.");
+  useSettingsError(
+    query.isFetchedAfterMount ? query.data?.native.activeRemindersError : undefined,
+    query.data?.native.activeRemindersError ||
+      "Active reminders could not refresh. nohmi will retry while it is running.",
+  );
   useSettingsError(
     query.data?.wallpaperError,
     "Wallpaper could not refresh. nohmi will retry while it is running.",
@@ -838,6 +844,18 @@ function DesktopSettingsContent({
               </Button>
             </FieldGroup>
           </SettingsSection>
+        ) : null}
+        {section === "notifications" ? (
+          <RelatedSettings
+            title="Active cards"
+            items={[
+              {
+                section: "active-cards",
+                label: "Active cards",
+                description: "Set creation defaults, placement, grouping, sounds, and appearance.",
+              },
+            ]}
+          />
         ) : null}
         {section === "notifications" ? (
           <SettingsSection

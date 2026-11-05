@@ -34,6 +34,7 @@ import {
   upcomingRitualWindows,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, gte, lt, lte, or, sql } from "drizzle-orm";
+import { readActiveReminderPreferences } from "./active-reminder-preferences.js";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import type { Principal } from "./types.js";
@@ -727,10 +728,14 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
               // the follow-up by making it due shortly after acceptance, never in the past.
               const dueAt = new Date(Math.max(requestedAt, now().getTime() + 60000));
               const reminderIds: string[] = [];
+              const activeReminder = (
+                await readActiveReminderPreferences(tx, context.principal.userId)
+              ).defaultReminderActiveReminder;
               for (const step of optional) {
                 const reminderId = randomUUID();
                 await tx.insert(reminders).values({
                   id: reminderId,
+                  activeReminder,
                   userId: context.principal.userId,
                   title: step.label,
                   kind: "reminder",
@@ -747,6 +752,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
                     before: null,
                     after: {
                       occurrenceId: occurrence.id,
+                      activeReminder,
                       dueAt: dueAt.toISOString(),
                       source: "ritual",
                     },

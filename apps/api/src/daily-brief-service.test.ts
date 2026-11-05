@@ -2,6 +2,7 @@ import type { Task, TaskListQuery } from "@personal-os/domain";
 import { createDailyBriefService } from "./daily-brief-service.js";
 
 const taskBase: Task = {
+  activeReminder: false,
   cancelledAt: null,
   completedAt: null,
   createdAt: "2026-08-12T12:00:00.000Z",

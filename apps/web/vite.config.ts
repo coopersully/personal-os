@@ -125,7 +125,10 @@ export default defineConfig(({ mode }) => {
         workbox: {
           navigateFallback: "/index.html",
           // Public policies must remain real HTML pages, including for installed PWAs.
-          navigateFallbackDenylist: [/^\/(about|docs|privacy|terms|data-use|sms|support)(?:\/|$)/],
+          navigateFallbackDenylist: [
+            /^\/(about|docs|privacy|terms|data-use|sms|support)(?:\/|$)/,
+            /^\/active-cards-playground\.html(?:\?|$)/,
+          ],
           runtimeCaching: [
             {
               handler: "NetworkOnly",
@@ -135,6 +138,16 @@ export default defineConfig(({ mode }) => {
         },
       }),
       agentSkillSitePlugin(),
+      {
+        name: "publish-active-card-settings-preview",
+        async generateBundle() {
+          this.emitFile({
+            type: "asset",
+            fileName: "active-cards-playground.html",
+            source: await readFile(resolve("active-cards-playground.html"), "utf8"),
+          });
+        },
+      },
       {
         name: "public-documentation-directory-indexes",
         enforce: "post",

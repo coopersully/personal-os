@@ -410,6 +410,50 @@ controls where useful, preserve edits, and do not automatically retry uncertain 
 Repeated polling of the same unresolved failure must not repeatedly announce it; recovery
 clears its toast. Quiet-hour From and Until controls share a row on larger screens.
 
+## Active cards — browser refinement
+
+Active cards has a dedicated Settings destination. Its target groups are Defaults,
+On this Mac, Placement, Grouping, Sound & motion, and Appearance. Defaults distinguish
+new Tasks from new Reminders and preserve existing item overrides. Device preferences
+use a positive “Show active cards on this Mac” switch. All cards start at minimum size,
+remain until completed, and retain exact due times alongside configurable countdown detail.
+There is no automatic dismissal, visible-card cap, or per-card active-off shortcut.
+
+The interactive preview stays beside the controls on wide surfaces and precedes them
+on phones. Reuse the approved card interaction engine for dragging, resizing, snapping,
+pair locks, Shift group actions and shake gathering. Show full-size card slots, preserve
+joined groups when refitting, and use the shared Earshot family with overall and per-action
+levels. Placement includes display/anchor, edge spacing, snap strength, position memory,
+and a simulated Dock. Appearance offers text scale, title wrapping after resizing, and
+countdown precision. Focus behavior is explicit; the design harness can also simulate screen sharing without claiming native detection.
+
+The canonical `?page=active-cards` destination now uses the same controls with a domain adapter.
+Independent Task/Reminder creation defaults persist account-wide with owner/revision fencing;
+historical item flags are unchanged. On macOS, device controls merge patches into the latest
+native preferences under server/account identity checks. Autosaves are silent on success, retain
+failed drafts, and report errors through Sonner with explicit retry controls. Numeric sliders
+preview during movement and persist on commit. Old Tasks/Notifications editors are replaced by
+links to this one surface. All preferences have stable Settings search destinations.
+
+The preview contains synthetic cards only. In browser/mobile, account defaults persist while
+layout/sound/appearance controls remain clearly labelled device previews. Native display choices
+come from actual display inventory; the simulated Dock remains a sample control. The standalone
+`preview:active-cards` remains an API-free design harness, not a second settings store. The sample
+HTML ships as a production asset and is excluded from the service-worker SPA fallback.
+
+Focus waiting is capability-gated. This build does not configure Communication Notifications,
+which Apple's public Focus-sharing API requires; task/reminder-only eligibility and signed behavior
+remain unverified. The live page marks waiting unavailable and offers manual pause. It allows
+clearing a previously saved wait preference, but cannot enable it or request OS permission here.
+The API describes whether Focus silences this app, not every system Focus mode. A future legitimately
+configured build must obtain explicit authorization, retain one loading Sonner toast until the real
+result or bounded failure, and distinguish permission from on/off/unknown status. Unknown remains
+conservative for an existing wait preference; choosing Keep cards visible restores presentation.
+See [Apple's Focus sample](https://developer.apple.com/documentation/usernotifications/handling-communication-notifications-and-focus-status-updates)
+and [macOS capabilities](https://developer.apple.com/help/account/reference/supported-capabilities-macos).
+macOS does not expose a verified general screen-sharing signal here; the live surface omits that
+automatic control and explains manual device pause. Do not add a dummy setting for that capability.
+
 ## Ritual step configuration
 
 Enabled rituals run automatically over the person's current page while the signed-in browser

@@ -120,6 +120,84 @@ export async function authorizeAdoption(configPath, io, expectedDeployed, target
   });
 }
 
+// This attended exception is pinned to the one release Cooper authorized. It
+// changes eligibility only, never the build/switch/recovery transaction below.
+const attendedCiTarget = "76de239aa764cc0642c4b0a15375766353213c16";
+
+export async function authorizeCiOverride(
+  configPath,
+  io,
+  expectedDeployed,
+  target,
+  acknowledgement,
+  reason,
+) {
+  if (
+    acknowledgement !== "--attended-ci-override" ||
+    !commit.test(expectedDeployed) ||
+    target !== attendedCiTarget ||
+    target === expectedDeployed ||
+    typeof reason !== "string" ||
+    !reason.trim() ||
+    reason.length > 240 ||
+    /[\r\n]/.test(reason)
+  )
+    throw new Error("Exact one-release revisions, reason and acknowledgement required.");
+  const initial = io.load(configPath);
+  return withLock(initial.root, async () => {
+    const runtime = io.load(configPath);
+    const state = readState(runtime.root, runtime.config.revision);
+    const activation = JSON.parse(privateFile(join(runtime.root, "activation.json")));
+    if (
+      existsSync(join(runtime.root, "maintenance.json")) ||
+      state.phase !== "idle" ||
+      state.ciOverride ||
+      state.deployed !== expectedDeployed ||
+      runtime.config.revision !== expectedDeployed ||
+      activation.revision !== expectedDeployed ||
+      (await io.main()) !== target ||
+      !(await io.history(expectedDeployed, target))
+    )
+      throw new Error(
+        "Override requires the exact idle serving release and descendant current main.",
+      );
+    let runs = [];
+    let ciObservation = "unavailable";
+    try {
+      runs = await io.ci(target);
+      ciObservation = "not-successful";
+    } catch {
+      /* Availability is the explicitly attended eligibility exception. */
+    }
+    if (eligibleRelease({ candidate: target, deployed: expectedDeployed, descendant: true, runs }))
+      throw new Error("Exact main CI already succeeded; use the normal controller path.");
+    await io.check(runtime);
+    state.ciOverride = {
+      expectedDeployed,
+      target,
+      reason: reason.trim(),
+      authorizedAt: new Date().toISOString(),
+      ciObservation,
+    };
+    state.nextPollAt = 0;
+    state.updatedAt = new Date().toISOString();
+    writePrivate(join(runtime.root, "continuous-state.json"), JSON.stringify(state, null, 2));
+  });
+}
+
+function unusedCiOverride(state, candidate) {
+  const receipt = state.ciOverride;
+  return (
+    candidate === attendedCiTarget &&
+    receipt?.target === candidate &&
+    receipt.expectedDeployed === state.deployed &&
+    !receipt.consumedAt &&
+    typeof receipt.reason === "string" &&
+    Boolean(receipt.reason.trim()) &&
+    typeof receipt.authorizedAt === "string"
+  );
+}
+
 // io owns only external process/network boundaries. Receipts, eligibility,
 // locking and the release switch are exercised against real files in tests.
 export async function tick(configPath, io, now = Date.now()) {
@@ -181,12 +259,33 @@ export async function tick(configPath, io, now = Date.now()) {
         save();
         return;
       }
-      const runs = await io.ci(candidate);
-      if (!eligibleRelease({ candidate, deployed: state.deployed, descendant, runs })) {
+      const override = unusedCiOverride(state, candidate);
+      let runs;
+      try {
+        runs = await io.ci(candidate);
+      } catch (error) {
+        if (!override) throw error;
+        runs = [];
+      }
+      const normalEligibility = eligibleRelease({
+        candidate,
+        deployed: state.deployed,
+        descendant,
+        runs,
+      });
+      if (!normalEligibility && !override) {
         state.error = "awaiting-successful-main-ci";
         save();
         return;
       }
+      // Consume before external work: a crash, failed check/build or lost
+      // response cannot silently turn an attended attempt into a retry loop.
+      if (override) {
+        state.ciOverride.consumedAt = new Date(now).toISOString();
+        state.ciOverride.disposition = normalEligibility ? "normal-ci-won" : "attempt-authorized";
+        save();
+      }
+      state.releaseEligibility = normalEligibility ? "successful-main-ci" : "attended-ci-override";
       await io.check(runtime);
       state.phase = "building";
       state.candidate = candidate;

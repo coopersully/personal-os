@@ -77,9 +77,13 @@ describe.sequential("notification migration integrity", () => {
       source: r.source === "ilo" ? "nohmi" : r.source,
     }));
     for (let repeat = 0; repeat < 2; repeat++) {
-      expect((await database.pool.query("SELECT * FROM text_messages ORDER BY id")).rows).toEqual(
-        expectedMessages,
-      );
+      // Compare every historical column; later migrations may add unrelated nullable metadata.
+      const messageColumns = Object.keys(expectedMessages[0] ?? {})
+        .map((column) => `"${column}"`)
+        .join(", ");
+      expect(
+        (await database.pool.query(`SELECT ${messageColumns} FROM text_messages ORDER BY id`)).rows,
+      ).toEqual(expectedMessages);
       expect(
         (await database.pool.query("SELECT * FROM texting_consent_events ORDER BY id")).rows,
       ).toEqual(expectedConsent);

@@ -51,9 +51,7 @@ export function workspaceSectionPages(owner: string, search: string): MobileWork
         ? { id: "inbox", label: "inbox", icon: InboxIcon, path: "/mail" }
         : owner === "finances"
           ? { id: "overview", label: "overview", icon: GridIcon, path: "/finances" }
-          : owner === "calendar"
-            ? { id: "calendar", label: "calendar", icon: CalendarIcon, path: "/calendar" }
-            : null;
+          : null;
   if (primary) {
     if (owner === "mail") {
       const accounts = new URLSearchParams();

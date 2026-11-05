@@ -827,7 +827,9 @@ export function createFinanceService({
   const providerTransactionEvidence = createFinanceProviderTransactionEvidenceService({
     db,
     now,
-    providerItems,
+    providerItems: {
+      readTransactionHistory: (input) => providerItems.readTransactionHistory(input, plaid),
+    },
   });
   const accountHandoff = createFinanceConnectionHandoffService({
     db,

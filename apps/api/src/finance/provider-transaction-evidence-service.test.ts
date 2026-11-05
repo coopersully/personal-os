@@ -191,4 +191,43 @@ describe("historical provider reader", () => {
       f.service.read(principal, { transactionIds: [id] }, "session-hash"),
     ).rejects.toMatchObject({ code: "forbidden" });
   });
+  it.each([
+    "revoked",
+    "scope_removed",
+    "connection_changed",
+  ])("revalidates presenting agent authority after provider read: %s", async (change) => {
+    const f = fixture();
+    const token = {
+      userId: id,
+      revokedAt: null,
+      expiresAt: null,
+      scopes: ["finances:read"],
+      authorizationConnectionId: id,
+    };
+    const afterToken = {
+      ...token,
+      ...(change === "revoked"
+        ? { revokedAt: date }
+        : change === "scope_removed"
+          ? { scopes: [] }
+          : { authorizationConnectionId: accountId }),
+    };
+    f.queue.splice(0, 6, [{ id }], [token], [row], [{ id }], [afterToken], [row]);
+    await expect(
+      f.service.read(
+        { ...principal, actorType: "agent", authorizationConnectionId: id },
+        { transactionIds: [id] },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(f.readTransactionHistory).toHaveBeenCalledTimes(1);
+    expect(f.writes).not.toHaveBeenCalled();
+  });
+  it("rechecks exact human-session expiry after provider completion", async () => {
+    const f = fixture();
+    f.queue[4] = [{ expiresAt: new Date(0) }];
+    await expect(
+      f.service.read(principal, { transactionIds: [id] }, "session-hash"),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(f.readTransactionHistory).toHaveBeenCalledTimes(1);
+  });
 });

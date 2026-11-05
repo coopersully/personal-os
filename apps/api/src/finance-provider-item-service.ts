@@ -138,15 +138,18 @@ export function createFinanceProviderItemService({ db, encryptionKey, now, plaid
 
   return {
     /** Internal port: snapshots originate in the native owner-checked reader, never public input. */
-    async readTransactionHistory(input: {
-      userId: string;
-      itemRecordId: string;
-      expectedUpdatedAt: string;
-      targets: PlaidTransactionHistoryInput["targets"];
-      startDate: string;
-      endDate: string;
-    }) {
-      if (!plaid?.readTransactionHistory)
+    async readTransactionHistory(
+      input: {
+        userId: string;
+        itemRecordId: string;
+        expectedUpdatedAt: string;
+        targets: PlaidTransactionHistoryInput["targets"];
+        startDate: string;
+        endDate: string;
+      },
+      historyConnector: PlaidConnector | undefined = plaid,
+    ) {
+      if (!historyConnector?.readTransactionHistory)
         throw new AppError("service_unavailable", "Historical provider evidence is unavailable.");
       const [item] = await db
         .select()
@@ -180,7 +183,7 @@ export function createFinanceProviderItemService({ db, encryptionKey, now, plaid
       // Connector performs real /item/get + initialized transactions preflight before /transactions/get.
       // No synchronization, initialization, refresh or credential mutation is permitted here.
       try {
-        return await plaid.readTransactionHistory({
+        return await historyConnector.readTransactionHistory({
           accessToken,
           itemId: item.providerItemId,
           targets: input.targets,

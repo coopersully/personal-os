@@ -1803,6 +1803,10 @@ describe.sequential("Finance Provider Item service", () => {
       endDate: input.endDate,
     });
     expect(sync).not.toHaveBeenCalled();
+    await expect(
+      service().readTransactionHistory(input, { ...connector, readTransactionHistory: read }),
+    ).resolves.toMatchObject({ coverage: { reason: "not_initialized" } });
+    expect(read).toHaveBeenCalledTimes(2);
     expect(await database.db.select().from(financeProviderItems)).toEqual(snapshot);
   });
 });

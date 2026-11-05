@@ -24,6 +24,7 @@ export * from "./finance/spending.js";
 export * from "./finance.js";
 export * from "./finance-action-decision.js";
 export * from "./finance-maintenance.js";
+export * from "./finance-provider-transaction-evidence.js";
 export * from "./goals.js";
 export * from "./mail.js";
 export * from "./mail-stewardship.js";

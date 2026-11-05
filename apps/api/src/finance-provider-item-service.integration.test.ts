@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { PlaidAccountSnapshot } from "@personal-os/connectors";
+import { createPlaidConnector, type PlaidAccountSnapshot } from "@personal-os/connectors";
 import {
   auditEvents,
   createDatabaseClient,
@@ -1726,5 +1726,83 @@ describe.sequential("Finance Provider Item service", () => {
     await expect(service().resolveItemForAccount(crypto.randomUUID(), account.id)).rejects.toThrow(
       "Finance account does not have an owned Provider Item.",
     );
+  });
+  it("historical port is owner/revision fenced, credential private and never initializes a missing capability", async () => {
+    const [account] = await service().upsertConnection({
+      accessToken: "history-secret-canary",
+      accounts: [remoteAccount("history-account")],
+      context: { principal: principal(userId), requestId: "history-port" },
+      institution: "Fixture",
+      itemId: "history-item",
+    });
+    if (!account) throw new Error("Fixture account missing.");
+    const [item] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(
+        eq(
+          financeProviderItems.id,
+          account.providerItemRecordId ?? "00000000-0000-4000-8000-000000000000",
+        ),
+      );
+    if (!item) throw new Error("Fixture item missing.");
+    const input = {
+      userId,
+      itemRecordId: item.id,
+      expectedUpdatedAt: item.updatedAt.toISOString(),
+      targets: [{ accountId: "history-account", transactionId: "history-transaction" }],
+      startDate: "2026-08-01",
+      endDate: "2026-08-16",
+    };
+    const snapshot = await database.db.select().from(financeProviderItems);
+    await expect(service().readTransactionHistory(input)).rejects.toMatchObject({
+      code: "service_unavailable",
+      message: "Historical provider evidence is unavailable.",
+    });
+    expect(await database.db.select().from(financeProviderItems)).toEqual(snapshot);
+    const read = vi.fn(async () => ({
+      observedAt: now.toISOString(),
+      providerUpdatedAt: null,
+      snapshotConsistency: "not_atomic" as const,
+      entries: [],
+      coverage: {
+        state: "unavailable" as const,
+        scope: "provider_available_window" as const,
+        reason: "not_initialized" as const,
+        pages: 0,
+        returnedTransactions: 0,
+      },
+    }));
+    const connector = createPlaidConnector({
+      clientId: "fixture",
+      secret: "fixture",
+      environment: "sandbox",
+    });
+    const sync = vi.fn(connector.syncTransactions);
+    const reader = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey,
+      now: () => now,
+      plaid: { ...connector, readTransactionHistory: read, syncTransactions: sync },
+    });
+    await expect(
+      reader.readTransactionHistory({ ...input, userId: crypto.randomUUID() }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      reader.readTransactionHistory({ ...input, expectedUpdatedAt: new Date(0).toISOString() }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(read).not.toHaveBeenCalled();
+    await expect(reader.readTransactionHistory(input)).resolves.toMatchObject({
+      coverage: { reason: "not_initialized" },
+    });
+    expect(read).toHaveBeenCalledWith({
+      accessToken: "history-secret-canary",
+      itemId: "history-item",
+      targets: input.targets,
+      startDate: input.startDate,
+      endDate: input.endDate,
+    });
+    expect(sync).not.toHaveBeenCalled();
+    expect(await database.db.select().from(financeProviderItems)).toEqual(snapshot);
   });
 });

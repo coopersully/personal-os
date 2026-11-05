@@ -64,6 +64,7 @@ import type {
   FinanceMaintenanceCandidateItemDraft,
   FinanceOverview,
   FinanceProfile,
+  FinanceProviderTransactionEvidenceInput,
   FinanceReceiptReview,
   FinanceReceiptReviewInput,
   FinanceRecurringObligation,
@@ -163,6 +164,7 @@ import {
 } from "./finance/planning-evidence-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
+import { createFinanceProviderTransactionEvidenceService } from "./finance/provider-transaction-evidence-service.js";
 import { createFinanceRecurringOccurrenceService } from "./finance/recurring-occurrence-service.js";
 import { createFinanceRecurringScheduleService } from "./finance/recurring-schedule-service.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
@@ -819,8 +821,14 @@ export function createFinanceService({
     createFinanceProviderItemService({
       db,
       ...(encryptionKey ? { encryptionKey } : {}),
+      ...(plaid ? { plaid } : {}),
       now,
     });
+  const providerTransactionEvidence = createFinanceProviderTransactionEvidenceService({
+    db,
+    now,
+    providerItems,
+  });
   const accountHandoff = createFinanceConnectionHandoffService({
     db,
     ...(log ? { log } : {}),
@@ -4008,6 +4016,13 @@ export function createFinanceService({
     resolveScopeAccountId: maintenanceScopeAccountId,
   });
   return {
+    readFinanceProviderTransactionEvidence(
+      principal: Principal,
+      input: FinanceProviderTransactionEvidenceInput,
+      sessionTokenHash?: string,
+    ) {
+      return providerTransactionEvidence.read(principal, input, sessionTokenHash);
+    },
     async reviewReceipt(
       userId: string,
       transactionId: string,

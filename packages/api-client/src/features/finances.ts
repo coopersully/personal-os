@@ -145,12 +145,15 @@ import type {
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import {
+  type FinanceProviderTransactionEvidenceInput,
   financeBudgetBaselineQualificationReadSchema,
   financeBudgetBaselineReviewSchema,
   financeLedgerChallengePageSchema,
   financeLedgerChallengeSchema,
   financeOnboardingSnapshotSchema,
   financePeriodReviewSchema,
+  financeProviderTransactionEvidenceInputSchema,
+  financeProviderTransactionEvidenceSchema,
   financeSpendingDashboardSchema,
   financeSpendingReferencePageSchema,
   financeStatusSchema,
@@ -202,6 +205,14 @@ export function createFinanceApi(request: FinanceRequest) {
     return params;
   }
   return {
+    async readFinanceProviderTransactionEvidence(input: FinanceProviderTransactionEvidenceInput) {
+      return financeProviderTransactionEvidenceSchema.parse(
+        await request("/v1/finances/provider-transaction-evidence", {
+          method: "POST",
+          body: JSON.stringify(financeProviderTransactionEvidenceInputSchema.parse(input)),
+        }),
+      );
+    },
     async getFinanceOnboarding(): Promise<FinanceOnboardingSnapshot> {
       return financeOnboardingSnapshotSchema.parse(await request("/v1/finances/onboarding"));
     },

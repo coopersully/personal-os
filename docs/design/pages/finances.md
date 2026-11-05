@@ -228,6 +228,12 @@ for the complete plan shared with MCP.
 
 ## Transaction context questions
 
+The transaction breakdown editor loads supplied active allocations in their saved order,
+including category and personal/reimbursable treatment. Reopening loads the latest supplied
+breakdown; background refreshes preserve an open draft and its original revision guard.
+Saving refreshes the linked transaction as well as transaction lists. Missing allocation evidence
+from a transaction reader remains a separate API limitation.
+
 For a known manual account, an unresolved, posted, uncategorized expense or income transaction
 may expose **Add context** beside its transaction actions. The server checks full eligibility.
 Creation opens the exact `?contextualQuestion=` destination, which reads the current typed

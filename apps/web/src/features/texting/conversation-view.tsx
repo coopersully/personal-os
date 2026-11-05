@@ -1,0 +1,178 @@
+import type { TextMessage } from "@personal-os/domain";
+import { Fragment } from "react";
+import { Link } from "react-router-dom";
+import { DataViewEmpty } from "@/components/data-view-state";
+import { ReplyIcon } from "@/components/icons";
+import { Button } from "@/components/ui/button";
+import {
+  WorkspaceIcon,
+  type WorkspaceId,
+  workspaceIdentities,
+  workspaceIds,
+} from "@/components/workspace-identity";
+import { cn } from "@/lib/utils";
+
+export type ConversationWorkspace = WorkspaceId;
+
+export function ConversationNavigation({
+  workspace,
+  preview,
+}: {
+  workspace?: WorkspaceId | undefined;
+  preview?: string | undefined;
+}) {
+  const suffix = preview ? `?preview=${preview}` : "";
+  return (
+    <nav className="flex flex-wrap gap-1" aria-label="Message workspaces">
+      <Button variant={!workspace ? "default" : "ghost"} size="sm" asChild>
+        <Link to={`/messages${suffix}`} aria-current={!workspace ? "page" : undefined}>
+          All messages
+        </Link>
+      </Button>
+      {workspaceIds.map((id) => (
+        <Button key={id} variant={workspace === id ? "default" : "ghost"} size="sm" asChild>
+          <Link
+            to={`/${id}/messages${suffix}`}
+            aria-current={workspace === id ? "page" : undefined}
+          >
+            <WorkspaceIcon size="sm" workspace={id} />
+            {workspaceIdentities[id].label}
+          </Link>
+        </Button>
+      ))}
+    </nav>
+  );
+}
+
+export function ConversationView({
+  messages,
+  workspace,
+  timeZone,
+  preview,
+}: {
+  messages: TextMessage[];
+  workspace?: WorkspaceId | undefined;
+  timeZone: string;
+  preview?: string | undefined;
+}) {
+  const date = (value: string) =>
+    new Intl.DateTimeFormat(undefined, {
+      timeZone,
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(value));
+  const time = (value: string) =>
+    new Intl.DateTimeFormat(undefined, { timeZone, hour: "numeric", minute: "2-digit" }).format(
+      new Date(value),
+    );
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  if (!messages.length)
+    return (
+      <DataViewEmpty
+        icon={ReplyIcon}
+        title={
+          workspace
+            ? `No ${workspaceIdentities[workspace].label} messages yet`
+            : "Your conversation starts here"
+        }
+        description={
+          workspace
+            ? "Messages appear here when your agent connects them to this workspace."
+            : "Text nohmi from your verified phone. Your messages and replies appear here."
+        }
+      >
+        {workspace && (
+          <Button variant="outline" asChild>
+            <Link to={`/messages${preview ? `?preview=${preview}` : ""}`}>View all messages</Link>
+          </Button>
+        )}
+      </DataViewEmpty>
+    );
+  return (
+    <ol className="flex flex-col gap-5" aria-label="Conversation history">
+      {messages.map((message, index) => {
+        const human = message.senderKind === "human" || message.direction === "inbound";
+        const system = message.senderKind === "system";
+        const parent = message.replyToMessageIds?.map((id) => byId.get(id)).find(Boolean);
+        const previous = messages[index - 1];
+        const firstOfDay = !previous || date(previous.occurredAt) !== date(message.occurredAt);
+        return (
+          <Fragment key={message.id}>
+            {firstOfDay && (
+              <li className="py-3 text-center text-xs text-muted-foreground">
+                <time dateTime={message.occurredAt}>{date(message.occurredAt)}</time>
+              </li>
+            )}
+            <li
+              id={`message-${message.id}`}
+              className={cn(
+                "flex min-w-0 flex-col gap-1.5 scroll-mt-24",
+                human ? "items-end" : "items-start",
+              )}
+            >
+              <span className="px-1 text-xs font-medium text-muted-foreground">
+                {human ? "You" : system ? "nohmi · system notice" : "Your agent"}
+              </span>
+              <div
+                className={cn(
+                  "flex max-w-[92%] flex-col gap-2 whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-relaxed sm:max-w-[85%]",
+                  human
+                    ? "bg-primary text-primary-foreground"
+                    : system
+                      ? "bg-secondary text-secondary-foreground"
+                      : "bg-card text-card-foreground",
+                )}
+              >
+                {parent && !human && !system && (
+                  <a
+                    className="flex min-w-0 items-center gap-1.5 rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground hover:bg-selection"
+                    href={`#message-${parent.id}`}
+                  >
+                    <ReplyIcon className="size-3 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{parent.text}</span>
+                  </a>
+                )}
+                <p>{message.text || "Message without text"}</p>
+              </div>
+              <div
+                className={cn(
+                  "flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 px-1 text-xs text-muted-foreground",
+                  human && "justify-end",
+                )}
+              >
+                <time dateTime={message.occurredAt}>{time(message.occurredAt)}</time>
+                {!human && (
+                  <span>
+                    {message.status === "unknown"
+                      ? "Delivery unconfirmed"
+                      : message.status === "delivered"
+                        ? "Delivered"
+                        : message.status}
+                  </span>
+                )}
+                {message.workspaces?.map((id) => (
+                  <Link
+                    key={id}
+                    className="rounded-sm px-1 hover:bg-selection hover:text-foreground"
+                    to={`/${id}/messages${preview ? `?preview=${preview}` : ""}`}
+                  >
+                    {workspaceIdentities[id].label}
+                  </Link>
+                ))}
+                {workspace && (message.workspaces?.length ?? 0) > 1 && (
+                  <Link
+                    className="rounded-sm px-1 underline underline-offset-2 hover:text-foreground"
+                    to={`/messages${preview ? `?preview=${preview}` : ""}#message-${message.id}`}
+                  >
+                    Full conversation
+                  </Link>
+                )}
+              </div>
+            </li>
+          </Fragment>
+        );
+      })}
+    </ol>
+  );
+}

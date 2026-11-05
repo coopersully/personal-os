@@ -129,9 +129,19 @@ it("maps the bounded Texting agent protocol to owner-authenticated endpoints", a
     method: "POST",
     body: JSON.stringify({ invocationId, work: [] }),
   });
-  await api.replyToTextingAgentRun("run", { invocationId, body: "Your reply" });
+  await api.replyToTextingAgentRun("run", {
+    invocationId,
+    body: "Your reply",
+    workspaces: ["tasks"],
+    replyToMessageIds: [invocationId],
+  });
   expect(request).toHaveBeenLastCalledWith("/v1/texting/agent/runs/run/reply", {
     method: "POST",
-    body: JSON.stringify({ invocationId, body: "Your reply" }),
+    body: JSON.stringify({
+      invocationId,
+      body: "Your reply",
+      workspaces: ["tasks"],
+      replyToMessageIds: [invocationId],
+    }),
   });
 });

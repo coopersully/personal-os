@@ -1,11 +1,19 @@
 import { ApiClientError } from "@personal-os/api-client";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import type { TextingAgentRun } from "@personal-os/domain";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
+import { DataViewLoading } from "../../components/data-view-state.js";
 import { Button } from "../../components/ui/button.js";
-import { cn } from "../../lib/utils.js";
+import { ConversationPreview, conversationPreviewMode } from "./conversation-preview.js";
+import { ConversationSetup } from "./conversation-setup.js";
+import {
+  ConversationNavigation,
+  ConversationView,
+  type ConversationWorkspace,
+} from "./conversation-view.js";
 import { TextingRunRecovery } from "./run-recovery.js";
 
 export const textingRunLabels = {
@@ -17,24 +25,33 @@ export const textingRunLabels = {
   blocked: "Agent needs attention",
 } as const;
 
+function runLabel(run: TextingAgentRun) {
+  if (run.reason === "retry_requested") return "Saved request queued again";
+  if (run.reason === "human_closed") return "Closed without retrying";
+  if (run.reason === "shutdown_deferred") return "Waiting for nohmi to resume";
+  if (run.reason === "rate_limited") return "Waiting for the usage limit to reset";
+  return textingRunLabels[run.state];
+}
 const denied = (error: unknown) =>
   error instanceof ApiClientError && [401, 403].includes(error.status);
+const polling = () => (document.hidden ? false : 10_000);
 
-export function TextConversation({ userId, timeZone }: { userId: string; timeZone: string }) {
+type Props = { userId: string; timeZone: string; workspace?: ConversationWorkspace };
+export function TextConversation(props: Props) {
+  const location = useLocation();
+  const preview = conversationPreviewMode(
+    new URL(`${location.pathname}${location.search}`, window.location.origin),
+  );
+  return preview ? (
+    <ConversationPreview mode={preview} workspace={props.workspace} timeZone={props.timeZone} />
+  ) : (
+    <LiveConversation key={`${props.userId}:${props.workspace ?? "all"}`} {...props} />
+  );
+}
+
+function LiveConversation({ userId, timeZone, workspace }: Props) {
   const mount = useId();
   const client = useQueryClient();
-  const history = useInfiniteQuery({
-    queryKey: ["text-conversation", userId, mount, timeZone],
-    initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) =>
-      api.getTextConversation(timeZone, {
-        limit: 50,
-        ...(pageParam ? { beforeCursor: pageParam } : {}),
-      }),
-    getNextPageParam: (page) =>
-      page.hasEarlierMessages ? (page.earlierCursor ?? undefined) : undefined,
-    refetchInterval: () => (document.hidden ? false : 10_000),
-  });
   const agentQueryKey = ["texting-agent", userId, mount];
   const agent = useInfiniteQuery({
     queryKey: agentQueryKey,
@@ -42,20 +59,42 @@ export function TextConversation({ userId, timeZone }: { userId: string; timeZon
     queryFn: ({ pageParam }) =>
       api.getTextingAgentStatus(pageParam ? { beforeRun: pageParam } : {}),
     getNextPageParam: (page) => page.nextRunCursor ?? undefined,
-    refetchInterval: () => (document.hidden ? false : 10_000),
+    refetchInterval: polling,
   });
-  const privateDenied = denied(history.error) || denied(agent.error);
-  const pages = privateDenied ? [] : (history.data?.pages ?? []);
-  const messages = [
-    ...new Map(
-      [...pages]
-        .reverse()
-        .flatMap((page) => page.messages)
-        .map((message) => [message.id, message]),
-    ).values(),
-  ].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id));
-  const connection = pages[0]?.connection;
-  const status = privateDenied ? undefined : agent.data?.pages[0];
+  const connectionQuery = useQuery({
+    queryKey: ["texting-connection", userId, mount],
+    queryFn: () => api.getTextingConnection(),
+    refetchInterval: polling,
+  });
+  const status = denied(agent.error) ? undefined : agent.data?.pages[0];
+  const chatReady = status?.chatReady === true && !denied(connectionQuery.error);
+  const history = useInfiniteQuery({
+    queryKey: ["text-conversation", userId, mount, timeZone, workspace ?? "all"],
+    enabled: chatReady,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      api.getTextConversation(timeZone, {
+        limit: 50,
+        ...(workspace ? { workspace } : {}),
+        ...(pageParam ? { beforeCursor: pageParam } : {}),
+      }),
+    getNextPageParam: (page) =>
+      page.hasEarlierMessages ? (page.earlierCursor ?? undefined) : undefined,
+    refetchInterval: polling,
+  });
+  const privateDenied =
+    denied(history.error) || denied(agent.error) || denied(connectionQuery.error);
+  const messages =
+    chatReady && !privateDenied
+      ? [
+          ...new Map(
+            [...(history.data?.pages ?? [])]
+              .reverse()
+              .flatMap((page) => page.messages)
+              .map((message) => [message.id, message]),
+          ).values(),
+        ].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id))
+      : [];
   const runs = privateDenied
     ? []
     : [
@@ -66,167 +105,121 @@ export function TextConversation({ userId, timeZone }: { userId: string; timeZon
             .map((run) => [run.id, run]),
         ).values(),
       ].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
-  const latest = status?.runs[0];
+  const connection = privateDenied ? undefined : connectionQuery.data;
   return (
     <section
       className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6"
       aria-label="Messages"
     >
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-1 basis-48 flex-col gap-1">
-          <p className="text-sm text-muted-foreground">Your conversation across workspaces.</p>
-          {connection?.senderPhoneNumber && (
-            <p className="text-xs text-muted-foreground">
-              Text {connection.senderPhoneNumber} from {connection.maskedPhoneNumber}.
-            </p>
-          )}
-        </div>
-        <Button variant="outline" asChild>
-          <Link to="/settings?page=texting">Texting settings</Link>
-        </Button>
-      </header>
-      <QueryFeedback query={history} title="Couldn’t load your messages." />
+      <ConversationNavigation workspace={workspace} />
       <QueryFeedback query={agent} title="Couldn’t load agent status." />
-      {status && (
-        <section
-          className="flex flex-col gap-1 text-sm text-muted-foreground"
-          aria-label="Agent status"
-        >
-          <p>
-            {status.readiness === "ready"
-              ? "Automatic replies are on."
-              : status.readiness === "disabled"
-                ? "Automatic replies are off. Your saved messages remain here."
-                : status.readiness === "consent_required"
-                  ? "Verify your number or reply START to restore texting."
-                  : status.readiness === "permission_required"
-                    ? "Your agent needs Texting permission. Review its connected-agent settings."
-                    : "Your Claude routine needs attention in Texting settings."}
-          </p>
-          {latest && (
-            <p>
-              {latest.reason === "retry_requested"
-                ? "Saved request queued again"
-                : latest.reason === "human_closed"
-                  ? "Closed without retrying"
-                  : latest.reason === "shutdown_deferred"
-                    ? "Waiting for nohmi to resume"
-                    : latest.reason === "rate_limited"
-                      ? "Waiting for the usage limit to reset"
-                      : textingRunLabels[latest.state]}
-            </p>
+      <QueryFeedback query={connectionQuery} title="Couldn’t load Texting setup." />
+      {privateDenied ? null : !status ? (
+        agent.isPending && <DataViewLoading label="Checking your agent connection" />
+      ) : !chatReady ? (
+        <ConversationSetup status={status} connection={connection} />
+      ) : (
+        <>
+          <header className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <p className="text-sm font-medium">
+                {workspace
+                  ? "The same conversation, focused here."
+                  : "One conversation across your workspaces."}
+              </p>
+              {connection?.senderPhoneNumber && (
+                <p className="text-xs text-muted-foreground">
+                  Text {connection.senderPhoneNumber} from {connection.maskedPhoneNumber}.
+                </p>
+              )}
+            </div>
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/settings?page=texting">Texting settings</Link>
+            </Button>
+          </header>
+          <QueryFeedback query={history} title="Couldn’t load your messages." />
+          {history.isPending ? (
+            <DataViewLoading label="Loading your conversation" />
+          ) : (
+            <>
+              {history.hasNextPage && (
+                <Button
+                  variant="ghost"
+                  disabled={history.isFetchingNextPage}
+                  onClick={() => void history.fetchNextPage()}
+                >
+                  Load older messages
+                </Button>
+              )}
+              <ConversationView messages={messages} workspace={workspace} timeZone={timeZone} />
+            </>
           )}
           {Boolean(status.pendingCount) && (
-            <p>
+            <p className="text-center text-xs text-muted-foreground">
               {status.pendingCount}{" "}
               {status.pendingCount === 1 ? "message waiting" : "messages waiting"} for your agent.
             </p>
           )}
-          {runs.length > 0 && (
-            <details className="mt-2">
-              <summary className="cursor-pointer">Agent runs</summary>
-              <ol className="mt-3 flex flex-col gap-4" aria-label="Agent runs">
-                {runs.map((run) => (
-                  <li key={run.id} className="flex flex-col gap-2 border-b pb-4 last:border-0">
-                    <article
-                      aria-label={`Run from ${new Date(run.createdAt).toLocaleString(undefined, { timeZone })}`}
-                      className="flex flex-col gap-2"
-                    >
-                      <p>
-                        <time dateTime={run.createdAt}>
-                          {new Date(run.createdAt).toLocaleString(undefined, { timeZone })}
-                        </time>
-                        {" · "}
-                        {run.reason === "retry_requested"
-                          ? "Saved request queued again"
-                          : run.reason === "human_closed"
-                            ? "Closed without retrying"
-                            : run.reason === "rate_limited"
-                              ? "Waiting for the usage limit to reset"
-                              : run.reason === "shutdown_deferred"
-                                ? "Waiting for nohmi to resume"
-                                : textingRunLabels[run.state]}
-                      </p>
-                      <TextingRunRecovery
-                        run={run}
-                        onRecovered={() => {
-                          void client.invalidateQueries({ queryKey: agentQueryKey });
-                        }}
-                      />
-                      {run.work.some((item) => item.state !== "completed") && (
-                        <ul className="flex flex-col gap-2" aria-label="Pending work">
-                          {run.work
-                            .filter((item) => item.state !== "completed")
-                            .map((item) => (
-                              <li key={`${item.domain}:${item.key}`}>
-                                <span className="font-medium capitalize">{item.domain}</span>:{" "}
-                                {item.note} <span>({item.state}, reported by your agent)</span>
-                              </li>
-                            ))}
-                        </ul>
-                      )}
-                    </article>
-                  </li>
-                ))}
-              </ol>
-              {agent.hasNextPage && (
-                <Button
-                  variant="ghost"
-                  disabled={agent.isFetchingNextPage}
-                  onClick={() => void agent.fetchNextPage()}
+        </>
+      )}
+      {!privateDenied && runs.length > 0 && (
+        <details className="text-sm text-muted-foreground">
+          <summary className="cursor-pointer py-2">Agent runs</summary>
+          <ol className="mt-2 flex flex-col gap-4" aria-label="Agent runs">
+            {runs.map((run) => (
+              <li key={run.id} className="border-b border-border/40 pb-4 last:border-0">
+                <article
+                  aria-label={`Run from ${new Date(run.createdAt).toLocaleString(undefined, { timeZone })}`}
+                  className="flex flex-col gap-2"
                 >
-                  Load older runs
-                </Button>
-              )}
-            </details>
-          )}
-        </section>
-      )}
-      {history.hasNextPage && !privateDenied && (
-        <Button
-          variant="ghost"
-          disabled={history.isFetchingNextPage}
-          onClick={() => void history.fetchNextPage()}
-        >
-          Load older messages
-        </Button>
-      )}
-      {history.isSuccess && !messages.length && !privateDenied && (
-        <div className="py-12 text-center">
-          <h2 className="font-medium">Your conversation starts here</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Text nohmi from your verified phone. Your messages and replies will appear here.
-          </p>
-        </div>
-      )}
-      <ol className="flex flex-col gap-4" aria-label="Conversation history">
-        {messages.map((message) => (
-          <li
-            key={message.id}
-            className={cn(
-              "flex flex-col gap-1",
-              message.direction === "inbound" ? "items-end" : "items-start",
-            )}
-          >
-            <div
-              className={cn(
-                "max-w-[90%] whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm",
-                message.direction === "inbound"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-foreground",
-              )}
+                  <p>
+                    <time dateTime={run.createdAt}>
+                      {new Date(run.createdAt).toLocaleString(undefined, { timeZone })}
+                    </time>
+                    {" · "}
+                    {runLabel(run)}
+                  </p>
+                  <TextingRunRecovery
+                    run={run}
+                    onRecovered={() => {
+                      void client.invalidateQueries({ queryKey: agentQueryKey });
+                    }}
+                  />
+                  {chatReady &&
+                    run.work.some(
+                      (item) =>
+                        item.state !== "completed" && (!workspace || item.domain === workspace),
+                    ) && (
+                      <ul aria-label="Pending work" className="flex flex-col gap-2">
+                        {run.work
+                          .filter(
+                            (item) =>
+                              item.state !== "completed" &&
+                              (!workspace || item.domain === workspace),
+                          )
+                          .map((item) => (
+                            <li key={`${item.domain}:${item.key}`}>
+                              <span className="font-medium capitalize">{item.domain}</span>:{" "}
+                              {item.note} ({item.state}, reported by your agent)
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                </article>
+              </li>
+            ))}
+          </ol>
+          {agent.hasNextPage && (
+            <Button
+              variant="ghost"
+              disabled={agent.isFetchingNextPage}
+              onClick={() => void agent.fetchNextPage()}
             >
-              <span className="sr-only">{message.direction === "inbound" ? "You" : "nohmi"}: </span>
-              {message.text || "Message without text"}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              <time dateTime={message.occurredAt}>{message.localDateTime}</time>
-              {message.direction === "outbound" &&
-                ` · ${message.status === "unknown" ? "Delivery unconfirmed" : message.status}`}
-            </p>
-          </li>
-        ))}
-      </ol>
+              Load older runs
+            </Button>
+          )}
+        </details>
+      )}
     </section>
   );
 }

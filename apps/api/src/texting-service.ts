@@ -378,6 +378,9 @@ export function createTextingService(options: Options) {
       : undefined;
     const conditions = and(
       eq(textMessages.connectionId, row.id),
+      query.workspace
+        ? sql`${textMessages.workspaces} @> ${JSON.stringify([query.workspace])}::jsonb`
+        : undefined,
       query.beforeCursor ? beforeCondition : query.afterCursor ? afterCondition : undefined,
     );
     const messages = query.afterCursor
@@ -398,20 +401,21 @@ export function createTextingService(options: Options) {
     const firstVisible = visible[0];
     const lastVisible = visible.at(-1);
     const hasExtra = messages.length > query.limit;
-    const receipt = cursorId
-      ? null
-      : issueConversationReceipt(
-          {
-            actorId: principal.actorId,
-            connectionId: row.id,
-            consentEpoch: row.consentEpoch,
-            exp: current.getTime() + 5 * 60_000,
-            revision: row.conversationRevision,
-            timeZone,
-            userId: principal.userId,
-          },
-          options.encryptionKey,
-        );
+    const receipt =
+      cursorId || query.workspace
+        ? null
+        : issueConversationReceipt(
+            {
+              actorId: principal.actorId,
+              connectionId: row.id,
+              consentEpoch: row.consentEpoch,
+              exp: current.getTime() + 5 * 60_000,
+              revision: row.conversationRevision,
+              timeZone,
+              userId: principal.userId,
+            },
+            options.encryptionKey,
+          );
     return {
       asOf: current.toISOString(),
       connection: publicConnection(row),
@@ -421,6 +425,10 @@ export function createTextingService(options: Options) {
         (query.afterCursor && firstVisible) || hasExtra ? (firstVisible?.id ?? null) : null,
       hasEarlierMessages: Boolean((query.afterCursor && firstVisible) || hasExtra),
       messages: visible.map((message) => ({
+        workspaces: message.workspaces,
+        senderKind: message.senderKind ?? (message.direction === "inbound" ? "human" : "system"),
+        replyToMessageIds: message.replyToMessageIds,
+        classifiedAt: message.classifiedAt?.toISOString() ?? null,
         actualSegments: message.actualSegments,
         contentKind: message.contentKind,
         deliveredAt: message.deliveredAt?.toISOString() ?? null,
@@ -569,12 +577,37 @@ export function createTextingService(options: Options) {
         options.encryptionKey,
         now(),
       );
+      const replyToMessageIds = input.replyToMessageIds ?? [];
+      if (new Set(replyToMessageIds).size !== replyToMessageIds.length)
+        throw new AppError("invalid_request", "Reply references must be distinct.");
+      if (replyToMessageIds.length) {
+        const referenced = await tx
+          .select({ id: textMessages.id })
+          .from(textMessages)
+          .where(
+            and(
+              eq(textMessages.userId, principal.userId),
+              eq(textMessages.connectionId, locked.id),
+              inArray(textMessages.id, replyToMessageIds),
+              sql`${textMessages.occurredAt} <= ${now()}`,
+            ),
+          );
+        if (referenced.length !== replyToMessageIds.length)
+          throw new AppError(
+            "invalid_request",
+            "Reply references must be earlier messages in this conversation.",
+          );
+      }
       const [created] = await tx
         .insert(textMessages)
         .values({
+          workspaces: [...new Set(input.workspaces ?? [])].sort(),
+          replyToMessageIds,
+          classifiedAt: input.workspaces ? now() : null,
           body,
           connectionId: locked.id,
           contentKind: input.contentKind,
+          senderKind: principal.actorType === "agent" ? "agent" : "human",
           direction: "outbound",
           occurredAt: now(),
           occurredAtSource: "nohmi",
@@ -689,7 +722,13 @@ export function createTextingService(options: Options) {
       })
       .where(eq(textMessages.id, pendingMessage.id))
       .returning();
-    return requireDatabaseRecord(message, "Could not finalize the outgoing text message.");
+    const stored = requireDatabaseRecord(message, "Could not finalize the outgoing text message.");
+    return {
+      ...stored,
+      senderKind:
+        stored.senderKind ??
+        (stored.direction === "inbound" ? ("human" as const) : ("system" as const)),
+    };
   }
 
   /** Internal notification handoff. The coordinator commits its fenced attempt and message link
@@ -758,6 +797,7 @@ export function createTextingService(options: Options) {
           body,
           connectionId: connection.id,
           contentKind: "concise",
+          senderKind: "system",
           direction: "outbound",
           occurredAt: now(),
           occurredAtSource: "nohmi",
@@ -969,6 +1009,19 @@ export function createTextingService(options: Options) {
             body,
             candidates.map(({ binding }) => binding),
           ).state === "matched";
+        if (claim && boundedReply) {
+          await tx
+            .update(textMessages)
+            .set({
+              workspaces: ["finances"],
+              senderKind: "human",
+              classifiedAt: now(),
+              replyToMessageIds: [
+                ...new Set(candidates.map(({ binding }) => binding.outboundMessageId)),
+              ],
+            })
+            .where(and(eq(textMessages.userId, row.userId), eq(textMessages.id, claim.messageId)));
+        }
         if (claim && agent && !boundedReply) {
           const availableAt = new Date(now().getTime() + 5000);
           // Debounce the owner's unclaimed burst without shortening provider backoff.

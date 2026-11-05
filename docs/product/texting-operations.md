@@ -722,3 +722,38 @@ routine, installing its protocol instructions, validating subscription billing s
 a real signed SMS → new session → authorized workspace tools → recorded reply → carrier delivery
 remain release acceptance steps. Broader notification-producer unification in COO-61 — Shared
 Texting general inbox remains separately tracked; this candidate does not claim that work complete.
+
+### Workspace conversation views and verified setup — November 5 candidate
+
+Messages remain one canonical SMS conversation. The agent classifies human messages and its own
+replies into zero or more of Mail, Tasks, Calendar and Finances. Empty tags mean general; a missing
+classification stays global-only. Each relevant workspace displays the full original message,
+without copied records, excerpts or rewritten human text. Reply references preserve context;
+separate topic replies share the original incoming message. Workspace classification describes
+relevance and grants no additional domain authority. Existing Finance Chat is preserved.
+
+`/messages` and `/{workspace}/messages` share a chronological view, workspace labels and a link
+back to full context. The API filters before pagination; a filtered view cannot issue the receipt
+required by the generic SMS sender. Topic replies use stable per-run keys and at most four SMS
+messages; replay of a reserved key never resubmits an uncertain send. Existing unclassified history
+is retained globally; no provider-backed retrospective classification is started automatically.
+
+Chat screens remain behind setup until current active phone consent, routine and agent grants are
+paired with an authenticated agent reply to a real incoming batch and provider-confirmed delivery.
+Proof is bound to the phone consent epoch, routine, authorization connection, current configuration
+and provider-trigger credential fingerprint. Saving an unchanged configuration preserves proof;
+changing the binding requires a fresh delivered reply.
+A queued SMS, accepted host session or system notice never unlocks Messages. Disabled/replaced setup
+locks the screens without deleting records; setup and failed-attempt recovery remain accessible.
+The initial test is a real text from the verified phone, followed by the agent's delivered reply.
+
+nohmi provides system-authored fallback SMS for rejected or uncertain handoffs, rate limits and
+sessions without a completed reply after five minutes without progress. One durable notice per run
+and a fifteen-minute owner cooldown prevent repeated notices. These notices retain honest delivery
+state, do not finish agent work or claim it failed, and are never replayed after an uncertain send.
+Current consent and routine identity are checked again at preparation. Local render-only previews
+are explicitly fictional and cannot manufacture live verification.
+
+Known Finance notification and acknowledgement producers explicitly tag Finance; generic direct sends
+accept optional validated workspace/reply metadata. Legacy outbound records with unknown authorship
+are labeled nohmi system messages, never attributed to an agent without evidence.

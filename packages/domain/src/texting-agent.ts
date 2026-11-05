@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
+import { textWorkspaceSchema } from "./texting-workspace.js";
 
 export const textingAgentSettingsInputSchema = z
   .object({
@@ -31,11 +32,27 @@ export type TextingAgentClaimInput = z.infer<typeof textingAgentClaimSchema>;
 export const textingAgentCheckpointSchema = textingAgentInvocationSchema
   .extend({
     work: z.array(textingAgentWorkSchema).max(20),
+    annotations: z
+      .array(
+        z
+          .object({
+            messageId: idSchema,
+            workspaces: z.array(textWorkspaceSchema).max(4),
+            replyToMessageIds: z.array(idSchema).max(25).optional(),
+          })
+          .strict(),
+      )
+      .max(25)
+      .optional(),
   })
   .strict();
 export const textingAgentReplySchema = textingAgentInvocationSchema
   .extend({
     body: z.string().trim().min(1).max(480),
+    workspaces: z.array(textWorkspaceSchema).max(4),
+    replyToMessageIds: z.array(idSchema).min(1).max(25),
+    replyKey: z.string().trim().min(1).max(80).optional(),
+    final: z.boolean().optional(),
   })
   .strict();
 export const textingAgentRunSchema = z.object({
@@ -49,6 +66,8 @@ export const textingAgentRunSchema = z.object({
   work: z.array(textingAgentWorkSchema),
 });
 export const textingAgentStatusSchema = z.object({
+  chatReady: z.boolean(),
+  verifiedAt: isoDateTimeSchema.nullable(),
   enabled: z.boolean(),
   scheduleId: idSchema.nullable(),
   readiness: z.enum([

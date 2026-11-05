@@ -19,7 +19,21 @@ import {
   textingAgentSettingsInputSchema,
   textingAgentWorkSchema,
 } from "@personal-os/domain";
-import { and, asc, count, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import {
@@ -29,6 +43,7 @@ import {
   textingAgentAuthority,
   textingAgentInstructions,
   textingAgentScopes,
+  textingHostBindingFingerprint,
 } from "./texting-agent-authority.js";
 import type { createTextingService } from "./texting-service.js";
 import type { Principal } from "./types.js";
@@ -91,7 +106,53 @@ export function createTextingAgentService(options: {
             isNull(textingAgentQueue.cancelledAt),
           ),
         );
+      const [proof] =
+        authority.readiness === "ready" &&
+        authority.settings &&
+        authority.connection &&
+        authority.schedule
+          ? await tx
+              .select({ deliveredAt: textMessages.deliveredAt })
+              .from(textMessages)
+              .innerJoin(
+                textingAgentRuns,
+                and(
+                  eq(textingAgentRuns.id, textMessages.agentRunId),
+                  eq(textingAgentRuns.userId, principal.userId),
+                ),
+              )
+              .where(
+                and(
+                  eq(textMessages.userId, principal.userId),
+                  eq(textMessages.connectionId, authority.connection.id),
+                  eq(textMessages.senderKind, "agent"),
+                  eq(textMessages.direction, "outbound"),
+                  eq(textMessages.status, "delivered"),
+                  isNotNull(textMessages.deliveredAt),
+                  isNotNull(textMessages.providerSubmittedAt),
+                  isNotNull(textMessages.classifiedAt),
+                  isNotNull(textingAgentRuns.invocationId),
+                  eq(textingAgentRuns.connectionId, authority.connection.id),
+                  eq(textingAgentRuns.consentEpoch, authority.connection.consentEpoch),
+                  eq(textingAgentRuns.scheduleId, authority.settings.scheduleId),
+                  eq(
+                    textingAgentRuns.authorizationConnectionId,
+                    authority.schedule.authorizationConnectionId,
+                  ),
+                  eq(
+                    textingAgentRuns.hostBindingFingerprint,
+                    textingHostBindingFingerprint(authority.schedule) ?? "",
+                  ),
+                  gte(textingAgentRuns.createdAt, authority.settings.updatedAt),
+                  sql`EXISTS (SELECT 1 FROM texting_agent_queue q JOIN text_inbound_claims c ON c.id = q.claim_id AND c.user_id = q.user_id WHERE q.run_id = ${textingAgentRuns.id} AND q.user_id = ${principal.userId} AND c.connection_id = ${authority.connection.id} AND c.consent_epoch = ${authority.connection.consentEpoch})`,
+                ),
+              )
+              .orderBy(desc(textMessages.deliveredAt))
+              .limit(1)
+          : [];
       return {
+        chatReady: Boolean(proof?.deliveredAt),
+        verifiedAt: proof?.deliveredAt?.toISOString() ?? null,
         enabled: Boolean(authority.settings),
         scheduleId: authority.settings?.scheduleId ?? null,
         readiness: authority.readiness,
@@ -149,7 +210,10 @@ export function createTextingAgentService(options: {
           })
           .onConflictDoUpdate({
             target: textingAgentSettings.userId,
-            set: { scheduleId: input.scheduleId, updatedAt: now() },
+            set: {
+              scheduleId: input.scheduleId,
+              updatedAt: before?.scheduleId === input.scheduleId ? before.updatedAt : now(),
+            },
           });
         const authority = await textingAgentAuthority(
           tx,
@@ -219,6 +283,7 @@ export function createTextingAgentService(options: {
       authority.connection?.id !== run.connectionId ||
       authority.connection.consentEpoch !== run.consentEpoch ||
       authority.schedule?.authorizationConnectionId !== run.authorizationConnectionId ||
+      textingHostBindingFingerprint(authority.schedule) !== run.hostBindingFingerprint ||
       principal.authorizationConnectionId !== run.authorizationConnectionId
     )
       throw new AppError(
@@ -320,12 +385,109 @@ export function createTextingAgentService(options: {
       };
     });
   }
+  async function batchMessages(tx: TextingAgentTransaction, userId: string, runId: string) {
+    return tx
+      .select({ message: textMessages })
+      .from(textingAgentQueue)
+      .innerJoin(
+        textInboundClaims,
+        and(
+          eq(textInboundClaims.id, textingAgentQueue.claimId),
+          eq(textInboundClaims.userId, userId),
+        ),
+      )
+      .innerJoin(
+        textMessages,
+        and(eq(textMessages.id, textInboundClaims.messageId), eq(textMessages.userId, userId)),
+      )
+      .where(and(eq(textingAgentQueue.userId, userId), eq(textingAgentQueue.runId, runId)));
+  }
+  async function validateReferences(
+    tx: TextingAgentTransaction,
+    userId: string,
+    connectionId: string,
+    ids: string[],
+    before: Date,
+    selfId?: string,
+  ) {
+    if (!ids.length) return [];
+    if (new Set(ids).size !== ids.length || (selfId && ids.includes(selfId)))
+      throw new AppError("invalid_request", "Reply references must be distinct earlier messages.");
+    const records = await tx
+      .select({
+        id: textMessages.id,
+        workspaces: textMessages.workspaces,
+        direction: textMessages.direction,
+      })
+      .from(textMessages)
+      .where(
+        and(
+          eq(textMessages.userId, userId),
+          eq(textMessages.connectionId, connectionId),
+          inArray(textMessages.id, ids),
+          sql`${textMessages.occurredAt} <= ${before}`,
+        ),
+      );
+    if (records.length !== ids.length)
+      throw new AppError(
+        "invalid_request",
+        "Reply references must belong to this conversation and precede the reply.",
+      );
+    return records;
+  }
   async function checkpoint(principal: Principal, runId: string, raw: unknown) {
     const input = textingAgentCheckpointSchema.parse(raw);
     return db.transaction(async (tx) => {
       await lockTextingOwner(tx, principal.userId);
       const run = await authorizedRun(tx, principal, runId, input.invocationId);
       if (run.state !== "running") throw new AppError("conflict", "This run is not running.");
+      const batch = await batchMessages(tx, principal.userId, run.id);
+      const batchById = new Map(batch.map(({ message }) => [message.id, message]));
+      if (
+        new Set((input.annotations ?? []).map((a) => a.messageId)).size !==
+        (input.annotations ?? []).length
+      )
+        throw new AppError("invalid_request", "Classify each message only once per checkpoint.");
+      for (const annotation of input.annotations ?? []) {
+        const message = batchById.get(annotation.messageId);
+        if (!message)
+          throw new AppError("forbidden", "Only this run's inbound messages can be classified.");
+        const replyToMessageIds = annotation.replyToMessageIds ?? [];
+        await validateReferences(
+          tx,
+          principal.userId,
+          run.connectionId,
+          replyToMessageIds,
+          message.occurredAt,
+          message.id,
+        );
+        // Once a reply uses a workspace, retain that context on its original input.
+        const replies = await tx
+          .select({ workspaces: textMessages.workspaces })
+          .from(textMessages)
+          .where(
+            and(
+              eq(textMessages.userId, principal.userId),
+              eq(textMessages.connectionId, run.connectionId),
+              eq(textMessages.senderKind, "agent"),
+              sql`${textMessages.replyToMessageIds} @> ${JSON.stringify([message.id])}::jsonb`,
+            ),
+          );
+        const usedWorkspaces = new Set(replies.flatMap((reply) => reply.workspaces));
+        const retainedWorkspaces = message.workspaces.filter((workspace) =>
+          usedWorkspaces.has(workspace),
+        );
+        await tx
+          .update(textMessages)
+          .set({
+            workspaces: [...new Set([...annotation.workspaces, ...retainedWorkspaces])].sort(),
+            replyToMessageIds,
+            senderKind: "human",
+            classifiedAt: now(),
+            updatedAt: now(),
+          })
+          .where(and(eq(textMessages.userId, principal.userId), eq(textMessages.id, message.id)));
+      }
       const work = new Map(run.work.map((item) => [`${item.domain}:${item.key}`, item]));
       for (const item of input.work) {
         const key = `${item.domain}:${item.key}`;
@@ -380,7 +542,10 @@ export function createTextingAgentService(options: {
         auditValues({
           action: "texting.agent.checkpoint",
           before: { workCount: run.work.length },
-          after: { workCount: updated.work.length },
+          after: {
+            workCount: updated.work.length,
+            annotationCount: input.annotations?.length ?? 0,
+          },
           entityId: run.id,
           entityType: "texting_agent_run",
           principal,
@@ -392,32 +557,95 @@ export function createTextingAgentService(options: {
   }
   async function reply(principal: Principal, runId: string, raw: unknown) {
     const input = textingAgentReplySchema.parse(raw);
+    const replyKey = input.replyKey ?? "final";
+    const final = input.final ?? true;
+    const workspaces = [...new Set(input.workspaces)].sort();
+    const references = [...new Set(input.replyToMessageIds)].sort();
+    if (references.length !== input.replyToMessageIds.length)
+      throw new AppError("invalid_request", "Reply references must be distinct.");
     await options.texting.sendNotification(principal.userId, async (tx) => {
       const run = await authorizedRun(tx, principal, runId, input.invocationId);
-      if (run.replyMessageId) {
-        const [message] = await tx
-          .select()
-          .from(textMessages)
-          .where(
-            and(eq(textMessages.userId, principal.userId), eq(textMessages.id, run.replyMessageId)),
-          );
+      const [existing] = await tx
+        .select()
+        .from(textMessages)
+        .where(
+          and(
+            eq(textMessages.userId, principal.userId),
+            eq(textMessages.agentRunId, run.id),
+            eq(textMessages.replyKey, replyKey),
+          ),
+        );
+      if (existing) {
         if (
-          !message ||
-          (message.body !== input.body &&
-            message.body !== `${input.body}\nReply STOP to unsubscribe.`)
+          (existing.body !== input.body &&
+            existing.body !== `${input.body}\nReply STOP to unsubscribe.`) ||
+          existing.replyFinal !== final ||
+          JSON.stringify(existing.workspaces) !== JSON.stringify(workspaces) ||
+          JSON.stringify(existing.replyToMessageIds) !== JSON.stringify(references)
         )
-          throw new AppError("conflict", "This run already has a different reply.");
+          throw new AppError("conflict", "This reply key already has different content.");
         return null;
       }
       if (run.state !== "running") throw new AppError("conflict", "This run is not running.");
+      const batch = await batchMessages(tx, principal.userId, run.id);
+      if (!references.some((id) => batch.some(({ message }) => message.id === id)))
+        throw new AppError("invalid_request", "A reply must answer a message in this run.");
+      if (batch.some(({ message }) => !message.classifiedAt))
+        throw new AppError("conflict", "Classify all saved inbound messages before replying.");
+      const referenced = await validateReferences(
+        tx,
+        principal.userId,
+        run.connectionId,
+        references,
+        now(),
+      );
+      if (
+        workspaces.some(
+          (workspace) =>
+            !referenced.some(
+              (message) =>
+                message.direction === "inbound" && message.workspaces.includes(workspace),
+            ),
+        )
+      )
+        throw new AppError(
+          "invalid_request",
+          "Classify a referenced input in each reply workspace first.",
+        );
+      const [countRow] = await tx
+        .select({ value: count() })
+        .from(textMessages)
+        .where(
+          and(
+            eq(textMessages.userId, principal.userId),
+            eq(textMessages.agentRunId, run.id),
+            eq(textMessages.senderKind, "agent"),
+          ),
+        );
+      if ((countRow?.value ?? 0) >= 4)
+        throw new AppError("invalid_request", "A run supports at most four topic replies.");
+      if ((countRow?.value ?? 0) === 3 && !final)
+        throw new AppError("invalid_request", "The fourth topic reply must finish the run.");
       return {
         body: input.body,
         queued: async (messageId: string) => {
+          await tx
+            .update(textMessages)
+            .set({
+              workspaces,
+              senderKind: "agent",
+              replyToMessageIds: references,
+              classifiedAt: now(),
+              agentRunId: run.id,
+              replyKey,
+              replyFinal: final,
+            })
+            .where(and(eq(textMessages.userId, principal.userId), eq(textMessages.id, messageId)));
           await tx.insert(auditEvents).values(
             auditValues({
               action: "texting.agent.reply",
               before: { state: run.state },
-              after: { messageId },
+              after: { messageId, replyKey, final },
               entityId: run.id,
               entityType: "texting_agent_run",
               principal,
@@ -426,7 +654,10 @@ export function createTextingAgentService(options: {
           );
           await tx
             .update(textingAgentRuns)
-            .set({ state: "completed", replyMessageId: messageId, updatedAt: now() })
+            .set({
+              ...(final ? { state: "completed" as const, replyMessageId: messageId } : {}),
+              updatedAt: now(),
+            })
             .where(eq(textingAgentRuns.id, run.id));
         },
       };
@@ -469,7 +700,8 @@ export function createTextingAgentService(options: {
           authority.schedule?.id !== run.scheduleId ||
           authority.connection?.id !== run.connectionId ||
           authority.connection.consentEpoch !== run.consentEpoch ||
-          authority.schedule.authorizationConnectionId !== run.authorizationConnectionId
+          authority.schedule.authorizationConnectionId !== run.authorizationConnectionId ||
+          textingHostBindingFingerprint(authority.schedule) !== run.hostBindingFingerprint
         )
           throw new AppError(
             "forbidden",

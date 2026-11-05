@@ -250,3 +250,21 @@ explicit Finance routing, uncertain host/send behavior and recovery. Browser tes
 history and prove rendering only. Green tests can coexist with absent routine entitlement, missing
 MCP permission, stale host instructions, provider rate limits or carrier rejection. The deployment
 owner must verify those live boundaries before describing the feature as operational.
+
+### Texting fallback notices, workspace metadata and reply proof
+
+Fallbacks reuse the configured Twilio connector and consent/quotas of `sendNotification`; no new
+host, port, model API or credential is introduced. A bounded rotating scan considers 25 failed or
+stalled runs per pass. Under the existing owner/connection serialization, it rechecks current run,
+phone epoch and routine identity, reserves one system message and its run notice ID, and commits
+before provider submission. Each owner has a fifteen-minute notice cooldown. A lost result retains
+the reserved message; it never triggers an automatic second send. Revocation, quota or provider
+unavailability can still prevent the notice. Redacted background errors retain recovery observation.
+
+The setup gate requires a delivered, provider-submitted, authenticated agent message linked to a
+real incoming batch and current configuration. Human-visible metadata is not proof of a workspace
+effect. Tags and reply references are owner-bound conversation metadata; workspace filtering occurs
+before pagination and does not produce a full-context send receipt. Loopback-only development
+previews contain fictional records, make no provider call and cannot update verification state.
+PostgreSQL tests establish concurrency, cooldown, isolation and proof transitions; local browser
+checks establish layout and gating only. Real routine and carrier acceptance remain rollout evidence.

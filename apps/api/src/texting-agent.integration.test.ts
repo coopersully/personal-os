@@ -15,6 +15,7 @@ import {
   textReplyBindings,
   users,
 } from "@personal-os/database";
+import { automationHostScheduleSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, isNull } from "drizzle-orm";
 import { encryptJson } from "./security.js";
@@ -202,6 +203,10 @@ describe.sequential("Texting agent lifecycle", () => {
     ).rejects.toMatchObject({ code: "forbidden" });
     await f.service.checkpoint(f.agent, run.id, {
       invocationId,
+      annotations: batch.messages.map((m) => ({
+        messageId: m.id,
+        workspaces: ["tasks", "calendar"],
+      })),
       work: [
         {
           domain: "tasks",
@@ -222,10 +227,14 @@ describe.sequential("Texting agent lifecycle", () => {
     await f.service.reply(f.agent, run.id, {
       invocationId,
       body: "Your task list is up to date. Calendar access is needed.",
+      workspaces: ["tasks", "calendar"],
+      replyToMessageIds: batch.messages.map((m) => m.id),
     });
     await f.service.reply(f.agent, run.id, {
       invocationId,
       body: "Your task list is up to date. Calendar access is needed.",
+      workspaces: ["tasks", "calendar"],
+      replyToMessageIds: batch.messages.map((m) => m.id),
     });
     expect(f.twilio.sendMessage).toHaveBeenCalledTimes(1);
     const completed = (await f.service.status(f.human)).runs[0];
@@ -258,12 +267,31 @@ describe.sequential("Texting agent lifecycle", () => {
     const run = (await f.service.status(f.human)).runs[0];
     if (!run) throw new Error("Missing run");
     const invocationId = crypto.randomUUID();
-    await f.service.claim(f.agent, run.id, { invocationId });
+    const claimed = await f.service.claim(f.agent, run.id, { invocationId });
+    const replyToMessageIds = claimed.messages.map((m) => m.id);
+    await f.service.checkpoint(f.agent, run.id, {
+      invocationId,
+      work: [],
+      annotations: claimed.messages.map((m) => ({
+        messageId: m.id,
+        workspaces: ["tasks", "calendar"],
+      })),
+    });
     vi.mocked(f.twilio.sendMessage).mockRejectedValue(new Error("timeout"));
     await expect(
-      f.service.reply(f.agent, run.id, { invocationId, body: "Here is your update." }),
+      f.service.reply(f.agent, run.id, {
+        invocationId,
+        body: "Here is your update.",
+        workspaces: ["tasks"],
+        replyToMessageIds,
+      }),
     ).rejects.toThrow();
-    await f.service.reply(f.agent, run.id, { invocationId, body: "Here is your update." });
+    await f.service.reply(f.agent, run.id, {
+      invocationId,
+      body: "Here is your update.",
+      workspaces: ["tasks"],
+      replyToMessageIds,
+    });
     expect(f.twilio.sendMessage).toHaveBeenCalledTimes(1);
     const [stored] = await database.db
       .select()
@@ -279,7 +307,16 @@ describe.sequential("Texting agent lifecycle", () => {
     const run = (await f.service.status(f.human)).runs[0];
     if (!run) throw new Error("Missing run");
     const invocationId = crypto.randomUUID();
-    await f.service.claim(f.agent, run.id, { invocationId });
+    const claimed = await f.service.claim(f.agent, run.id, { invocationId });
+    const replyToMessageIds = claimed.messages.map((m) => m.id);
+    await f.service.checkpoint(f.agent, run.id, {
+      invocationId,
+      work: [],
+      annotations: claimed.messages.map((m) => ({
+        messageId: m.id,
+        workspaces: ["tasks", "calendar"],
+      })),
+    });
     const work = [
       {
         domain: "tasks",
@@ -301,6 +338,8 @@ describe.sequential("Texting agent lifecycle", () => {
     await f.service.reply(f.agent, run.id, {
       invocationId,
       body: "Task created. Calendar needs verification.",
+      workspaces: ["tasks", "calendar"],
+      replyToMessageIds,
     });
     await f.inbound("What is still pending?");
     current = new Date(current.getTime() + 6000);
@@ -518,6 +557,226 @@ describe.sequential("Texting agent lifecycle", () => {
     await expect(
       other.service.status(other.human, first.nextRunCursor ?? undefined),
     ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+  it("classifies originals, filters before pagination and proves only a delivered current agent reply", async () => {
+    const f = await fixture();
+    expect(await f.service.status(f.human)).toMatchObject({ chatReady: false, verifiedAt: null });
+    await f.inbound("What is on my calendar and task list?");
+    current = new Date(current.getTime() + 1000);
+    await f.inbound("Also check mail");
+    current = new Date(current.getTime() + 6000);
+    await f.dispatch();
+    const run = (await f.service.status(f.human)).runs[0];
+    if (!run) throw new Error("Missing run");
+    const invocationId = crypto.randomUUID();
+    const batch = await f.service.claim(f.agent, run.id, { invocationId });
+    const mixed = batch.messages.find((m) => m.text.includes("calendar"));
+    const mail = batch.messages.find((m) => m.text.includes("mail"));
+    if (!mixed || !mail) throw new Error("Missing messages");
+    const taskReply = {
+      invocationId,
+      body: "Finish the proposal first.",
+      workspaces: ["tasks"],
+      replyToMessageIds: [mixed.id],
+      replyKey: "tasks",
+      final: false,
+    };
+    await expect(f.service.reply(f.agent, run.id, taskReply)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await f.service.checkpoint(f.agent, run.id, {
+      invocationId,
+      work: [],
+      annotations: [
+        { messageId: mixed.id, workspaces: ["tasks", "calendar"] },
+        { messageId: mail.id, workspaces: ["mail"] },
+      ],
+    });
+    await expect(
+      f.service.reply(f.agent, run.id, { ...taskReply, workspaces: ["finances"] }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await f.service.reply(f.agent, run.id, taskReply);
+    await f.service.checkpoint(f.agent, run.id, {
+      invocationId,
+      work: [],
+      annotations: [{ messageId: mixed.id, workspaces: ["calendar"] }],
+    });
+    expect(
+      (
+        await f.texting.conversation(f.human, "UTC", { limit: 100, workspace: "tasks" })
+      ).messages.some((message) => message.id === mixed.id),
+    ).toBe(true);
+    await f.service.reply(f.agent, run.id, taskReply);
+    expect(f.twilio.sendMessage).toHaveBeenCalledTimes(1);
+    await expect(
+      f.service.reply(f.agent, run.id, { ...taskReply, workspaces: ["calendar"] }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const first = await f.texting.conversation(f.human, "UTC", { limit: 1, workspace: "tasks" });
+    expect(first.messages).toHaveLength(1);
+    expect(first.messages[0]).toMatchObject({
+      text: expect.stringContaining("Finish the proposal"),
+      senderKind: "agent",
+      workspaces: ["tasks"],
+      replyToMessageIds: [mixed.id],
+    });
+    expect(first.conversationReceipt).toBeNull();
+    expect(first.hasEarlierMessages).toBe(true);
+    const older = await f.texting.conversation(f.human, "UTC", {
+      limit: 1,
+      workspace: "tasks",
+      beforeCursor: first.earlierCursor ?? undefined,
+    });
+    expect(older.messages.map((m) => m.text)).toEqual([mixed.text]);
+    expect(older.hasEarlierMessages).toBe(false);
+    expect(
+      (
+        await f.texting.conversation(f.human, "UTC", { limit: 100, workspace: "mail" })
+      ).messages.map((m) => m.text),
+    ).toEqual([mail.text]);
+    expect(await f.service.status(f.human)).toMatchObject({ chatReady: false, verifiedAt: null });
+    const [outbound] = await database.db
+      .select()
+      .from(textMessages)
+      .where(eq(textMessages.id, first.messages[0]?.id ?? ""));
+    if (!outbound?.providerMessageSid) throw new Error("No submission evidence");
+    await f.texting.updateStatus({
+      MessageSid: outbound.providerMessageSid,
+      MessageStatus: "delivered",
+    });
+    expect(await f.service.status(f.human)).toMatchObject({
+      chatReady: true,
+      verifiedAt: current.toISOString(),
+    });
+    await database.db
+      .update(textMessages)
+      .set({ senderKind: "system" })
+      .where(eq(textMessages.id, outbound.id));
+    expect((await f.service.status(f.human)).chatReady).toBe(false);
+    await database.db
+      .update(textMessages)
+      .set({ senderKind: "agent" })
+      .where(eq(textMessages.id, outbound.id));
+    const [scheduleBefore] = await database.db
+      .select()
+      .from(automationHostSchedules)
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    if (!scheduleBefore) throw new Error("Missing schedule");
+    await database.db
+      .update(automationHostSchedules)
+      .set({ encryptedFireCredentials: encryptJson({ token: "rotated-token" }, encryptionKey) })
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    expect((await f.service.status(f.human)).chatReady).toBe(false);
+    await expect(f.service.claim(f.agent, run.id, { invocationId })).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await database.db
+      .update(automationHostSchedules)
+      .set({
+        encryptedFireCredentials: scheduleBefore.encryptedFireCredentials,
+        schedule: automationHostScheduleSchema.parse({
+          ...scheduleBefore.schedule,
+          hostAutomationId: "trig_99999999999",
+        }),
+      })
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    expect((await f.service.status(f.human)).chatReady).toBe(false);
+    await database.db
+      .update(automationHostSchedules)
+      .set({ schedule: scheduleBefore.schedule })
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    expect((await f.service.status(f.human)).chatReady).toBe(true);
+    current = new Date(current.getTime() + 1000);
+    await f.service.configure(f.human, {
+      scheduleId: f.scheduleId,
+      subscriptionOnlyConfirmed: true,
+    });
+    expect((await f.service.status(f.human)).chatReady).toBe(true);
+    await f.service.configure(f.human, { scheduleId: null });
+    expect((await f.service.status(f.human)).chatReady).toBe(false);
+    await f.service.configure(f.human, {
+      scheduleId: f.scheduleId,
+      subscriptionOnlyConfirmed: true,
+    });
+    expect((await f.service.status(f.human)).chatReady).toBe(false);
+    await f.service.reply(f.agent, run.id, {
+      invocationId,
+      body: "Your afternoon is free.",
+      workspaces: ["calendar"],
+      replyToMessageIds: [mixed.id],
+      replyKey: "calendar",
+      final: true,
+    });
+    expect((await f.service.status(f.human)).runs[0]?.state).toBe("completed");
+    expect(f.twilio.sendMessage).toHaveBeenCalledTimes(2);
+  });
+  it("rejects cross-owner classification and references while preserving linked human follow-ups", async () => {
+    const other = await fixture();
+    await other.inbound("Other owner private message");
+    const foreign = (await other.texting.conversation(other.human, "UTC", { limit: 100 }))
+      .messages[0];
+    if (!foreign) throw new Error("Missing foreign message");
+    const f = await fixture();
+    await f.inbound("Can you check tasks?");
+    current = new Date(current.getTime() + 1000);
+    await f.inbound("Yes, do that");
+    current = new Date(current.getTime() + 6000);
+    await f.dispatch();
+    const run = (await f.service.status(f.human)).runs[0];
+    if (!run) throw new Error("Missing run");
+    const invocationId = crypto.randomUUID();
+    const batch = await f.service.claim(f.agent, run.id, { invocationId });
+    const question = batch.messages.find((m) => m.text.startsWith("Can"));
+    const followup = batch.messages.find((m) => m.text.startsWith("Yes"));
+    if (!question || !followup) throw new Error("Missing batch");
+    await expect(
+      f.service.checkpoint(f.agent, run.id, {
+        invocationId,
+        work: [],
+        annotations: [{ messageId: foreign.id, workspaces: ["tasks"] }],
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      f.service.checkpoint(f.agent, run.id, {
+        invocationId,
+        work: [],
+        annotations: [
+          { messageId: question.id, workspaces: ["tasks"], replyToMessageIds: [foreign.id] },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      f.service.checkpoint(f.agent, run.id, {
+        invocationId,
+        work: [],
+        annotations: [
+          { messageId: question.id, workspaces: ["tasks"], replyToMessageIds: [followup.id] },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await f.service.checkpoint(f.agent, run.id, {
+      invocationId,
+      work: [],
+      annotations: [
+        { messageId: question.id, workspaces: ["tasks"] },
+        { messageId: followup.id, workspaces: ["tasks"], replyToMessageIds: [question.id] },
+      ],
+    });
+    await expect(
+      f.service.reply(f.agent, run.id, {
+        invocationId,
+        body: "Done",
+        workspaces: ["tasks"],
+        replyToMessageIds: [question.id, foreign.id],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const view = await f.texting.conversation(f.human, "UTC", { limit: 100, workspace: "tasks" });
+    expect(view.messages.find((m) => m.id === followup.id)?.replyToMessageIds).toEqual([
+      question.id,
+    ]);
+    expect(
+      (await f.texting.conversation(other.human, "UTC", { limit: 100, workspace: "tasks" }))
+        .messages,
+    ).toEqual([]);
   });
   it("makes a rejected-run retry idempotent and rejects closing its stale recovery control", async () => {
     const f = await fixture();

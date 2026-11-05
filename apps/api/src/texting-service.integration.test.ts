@@ -295,10 +295,25 @@ describe.sequential("texting service", () => {
     const empty = await service.conversation(principal, "America/New_York", { limit: 100 });
     expect(empty.currentLocalDateTime).toContain("12:30:00 PM");
     expect(empty.conversationReceipt).toBeTruthy();
+    await expect(
+      service.send(principal, "America/New_York", {
+        body: "Unrelated reference",
+        contentKind: "concise",
+        conversationReceipt: empty.conversationReceipt ?? "",
+        workspaces: ["calendar"],
+        replyToMessageIds: [crypto.randomUUID()],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
     const sent = await service.send(principal, "America/New_York", {
+      workspaces: ["calendar"],
       body: "The appointment is at 3 PM.",
       contentKind: "concise",
       conversationReceipt: empty.conversationReceipt ?? "",
+    });
+    expect(sent).toMatchObject({
+      workspaces: ["calendar"],
+      senderKind: principal.actorType === "agent" ? "agent" : "human",
+      classifiedAt: current,
     });
     expect(sent.body).toBe("nohmi: The appointment is at 3 PM.\nReply STOP to unsubscribe.");
     expect(

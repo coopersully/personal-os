@@ -7,7 +7,11 @@ import {
 } from "@personal-os/database";
 import { and, asc, count, eq, gt, inArray, isNull, lte } from "drizzle-orm";
 import { decryptJson } from "./security.js";
-import { lockTextingOwner, textingAgentAuthority } from "./texting-agent-authority.js";
+import {
+  lockTextingOwner,
+  textingAgentAuthority,
+  textingHostBindingFingerprint,
+} from "./texting-agent-authority.js";
 
 /** A durable submitting commit precedes transport. No uncertain request is automatically repeated. */
 export function createTextingAgentDispatcher(options: {
@@ -60,7 +64,8 @@ export function createTextingAgentDispatcher(options: {
             active.consentEpoch === authority.connection.consentEpoch &&
             active.connectionId === authority.connection.id &&
             active.scheduleId === authority.schedule.id &&
-            active.authorizationConnectionId === authority.schedule.authorizationConnectionId
+            active.authorizationConnectionId === authority.schedule.authorizationConnectionId &&
+            active.hostBindingFingerprint === textingHostBindingFingerprint(authority.schedule)
           )
             return null;
           await tx
@@ -80,7 +85,7 @@ export function createTextingAgentDispatcher(options: {
         if ((recent?.value ?? 0) >= 25) return null;
         // The exact epoch-bound membership is frozen before the host can see the run.
         const pending = await tx
-          .select({ claimId: textingAgentQueue.claimId })
+          .select({ claimId: textingAgentQueue.claimId, messageId: textInboundClaims.messageId })
           .from(textingAgentQueue)
           .innerJoin(
             textInboundClaims,
@@ -110,6 +115,8 @@ export function createTextingAgentDispatcher(options: {
             consentEpoch: authority.connection.consentEpoch,
             scheduleId: authority.schedule.id,
             authorizationConnectionId: authority.schedule.authorizationConnectionId,
+            hostBindingFingerprint: textingHostBindingFingerprint(authority.schedule),
+            inputMessageIds: pending.map((entry) => entry.messageId),
             state: "submitting",
             createdAt: now(),
             updatedAt: now(),
@@ -158,6 +165,7 @@ export function createTextingAgentDispatcher(options: {
           authority.connection?.id !== run.connectionId ||
           authority.connection.consentEpoch !== run.consentEpoch ||
           authority.schedule?.authorizationConnectionId !== run.authorizationConnectionId ||
+          textingHostBindingFingerprint(authority.schedule) !== run.hostBindingFingerprint ||
           !authority.schedule.encryptedFireCredentials ||
           !authority.schedule.schedule.hostAutomationId
         ) {

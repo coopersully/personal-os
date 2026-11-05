@@ -142,6 +142,7 @@ import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
 import { createTaskWorkspaceService } from "./task-workspace-service.js";
 import { createTextingAgentDispatcher } from "./texting-agent-dispatcher.js";
+import { createTextingAgentNotices } from "./texting-agent-notices.js";
 import { createTextingAgentService } from "./texting-agent-service.js";
 import { createTextingRecoveryDispatcher } from "./texting-recovery-dispatcher.js";
 import { createTextingRecoveryRuntime } from "./texting-recovery-runtime.js";
@@ -757,6 +758,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     encryptionKey: dependencies.config.encryptionKey,
     fetch: dependencies.fetch ?? globalThis.fetch,
   });
+  const dispatchTextingAgentNotices = createTextingAgentNotices({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled,
+    now,
+    texting,
+  });
   const textingRecovery = createTextingRecoveryService({
     db: dependencies.db,
     enabled: () => textingConfig.enabled,
@@ -785,6 +792,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const textingRecoveryRuntime = createTextingRecoveryRuntime(async (shouldContinue) => {
     await dispatchTextingAgent(shouldContinue);
+    await dispatchTextingAgentNotices(shouldContinue);
     const result = await textingRecoveryDispatcher.runPass({ shouldContinue });
     if (result.failed) {
       throw new Error(`Texting recovery failed for ${result.failed} claims.`);

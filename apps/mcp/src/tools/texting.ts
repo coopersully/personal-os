@@ -4,6 +4,7 @@ import {
   textingAgentCheckpointSchema,
   textingAgentClaimSchema,
   textingAgentReplySchema,
+  textWorkspaceSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
@@ -30,7 +31,7 @@ export function registerTextingTools(
       annotations: { openWorldHint: false, readOnlyHint: false, idempotentHint: true },
       title: "Save SMS work progress",
       description:
-        "Save pending work before an action and its domain record or operation references afterward. Completed work cannot be overwritten. These are agent reports; domain receipts are the authority for actual effects. Retain stable domain/key identities across sessions.",
+        "Save pending work before an action and its domain record or operation references afterward. Completed work cannot be overwritten. These are agent reports; domain receipts are the authority for actual effects. Retain stable domain/key identities across sessions. Classify every saved inbound message with annotations (messageId, workspaces and optional replyToMessageIds) before replying; an empty workspace list means general.",
       inputSchema: { runId: z.uuid(), ...textingAgentCheckpointSchema.shape },
     },
     async ({ runId, ...input }) => apiResult(() => api.checkpointTextingAgentRun(runId, input)),
@@ -41,7 +42,7 @@ export function registerTextingTools(
       annotations: { openWorldHint: true, readOnlyHint: false, idempotentHint: true },
       title: "Reply to SMS conversation work",
       description:
-        "Record one concise SMS reply for the claimed run and queue its delivery atomically. Retry only with the same invocation and identical body; an uncertain send is never repeated. Preserve blocked or uncertain workspace outcomes honestly. Do not also send_text_message for the same run.",
+        "Record a concise topic-specific SMS reply, workspace tags and reply references atomically. Use distinct stable replyKey values and final:false for intermediate replies (at most four); final:true completes the run. Retry only with the same invocation, replyKey and identical content; an uncertain send is never repeated. Preserve blocked or uncertain workspace outcomes honestly. Do not also send_text_message for the same run.",
       inputSchema: { runId: z.uuid(), ...textingAgentReplySchema.shape },
     },
     async ({ runId, ...input }) => apiResult(() => api.replyToTextingAgentRun(runId, input)),
@@ -88,6 +89,18 @@ export function registerTextingTools(
       description:
         "Send an SMS only after reading and understanding the conversation. Texting should convey the answer quickly: use one concise, information-dense bubble by default. Use 2–3 messages only for structured lists/data or large content the user explicitly requested. Three SMS segments require necessity; 4–6 require explicit length review; 7–10 are exceptional; over 10 is rejected. Avoid greetings, throat-clearing, repetition, markdown tables, and splitting one idea across bubbles. A provider timeout can leave a queued message with uncertain delivery; reread the conversation and do not resend it until the user or delivery status resolves the uncertainty.",
       inputSchema: {
+        workspaces: z
+          .array(textWorkspaceSchema)
+          .max(4)
+          .optional()
+          .describe(
+            "Related workspaces; use [] for general conversation. Tag each message explicitly.",
+          ),
+        replyToMessageIds: z
+          .array(z.uuid())
+          .max(25)
+          .optional()
+          .describe("Original messages this reply answers, from this owner conversation."),
         body: z.string().min(1).max(1600).describe("Final concise text, without a nohmi prefix."),
         contentKind: z
           .enum([

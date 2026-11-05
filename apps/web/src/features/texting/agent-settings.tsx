@@ -11,8 +11,8 @@ import {
   FieldLabel,
 } from "../../components/settings-field.js";
 import { Button } from "../../components/ui/button.js";
-import { Checkbox } from "../../components/ui/checkbox.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
+import { Switch } from "../../components/ui/switch.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { SettingsSection } from "../settings/settings-layout.js";
 
@@ -84,7 +84,7 @@ export function TextingAgentSettings({ userId }: { userId: string }) {
               </p>
             </details>
             <Field orientation="horizontal">
-              <Checkbox
+              <Switch
                 id="texting-agent-billing"
                 checked={confirmed}
                 onCheckedChange={(checked) => setConfirmed(checked === true)}

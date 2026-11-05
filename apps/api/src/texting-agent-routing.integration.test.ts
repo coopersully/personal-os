@@ -175,6 +175,16 @@ describe.sequential("general SMS and Finance reply admission", () => {
     await choice.questions(["choices"]);
     await choice.inbound("yes");
     expect(await choice.queue()).toHaveLength(0);
+    const tagged = await database.db
+      .select()
+      .from(textMessages)
+      .where(eq(textMessages.userId, choice.userId));
+    expect(tagged.find((message) => message.direction === "inbound")).toMatchObject({
+      workspaces: ["finances"],
+      senderKind: "human",
+      classifiedAt: expect.any(Date),
+      replyToMessageIds: [expect.any(String)],
+    });
     expect(await choice.legacyReply()).toMatchObject({ state: "pending" });
     const text = await fixture();
     await text.questions(["free_text"]);

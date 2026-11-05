@@ -10,15 +10,18 @@ import { TextConversation } from "./conversation.js";
 
 const mocks = vi.hoisted(() => ({
   getTextConversation: vi.fn(),
+  getTextingConnection: vi.fn(),
   getTextingAgentStatus: vi.fn(),
   configureTextingAgent: vi.fn(),
   recoverTextingAgentRun: vi.fn(),
 }));
 vi.mock("../../api.js", () => ({ api: mocks }));
 const status = {
-  enabled: false,
-  scheduleId: null,
-  readiness: "disabled",
+  enabled: true,
+  scheduleId: "routine",
+  readiness: "ready",
+  chatReady: true,
+  verifiedAt: "2026-11-05T12:00:00Z",
   pendingCount: 0,
   routines: [{ id: "routine", label: "Personal Claude" }],
   runs: [],
@@ -32,6 +35,9 @@ const message = (id: string, direction: string, text: string) => ({
   occurredAt: "2026-11-05T12:00:00Z",
   localDateTime: "Nov 5, 7:00 AM",
   status: "unknown",
+  workspaces: ["tasks"],
+  senderKind: direction === "inbound" ? "human" : "agent",
+  replyToMessageIds: [],
 });
 function mount(element: React.ReactNode) {
   const client = new QueryClient({
@@ -47,8 +53,13 @@ function mount(element: React.ReactNode) {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.getTextingAgentStatus.mockResolvedValue(status);
+  mocks.getTextingConnection.mockResolvedValue({
+    state: "active",
+    senderPhoneNumber: "+18885550100",
+    maskedPhoneNumber: "•••0123",
+  });
 });
-it("shows history while automatic replies are off and paginates older messages", async () => {
+it("shows verified history and paginates older messages", async () => {
   mocks.getTextConversation.mockImplementation((_tz, query) =>
     Promise.resolve({
       connection: { state: "disconnected" },
@@ -62,7 +73,7 @@ it("shows history while automatic replies are off and paginates older messages",
   mount(<TextConversation userId="one" timeZone="America/New_York" />);
   expect(await screen.findByText("Your update")).toBeVisible();
   expect(screen.getByText(/Delivery unconfirmed/)).toBeVisible();
-  expect(screen.getByText(/Automatic replies are off/)).toBeVisible();
+  expect(screen.getByText(/One conversation across your workspaces/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
   expect(await screen.findByText("Yesterday’s request")).toBeVisible();
   expect(mocks.getTextConversation).toHaveBeenCalledWith("America/New_York", {
@@ -71,13 +82,19 @@ it("shows history while automatic replies are off and paginates older messages",
   });
 });
 it("requires billing and prompt confirmation and delivers save errors through Sonner", async () => {
+  mocks.getTextingAgentStatus.mockResolvedValue({
+    ...status,
+    enabled: false,
+    scheduleId: null,
+    chatReady: false,
+  });
   mocks.configureTextingAgent.mockRejectedValue(new Error("Cannot save right now"));
   mount(<TextingAgentSettings userId="one" />);
   const button = await screen.findByRole("button", { name: "Enable automatic replies" });
   expect(button).toBeDisabled();
   fireEvent.change(screen.getByLabelText("Claude routine"), { target: { value: "routine" } });
   expect(button).toBeDisabled();
-  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("switch"));
   fireEvent.click(button);
   expect(await screen.findByText(/Couldn’t save automatic replies/)).toBeVisible();
   expect(document.querySelector("[data-sonner-toast]")).toHaveTextContent(
@@ -165,4 +182,45 @@ it("hides cached messages and run details after authorization is denied", async 
   });
   await waitFor(() => expect(screen.queryByText("Private saved message")).not.toBeInTheDocument());
   expect(screen.queryByText("Agent runs", { selector: "summary" })).not.toBeInTheDocument();
+});
+
+it("keeps every conversation locked and does not fetch history before delivered agent proof", async () => {
+  mocks.getTextingAgentStatus.mockResolvedValue({ ...status, chatReady: false, verifiedAt: null });
+  mount(<TextConversation userId="one" timeZone="UTC" workspace="calendar" />);
+  expect(await screen.findByText("Connect your agent to unlock Messages")).toBeVisible();
+  expect(screen.getByText(/Text “Hello nohmi”/)).toBeVisible();
+  expect(mocks.getTextConversation).not.toHaveBeenCalled();
+  expect(screen.queryByRole("list", { name: "Conversation history" })).not.toBeInTheDocument();
+});
+it("passes workspace scope to the server and preserves the original mixed message", async () => {
+  mocks.getTextConversation.mockResolvedValue({
+    messages: [
+      {
+        ...message("mixed", "inbound", "Check my calendar and tasks"),
+        workspaces: ["calendar", "tasks"],
+      },
+    ],
+    hasEarlierMessages: false,
+  });
+  mount(<TextConversation userId="one" timeZone="UTC" workspace="tasks" />);
+  expect(await screen.findByText("Check my calendar and tasks")).toBeVisible();
+  expect(mocks.getTextConversation).toHaveBeenCalledWith("UTC", { limit: 50, workspace: "tasks" });
+  expect(screen.getByRole("link", { name: "Full conversation" })).toHaveAttribute(
+    "href",
+    "/messages#message-mixed",
+  );
+});
+it("hides cached history immediately when verification is revoked", async () => {
+  mocks.getTextConversation.mockResolvedValue({
+    messages: [message("secret", "inbound", "Saved private message")],
+    hasEarlierMessages: false,
+  });
+  const { client } = mount(<TextConversation userId="one" timeZone="UTC" />);
+  expect(await screen.findByText("Saved private message")).toBeVisible();
+  mocks.getTextingAgentStatus.mockResolvedValue({ ...status, chatReady: false, verifiedAt: null });
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["texting-agent"] });
+  });
+  expect(await screen.findByText("Connect your agent to unlock Messages")).toBeVisible();
+  expect(screen.queryByText("Saved private message")).not.toBeInTheDocument();
 });

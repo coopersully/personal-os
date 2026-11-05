@@ -4357,6 +4357,16 @@ export const textMessages = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    workspaces: jsonb("workspaces")
+      .$type<import("@personal-os/domain").TextWorkspace[]>()
+      .notNull()
+      .default([]),
+    senderKind: text("sender_kind").$type<"human" | "agent" | "system">(),
+    replyToMessageIds: jsonb("reply_to_message_ids").$type<string[]>().notNull().default([]),
+    classifiedAt: timestamp("classified_at", { withTimezone: true }),
+    agentRunId: uuid("agent_run_id"),
+    replyKey: text("reply_key"),
+    replyFinal: boolean("reply_final"),
     providerMessageSid: text("provider_message_sid"),
     direction: text("direction").$type<TextMessageDirection>().notNull(),
     status: text("status").$type<TextMessageStatus>().notNull(),
@@ -4378,6 +4388,11 @@ export const textMessages = pgTable(
     check(
       "text_messages_provider_submitted_check",
       sql`${table.providerSubmittedAt} IS NULL OR (${table.direction} = 'outbound' AND ${table.providerMessageSid} IS NOT NULL)`,
+    ),
+    uniqueIndex("text_messages_agent_reply_idx").on(table.userId, table.agentRunId, table.replyKey),
+    check(
+      "text_messages_sender_kind_check",
+      sql`${table.senderKind} IS NULL OR ${table.senderKind} IN ('human','agent','system')`,
     ),
     uniqueIndex("text_messages_provider_sid_idx").on(table.providerMessageSid),
     uniqueIndex("text_messages_owner_id_idx").on(table.userId, table.id),
@@ -6473,7 +6488,10 @@ export const textingAgentRuns = pgTable(
     state: text("state").$type<import("@personal-os/domain").TextingAgentRun["state"]>().notNull(),
     reason: text("reason"),
     hostSessionId: text("host_session_id"),
+    hostBindingFingerprint: text("host_binding_fingerprint"),
+    inputMessageIds: jsonb("input_message_ids").$type<string[]>().notNull().default([]),
     replyMessageId: uuid("reply_message_id"),
+    failureNoticeMessageId: uuid("failure_notice_message_id"),
     work: jsonb("work")
       .$type<import("@personal-os/domain").TextingAgentWork[]>()
       .notNull()
@@ -6490,6 +6508,11 @@ export const textingAgentRuns = pgTable(
       name: "texting_agent_runs_connection_fk",
       columns: [table.userId, table.connectionId],
       foreignColumns: [textingConnections.userId, textingConnections.id],
+    }),
+    foreignKey({
+      name: "texting_agent_runs_notice_fk",
+      columns: [table.userId, table.failureNoticeMessageId, table.connectionId],
+      foreignColumns: [textMessages.userId, textMessages.id, textMessages.connectionId],
     }),
     foreignKey({
       name: "texting_agent_runs_reply_fk",

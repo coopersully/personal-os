@@ -164,6 +164,7 @@ import {
   PlusIcon,
   PulseIcon,
   RefreshIcon,
+  ReplyIcon,
   ScissorsIcon,
   SettingsIcon,
   ShieldCheckIcon,
@@ -1318,6 +1319,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           ?.label.toLowerCase() ?? "account")
       : activeWorkspaceSection(sectionOwner, location.pathname, location.search));
   const isCalendarWorkspace = activeWorkspace?.id === "calendar";
+  const isMessageView = shellPathname.endsWith("/messages");
   const isSpatialCalendar = shellPathname === "/calendar";
   const navigationOwner = navigationOwnerForLocation(location.pathname);
   const workspacePath = activeWorkspace?.path ?? null;
@@ -1429,7 +1431,7 @@ function AuthenticatedApp({ user }: { user: User }) {
       }}
     >
       <div
-        className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}${(isTodayWorkspace || navigationOwner.kind === "shared-channel") && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
+        className={`app-shell${isCalendarWorkspace && !isMessageView ? " app-shell--calendar" : sidebarMode === "mail" && !isMessageView ? " app-shell--mail" : ""}${(isTodayWorkspace || navigationOwner.kind === "shared-channel" || (isCalendarWorkspace && isMessageView)) && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
         data-workspace={sectionOwner}
         data-mobile-app-bar={hasMobileAppBar || undefined}
         data-rail-collapsed={!isMobileWorkspaceDock && railCollapsed ? "true" : undefined}
@@ -1527,6 +1529,33 @@ function AuthenticatedApp({ user }: { user: User }) {
               ) : sidebarMode === "mail" ? (
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
               ) : null}
+              {sidebarMode !== "settings" && activeWorkspace && (
+                <ShadcnSidebarGroup>
+                  <ShadcnSidebarGroupContent>
+                    <ShadcnSidebarMenu>
+                      <ShadcnSidebarMenuItem>
+                        <ShadcnSidebarMenuButton
+                          asChild
+                          isActive={isMessageView}
+                          tooltip="Messages"
+                        >
+                          <Link
+                            to={`${activeWorkspace.path}/messages`}
+                            onClick={closeMobileMenu}
+                            aria-current={isMessageView ? "page" : undefined}
+                          >
+                            <ReplyIcon
+                              aria-hidden="true"
+                              weight={isMessageView ? "Filled" : "Outline"}
+                            />
+                            <span>Messages</span>
+                          </Link>
+                        </ShadcnSidebarMenuButton>
+                      </ShadcnSidebarMenuItem>
+                    </ShadcnSidebarMenu>
+                  </ShadcnSidebarGroupContent>
+                </ShadcnSidebarGroup>
+              )}
             </ShadcnSidebarContent>
           </ShadcnSidebar>
         ) : null}
@@ -1553,7 +1582,9 @@ function AuthenticatedApp({ user }: { user: User }) {
         />
         <WorkspaceLayout
           contentMode={
-            !navigationSection && (isCalendarWorkspace || sidebarMode === "mail") ? "panes" : "page"
+            !navigationSection && !isMessageView && (isCalendarWorkspace || sidebarMode === "mail")
+              ? "panes"
+              : "page"
           }
           banner={
             !online && (
@@ -1860,6 +1891,20 @@ function WorkspaceRoutes({
           </Suspense>
         }
       />
+      {(["mail", "tasks", "calendar", "finances"] as const).map((workspace) => (
+        <Route
+          key={workspace}
+          path={`/${workspace}/messages`}
+          element={
+            <TextConversation
+              key={`${user.id}:${workspace}`}
+              userId={user.id}
+              timeZone={user.planningTimezone}
+              workspace={workspace}
+            />
+          }
+        />
+      ))}
       <Route
         path="/messages"
         element={
@@ -2028,6 +2073,7 @@ function WorkspaceAppBarForRoute({
     workspaceForLocation(pathname)?.id ?? (pathname === "/messages" ? "messages" : "account");
   const isSpatialCalendar = pathname === "/calendar";
   const isReviewQueue = pathname.endsWith("/decisions");
+  const isMessages = pathname.endsWith("/messages");
   const identity = isReviewQueue ? (
     <span className="workspace-app-bar__title">Needs review</span>
   ) : pathname === "/tasks" ? null : isSpatialCalendar ? (
@@ -2052,49 +2098,58 @@ function WorkspaceAppBarForRoute({
       {pageTitle ?? workspaceDefinitions.find((item) => item.id === workspace)?.label}
     </span>
   );
-  const context = isReviewQueue ? null : isSpatialCalendar ? (
-    <div className="calendar-header-context">
-      <CalendarAppBarControls
-        search={
-          <WorkspaceFinder
-            workspace="calendar"
-            timeZone={user.planningTimezone}
-            onAction={handleSearchAction}
-          />
-        }
-        accounts={<CalendarAccountsControl />}
-        onToday={onCalendarToday}
-        user={user}
+  const context =
+    isReviewQueue || isMessages ? null : isSpatialCalendar ? (
+      <div className="calendar-header-context">
+        <CalendarAppBarControls
+          search={
+            <WorkspaceFinder
+              workspace="calendar"
+              timeZone={user.planningTimezone}
+              onAction={handleSearchAction}
+            />
+          }
+          accounts={<CalendarAccountsControl />}
+          onToday={onCalendarToday}
+          user={user}
+        />
+      </div>
+    ) : pathname === "/today" ? (
+      <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
+    ) : pathname === "/activity" ? (
+      <ActivityTopbarControls />
+    ) : pathname === "/reminders" ? (
+      <WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />
+    ) : pathname === "/tasks" ? (
+      <TasksAppBarControls
+        timeZone={user.planningTimezone}
+        search={<WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />}
       />
-    </div>
-  ) : pathname === "/today" ? (
-    <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
-  ) : pathname === "/activity" ? (
-    <ActivityTopbarControls />
-  ) : pathname === "/reminders" ? (
-    <WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />
-  ) : pathname === "/tasks" ? (
-    <TasksAppBarControls
-      timeZone={user.planningTimezone}
-      search={<WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />}
-    />
-  ) : workspace === "mail" ? (
-    <MailAppBarControls
-      accounts={<MailAccountsControl />}
-      sync={<MailSyncButton />}
-      search={<WorkspaceFinder workspace="mail" onAction={handleSearchAction} />}
-    />
-  ) : workspace === "finances" ? (
-    <>
-      <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
-    </>
-  ) : null;
+    ) : workspace === "mail" ? (
+      <MailAppBarControls
+        accounts={<MailAccountsControl />}
+        sync={<MailSyncButton />}
+        search={<WorkspaceFinder workspace="mail" onAction={handleSearchAction} />}
+      />
+    ) : workspace === "finances" ? (
+      <>
+        <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
+      </>
+    ) : null;
 
   return (
     <>
       <WorkspaceAppBar
         actions={
           <>
+            {workspace === "calendar" && !isMessages && (
+              <ShadcnButton asChild variant="ghost" size="sm">
+                <Link to="/calendar/messages">
+                  <ReplyIcon aria-hidden="true" />
+                  Messages
+                </Link>
+              </ShadcnButton>
+            )}
             {"__TAURI_INTERNALS__" in window && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -2133,7 +2188,7 @@ function WorkspaceAppBarForRoute({
       {pathname === "/reminders" && !isReviewQueue ? (
         <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
       ) : null}
-      {workspace === "tasks" && pathname !== "/reminders" && !isReviewQueue ? (
+      {workspace === "tasks" && pathname !== "/reminders" && !isReviewQueue && !isMessages ? (
         <TasksCreateButton
           floating
           onCreate={(placement) => setEditor({ kind: "task", ...(placement ? { placement } : {}) })}
@@ -3050,6 +3105,7 @@ function TodayNavigationTitle({
 
 function workspaceTitleForLocation(pathname: string, search: string): string | null {
   const searchParams = new URLSearchParams(search);
+  if (pathname.endsWith("/messages")) return "Messages";
   if (pathname === "/calendar/review") return "Calendar review";
   if (pathname === "/calendar") return "Calendar";
   if (pathname === "/reminders") {

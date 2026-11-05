@@ -6,6 +6,7 @@ import {
   InboxIcon,
   ListTodoIcon,
   PinIcon,
+  ReplyIcon,
   SettingsIcon,
   TargetIcon,
   UserIcon,
@@ -51,7 +52,9 @@ export function workspaceSectionPages(owner: string, search: string): MobileWork
         ? { id: "inbox", label: "inbox", icon: InboxIcon, path: "/mail" }
         : owner === "finances"
           ? { id: "overview", label: "overview", icon: GridIcon, path: "/finances" }
-          : null;
+          : owner === "calendar"
+            ? { id: "calendar", label: "calendar", icon: CalendarIcon, path: "/calendar" }
+            : null;
   if (primary) {
     if (owner === "mail") {
       const accounts = new URLSearchParams();
@@ -60,10 +63,20 @@ export function workspaceSectionPages(owner: string, search: string): MobileWork
     }
     pages.unshift({ ...primary, kind: "destination" });
   }
+  if (["mail", "tasks", "calendar", "finances"].includes(owner))
+    pages.push({
+      id: "messages",
+      label: "messages",
+      icon: ReplyIcon,
+      path: `/${owner}/messages`,
+      kind: "destination",
+    });
   return pages;
 }
 
 export function activeWorkspaceSection(owner: string, pathname: string, search: string): string {
+  if (pathname === `/${owner}/messages`) return "messages";
+  if (owner === "calendar") return "calendar";
   const params = new URLSearchParams(search);
   const requested = params.get("navigation");
   if (sections[owner]?.some(({ id }) => id === requested)) return requested as string;

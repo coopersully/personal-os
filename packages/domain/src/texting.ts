@@ -1,3 +1,7 @@
+import { textWorkspaceSchema } from "./texting-workspace.js";
+
+export { type TextWorkspace, textWorkspaceSchema } from "./texting-workspace.js";
+
 import { parsePhoneNumberFromString } from "libphonenumber-js/max";
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
@@ -207,6 +211,10 @@ export const textingConnectionSchema = z.object({
   verifiedAt: isoDateTimeSchema.nullable(),
 });
 export const textMessageSchema = z.object({
+  workspaces: z.array(textWorkspaceSchema).max(4).default([]),
+  senderKind: z.enum(["human", "agent", "system"]),
+  replyToMessageIds: z.array(idSchema).max(25).default([]),
+  classifiedAt: isoDateTimeSchema.nullable(),
   actualSegments: z.int().positive().nullable(),
   contentKind: textContentKindSchema.nullable(),
   deliveredAt: isoDateTimeSchema.nullable(),
@@ -225,6 +233,7 @@ export const textMessageSchema = z.object({
 });
 export const textConversationQuerySchema = z
   .object({
+    workspace: textWorkspaceSchema.optional(),
     afterCursor: z.string().min(1).optional(),
     beforeCursor: z.string().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(100),
@@ -244,6 +253,8 @@ export const textConversationPageSchema = z.object({
   timeZone: z.string().min(1),
 });
 export const sendTextMessageInputSchema = z.object({
+  workspaces: z.array(textWorkspaceSchema).max(4).optional(),
+  replyToMessageIds: z.array(idSchema).max(25).optional(),
   body: z.string().trim().min(1).max(1_600),
   contentKind: textContentKindSchema.default("concise"),
   conversationReceipt: z.string().min(1),

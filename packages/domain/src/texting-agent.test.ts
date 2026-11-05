@@ -1,4 +1,8 @@
-import { textingAgentCheckpointSchema, textingAgentSettingsInputSchema } from "./texting-agent.js";
+import {
+  textingAgentCheckpointSchema,
+  textingAgentReplySchema,
+  textingAgentSettingsInputSchema,
+} from "./texting-agent.js";
 
 describe("Texting agent contracts", () => {
   it("requires explicit subscription-only confirmation to enable", () => {
@@ -34,5 +38,28 @@ describe("Texting agent contracts", () => {
     expect(
       textingAgentCheckpointSchema.safeParse({ ...input, authorization: "full" }).success,
     ).toBe(false);
+  });
+  it("requires workspace tags and reply references and bounds topic reply identity", () => {
+    const input = {
+      invocationId: crypto.randomUUID(),
+      body: "Task updated",
+      workspaces: ["tasks"],
+      replyToMessageIds: [crypto.randomUUID()],
+      replyKey: "tasks",
+      final: false,
+    };
+    expect(textingAgentReplySchema.parse(input).final).toBe(false);
+    expect(textingAgentReplySchema.safeParse({ ...input, workspaces: ["knowledge"] }).success).toBe(
+      false,
+    );
+    expect(textingAgentReplySchema.safeParse({ ...input, replyToMessageIds: [] }).success).toBe(
+      false,
+    );
+    expect(textingAgentReplySchema.safeParse({ ...input, workspaces: undefined }).success).toBe(
+      false,
+    );
+    expect(textingAgentReplySchema.safeParse({ ...input, replyKey: "x".repeat(81) }).success).toBe(
+      false,
+    );
   });
 });

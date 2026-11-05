@@ -1,5 +1,426 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ConnectorError, createPlaidConnector } from "./index.js";
+
+const historyInput = {
+  accessToken: "sensitive-history-token",
+  itemId: "item-1",
+  startDate: "2023-01-01",
+  endDate: "2023-01-31",
+  targets: [{ accountId: "account-1", transactionId: "target-1" }],
+};
+const initializedHistoryItem = {
+  item: { item_id: "item-1", billed_products: ["transactions"] },
+  status: { transactions: { last_successful_update: "2026-11-01T12:00:00Z" } },
+};
+function historyTransaction(id = "target-1", amount = -12.5) {
+  return {
+    transaction_id: id,
+    account_id: "account-1",
+    amount,
+    iso_currency_code: "USD" as unknown,
+    date: "2023-01-10",
+  };
+}
+function historyPage(transactions = [historyTransaction()], total = transactions.length) {
+  return {
+    item: { item_id: "item-1" },
+    accounts: [{ account_id: "account-1" }],
+    transactions,
+    total_transactions: total,
+  };
+}
+function historyConnector(pages: unknown[], item: unknown = initializedHistoryItem) {
+  const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const connector = createPlaidConnector({
+    clientId: "client",
+    secret: "secret",
+    environment: "sandbox",
+    fetch: async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      requests.push({ path, body: JSON.parse(String(init?.body)) });
+      return Response.json(path === "/item/get" ? item : pages.shift());
+    },
+  });
+  return { connector, requests };
+}
+
+function historyRead(connector: ReturnType<typeof createPlaidConnector>) {
+  const read = connector.readTransactionHistory;
+  if (!read) throw new Error("Historical evidence reader is unavailable.");
+  return read;
+}
+
+describe("bounded Plaid historical evidence", () => {
+  it("reads exact linked identities with count/offset, signed evidence and separate provider freshness", async () => {
+    const first = [
+      historyTransaction(),
+      ...Array.from({ length: 99 }, (_, i) => historyTransaction(`other-${i}`)),
+    ];
+    const { connector, requests } = historyConnector([
+      historyPage(first, 101),
+      historyPage([historyTransaction("target-2", 3)], 101),
+    ]);
+    const result = await historyRead(connector)({
+      ...historyInput,
+      targets: [
+        ...historyInput.targets,
+        { accountId: "account-1", transactionId: "target-2" },
+        { accountId: "account-1", transactionId: "missing" },
+      ],
+    });
+    expect(requests.map((r) => r.path)).toEqual([
+      "/item/get",
+      "/transactions/get",
+      "/transactions/get",
+    ]);
+    expect(requests[1]?.body).toMatchObject({
+      start_date: "2023-01-01",
+      end_date: "2023-01-31",
+      options: { account_ids: ["account-1"], count: 100, offset: 0 },
+    });
+    expect(requests[2]?.body.options).toEqual({
+      account_ids: ["account-1"],
+      count: 100,
+      offset: 100,
+    });
+    expect(result.coverage).toMatchObject({
+      state: "complete",
+      scope: "provider_available_window",
+      pages: 2,
+      returnedTransactions: 101,
+    });
+    expect(result.providerUpdatedAt).toBe("2026-11-01T12:00:00Z");
+    expect(result.entries).toMatchObject([
+      {
+        transactionId: "target-1",
+        accountId: "account-1",
+        status: "found",
+        sourceAmount: -12.5,
+        normalizedAmount: 12.5,
+        economicDirection: "inflow",
+        currencyCode: "USD",
+      },
+      {
+        transactionId: "target-2",
+        status: "found",
+        sourceAmount: 3,
+        normalizedAmount: 3,
+        economicDirection: "outflow",
+      },
+      { transactionId: "missing", status: "missing", sourceAmount: null },
+    ]);
+    expect(result).not.toHaveProperty("accessToken");
+  });
+
+  it.each([
+    { item: { item_id: "foreign", billed_products: ["transactions"] } },
+    { item: { item_id: "item-1", billed_products: [] } },
+    { item: { item_id: "item-1", products: ["transactions"] } },
+    { ...initializedHistoryItem, status: { transactions: { last_successful_update: null } } },
+  ])("does not initialize Transactions when prior Item/initialization evidence is unavailable", async (item) => {
+    const { connector, requests } = historyConnector([], item);
+    const result = await historyRead(connector)(historyInput);
+    expect(requests.map((r) => r.path)).toEqual(["/item/get"]);
+    expect(result.coverage.state).toBe("unavailable");
+    expect(result.entries[0]?.status).toBe("unobserved");
+  });
+
+  it.each([
+    undefined,
+    null,
+    "usd",
+    "ZZZ",
+    "XXX",
+  ])("holds missing or invalid explicit currency %s without account defaults", async (currency) => {
+    const { connector } = historyConnector([
+      historyPage([{ ...historyTransaction(), iso_currency_code: currency }]),
+    ]);
+    const result = await historyRead(connector)(historyInput);
+    expect(result.entries[0]).toMatchObject({
+      status: "invalid_currency",
+      sourceAmount: -12.5,
+      currencyCode: null,
+      normalizedAmount: null,
+    });
+  });
+
+  it("does not echo unknown target fields into evidence", async () => {
+    const { connector } = historyConnector([historyPage()]);
+    const targets = [
+      { accountId: "account-1", transactionId: "target-1", accessToken: "target-secret-canary" },
+    ];
+    const result = await historyRead(connector)({ ...historyInput, targets });
+    expect(result.entries[0]?.status).toBe("found");
+    expect(JSON.stringify(result)).not.toContain("target-secret-canary");
+    expect(result.entries[0]).not.toHaveProperty("accessToken");
+  });
+
+  it("does not infer direction for a zero source amount", async () => {
+    const { connector } = historyConnector([historyPage([historyTransaction("target-1", 0)])]);
+    expect((await historyRead(connector)(historyInput)).entries[0]).toMatchObject({
+      sourceAmount: 0,
+      economicDirection: "unknown",
+    });
+  });
+
+  it.each([
+    { ...historyPage(), item: { item_id: "foreign" } },
+    { ...historyPage(), accounts: [{ account_id: "foreign" }] },
+    historyPage([{ ...historyTransaction(), account_id: "foreign" }]),
+    historyPage([{ ...historyTransaction(), date: "2022-12-31" }]),
+  ])("rejects a changed Item/account/window without accepting foreign evidence", async (page) => {
+    const { connector } = historyConnector([page]);
+    const result = await historyRead(connector)(historyInput);
+    expect(result.coverage.state).toBe("unavailable");
+    expect(result.entries[0]).toMatchObject({ status: "unobserved", sourceAmount: null });
+  });
+
+  it("holds conflicting duplicate exact IDs rather than choosing a value", async () => {
+    const { connector } = historyConnector([
+      historyPage([historyTransaction(), historyTransaction("target-1", 99)]),
+    ]);
+    const result = await historyRead(connector)(historyInput);
+    expect(result.coverage.state).toBe("conflict");
+    expect(result.entries[0]).toMatchObject({ status: "conflict", sourceAmount: null });
+  });
+
+  it("labels capped history partial and absent targets unobserved, never missing", async () => {
+    const pages = Array.from({ length: 5 }, (_, page) =>
+      historyPage(
+        Array.from({ length: 100 }, (_, i) => historyTransaction(`other-${page}-${i}`)),
+        501,
+      ),
+    );
+    const { connector, requests } = historyConnector(pages);
+    const result = await historyRead(connector)(historyInput);
+    expect(result.coverage).toMatchObject({
+      state: "partial",
+      reason: "page_limit",
+      pages: 5,
+      returnedTransactions: 500,
+    });
+    expect(result.entries[0]?.status).toBe("unobserved");
+    expect(requests).toHaveLength(6);
+  });
+
+  it("reports a changing total as conflicting coverage", async () => {
+    const { connector } = historyConnector([
+      historyPage(
+        Array.from({ length: 100 }, (_, i) => historyTransaction(`other-${i}`)),
+        101,
+      ),
+      historyPage([historyTransaction()], 102),
+    ]);
+    expect((await historyRead(connector)(historyInput)).coverage).toMatchObject({
+      state: "conflict",
+      reason: "changed_total",
+    });
+  });
+
+  it("does not call an empty short page proof of missing historical transactions", async () => {
+    const { connector } = historyConnector([historyPage([], 2)]);
+    const result = await historyRead(connector)(historyInput);
+    expect(result.coverage).toMatchObject({ state: "conflict", reason: "inconsistent_page" });
+    expect(result.entries[0]?.status).toBe("unobserved");
+  });
+
+  it("does not accept an exact transaction ID returned for a different requested account", async () => {
+    const page = historyPage([{ ...historyTransaction(), account_id: "account-2" }]);
+    page.accounts.push({ account_id: "account-2" });
+    const { connector } = historyConnector([page]);
+    const result = await historyRead(connector)({
+      ...historyInput,
+      targets: [...historyInput.targets, { accountId: "account-2", transactionId: "other" }],
+    });
+    expect(result.coverage.state).toBe("conflict");
+    expect(result.entries[0]).toMatchObject({ status: "conflict", sourceAmount: null });
+  });
+
+  it.each([
+    { ...historyInput, startDate: "2023-02-30" },
+    { ...historyInput, endDate: "2025-01-01" },
+    { ...historyInput, targets: [] },
+    { ...historyInput, endDate: "2022-12-31" },
+    {
+      ...historyInput,
+      targets: Array.from({ length: 6 }, (_, i) => ({
+        accountId: `account-${i}`,
+        transactionId: `tx-${i}`,
+      })),
+    },
+    {
+      ...historyInput,
+      targets: [
+        { accountId: "a", transactionId: "same" },
+        { accountId: "b", transactionId: "same" },
+      ],
+    },
+  ])("rejects an invalid or excessive request before any provider call", async (input) => {
+    const { connector, requests } = historyConnector([]);
+    await expect(historyRead(connector)(input)).rejects.toMatchObject({
+      code: "plaid_invalid_history_request",
+    });
+    expect(requests).toEqual([]);
+  });
+
+  it("bounds an oversized response without publishing partial body or secrets", async () => {
+    const connector = createPlaidConnector({
+      clientId: "client",
+      secret: "secret",
+      environment: "sandbox",
+      fetch: async () => new Response("sensitive-canary".repeat(100_000)),
+    });
+    const result = await historyRead(connector)(historyInput);
+    expect(result.coverage).toMatchObject({ state: "unavailable", reason: "byte_limit" });
+    expect(JSON.stringify(result)).not.toContain("sensitive-canary");
+  });
+
+  it("retains observed evidence as partial when a later provider request fails", async () => {
+    let calls = 0;
+    const connector = createPlaidConnector({
+      clientId: "client",
+      secret: "secret",
+      environment: "sandbox",
+      fetch: async () => {
+        calls++;
+        if (calls === 1) return Response.json(initializedHistoryItem);
+        if (calls === 2)
+          return Response.json(
+            historyPage(
+              [
+                historyTransaction(),
+                ...Array.from({ length: 99 }, (_, i) => historyTransaction(`other-${i}`)),
+              ],
+              101,
+            ),
+          );
+        throw new Error("sensitive-provider-canary");
+      },
+    });
+    const result = await historyRead(connector)({
+      ...historyInput,
+      targets: [...historyInput.targets, { accountId: "account-1", transactionId: "missing" }],
+    });
+    expect(result.coverage).toMatchObject({ state: "partial", reason: "provider_error", pages: 1 });
+    expect(result.entries.map((entry) => entry.status)).toEqual(["found", "unobserved"]);
+    expect(JSON.stringify(result)).not.toContain("sensitive-provider-canary");
+  });
+
+  it("discards earlier evidence when a later page changes Item identity", async () => {
+    const { connector } = historyConnector([
+      historyPage(
+        [
+          historyTransaction(),
+          ...Array.from({ length: 99 }, (_, i) => historyTransaction(`other-${i}`)),
+        ],
+        101,
+      ),
+      { ...historyPage([historyTransaction("last")], 101), item: { item_id: "foreign" } },
+    ]);
+    const result = await historyRead(connector)(historyInput);
+    expect(result.coverage).toMatchObject({ state: "unavailable", reason: "identity_mismatch" });
+    expect(result.entries[0]).toMatchObject({ status: "unobserved", sourceAmount: null });
+  });
+
+  it("caps aggregate response bytes across individually bounded pages", async () => {
+    const pages = Array.from({ length: 5 }, (_, page) => ({
+      ...historyPage(
+        Array.from({ length: 100 }, (_, i) => historyTransaction(`other-${page}-${i}`)),
+        501,
+      ),
+      padding: "x".repeat(110_000),
+    }));
+    const { connector, requests } = historyConnector(pages);
+    const result = await historyRead(connector)(historyInput);
+    expect(result.coverage).toMatchObject({ state: "partial", reason: "byte_limit", pages: 4 });
+    expect(result.entries[0]?.status).toBe("unobserved");
+    expect(requests).toHaveLength(6);
+  });
+
+  it("does not reset the aggregate deadline between metadata and history", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const connector = createPlaidConnector({
+        clientId: "client",
+        secret: "secret",
+        environment: "sandbox",
+        fetch: async () => {
+          calls++;
+          await new Promise((resolve) => setTimeout(resolve, 10_000));
+          return Response.json(calls === 1 ? initializedHistoryItem : historyPage());
+        },
+      });
+      const pending = historyRead(connector)(historyInput);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect((await pending).coverage).toMatchObject({ state: "unavailable", reason: "deadline" });
+      expect(calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not start a provider read when already aborted", async () => {
+    const { connector, requests } = historyConnector([]);
+    const abort = new AbortController();
+    abort.abort();
+    const result = await historyRead(connector)({ ...historyInput, signal: abort.signal });
+    expect(result.coverage.reason).toBe("aborted");
+    expect(requests).toEqual([]);
+  });
+
+  it("enforces the aggregate deadline even when an injected fetch ignores its abort signal", async () => {
+    vi.useFakeTimers();
+    try {
+      const connector = createPlaidConnector({
+        clientId: "client",
+        secret: "secret",
+        environment: "sandbox",
+        fetch: () => new Promise<Response>(() => undefined),
+      });
+      const pending = historyRead(connector)(historyInput);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect((await pending).coverage).toMatchObject({ state: "unavailable", reason: "deadline" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    "caller",
+    "deadline",
+  ] as const)("aborts a hanging response body within the aggregate budget (%s)", async (cause) => {
+    vi.useFakeTimers();
+    try {
+      let cancelled = false;
+      const abort = new AbortController();
+      const connector = createPlaidConnector({
+        clientId: "client",
+        secret: "secret",
+        environment: "sandbox",
+        fetch: async () =>
+          new Response(
+            new ReadableStream({
+              cancel() {
+                cancelled = true;
+              },
+            }),
+          ),
+      });
+      const pending = historyRead(connector)({ ...historyInput, signal: abort.signal });
+      await vi.advanceTimersByTimeAsync(0);
+      if (cause === "caller") abort.abort();
+      else await vi.advanceTimersByTimeAsync(15_000);
+      expect((await pending).coverage).toMatchObject({
+        state: "unavailable",
+        reason: cause === "caller" ? "aborted" : "deadline",
+      });
+      expect(cancelled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 const linkInput = {
   clientName: "ilo",

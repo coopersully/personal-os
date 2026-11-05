@@ -6,7 +6,6 @@ import {
   InboxIcon,
   ListTodoIcon,
   PinIcon,
-  ReplyIcon,
   SettingsIcon,
   TargetIcon,
   UserIcon,
@@ -63,19 +62,10 @@ export function workspaceSectionPages(owner: string, search: string): MobileWork
     }
     pages.unshift({ ...primary, kind: "destination" });
   }
-  if (["mail", "tasks", "calendar", "finances"].includes(owner))
-    pages.push({
-      id: "messages",
-      label: "messages",
-      icon: ReplyIcon,
-      path: `/${owner}/messages`,
-      kind: "destination",
-    });
   return pages;
 }
 
 export function activeWorkspaceSection(owner: string, pathname: string, search: string): string {
-  if (pathname === `/${owner}/messages`) return "messages";
   if (owner === "calendar") return "calendar";
   const params = new URLSearchParams(search);
   const requested = params.get("navigation");

@@ -207,11 +207,18 @@ test("Messages gates every workspace and provides clearly labeled conversation p
   await expect(
     page.getByText("Your reminder is set for 2 PM today: finish the proposal."),
   ).toBeVisible();
-  await expect(page.getByText(/nohmi · system notice/)).toBeVisible();
+  await expect(page.getByLabel("System event")).toBeVisible();
+  await expect(
+    page.locator("#message-demo-five").getByRole("link", { name: "Reply to previous message" }),
+  ).toBeVisible();
+  await expect(page.locator("#message-demo-five")).not.toContainText(
+    "Yes, remind me about the proposal at 2.",
+  );
   await page.screenshot({ path: info.outputPath("messages-global.png"), fullPage: true });
   await page.getByRole("button", { name: "Message views", exact: true }).click();
   await page.getByRole("menuitem", { name: "Tasks", exact: true }).click();
-  await expect(page).toHaveURL(/\/tasks\/messages\?preview=messages/);
+  await expect(page).toHaveURL(/\/messages\?workspace=tasks&preview=messages/);
+  await expect(page.getByRole("navigation", { name: "Workspace sections" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Message views", exact: true })).toHaveText(
     /Tasks/,
   );

@@ -3,6 +3,7 @@ import type { TextingAgentRun } from "@personal-os/domain";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId } from "react";
 import { useLocation } from "react-router-dom";
+import { workspaceIds } from "@/components/workspace-identity";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { DataViewLoading } from "../../components/data-view-state.js";
@@ -36,16 +37,22 @@ const denied = (error: unknown) =>
   error instanceof ApiClientError && [401, 403].includes(error.status);
 const polling = () => (document.hidden ? false : 10_000);
 
-type Props = { userId: string; timeZone: string; workspace?: ConversationWorkspace };
+type Props = { userId: string; timeZone: string; workspace?: ConversationWorkspace | undefined };
 export function TextConversation(props: Props) {
   const location = useLocation();
   const preview = conversationPreviewMode(
     new URL(`${location.pathname}${location.search}`, window.location.origin),
   );
+  const selected = new URLSearchParams(location.search).get("workspace");
+  const workspace = workspaceIds.find((id) => id === selected);
   return preview ? (
-    <ConversationPreview mode={preview} workspace={props.workspace} timeZone={props.timeZone} />
+    <ConversationPreview mode={preview} workspace={workspace} timeZone={props.timeZone} />
   ) : (
-    <LiveConversation key={`${props.userId}:${props.workspace ?? "all"}`} {...props} />
+    <LiveConversation
+      key={`${props.userId}:${workspace ?? "all"}`}
+      {...props}
+      workspace={workspace}
+    />
   );
 }
 

@@ -22,6 +22,13 @@ import { cn } from "@/lib/utils";
 
 export type ConversationWorkspace = WorkspaceId;
 
+export function conversationUrl(workspace?: WorkspaceId, preview?: string) {
+  const params = new URLSearchParams();
+  if (workspace) params.set("workspace", workspace);
+  if (preview) params.set("preview", preview);
+  return `/messages${params.size ? `?${params}` : ""}`;
+}
+
 export function ConversationNavigation({
   workspace,
   preview,
@@ -49,7 +56,7 @@ export function ConversationNavigation({
           {workspaceIds.map((id) => (
             <DropdownMenuItem key={id} asChild data-active={workspace === id}>
               <Link
-                to={`/${id}/messages${suffix}`}
+                to={conversationUrl(id, preview)}
                 aria-current={workspace === id ? "page" : undefined}
               >
                 <WorkspaceIcon size="sm" workspace={id} />
@@ -68,12 +75,10 @@ export function ConversationNavigation({
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link to={`${workspace ? `/${workspace}` : ""}/messages?preview=messages-locked`}>
-                  Preview setup
-                </Link>
+                <Link to={conversationUrl(workspace, "messages-locked")}>Preview setup</Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link to={workspace ? `/${workspace}/messages` : "/messages"}>Exit preview</Link>
+                <Link to={conversationUrl(workspace)}>Exit preview</Link>
               </DropdownMenuItem>
             </>
           )}
@@ -145,33 +150,45 @@ export function ConversationView({
             )}
             <li
               id={`message-${message.id}`}
+              aria-label={system ? "System event" : undefined}
               className={cn(
                 "flex min-w-0 flex-col gap-1.5 scroll-mt-24",
-                human ? "items-end" : "items-start",
+                system ? "items-center py-2 text-center" : human ? "items-end" : "items-start",
               )}
             >
-              <span className="px-1 text-xs font-medium text-muted-foreground">
-                {human ? "You" : system ? "nohmi · system notice" : "Your agent"}
-              </span>
+              {!system && (
+                <div className="flex max-w-[92%] items-center gap-2 px-1 text-xs text-muted-foreground">
+                  <span className="shrink-0 font-medium">{human ? "You" : "Your agent"}</span>
+                  {parent && (
+                    <a
+                      className="flex min-w-0 items-center gap-1 hover:text-foreground"
+                      href={`#message-${parent.id}`}
+                      aria-label={
+                        parent.id === previous?.id
+                          ? "Reply to previous message"
+                          : `Reply to: ${parent.text}`
+                      }
+                    >
+                      <ReplyIcon className="size-3 shrink-0" aria-hidden="true" />
+                      {parent.id !== previous?.id && (
+                        <span className="truncate">{parent.text}</span>
+                      )}
+                    </a>
+                  )}
+                </div>
+              )}
               <div
                 className={cn(
-                  "flex max-w-[92%] flex-col gap-2 whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-relaxed sm:max-w-[85%]",
+                  system
+                    ? "max-w-lg whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground"
+                    : "flex max-w-[92%] flex-col gap-2 whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-relaxed sm:max-w-[85%]",
                   human
                     ? "bg-primary text-primary-foreground"
                     : system
-                      ? "bg-secondary text-secondary-foreground"
+                      ? ""
                       : "bg-card text-card-foreground",
                 )}
               >
-                {parent && !human && !system && (
-                  <a
-                    className="flex min-w-0 items-center gap-1.5 rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground hover:bg-selection"
-                    href={`#message-${parent.id}`}
-                  >
-                    <ReplyIcon className="size-3 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{parent.text}</span>
-                  </a>
-                )}
                 <p>{message.text || "Message without text"}</p>
               </div>
               <div
@@ -181,7 +198,7 @@ export function ConversationView({
                 )}
               >
                 <time dateTime={message.occurredAt}>{time(message.occurredAt)}</time>
-                {!human && (
+                {!human && !system && (
                   <span>
                     {message.status === "unknown"
                       ? "Delivery unconfirmed"
@@ -190,15 +207,16 @@ export function ConversationView({
                         : message.status}
                   </span>
                 )}
-                {message.workspaces?.map((id) => (
-                  <Link
-                    key={id}
-                    className="rounded-sm px-1 hover:bg-selection hover:text-foreground"
-                    to={`/${id}/messages${preview ? `?preview=${preview}` : ""}`}
-                  >
-                    {workspaceIdentities[id].label}
-                  </Link>
-                ))}
+                {!system &&
+                  message.workspaces?.map((id) => (
+                    <Link
+                      key={id}
+                      className="rounded-sm px-1 hover:bg-selection hover:text-foreground"
+                      to={conversationUrl(id, preview)}
+                    >
+                      {workspaceIdentities[id].label}
+                    </Link>
+                  ))}
                 {workspace && (message.workspaces?.length ?? 0) > 1 && (
                   <Link
                     className="rounded-sm px-1 underline underline-offset-2 hover:text-foreground"

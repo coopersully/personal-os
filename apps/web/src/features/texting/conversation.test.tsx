@@ -39,13 +39,13 @@ const message = (id: string, direction: string, text: string) => ({
   senderKind: direction === "inbound" ? "human" : "agent",
   replyToMessageIds: [],
 });
-function mount(element: React.ReactNode) {
+function mount(element: React.ReactNode, path = "/messages") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
   });
   const rendered = render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>{element}</MemoryRouter>
+      <MemoryRouter initialEntries={[path]}>{element}</MemoryRouter>
     </QueryClientProvider>,
   );
   return { ...rendered, client };
@@ -186,7 +186,7 @@ it("hides cached messages and run details after authorization is denied", async 
 
 it("keeps every conversation locked and does not fetch history before delivered agent proof", async () => {
   mocks.getTextingAgentStatus.mockResolvedValue({ ...status, chatReady: false, verifiedAt: null });
-  mount(<TextConversation userId="one" timeZone="UTC" workspace="calendar" />);
+  mount(<TextConversation userId="one" timeZone="UTC" />, "/messages?workspace=calendar");
   expect(await screen.findByText("Connect your agent to unlock Messages")).toBeVisible();
   expect(screen.getByText(/Text “Hello nohmi”/)).toBeVisible();
   expect(mocks.getTextConversation).not.toHaveBeenCalled();
@@ -202,7 +202,7 @@ it("passes workspace scope to the server and preserves the original mixed messag
     ],
     hasEarlierMessages: false,
   });
-  mount(<TextConversation userId="one" timeZone="UTC" workspace="tasks" />);
+  mount(<TextConversation userId="one" timeZone="UTC" />, "/messages?workspace=tasks");
   expect(await screen.findByText("Check my calendar and tasks")).toBeVisible();
   expect(mocks.getTextConversation).toHaveBeenCalledWith("UTC", { limit: 50, workspace: "tasks" });
   expect(screen.getByRole("link", { name: "Full conversation" })).toHaveAttribute(

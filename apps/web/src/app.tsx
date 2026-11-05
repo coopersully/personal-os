@@ -1529,33 +1529,6 @@ function AuthenticatedApp({ user }: { user: User }) {
               ) : sidebarMode === "mail" ? (
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
               ) : null}
-              {sidebarMode !== "settings" && activeWorkspace && (
-                <ShadcnSidebarGroup>
-                  <ShadcnSidebarGroupContent>
-                    <ShadcnSidebarMenu>
-                      <ShadcnSidebarMenuItem>
-                        <ShadcnSidebarMenuButton
-                          asChild
-                          isActive={isMessageView}
-                          tooltip="Messages"
-                        >
-                          <Link
-                            to={`${activeWorkspace.path}/messages`}
-                            onClick={closeMobileMenu}
-                            aria-current={isMessageView ? "page" : undefined}
-                          >
-                            <ReplyIcon
-                              aria-hidden="true"
-                              weight={isMessageView ? "Filled" : "Outline"}
-                            />
-                            <span>Messages</span>
-                          </Link>
-                        </ShadcnSidebarMenuButton>
-                      </ShadcnSidebarMenuItem>
-                    </ShadcnSidebarMenu>
-                  </ShadcnSidebarGroupContent>
-                </ShadcnSidebarGroup>
-              )}
             </ShadcnSidebarContent>
           </ShadcnSidebar>
         ) : null}
@@ -1895,14 +1868,7 @@ function WorkspaceRoutes({
         <Route
           key={workspace}
           path={`/${workspace}/messages`}
-          element={
-            <TextConversation
-              key={`${user.id}:${workspace}`}
-              userId={user.id}
-              timeZone={user.planningTimezone}
-              workspace={workspace}
-            />
-          }
+          element={<LegacyMessagesRedirect workspace={workspace} />}
         />
       ))}
       <Route
@@ -1915,6 +1881,13 @@ function WorkspaceRoutes({
       <Route path="*" element={<Navigate replace to="/today" />} />
     </Routes>
   );
+}
+
+function LegacyMessagesRedirect({ workspace }: { workspace: string }) {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set("workspace", workspace);
+  return <Navigate replace to={`/messages?${params}${location.hash}`} />;
 }
 
 function LegacySettingsRedirect({ section }: { section: SettingsSectionId }) {
@@ -2143,14 +2116,6 @@ function WorkspaceAppBarForRoute({
         compact={isMessages}
         actions={
           <>
-            {workspace === "calendar" && !isMessages && (
-              <ShadcnButton asChild variant="ghost" size="sm">
-                <Link to="/calendar/messages">
-                  <ReplyIcon aria-hidden="true" />
-                  Messages
-                </Link>
-              </ShadcnButton>
-            )}
             {"__TAURI_INTERNALS__" in window && (
               <Tooltip>
                 <TooltipTrigger asChild>

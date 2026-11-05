@@ -727,12 +727,13 @@ Texting general inbox remains separately tracked; this candidate does not claim 
 
 Messages remain one canonical SMS conversation. The agent classifies human messages and its own
 replies into zero or more of Mail, Tasks, Calendar and Finances. Empty tags mean general; a missing
-classification stays global-only. Each relevant workspace displays the full original message,
+classification stays global-only. Each workspace filter within Messages displays the full original message,
 without copied records, excerpts or rewritten human text. Reply references preserve context;
 separate topic replies share the original incoming message. Workspace classification describes
 relevance and grants no additional domain authority. Existing Finance Chat is preserved.
 
-`/messages` and `/{workspace}/messages` share a chronological view, workspace labels and a link
+`/messages` is a standalone destination in the workspace selector, alongside Settings, with no
+Messages entries inside individual workspaces. Its `workspace` query filter provides a chronological view, workspace labels and a link
 back to full context. The API filters before pagination; a filtered view cannot issue the receipt
 required by the generic SMS sender. Topic replies use stable per-run keys and at most four SMS
 messages; replay of a reserved key never resubmits an uncertain send. Existing unclassified history
@@ -756,12 +757,17 @@ are explicitly fictional and cannot manufacture live verification.
 
 Known Finance notification and acknowledgement producers explicitly tag Finance; generic direct sends
 accept optional validated workspace/reply metadata. Legacy outbound records with unknown authorship
-are labeled nohmi system messages, never attributed to an agent without evidence.
+appear as unframed system events in the conversation timeline, never as agent bubbles.
 
 ### Message page presentation
 
 Messages uses a compact, single-row app header. The standard Message views menu contains
-All messages, the four workspace projections, and Texting settings. Workspace sidebars retain
-their Messages destination. Do not repeat workspace tabs or introductory slogans above the
+All messages, the four workspace filters, and Texting settings. Workspace sidebars and mobile
+navigation do not contain Messages. Older workspace message URLs redirect to the standalone view. Do not repeat workspace tabs or introductory slogans above the
 conversation. Development previews use a quiet fictional-data label, with preview actions in
 the same menu. This presentation preserves the verified-reply gate and full original messages.
+
+Reply references sit outside message bubbles. An adjacent reply uses a small linked reply glyph
+without quoting the immediately preceding message; replies to earlier messages show a compact
+external excerpt linking back to the original. System events use subdued text and a timestamp,
+without speaker, bubble, or delivery-status framing.

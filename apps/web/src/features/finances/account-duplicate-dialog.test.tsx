@@ -151,6 +151,62 @@ it("requires an explicit healthy keep choice and review, preserves history, then
     expect.objectContaining({ id: loadingToast.mock.calls.at(-1)?.[1]?.id }),
   );
 });
+it("distinguishes identical account labels and carries the selected record into comparison", async () => {
+  const first = { ...kept, id: "11111111-1111-4111-8111-11111111abcd" };
+  const second = { ...kept, id: "22222222-2222-4222-8222-22222222abcd" };
+  let completePreview!: (value: ReturnType<typeof envelope>) => void;
+  api.getFinanceAccountDuplicatePreview.mockReturnValueOnce(
+    new Promise<ReturnType<typeof envelope>>((resolve) => {
+      completePreview = resolve;
+    }),
+  );
+  mount([first, second]);
+  expect(screen.getByRole("option", { name: /^Record 1111abcd/ })).toBeVisible();
+  expect(screen.getByRole("option", { name: /^Record 2222abcd/ })).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Account to keep tracking"), {
+    target: { value: second.id },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Preview comparison" }));
+  const dialog = screen.getByRole("dialog");
+  const pendingMessage = await screen.findByText("Comparing accounts…");
+  expect(pendingMessage.closest("[data-sonner-toast]")).not.toBeNull();
+  expect(loadingToast).toHaveBeenCalledWith("Comparing accounts…", expect.anything());
+  const previewToastId = loadingToast.mock.calls.at(-1)?.[1]?.id;
+  expect(previewToastId).toBeDefined();
+  expect(
+    within(dialog).queryByText(/^(Comparing accounts…|Account comparison ready\.)$/),
+  ).not.toBeInTheDocument();
+  expect(api.resolveFinanceAccountDuplicate).not.toHaveBeenCalled();
+  completePreview(envelope({ ...preview, keptAccount: second }));
+  await screen.findByRole("button", { name: "Stop tracking duplicate" });
+  await waitFor(() =>
+    expect(successToast).toHaveBeenCalledWith(
+      "Account comparison ready.",
+      expect.objectContaining({ id: previewToastId }),
+    ),
+  );
+  const successMessage = await screen.findByText("Account comparison ready.");
+  expect(successMessage.closest("[data-sonner-toast]")).not.toBeNull();
+  expect(
+    within(dialog).queryByText(/^(Comparing accounts…|Account comparison ready\.)$/),
+  ).not.toBeInTheDocument();
+  expect(api.getFinanceAccountDuplicatePreview).toHaveBeenCalledWith(redundant.id, second.id);
+  expect(screen.getByRole("region", { name: "Keep tracking" })).toHaveTextContent(
+    "Record 2222abcd",
+  );
+  expect(screen.getByRole("region", { name: "Stop tracking" })).toHaveTextContent(
+    "Record -account",
+  );
+  expect(api.resolveFinanceAccountDuplicate).not.toHaveBeenCalled();
+});
+it("uses complete record references when shortened identifiers collide", () => {
+  const first = { ...kept, id: "11111111-1111-4111-8111-aaaaaaaaaaaa" };
+  const second = { ...kept, id: "22222222-2222-4222-8222-aaaaaaaaaaaa" };
+  mount([first, second]);
+  expect(screen.getByRole("option", { name: new RegExp(`^Record ${first.id} ·`) })).toBeVisible();
+  expect(screen.getByRole("option", { name: new RegExp(`^Record ${second.id} ·`) })).toBeVisible();
+  expect(api.getFinanceAccountDuplicatePreview).not.toHaveBeenCalled();
+});
 it("preserves the reviewed comparison and idempotency key for an uncertain retry, with Sonner only", async () => {
   api.resolveFinanceAccountDuplicate.mockRejectedValueOnce(new Error("connection lost"));
   mount();

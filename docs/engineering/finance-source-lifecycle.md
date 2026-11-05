@@ -76,8 +76,12 @@ planning trust when multiple included records are possible duplicates. Warnings 
 merge or deletion.
 
 The signed-in Accounts page offers **Compare duplicates** and requires choosing a connected,
-current account to keep. The server compares owner-scoped ledger entries by date, signed amount,
-currency, direction, merchant and pending state, counting matches as a multiset. These are possible
+current account to keep.
+The selector and comparison identify each local record with a stable reference, falling back to
+the full identifier when shortened references collide; identical names, masks and timestamps must
+not make keeper choices indistinguishable.
+The server compares owner-scoped ledger entries by date, signed amount, currency, direction,
+merchant and pending state, counting matches as a multiset. These are possible
 matching charges, not proof that two financial events are identical. Show overlapping and unique
 history counts, both account identities, freshness and the consequence before confirmation.
 

@@ -226,3 +226,27 @@ release, the deployment owner must observe one ordinary Item sync, confirm safe 
 and logo display, and inspect `branding_failure_code` / `branding_next_refresh_at` on failures.
 Green local tests can still coexist with missing bank artwork, Plaid configuration rejection,
 provider downtime or browser image-decoder failures. These retain honest fallbacks.
+
+## General Texting routine handoff
+
+The Texting coordinator reuses the owner's registered Claude routine and encrypted fire credential,
+but requires separate human opt-in, active verified SMS consent and a live original connection with
+Texting read/write/execute and standing execution policy. The credential authorizes only a wake-up;
+workspace API permissions still govern every effect. The connector posts only a local run ID to
+`api.anthropic.com` over HTTPS/443, without redirects, within 15 seconds and a 16 KiB response cap.
+No API-key model call or paid fallback exists. Account billing configuration must be checked in Claude.
+
+The message/queue commit acknowledges inbound acceptance. A separate submitting commit freezes the
+batch before transport; an uncertain provider response remains fenced against automatic replay.
+A successful response proves session creation only. The agent must claim through nohmi and record
+checkpoints and a reply; the reply row and run completion commit before one SMS submission.
+Provider timeout retains that message with unconfirmed delivery. Recovery reads and idempotent
+same-body replies do not resend it. Consent epochs, live grants and schedule identity are rechecked
+under locks; pre-handoff quiescence releases work, while crash after the submitting commit requires
+inspection. Human closure requires confirming the Claude session stopped and never replays work.
+
+PostgreSQL tests cover durable batching, competing claims, revoked consent/grants, tenant isolation,
+explicit Finance routing, uncertain host/send behavior and recovery. Browser tests use synthetic
+history and prove rendering only. Green tests can coexist with absent routine entitlement, missing
+MCP permission, stale host instructions, provider rate limits or carrier rejection. The deployment
+owner must verify those live boundaries before describing the feature as operational.

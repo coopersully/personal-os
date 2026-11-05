@@ -2,6 +2,21 @@
  * A missing ordinary operation must get an adapter; it cannot be waived by the inventory test.
  */
 export const workspaceApiExceptions = {
+  getTextingAgentStatus: {
+    kind: "owner_interaction",
+    reason:
+      "Human-only routine settings and paginated recovery history; agents claim one exact run with original connection authority.",
+  },
+  configureTextingAgent: {
+    kind: "owner_consent",
+    reason:
+      "Only the human opts into automatic SMS wakes and confirms subscription-only billing configuration.",
+  },
+  recoverTextingAgentRun: {
+    kind: "owner_interaction",
+    reason:
+      "Only the human confirms the provider session is stopped or retries a definitely rejected request.",
+  },
   confirmFinanceRecurringSchedule: {
     kind: "owner_consent",
     reason:

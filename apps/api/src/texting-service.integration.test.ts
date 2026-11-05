@@ -416,7 +416,10 @@ describe.sequential("texting service", () => {
         .where(eq(textInboundClaims.userId, userId)),
     ).toHaveLength(1);
     const stoppedConversation = await service.conversation(principal, "UTC", { limit: 100 });
-    expect(stoppedConversation.messages).toHaveLength(messageCountBeforeStop);
+    expect(stoppedConversation.messages).toHaveLength(messageCountBeforeStop + 1);
+    expect(stoppedConversation.messages.some((message) => message.text === "UNSUBSCRIBE")).toBe(
+      true,
+    );
     await service.inbound({
       Body: "UNSUBSCRIBE",
       From: "+12125550123",

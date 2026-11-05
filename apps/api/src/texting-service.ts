@@ -8,14 +8,18 @@ import {
   auditEvents,
   type Database,
   textInboundClaims,
+  textingAgentQueue,
+  textingAgentSettings,
   textingConnections,
   textingConsentEvents,
   textingVerificationChallenges,
   textMessages,
+  textReplyBindings,
   users,
 } from "@personal-os/database";
 import {
   normalizeTextingPhoneNumber,
+  parseTextReply,
   type SendTextMessageInput,
   type StartTextingVerificationInput,
   type TextConversationPage,
@@ -23,13 +27,14 @@ import {
   type TextingConnection,
   textingConsentVersion,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import type { NotificationTransaction } from "./notification-work-resolver.js";
 import { decryptJson, encryptJson } from "./security.js";
 import { issueConversationReceipt, verifyConversationReceipt } from "./texting-security.js";
+import { replyDeliveryState } from "./texting-sms-admission.js";
 import { formatTextLocalTime } from "./texting-time.js";
 import type { Principal } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
@@ -57,6 +62,20 @@ export function createTextingService(options: Options) {
       throw new AppError("service_unavailable", "Texting setup is not currently available.");
     return options.twilio;
   };
+
+  async function cancelQueuedAgentMessages(tx: NotificationTransaction, userId: string) {
+    // Keep the immutable routing assignment so legacy Finance cannot later consume this claim.
+    await tx
+      .update(textingAgentQueue)
+      .set({ cancelledAt: now() })
+      .where(
+        and(
+          eq(textingAgentQueue.userId, userId),
+          isNull(textingAgentQueue.runId),
+          isNull(textingAgentQueue.cancelledAt),
+        ),
+      );
+  }
 
   async function connectionRow(userId: string) {
     return options.db.query.textingConnections.findFirst({
@@ -239,6 +258,7 @@ export function createTextingService(options: Options) {
               verifiedAt: now(),
             })
             .where(eq(textingConnections.id, existing.id));
+          await cancelQueuedAgentMessages(tx, userId);
         } else {
           const [createdConnection] = await tx
             .insert(textingConnections)
@@ -293,6 +313,7 @@ export function createTextingService(options: Options) {
         .update(textingConnections)
         .set({ disconnectedAt: now(), state: "disconnected", updatedAt: now() })
         .where(eq(textingConnections.id, row.id));
+      await cancelQueuedAgentMessages(tx, userId);
       if (principal)
         await tx.insert(auditEvents).values(
           auditValues({
@@ -613,7 +634,7 @@ export function createTextingService(options: Options) {
             )
             .for("update")
             .limit(1);
-          if (currentConnection)
+          if (currentConnection) {
             await tx
               .update(textingConnections)
               .set({
@@ -623,6 +644,8 @@ export function createTextingService(options: Options) {
                 updatedAt: now(),
               })
               .where(eq(textingConnections.id, currentConnection.id));
+            await cancelQueuedAgentMessages(tx, currentConnection.userId);
+          }
           await tx.insert(textingConsentEvents).values({
             connectionId: currentConnection?.id,
             kind: "provider_block",
@@ -775,6 +798,7 @@ export function createTextingService(options: Options) {
     });
     if (!routed) return;
     const occurredAt = await options.twilio.getMessageOccurredAt(sid);
+    if (parameters.To && parameters.To !== options.senderPhoneNumber) return;
     const body = parameters.Body ?? "";
     // Advanced Opt-Out supplies OptOutType even when the configured keyword is not literally
     // STOP/START. Treat Twilio's classification as authoritative and retain Body as the fallback.
@@ -829,12 +853,29 @@ export function createTextingService(options: Options) {
           .onConflictDoNothing()
           .returning({ id: textingConsentEvents.id });
         if (!inserted) return;
+        await tx
+          .insert(textMessages)
+          .values({
+            userId: row.userId,
+            connectionId: row.id,
+            providerMessageSid: sid,
+            direction: "inbound",
+            body,
+            status: "delivered",
+            occurredAt,
+            occurredAtSource: "provider",
+          })
+          .onConflictDoNothing();
+        await tx
+          .update(textingConnections)
+          .set({ conversationRevision: row.conversationRevision + 1, updatedAt: now() })
+          .where(eq(textingConnections.id, row.id));
         const isNewer = !latest || occurredAt.getTime() > latest.occurredAt.getTime();
         const stopWinsTie =
           keyword === "STOP" &&
           latest?.kind === "provider_start" &&
           occurredAt.getTime() === latest.occurredAt.getTime();
-        if (isNewer || stopWinsTie)
+        if (isNewer || stopWinsTie) {
           await tx
             .update(textingConnections)
             .set({
@@ -844,6 +885,8 @@ export function createTextingService(options: Options) {
               updatedAt: now(),
             })
             .where(eq(textingConnections.id, row.id));
+          await cancelQueuedAgentMessages(tx, row.userId);
+        }
         return;
       }
       const [inserted] = await tx
@@ -865,13 +908,89 @@ export function createTextingService(options: Options) {
       // This method is registered only behind the signature-validating inbound route.
       // Consent keywords never reach this branch. Disabled Texting keeps transport history
       // while preventing new reply work from becoming agent-readable.
-      if (options.enabled && row.state === "active")
-        await tx.insert(textInboundClaims).values({
-          connectionId: row.id,
-          consentEpoch: row.consentEpoch,
-          messageId: inserted.id,
-          userId: row.userId,
-        });
+      if (options.enabled && row.state === "active" && keyword !== "HELP") {
+        const [claim] = await tx
+          .insert(textInboundClaims)
+          .values({
+            connectionId: row.id,
+            consentEpoch: row.consentEpoch,
+            messageId: inserted.id,
+            userId: row.userId,
+          })
+          .returning();
+        const [agent] = await tx
+          .select()
+          .from(textingAgentSettings)
+          .where(eq(textingAgentSettings.userId, row.userId));
+        // With general texting enabled, an open Finance question is not enough to infer
+        // that arbitrary new text answers it. Only exact bounded answers or explicitly
+        // numbered free-text answers retain the legacy Finance admission path.
+        const candidates = agent
+          ? await tx
+              .select({ binding: textReplyBindings, outbound: textMessages })
+              .from(textReplyBindings)
+              .innerJoin(
+                textMessages,
+                and(
+                  eq(textMessages.id, textReplyBindings.outboundMessageId),
+                  eq(textMessages.userId, row.userId),
+                  eq(textMessages.connectionId, row.id),
+                ),
+              )
+              .where(
+                and(
+                  eq(textReplyBindings.userId, row.userId),
+                  eq(textReplyBindings.connectionId, row.id),
+                  eq(textReplyBindings.consentEpoch, row.consentEpoch),
+                  eq(textReplyBindings.state, "open"),
+                  gt(textReplyBindings.expiresAt, now()),
+                  claim ? lt(textReplyBindings.createdAt, claim.createdAt) : undefined,
+                ),
+              )
+              .orderBy(asc(textReplyBindings.itemNumber))
+              .limit(4)
+          : [];
+        const candidate = candidates[0];
+        const explicitFreeText = /^\s*[1-3]\s*:[ \t]*\S/u.test(body);
+        const boundedReply =
+          candidate &&
+          candidates.length <= 3 &&
+          candidates.every(
+            ({ binding, outbound }) =>
+              binding.outboundMessageId === candidate.binding.outboundMessageId &&
+              ["question", "approval"].includes(binding.workKind) &&
+              (binding.answerMode === "choices" || explicitFreeText) &&
+              outbound.direction === "outbound" &&
+              replyDeliveryState(outbound) === "eligible" &&
+              outbound.providerSubmittedAt !== null &&
+              outbound.providerSubmittedAt < occurredAt,
+          ) &&
+          parseTextReply(
+            body,
+            candidates.map(({ binding }) => binding),
+          ).state === "matched";
+        if (claim && agent && !boundedReply) {
+          const availableAt = new Date(now().getTime() + 5000);
+          // Debounce the owner's unclaimed burst without shortening provider backoff.
+          await tx
+            .update(textingAgentQueue)
+            .set({ availableAt })
+            .where(
+              and(
+                eq(textingAgentQueue.userId, row.userId),
+                isNull(textingAgentQueue.runId),
+                isNull(textingAgentQueue.cancelledAt),
+                lt(textingAgentQueue.availableAt, availableAt),
+              ),
+            );
+          await tx.insert(textingAgentQueue).values({
+            claimId: claim.id,
+            userId: row.userId,
+            availableAt,
+            createdAt: now(),
+          });
+        }
+      }
       await tx
         .update(textingConnections)
         .set({ conversationRevision: row.conversationRevision + 1, updatedAt: now() })

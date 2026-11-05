@@ -6438,3 +6438,118 @@ export const financeReviewBatchRuns = pgTable(
     ),
   ],
 );
+
+/** Explicit opt-in: registration alone never starts general SMS execution. */
+export const textingAgentSettings = pgTable(
+  "texting_agent_settings",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scheduleId: uuid("schedule_id").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    foreignKey({
+      name: "texting_agent_settings_schedule_fk",
+      columns: [table.userId, table.scheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+export const textingAgentRuns = pgTable(
+  "texting_agent_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    connectionId: uuid("connection_id").notNull(),
+    consentEpoch: integer("consent_epoch").notNull(),
+    scheduleId: uuid("schedule_id").notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    invocationId: uuid("invocation_id"),
+    state: text("state").$type<import("@personal-os/domain").TextingAgentRun["state"]>().notNull(),
+    reason: text("reason"),
+    hostSessionId: text("host_session_id"),
+    replyMessageId: uuid("reply_message_id"),
+    work: jsonb("work")
+      .$type<import("@personal-os/domain").TextingAgentWork[]>()
+      .notNull()
+      .default([]),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("texting_agent_runs_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("texting_agent_runs_active_idx")
+      .on(table.userId)
+      .where(sql`${table.state} IN ('submitting','started','running','uncertain')`),
+    index("texting_agent_runs_history_idx").on(table.userId, table.createdAt),
+    foreignKey({
+      name: "texting_agent_runs_connection_fk",
+      columns: [table.userId, table.connectionId],
+      foreignColumns: [textingConnections.userId, textingConnections.id],
+    }),
+    foreignKey({
+      name: "texting_agent_runs_reply_fk",
+      columns: [table.userId, table.replyMessageId, table.connectionId],
+      foreignColumns: [textMessages.userId, textMessages.id, textMessages.connectionId],
+    }),
+    check(
+      "texting_agent_runs_state_check",
+      sql`${table.state} IN ('submitting','started','running','completed','uncertain','blocked')`,
+    ),
+    check("texting_agent_runs_epoch_check", sql`${table.consentEpoch} > 0`),
+  ],
+);
+
+export const textingAgentQueue = pgTable(
+  "texting_agent_queue",
+  {
+    claimId: uuid("claim_id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id"),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("texting_agent_queue_due_idx").on(table.availableAt).where(sql`${table.runId} IS NULL`),
+    foreignKey({
+      name: "texting_agent_queue_claim_fk",
+      columns: [table.userId, table.claimId],
+      foreignColumns: [textInboundClaims.userId, textInboundClaims.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "texting_agent_queue_run_fk",
+      columns: [table.userId, table.runId],
+      foreignColumns: [textingAgentRuns.userId, textingAgentRuns.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/** Cross-session pending work is independent of the bounded run history projection. */
+export const textingAgentWork = pgTable(
+  "texting_agent_work",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").notNull(),
+    key: text("key").notNull(),
+    runId: uuid("run_id").notNull(),
+    item: jsonb("item").$type<import("@personal-os/domain").TextingAgentWork>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.domain, table.key] }),
+    foreignKey({
+      name: "texting_agent_work_run_fk",
+      columns: [table.userId, table.runId],
+      foreignColumns: [textingAgentRuns.userId, textingAgentRuns.id],
+    }).onDelete("cascade"),
+  ],
+);

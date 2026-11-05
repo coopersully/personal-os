@@ -3,7 +3,7 @@ import type { WorkspaceId } from "../navigation/manifest.js";
 import { WorkspaceBreadcrumbs } from "./workspace-breadcrumbs";
 import { WorkspaceHeaderControlsSlot } from "./workspace-header-controls";
 
-export type WorkspaceAppBarWorkspace = WorkspaceId | "account";
+export type WorkspaceAppBarWorkspace = WorkspaceId | "account" | "messages";
 
 /**
  * The stable, page-wide frame for every workspace. Consumers supply semantic

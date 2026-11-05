@@ -134,12 +134,15 @@ import { registerTaskProjectRoutes } from "./routes/task-projects.js";
 import { registerTaskWorkspaceRoutes } from "./routes/task-workspace.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerTextingRoutes } from "./routes/texting.js";
+import { registerTextingAgentRoutes } from "./routes/texting-agent.js";
 import { registerTextingRecoveryRoutes } from "./routes/texting-recovery.js";
 import { registerWorkspaceSearchRoutes } from "./routes/workspace-search.js";
 import { createTaskListService } from "./task-list-service.js";
 import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
 import { createTaskWorkspaceService } from "./task-workspace-service.js";
+import { createTextingAgentDispatcher } from "./texting-agent-dispatcher.js";
+import { createTextingAgentService } from "./texting-agent-service.js";
 import { createTextingRecoveryDispatcher } from "./texting-recovery-dispatcher.js";
 import { createTextingRecoveryRuntime } from "./texting-recovery-runtime.js";
 import { createTextingRecoveryService } from "./texting-recovery-service.js";
@@ -741,6 +744,19 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(twilio ? { twilio } : {}),
     now,
   });
+  const textingAgent = createTextingAgentService({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled,
+    now,
+    texting,
+  });
+  const dispatchTextingAgent = createTextingAgentDispatcher({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled,
+    now,
+    encryptionKey: dependencies.config.encryptionKey,
+    fetch: dependencies.fetch ?? globalThis.fetch,
+  });
   const textingRecovery = createTextingRecoveryService({
     db: dependencies.db,
     enabled: () => textingConfig.enabled,
@@ -768,6 +784,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     recovery: textingRecovery,
   });
   const textingRecoveryRuntime = createTextingRecoveryRuntime(async (shouldContinue) => {
+    await dispatchTextingAgent(shouldContinue);
     const result = await textingRecoveryDispatcher.runPass({ shouldContinue });
     if (result.failed) {
       throw new Error(`Texting recovery failed for ${result.failed} claims.`);
@@ -1576,6 +1593,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });
   registerTextingRecoveryRoutes({ app, recovery: textingRecovery });
+  registerTextingAgentRoutes(app, textingAgent);
   registerAgentAccountRoutes({
     app,
     accounts: createAgentAccountService({ db: dependencies.db, now }),

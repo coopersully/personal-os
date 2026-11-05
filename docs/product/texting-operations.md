@@ -685,3 +685,40 @@ schema coordination; it must verify the exact approved budget and resolved recon
 not a host's success label or an empty/partial Activity feed. This source change does not establish
 production activation, actual carrier delivery, original-Claude processing or requested-outcome
 completion. Those remain parent-owned acceptance checks.
+
+## General Claude SMS conversation — November 5 candidate
+
+Cooper selected an existing Claude routine as the event host for one conversation across all
+authorized workspaces. Each trigger starts a fresh session; canonical messages and pending work
+provide continuity. The candidate introduces explicit human opt-in to a registered routine,
+subscription-only confirmation, fixed queued batches, invocation claims and persisted work reports.
+No model API fallback is configured. Claude account extra-usage settings and SMS transport charges
+remain outside nohmi's control.
+
+`/messages` displays chronological SMS history, delivery evidence and paginated run recovery.
+STOP/START messages are retained without becoming agent work. Original exact Finance reply flows
+retain their own authority; with general replies enabled, arbitrary text cannot silently become an
+answer to an open Finance question. Explicit bounded choices or numbered answers identify that path.
+Other requests enter the general agent queue. Existing workspace APIs remain the effect authority;
+agent checkpoints are reports, never independently verified evidence or new permission.
+
+New inbound claims are assigned to the general queue in the same transaction as the message.
+Disabling or replacing the routine cancels unassigned work without erasing its ownership, so the
+legacy processor cannot later consume it. A run freezes up to 25 messages and may retain 100 work
+items, submitted in checkpoints of at most 20. Pending-work and run-history reads are paginated.
+Only the original authorized connection may claim, checkpoint or reply. Completed work is retained,
+and uncertain effects require domain readback before any future attempt.
+
+The existing 30-second background tick drains eligible work after a five-second burst window.
+The API commits submitting before transport; crash or ambiguous host response never causes an
+automatic second fire. Pre-transport shutdown releases definitely unsubmitted work. Explicit 429
+rejection delays the queue for one hour; at most 25 general starts per owner are attempted per
+rolling hour. The routine's own shared provider limits can still reject starts. Other definite
+rejections need human repair/retry. Unknown or interrupted sessions require human confirmation that
+the host is stopped before releasing the conversation; closing never replays the old request.
+
+Source and synthetic verification do not establish production availability. Enabling an actual
+routine, installing its protocol instructions, validating subscription billing settings and proving
+a real signed SMS → new session → authorized workspace tools → recorded reply → carrier delivery
+remain release acceptance steps. Broader notification-producer unification in COO-61 — Shared
+Texting general inbox remains separately tracked; this candidate does not claim that work complete.

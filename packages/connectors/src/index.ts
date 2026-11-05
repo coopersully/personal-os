@@ -1,3 +1,4 @@
+export { type ClaudeRoutineResult, fireClaudeRoutine } from "./claude-routine.js";
 export * from "./desktop-release.js";
 export * from "./failures.js";
 export * from "./google.js";

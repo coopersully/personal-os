@@ -1,5 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
+import {
+  textingAgentCheckpointSchema,
+  textingAgentClaimSchema,
+  textingAgentReplySchema,
+} from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
@@ -8,6 +13,39 @@ export function registerTextingTools(
   api: PersonalOsApiClient,
   timeZone: string,
 ) {
+  server.registerTool(
+    "claim_texting_agent_run",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: false, idempotentHint: true },
+      title: "Claim SMS conversation work",
+      description:
+        "Claim the exact run ID supplied by a nohmi_texting_ready routine trigger using a fresh invocation UUID. Reuse that UUID only within this invocation. Returns the fixed inbound batch, pending work from earlier sessions and API-owned instructions. A competing invocation cannot take this run. Domain APIs retain all action authority.",
+      inputSchema: { runId: z.uuid(), ...textingAgentClaimSchema.shape },
+    },
+    async ({ runId, ...input }) => apiResult(() => api.claimTextingAgentRun(runId, input)),
+  );
+  server.registerTool(
+    "checkpoint_texting_agent_run",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: false, idempotentHint: true },
+      title: "Save SMS work progress",
+      description:
+        "Save pending work before an action and its domain record or operation references afterward. Completed work cannot be overwritten. These are agent reports; domain receipts are the authority for actual effects. Retain stable domain/key identities across sessions.",
+      inputSchema: { runId: z.uuid(), ...textingAgentCheckpointSchema.shape },
+    },
+    async ({ runId, ...input }) => apiResult(() => api.checkpointTextingAgentRun(runId, input)),
+  );
+  server.registerTool(
+    "reply_to_texting_agent_run",
+    {
+      annotations: { openWorldHint: true, readOnlyHint: false, idempotentHint: true },
+      title: "Reply to SMS conversation work",
+      description:
+        "Record one concise SMS reply for the claimed run and queue its delivery atomically. Retry only with the same invocation and identical body; an uncertain send is never repeated. Preserve blocked or uncertain workspace outcomes honestly. Do not also send_text_message for the same run.",
+      inputSchema: { runId: z.uuid(), ...textingAgentReplySchema.shape },
+    },
+    async ({ runId, ...input }) => apiResult(() => api.replyToTextingAgentRun(runId, input)),
+  );
   server.registerTool(
     "get_texting_finance_reply_status",
     {

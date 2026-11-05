@@ -286,3 +286,4 @@ export type TextingCountry = z.infer<typeof textingCountrySchema>;
 export type TextingVerificationChallenge = z.infer<typeof textingVerificationChallengeSchema>;
 
 export * from "./notification-policy.js";
+export * from "./texting-agent.js";

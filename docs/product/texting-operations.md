@@ -757,3 +757,11 @@ are explicitly fictional and cannot manufacture live verification.
 Known Finance notification and acknowledgement producers explicitly tag Finance; generic direct sends
 accept optional validated workspace/reply metadata. Legacy outbound records with unknown authorship
 are labeled nohmi system messages, never attributed to an agent without evidence.
+
+### Message page presentation
+
+Messages uses a compact, single-row app header. The standard Message views menu contains
+All messages, the four workspace projections, and Texting settings. Workspace sidebars retain
+their Messages destination. Do not repeat workspace tabs or introductory slogans above the
+conversation. Development previews use a quiet fictional-data label, with preview actions in
+the same menu. This presentation preserves the verified-reply gate and full original messages.

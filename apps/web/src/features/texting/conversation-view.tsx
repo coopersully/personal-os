@@ -2,8 +2,16 @@ import type { TextMessage } from "@personal-os/domain";
 import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import { DataViewEmpty } from "@/components/data-view-state";
-import { ReplyIcon } from "@/components/icons";
+import { ChevronDownIcon, ReplyIcon, SettingsIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import {
   WorkspaceIcon,
   type WorkspaceId,
@@ -23,24 +31,55 @@ export function ConversationNavigation({
 }) {
   const suffix = preview ? `?preview=${preview}` : "";
   return (
-    <nav className="flex flex-wrap gap-1" aria-label="Message workspaces">
-      <Button variant={!workspace ? "default" : "ghost"} size="sm" asChild>
-        <Link to={`/messages${suffix}`} aria-current={!workspace ? "page" : undefined}>
-          All messages
-        </Link>
-      </Button>
-      {workspaceIds.map((id) => (
-        <Button key={id} variant={workspace === id ? "default" : "ghost"} size="sm" asChild>
-          <Link
-            to={`/${id}/messages${suffix}`}
-            aria-current={workspace === id ? "page" : undefined}
-          >
-            <WorkspaceIcon size="sm" workspace={id} />
-            {workspaceIdentities[id].label}
-          </Link>
-        </Button>
-      ))}
-    </nav>
+    <WorkspaceHeaderControls label="Message views">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="sm" aria-label="Message views">
+            {workspace ? workspaceIdentities[workspace].label : "All messages"}
+            <ChevronDownIcon data-icon="inline-end" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem asChild data-active={!workspace}>
+            <Link to={`/messages${suffix}`} aria-current={!workspace ? "page" : undefined}>
+              <ReplyIcon />
+              All messages
+            </Link>
+          </DropdownMenuItem>
+          {workspaceIds.map((id) => (
+            <DropdownMenuItem key={id} asChild data-active={workspace === id}>
+              <Link
+                to={`/${id}/messages${suffix}`}
+                aria-current={workspace === id ? "page" : undefined}
+              >
+                <WorkspaceIcon size="sm" workspace={id} />
+                {workspaceIdentities[id].label}
+              </Link>
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <Link to="/settings?page=texting">
+              <SettingsIcon />
+              Texting settings
+            </Link>
+          </DropdownMenuItem>
+          {preview && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link to={`${workspace ? `/${workspace}` : ""}/messages?preview=messages-locked`}>
+                  Preview setup
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to={workspace ? `/${workspace}/messages` : "/messages"}>Exit preview</Link>
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </WorkspaceHeaderControls>
   );
 }
 
@@ -90,7 +129,7 @@ export function ConversationView({
       </DataViewEmpty>
     );
   return (
-    <ol className="flex flex-col gap-5" aria-label="Conversation history">
+    <ol className="flex flex-col gap-4" aria-label="Conversation history">
       {messages.map((message, index) => {
         const human = message.senderKind === "human" || message.direction === "inbound";
         const system = message.senderKind === "system";
@@ -100,7 +139,7 @@ export function ConversationView({
         return (
           <Fragment key={message.id}>
             {firstOfDay && (
-              <li className="py-3 text-center text-xs text-muted-foreground">
+              <li className="py-1 text-center text-xs text-muted-foreground">
                 <time dateTime={message.occurredAt}>{date(message.occurredAt)}</time>
               </li>
             )}

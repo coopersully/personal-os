@@ -137,11 +137,12 @@ test("Messages preserves SMS history and remains readable on desktop and mobile"
   await expect(page.getByRole("list", { name: "Conversation history" })).toBeVisible();
   await expect(page.getByText("Thanks. Remind me to renew it after lunch.")).toBeVisible();
   await expect(page.getByText(/Delivery unconfirmed/)).toBeVisible();
-  await expect(page.getByText(/One conversation across your workspaces/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Texting settings" })).toHaveAttribute(
+  await page.getByRole("button", { name: "Message views", exact: true }).click();
+  await expect(page.getByRole("menuitem", { name: "Texting settings" })).toHaveAttribute(
     "href",
     "/settings?page=texting",
   );
+  await page.keyboard.press("Escape");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
@@ -208,12 +209,12 @@ test("Messages gates every workspace and provides clearly labeled conversation p
   ).toBeVisible();
   await expect(page.getByText(/nohmi · system notice/)).toBeVisible();
   await page.screenshot({ path: info.outputPath("messages-global.png"), fullPage: true });
-  await page
-    .getByRole("navigation", { name: "Message workspaces" })
-    .getByRole("link", { name: "Tasks", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Message views", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Tasks", exact: true }).click();
   await expect(page).toHaveURL(/\/tasks\/messages\?preview=messages/);
-  await expect(page.getByText("The same conversation, focused here.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Message views", exact: true })).toHaveText(
+    /Tasks/,
+  );
   await expect(page.locator("#message-demo-one p")).toHaveText(
     "What’s on my calendar this afternoon, and what should I tackle first?",
   );

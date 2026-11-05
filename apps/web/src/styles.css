@@ -9098,3 +9098,18 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
 .workspace-finder[data-compact="true"] .workspace-finder-trigger { width: var(--header-control-size, 2.75rem); height: var(--header-control-size, 2.75rem); padding: 0; aspect-ratio: 1; border-radius: 50%; }
 
 .workspace-finder-trigger > [data-slot="combobox-trigger-icon"] { display: none; }
+
+/* Conversation pages need one compact row, with scope in the standard menu. */
+.workspace-app-bar[data-header-layout="compact"],
+.workspace-app-bar[data-header-layout="compact"]:has(> .workspace-app-bar__identity:empty) {
+  grid-template-areas: "identity title page-actions actions";
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: 2.75rem;
+  height: 3.5rem;
+  min-height: 3.5rem;
+  gap: .375rem;
+}
+.workspace-app-bar[data-header-layout="compact"] > .workspace-app-bar__identity { grid-area: identity; }
+.workspace-app-bar[data-header-layout="compact"] > .workspace-app-bar__context { display: none; }
+.workspace-app-bar[data-header-layout="compact"] > .workspace-app-bar__page-title { grid-area: title; min-width: 0; }
+.workspace-app-bar[data-header-layout="compact"] .workspace-page-breadcrumbs { display: none; }

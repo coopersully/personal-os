@@ -1,6 +1,4 @@
 import type { TextingAgentStatus, TextingConnection, TextMessage } from "@personal-os/domain";
-import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
 import { ConversationSetup } from "./conversation-setup";
 import {
   ConversationNavigation,
@@ -121,41 +119,24 @@ export function ConversationPreview({
 }) {
   return (
     <section
-      className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6"
+      className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-2"
       aria-label="Messages preview"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-secondary px-3 py-2 text-xs text-secondary-foreground">
-        <p>Design preview · fictional messages · no live connection verified</p>
-        <Button size="sm" variant="ghost" asChild>
-          <Link to={workspace ? `/${workspace}/messages` : "/messages"}>Exit preview</Link>
-        </Button>
-      </div>
+      <p className="text-center text-xs text-muted-foreground">
+        Design preview · fictional messages · no live connection verified
+      </p>
       <ConversationNavigation workspace={workspace} preview={mode} />
       {mode === "messages-locked" ? (
         <ConversationSetup status={status} connection={connection} />
       ) : (
-        <>
-          <header className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-muted-foreground">
-              {workspace
-                ? "The same conversation, focused here."
-                : "One conversation across your workspaces."}
-            </p>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to={`${workspace ? `/${workspace}` : ""}/messages?preview=messages-locked`}>
-                Preview setup
-              </Link>
-            </Button>
-          </header>
-          <ConversationView
-            messages={
-              workspace ? messages.filter((item) => item.workspaces.includes(workspace)) : messages
-            }
-            workspace={workspace}
-            timeZone={timeZone}
-            preview={mode}
-          />
-        </>
+        <ConversationView
+          messages={
+            workspace ? messages.filter((item) => item.workspaces.includes(workspace)) : messages
+          }
+          workspace={workspace}
+          timeZone={timeZone}
+          preview={mode}
+        />
       )}
     </section>
   );

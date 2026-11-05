@@ -2,7 +2,7 @@ import { ApiClientError } from "@personal-os/api-client";
 import type { TextingAgentRun } from "@personal-os/domain";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { DataViewLoading } from "../../components/data-view-state.js";
@@ -107,10 +107,7 @@ function LiveConversation({ userId, timeZone, workspace }: Props) {
       ].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
   const connection = privateDenied ? undefined : connectionQuery.data;
   return (
-    <section
-      className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6"
-      aria-label="Messages"
-    >
+    <section className="mx-auto flex w-full max-w-3xl flex-col gap-4 py-2" aria-label="Messages">
       <ConversationNavigation workspace={workspace} />
       <QueryFeedback query={agent} title="Couldn’t load agent status." />
       <QueryFeedback query={connectionQuery} title="Couldn’t load Texting setup." />
@@ -120,23 +117,11 @@ function LiveConversation({ userId, timeZone, workspace }: Props) {
         <ConversationSetup status={status} connection={connection} />
       ) : (
         <>
-          <header className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-col gap-1">
-              <p className="text-sm font-medium">
-                {workspace
-                  ? "The same conversation, focused here."
-                  : "One conversation across your workspaces."}
-              </p>
-              {connection?.senderPhoneNumber && (
-                <p className="text-xs text-muted-foreground">
-                  Text {connection.senderPhoneNumber} from {connection.maskedPhoneNumber}.
-                </p>
-              )}
-            </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/settings?page=texting">Texting settings</Link>
-            </Button>
-          </header>
+          {connection?.senderPhoneNumber && (
+            <p className="text-center text-xs text-muted-foreground">
+              Text {connection.senderPhoneNumber} from {connection.maskedPhoneNumber}.
+            </p>
+          )}
           <QueryFeedback query={history} title="Couldn’t load your messages." />
           {history.isPending ? (
             <DataViewLoading label="Loading your conversation" />

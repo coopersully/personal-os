@@ -2140,6 +2140,7 @@ function WorkspaceAppBarForRoute({
   return (
     <>
       <WorkspaceAppBar
+        compact={isMessages}
         actions={
           <>
             {workspace === "calendar" && !isMessages && (

@@ -73,7 +73,7 @@ it("shows verified history and paginates older messages", async () => {
   mount(<TextConversation userId="one" timeZone="America/New_York" />);
   expect(await screen.findByText("Your update")).toBeVisible();
   expect(screen.getByText(/Delivery unconfirmed/)).toBeVisible();
-  expect(screen.getByText(/One conversation across your workspaces/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Message views" })).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Load older messages" }));
   expect(await screen.findByText("Yesterday’s request")).toBeVisible();
   expect(mocks.getTextConversation).toHaveBeenCalledWith("America/New_York", {

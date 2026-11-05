@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
-  financeAccounts,
   migrateDatabase,
   users,
 } from "@personal-os/database";
@@ -37,10 +36,13 @@ describe("Finance SMS provenance migration", () => {
       displayName: "Migration",
       passwordHash: "unused",
     });
-    const [account] = await database.db
-      .insert(financeAccounts)
-      .values({ userId, provider: "manual", institution: "Cash", name: "Cash" })
-      .returning();
+    // Seed only columns published before 0092, independently of today's ORM schema.
+    const {
+      rows: [account],
+    } = await database.pool.query<{ id: string }>(
+      "INSERT INTO finance_accounts (user_id,provider,institution,name) VALUES ($1,'manual','Cash','Cash') RETURNING id",
+      [userId],
+    );
     if (!account) throw new Error("account");
     for (const source of ["app", "agent"]) {
       // The historical schema predates current reimbursement relationship columns.

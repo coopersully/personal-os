@@ -128,7 +128,7 @@ export function BrowserRitual({ userId }: { userId: string }) {
     <Dialog open>
       <DialogContent
         showCloseButton={false}
-        className="ritual-fullscreen browser-ritual"
+        className="ritual-fullscreen browser-ritual translate-x-0 translate-y-0"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onKeyDown={(event) => {
           // Keep app-wide shortcuts from opening a second editor above the ritual.

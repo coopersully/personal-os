@@ -31,12 +31,14 @@ import {
   financeQuestionSchema,
   financeStatusSchema,
   type MaintenanceScope,
+  projectFinanceInstitutionBranding,
 } from "@personal-os/domain";
 import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
 import { projectFinanceActionQuestion } from "./finance/action-question-projection.js";
+import { budgetPlanningDate, readBudgetPlanContext } from "./finance/budget-plan-projection.js";
 import { findUnverifiedLegacyFinanceEffects } from "./finance/legacy-maintenance-evidence.js";
 import {
   activeAllocationsByTransaction,
@@ -157,6 +159,8 @@ function serializeAccount(
   row: typeof financeAccounts.$inferSelect,
   source?: SynchronizationSource,
   sourceSynchronization?: ReturnType<typeof synchronization>,
+  branding?: FinanceAccount["institutionBranding"],
+  includeArtwork = false,
 ): FinanceAccount {
   const synchronizationSource = source ?? row;
   const legacyPlaid = row.provider === "plaid" && row.providerItemRecordId === null;
@@ -167,6 +171,8 @@ function serializeAccount(
     id: row.id,
     includeInPlanning: row.includeInPlanning,
     institution: row.institution,
+    accountMask: row.providerAccountMask,
+    institutionBranding: projectFinanceInstitutionBranding(branding, includeArtwork),
     kind: row.kind,
     kindSource: row.kindSource,
     lastSyncedAt: legacyPlaid ? null : iso(synchronizationSource.lastSyncedAt),
@@ -259,14 +265,17 @@ export function createFinanceStatusService({ db, now }: Options) {
       userId: string,
       scope: MaintenanceScope,
       executor?: Parameters<Parameters<Database["transaction"]>[0]>[0],
+      includeArtwork = false,
     ): Promise<FinanceStatus> {
       const asOfDate = now();
       const asOf = asOfDate.toISOString();
-      const currentMonth = asOf.slice(0, 7);
+
       if (scope.type === "target" && !isFinanceTargetType(scope.entityType)) {
         throw new AppError("invalid_request", "The Finance target type is not supported.");
       }
       const read = async (tx: Parameters<Parameters<Database["transaction"]>[0]>[0]) => {
+        const planContext = await readBudgetPlanContext(tx, userId, asOfDate);
+        const currentMonth = planContext.month;
         const accounts = await tx
           .select()
           .from(financeAccounts)
@@ -608,9 +617,12 @@ export function createFinanceStatusService({ db, now }: Options) {
             ? activeProfile.grossAnnualIncome / 1200
             : null;
         const observedIncome = incomeObserved > 0 ? incomeObserved : null;
-        const budgetTotal =
+        const categoryLimitTotal =
           budgets.length > 0 ? budgets.reduce((sum, row) => sum + row.limit, 0) / 100 : null;
-        const selectedDay = asOfDate.getUTCDate();
+        // Only spending allocations are comparable to forecast spending. Savings and buffers
+        // never become category limits; legacy limits remain separately disclosed.
+        const budgetTotal = planContext.current?.spendingTotal ?? null;
+        const selectedDay = Number(budgetPlanningDate(asOfDate, planContext.timezone).slice(8, 10));
         const daysInMonth = new Date(
           Date.UTC(Number(currentMonth.slice(0, 4)), Number(currentMonth.slice(5, 7)), 0),
         ).getUTCDate();
@@ -673,6 +685,10 @@ export function createFinanceStatusService({ db, now }: Options) {
             account.providerItemRecordId
               ? providerItemSynchronizationById.get(account.providerItemRecordId)
               : effectiveSynchronization(account, asOfDate, account.provider === "manual"),
+            account.providerItemRecordId
+              ? providerItemById.get(account.providerItemRecordId)?.institutionBranding
+              : null,
+            includeArtwork,
           ),
         );
         const planningAccountTotals = summarizeFinanceAccounts(serializedAccounts).totals;
@@ -803,7 +819,11 @@ export function createFinanceStatusService({ db, now }: Options) {
         const byReason: Record<string, number> = {};
         for (const review of scopedReviews)
           byReason[review.reason] = (byReason[review.reason] ?? 0) + 1;
-        const needsFirstBudgetFacts = latestBudgetPlan === undefined && budgets.length === 0;
+        const needsFirstBudgetFacts =
+          latestBudgetPlan === undefined &&
+          !planContext.current &&
+          !planContext.previous &&
+          !planContext.upcoming;
         const missingFacts = needsFirstBudgetFacts
           ? [
               ...(monthlyIncome === null ? ["reliable_monthly_income"] : []),
@@ -890,11 +910,15 @@ export function createFinanceStatusService({ db, now }: Options) {
             : null;
         const rulebookInput = {
           accountRoles: { available: false, revisions: [] },
-          activeBudgets: budgets.map((row) => ({
-            id: row.id,
-            month: row.month,
-            updatedAt: row.updatedAt.toISOString(),
-          })),
+          activeBudgets: planContext.current
+            ? [
+                {
+                  id: planContext.current.id,
+                  month: planContext.current.effectiveFrom,
+                  updatedAt: planContext.current.approvedAt,
+                },
+              ]
+            : [],
           activeGoals: goals.map((row) => ({
             id: row.id,
             revision: row.updatedAt.toISOString(),
@@ -1101,7 +1125,9 @@ export function createFinanceStatusService({ db, now }: Options) {
             activeGoals: goals.map(serializeGoal),
             activeMotives: motives.map(serializeMotive),
             budget: {
-              approved: budgets.length > 0,
+              approved: planContext.current !== null,
+              planContext,
+              categoryLimitTotal: evidenceCurrent ? categoryLimitTotal : null,
               month: currentMonth,
               total: evidenceCurrent ? budgetTotal : null,
             },

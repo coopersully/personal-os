@@ -106,6 +106,16 @@ future genuine PR events and never cancels an existing full run.
 
 A full-scope configuration is not successful execution. Collect every distinct successful job,
 matrix member and exact candidate identity required above, then check the normal metadata gate.
+Browser jobs allow 50 minutes including dependency downloads and artifact retention, with browser execution separately
+bounded to 30 minutes. The metadata observer waits up to 55 minutes inside a 60-minute job so
+source-job setup and aggregation can finish before its deadline. Individual test timeouts and
+assertions remain unchanged. Synthetic duplicate-confirmation review retains its two explicitly
+named dialog PNGs and a numeric layout/scroll/viewport receipt as attempt/project/shard-bound
+artifacts for seven days, including on successful runs, so acceptance can inspect counts,
+consequence text and fixed heading/footer geometry. These use the
+existing artifact authority and add a separately bounded two-minute upload; no inbox or live
+provider content is captured.
+
 Hosted capacity, permissions, provider outages and native dependencies can still block delivery.
 Existing failure diagnosis and bounded retry rules continue to apply; a failed metadata gate after
 source recovery needs the documented metadata rerun, not a PR-body edit.
@@ -113,7 +123,7 @@ source recovery needs the documented metadata rerun, not a PR-body edit.
 ## Bounded browser failure diagnostics
 
 The browser matrix preserves the original test command, both projects and four shards, one worker,
-configured single retry, 45-second case deadline and 30-minute job deadline. Existing Playwright
+configured single retry, 45-second case deadline and 30-minute test-step deadline. Existing Playwright
 `retain-on-failure` traces and `only-on-failure` screenshots can remain after a retry succeeds.
 Collection and upload therefore run independently of the terminal test-step result. No extra test,
 retry, reporter, report regeneration or intentional full-suite failure supplies diagnostics.
@@ -266,7 +276,7 @@ inventory and one bounded recollection for a changing PR/attempt. API read failu
 within that same budget. A trusted retargeted metadata event fails immediately until a genuine new candidate event;
 run-association mismatches are negative stale hints, never positive provenance. The `ci:full`
 decision comes from the original receipt event; editing the live label affects future events only.
-The existing 40-minute polling deadline remains; pending source runs
+The existing 55-minute polling deadline remains; pending source runs
 only use lightweight identity/status reads, without repeatedly downloading artifacts.
 
 The classification job uploads `source-candidate-<run-id>-<attempt>` under existing artifact runtime

@@ -82,6 +82,21 @@ The canonical catalog and loader live in
 `apps/api/src/qa-fixtures.ts`. Keep fixture additions deterministic, scoped to
 the named users, and free of real provider credentials or personal data.
 
+## Plaid regression and sandbox testing
+
+Plaid regression tests use synthetic provider responses and an isolated PostgreSQL database by
+default; they make no Plaid calls and require no real Plaid credentials. This covers account
+selection, reconnect, duplicate comparison, resolution, and retry behavior without creating provider
+Items or adding test records to production.
+
+An optional real Plaid Sandbox check must use a separate local runtime, its own database, and
+Sandbox-only keys with explicit `PLAID_ENV=sandbox`. Never seed or connect test Plaid accounts in
+the production runtime or database. The Mac production environment generator rejects configured
+Plaid credentials unless both `PLAID_CLIENT_ID` and `PLAID_SECRET` are nonblank and
+`PLAID_ENV=production` is explicit; omit both keys to leave Plaid disabled. This deployment check
+is specific to the actual production runtime, so isolated local builds may still use Sandbox.
+Configuration validation does not prove that provider credentials or live authorization work.
+
 ## Alex Morgan's planning story
 
 The polished demo is Alex, a New York operations director at fictional Harbor Arts Center. Alex is opening

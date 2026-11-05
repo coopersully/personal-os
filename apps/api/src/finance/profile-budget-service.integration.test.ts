@@ -687,8 +687,14 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await expect(service.getFinanceBudget(userId, active.data.planId)).resolves.toMatchObject({
       data: { version: 2 },
     });
+    // The approved September version is not an operative August plan.
     await expect(service.getFinanceBudgetStatus(userId)).resolves.toMatchObject({
-      data: { status: "active", version: 2 },
+      data: null,
+      planContext: {
+        month: "2026-08",
+        current: null,
+        upcoming: { status: "active", version: 2, effectiveFrom: "2026-09" },
+      },
     });
     await expect(
       service.approveFinanceBudget(

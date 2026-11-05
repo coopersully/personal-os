@@ -303,8 +303,38 @@ export const financeGuidedPreferencesSchema = z
   });
 export type FinanceGuidedPreferences = z.infer<typeof financeGuidedPreferencesSchema>;
 
+/** Display-only institution branding, never a payment credential or exact card artwork. */
+export const financeInstitutionBrandingSchema = z.object({
+  institutionId: z.string().min(1).max(160),
+  logo: z
+    .string()
+    .max(44_000)
+    .regex(/^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/u)
+    .nullable(),
+  primaryColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/u)
+    .nullable(),
+  url: z
+    .string()
+    .max(2048)
+    .url()
+    .refine((value) => value.startsWith("https://"), "HTTPS required")
+    .nullable(),
+});
+export type FinanceInstitutionBranding = z.infer<typeof financeInstitutionBrandingSchema>;
+
+/** Keep decorative bitmap payloads out of agent/context reads unless a human UI explicitly needs them. */
+export function projectFinanceInstitutionBranding(
+  branding: FinanceInstitutionBranding | null | undefined,
+  includeArtwork = false,
+): FinanceInstitutionBranding | null {
+  return branding ? { ...branding, logo: includeArtwork ? branding.logo : null } : null;
+}
+
 export const financeAccountSchema = z
   .object({
+    accountMask: z.string().max(32).nullable().optional(),
     balance: z.number().finite().nullable(),
     createdAt: isoDateTimeSchema,
     currencyCode: z
@@ -314,6 +344,7 @@ export const financeAccountSchema = z
       .default(null),
     id: idSchema,
     includeInPlanning: z.boolean(),
+    institutionBranding: financeInstitutionBrandingSchema.nullable().optional(),
     institution: z.string().min(1).max(160),
     kind: financeAccountKindSchema,
     kindSource: financeAccountKindSourceSchema,
@@ -352,6 +383,26 @@ export const financeAccountSchema = z
     }
   });
 export type FinanceAccount = z.infer<typeof financeAccountSchema>;
+
+export const financeAccountDuplicatePreviewSchema = z.object({
+  keptAccount: financeAccountSchema,
+  redundantAccount: financeAccountSchema,
+  keptTransactionCount: z.number().int().nonnegative(),
+  redundantTransactionCount: z.number().int().nonnegative(),
+  overlappingTransactionCount: z.number().int().nonnegative(),
+  uniqueRedundantTransactionCount: z.number().int().nonnegative(),
+  match: z.enum(["provider_identity", "possible"]),
+  revision: z.string().regex(/^[a-f0-9]{64}$/u),
+});
+export type FinanceAccountDuplicatePreview = z.infer<typeof financeAccountDuplicatePreviewSchema>;
+export const resolveFinanceAccountDuplicateInputSchema = z.object({
+  keepAccountId: idSchema,
+  revision: z.string().regex(/^[a-f0-9]{64}$/u),
+  idempotencyKey: z.string().trim().min(1).max(200),
+});
+export type ResolveFinanceAccountDuplicateInput = z.infer<
+  typeof resolveFinanceAccountDuplicateInputSchema
+>;
 
 const financeQueryBooleanSchema = z.preprocess(
   (value) => (value === "true" ? true : value === "false" ? false : value),
@@ -1383,6 +1434,19 @@ export const createFinanceBudgetInputSchema = z.object({
 export type CreateFinanceBudgetInput = z.infer<typeof createFinanceBudgetInputSchema>;
 
 export const exchangePlaidTokenInputSchema = z.object({
+  metadata: z
+    .object({
+      institutionId: z.string().max(256).trim().min(1).nullish(),
+      accounts: z
+        .array(
+          z.object({
+            name: z.string().max(240).trim().min(1),
+            mask: z.string().max(32).trim().min(1).nullish(),
+          }),
+        )
+        .max(100),
+    })
+    .optional(),
   institution: z.string().trim().min(1).max(160).nullable().default(null),
   publicToken: z.string().trim().min(1).max(2_000),
 });

@@ -3,7 +3,7 @@ import { resolveWorkspaceSettings } from "@personal-os/domain";
 
 import type { WorkspaceSearchPage } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { api } from "@/api";
@@ -155,19 +155,98 @@ it("shares the settings field catalog and recognizes weekdays with the account t
   expect(parseCalendarDateQuery("2026-02-30", "UTC")).toBeUndefined();
 });
 
-it("renders mobile search inline and closes its results after selection", async () => {
+it("opens compact mobile search from a named button and restores keyboard focus", async () => {
   const originalWidth = window.innerWidth;
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
   try {
     renderSearch("tasks");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Search Tasks" })).not.toBeInTheDocument();
+    const popup = await screen.findByRole("dialog", { name: "Search Tasks" });
+    const trigger = screen.getByRole("button", { name: "Search Tasks" });
+    expect(trigger).toHaveAttribute("tabindex", "0");
+    const input = await screen.findByRole("combobox", { name: "Search Tasks" });
+    expect(popup).toContainElement(input);
+    await waitFor(() => expect(input).toHaveFocus());
+    await userEvent.setup().keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Search Tasks" })).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await userEvent.setup().keyboard("{Enter}");
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Search Tasks" })).toHaveFocus(),
+    );
     fireEvent.change(screen.getByRole("combobox", { name: "Search Tasks" }), {
       target: { value: "reviews" },
     });
     fireEvent.click(await screen.findByRole("option", { name: /Items needing review/ }));
     await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
     expect(screen.getByLabelText("Current route")).toHaveTextContent("/tasks?review=open");
+  } finally {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+  }
+});
+
+it.each([
+  true,
+  false,
+])("preserves mobile-to-desktop search focus only when the input owned it (focused=%s)", async (focused) => {
+  const originalWidth = window.innerWidth;
+  const media = new EventTarget();
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+    matches: window.innerWidth < 768,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: media.addEventListener.bind(media),
+    removeEventListener: media.removeEventListener.bind(media),
+    dispatchEvent: media.dispatchEvent.bind(media),
+  }));
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  const outside = document.createElement("button");
+  outside.textContent = "Keep keyboard focus";
+  document.body.append(outside);
+  try {
+    renderSearch("tasks");
+    const mobile = await screen.findByRole("combobox", { name: "Search Tasks" });
+    await waitFor(() => expect(mobile).toHaveFocus());
+    fireEvent.change(mobile, { target: { value: "reviews" } });
+    act(() => {
+      if (!focused) outside.focus();
+      expect(focused ? mobile : outside).toHaveFocus();
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1100 });
+      media.dispatchEvent(new Event("change"));
+    });
+    const desktop = screen.getByRole("combobox", { name: "Search Tasks" });
+    expect(desktop).not.toBe(mobile);
+    expect(desktop).toHaveValue("reviews");
+    await waitFor(() => expect(focused ? desktop : outside).toHaveFocus());
+  } finally {
+    outside.remove();
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+  }
+});
+
+it.each([
+  "n",
+  "i",
+])("does not select results when typing %s on a closed compact trigger", async (key) => {
+  const originalWidth = window.innerWidth;
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  try {
+    const user = userEvent.setup();
+    const onAction = renderSearch("tasks");
+    const trigger = screen.getByRole("button", { name: "Search Tasks" });
+    await screen.findByRole("option", { name: /New task/ });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await user.keyboard(key);
+    expect(onAction).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/tasks?view=week");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("option", { name: /New task/ }));
+    expect(onAction).toHaveBeenCalledExactlyOnceWith("new-task");
   } finally {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
   }

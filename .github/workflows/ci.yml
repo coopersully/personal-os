@@ -179,7 +179,8 @@ jobs:
     needs: changes
     if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'browser') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Leave setup/download headroom outside the bounded test execution.
+    timeout-minutes: 50
     env:
       BROWSER_PROJECT: ${{ matrix.project }}
       BROWSER_SHARD: ${{ matrix.shard }}
@@ -211,6 +212,7 @@ jobs:
           pnpm exec playwright install --with-deps chromium
       - id: browser_tests
         run: pnpm test:e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/4
+        timeout-minutes: 30
       - id: browser_diagnostics
         name: Collect bounded browser diagnostics
         if: always()
@@ -225,6 +227,20 @@ jobs:
         with:
           name: browser-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.project }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/browser-diagnostics/artifact/
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 7
+
+      - name: Retain synthetic duplicate review evidence
+        if: ${{ always() && hashFiles('test-results/**/duplicate-counts.png', 'test-results/**/duplicate-comparison.png', 'test-results/**/duplicate-layout.json') != '' }}
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v7
+        with:
+          name: duplicate-review-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.project }}-${{ matrix.shard }}
+          path: |
+            test-results/**/duplicate-counts.png
+            test-results/**/duplicate-comparison.png
+            test-results/**/duplicate-layout.json
           if-no-files-found: error
           include-hidden-files: false
           retention-days: 7

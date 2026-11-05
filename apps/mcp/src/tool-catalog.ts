@@ -197,6 +197,10 @@ export const personalOsToolCatalog = {
     ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
     { policy: "approved_rule", stage: "recover" },
   ),
+  get_notification_attempt: {
+    ...read("texting", ["texting:read", "finances:read"], "inspect", { openWorld: false }),
+    scopeMatch: "all",
+  },
   get_notification_settings: read("texting", ["texting:read", "finances:read"]),
   get_texting_connection: read("texting", ["texting:read"]),
   update_notification_settings: write(
@@ -231,6 +235,9 @@ export const personalOsToolCatalog = {
   search_finance: read("finances", ["finances:read"]),
   get_finance_review_backlog: read("finances", ["finances:read"]),
   list_finance_review_backlog_items: read("finances", ["finances:read"]),
+  qualify_finance_maintenance_work: read("finances", ["finances:read"], "prepare", {
+    openWorld: false,
+  }),
   get_finance_review_batch: read("finances", ["finances:read"], "verify"),
   list_finance_review_batches: read("finances", ["finances:read"], "recover"),
   preview_finance_review_batch: write("finances", ["finances:read", "finances:write"], {
@@ -443,6 +450,13 @@ export const personalOsToolCatalog = {
   }),
   create_finance_category: write("finances", ["finances:write", "finances:execute"], {
     policy: "approved_rule",
+  }),
+  get_finance_account_duplicate_preview: preview("finances", ["finances:read"]),
+  resolve_finance_account_duplicate: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+    destructive: true,
+    idempotent: true,
+    openWorld: false,
   }),
   disconnect_finance_account: write("finances", ["finances:write", "finances:execute"], {
     policy: "approved_rule",

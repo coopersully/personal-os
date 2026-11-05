@@ -26,6 +26,7 @@ export function createFinanceActivityApi(request: FinanceRequest) {
         "cursor",
         "limit",
         "type",
+        "includeNotificationDeliveries",
         "actor",
         "recordId",
         "from",

@@ -56,6 +56,8 @@ export function FinanceActivityEntry({
       if (activeToast.current !== undefined) toast.dismiss(activeToast.current);
     };
   }, []);
+  if (entry.kind === "notification_delivery")
+    return <NotificationDeliveryEntry entry={entry} nested={nested} />;
   const changes = [...entry.changes, ...more.flatMap((page) => page.changes)];
   const cursor = more.length ? more.at(-1)?.nextCursor : entry.evidence?.nextCursor;
   async function loadMoreEvidence() {
@@ -285,6 +287,100 @@ export function FinanceActivityEntry({
                 >
                   Open source message
                 </Link>
+              </section>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      </ItemContent>
+    </Item>
+  );
+}
+
+function NotificationDeliveryEntry({
+  entry,
+  nested,
+}: {
+  entry: Extract<Entry, { kind: "notification_delivery" }>;
+  nested: boolean;
+}) {
+  return (
+    <Item variant={nested ? "secondary" : "outline"} role="listitem">
+      <ItemContent>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <span className="font-medium">Finance notification</span>
+          <span className="text-sm">{entry.status.replaceAll("_", " ")}</span>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Initiating actor not recorded · <DateDisplay value={entry.occurredAt} />
+        </p>
+        <p>{entry.explanation}</p>
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost">Inspect delivery evidence</Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="grid min-w-0 gap-3 pt-2">
+            <dl className="grid gap-1 text-sm break-all">
+              <div>
+                <dt className="inline font-medium">Attempt: </dt>
+                <dd className="inline">{entry.delivery.attemptId}</dd>
+              </div>
+              <div>
+                <dt className="inline font-medium">Attempt state: </dt>
+                <dd className="inline">{entry.delivery.attemptState}</dd>
+              </div>
+              <div>
+                <dt className="inline font-medium">Message status: </dt>
+                <dd className="inline">{entry.delivery.messageStatus ?? "Not recorded"}</dd>
+              </div>
+              <div>
+                <dt className="inline font-medium">Last observed: </dt>
+                <dd className="inline">
+                  <DateDisplay value={entry.delivery.observedAt} />
+                </dd>
+              </div>
+              {entry.delivery.messageId ? (
+                <div>
+                  <dt className="inline font-medium">Message: </dt>
+                  <dd className="inline">{entry.delivery.messageId}</dd>
+                </div>
+              ) : null}
+              {entry.delivery.submittedAt ? (
+                <div>
+                  <dt className="inline font-medium">Provider submitted: </dt>
+                  <dd className="inline">
+                    <DateDisplay value={entry.delivery.submittedAt} />
+                  </dd>
+                </div>
+              ) : null}
+              {entry.delivery.deliveredAt ? (
+                <div>
+                  <dt className="inline font-medium">Provider delivery: </dt>
+                  <dd className="inline">
+                    <DateDisplay value={entry.delivery.deliveredAt} />
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+            {entry.delivery.evidenceState === "partial" ? (
+              <p className="text-sm text-muted-foreground">
+                Delivery history is incomplete. Missing evidence does not establish a failed send or
+                financial outcome.
+              </p>
+            ) : null}
+            {entry.delivery.work.map((item) => (
+              <section key={item.intentId} className="grid min-w-0 gap-1 text-sm break-all">
+                <p>
+                  Work: {item.work.kind} · {item.work.id}
+                </p>
+                <p>
+                  Revision: {item.work.revision} · Action revision: {item.work.actionRevision}
+                </p>
+                <p>Notification intent: {item.intentId}</p>
+                {item.runId ? (
+                  <p>Run: {item.runId}</p>
+                ) : item.work.kind === "repair" ? (
+                  <p>Owned run linkage unavailable</p>
+                ) : null}
               </section>
             ))}
           </CollapsibleContent>

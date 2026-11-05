@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { useProductionStyles } from "./production-styles.js";
 import { cleanupRitual, test } from "./recovery-fixtures.js";
 import { selectSetting, setSettingTime } from "./settings-controls.js";
 
@@ -366,6 +367,7 @@ test("browser rituals preserve the current page and save real answers and option
     expect(saved.ok()).toBe(true);
     const ritual = page.getByRole("dialog", { name: "Morning ritual", exact: true });
     await expect(ritual).toBeVisible({ timeout: 15000 });
+    await useProductionStyles(page);
     await expect
       .poll(async () => {
         const bounds = await ritual.boundingBox();
@@ -471,6 +473,21 @@ test("browser snooze survives reload and another client can settle the same ritu
         );
       })
       .toBe(true);
+    await useProductionStyles(page);
+    for (const size of [
+      { width: 1440, height: 1000 },
+      { width: 320, height: 568 },
+    ]) {
+      await page.setViewportSize(size);
+      for (const name of ["Snooze", "Skip for Today"]) {
+        const escapeButton = ritual.getByRole("button", { name, exact: true });
+        await expect(
+          ritual.locator(".ritual-card").getByRole("button", { name, exact: true }),
+        ).toHaveCount(1);
+        await expect(escapeButton).toBeInViewport({ ratio: 1 });
+        await escapeButton.click({ trial: true });
+      }
+    }
     await ritual.getByRole("button", { name: "Snooze", exact: true }).click();
     await expect
       .poll(async () => {

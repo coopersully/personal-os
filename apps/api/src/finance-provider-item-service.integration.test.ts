@@ -124,6 +124,182 @@ describe.sequential("Finance Provider Item service", () => {
     await database.db.delete(financeCategories);
   });
 
+  it("persists authoritative identity and rejects changed-ID duplicates while retaining exact-ID ledgers", async () => {
+    const metadata = {
+      institutionId: "ins-fixture",
+      mask: "0042",
+      persistentAccountId: "persistent-1",
+      name: "Original Checking",
+    };
+    const input = {
+      accessToken: "identity-token",
+      accounts: [{ ...remoteAccount("identity-account"), ...metadata }],
+      context: { principal: principal(userId), requestId: "identity" },
+      institution: "Fixture Bank",
+      itemId: "identity-item",
+    };
+    const [saved] = await service().upsertConnection(input);
+    expect(saved).toBeDefined();
+    const [stored] = await database.db
+      .select()
+      .from(financeAccounts)
+      .where(eq(financeAccounts.userId, userId));
+    expect(stored).toMatchObject({
+      providerInstitutionId: "ins-fixture",
+      providerAccountMask: "0042",
+      providerPersistentAccountId: "persistent-1",
+      providerAccountName: "Original Checking",
+    });
+    expect(await service().findDuplicateAccounts(userId, [metadata])).toEqual([saved?.id]);
+    expect(await service().findDuplicateAccounts(crypto.randomUUID(), [metadata])).toEqual([]);
+    await expect(
+      service().upsertConnection({
+        ...input,
+        itemId: "changed-item",
+        accounts: [
+          { ...remoteAccount("changed-account"), ...metadata, accountId: "changed-account" },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: { reason: "duplicate_bank_accounts", accountIds: [saved?.id] },
+    });
+    const [relinked] = await service().upsertConnection({ ...input, itemId: "relinked-item" });
+    expect(relinked?.id).toBe(saved?.id);
+    expect(await database.db.$count(financeAccounts)).toBe(1);
+  });
+
+  it("blocks normalized institution/mask/name duplicates but permits different cards and names alone", async () => {
+    const connect = (accountId: string, identity: Partial<PlaidAccountSnapshot>) =>
+      service().upsertConnection({
+        accessToken: "identity-token",
+        accounts: [{ ...remoteAccount(accountId), name: "Checking", ...identity }],
+        context: { principal: principal(userId), requestId: "identity" },
+        institution: "Fixture Bank",
+        itemId: `item-${accountId}`,
+      });
+    await connect("first", { institutionId: "ins-1", mask: "0042" });
+    await expect(
+      connect("duplicate", { institutionId: "ins-1", mask: "0042", name: "  CHECKING  " }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await connect("other-card", { institutionId: "ins-1", mask: "0043" });
+    await connect("name-only", {});
+    expect(await database.db.$count(financeAccounts)).toBe(3);
+    const [otherUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Other Owner",
+        email: `identity-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!otherUser) throw new Error("Other owner fixture missing.");
+    const other = await service().upsertConnection({
+      accessToken: "other-token",
+      accounts: [
+        {
+          ...remoteAccount("other-owner-account"),
+          name: "Checking",
+          institutionId: "ins-1",
+          mask: "0042",
+        },
+      ],
+      context: { principal: principal(otherUser.id), requestId: "other-owner" },
+      institution: "Fixture Bank",
+      itemId: "other-owner-item",
+    });
+    expect(other).toHaveLength(1);
+  });
+
+  it("keeps accounts with contradictory persistent identities distinct despite matching composite metadata", async () => {
+    const metadata = { institutionId: "ins-fixture", mask: "0042", name: "Checking" };
+    const connection = (accountId: string, persistentAccountId: string) => ({
+      accessToken: "identity-token",
+      accounts: [{ ...remoteAccount(accountId), ...metadata, persistentAccountId }],
+      context: { principal: principal(userId), requestId: "distinct-identities" },
+      institution: "Fixture Bank",
+      itemId: `item-${accountId}`,
+    });
+    const [first] = await service().upsertConnection(connection("first", "persistent-first"));
+    expect(
+      await service().findDuplicateAccounts(userId, [
+        { ...metadata, persistentAccountId: "persistent-second" },
+      ]),
+    ).toEqual([]);
+    const [second] = await service().upsertConnection(connection("second", "persistent-second"));
+    expect(second?.id).not.toBe(first?.id);
+    expect(
+      await service().findDuplicateAccounts(userId, [
+        { ...metadata, persistentAccountId: "persistent-second" },
+      ]),
+    ).toEqual([second?.id]);
+    expect(await database.db.$count(financeAccounts)).toBe(2);
+  });
+
+  it("permits fresh consent after explicit disconnection without merging the retained history", async () => {
+    const metadata = { institutionId: "ins-fixture", mask: "0042", name: "Checking" };
+    const connection = (accountId: string) => ({
+      accessToken: "token",
+      accounts: [{ ...remoteAccount(accountId), ...metadata }],
+      context: { principal: principal(userId), requestId: "fresh-consent" },
+      institution: "Fixture",
+      itemId: `item-${accountId}`,
+    });
+    const [original] = await service().upsertConnection(connection("original"));
+    if (!original) throw new Error("Disconnected fixture missing.");
+    await database.db
+      .update(financeAccounts)
+      .set({
+        providerItemRecordId: null,
+        providerItemId: null,
+        encryptedCredentials: null,
+        syncErrorCode: "finance_account_disconnected",
+        syncError: "Disconnected.",
+        syncErrorCategory: "authorization",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncState: "blocked",
+        nextSyncAt: null,
+        status: "needs_reauth",
+      })
+      .where(eq(financeAccounts.id, original.id));
+    expect(await service().findDuplicateAccounts(userId, [metadata])).toEqual([]);
+    const [fresh] = await service().upsertConnection(connection("fresh"));
+    expect(fresh?.id).not.toBe(original.id);
+    expect(await database.db.$count(financeAccounts)).toBe(2);
+    await expect(service().upsertConnection(connection("third"))).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
+
+  it("serializes concurrent changed-ID connections and rejects duplicates within one snapshot", async () => {
+    const connection = (accountId: string) => ({
+      accessToken: "identity-token",
+      accounts: [{ ...remoteAccount(accountId), persistentAccountId: "same-persistent" }],
+      context: { principal: principal(userId), requestId: "concurrent-identity" },
+      institution: "Fixture Bank",
+      itemId: `item-${accountId}`,
+    });
+    const results = await Promise.allSettled([
+      service().upsertConnection(connection("one")),
+      service().upsertConnection(connection("two")),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(await database.db.$count(financeAccounts)).toBe(1);
+    await expect(
+      service().upsertConnection({
+        ...connection("three"),
+        accounts: [
+          { ...remoteAccount("three"), persistentAccountId: "incoming-persistent" },
+          { ...remoteAccount("four"), persistentAccountId: "incoming-persistent" },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await database.db.$count(financeAccounts)).toBe(1);
+  });
+
   it("classifies provider accounts without overwriting a user kind override", async () => {
     const first = await service().upsertConnection({
       accessToken: "typed-token",

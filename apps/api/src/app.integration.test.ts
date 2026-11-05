@@ -15,6 +15,8 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   domainProfiles,
+  financeAccounts,
+  financeProviderItems,
   financeTransactions,
   mailReviews,
   mailRuleWorkItems,
@@ -41,7 +43,7 @@ import type { EmailMessage } from "./email-delivery.js";
 import { GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
 import { createRuntimeLifecycle, type RuntimeLifecycle } from "./runtime-lifecycle.js";
-import { verifyPassword } from "./security.js";
+import { encryptJson, verifyPassword } from "./security.js";
 
 const invalidLowercasePassword = ["alllowercase", "123", "!"].join("");
 
@@ -6009,7 +6011,10 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(404);
-    expect(await payload(await request("/v1/finances/plaid/status"))).toEqual({ available: false });
+    expect(await payload(await request("/v1/finances/plaid/status"))).toEqual({
+      available: false,
+      environment: "sandbox",
+    });
     expect((await request("/v1/finances/plaid/link-token", { method: "POST" })).status).toBe(400);
     expect(
       (
@@ -8592,5 +8597,124 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(401);
+  });
+
+  it("routes duplicate previews and explicit resolution through owner and execution boundaries", async () => {
+    const registration = await app.request("/v1/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        displayName: "Duplicate fixture",
+        email: `duplicate-${crypto.randomUUID()}@example.test`,
+        password: "LocalTestOnly123!",
+        planningTimezone: "UTC",
+      }),
+    });
+    const owner = await payload(registration);
+    const headers = {
+      authorization: `Session ${owner.sessionToken}`,
+      "content-type": "application/json",
+    };
+    const [item] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        userId: owner.user.id,
+        provider: "plaid",
+        providerItemId: crypto.randomUUID(),
+        encryptedCredentials: encryptJson(
+          { accessToken: "synthetic-only" },
+          appConfig.encryptionKey ?? Buffer.alloc(32, 1).toString("base64"),
+        ),
+        syncState: "current",
+        lastSyncedAt: new Date(),
+      })
+      .returning();
+    if (!item) throw new Error("Missing fixture");
+    const accounts = await database.db
+      .insert(financeAccounts)
+      .values(
+        [0, 1].map((index) => ({
+          userId: owner.user.id,
+          provider: "plaid" as const,
+          providerAccountId: `fixture-${index}-${crypto.randomUUID()}`,
+          providerItemRecordId: item.id,
+          name: "Fixture card",
+          institution: "Fixture bank",
+          status: "connected" as const,
+          syncState: "current" as const,
+          balance: 100,
+          currencyCode: "USD",
+          lastSyncedAt: new Date(),
+        })),
+      )
+      .returning();
+    const redundant = accounts[0],
+      keep = accounts[1];
+    if (!redundant || !keep) throw new Error("Missing fixture");
+    const path = `/v1/finances/accounts/${redundant.id}`;
+    expect((await app.request(`${path}/duplicate-preview?keepAccountId=${keep.id}`)).status).toBe(
+      401,
+    );
+    expect(
+      (await app.request(`${path}/duplicate-preview?keepAccountId=invalid`, { headers })).status,
+    ).toBe(400);
+    const previewResponse = await app.request(
+      `${path}/duplicate-preview?keepAccountId=${keep.id}`,
+      { headers },
+    );
+    expect(previewResponse.status).toBe(200);
+    const preview = await payload(previewResponse);
+    expect(preview.data).toMatchObject({
+      keptAccount: { id: keep.id },
+      redundantAccount: { id: redundant.id },
+      match: "possible",
+    });
+    const createdToken = await payload(
+      await app.request("/v1/access-tokens", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "Read-only fixture", scopes: ["finances:read"] }),
+      }),
+    );
+    const readHeaders = {
+      authorization: `Bearer ${createdToken.token.token}`,
+      "content-type": "application/json",
+    };
+    expect(
+      (
+        await app.request(`${path}/duplicate-preview?keepAccountId=${keep.id}`, {
+          headers: readHeaders,
+        })
+      ).status,
+    ).toBe(200);
+    const body = JSON.stringify({
+      keepAccountId: keep.id,
+      revision: preview.data.revision,
+      idempotencyKey: "explicit-resolution",
+    });
+    expect(
+      (
+        await app.request(`${path}/resolve-duplicate`, {
+          method: "POST",
+          headers: readHeaders,
+          body,
+        })
+      ).status,
+    ).toBe(403);
+    const resolved = await app.request(`${path}/resolve-duplicate`, {
+      method: "POST",
+      headers,
+      body,
+    });
+    expect(resolved.status).toBe(200);
+    expect((await payload(resolved)).data).toMatchObject({
+      id: redundant.id,
+      includeInPlanning: false,
+      synchronization: { failureCode: "finance_account_disconnected" },
+    });
+    expect(
+      (await database.db.select().from(financeAccounts).where(eq(financeAccounts.id, keep.id)))[0]
+        ?.status,
+    ).toBe("connected");
   });
 });

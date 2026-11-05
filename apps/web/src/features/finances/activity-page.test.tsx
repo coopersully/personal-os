@@ -41,7 +41,10 @@ const entry: FinanceActivityEntry = {
     },
   ],
 };
-const page = (entries = [entry], nextCursor: string | null = null): Page => ({
+const page = (
+  entries: FinanceActivityEntry[] = [entry],
+  nextCursor: string | null = null,
+): Page => ({
   entries,
   nextCursor,
   capabilities: {
@@ -140,6 +143,7 @@ it("applies filters from scratch and refreshes the applied filters rather than d
   fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
   await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
   expect(read.mock.calls[1]?.[0]).toEqual({
+    includeNotificationDeliveries: true,
     limit: 50,
     actor: "agent",
     from: "2026-10-01T00:00:00.000Z",
@@ -241,7 +245,7 @@ it.each([
   expect(screen.queryByLabelText("Activity coverage")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Retry activity" }));
   await screen.findByText(/No recorded activity/);
-  expect(read.mock.calls[2]?.[0]).toEqual({ limit: 50 });
+  expect(read.mock.calls[2]?.[0]).toEqual({ limit: 50, includeNotificationDeliveries: true });
 });
 it.each([401, 403])("clears same-owner evidence on direct pagination %s denial", async (status) => {
   const read = vi
@@ -309,7 +313,9 @@ it("cannot restore denied evidence from an older in-flight response", async () =
   expect(screen.queryByRole("button", { name: "Next page" })).not.toBeInTheDocument();
 });
 
-function financialEntry(): FinanceActivityEntry {
+function financialEntry(): Exclude<FinanceActivityEntry, { kind: "notification_delivery" }> & {
+  kind: "financial_action";
+} {
   const changes = Array.from({ length: 100 }, (_, i) => ({
     id: `audit-${i}`,
     recordRef: { kind: "transaction", id: `record-${i}` },
@@ -543,6 +549,7 @@ it("applies a complete bounded filter set and deduplicates overlapping action pa
   fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled());
   expect(read.mock.calls[1]?.[0]).toEqual({
+    includeNotificationDeliveries: true,
     limit: 50,
     type: "human_answer_decision",
     recordId: "11111111-1111-4111-8111-111111111111",
@@ -679,4 +686,82 @@ it("fetches fresh profile attribution when returning from account settings for t
   openActivity();
   expect(screen.getByRole("dialog")).toHaveTextContent("Updated Maple");
   expect(screen.getByRole("dialog")).toHaveTextContent("recorded-actor");
+});
+
+it("keeps notification attempts distinct from financial action groups and exposes their delivery history", async () => {
+  const notification: FinanceActivityEntry = {
+    id: "notification",
+    occurredAt: "2026-11-01T12:00:00Z",
+    kind: "notification_delivery",
+    status: "accepted",
+    actor: null,
+    action: "Finance notification",
+    explanation: "The provider accepted this notification. Delivery is not confirmed.",
+    caseId: null,
+    runId: null,
+    actionId: null,
+    sourceOperationId: null,
+    auditEventIds: [],
+    sourceMessages: [],
+    recordRefs: [],
+    changes: [],
+    targets: [],
+    delivery: {
+      attemptId: "notification",
+      attemptState: "accepted",
+      observedAt: "2026-11-01T12:00:02Z",
+      messageId: null,
+      messageStatus: null,
+      submittedAt: null,
+      deliveredAt: null,
+      evidenceState: "partial",
+      work: [],
+    },
+  };
+  expect(groupFinanceActivity([notification, { ...notification, id: "second" }])).toHaveLength(2);
+  const sameIdGroups = groupFinanceActivity([notification, { ...entry, id: notification.id }]);
+  expect(new Set(sameIdGroups.map((group) => group.key)).size).toBe(2);
+  const read = vi.fn().mockResolvedValue(page([notification]));
+  render(view(read));
+  expect(await screen.findByText("Finance notification")).toBeVisible();
+  openActivity();
+  expect(await screen.findByText(/Initiating actor not recorded/u)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Inspect delivery evidence" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /approve|retry send/iu })).not.toBeInTheDocument();
+});
+
+it("retains aware-response selection for initial load, paging, refresh and filters", async () => {
+  const read = vi.fn().mockResolvedValue(page([entry], "next"));
+  render(view(read));
+  await screen.findByText(entry.explanation);
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Refresh activity" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Refresh activity" }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+  fireEvent.click(screen.getByRole("button", { name: "Activity filters" }));
+  fireEvent.change(screen.getByLabelText("Event type"), {
+    target: { value: "notification_delivery" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(4));
+  for (const call of read.mock.calls)
+    expect(call[0]).toMatchObject({ includeNotificationDeliveries: true });
+});
+
+it("restores the actual owned Activity opener when keyboard dismissal closes details", async () => {
+  render(view(vi.fn().mockResolvedValue(page())));
+  await screen.findByText(entry.explanation);
+  const opener = screen.getByRole("button", { name: `Open activity: ${entry.explanation}` });
+  opener.focus();
+  fireEvent.click(opener);
+  const details = await screen.findByRole("dialog", { name: "Activity details" });
+  expect(opener).toBeInTheDocument();
+  fireEvent.keyDown(details, { key: "Escape", code: "Escape" });
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Activity details" })).not.toBeInTheDocument(),
+  );
+  await waitFor(() => expect(opener).toHaveFocus());
 });

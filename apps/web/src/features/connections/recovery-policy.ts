@@ -43,7 +43,13 @@ export function financeConnectionProblems(
   accounts: Array<Pick<FinanceAccount, "id" | "name" | "provider" | "status" | "synchronization">>,
 ) {
   return accounts.flatMap((account) => {
-    if (account.provider === "manual" || account.status === "manual") return [];
+    if (
+      account.provider === "manual" ||
+      account.status === "manual" ||
+      account.synchronization.failureCode === "finance_account_disconnected" ||
+      account.synchronization.failureCode === "finance_account_legacy_disconnected"
+    )
+      return [];
     const state =
       account.status === "needs_reauth" || account.synchronization.recovery === "reconnect"
         ? "reconnect"

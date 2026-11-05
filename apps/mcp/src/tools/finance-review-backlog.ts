@@ -6,6 +6,7 @@ import {
   idSchema,
   listFinanceReviewBatchesInputSchema,
   previewFinanceReviewBatchInputSchema,
+  qualifyFinanceMaintenanceWorkInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
@@ -30,6 +31,16 @@ export function registerFinanceReviewBacklogTools(server: McpServer, api: Person
       inputSchema: financeReviewBacklogQuerySchema,
     },
     async (input) => apiResult(() => api.listFinanceReviewBacklogItems(input)),
+  );
+  server.registerTool(
+    "qualify_finance_maintenance_work",
+    {
+      title: "Qualify independent Finance maintenance work",
+      description:
+        "Read current source, counterpart, revision and execution-qualification states for up to 25 explicit decisions. Keeps qualified and held items in order; currently only exact reciprocal transfer confirmations can qualify. Other decisions require their owning evidence adapter. Creates no run, claim, preview, question, approval or financial effect and makes no provider call. Qualification is advisory: strict preview and execution revalidation remain required. Requires finances:read.",
+      inputSchema: qualifyFinanceMaintenanceWorkInputSchema,
+    },
+    async (input) => apiResult(() => api.qualifyFinanceMaintenanceWork(input)),
   );
   server.registerTool(
     "preview_finance_review_batch",

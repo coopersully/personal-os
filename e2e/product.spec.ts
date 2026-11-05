@@ -488,6 +488,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
   const planningDate = await page.locator("h1 time").getAttribute("datetime");
   if (!planningDate) throw new Error("Today heading did not expose its planning date.");
   await openWorkspace("Calendar");
+  if ((page.viewportSize()?.width ?? 0) < 768)
+    await page.getByRole("button", { name: "Search Calendar", exact: true }).click();
   await page.getByRole("combobox", { name: "Search Calendar" }).fill("new event");
   await page.getByRole("option", { name: /New event/ }).click();
   await page.getByLabel("Event", { exact: true }).fill(eventTitle);
@@ -526,6 +528,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(todayEventLayout.textAlign).toBe("left");
   expect(todayEventLayout.withinTimeline).toBe(true);
   await openWorkspace("Calendar");
+  if ((page.viewportSize()?.width ?? 0) < 768)
+    await page.getByRole("button", { name: "Search Calendar", exact: true }).click();
   await page.getByRole("combobox", { name: "Search Calendar" }).fill("new event");
   await page.getByRole("option", { name: /New event/ }).click();
   await page.getByLabel("Event", { exact: true }).fill(allDayTitle);
@@ -662,7 +666,12 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(
     calendarActions.getByRole("button", { name: "Search calendar", exact: true }),
   ).toHaveCount(0);
-  await expect(page.getByRole("combobox", { name: "Search Calendar", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole((page.viewportSize()?.width ?? 0) < 768 ? "button" : "combobox", {
+      name: "Search Calendar",
+      exact: true,
+    }),
+  ).toBeVisible();
   for (const action of await page
     .getByRole("navigation", { name: "Calendar actions" })
     .getByRole("button")
@@ -1035,12 +1044,26 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
   expect(composeBounds?.height).toBe(44);
   await revealWorkspaceOptions(page);
   await page.getByRole("button", { name: "Sync all mail accounts" }).click();
-  await expect(
-    page.getByText("1 of 2 mail accounts synced. 1 account needs another attempt."),
-  ).toBeVisible();
+  const partialSummary =
+    "1 of 2 mail accounts synced. 0 will continue automatically. 1 account needs another attempt.";
+  const failure = page
+    .locator('[data-sonner-toast][data-type="error"]')
+    .filter({ hasText: partialSummary });
+  await expect(failure).toBeVisible();
+  await expect(failure).toBeInViewport();
+  await expect(failure).toContainText("Couldn’t sync mail accounts. Try again.");
+  await expect(page.getByRole("main")).not.toContainText(partialSummary);
+  await expect(page.getByRole("navigation", { name: "Top navigation" })).not.toContainText(
+    /mail accounts synced\.|account needs another attempt/,
+  );
+  expect(synced).toHaveLength(2);
+  expect(synced.filter((id) => id === failedId)).toHaveLength(1);
   const details = page
     .locator('[data-slot="popover-content"]')
     .filter({ hasText: "Mail sync needs attention" });
+  await expect(details).toBeVisible();
+  await expect(details).not.toContainText(partialSummary);
+  await expect(details.getByRole("status")).toHaveCount(0);
   const bounds = await details.boundingBox();
   expect(bounds).not.toBeNull();
   expect(bounds?.x).toBeGreaterThanOrEqual(0);
@@ -1055,4 +1078,11 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
   await expect(page.getByRole("button", { name: "Sync all mail accounts" })).toBeEnabled();
   expect(synced).toHaveLength(3);
   expect(synced.at(-1)).toBe(failedId);
+  expect(synced.filter((id) => id === failedId)).toHaveLength(2);
+  await expect(
+    page
+      .locator('[data-sonner-toast][data-type="success"]')
+      .filter({ hasText: "Mail accounts synced." }),
+  ).toBeVisible();
+  await expect(page.getByRole("main")).not.toContainText("Mail accounts synced.");
 });

@@ -105,6 +105,63 @@ describe("connector sync health policy", () => {
     ).toMatchObject({ state });
   });
 
+  it("exposes durable Mail continuation as aggregate syncing while preserving recovery and active-lease priority", () => {
+    const pending = {
+      lastAttemptAt: now.toISOString(),
+      lastSyncedAt: null,
+      failureCount: 0,
+      errorCode: null,
+      errorCategory: null,
+      status: null,
+      health: {
+        state: "syncing" as const,
+        recovery: null,
+        message: "Mail synchronization continues in batches.",
+        nextSyncAt: now.toISOString(),
+      },
+    };
+    const account = {
+      syncCapabilities: { mail: pending },
+      nextSyncAt: now,
+      syncError: null,
+      syncRecovery: null,
+      syncStatus: "idle" as const,
+    };
+    expect(connectionHealthForAccount(account)).toEqual(pending.health);
+    expect(connectionHealthForAccount(account, "mail")).toEqual(pending.health);
+    expect(connectionHealthForAccount({ ...account, mailEnabled: false }).state).toBe("ready");
+    const reconnect = {
+      ...pending,
+      health: { ...pending.health, state: "reconnect" as const, recovery: "reconnect" as const },
+    };
+    expect(
+      connectionHealthForAccount({
+        ...account,
+        syncCapabilities: { mail: pending, calendar: reconnect },
+      }).state,
+    ).toBe("reconnect");
+    expect(
+      connectionHealthForAccount({
+        ...account,
+        calendarEnabled: false,
+        syncCapabilities: { mail: pending, calendar: reconnect },
+      }).state,
+    ).toBe("syncing");
+    expect(
+      connectionHealthForAccount({ ...account, syncStatus: "syncing", syncRecovery: "reconnect" })
+        .state,
+    ).toBe("syncing");
+    for (const [syncRecovery, state] of [
+      ["automatic", "retrying"],
+      ["operator", "service_attention"],
+      ["reconnect", "reconnect"],
+    ] as const) {
+      expect(
+        connectionHealthForAccount({ ...account, syncRecovery, syncStatus: "error" }).state,
+      ).toBe(state);
+    }
+  });
+
   it("normalizes legacy product names in stored health messages", () => {
     expect(
       connectionHealthForAccount({

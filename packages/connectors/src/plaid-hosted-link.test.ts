@@ -48,6 +48,7 @@ it("requests hosted consent without delivering unsolicited messages and parses c
             {
               public_token: "consent-token",
               institution: { name: "Fixture Credit Union", institution_id: "ins_fixture" },
+              accounts: [{ name: "Checking", mask: "0042" }],
             },
           ],
         },
@@ -55,6 +56,12 @@ it("requests hosted consent without delivering unsolicited messages and parses c
     ],
   });
   await expect(completed.plaid.getHostedLinkResult?.("private-link")).resolves.toEqual({
+    accountMetadata: {
+      "consent-token": {
+        institutionId: "ins_fixture",
+        accounts: [{ name: "Checking", mask: "0042" }],
+      },
+    },
     publicTokens: ["consent-token"],
     institutions: { "consent-token": "Fixture Credit Union" },
   });
@@ -62,7 +69,7 @@ it("requests hosted consent without delivering unsolicited messages and parses c
     connector({ link_token: "private-link", link_sessions: [] }).plaid.getHostedLinkResult?.(
       "private-link",
     ),
-  ).resolves.toEqual({ publicTokens: [], institutions: {} });
+  ).resolves.toEqual({ publicTokens: [], institutions: {}, accountMetadata: {} });
 });
 it.each([
   "https://attacker.example/hl/session",
@@ -90,4 +97,14 @@ it("rejects unrelated sessions and malformed consent receipts", async () => {
       link_sessions: [{ results: { item_add_results: [{ public_token: "" }] } }],
     }).plaid.getHostedLinkResult?.("private-link"),
   ).rejects.toMatchObject({ code: "plaid_invalid_response" });
+});
+
+it("initializes update mode with existing credentials without requesting new products", async () => {
+  const { plaid, fetch } = connector({ link_token: "update-link" });
+  await plaid.createLinkToken({ ...input, accessToken: "existing-item-token" });
+  const call = fetch.mock.calls[0] as unknown as [string, RequestInit];
+  const body = JSON.parse(String(call[1].body));
+  expect(body.access_token).toBe("existing-item-token");
+  expect(body).not.toHaveProperty("products");
+  expect(body).not.toHaveProperty("transactions");
 });

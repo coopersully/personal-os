@@ -50,6 +50,7 @@ import {
   mergeFinanceMerchantsInputSchema,
   previewFinanceBudgetPolicySchema,
   reconcileFinanceReimbursementInputSchema,
+  resolveFinanceAccountDuplicateInputSchema,
   resolveFinanceAlertInputSchema,
   reviseFinanceBudgetInputSchema,
   reviseFinanceBudgetPolicySchema,
@@ -202,6 +203,7 @@ export function registerFinanceRoutes({
           "/v1/finances/categorizations/propose",
           "/v1/finances/scenarios/compare",
           "/v1/finances/budget-policies/preview",
+          "/v1/finances/review-batches/qualification",
         ].includes(context.req.path))
     ) {
       await requireFinanceRead(context, next);
@@ -437,6 +439,8 @@ export function registerFinanceRoutes({
       status: await financeStatus.getFinanceStatus(
         context.get("principal").userId,
         maintenanceScopeQuerySchema.parse(context.req.query()),
+        undefined,
+        context.get("principal").actorType === "user",
       ),
     }),
   );
@@ -531,7 +535,10 @@ export function registerFinanceRoutes({
   );
   app.get("/v1/finances/guided-setup", async (context) =>
     context.json({
-      setup: await finances.getGuidedSetupContext(context.get("principal").userId),
+      setup: await finances.getGuidedSetupContext(
+        context.get("principal").userId,
+        context.get("principal").actorType === "user",
+      ),
     }),
   );
   app.get("/v1/finances/profile", async (context) =>
@@ -1025,6 +1032,7 @@ export function registerFinanceRoutes({
       await finances.listFinanceAccounts(
         context.get("principal").userId,
         financeAccountQuerySchema.parse(context.req.query()),
+        context.get("principal").actorType === "user",
       ),
     ),
   );
@@ -1263,12 +1271,34 @@ export function registerFinanceRoutes({
     });
   });
   app.get("/v1/finances/plaid/status", async (context) =>
-    context.json({ available: finances.plaidAvailable() }),
-  );
-  app.post("/v1/finances/plaid/link-token", requireHuman, async (context) =>
     context.json({
-      linkToken: await finances.createPlaidLinkToken(context.get("principal").userId),
+      available: finances.plaidAvailable(),
+      environment: finances.plaidEnvironment(),
     }),
+  );
+  app.post("/v1/finances/plaid/link-token", requireHuman, async (context) => {
+    const input = context.req.header("content-type")?.includes("application/json")
+      ? await parseBody(context, z.object({ accountId: idSchema.optional() }))
+      : {};
+    return context.json({
+      linkToken: await finances.createPlaidLinkToken(
+        context.get("principal").userId,
+        input.accountId,
+      ),
+    });
+  });
+  app.post(
+    "/v1/finances/accounts/:id/reconnect",
+    requireHuman,
+    requireWorkspaceExecutionRoute(db, "finances"),
+    async (context) =>
+      context.json(
+        await finances.completePlaidReconnect(
+          routeId(context),
+          await parseBody(context, z.object({ idempotencyKey: z.string().trim().min(1).max(200) })),
+          await financeContext(context),
+        ),
+      ),
   );
   app.post("/v1/finances/plaid/exchange", requireHuman, async (context) =>
     context.json(
@@ -1324,6 +1354,27 @@ export function registerFinanceRoutes({
         await financeContext(context),
       ),
     ),
+  );
+  app.get("/v1/finances/accounts/:id/duplicate-preview", async (context) =>
+    context.json(
+      await finances.previewFinanceAccountDuplicate(
+        routeId(context),
+        idSchema.parse(context.req.query("keepAccountId")),
+        await financeContext(context),
+      ),
+    ),
+  );
+  app.post(
+    "/v1/finances/accounts/:id/resolve-duplicate",
+    requireWorkspaceExecutionRoute(db, "finances"),
+    async (context) =>
+      context.json(
+        await finances.resolveFinanceAccountDuplicate(
+          routeId(context),
+          await parseBody(context, resolveFinanceAccountDuplicateInputSchema),
+          await financeContext(context),
+        ),
+      ),
   );
   app.post(
     "/v1/finances/accounts/:id/disconnect",

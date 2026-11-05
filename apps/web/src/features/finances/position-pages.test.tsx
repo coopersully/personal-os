@@ -74,8 +74,12 @@ vi.mock("../../api.js", () => ({
   api,
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Unknown error"),
 }));
+const plaidConnectProps = vi.hoisted(() => vi.fn());
 vi.mock("./plaid-connect.js", () => ({
-  PlaidConnectButton: () => <button type="button">Connect bank</button>,
+  PlaidConnectButton: (props: unknown) => {
+    plaidConnectProps(props);
+    return <button type="button">Connect bank</button>;
+  },
 }));
 const envelope = (data: unknown) => ({
   data,
@@ -245,9 +249,6 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
-    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Account name"), {
       target: { value: "Household checking" },
@@ -270,9 +271,6 @@ describe("Finance position pages", () => {
         <FinanceCreateButton />
         <FinanceAccountsPage />
       </>,
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Account name"), {
@@ -552,9 +550,6 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
-    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Ownership"), { target: { value: "joint" } });
     fireEvent.change(screen.getByLabelText("Your ownership share (%)"), {
@@ -595,9 +590,6 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
-    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     expect(screen.getByLabelText("Your ownership share (%)")).toHaveValue(50);
   });
@@ -636,9 +628,6 @@ describe("Finance position pages", () => {
         <FinanceCreateButton />
         <FinanceAccountsPage />
       </>,
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
@@ -694,9 +683,6 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
-    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     expect(screen.queryByRole("button", { name: "Stop tracking account" })).not.toBeInTheDocument();
   });
@@ -722,9 +708,6 @@ describe("Finance position pages", () => {
         <FinanceCreateButton />
         <FinanceAccountsPage />
       </>,
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     expect(screen.queryByRole("button", { name: "Stop tracking account" })).not.toBeInTheDocument();
@@ -761,9 +744,6 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
-    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
@@ -790,9 +770,6 @@ describe("Finance position pages", () => {
         <FinanceCreateButton />
         <FinanceAccountsPage />
       </>,
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.change(screen.getByLabelText("Account name"), {
@@ -899,7 +876,6 @@ describe("Finance position pages", () => {
         <FinanceAccountsPage />
       </>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Account options for Cash box" }));
     fireEvent.click(await screen.findByRole("button", { name: "Edit Cash box" }));
     fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Home safe" } });
     fireEvent.change(screen.getByLabelText("Account kind"), { target: { value: "other" } });
@@ -1021,9 +997,6 @@ describe("Finance position pages", () => {
       </>,
     );
     expect(await screen.findByText(/Possible duplicate of Imported checking/)).toBeInTheDocument();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Account options for Shared checking" }),
-    );
     fireEvent.click(screen.getByRole("button", { name: "Edit Shared checking" }));
     fireEvent.click(screen.getByLabelText("Include in planning"));
     fireEvent.click(screen.getByRole("button", { name: "Save account" }));
@@ -1282,10 +1255,7 @@ it("keeps account evidence visible when its refresh fails and allows source-spec
   );
 });
 
-it("retries account coverage and syncs an account with blocked evidence", async () => {
-  api.getFinanceLedgerHealth
-    .mockRejectedValueOnce(new Error("Offline"))
-    .mockResolvedValue({ balanceOnlyAccounts: 1 });
+it("syncs blocked accounts without a duplicate heading or unused coverage read", async () => {
   const response = await api.listFinanceAccounts();
   api.listFinanceAccounts.mockResolvedValue({
     ...response,
@@ -1293,9 +1263,12 @@ it("retries account coverage and syncs an account with blocked evidence", async 
   });
   api.syncFinanceAccount.mockResolvedValue({});
   mount(<FinanceAccountsPage />);
-  fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
-  expect(await screen.findByText(/1 balance-only account/)).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Sync account" }));
+  const syncAction = await screen.findByRole("button", { name: `Sync ${account.name}` });
+  expect(screen.queryByRole("heading", { name: "Accounts", level: 2 })).not.toBeInTheDocument();
+  expect(screen.queryByText(/balance-only account/)).not.toBeInTheDocument();
+  expect(api.getFinanceLedgerHealth).not.toHaveBeenCalled();
+  expect(syncAction.textContent?.trim()).toBe("");
+  fireEvent.click(syncAction);
   await waitFor(() => expect(api.syncFinanceAccount).toHaveBeenCalledWith(account.id));
   await waitFor(() => expect(api.listFinanceAccounts.mock.calls.length).toBeGreaterThan(2));
 });
@@ -1304,9 +1277,6 @@ it("reloads the latest account after a conflict before another edit", async () =
     new ApiClientError({ code: "conflict", message: "Changed", status: 409 }),
   );
   mount(<FinanceAccountsPage />);
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Account options for Shared checking" }),
-  );
   fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
   fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "My draft" } });
   fireEvent.click(screen.getByRole("button", { name: "Save account" }));
@@ -1358,13 +1328,8 @@ it("retains account correction and bank linking while manual capture and imports
     reload: vi.fn(),
   });
   mount(<FinanceAccountsPage />);
-  expect(
-    await screen.findByRole("button", { name: "Account options for Shared checking" }),
-  ).toBeVisible();
+  expect(await screen.findByRole("button", { name: "Edit Shared checking" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Import records" })).not.toBeInTheDocument();
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Account options for Shared checking" }),
-  );
   fireEvent.click(screen.getByRole("button", { name: "Edit Shared checking" }));
   expect(screen.getByLabelText("Ownership")).toBeEnabled();
 });
@@ -1625,7 +1590,7 @@ it("waits for initial owner identity before exposing Overview view settings", as
   expect(screen.getByRole("link", { name: "Open Finance settings" })).toBeVisible();
 });
 
-it("keeps account details tucked away and labels debt as an amount owed", async () => {
+it("exposes direct account actions and labels debt as an amount owed", async () => {
   const response = await api.listFinanceAccounts();
   api.listFinanceAccounts.mockResolvedValue({
     ...response,
@@ -1633,8 +1598,78 @@ it("keeps account details tucked away and labels debt as an amount owed", async 
   });
   mount(<FinanceAccountsPage />);
   expect(await screen.findByText("Amount owed")).toHaveClass("text-destructive");
-  expect(screen.queryByRole("button", { name: "Edit Shared checking" })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Account options for Shared checking" }));
   expect(screen.getByRole("button", { name: "Edit Shared checking" })).toBeVisible();
-  expect(screen.getByText(/Included in planning/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Transactions for Shared checking" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Edit Shared checking" }));
+  expect(screen.getByLabelText("Include in planning")).toBeChecked();
+});
+
+it("opens comparison from a duplicate account row and restricts keep choices to its group", async () => {
+  const response = await api.listFinanceAccounts();
+  api.listFinanceAccounts.mockResolvedValue({
+    ...response,
+    accounts: [
+      account,
+      { ...account, id: "account-2", name: "Replacement checking" },
+      { ...account, id: "account-3", name: "Unrelated checking" },
+    ],
+    accountSemantics: {
+      ...response.accountSemantics,
+      possibleDuplicateGroups: [{ accountIds: [account.id, "account-2"] }],
+    },
+  });
+  mount(<FinanceAccountsPage />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Compare duplicates for Shared checking" }),
+  );
+  const dialog = screen.getByRole("dialog");
+  expect(within(dialog).getByRole("option", { name: /Replacement checking/ })).toBeVisible();
+  expect(
+    within(dialog).queryByRole("option", { name: /Unrelated checking/ }),
+  ).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Preview comparison" })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+it.each([
+  "finance_account_disconnected",
+  "finance_account_legacy_disconnected",
+  "ITEM_LOGIN_REQUIRED",
+])("routes %s to the expected bank consent mode", async (failureCode) => {
+  api.listFinanceAccounts.mockResolvedValue({
+    accounts: [
+      {
+        ...account,
+        provider: "plaid",
+        status: "needs_reauth",
+        synchronization: {
+          ...account.synchronization,
+          state: "blocked",
+          recovery: "reconnect",
+          failureCode,
+        },
+      },
+    ],
+    accountSemantics: {
+      trustworthy: false,
+      possibleDuplicateGroups: [],
+      excludedAccountIds: [],
+      unresolvedOwnershipAccountIds: [],
+    },
+    totals: { cash: 0, debt: 0, investments: 0, netWorth: 0, otherAssets: 0 },
+  });
+  mount(<FinanceAccountsPage />);
+  await screen.findByRole("button", { name: "Connect bank" });
+  expect(plaidConnectProps).toHaveBeenCalledWith(
+    expect.objectContaining({ label: `Reconnect ${account.name}`, iconOnly: true }),
+  );
+  expect(
+    plaidConnectProps.mock.calls
+      .filter(([props]) => props.label === `Reconnect ${account.name}`)
+      .every(
+        ([props]) =>
+          props.accountId === (failureCode === "ITEM_LOGIN_REQUIRED" ? account.id : undefined),
+      ),
+  ).toBe(true);
 });

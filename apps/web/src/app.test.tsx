@@ -5,13 +5,14 @@ import { readFileSync } from "node:fs";
 import { ApiClientError } from "@personal-os/api-client";
 import {
   type CalendarStatus,
+  type ConnectorSyncResult,
   type FinanceBudgetVersion,
   getDefaultWorkspacePreferences,
   getFinanceBudgetApprovalReadiness,
   type UpdateAccountSetupInput,
   type User,
 } from "@personal-os/domain";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   createEvent,
@@ -739,6 +740,14 @@ function TestLocationObserver({ current }: { current: { value: string } }) {
   const location = useLocation();
   current.value = `${location.pathname}${location.search}${location.hash}`;
   return null;
+}
+
+// Navigation counts use limit1 without page sorting/grouping. Exclude only that role,
+// so a newer page read with wrong filters (or limit) still fails exact equality.
+function latestTaskPageRequest() {
+  return mocks.listTaskWorkspace.mock.calls
+    .filter(([query]) => query.limit !== 1 || query.sort !== undefined || query.group !== undefined)
+    .at(-1)?.[0];
 }
 
 async function findSettingsLink(name: string) {
@@ -1493,7 +1502,7 @@ function defaults() {
   mocks.openUrl.mockResolvedValue(undefined);
   mocks.setAlwaysOnTop.mockResolvedValue(undefined);
   mocks.listen.mockImplementation(async () => vi.fn());
-  mocks.syncConnector.mockResolvedValue(1);
+  mocks.syncConnector.mockResolvedValue({ changed: 1, pending: false, nextSyncAt: null });
   mocks.selectXBookmarkFolder.mockResolvedValue(1);
   mocks.syncXBookmarks.mockResolvedValue(2);
   mocks.deleteXBookmarkAccount.mockResolvedValue(undefined);
@@ -1817,6 +1826,10 @@ function dragLeaveCalendarEvent(target: HTMLElement, relatedTarget: EventTarget 
 }
 
 beforeEach(() => {
+  // Completed query notifications must commit React updates (including route redirects)
+  // before the next assertion. Otherwise cold-page checks race unflushed app bootstrap.
+  // Keep the default scheduler and assertion deadlines; only provide React's test boundary.
+  notifyManager.setNotifyFunction((callback) => act(callback));
   // Test-specific `mockResolvedValueOnce` and pending promises must not leak into
   // the next rendered route. `clearAllMocks` only clears call history; it keeps
   // queued one-off implementations, which made later calendar tests render an
@@ -1880,6 +1893,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  notifyManager.setNotifyFunction((callback) => callback());
   toast.dismiss();
   vi.unstubAllGlobals();
 });
@@ -2671,7 +2685,7 @@ describe("Personal OS web app", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect your Google accounts" }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("test@example.com")).toBeInTheDocument();
+    expect(await screen.findByText("Google · test@example.com")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Back" }));
     expect(
       await screen.findByRole("heading", { name: "What should nohmi help with?" }),
@@ -2758,6 +2772,7 @@ describe("Personal OS web app", () => {
     await waitFor(() =>
       expect(mocks.exchangePlaidToken).toHaveBeenCalledWith({
         institution: null,
+        metadata: { institutionId: null, accounts: [] },
         publicToken: "setup-public-token",
       }),
     );
@@ -2983,7 +2998,9 @@ describe("Personal OS web app", () => {
     const browser = userEvent.setup();
 
     expect(await screen.findByText("Connected")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Apple" })).toBeInTheDocument();
+    expect(
+      screen.getByText("iCloud", { selector: ".account-profile__details" }),
+    ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Continue" }));
     expect(await screen.findByText("1 account connected")).toBeInTheDocument();
   });
@@ -3343,7 +3360,7 @@ describe("Personal OS web app", () => {
     await browser.selectOptions(screen.getByLabelText("Type"), "reminder");
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(await screen.findByText("Test reminder")).toBeInTheDocument();
-    expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+    expect(latestTaskPageRequest()).toEqual({
       sort: "default",
       group: "none",
       view: "all",
@@ -3604,7 +3621,7 @@ describe("Personal OS web app", () => {
     expect(screen.getByText("Release the new workspace")).toBeInTheDocument();
     expect(screen.getByText(/Target Aug 1, 2026/)).toBeInTheDocument();
     await waitFor(() =>
-      expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+      expect(latestTaskPageRequest()).toEqual({
         sort: "default",
         group: "none",
         view: "all",
@@ -3721,7 +3738,7 @@ describe("Personal OS web app", () => {
     await browser.selectOptions(screen.getByLabelText("Deadline", { exact: true }), "tomorrow");
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() =>
-      expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect(latestTaskPageRequest()).toEqual(
         expect.objectContaining({
           listId: secondId,
           query: "draft",
@@ -3837,7 +3854,7 @@ describe("Personal OS web app", () => {
     });
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() =>
-      expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+      expect(latestTaskPageRequest()).toEqual({
         sort: "default",
         group: "none",
         dueAfter: "2026-07-13T09:00:00.000Z",
@@ -3865,7 +3882,7 @@ describe("Personal OS web app", () => {
     expect(screen.getByLabelText("Show")).toHaveValue("completed");
     await browser.click(screen.getByRole("button", { name: "Apply filters" }));
     expect(systemView.location.value).toBe("/tasks?view=today&status=completed");
-    expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith({
+    expect(latestTaskPageRequest()).toEqual({
       sort: "default",
       group: "none",
       limit: 50,
@@ -5154,9 +5171,7 @@ describe("Personal OS web app", () => {
     const mixed = setup(`/tasks?view=today&list=${secondId}&project=${thirdId}`);
     await screen.findByText("Draft brief");
     expect(mixed.location.value).toBe(`/tasks?view=today&list=${secondId}&project=${thirdId}`);
-    expect(
-      mocks.listTaskWorkspace.mock.calls.filter(([query]) => query.limit === 50).at(-1)?.[0],
-    ).toEqual({
+    expect(latestTaskPageRequest()).toEqual({
       sort: "default",
       group: "none",
       view: "today",
@@ -5735,7 +5750,7 @@ describe("Personal OS web app", () => {
     const browser = userEvent.setup();
     const view = setup("/finances/accounts");
     expect(
-      await screen.findByRole("list", { name: "Financial accounts" }, { timeout: 5_000 }),
+      await screen.findByRole("table", { name: "Accounts" }, { timeout: 5_000 }),
     ).toHaveTextContent("Checking");
     await browser.click(screen.getByRole("button", { name: "Add account" }));
     await browser.click(screen.getByRole("button", { name: "Connect bank" }));
@@ -5744,6 +5759,7 @@ describe("Personal OS web app", () => {
     await waitFor(() =>
       expect(mocks.exchangePlaidToken).toHaveBeenCalledWith({
         institution: null,
+        metadata: { institutionId: null, accounts: [] },
         publicToken: "public-token",
       }),
     );
@@ -8394,7 +8410,48 @@ describe("Personal OS web app", () => {
   it("keeps Activity search results and URL state aligned", async () => {
     const view = setup("/settings?section=activity");
     const browser = userEvent.setup();
-    expect(await screen.findByText("Reminder · created")).toBeInTheDocument();
+    try {
+      expect(await screen.findByText("Reminder · created")).toBeInTheDocument();
+    } catch (error) {
+      let diagnostic = "diagnostic-unavailable";
+      try {
+        const [pathname, search = ""] = (view.location.value.split("#")[0] ?? "").split("?");
+        const params = new URLSearchParams(search);
+        const state = view.queryClient
+          .getQueryCache()
+          .findAll({ queryKey: ["activity"], exact: true })[0]?.state;
+        const status = state?.status;
+        const fetchStatus = state?.fetchStatus;
+        const serialized = JSON.stringify({
+          canonicalActivity:
+            pathname === "/settings" && params.get("page") === "activity" && !params.has("section"),
+          legacyActivity: pathname === "/settings" && params.get("section") === "activity",
+          hasSearch: params.has("q"),
+          query: {
+            status: status && ["pending", "success", "error"].includes(status) ? status : "absent",
+            fetchStatus:
+              fetchStatus && ["fetching", "paused", "idle"].includes(fetchStatus)
+                ? fetchStatus
+                : "absent",
+            errorPresent: state?.error != null,
+            dataCount: Array.isArray(state?.data) ? Math.min(999, state.data.length) : 0,
+          },
+          listActivityCalls: Math.min(999, mocks.listActivity.mock.calls.length),
+          activityRegionPresent: !!view.container.querySelector('[aria-label="Activity history"]'),
+          loadingPresent: !!view.container.querySelector('[aria-label="Loading activity"]'),
+          recoveryPresent: screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length > 0,
+        });
+        if (serialized.length <= 1024) diagnostic = serialized;
+      } catch {
+        // Preserve the original assertion if bounded observation fails.
+      }
+      try {
+        console.error("activity-readiness-v1", diagnostic);
+      } catch {
+        // Diagnostic delivery must not replace the original assertion error.
+      }
+      throw error;
+    }
     const activitySearch = screen.getByRole("searchbox", { name: "Search activity" });
     await browser.type(activitySearch, "system");
     expect(view.location.value).toBe("/settings?page=activity&q=system");
@@ -9553,7 +9610,56 @@ describe("Personal OS web app", () => {
     expect(details).toHaveAttribute("aria-expanded", "false");
   });
 
+  it.each([
+    true,
+    false,
+  ])("announces Settings sync continuation honestly (pending=%s)", async (pending) => {
+    const successes = vi.spyOn(toast, "success");
+    mocks.syncConnector.mockResolvedValue({
+      changed: 25,
+      pending,
+      nextSyncAt: pending ? now : null,
+    });
+    setup("/settings?page=connections");
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Sync Google" }));
+    const message = pending
+      ? "Updates saved. Mail synchronization will continue automatically."
+      : "Connection synced.";
+    await waitFor(() => expect(successes).toHaveBeenCalledWith(message));
+    expect(screen.getByRole("main")).not.toHaveTextContent(message);
+    if (pending) expect(successes).not.toHaveBeenCalledWith("Connection synced.");
+  });
+
+  it.each([
+    true,
+    false,
+  ])("announces the settled Mail batch honestly (pending=%s)", async (pending) => {
+    const successes = vi.spyOn(toast, "success");
+    let finish: (result: ConnectorSyncResult) => void = () => {};
+    mocks.syncConnector.mockImplementation(
+      () =>
+        new Promise<ConnectorSyncResult>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    setup("/mail");
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Sync all mail accounts" }));
+    await waitFor(() => expect(mocks.syncConnector).toHaveBeenCalled());
+    expect(successes).not.toHaveBeenCalled();
+    await act(async () => finish({ changed: 25, pending, nextSyncAt: pending ? now : null }));
+    const message = pending
+      ? "Updates saved. Mail synchronization will continue automatically."
+      : "Mail accounts synced.";
+    await waitFor(() => expect(successes).toHaveBeenCalledWith(message));
+    expect(screen.getByRole("main")).not.toHaveTextContent(message);
+    if (pending) expect(successes).not.toHaveBeenCalledWith("Mail accounts synced.");
+  });
+
   it("refreshes partial mail sync results and retries only the failed account", async () => {
+    const errors = vi.spyOn(toast, "error");
+    const successes = vi.spyOn(toast, "success");
     mocks.listConnectors.mockResolvedValue(
       [secondId, thirdId].map((accountId) => ({
         id: accountId,
@@ -9573,7 +9679,7 @@ describe("Personal OS web app", () => {
         ? new Promise((_resolve, reject) => {
             rejectFailedAccount = reject;
           })
-        : Promise.resolve(undefined),
+        : Promise.resolve({ changed: 25, pending: true, nextSyncAt: now }),
     );
     setup("/mail");
     const browser = userEvent.setup();
@@ -9587,9 +9693,20 @@ describe("Personal OS web app", () => {
     await act(async () => {
       rejectFailedAccount(new Error("private sync failure"));
     });
+    await waitFor(() =>
+      expect(errors).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          description:
+            "0 of 2 mail accounts synced. 1 will continue automatically. 1 account needs another attempt.",
+        }),
+      ),
+    );
     expect(
-      await screen.findByText("1 of 2 mail accounts synced. 1 account needs another attempt."),
-    ).toBeInTheDocument();
+      within(screen.getByRole("navigation", { name: "Top navigation" })).queryByText(
+        /will continue automatically/,
+      ),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(mocks.listConnectors.mock.calls.length).toBeGreaterThan(accountLoads);
       expect(mocks.listMailboxes.mock.calls.length).toBeGreaterThan(mailboxLoads);
@@ -9597,7 +9714,7 @@ describe("Personal OS web app", () => {
       expect(screen.getByRole("button", { name: "Retry failed mail accounts" })).toBeEnabled();
     });
     expect(screen.queryByText("private sync failure")).not.toBeInTheDocument();
-    mocks.syncConnector.mockResolvedValue(undefined);
+    mocks.syncConnector.mockResolvedValue({ changed: 1, pending: false, nextSyncAt: null });
     await browser.click(screen.getByRole("button", { name: "Retry failed mail accounts" }));
     await waitFor(() => expect(mocks.syncConnector).toHaveBeenCalledTimes(3));
     expect(mocks.syncConnector.mock.calls.map(([accountId]) => accountId)).toEqual([
@@ -9607,7 +9724,10 @@ describe("Personal OS web app", () => {
     ]);
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Sync all mail accounts" })).toBeEnabled();
-      expect(screen.queryByText(/mail accounts synced\./)).not.toBeInTheDocument();
+      expect(successes).toHaveBeenCalledWith(
+        "Updates saved. Mail synchronization will continue automatically.",
+      );
+      expect(successes).not.toHaveBeenCalledWith("Mail accounts synced.");
     });
   });
 
@@ -9833,7 +9953,7 @@ describe("Personal OS web app", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     pendingEditorView.unmount();
 
-    let resolveSync: (value: number) => void = () => undefined;
+    let resolveSync: (value: ConnectorSyncResult) => void = () => undefined;
     mocks.syncConnector.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveSync = resolve;
@@ -9843,7 +9963,7 @@ describe("Personal OS web app", () => {
     await browser.click(await findSettingsLink("Connections"));
     await browser.click(await screen.findByRole("button", { name: "Sync Google" }));
     await waitFor(() => expect(syncingView.container.querySelector(".spin")).toBeInTheDocument());
-    resolveSync(1);
+    resolveSync({ changed: 1, pending: false, nextSyncAt: null });
     syncingView.unmount();
   }, 15_000);
 
@@ -9991,16 +10111,109 @@ describe("Personal OS web app", () => {
   });
 
   it("shows one safe callback outcome and removes callback state from the URL", async () => {
-    mocks.getConnectorAuthorizationAttempt.mockResolvedValue({
+    type Outcome = import("@personal-os/domain").ConnectorAuthorizationOutcome;
+    const connected = {
       accountId: id,
       provider: "google",
       providerMessage: "raw-provider-canary",
       retryable: false,
       status: "connected",
+    } satisfies Outcome & { providerMessage: string };
+    let finish: (outcome: Outcome) => void = () => {
+      throw new Error("Callback fixture resolver was not initialized.");
+    };
+    const pending = new Promise<Outcome>((resolve) => {
+      finish = resolve;
     });
+    mocks.getConnectorAuthorizationAttempt.mockReturnValue(pending);
     const view = setup(`/settings?page=connections&connection_attempt=${id}`);
+    expect(await screen.findByText("Confirming your connection")).toBeInTheDocument();
+    expect(mocks.getConnectorAuthorizationAttempt).toHaveBeenCalledTimes(1);
+    expect(mocks.getConnectorAuthorizationAttempt).toHaveBeenCalledWith(id);
+    await act(async () => {
+      finish(connected);
+      await pending;
+    });
 
-    expect(await screen.findByText("Google is connected")).toBeInTheDocument();
+    try {
+      expect(await screen.findByText("Google is connected")).toBeInTheDocument();
+    } catch (error) {
+      // Private diagnostic: inspect only after the original lookup has failed.
+      try {
+        const route = new URL(view.location.value, "https://fixture.invalid");
+        const attempt = mocks.getConnectorAuthorizationAttempt.mock;
+        const labels = [
+          "Connections",
+          "Loading connections",
+          "Couldn’t load connections.",
+          "Connections unavailable",
+          "Confirming your connection",
+          "Google is connected",
+          "Restart the connection",
+        ];
+        const queries = [["connectors"], ["connector-authorization-attempt", id]].map(
+          (queryKey) => {
+            const state = view.queryClient.getQueryState(queryKey);
+            const outcome = (state?.data as { status?: unknown } | undefined)?.status;
+            return {
+              query: queryKey[0],
+              status: state?.status ?? "missing",
+              fetchStatus: state?.fetchStatus ?? "missing",
+              hasData: state?.data !== undefined,
+              hasError: state?.error != null,
+              outcome:
+                typeof outcome === "string" &&
+                [
+                  "connected",
+                  "pending",
+                  "cancelled",
+                  "expired",
+                  "permission_incomplete",
+                  "failed",
+                ].includes(outcome)
+                  ? outcome
+                  : "absent-or-other",
+            };
+          },
+        );
+        console.error(
+          "CALLBACK_LOOKUP_DIAGNOSTIC",
+          JSON.stringify({
+            route: {
+              isSettings: route.pathname === "/settings",
+              isConnections: route.searchParams.get("page") === "connections",
+              hasAttempt: route.searchParams.has("connection_attempt"),
+              attemptMatchesFixture: route.searchParams.get("connection_attempt") === id,
+              hasRestartResult: route.searchParams.get("connection_result") === "restart_required",
+            },
+            attempt: {
+              calls: Math.min(attempt.calls.length, 100),
+              callsTruncated: attempt.calls.length > 100,
+              lastCallMatchesFixture: attempt.calls.at(-1)?.[0] === id,
+              results: attempt.results.slice(-4).map((result) => result.type),
+              settledResults: attempt.settledResults.slice(-4).map((result) => result.type),
+            },
+            queries,
+            dom: Array.from(
+              view.container.querySelectorAll(
+                '[role="alert"], [data-slot="alert"], [data-slot="alert-title"], h1, h2, h3',
+              ),
+            )
+              .slice(0, 12)
+              .map((element) => ({
+                tag: element.tagName,
+                isAlert: element.getAttribute("role") === "alert",
+                labels: labels.filter((label) =>
+                  (element.textContent ?? "").slice(0, 256).includes(label),
+                ),
+              })),
+          }),
+        );
+      } catch {
+        // A failed capture must never replace the original lookup/assertion error.
+      }
+      throw error;
+    }
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(screen.queryByText("raw-provider-canary")).not.toBeInTheDocument();
     await waitFor(() => expect(view.location.value).toBe("/settings?page=connections"));
@@ -10550,9 +10763,81 @@ describe("Personal OS web app", () => {
 
   it("keeps Pinterest wallpaper desktop-only and exposes its desktop controls intentionally", async () => {
     const webView = setup("/settings?page=wallpaper");
-    expect(
-      await screen.findByRole("heading", { name: "Appearance", level: 2 }),
-    ).toBeInTheDocument();
+    try {
+      expect(
+        await screen.findByRole("heading", { name: "Appearance", level: 2 }),
+      ).toBeInTheDocument();
+    } catch (error) {
+      // Inspect only after the original lookup fails; retain no application data or full DOM.
+      try {
+        const route = new URL(webView.location.value, "https://fixture.invalid");
+        const page = route.searchParams.get("page");
+        const labels = ["Appearance", "Wallpaper", "Pinterest wallpaper", "Connections"];
+        const queries = [["me"], ["connectors"], ["pinterest-wallpaper"]].map((queryKey) => {
+          const state = webView.queryClient.getQueryState(queryKey);
+          return {
+            query: queryKey[0],
+            status: state?.status ?? "missing",
+            fetchStatus: state?.fetchStatus ?? "missing",
+            hasData: state?.data !== undefined,
+            hasError: state?.error != null,
+          };
+        });
+        const calls = [
+          ["getMe", mocks.getMe.mock],
+          ["getPinterestWallpaperSettings", mocks.getPinterestWallpaperSettings.mock],
+          ["listPinterestPins", mocks.listPinterestPins.mock],
+        ] as const;
+        console.error(
+          "WALLPAPER_FALLBACK_DIAGNOSTIC",
+          JSON.stringify({
+            route: {
+              isSettings: route.pathname === "/settings",
+              page: page === "wallpaper" || page === "appearance" ? page : "missing-or-other",
+            },
+            native: {
+              calls: Math.min(mocks.isTauri.mock.calls.length, 100),
+              callsTruncated: mocks.isTauri.mock.calls.length > 100,
+              results: mocks.isTauri.mock.results.slice(-4).map((result) => ({
+                type: result.type,
+                value: typeof result.value === "boolean" ? result.value : "other",
+              })),
+            },
+            calls: calls.map(([name, mock]) => ({
+              name,
+              count: Math.min(mock.calls.length, 100),
+              truncated: mock.calls.length > 100,
+              results: mock.results.slice(-4).map((result) => result.type),
+              settledResults: mock.settledResults.slice(-4).map((result) => result.type),
+            })),
+            queries,
+            render: {
+              containerConnected: webView.container.isConnected,
+              hasSettingsWorkspace: !!webView.container.querySelector(
+                '[data-workspace="settings"]',
+              ),
+              exposedAppearanceHeadings: Math.min(
+                screen.queryAllByRole("heading", { name: "Appearance", level: 2 }).length,
+                100,
+              ),
+              hasRecoveryDialog:
+                screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length > 0,
+              headings: Array.from(webView.container.querySelectorAll("h1, h2, h3"))
+                .slice(0, 12)
+                .map((element) => ({
+                  tag: element.tagName,
+                  labels: labels.filter((label) => (element.textContent ?? "").trim() === label),
+                  ariaHiddenAncestor: !!element.closest('[aria-hidden="true"]'),
+                  inertAncestor: !!element.closest("[inert]"),
+                })),
+            },
+          }),
+        );
+      } catch {
+        // A failed capture must never replace the original lookup/assertion error.
+      }
+      throw error;
+    }
     expect(
       within(screen.getByRole("complementary", { name: "Account utility navigation" })).queryByRole(
         "link",
@@ -10733,9 +11018,59 @@ describe("Personal OS web app", () => {
       });
       const browser = userEvent.setup();
       const view = setup("/settings?page=wallpaper");
-      await waitFor(() =>
-        expect(mocks.invoke).toHaveBeenCalledWith("preview_pinterest_wallpaper", expect.anything()),
-      );
+      try {
+        await waitFor(() =>
+          expect(mocks.invoke).toHaveBeenCalledWith(
+            "preview_pinterest_wallpaper",
+            expect.anything(),
+          ),
+        );
+      } catch (error) {
+        // Failure-only readiness evidence; never serialize query keys, payloads or errors.
+        let diagnostic = '{"captureFailed":true}';
+        try {
+          const states = (prefix: string) =>
+            view.queryClient
+              .getQueryCache()
+              .findAll({ queryKey: [prefix] })
+              .slice(0, 3)
+              .map(({ state }) => ({
+                status: state.status,
+                fetchStatus: state.fetchStatus,
+                isInvalidated: state.isInvalidated,
+                error: Boolean(state.error),
+              }));
+          const countInvocations = (command: string) =>
+            Math.min(999, mocks.invoke.mock.calls.filter(([name]) => name === command).length);
+          const pinData = view.queryClient
+            .getQueryCache()
+            .findAll({ queryKey: ["pinterest-wallpaper-preview"] })[0]?.state.data;
+          const serialized = JSON.stringify({
+            settings: states("pinterest-wallpaper"),
+            pins: states("pinterest-wallpaper-preview"),
+            preview: states("native-wallpaper-preview"),
+            boardReady:
+              view.container.querySelector<HTMLInputElement>("#pinterest-board-url")?.value ===
+              "https://www.pinterest.com/",
+            pinsCount: Array.isArray(pinData) ? Math.min(999, pinData.length) : 0,
+            tauri: mocks.isTauri.mock.results.at(-1)?.value === true,
+            invocations: {
+              environment: countInvocations("desktop_preview_environment"),
+              preview: countInvocations("preview_pinterest_wallpaper"),
+              apply: countInvocations("apply_pinterest_wallpaper"),
+            },
+          });
+          if (serialized.length <= 2048) diagnostic = serialized;
+        } catch {
+          // Keep the fixed fallback when diagnostic capture itself fails.
+        }
+        try {
+          console.error("wallpaper-readiness-v1", diagnostic);
+        } catch {
+          // A diagnostic sink failure must not replace the original assertion error.
+        }
+        throw error;
+      }
       const refresh = within(view.container).getByRole("button", { name: "Refresh wallpaper" });
       expect(refresh).toBeDisabled();
       expect(

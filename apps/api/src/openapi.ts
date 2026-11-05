@@ -1228,7 +1228,37 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: { security, responses: { 201: { description: "iCloud connected" } } },
       },
       "/v1/connectors/{id}/sync": {
-        post: { security, responses: { 200: { description: "Connection synchronized" } } },
+        post: {
+          security,
+          responses: {
+            200: {
+              description: "Synchronization pass completed; pending work continues at nextSyncAt",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["result"],
+                    properties: {
+                      result: {
+                        type: "object",
+                        required: ["changed"],
+                        properties: {
+                          changed: { type: "integer", minimum: 0 },
+                          pending: { type: "boolean", default: false },
+                          nextSyncAt: {
+                            type: ["string", "null"],
+                            format: "date-time",
+                            default: null,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       "/v1/connectors/{id}": {
         delete: { security, responses: { 204: { description: "Connection removed" } } },

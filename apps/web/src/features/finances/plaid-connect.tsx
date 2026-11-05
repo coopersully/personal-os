@@ -1,28 +1,52 @@
+import type { ExchangePlaidTokenInput } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
-import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { ActionButton as Button } from "@/components/action-button";
+import { RefreshIcon } from "@/components/icons";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { isConfirmedFinanceMutationFailure } from "./mutation-retry.js";
 
 export function PlaidConnectButton({
   label = "Connect bank",
   onConnected,
+  accountId,
+  iconOnly = false,
 }: {
+  iconOnly?: boolean;
   label?: string;
+  accountId?: string;
   onConnected: () => Promise<unknown>;
 }) {
   const status = useQuery({ queryFn: api.getPlaidStatus, queryKey: ["plaid-status"] });
 
   if (status.isPending) {
     return (
-      <Button disabled size="sm" variant="outline">
-        Checking Plaid
+      <Button
+        disabled
+        size={iconOnly ? "icon-sm" : "sm"}
+        variant="outline"
+        aria-label="Checking bank connection availability"
+      >
+        {iconOnly ? <RefreshIcon aria-hidden="true" /> : "Checking Plaid"}
       </Button>
     );
   }
+  if (status.isError && iconOnly)
+    return (
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label="Retry checking bank connection availability"
+        onClick={() => status.refetch()}
+      >
+        <RefreshIcon aria-hidden="true" />
+      </Button>
+    );
   if (status.isError)
     return (
       <InlineError
@@ -33,41 +57,96 @@ export function PlaidConnectButton({
     );
   if (!status.data.available) {
     return (
-      <Button disabled size="sm" variant="outline">
-        Plaid needs keys
+      <Button
+        disabled
+        size={iconOnly ? "icon-sm" : "sm"}
+        variant="outline"
+        aria-label="Bank connection unavailable: Plaid needs keys"
+      >
+        {iconOnly ? <RefreshIcon aria-hidden="true" /> : "Plaid needs keys"}
       </Button>
     );
   }
-  return <AvailablePlaidConnectButton label={label} onConnected={onConnected} />;
+  const environmentLabel =
+    status.data.environment === "sandbox"
+      ? "Sandbox test bank"
+      : status.data.environment === "development"
+        ? "Development test bank"
+        : null;
+  return (
+    <AvailablePlaidConnectButton
+      {...(accountId ? { accountId } : {})}
+      label={environmentLabel ? `${label} · ${environmentLabel}` : label}
+      onConnected={onConnected}
+      iconOnly={iconOnly}
+    />
+  );
 }
 
 function AvailablePlaidConnectButton({
+  accountId,
   label,
   onConnected,
+  iconOnly,
 }: {
+  accountId?: string;
   label: string;
+  iconOnly: boolean;
   onConnected: () => Promise<unknown>;
 }) {
   const [token, setToken] = useState<string | null>(null);
-  const [linkError, setLinkError] = useState<string | null>(null);
+  const [reconnectKey, setReconnectKey] = useState(() => crypto.randomUUID());
   const linkToken = useFeedbackMutation({
     feedback: { action: "open bank connection", safeToRetry: true, form: false },
-    mutationFn: api.getPlaidLinkToken,
+    mutationFn: () => api.getPlaidLinkToken(accountId),
     onSuccess: setToken,
   });
   const exchange = useFeedbackMutation({
     feedback: { action: "connect this bank", safeToRetry: false, form: false },
-    mutationFn: (publicToken: string) => api.exchangePlaidToken({ institution: null, publicToken }),
+    mutationFn: (input: ExchangePlaidTokenInput) => api.exchangePlaidToken(input),
     onSuccess: onConnected,
   });
+  const reconnect = useFeedbackMutation({
+    feedback: {
+      action: "verify bank authorization and schedule synchronization",
+      pending: "Verifying bank authorization…",
+      success: "Bank authorization verified; synchronization scheduled.",
+      safeToRetry: true,
+      form: false,
+    },
+    mutationFn: () => {
+      if (!accountId) throw new Error("Choose an account to reconnect.");
+      return api.completePlaidReconnect(accountId, reconnectKey);
+    },
+    onError: (error) => {
+      if (isConfirmedFinanceMutationFailure(error)) setReconnectKey(crypto.randomUUID());
+    },
+    onSuccess: async () => {
+      setReconnectKey(crypto.randomUUID());
+      await onConnected();
+    },
+  });
   const { open, ready } = usePlaidLink({
-    onSuccess: (publicToken) => {
-      if (!publicToken) {
-        setLinkError("Plaid completed without a bank connection. Try connecting again.");
+    onSuccess: (publicToken, metadata) => {
+      if (accountId) {
+        reconnect.mutate();
         return;
       }
-      setLinkError(null);
-      exchange.mutate(publicToken);
+      if (!publicToken) {
+        toast.error("Plaid completed without a bank connection. Try connecting again.");
+        return;
+      }
+      exchange.mutate({
+        publicToken,
+        institution: metadata?.institution?.name ?? null,
+        metadata: {
+          institutionId: metadata?.institution?.institution_id ?? null,
+          accounts: (metadata?.accounts ?? []).map((account) => ({
+            name: account.name,
+            mask: account.mask,
+          })),
+        },
+      });
     },
     token,
   });
@@ -79,22 +158,29 @@ function AvailablePlaidConnectButton({
   return (
     <div className="plaid-connect">
       <Button
-        disabled={linkToken.isPending || exchange.isPending}
+        disabled={linkToken.isPending || exchange.isPending || reconnect.isPending}
         onClick={() => {
-          setLinkError(null);
           linkToken.mutate();
         }}
-        size="sm"
+        size={iconOnly ? "icon-sm" : "sm"}
+        variant={iconOnly ? "ghost" : "default"}
+        aria-label={
+          linkToken.isPending || exchange.isPending || reconnect.isPending
+            ? "Connecting bank"
+            : label
+        }
       >
-        {linkToken.isPending || exchange.isPending ? "Connecting bank" : label}
+        {iconOnly ? (
+          <RefreshIcon aria-hidden="true" />
+        ) : linkToken.isPending || exchange.isPending || reconnect.isPending ? (
+          "Connecting bank"
+        ) : (
+          label
+        )}
       </Button>
-      {linkError ? (
-        <p className="form-error" role="alert">
-          {linkError}
-        </p>
-      ) : null}
       <MutationFeedback feedback={linkToken.feedback} />
       <MutationFeedback feedback={exchange.feedback} />
+      <MutationFeedback feedback={reconnect.feedback} />
     </div>
   );
 }

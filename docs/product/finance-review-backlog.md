@@ -16,6 +16,30 @@ fallback only where no canonical profile exists. An explicit unknown in the cano
 must not silently resurrect an older value. Budget approval binds the displayed proposal and
 its profile revision; readiness is informational and commit-time validation remains mandatory.
 
+## Approved plans and monthly category limits
+
+Finance status and canonical budget reads share owner-timezone monthly plan context. An approved
+versioned plan establishes approval; legacy monthly category-limit rows do not. Context names the
+approved version for the current month, the most recent earlier approved version, and the nearest
+current/future proposal, incomplete draft or future approved plan. A future approval is never this month's plan;
+retirement when a successor is approved does not erase the earlier month's approval history.
+Latest-version budget reads still return a draft when it is the latest version, alongside this
+explicit context. Missing current-month approval does not mean no budget has ever been approved.
+Archived plan containers are excluded from current/upcoming selection; earlier approved versions
+remain explicit historical context. Invalid stored planning timezones return a controlled unavailable
+error with timezone-repair guidance, never a guessed UTC month. Read failures remain unavailable
+errors (`service_unavailable` with refresh recovery), never fabricated missing plans. Missing
+current-month approval points to reviewing that month’s proposal when present, otherwise creating
+a proposal. If a newer incomplete draft supersedes an older proposal, recovery points to revising
+that latest draft, not approving the superseded proposal. It never asks to reapprove the previous month. Profile revisions can
+require a new proposal without erasing a previous approval.
+
+Status keeps complete allocated resources and spending allocations distinct. Health and forecast
+comparisons use only the approved plan's spending allocations, never savings, debt, goals or buffer
+as spending limits. Legacy category-limit totals remain separately labeled and are not combined
+with the canonical plan. These reads neither approve nor retire a plan, qualify a monthly baseline,
+or alter financial records. Historical work scopes do not replace the current planning month.
+
 ## Grouped investigation
 
 Assessment groups outstanding material by useful investigation patterns, including roundups,
@@ -49,3 +73,14 @@ stale revisions, partial failure, concurrent resume, lost responses, owner isola
 agents. App and MCP results describe the same work. Approval failures identify recovery and a
 request ID through the standard feedback surface; production success requires production
 evidence and is never inferred from local tests.
+
+
+## Qualify independent maintenance work before preview
+
+The read-only `POST /v1/finances/review-batches/qualification` operation accepts up to 25 explicit decisions, with the same current revision and timestamp bindings as preview. It creates no run, durable preview, question, approval, audit or ledger effect. The typed client exposes `qualifyFinanceMaintenanceWork`. Existing preview remains all-or-nothing and execute retains its original current-authorization and source revalidation; qualification is never an execution capability.
+
+Results retain every supplied item in order. Source checks use the owned transaction/account and, for connected Plaid sources, both account and authoritative Provider Item freshness. Unknown currency, pending data, unavailable topology or stale sources stay blocked. Transfer confirmation additionally uses the existing unique reciprocal counterpart validator and checks the counterpart account/source. A scan reaching 201 same-amount rows is incomplete and cannot establish uniqueness. Requests have a 25-item bound, a 1-second SQL statement bound and a 5-second work window checked between items; an unexpected storage failure aborts the read rather than inventing partial success.
+
+The first evidence adapter qualifies exact reciprocal transfer confirmations only. Other decisions remain `awaiting_evidence` until their owning evidence adapter establishes sufficiency; caller explanations, confidence, routing groups and `current_record` do not establish it. Missing execute permission is reported as `authorization_denied`, separately from source failure. Valid permission without standing approval remains `awaiting_approval`. A human inspection request itself does not grant approval. Independent qualified items remain visible alongside all held items, so a caller can prepare a separate exact preview for justified work without creating another maintenance run.
+
+The response includes canonical source references and an observation time, plus explicit `advisoryOnly`, `previewRequired` and `executionRevalidationRequired` markers. Re-read or requalify after source changes; the strict existing preview and execution paths remain authoritative. The MCP tool `qualify_finance_maintenance_work` uses the same service and typed client with only `finances:read`, including read-only discovery; it requires no maintenance or execution scope to inspect. Its catalog entry is read-only, prepare-stage and closed-world. Natural-host consumption and useful independent progress remain outcome acceptance, not a consequence of passing source tests.

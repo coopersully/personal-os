@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { useProductionStyles } from "./production-styles.js";
 
 async function fillsViewport(page: Page, layer: Locator) {
   await expect(layer).toBeVisible();
@@ -48,6 +49,7 @@ test("morning and evening previews fill the viewport independently of the ritual
     await page.getByRole("button", { name: `Preview ${kind} Ritual`, exact: true }).click();
     const preview = page.getByRole("dialog", { name: "Ritual preview" });
     await expect(preview).toBeVisible();
+    await useProductionStyles(page);
     const sizes = info.project.use.isMobile
       ? [
           { width: 390, height: 844 },
@@ -148,6 +150,7 @@ test("native ritual surface and clouds fill the whole window after resize", asyn
   await page.goto("/index.html#ritual");
   const surface = page.locator(".ritual-surface");
   await expect(surface).toHaveAttribute("data-ready", "true");
+  await useProductionStyles(page);
   const draft = page.getByLabel("Reflection", { exact: true });
   await draft.fill("An unfinished thought across displays");
   await draft.evaluate((el) => {
@@ -167,6 +170,15 @@ test("native ritual surface and clouds fill the whole window after resize", asyn
     await expect(page.getByRole("checkbox", { name: "Drink water" })).toBeVisible();
     await expect(draft).toHaveValue("An unfinished thought across displays");
     await expect(draft).toHaveAttribute("data-resize-marker", "retained");
+    for (const name of ["Snooze", "Skip for Today"]) {
+      const escapeButton = page.getByRole("button", { name, exact: true });
+      await expect(
+        page.locator(".ritual-card").getByRole("button", { name, exact: true }),
+      ).toHaveCount(1);
+      await expect(escapeButton).toBeEnabled();
+      await expect(escapeButton).toBeInViewport({ ratio: 1 });
+      await escapeButton.click({ trial: true });
+    }
     await expect
       .poll(() =>
         page.locator(".ritual-presentation").evaluate((el) => {

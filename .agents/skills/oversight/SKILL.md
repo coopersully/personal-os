@@ -191,6 +191,14 @@ verification after review convergence on the frozen candidate. Follow
 [delivery verification](../../../docs/engineering/delivery-verification.md). Only the delivery contract’s Git-verified prose-only exception may omit full stages;
 path-only planning or speculative evidence reuse never grants that exception. Do not repeat full suites for each reviewer or metadata edit.
 
+Require completed applicable final-file native format/import checks, bundled fixture invariant
+review and validated live-backed Work maps before the worker triggers hosted publication. Follow
+the authoring and inventory rules in verification efficiency, including actual verify:pr/Jest
+argv/ancestry and Docker state. Approve finite conditional stages with named bounds and stops once;
+do not add per-stage scheduling questions or fresh unchanged-input lint merely for a new commit/base.
+Keep fresh resource admission and failure recovery intact. Private admission scripts need explicit
+adoption of the reusable classifier; repository guidance does not patch their copies automatically.
+
 ## Monitoring and reports
 
 Read [monitoring and recovery](references/monitoring.md) for authorized recurrence, reconciliation or

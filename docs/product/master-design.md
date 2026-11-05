@@ -329,8 +329,10 @@ Enabled rituals also present automatically inside the signed-in browser applicat
 unexpired, unsnoozed occurrence opens the shared checklist in a full-viewport ritual surface on
 desktop and mobile. Full previews use the same screen-filling presentation. The illustrated sky
 fills the surface behind a centered, readable checklist card; snooze and skip confirmations share
-that card treatment. Keep the underlying page mounted and restore its focus when the ritual is
-completed, snoozed, skipped, or settled by another client. Escape and outside clicks do not bypass
+that card treatment. Active rituals keep Snooze and Skip for Today as visible secondary buttons
+beneath Done in the card footer, disabled while answers are saving or unsaved. Preview keeps its
+explicit close action instead of these account actions. Keep the underlying page mounted and restore
+its focus when the ritual is completed, snoozed, skipped, or settled by another client. Escape and outside clicks do not bypass
 a scheduled ritual; previews retain their explicit close action. Authentication and standalone
 setup flows remain unobstructed; the desktop shell keeps its native presentation without a
 duplicate browser ritual. On macOS, the checklist fills the system primary display and adapts in

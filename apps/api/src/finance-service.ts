@@ -17,6 +17,7 @@ import {
   financeCategories,
   financeCategoryRules,
   financeClassificationDecisions,
+  financeContextualQuestions,
   financeEconomicEvents,
   financeEventTransactions,
   financeIncomeStreams,
@@ -120,6 +121,7 @@ import {
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { financeProviderDuplicateGroups } from "./finance/account-duplicate-service.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
 import {
   createFinanceAccountService,
@@ -139,8 +141,13 @@ import { createFinanceConnectionHandoffService } from "./finance/connection-hand
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
+  loadFinanceAuthorization,
   requireFinanceExecution,
 } from "./finance/context.js";
+import {
+  contextualSubtype,
+  lockContextualTransaction,
+} from "./finance/contextual-question-store.js";
 import { mirrorNewMaintenanceReviewQuestion } from "./finance/conversation-review-mirror.js";
 import type { FinanceExecutionFence } from "./finance/execution-binding.js";
 import { assertFinanceDerivedCompletionClaim } from "./finance/execution-claim-fence.js";
@@ -189,6 +196,7 @@ import {
 import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
 import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { createFinanceReimbursementService } from "./finance-reimbursement-service.js";
+import { decryptJson } from "./security.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
@@ -228,6 +236,7 @@ type Options = {
   now: () => Date;
   onProposalSnapshotRead?: () => Promise<void>;
   plaid?: PlaidConnector;
+  plaidEnvironment?: "sandbox" | "development" | "production";
   providerItems?: ReturnType<typeof createFinanceProviderItemService>;
   searchReceiptCandidates?: (
     userId: string,
@@ -774,6 +783,7 @@ export function createFinanceService({
   now,
   onProposalSnapshotRead,
   plaid,
+  plaidEnvironment,
   providerItems: configuredProviderItems,
   searchReceiptCandidates,
 }: Options) {
@@ -816,6 +826,8 @@ export function createFinanceService({
     ...(log ? { log } : {}),
     now,
     accounts: canonicalAccounts,
+    findDuplicateAccounts: (userId, metadata) =>
+      providerItems.findDuplicateAccounts(userId, metadata),
     ...(encryptionKey ? { encryptionKey } : {}),
     ...(plaid ? { plaid } : {}),
     preparePersistence: async (item, context) => {
@@ -867,8 +879,11 @@ export function createFinanceService({
     }
   }
 
-  async function serializeAccounts(rows: Array<typeof financeAccounts.$inferSelect>) {
-    return serializeFinanceAccountRows(db, rows);
+  async function serializeAccounts(
+    rows: Array<typeof financeAccounts.$inferSelect>,
+    includeArtwork = false,
+  ) {
+    return serializeFinanceAccountRows(db, rows, includeArtwork);
   }
   async function reimbursementProjection(
     userId: string,
@@ -2595,8 +2610,9 @@ export function createFinanceService({
     executor: FinanceReviewExecutor = db,
     context?: MutationContext,
     source?: MaterialSourceReference,
+    reviewPolicy?: "preserve_open_context_rationale",
   ) {
-    const [existing] = await executor
+    const existingQuery = executor
       .select()
       .from(financeReviewCases)
       .where(
@@ -2608,6 +2624,7 @@ export function createFinanceService({
       )
       .orderBy(desc(financeReviewCases.updatedAt))
       .limit(1);
+    const [existing] = await (reviewPolicy ? existingQuery.for("update") : existingQuery);
     if (existing) {
       if (
         existing.reason === reason &&
@@ -2615,6 +2632,37 @@ export function createFinanceService({
         existing.rationale === rationale
       ) {
         return existing;
+      }
+      if (
+        reviewPolicy === "preserve_open_context_rationale" &&
+        existing.reason === reason &&
+        existing.suggestedCategoryId === suggestedCategoryId
+      ) {
+        // The background caller already holds owner/account/transaction locks in canonical order.
+        // Hold review and exact native ownership through commit, including the absent-question case.
+        const [openContext] = await executor
+          .select({ id: financeContextualQuestions.id })
+          .from(financeContextualQuestions)
+          .innerJoin(
+            financeTransactions,
+            and(
+              eq(financeTransactions.id, transactionId),
+              eq(financeTransactions.userId, userId),
+              eq(financeContextualQuestions.accountId, financeTransactions.accountId),
+            ),
+          )
+          .where(
+            and(
+              eq(financeContextualQuestions.userId, userId),
+              eq(financeContextualQuestions.transactionId, transactionId),
+              eq(financeContextualQuestions.reviewCaseId, existing.id),
+              eq(financeContextualQuestions.subtype, contextualSubtype),
+              eq(financeContextualQuestions.state, "open"),
+            ),
+          )
+          .limit(1)
+          .for("share");
+        if (openContext) return existing;
       }
       const [updated] = await executor
         .update(financeReviewCases)
@@ -4028,6 +4076,8 @@ export function createFinanceService({
     mutateFinanceBudgetBucket: budgetBuckets.mutate,
     updateFinanceAccount: canonicalAccounts.update,
     disconnectFinanceAccount: canonicalAccounts.disconnect,
+    previewFinanceAccountDuplicate: canonicalAccounts.previewDuplicate,
+    resolveFinanceAccountDuplicate: canonicalAccounts.resolveDuplicate,
     getFinanceTransaction: canonicalLedger.getTransaction,
     removeFinanceTransaction: canonicalLedger.removeTransaction,
     splitFinanceTransaction: canonicalLedger.splitTransaction,
@@ -4220,6 +4270,9 @@ export function createFinanceService({
       return serializeAttentionItem(saved);
     },
 
+    plaidEnvironment() {
+      return plaidEnvironment ?? null;
+    },
     plaidAvailable() {
       return Boolean(plaid);
     },
@@ -4274,7 +4327,10 @@ export function createFinanceService({
         );
       }
     },
-    async getGuidedSetupContext(userId: string): Promise<FinanceGuidedSetupContext> {
+    async getGuidedSetupContext(
+      userId: string,
+      includeArtwork = false,
+    ): Promise<FinanceGuidedSetupContext> {
       const snapshotTime = now();
       const [user] = await db
         .select({ planningTimezone: users.planningTimezone })
@@ -4382,7 +4438,7 @@ export function createFinanceService({
         unavailableReason: available ? null : unavailableReason,
       });
       return {
-        accountSources: await serializeAccounts(accountRows),
+        accountSources: await serializeAccounts(accountRows, includeArtwork),
         alertSummary: {
           open: alerts.length,
           warnings: alerts.filter((item) => item.severity === "warning").length,
@@ -4884,8 +4940,31 @@ export function createFinanceService({
       for (const userId of userIds) await refreshCashflowIntelligence(userId);
       return { processed: userIds.length };
     },
-    async createPlaidLinkToken(userId: string) {
+    async createPlaidLinkToken(userId: string, accountId?: string) {
+      let accessToken: string | undefined;
+      if (accountId) {
+        const item = await providerItems.resolveItemForAccount(userId, accountId);
+        if (!encryptionKey || !item.providerItemId)
+          throw new AppError(
+            "conflict",
+            "This bank connection needs recovery before reconnecting.",
+          );
+        const credentials = decryptJson(item.encryptedCredentials, encryptionKey);
+        if (
+          typeof credentials !== "object" ||
+          credentials === null ||
+          !("accessToken" in credentials) ||
+          typeof credentials.accessToken !== "string" ||
+          !credentials.accessToken
+        )
+          throw new AppError(
+            "conflict",
+            "This bank connection needs recovery before reconnecting.",
+          );
+        accessToken = credentials.accessToken;
+      }
       return getPlaid().createLinkToken({
+        ...(accessToken ? { accessToken } : {}),
         clientName: "nohmi",
         countryCodes: ["US"],
         language: "en",
@@ -4895,6 +4974,161 @@ export function createFinanceService({
         userId,
       });
     },
+    async completePlaidReconnect(
+      accountId: string,
+      input: { idempotencyKey: string },
+      context: FinanceMutationContext,
+    ) {
+      await requireFinanceExecution(db, context, now());
+      return executeFinanceIdempotently(
+        db,
+        context,
+        {
+          operation: "finance.account.reconnect",
+          requireUserAdmission: true,
+          idempotencyKey: input.idempotencyKey,
+          payload: { accountId },
+        },
+        async (tx) => {
+          await requireFinanceExecution(tx, context, now());
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${context.userId}`}, 0))`,
+          );
+          const item = await providerItems.resolveItemForAccount(context.userId, accountId);
+          const [lockedItem] = await tx
+            .select()
+            .from(financeProviderItems)
+            .where(
+              and(
+                eq(financeProviderItems.id, item.id),
+                eq(financeProviderItems.userId, context.userId),
+              ),
+            )
+            .for("update");
+          const accounts = await tx
+            .select()
+            .from(financeAccounts)
+            .where(
+              and(
+                eq(financeAccounts.providerItemRecordId, item.id),
+                eq(financeAccounts.userId, context.userId),
+              ),
+            )
+            .orderBy(financeAccounts.id)
+            .for("update");
+          const account = accounts.find((candidate) => candidate.id === accountId);
+          if (
+            !lockedItem ||
+            !account?.providerAccountId ||
+            !lockedItem.providerItemId ||
+            !encryptionKey
+          )
+            throw new AppError(
+              "conflict",
+              "This bank connection needs recovery before reconnecting.",
+            );
+          if (
+            (lockedItem.syncClaimId &&
+              lockedItem.syncClaimExpiresAt &&
+              lockedItem.syncClaimExpiresAt > now()) ||
+            accounts.some(
+              (candidate) =>
+                candidate.syncClaimId &&
+                candidate.syncClaimExpiresAt &&
+                candidate.syncClaimExpiresAt > now(),
+            )
+          )
+            throw new AppError(
+              "conflict",
+              "This bank connection is synchronizing. Retry reconnect completion shortly.",
+            );
+          const credentials = decryptJson(lockedItem.encryptedCredentials, encryptionKey);
+          if (
+            typeof credentials !== "object" ||
+            credentials === null ||
+            !("accessToken" in credentials) ||
+            typeof credentials.accessToken !== "string" ||
+            !credentials.accessToken
+          )
+            throw new AppError(
+              "conflict",
+              "This bank connection needs recovery before reconnecting.",
+            );
+          const provider = getPlaid();
+          const verifiedItem = await provider.getItem(credentials.accessToken);
+          if (verifiedItem.itemId !== lockedItem.providerItemId)
+            throw new AppError(
+              "conflict",
+              "The bank authorization does not match the existing connection.",
+            );
+          const snapshots = await provider.getAccounts(credentials.accessToken);
+          const snapshot = snapshots.find(
+            (remote) => remote.accountId === account.providerAccountId,
+          );
+          if (!snapshot)
+            throw new AppError(
+              "conflict",
+              "The selected account is unavailable in this bank authorization.",
+            );
+          await requireFinanceExecution(tx, context, now());
+          const reset = {
+            nextSyncAt: now(),
+            syncState: "stale" as const,
+            syncError: null,
+            syncErrorCategory: null,
+            syncErrorCode: null,
+            syncFailureCount: 0,
+            syncRecovery: null,
+            syncClaimId: null,
+            syncClaimExpiresAt: null,
+            updatedAt: now(),
+          };
+          await tx
+            .update(financeProviderItems)
+            .set({
+              ...reset,
+              syncClaimOwner: null,
+              syncClaimGeneration: null,
+              syncClaimStartedAt: null,
+            })
+            .where(eq(financeProviderItems.id, lockedItem.id));
+          await tx
+            .update(financeAccounts)
+            .set(reset)
+            .where(
+              inArray(
+                financeAccounts.id,
+                accounts.map((candidate) => candidate.id),
+              ),
+            );
+          await tx
+            .update(financeAccounts)
+            .set({
+              status: "connected",
+              providerInstitutionId: snapshot.institutionId ?? null,
+              providerAccountMask: snapshot.mask ?? null,
+              providerPersistentAccountId: snapshot.persistentAccountId ?? null,
+              providerAccountName: snapshot.name,
+            })
+            .where(eq(financeAccounts.id, accountId));
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.plaid_reconnected",
+              before: null,
+              after: { id: accountId, synchronizationScheduled: true },
+              entityId: accountId,
+              entityType: "finance_account",
+              ...legacyMutationContext(context),
+            }),
+          );
+          return {
+            accountId,
+            authorizationVerified: true as const,
+            synchronizationScheduled: true as const,
+          };
+        },
+      );
+    },
     startFinanceAccountConnection: accountHandoff.start,
     completeFinanceAccountConnection: accountHandoff.complete,
     async exchangePlaidToken(
@@ -4902,18 +5136,62 @@ export function createFinanceService({
       context: MutationContext,
     ): Promise<FinanceAccount[]> {
       const plaid = getPlaid();
+      if (input.metadata) {
+        const duplicateIds = await providerItems.findDuplicateAccounts(
+          context.principal.userId,
+          input.metadata.accounts.map((account) => ({
+            ...account,
+            institutionId: input.metadata?.institutionId,
+          })),
+        );
+        if (duplicateIds.length > 0)
+          throw new AppError(
+            "conflict",
+            "These bank accounts are already connected. Review existing accounts before reconnecting.",
+            {
+              reason: "duplicate_bank_accounts",
+              accountIds: duplicateIds,
+            },
+          );
+      }
+      const authorization = await loadFinanceAuthorization({ db, ...context });
+      await requireFinanceExecution(db, authorization, now());
+      if (!encryptionKey)
+        throw new AppError("service_unavailable", "Bank credential storage is unavailable.");
       const { accessToken, itemId } = await plaid.exchangePublicToken(input.publicToken);
-      const accounts = await plaid.getAccounts(accessToken);
-      return providerItems.upsertConnection({
-        accessToken,
-        accounts,
-        context,
-        institution: input.institution ?? "Plaid",
-        itemId,
-        prepareTransaction: async (transaction) => {
-          await ensureCategories(context.principal.userId, transaction);
-        },
-      });
+      const connectionId = await accountHandoff.retainExchange(
+        { accessToken, itemId, institution: input.institution ?? "Plaid" },
+        authorization,
+      );
+      try {
+        const completed = await accountHandoff.complete(connectionId, authorization);
+        const rows = await db
+          .select()
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, context.principal.userId),
+              inArray(financeAccounts.id, completed.data.accountIds),
+            ),
+          );
+        return serializeAccounts(rows);
+      } catch (error) {
+        throw new AppError(
+          error instanceof AppError ? error.code : "service_unavailable",
+          error instanceof AppError
+            ? error.message
+            : "Bank authorization was retained securely. Retry completion to save its accounts.",
+          {
+            ...(error instanceof AppError &&
+            typeof error.details === "object" &&
+            error.details !== null
+              ? error.details
+              : {}),
+            connectionId,
+            recovery: "complete_connection",
+          },
+        );
+      }
     },
     async syncPlaidAccount(
       id: string,
@@ -7608,6 +7886,36 @@ export function createFinanceService({
         .where(or(isNull(financeTransactions.merchantId), isNull(financeTransactions.categoryId)))
         .orderBy(desc(financeTransactions.createdAt))
         .limit(limit);
+      class BusyContextualParent extends Error {
+        constructor(cause: unknown) {
+          super("The Finance learning parent is busy.", { cause });
+        }
+      }
+      function isKnownParentBusy(error: unknown): boolean {
+        const seen = new Set<object>();
+        let current: unknown = error;
+        let busy = false;
+        try {
+          for (let depth = 0; depth < 16; depth += 1) {
+            if (typeof current !== "object" || current === null || seen.has(current)) return false;
+            seen.add(current);
+            if ("code" in current) {
+              const code: unknown = current.code;
+              if (code !== "55P03") return false;
+              busy = true;
+            }
+            const cause: unknown = "cause" in current ? current.cause : undefined;
+            if (cause === undefined) return busy;
+            current = cause;
+          }
+        } catch {
+          return false;
+        }
+        return false;
+      }
+      const selected = rows.length;
+      let completed = 0;
+      let deferred = 0;
       for (const row of rows) {
         const enriched = await persistTransactionEnrichment(row);
         if (enriched.merchantId !== row.merchantId || enriched.categoryId !== row.categoryId) {
@@ -7631,16 +7939,44 @@ export function createFinanceService({
             }),
           );
         }
-        if (enriched.categoryId === null)
-          await putInReview(
-            row.id,
-            row.userId,
-            "unknown_merchant",
-            null,
-            "Backfilled without a confident category.",
-          );
+        if (enriched.categoryId === null) {
+          try {
+            await db.transaction(async (tx) => {
+              await guardFinanceExecutionTransaction(tx, row.userId, { hostSchedules: true });
+              const parent = await (async () => {
+                try {
+                  return await lockContextualTransaction(tx, row.userId, row.id, true);
+                } catch (error) {
+                  if (isKnownParentBusy(error)) throw new BusyContextualParent(error);
+                  throw error;
+                }
+              })();
+              if (!parent)
+                throw new AppError("not_found", "The Finance transaction is unavailable.");
+              return putInReview(
+                row.id,
+                row.userId,
+                "unknown_merchant",
+                null,
+                "Backfilled without a confident category.",
+                tx,
+                undefined,
+                undefined,
+                "preserve_open_context_rationale",
+              );
+            });
+          } catch (error) {
+            // A rejected native transaction has rolled back before this boundary.
+            if (!(error instanceof BusyContextualParent)) throw error;
+            deferred += 1;
+            continue;
+          }
+        }
+        completed += 1;
       }
-      return { processed: rows.length };
+      if (completed + deferred !== selected)
+        throw new Error("Finance learning completion accounting is inconsistent.");
+      return { processed: completed };
     },
     async createAccount(input: CreateFinanceAccountInput, context: MutationContext) {
       const row = await db.transaction(async (tx) => {
@@ -8636,6 +8972,7 @@ export function createFinanceService({
       ]);
       const { accountSemantics, totals } = summarizeFinanceAccounts(
         await serializeAccounts(accounts),
+        financeProviderDuplicateGroups(accounts),
       );
       const matchedCredit = matchedReimbursementCentsByCredit(matches);
       const observedAnnualIncome =

@@ -67,7 +67,7 @@ async function main() {
     );
     return;
   }
-  const deadline = Date.now() + 40 * 60 * 1000;
+  const deadline = Date.now() + 55 * 60 * 1000;
   while (Date.now() < deadline) {
     const observation = stableObservation(
       new SourceClient(repository, number, Math.min(120000, deadline - Date.now())),

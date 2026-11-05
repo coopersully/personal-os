@@ -33,11 +33,17 @@ describe("Finance Activity client", () => {
       from: "2026-10-01T00:00:00Z",
       through: "2026-10-18T00:00:00Z",
     });
+    await activity.listFinanceActivity({ type: "notification_delivery", limit: 5 });
+    await activity.listFinanceActivity({ includeNotificationDeliveries: true });
+    await activity.listFinanceActivity({ includeNotificationDeliveries: false });
     expect(vi.mocked(request).mock.calls).toEqual([
       ["/v1/finances/activity"],
       [
         "/v1/finances/activity?cursor=signed%2Bcursor%2F%3D%3D&limit=10&type=human_answer_decision&actor=user&recordId=record%2Fid&from=2026-10-01T00%3A00%3A00Z&through=2026-10-18T00%3A00%3A00Z",
       ],
+      ["/v1/finances/activity?limit=5&type=notification_delivery"],
+      ["/v1/finances/activity?includeNotificationDeliveries=true"],
+      ["/v1/finances/activity?includeNotificationDeliveries=false"],
     ]);
   });
 });

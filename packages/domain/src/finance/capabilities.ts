@@ -289,6 +289,13 @@ export const financeCapabilityManifest = [
     requiredScope: "finances:write",
   },
   {
+    apiOperation: "readFinanceProviderTransactionEvidence",
+    capability: "ledger.provider_transaction_evidence",
+    mcpTool: "read_finance_provider_transaction_evidence",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
     apiOperation: "listFinanceTransactions",
     capability: "ledger.transaction_list",
     mcpTool: "list_finance_transactions",

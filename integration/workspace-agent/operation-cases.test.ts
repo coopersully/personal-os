@@ -27,6 +27,8 @@ it("exposes domain input fields instead of silently narrowing workspace mutation
     list_task_workspace: domain.taskWorkspaceQuerySchema,
     list_finance_accounts: domain.financeAccountQuerySchema,
     list_finance_transactions: domain.financeTransactionQuerySchema,
+    read_finance_provider_transaction_evidence:
+      domain.financeProviderTransactionEvidenceInputSchema,
     list_finance_budget_buckets: domain.financeBudgetBucketQuerySchema,
     list_finance_review_history: domain.financeReviewHistoryQuerySchema,
     get_finance_maintenance_history: domain.financeMaintenanceHistoryQuerySchema,

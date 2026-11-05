@@ -1621,7 +1621,8 @@ describe("Personal OS MCP server", () => {
       expect(tool.annotations).toEqual({
         destructiveHint: false,
         idempotentHint: true,
-        openWorldHint: false,
+        // This exact read reaches the provider; the remaining Finance reads use local material.
+        openWorldHint: tool.name === "read_finance_provider_transaction_evidence",
         readOnlyHint: true,
       });
     }

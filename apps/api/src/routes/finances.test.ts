@@ -15,6 +15,59 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("reads historical evidence with read-only scope, exact presenting session and no-store", async () => {
+    const app = new Hono<AppEnv>();
+    let scopes = new Set<AccessScope>(["finances:read"]);
+    let actorType: "user" | "agent" = "user";
+    const readFinanceProviderTransactionEvidence = vi.fn(async () => ({
+      coverage: "unavailable",
+      reason: "not_initialized",
+    }));
+    app.use("*", async (c, next) => {
+      c.set("principal", { actorId: id, actorType, scopes, userId: id });
+      await next();
+    });
+    app.onError(errorResponse);
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: {} as FinanceStatusService,
+      finances: { readFinanceProviderTransactionEvidence } as unknown as ReturnType<
+        typeof createFinanceService
+      >,
+      mutationContext: (c) => ({ principal: c.get("principal"), requestId: "history-read" }),
+    });
+    const request = (body: unknown, session = true) =>
+      app.request("/v1/finances/provider-transaction-evidence", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(session ? { authorization: "Session synthetic-history-session" } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+    const response = await request({ transactionIds: [id] });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(readFinanceProviderTransactionEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: id }),
+      { transactionIds: [id] },
+      expect.stringMatching(/^[0-9a-f]{64}$/),
+    );
+    expect((await request({ transactionIds: [id], userId: id })).status).toBe(400);
+    expect((await request({ transactionIds: [id] }, false)).status).toBe(403);
+    actorType = "agent";
+    expect((await request({ transactionIds: [id] }, false)).status).toBe(200);
+    expect(readFinanceProviderTransactionEvidence).toHaveBeenLastCalledWith(
+      expect.objectContaining({ actorType: "agent" }),
+      { transactionIds: [id] },
+      undefined,
+    );
+    scopes = new Set();
+    expect((await request({ transactionIds: [id] })).status).toBe(403);
+    expect(readFinanceProviderTransactionEvidence).toHaveBeenCalledTimes(2);
+  });
+
   it("reads configuration only for the authenticated owner without write scope", async () => {
     const app = new Hono<AppEnv>();
     let scopes = new Set<AccessScope>(["finances:read"]);

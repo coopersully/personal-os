@@ -7,11 +7,13 @@ import {
   financeAccountConnections,
   financeAccounts,
   financeCategories,
+  financeTransactionAllocations,
   financeTransactions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import { createFinanceAccountService } from "./account-service.js";
 import { loadFinanceAuthorization } from "./context.js";
@@ -60,6 +62,120 @@ describe.sequential("canonical Finance account and ledger mutations", () => {
   afterAll(async () => {
     await database.close();
     await container.stop();
+  });
+
+  it("reads the owned transaction version with its active saved allocations without changing history", async () => {
+    const service = createFinanceLedgerService({ db: database.db, now: () => new Date() });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        userId,
+        provider: "manual",
+        institution: "Allocation Bank",
+        name: "Allocation wallet",
+      })
+      .returning();
+    const categories = await database.db
+      .insert(financeCategories)
+      .values([
+        {
+          userId,
+          name: "Allocation rent",
+          slug: "allocation-rent",
+          group: "needs",
+          color: "#123456",
+        },
+        {
+          userId,
+          name: "Allocation insurance",
+          slug: "allocation-insurance",
+          group: "needs",
+          color: "#654321",
+        },
+      ])
+      .returning();
+    if (!account || !categories[0] || !categories[1])
+      throw new Error("Allocation fixtures missing.");
+    const [row] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId,
+        accountId: account.id,
+        amount: 8700,
+        direction: "expense",
+        merchant: "Storage",
+        transactionDate: "2026-11-02",
+      })
+      .returning();
+    if (!row) throw new Error("Transaction fixture missing.");
+    const history = await database.db
+      .insert(financeTransactionAllocations)
+      .values([
+        {
+          userId,
+          transactionId: row.id,
+          allocationOrder: 1,
+          amount: 900,
+          categoryId: categories[1].id,
+          rationale: "Insurance",
+          treatment: "reimbursable",
+        },
+        {
+          userId,
+          transactionId: row.id,
+          allocationOrder: 0,
+          amount: 7800,
+          categoryId: categories[0].id,
+          rationale: "Rent",
+          treatment: "personal",
+        },
+        {
+          userId,
+          transactionId: row.id,
+          allocationOrder: 0,
+          amount: 8700,
+          categoryId: categories[0].id,
+          rationale: "Prior breakdown",
+          treatment: "personal",
+          state: "invalidated",
+          invalidatedAt: new Date(),
+        },
+      ])
+      .returning();
+    const loaded = await service.getTransaction(userId, row.id);
+    expect(loaded.data).toMatchObject({
+      amount: 87,
+      categoryId: null,
+      updatedAt: row.updatedAt.toISOString(),
+      version: Number(row.contextualRevision),
+    });
+    expect(loaded.data.allocations).toEqual(
+      history
+        .filter((item) => item.state === "active")
+        .sort((a, b) => a.allocationOrder - b.allocationOrder)
+        .map((item) => ({
+          id: item.id,
+          allocationOrder: item.allocationOrder,
+          amount: item.amount / 100,
+          categoryId: item.categoryId,
+          rationale: item.rationale,
+          treatment: item.treatment,
+          state: "active",
+          invalidatedAt: null,
+          revision: item.revision,
+        })),
+    );
+    await expect(service.getTransaction(crypto.randomUUID(), row.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(
+      await database.db
+        .select()
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, row.id)),
+    ).toEqual(expect.arrayContaining(history));
+    await database.db.delete(financeTransactions).where(eq(financeTransactions.id, row.id));
+    await database.db.delete(financeAccounts).where(eq(financeAccounts.id, account.id));
   });
 
   it("updates and disconnects an account without deleting its ledger", async () => {

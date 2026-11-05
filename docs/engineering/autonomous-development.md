@@ -8,12 +8,16 @@ Use [agent handoffs](agent-handoffs.md) for packet, evidence, and revision forma
 [research note](autonomous-development-research.md) explains the design precedents and deferred
 runtime work; it is background for maintainers, not required context for every worker.
 
-Use the user-installed `nohmi-orchestrator` (`~/.codex/skills/nohmi-orchestrator/SKILL.md`)
+Use the repository `oversight` skill (`.agents/skills/oversight/SKILL.md`)
 as the canonical coordination entrypoint. Apply [epic planning and launch](epic-delivery.md) and
-the repository `oversight` compatibility runbook for repository-specific intake, admission and
+the repository `oversight` runbook for repository-specific intake, admission and
 Codex section constraints. These existing roles perform coordination without a fourth supervisor.
 Planning alone never activates the network; repository security, role and delivery policy remains
 authoritative.
+
+The repository `nohmi-project-manager` supplies the portfolio/head entrypoint; `oversight` supplies
+the outcome entrypoint. These are distinct responsibilities, not duplicate delivery owners. Personal
+discovery routes to repository policy and must not become a second editable Nohmi implementation.
 
 ## Three roles
 
@@ -42,24 +46,15 @@ An unavailable worker is resumed or explicitly replaced; its orchestrator does n
 ## Execution model
 
 Keep one persistent automation-head task for the selected queue and one persistent orchestrator
-task per coherent outcome. Implementation workers run as subagents by default; an orchestrator
-uses a separate read-only reviewer subagent before final acceptance. Skills define role behavior
-regardless of whether the host runs that role as a task or subagent. The reviewer reports findings;
-the orchestrator retains acceptance and merge responsibility. Reviewers never implement or merge.
+task per coherent outcome. Use exactly one dedicated implementation chat per direct issue;
+reuse its verified owner. Never give one implementation chat multiple direct issues or create two
+owners for the same issue. Scoped implementation subagents assist that owner; independent reviewers
+remain read-only subagents. The orchestrator retains acceptance and protected merge responsibility.
 
-Use one implementation worker for a small coherent outcome. Add parallel workers only for independent
-work with explicit ownership and stable interfaces. Keep the agent tree shallow: the orchestrator
-directly supervises workers and reviewers. Additional nested agents require a concrete independent
-subtask and available capacity; do not create a management layer for each implementation step.
-Count active agents across the network, including reviewers and nested agents, against host and
-user limits. Inspect the host's counting rules rather than assuming a universal slot count.
-
-Give a worker a standalone task only when it needs independent scheduled follow-up, direct ongoing
-user collaboration, or a separate execution environment that the subagent host cannot provide.
-Record the reason, preserve its dispatch/branch/PR/checkpoint identity, stop the previous executor,
-and transfer ownership explicitly. Task creation still requires the user's task-creation authority.
-A long CI wait alone is not a reason to promote a worker: the orchestrator owns wakeups and can
-resume the worker when actionable feedback arrives.
+New user-owned chats require explicit creation authority. Recover existing combined or duplicate
+owners through checkpoints and a stopped, acknowledged transfer before replacement. Preserve
+unpushed work and unknown liveness; never create another writer merely to normalize presentation.
+Keep the agent tree shallow and account for active reviewers and nested agents against host limits.
 
 Subagent persistence, messaging, and restart support vary by host. Discover current capabilities;
 do not assume subagents are one-shot or that a prior handle remains usable after restart. Durable
@@ -69,14 +64,14 @@ Unknown liveness blocks replacement writes rather than allowing two owners to ra
 
 ## Epic presentation
 
-Represent each admitted epic with one Codex sidebar section named for the epic, preserving shared
+Represent each admitted epic with one Codex sidebar section named `<repo> - <epic>`, preserving shared
 sections and explicit user-protected names. Reuse the existing section ID when its
 identity and membership match. The head records the epic-to-section mapping; its existing outcome
 lead maintains members. Name oversight chats exactly `👀 - <epic name>` from their verified
 Nohmi epic parent; Cooper’s October 27 exception supersedes issue-prefix names for oversight only.
 Ordinary children retain `ISSUE-ID - Issue name` from their verified direct issue, following the
-current oversight contract and `nohmi-project-manager` checklist. Issue subjects are durable and
-concise: preferably one or two words, generally at most five. Keep phases and progress in records;
+current oversight contract and repository oversight portfolio checklist. Issue subjects are durable and
+concise: aim for 2–5 context-inclusive words. Keep phases and progress in records;
 multi-slice oversight retains its parent mapping. Preserve later explicit exceptions and
 unrelated/shared chats. The portfolio manager maps to
 COO-170 — Portfolio oversight, with its exact user-selected title `Nohmi project manager`.
@@ -92,7 +87,8 @@ uncertain section creation before retrying; verify presentation after mutations.
 heartbeat, verify live section name, membership/order and titles even when PRs and issues are unchanged, following
 the oversight skill’s per-wake check and saving readback in the same setup entry. Respect explicit
 user titles and existing ownership. Section maintenance does not authorize new tasks, schedulers,
-project moves, archival, or deletion. Apply the repository
+project moves or deletion. Automatic completion archival follows the oversight portfolio
+reference and its full acceptance/preservation checks. Apply the repository
 [mandatory kickoff/adoption gate](../../.agents/skills/oversight/SKILL.md#mandatory-kickoff-and-adoption-gate):
 missing or failed setup blocks new implementation dispatch and an established-oversight claim.
 Continue read-only context gathering and preserve already-running authorized owners; a presentation

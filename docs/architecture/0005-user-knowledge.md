@@ -136,8 +136,10 @@ the separately published Finance `0130` and Accounts `0131`; historical duplicat
 135 is preserved. `0132_persistent_knowledge_recovery` appends index 137 at `1793300055682`.
 Its transaction requires the exact Finance and Accounts timestamp/hash receipts before inspecting
 the five Knowledge relations. If all are absent, it creates the original-equivalent schema; if
-all are present, it validates columns/defaults, owner keys, foreign keys, indexes and relation
-behavior. Partial or incompatible catalogs fail without repair or an advanced recovery receipt.
+all are present, it validates columns and builtin default identities, owner keys, foreign keys
+and their enabled enforcement triggers, indexes and relation behavior. Partial or incompatible
+catalogs fail without repair or an advanced recovery receipt. The published common journal prefix
+retains its original array order; only the concurrent tail is composed.
 The original Knowledge receipt may remain absent on a skipped-cursor upgrade; recovery never
 fabricates it or rewrites existing records. Later migrations retain the caller's search path.
 

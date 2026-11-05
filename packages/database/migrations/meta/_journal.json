@@ -143,20 +143,6 @@
       "breakpoints": true
     },
     {
-      "idx": 26,
-      "version": "7",
-      "when": 1785025600000,
-      "tag": "0026_mail_workflow",
-      "breakpoints": true
-    },
-    {
-      "idx": 27,
-      "version": "7",
-      "when": 1785029200000,
-      "tag": "0027_mail_messages",
-      "breakpoints": true
-    },
-    {
       "idx": 20,
       "version": "7",
       "when": 1786831200000,
@@ -196,6 +182,20 @@
       "version": "7",
       "when": 1786849200000,
       "tag": "0025_weather_location_selection",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785025600000,
+      "tag": "0026_mail_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785029200000,
+      "tag": "0027_mail_messages",
       "breakpoints": true
     },
     {

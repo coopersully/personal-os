@@ -78,7 +78,9 @@ BEGIN
     SELECT jsonb_agg(jsonb_build_object(
         'name', a.attname, 'type', pg_catalog.format_type(a.atttypid,a.atttypmod),
         'notNull', a.attnotnull,
-        'default', regexp_replace(pg_catalog.pg_get_expr(d.adbin,d.adrelid), '(public|pg_catalog)\.', '', 'g'))
+        -- With search_path fixed to pg_catalog, builtins deparse unqualified;
+        -- public.now()/public.gen_random_uuid() retain their distinct identities.
+        'default', pg_catalog.pg_get_expr(d.adbin,d.adrelid))
         ORDER BY a.attnum)
       INTO actual_columns FROM pg_catalog.pg_attribute a
       LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
@@ -91,6 +93,26 @@ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM pg_catalog.pg_constraint WHERE conrelid=relation_oid
         AND (contype NOT IN ('p','u','f') OR NOT convalidated OR condeferrable OR condeferred))
+       OR EXISTS (
+         SELECT 1 FROM pg_catalog.pg_constraint fk
+         WHERE fk.conrelid=relation_oid AND fk.contype='f' AND (
+           (SELECT count(*) FROM pg_catalog.pg_trigger t WHERE t.tgconstraint=fk.oid) <> 4
+           OR EXISTS (
+             -- Verify both referencing checks and referenced actions, including users.
+             SELECT 1 FROM (VALUES
+               (fk.conrelid, 5, 'pg_catalog."RI_FKey_check_ins"()'::regprocedure::oid),
+               (fk.conrelid, 17, 'pg_catalog."RI_FKey_check_upd"()'::regprocedure::oid),
+               (fk.confrelid, 9, 'pg_catalog."RI_FKey_cascade_del"()'::regprocedure::oid),
+               (fk.confrelid, 17, 'pg_catalog."RI_FKey_noaction_upd"()'::regprocedure::oid)
+             ) required_trigger(target_relation, trigger_type, function_oid)
+             LEFT JOIN pg_catalog.pg_trigger t ON t.tgconstraint=fk.oid
+               AND t.tgrelid=required_trigger.target_relation
+               AND t.tgtype=required_trigger.trigger_type AND t.tgfoid=required_trigger.function_oid
+             WHERE t.oid IS NULL OR NOT t.tgisinternal OR t.tgenabled <> 'O'
+               OR t.tgdeferrable OR t.tginitdeferred
+           )
+         )
+       )
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_index i WHERE i.indrelid=relation_oid
         AND (NOT i.indisvalid OR NOT i.indisready OR i.indexprs IS NOT NULL OR i.indpred IS NOT NULL
           OR (i.indisunique AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint c

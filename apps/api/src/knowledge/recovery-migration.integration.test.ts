@@ -102,6 +102,25 @@ describe.sequential("append-only Knowledge migration recovery", () => {
     ).rows;
   }
 
+  it("preserves the published common journal prefix in its original array order", async () => {
+    const journal = JSON.parse(await readFile(join(folder, "meta/_journal.json"), "utf8")) as {
+      entries: Array<{
+        idx: number;
+        version: string;
+        when: number;
+        tag: string;
+        breakpoints: boolean;
+      }>;
+    };
+    // Immutable history through 0129, pinned from accepted base 9f19e3c2.
+    const prefix = journal.entries
+      .slice(0, 137)
+      .map((entry) => [entry.idx, entry.version, entry.when, entry.tag, entry.breakpoints]);
+    expect(createHash("sha256").update(JSON.stringify(prefix)).digest("hex")).toBe(
+      "12d031a8eda5539e3efd2947b41b15502bd6a3b2d409f50d76d398a809626d7a",
+    );
+  });
+
   it("creates the same catalog on a fresh chain and restores the caller search path", async () => {
     await migrateDatabase(database.db, folder);
     const fresh = await catalog();
@@ -249,6 +268,8 @@ describe.sequential("append-only Knowledge migration recovery", () => {
     "ALTER TABLE knowledge_sources DROP CONSTRAINT knowledge_sources_user_id_record_id_fkey; ALTER TABLE knowledge_sources ADD FOREIGN KEY(user_id,record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE NOT VALID",
     "ALTER TABLE knowledge_records ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE knowledge_records ADD CHECK(revision<10)",
+    "CREATE FUNCTION public.now() RETURNS timestamptz LANGUAGE sql AS 'SELECT ''2000-01-01''::timestamptz'; ALTER TABLE knowledge_records ALTER COLUMN created_at SET DEFAULT public.now()",
+    "CREATE FUNCTION public.gen_random_uuid() RETURNS uuid LANGUAGE sql AS 'SELECT ''00000000-0000-4000-8000-000000000001''::uuid'; ALTER TABLE knowledge_records ALTER COLUMN id SET DEFAULT public.gen_random_uuid()",
   ])("rejects incompatible complete catalog without repairing or advancing its receipt: %s", async (change) => {
     await history([recovery]);
     await database.pool.query(change);
@@ -256,6 +277,34 @@ describe.sequential("append-only Knowledge migration recovery", () => {
     await expect(migrateDatabase(database.db, folder)).rejects.toThrow();
     expect(await ledger()).toEqual(before);
     expect(await tableCount()).toBe(5);
+  }, 120_000);
+
+  it("rejects disabled FK enforcement without repairing triggers or advancing history", async () => {
+    await history([recovery]);
+    await database.pool.query("ALTER TABLE knowledge_sources DISABLE TRIGGER ALL");
+    const triggers = async () =>
+      (
+        await database.pool.query(
+          "SELECT tgname,tgenabled FROM pg_trigger WHERE tgrelid='knowledge_sources'::regclass ORDER BY tgname",
+        )
+      ).rows;
+    const beforeTriggers = await triggers();
+    expect(beforeTriggers.length).toBeGreaterThan(0);
+    expect(beforeTriggers.every((trigger) => trigger.tgenabled === "D")).toBe(true);
+    const beforeLedger = await ledger();
+    await expect(migrateDatabase(database.db, folder)).rejects.toThrow();
+    expect(await triggers()).toEqual(beforeTriggers);
+    expect(await ledger()).toEqual(beforeLedger);
+    const owner = await user();
+    // A negative owner reference really bypasses the disabled FK: this is an enforcement failure,
+    // not merely an unexpected trigger name. The recovery must refuse to certify this catalog.
+    await database.pool.query(
+      "INSERT INTO knowledge_sources(id,user_id,record_id,source) VALUES($1,$2,$3,'{}')",
+      [randomUUID(), owner, randomUUID()],
+    );
+    expect(
+      (await database.pool.query("SELECT count(*)::int AS count FROM knowledge_sources")).rows,
+    ).toEqual([{ count: 1 }]);
   }, 120_000);
 
   it("fails closed when the lower published dependency receipt is missing", async () => {

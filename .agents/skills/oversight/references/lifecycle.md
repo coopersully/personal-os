@@ -22,7 +22,7 @@ Existing implementation progress does not excuse missing setup; repair it before
 | Reviewed candidate frozen | One verification owner obtains complete local or equivalent hosted evidence |
 | Current candidate reviewed and verified | Outcome owner reviews its work, refreshes live gates and performs normal protected merge under standing authority; no routine permission question |
 | Merged but acceptance remains | Verify the explicit release/observation criteria; merging alone is insufficient |
-| Full outcome accepted | Report receipts and remaining unrelated work; cleanup only within its separate grant |
+| Full outcome accepted | Report receipts and remaining unrelated work; archive completed dedicated chats under the standing portfolio cleanup grant |
 
 Before dispatch, inspect the executor's current work and last instruction. Use one bounded handoff
 per owner, with checkout/branch/PR, applicable workflow, acceptance and permitted effects. Chain

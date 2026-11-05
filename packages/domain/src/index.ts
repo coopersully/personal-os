@@ -17,6 +17,7 @@ export * from "./finance/budget-approval.js";
 export * from "./finance/cashflow-timeline.js";
 export * from "./finance/goal-scenario-projection.js";
 export * from "./finance/recurring-cost-projection.js";
+export type { RepairContextHeldReason } from "./finance/repair-context-page.js";
 export * from "./finance/review-backlog.js";
 export * from "./finance/review-batch.js";
 export * from "./finance/spending.js";

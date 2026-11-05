@@ -1,6 +1,6 @@
 import type { FinanceCategory, FinanceTransaction } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CurrencyInput } from "@/components/currency-input";
 import { TrashIcon } from "@/components/icons";
 import {
@@ -26,6 +26,7 @@ type Row = {
   amount: string;
   categoryId: string;
   id: string;
+  rationale: string;
   treatment: "personal" | "reimbursable";
 };
 
@@ -43,23 +44,48 @@ export function TransactionBreakdownDialog({
   const queryClient = useQueryClient();
   const [rows, setRows] = useState<Row[]>([]);
   const [futureRule, setFutureRule] = useState(false);
+  const [openedUpdatedAt, setOpenedUpdatedAt] = useState<string | null>(null);
+  const initializedTransaction = useRef<string | null>(null);
   useEffect(() => {
-    if (!transaction || !open) return;
+    if (!transaction || !open) {
+      initializedTransaction.current = null;
+      return;
+    }
+    if (initializedTransaction.current === transaction.id) return;
     const firstCategory = transaction.categoryId ?? categories[0]?.id ?? "";
-    setRows([
-      {
-        amount: transaction.amount.toFixed(2),
-        categoryId: firstCategory,
-        id: crypto.randomUUID(),
-        treatment: "personal",
-      },
-      {
-        amount: "",
-        categoryId: firstCategory,
-        id: crypto.randomUUID(),
-        treatment: "reimbursable",
-      },
-    ]);
+    const saved = (transaction.allocations ?? [])
+      .filter((allocation) => allocation.state === "active")
+      .sort((left, right) => left.allocationOrder - right.allocationOrder);
+    setRows(
+      saved.length
+        ? saved.map((allocation) => ({
+            amount: allocation.amount.toFixed(2),
+            categoryId: allocation.categoryId,
+            id: allocation.id,
+            rationale: allocation.rationale?.trim()
+              ? allocation.rationale
+              : "User-entered transaction breakdown.",
+            treatment: allocation.treatment,
+          }))
+        : [
+            {
+              amount: transaction.amount.toFixed(2),
+              categoryId: firstCategory,
+              id: crypto.randomUUID(),
+              rationale: "User-entered transaction breakdown.",
+              treatment: "personal",
+            },
+            {
+              amount: "",
+              categoryId: firstCategory,
+              id: crypto.randomUUID(),
+              rationale: "User-entered transaction breakdown.",
+              treatment: "reimbursable",
+            },
+          ],
+    );
+    setOpenedUpdatedAt(transaction.updatedAt);
+    initializedTransaction.current = transaction.id;
     setFutureRule(false);
   }, [categories, open, transaction]);
   const expectedCents = Math.round((transaction?.amount ?? 0) * 100);
@@ -87,15 +113,15 @@ export function TransactionBreakdownDialog({
   const mutation = useFeedbackMutation({
     feedback: { action: "save this transaction breakdown", safeToRetry: false, form: true },
     mutationFn: async () => {
-      if (!transaction) throw new Error("Choose a transaction to split.");
+      if (!transaction || !openedUpdatedAt) throw new Error("Choose a transaction to split.");
       return api.setFinanceTransactionBreakdown(transaction.id, {
         allocations: activeRows.map((row) => ({
           amount: Number(row.amount),
           categoryId: row.categoryId,
-          rationale: "User-entered transaction breakdown.",
+          rationale: row.rationale,
           treatment: row.treatment,
         })),
-        expectedTransactionUpdatedAt: transaction.updatedAt,
+        expectedTransactionUpdatedAt: openedUpdatedAt,
         futureRule:
           futureRule && activeRows.length === 1
             ? {
@@ -109,6 +135,7 @@ export function TransactionBreakdownDialog({
     },
     onSuccess: async () => {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["finance-transaction", transaction?.id] }),
         queryClient.invalidateQueries({ queryKey: ["finance-transactions"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-reimbursements"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-status"] }),
@@ -213,6 +240,7 @@ export function TransactionBreakdownDialog({
                     amount: "",
                     categoryId: categories[0]?.id ?? "",
                     id: crypto.randomUUID(),
+                    rationale: "User-entered transaction breakdown.",
                     treatment: "personal",
                   },
                 ])

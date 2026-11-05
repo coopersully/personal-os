@@ -11,7 +11,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { decryptJson, encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
@@ -1740,9 +1740,9 @@ describe.sequential("Finance Provider Item service", () => {
       .select()
       .from(financeProviderItems)
       .where(
-        eq(
-          financeProviderItems.id,
-          account.providerItemRecordId ?? "00000000-0000-4000-8000-000000000000",
+        and(
+          eq(financeProviderItems.userId, userId),
+          eq(financeProviderItems.providerItemId, "history-item"),
         ),
       );
     if (!item) throw new Error("Fixture item missing.");

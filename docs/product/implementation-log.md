@@ -1,5 +1,16 @@
 # nohmi — Implementation Log
 
+## 2026-10-26 — Scoped knowledge save/read foundation
+
+- Added typed, owner-isolated knowledge persistence with initial immutable revisions, source attribution,
+  relationships, retry receipts, and redacted mutation audit events. Existing agent grants stay unchanged.
+- Registered authenticated API, typed client and MCP save/read paths require explicit knowledge scopes
+  and purpose; workspace/source grants are checked again on reads and retries. Sensitive agent access
+  remains blocked, and unsourced interpretations remain proposed inference.
+- Real PostgreSQL tests cover concurrent retries, owner isolation, live revocation and scope narrowing,
+  source revisions, disclosure inheritance, limits, deletion cascade, and the registered MCP/client/API path.
+  This is source evidence; production deployment and the remaining knowledge lifecycle are not claimed.
+
 ## 2026-10-22 — Native settings and populated source rows
 
 - Shipping review added audited profile-zone reconciliation, serialized first/last-name edits,

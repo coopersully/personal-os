@@ -964,6 +964,13 @@
     {
       "idx": 135,
       "version": "7",
+      "when": 1792812516993,
+      "tag": "0130_persistent_knowledge",
+      "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "7",
       "when": 1793289422144,
       "tag": "0130_finance_provider_account_identity",
       "breakpoints": true
@@ -973,6 +980,13 @@
       "version": "7",
       "when": 1793300055681,
       "tag": "0131_finance_institution_branding",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1793300055682,
+      "tag": "0132_persistent_knowledge_recovery",
       "breakpoints": true
     }
   ]

@@ -35,6 +35,8 @@ import { serializeUser } from "./serialization.js";
 import type { Principal } from "./types.js";
 
 const allScopes = new Set<AccessScope>([
+  "knowledge:read",
+  "knowledge:write",
   "audit:read",
   "automations:read",
   "automations:write",

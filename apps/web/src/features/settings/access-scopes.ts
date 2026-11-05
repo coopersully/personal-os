@@ -1,5 +1,7 @@
 import type { AccessScope } from "@personal-os/domain";
 export const scopeLabels: Record<AccessScope, string> = {
+  "knowledge:read": "Read purpose-bound shared knowledge",
+  "knowledge:write": "Save shared knowledge with source attribution",
   "mail:execute":
     "Execute Mail approvals, sending, and settings; with Calendar and Tasks execution, sync or disconnect shared sources when review bypass is enabled",
   "finances:execute":

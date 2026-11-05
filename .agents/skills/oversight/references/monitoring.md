@@ -54,9 +54,9 @@ before replacing an executor and preserve unpushed work.
 
 ## Reporting and continuation
 
-The personal procedure is quiet on unchanged passes. nohmi retains its explicit scheduled-report
-preference: each scheduled oversight wake ends with a short visible report, including unchanged
-state and its next trigger. Preserve an explicit user quiet/mute override and the saved notification
+Every heartbeat ends with the visible [status report](reporting.md), including unchanged
+state and its next trigger. Investigate missing/stale evidence in the same pass; report concrete
+failed recovery, never a generic Unverified status. Preserve an explicit user quiet/mute override and the saved notification
 policy; do not silently change existing monitors. Internal polling and manual callbacks need no
 repeated narration. Update checked-at metadata rather than appending duplicate private narratives.
 

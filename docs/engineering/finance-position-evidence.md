@@ -103,3 +103,45 @@ An explicit window adds `qualifiedCashflow`, the canonical occurrence/match view
 `rawCashflowContext` carries separate current schedules, balance bases, dated source snapshots and balance-statement source snapshots. Schedules are restricted to the explicit account set when provided. Balance-statement source evidence covers capped all-known account history, not just the requested date window; preserve its `complete`/`truncated` coverage and server transaction limit. Other source caps and unavailable responses remain canonical. These independent reads do not claim to form one atomic projection snapshot, and raw context does not establish confirmation or qualified arithmetic.
 
 All calls retain the current owner's `finances:read` authority. This intent introduces no new mutation grant or confirmation tool. Explicit schedule statements, occurrence matching/reversal and balance-basis confirmation remain authenticated-human consent boundaries in the canonical services, as do recurring-cost and saved-goal progress confirmations. The occurrence-list API is represented by the exact `qualifiedCashflow.schedule` result rather than a second MCP intent.
+
+## Private category room in canonical budget status
+
+`createProfileBudgetService.getFinanceBudgetStatus`, served by the existing Finance budget-status
+read, consumes the private `readFinanceBudgetRoom` reader and `projectFinanceBudgetRoom` calculation.
+The existing approved-plan data and observed Spending presentation remain unchanged. Room context
+uses the existing communication details and evidence disclosures; it adds no public DTO, route,
+notification sender, financial operation or authority.
+
+The status transaction supplies its authenticated owner, exact current approved plan/version and
+one observation instant. Baseline qualification, personal-cost Spending, position and canonical
+cashflow readers accept that caller-owned transaction rather than opening independent snapshots.
+The reader validates persisted budget ownership and version before projection. Composed input
+preflights retain at most the existing cashflow source ceiling plus one owner-ID row per source
+table. Exceeding that ceiling withholds the new room context before full row loading; evidence is
+never silently truncated. This bound does not certify source completeness or classify financial
+materiality. Spending covers the
+qualified budget accounts from the month's first day through the owner's current local date;
+future dates are not observed usage. Cashflow funding uses the owned cash-account subset, not debt
+or excluded accounts. A payday income identity must be explicitly attached to all income resources
+in the approved plan and unambiguous; deposits and legacy forecasts never substitute for it.
+
+Each category's current approved allocation is compared with canonical recognized contributions,
+not a displayed bucket total or an older immutable comparison target. Known observed amounts remain
+visible when history is incomplete, clearly labeled as observed budget remainder rather than usable
+cash. Missing current scope, coverage, freshness, recognition, producer revisions, commitments,
+protected floor or payday evidence withholds usable room. In particular, the current persistence
+position producer's missing commitment/protection facts remain unknown; an empty list cannot make
+them verified zero. This source change does not supply those missing confirmations.
+
+When compatible upstream funding and reservation facts are actually verified, the calculation caps
+an **estimated** category amount by both the remaining category allocation and qualified cash after
+reservations, and by the canonical before-payday protected-floor margin. These are intersecting
+constraints, not repeated subtraction of the same bill. Future cashflow never becomes verified room
+or spending permission. Category estimates share funding and cannot be added together; negative
+shortfalls stay negative. Unknown income and unconfirmed bills remain explicit.
+
+The private snapshot retains the actual budget/version, qualification ID/revision, Spending and
+position revisions, and canonical payday evidence. Its derived revision binds the owner, exact
+scope, observation, qualifications and producer values. It is a read identity, not a bearer token,
+a financial approval or proof of deployment. The read creates no review, mutation, SMS, schedule or
+provider operation. Runtime and personalized-attention acceptance remain separate.

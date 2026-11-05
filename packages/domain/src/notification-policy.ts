@@ -290,3 +290,176 @@ export type NotificationStatus = z.infer<typeof notificationStatusSchema>;
 export type PublishNotificationResult =
   | { state: "accepted"; intentIds: string[] }
   | { state: "unavailable"; reason: "producer_not_registered" | "delivery_not_enabled" };
+
+/** Machine reasons only; never echo arbitrary stored/provider text into a diagnostic result. */
+export const notificationDiagnosticReasonSchema = z.enum([
+  "resolved",
+  "expired",
+  "disabled",
+  "timezone_unavailable",
+  "delivery_uncertain",
+  "reminder_never",
+  "reminder_wait",
+  "retry_exhausted",
+  "retry_wait",
+  "quiet_hours",
+  "unavailable",
+  "stale",
+  "consent_changed",
+  "unsupported_delivery_shape",
+  "delivery_blocked",
+  "provider_rejected",
+  "unknown_reason",
+]);
+const notificationCurrentIntentSchema = z
+  .object({
+    basis: z.literal("current"),
+    work: financeHumanWorkRefSchema,
+    state: z.enum(["pending", "deferred", "blocked", "resolved"]),
+    reason: notificationDiagnosticReasonSchema.nullable(),
+  })
+  .strict();
+const notificationRecordedSubmissionSchema = z
+  .object({
+    basis: z.literal("attempt_record"),
+    connectionId: z.uuid().nullable(),
+    consentEpoch: z.int().positive().nullable(),
+    timeZone: z.string().min(1).max(120).nullable(),
+    timezoneRevision: isoDateTimeSchema.nullable(),
+  })
+  .strict();
+
+export const notificationAttemptLookupSchema = z.object({ attemptId: z.uuid() }).strict();
+
+/** Exact native inspection only. Current policy and missing history cannot become send authority. */
+export const notificationAttemptDetailSchema = z
+  .object({
+    id: z.uuid(),
+    state: notificationDeliveryStateSchema,
+    reason: notificationDiagnosticReasonSchema.nullable(),
+    createdAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+    dispatchRecordedAt: isoDateTimeSchema.nullable(),
+    initiatingActor: z.object({ basis: z.literal("unavailable") }).strict(),
+    membership: z
+      .array(
+        z
+          .object({
+            intentId: z.uuid(),
+            work: financeHumanWorkRefSchema,
+            currentIntent: notificationCurrentIntentSchema.nullable(),
+          })
+          .strict(),
+      )
+      .max(100),
+    policy: z
+      .object({
+        historicalPreferences: z
+          .object({ basis: z.literal("unavailable"), reason: z.literal("not_persisted") })
+          .strict(),
+        recordedAttempt: notificationRecordedSubmissionSchema,
+        current: z
+          .object({
+            basis: z.literal("current"),
+            timeZone: z.string().min(1).max(120),
+            timezoneRevision: isoDateTimeSchema,
+            preferences: z
+              .array(
+                z
+                  .object({
+                    scope: notificationScopeSchema,
+                    revision: z.int().positive(),
+                    preferences: notificationPreferencesSchema,
+                  })
+                  .strict(),
+              )
+              .max(2),
+            effective: notificationPreferencesSchema,
+            connection: z
+              .object({
+                id: z.uuid(),
+                state: z.enum([
+                  "active",
+                  "opted_out",
+                  "sync_error",
+                  "suspended",
+                  "disconnected",
+                  "unknown",
+                ]),
+                consentEpoch: z.int().positive(),
+                updatedAt: isoDateTimeSchema,
+                matchesRecordedEpoch: z.boolean().nullable(),
+              })
+              .strict()
+              .nullable(),
+          })
+          .strict(),
+      })
+      .strict(),
+    transport: z
+      .object({
+        message: z
+          .object({
+            id: z.uuid(),
+            status: z.enum([
+              "accepted",
+              "queued",
+              "sending",
+              "sent",
+              "delivered",
+              "undelivered",
+              "failed",
+              "unknown",
+            ]),
+            providerSubmittedAt: isoDateTimeSchema.nullable(),
+            sentAt: isoDateTimeSchema.nullable(),
+            deliveredAt: isoDateTimeSchema.nullable(),
+            updatedAt: isoDateTimeSchema,
+          })
+          .strict()
+          .nullable(),
+        callbackProvenance: z
+          .object({ basis: z.literal("unavailable"), reason: z.literal("not_persisted") })
+          .strict(),
+      })
+      .strict(),
+    coverage: z
+      .object({
+        state: z.literal("partial"),
+        membership: z.enum(["complete", "partial", "unavailable"]),
+        limit: z.literal(100),
+        returnedItems: z.int().min(0).max(100),
+        hasMore: z.boolean(),
+        reasons: z
+          .array(
+            z.enum([
+              "historical_policy_unavailable",
+              "callback_provenance_unavailable",
+              "membership_unavailable",
+              "membership_inconsistent",
+              "membership_limit",
+              "message_unavailable",
+              "intent_unavailable",
+              "connection_state_unrecognized",
+              "message_status_unrecognized",
+            ]),
+          )
+          .min(2)
+          .max(9),
+      })
+      .strict(),
+    recovery: z.enum(["inspect_delivery_do_not_resend", "review_in_app"]),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.coverage.returnedItems !== value.membership.length ||
+      (value.coverage.hasMore && value.coverage.membership !== "partial") ||
+      (value.coverage.membership === "complete" && value.membership.length === 0)
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Notification membership coverage is inconsistent.",
+      });
+  });
+export type NotificationAttemptDetail = z.infer<typeof notificationAttemptDetailSchema>;

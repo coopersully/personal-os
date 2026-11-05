@@ -139,6 +139,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
   var settings: (() -> Void)?
   var interactions = ActiveReminderInteractions() {
     didSet {
+      growCardsToConfiguredMinimum()
       for window in windows.values { window.interactions = interactions }
       updateConnections()
     }
@@ -250,6 +251,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
       hide()
       throw NativeError.message("No display is available for active reminders.")
     }
+    growCardsToConfiguredMinimum()
     refitGroups(includingHidden: true)
     updatingGroup = true
     var failure: Error?
@@ -385,14 +387,6 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
       appearance.titleLines = interactions.titleLines == "two" ? 2 : 1
       appearance.countdown = interactions.countdown
       panel.contentMinSize = interactions.minimumSize
-      if panel.frame.width < panel.contentMinSize.width
-        || panel.frame.height < panel.contentMinSize.height
-      {
-        panel.setContentSize(
-          CGSize(
-            width: max(panel.frame.width, panel.contentMinSize.width),
-            height: max(panel.frame.height, panel.contentMinSize.height)))
-      }
     }
   }
   var frameLayout: ((CGRect) -> PetGeometry?)?
@@ -982,6 +976,34 @@ extension ActiveReminderPanelController {
     updatingGroup = false
     updateConnections()
   }
+  /// Grow connected scenes together; constrained screens retain their safe scrollable frames.
+  /// Retrying on refresh lets a deferred group expand once neighboring space becomes available.
+  private func growCardsToConfiguredMinimum() {
+    guard gesture == nil, resizing.isEmpty, mouseButtons() & 1 == 0 else { return }
+    var available = windows.mapValues { $0.panel.frame }
+    let contacts = ActiveReminderGrouping.edges(available)
+    var visited = Set<String>()
+    for id in available.keys.sorted() where !visited.contains(id) {
+      let ids = ActiveReminderGrouping.component(id, edges: contacts)
+      visited.formUnion(ids)
+      let frames = available.filter { ids.contains($0.key) }
+      guard
+        frames.values.contains(where: {
+          $0.width < interactions.minimumSize.width || $0.height < interactions.minimumSize.height
+        }), let layout = layout(for: frames),
+        let next = ActiveReminderGrouping.reset(
+          frames, targets: ids, geometry: layout,
+          occupied: available.filter { !ids.contains($0.key) },
+          minimumSize: interactions.minimumSize, growOnly: true)
+      else { continue }
+      apply(next, save: true)
+      available.merge(next) { _, value in value }
+      for (key, frame) in next {
+        windows[key]?.attachedAnchor = ActiveReminderPlacement.anchors(in: layout, size: frame.size)
+          .firstIndex(where: { $0.equalTo(frame) })
+      }
+    }
+  }
   private func groupKey(_ ids: Set<String>) -> String { ids.sorted().joined(separator: "|") }
   private func refitGroups(includingHidden: Bool = false) {
     guard gesture == nil, resizing.isEmpty, mouseButtons() & 1 == 0 else { return }
@@ -1119,7 +1141,8 @@ extension ActiveReminderPanelController {
     let frames = visibleFrames
     guard let firstFrame = frames[first], let layout = layout(for: [first: firstFrame]),
       let stack = ActiveReminderGrouping.stack(
-        [first] + frames.keys.filter { $0 != first }.sorted(), near: firstFrame, geometry: layout)
+        [first] + frames.keys.filter { $0 != first }.sorted(), near: firstFrame, geometry: layout,
+        minimumSize: interactions.minimumSize)
     else {
       play(.failure)
       return false
@@ -1135,7 +1158,8 @@ extension ActiveReminderPanelController {
     guard let layout = layout(for: frames),
       let next = ActiveReminderGrouping.reset(
         frames, targets: all ? ids : [id], geometry: layout,
-        occupied: visibleFrames.filter({ !ids.contains($0.key) }))
+        occupied: visibleFrames.filter({ !ids.contains($0.key) }),
+        minimumSize: interactions.minimumSize)
     else {
       play(.failure)
       return

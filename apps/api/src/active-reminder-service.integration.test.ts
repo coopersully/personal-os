@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   createDatabaseClient,
@@ -11,6 +10,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createActiveReminderService } from "./active-reminder-service.js";
+import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
 
 const owner = randomUUID();
@@ -31,15 +31,12 @@ describe.sequential("active reminder API persistence", () => {
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine").start();
     database = createDatabaseClient(container.getConnectionUri());
-    const priorMigrations = await mkdtemp(resolve(tmpdir(), "active-reminder-migration-"));
+    const priorMigrations = await migrationsWithout(
+      resolve("packages/database/migrations"),
+      "active-reminder-migration-",
+      ["0132_active_reminder_creation_defaults"],
+    );
     try {
-      await cp(resolve("packages/database/migrations"), priorMigrations, { recursive: true });
-      const journalPath = resolve(priorMigrations, "meta/_journal.json");
-      const journal = JSON.parse(await readFile(journalPath, "utf8"));
-      journal.entries = journal.entries.filter(
-        (entry: { tag: string }) => entry.tag !== "0132_active_reminder_creation_defaults",
-      );
-      await writeFile(journalPath, JSON.stringify(journal));
       await migrateDatabase(database.db, priorMigrations);
     } finally {
       await rm(priorMigrations, { recursive: true, force: true });

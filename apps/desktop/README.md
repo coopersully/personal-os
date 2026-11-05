@@ -22,7 +22,7 @@ New mail uses durable API arrival IDs and per-device cursors. Initial imports, s
 
 ## Active cards
 
-Due opted-in tasks and reminders appear as independent 240 × 64 cards with live local time/countdowns. Drag anywhere, resize from invisible edges, and click a shared seam to lock a pair; Shift-click applies to the connected group. Locked pairs travel together. Shake a held card to gather the visible scene into a compact locked stack. Settings → Notifications includes this Mac’s interaction, return, sound/volume and Reduce Motion controls, independent of the existing account creation default.
+Due opted-in tasks and reminders appear as independent 240 × 64 cards with live local time/countdowns. Drag anywhere, resize from invisible edges, and click a shared seam to lock a pair; Shift-click applies to the connected group. Locked pairs travel together. Shake a held card to gather the visible scene into a compact locked stack. Settings → Active cards includes this Mac’s interaction, return, sound/volume and Reduce Motion controls, alongside independent account-wide Task and Reminder creation defaults.
 
 Right-click has eight commands with live native Shift group alternatives. Completion waits for each source acknowledgement. Snooze 15m persists locally before hiding the card and reschedules ordinary fallback. Group reset retains valid contacts, pair locks and docking, while screen/Dock occupancy checks reject unsafe layouts. Card state and pair intent remain account/server scoped.
 

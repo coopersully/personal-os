@@ -1,5 +1,13 @@
 # nohmi — Implementation Log
 
+## 2026-11-05 — Active cards migration catchup (branch implementation)
+
+Catching the Active cards branch up with Finance institution branding preserves both published
+0131 histories and the independent-default migration unchanged. The append-only 0133 expansion
+adds missing nullable branding columns for preview databases already past Finance's timestamp;
+existing branding, reminder flags and preference revisions remain unchanged. Historical migration
+fixtures cover main, the original active-reminder branch and the later independent-default branch.
+
 ## 2026-11-02 — Active cards settings (branch implementation)
 
 The Active cards Settings destination now owns independent account creation defaults and real

@@ -934,7 +934,8 @@ extension ActiveReminderLifecycleTests {
 extension ActiveReminderLifecycleTests {
   @MainActor
   func testFocusNeverHandsOffStaleUnshownInventoryAndFreshHandoffIsNotRepeated() throws {
-    let time = Date()
+    // Whole-second fixture time cannot round into the future when serialized without fractions.
+    let time = Date(timeIntervalSince1970: 1_793_900_000)
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
     let sink = ActiveTestSink()

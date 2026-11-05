@@ -197,6 +197,10 @@ export const personalOsToolCatalog = {
     ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
     { policy: "approved_rule", stage: "recover" },
   ),
+  get_notification_attempt: {
+    ...read("texting", ["texting:read", "finances:read"], "inspect", { openWorld: false }),
+    scopeMatch: "all",
+  },
   get_notification_settings: read("texting", ["texting:read", "finances:read"]),
   get_texting_connection: read("texting", ["texting:read"]),
   update_notification_settings: write(

@@ -525,8 +525,10 @@ describe("database schema contracts", () => {
       "0128_shared_agent_accounts",
       "0129_finance_review_batches",
       "0130_finance_provider_account_identity",
+      "0131_finance_institution_branding",
       "0131_active_reminders_reconcile",
       "0132_active_reminder_creation_defaults",
+      "0133_finance_branding_reconcile",
     ]);
   });
 

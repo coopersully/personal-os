@@ -18,7 +18,7 @@ struct ActiveReminderDisplay {
 extension ActiveReminderInteractions {
   var magnetRadius: CGFloat { magnet == "eager" ? 40 : 16 }
   var minimumSize: CGSize {
-    CGSize(width: 240, height: titleLines == "two" ? 92 * fontScale : 64 * max(1, fontScale))
+    CGSize(width: 240, height: ceil(titleLines == "two" ? 92 * fontScale : 64 * max(1, fontScale)))
   }
   var fontScale: CGFloat { textScale == "small" ? 0.85 : textScale == "large" ? 1.2 : 1 }
   func geometry(_ base: PetGeometry) -> PetGeometry {
@@ -114,14 +114,17 @@ enum ActiveReminderGrouping {
     }
     return result
   }
-  static func stack(_ ids: [String], near frame: CGRect, geometry: PetGeometry) -> [String: CGRect]?
-  {
+  static func stack(
+    _ ids: [String], near frame: CGRect, geometry: PetGeometry,
+    minimumSize: CGSize = minimum
+  ) -> [String: CGRect]? {
     guard !ids.isEmpty else { return [:] }
     let area = geometry.conservativeCardBounds ?? geometry.bounds
-    let rows = max(1, Int((area.height - 24) / minimum.height))
+    let rows = max(1, Int((area.height - 24) / minimumSize.height))
     let cols = Int(ceil(Double(ids.count) / Double(rows)))
     let size = CGSize(
-      width: CGFloat(cols) * minimum.width, height: CGFloat(min(ids.count, rows)) * minimum.height)
+      width: CGFloat(cols) * minimumSize.width,
+      height: CGFloat(min(ids.count, rows)) * minimumSize.height)
     guard size.width <= area.width - 24, size.height <= area.height - 24 else { return nil }
     let box = geometry.fitCard(
       CGRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height))
@@ -130,9 +133,9 @@ enum ActiveReminderGrouping {
         (
           id,
           CGRect(
-            x: box.minX + CGFloat(i / rows) * minimum.width,
-            y: box.maxY - CGFloat(i % rows + 1) * minimum.height,
-            width: minimum.width, height: minimum.height)
+            x: box.minX + CGFloat(i / rows) * minimumSize.width,
+            y: box.maxY - CGFloat(i % rows + 1) * minimumSize.height,
+            width: minimumSize.width, height: minimumSize.height)
         )
       })
     return valid(result, geometry: geometry, occupied: [:]) ? result : nil
@@ -140,13 +143,20 @@ enum ActiveReminderGrouping {
   /// Reflow the original contact graph, retaining partial joins and the docked outer edge.
   static func reset(
     _ frames: [String: CGRect], targets: Set<String>, geometry: PetGeometry,
-    occupied: [String: CGRect]
+    occupied: [String: CGRect], minimumSize: CGSize = minimum, growOnly: Bool = false
   ) -> [String: CGRect]? {
     guard let first = frames.keys.sorted().first else { return nil }
     let contacts = edges(frames)
     let old = bounds(frames)
     var next = frames.mapValues { $0 }
-    for id in targets { next[id]?.size = minimum }
+    for id in targets {
+      guard let frame = next[id] else { continue }
+      next[id]?.size =
+        growOnly
+        ? CGSize(
+          width: max(frame.width, minimumSize.width), height: max(frame.height, minimumSize.height))
+        : minimumSize
+    }
     var placed: Set<String> = [first]
     while placed.count < frames.count {
       var progress = false

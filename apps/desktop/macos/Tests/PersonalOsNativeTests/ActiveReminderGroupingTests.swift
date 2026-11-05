@@ -66,6 +66,105 @@ final class ActiveReminderGroupingTests: XCTestCase {
       for id in targets { XCTAssertEqual(next[id]?.size, ActiveReminderGrouping.minimum) }
     }
   }
+  @MainActor
+  func testConfiguredMinimumGrowthGatherResetAndRefreshPreserveLockedGroup() throws {
+    let presenter = ActiveReminderPanelController(
+      feedback: { _ in }, geometry: { PetGeometry(bounds: $0.visibleFrame, obstacles: []) })
+    defer { presenter.reset() }
+    let items = (0..<2).map { i in
+      ActiveReminderCandidate(
+        id: UUID().uuidString, kind: "task", title: "Large wrapped fixture \(i)",
+        dueAt: "2026-10-23T10:00:00Z", activeReminder: true, revision: 1)
+    }
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    let first = items[0].cardID
+    XCTAssertTrue(presenter.gather(first))
+    let locks = presenter.locks
+    var configured = presenter.interactions
+    configured.textScale = "large"
+    configured.titleLines = "two"
+    presenter.interactions = configured
+    func assertSafeMinimumGroup(file: StaticString = #filePath, line: UInt = #line) throws {
+      let frames = presenter.visibleFrames
+      XCTAssertEqual(presenter.locks, locks, file: file, line: line)
+      XCTAssertEqual(
+        ActiveReminderGrouping.component(first, edges: ActiveReminderGrouping.edges(frames)).count,
+        2, file: file, line: line)
+      let screen = try XCTUnwrap(presenter.panels[first]?.screen)
+      XCTAssertTrue(
+        ActiveReminderGrouping.valid(
+          frames,
+          geometry: configured.geometry(PetGeometry(bounds: screen.visibleFrame, obstacles: [])),
+          occupied: [:]), file: file, line: line)
+      for frame in frames.values {
+        XCTAssertGreaterThanOrEqual(
+          frame.height, configured.minimumSize.height, file: file, line: line)
+      }
+    }
+    try assertSafeMinimumGroup()
+    let grown = presenter.visibleFrames
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertEqual(presenter.visibleFrames, grown)
+    try assertSafeMinimumGroup()
+    presenter.resetSizes(first, all: true)
+    try assertSafeMinimumGroup()
+    XCTAssertTrue(presenter.gather(first))
+    try assertSafeMinimumGroup()
+    let gathered = presenter.visibleFrames
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertEqual(presenter.visibleFrames, gathered)
+    try assertSafeMinimumGroup()
+  }
+  @MainActor
+  func testMinimumGrowthDefersWithoutLosingLocksAndRetriesWhenSpaceReturns() throws {
+    let screen = try XCTUnwrap(NSScreen.screens.first)
+    var area = CGRect(
+      x: screen.visibleFrame.minX + 100, y: screen.visibleFrame.minY + 100,
+      width: 300, height: 170)
+    let presenter = ActiveReminderPanelController(
+      mouseButtons: { 0 }, feedback: { _ in },
+      geometry: { _ in PetGeometry(bounds: area, obstacles: []) },
+      displays: {
+        [
+          ActiveReminderDisplay(
+            frame: screen.frame, geometry: PetGeometry(bounds: area, obstacles: []))
+        ]
+      })
+    defer { presenter.reset() }
+    let items = (0..<2).map { i in
+      ActiveReminderCandidate(
+        id: UUID().uuidString, kind: "reminder", title: "Constrained \(i)",
+        dueAt: "2026-10-23T10:00:00Z", activeReminder: true, revision: 1)
+    }
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    let first = items[0].cardID
+    XCTAssertTrue(presenter.gather(first))
+    let frames = presenter.visibleFrames
+    let locks = presenter.locks
+    var configured = presenter.interactions
+    configured.textScale = "large"
+    configured.titleLines = "two"
+    presenter.interactions = configured
+    XCTAssertEqual(presenter.visibleFrames, frames)
+    XCTAssertEqual(presenter.locks, locks)
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertEqual(presenter.visibleFrames, frames)
+    XCTAssertEqual(presenter.locks, locks)
+    XCTAssertFalse(presenter.gather(first), "An impossible configured stack retains its safe scene")
+    presenter.resetSizes(first, all: true)
+    XCTAssertEqual(presenter.visibleFrames, frames)
+    XCTAssertEqual(presenter.locks, locks)
+    area.size.height = 500
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertEqual(presenter.locks, locks)
+    XCTAssertTrue(
+      ActiveReminderGrouping.valid(
+        presenter.visibleFrames,
+        geometry: configured.geometry(PetGeometry(bounds: area, obstacles: [])), occupied: [:]))
+    for frame in presenter.visibleFrames.values {
+      XCTAssertEqual(frame.size, configured.minimumSize)
+    }
+  }
   func testSnoozeAndPairEdgesPersistAndStayAccountScoped() throws {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       .appendingPathComponent("state")

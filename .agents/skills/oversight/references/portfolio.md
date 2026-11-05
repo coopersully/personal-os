@@ -30,4 +30,4 @@ For explicit branch/chat reconciliation, inspect live PRs, branches/worktrees an
 
 Organization uses current app membership, not recency order. Keep the coordinator first and use evidenced dependency/readiness order while preserving unrelated members. Refresh before reordering and read back changes. Follow project/user naming exceptions. Layout does not determine ownership or merge authority.
 
-The separate personal project-manager skill remains a future rebuild. These routing rules support bounded coordination in the meantime and do not grant portfolio-wide execution or cleanup authority.
+The repository [nohmi-project-manager](../../nohmi-project-manager/SKILL.md) owns portfolio judgment and compact PM check-ins. Oversight retains epic delivery; these routing rules do not grant portfolio-wide execution or cleanup authority.

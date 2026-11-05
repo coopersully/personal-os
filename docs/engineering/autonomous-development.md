@@ -15,6 +15,10 @@ Codex section constraints. These existing roles perform coordination without a f
 Planning alone never activates the network; repository security, role and delivery policy remains
 authoritative.
 
+The repository `nohmi-project-manager` supplies the portfolio/head entrypoint; `oversight` supplies
+the outcome entrypoint. These are distinct responsibilities, not duplicate delivery owners. Personal
+discovery routes to repository policy and must not become a second editable Nohmi implementation.
+
 ## Three roles
 
 | Role | Owns | Delegates |

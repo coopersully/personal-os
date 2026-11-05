@@ -105,7 +105,8 @@ Preserve valid verification evidence; do not rerun full suites per reviewer or m
 The Lead owns integrated acceptance and keeps delivery open through production observation and
 reconciliation. Merged children do not prove the integrated journey works. Close issues only when
 all their criteria pass. Section deletion, archival, worktree cleanup and production recovery retain
-their separate authority requirements; completion grants none of them.
+their separate authority requirements. The standing oversight portfolio grant covers completed-chat
+archival after its acceptance/preservation checks; it does not authorize branch/worktree deletion.
 
 ## Monitoring, reset and useful status
 

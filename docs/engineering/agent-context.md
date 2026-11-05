@@ -32,6 +32,7 @@ select the next required step without replaying completed work. Use this map for
 | Delivery identity and verification | [Work context](work-context.md), [PR rubric](pr-rubric.md) |
 | Engineering acceptance and adoption | [Acceptance contract](acceptance-contract.md), [code standards](code-standards.md), [code placement](code-placement.md) |
 | Fast verification and delivery ownership | [Verification efficiency](verification-efficiency.md), [handoff skill](../../.agents/skills/handoff/SKILL.md), [deep-review skill](../../.agents/skills/deep-review/SKILL.md) |
+| Product/portfolio judgment and cross-epic follow-through | [Nohmi project manager](../../.agents/skills/nohmi-project-manager/SKILL.md) |
 | Outcome coordination, lifecycle, monitoring and epic launch | Repository `oversight`, [epic delivery](epic-delivery.md), [repository oversight workflow](../../.agents/skills/oversight/SKILL.md) |
 | Development network roles and merge ownership | [Autonomous development](autonomous-development.md) |
 | Dispatch, checkpoints, and acceptance evidence | [Agent handoffs](agent-handoffs.md) |

@@ -482,6 +482,9 @@ export const personalOsToolCatalog = {
     destructive: true,
     policy: "approve_each",
   }),
+  read_finance_provider_transaction_evidence: read("finances", ["finances:read"], "inspect", {
+    openWorld: true,
+  }),
   get_finance_spending: read("finances", ["finances:read"], "inspect", { openWorld: false }),
   list_finance_spending_transactions: read("finances", ["finances:read"], "inspect", {
     openWorld: false,

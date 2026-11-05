@@ -76,8 +76,12 @@ planning trust when multiple included records are possible duplicates. Warnings 
 merge or deletion.
 
 The signed-in Accounts page offers **Compare duplicates** and requires choosing a connected,
-current account to keep. The server compares owner-scoped ledger entries by date, signed amount,
-currency, direction, merchant and pending state, counting matches as a multiset. These are possible
+current account to keep.
+The selector and comparison identify each local record with a stable reference, falling back to
+the full identifier when shortened references collide; identical names, masks and timestamps must
+not make keeper choices indistinguishable.
+The server compares owner-scoped ledger entries by date, signed amount, currency, direction,
+merchant and pending state, counting matches as a multiset. These are possible
 matching charges, not proof that two financial events are identical. Show overlapping and unique
 history counts, both account identities, freshness and the consequence before confirmation.
 
@@ -221,3 +225,57 @@ the authenticated owner and exact filters, and UI row identity includes the entr
 This source slice adds a read projection and fixtures, not end-to-end SMS acceptance. Focused unit,
 UI, type and PostgreSQL execution evidence must be recorded separately; authored fixtures and
 transport metadata alone do not establish production delivery or original-host consumption.
+
+## Historical transaction evidence reader
+
+The Plaid connector implements an optional `readTransactionHistory` adapter for exact provider
+Item, account and transaction identities within a requested date window. This source capability
+is consumed by an owner-scoped historical-evidence service, typed client and MCP read tool in the current source slice. Verification and deployment remain separate; source wiring does not grant production access or repair stored transactions. Synthetic connector tests establish the bounded adapter behavior; they do not
+establish production entitlement, institution retention or availability of any historical ID.
+
+Before `/transactions/get`, the adapter reads `/item/get` and requires the exact Item ID,
+Transactions in `billed_products`, a recorded successful Transactions update and no Item error.
+Missing initialization evidence stops the read rather than initializing Transactions. The adapter
+never refreshes, syncs, resets a cursor, reconnects, initializes a product or writes ledger fields.
+The Item's successful update time remains separate from the adapter's observation time.
+
+One call permits at most five accounts, 100 unique transaction targets and 366 inclusive calendar
+days. It requests at most five pages of 100 transactions, with a 15-second aggregate deadline
+covering metadata, fetch and response-body reads. Each response is capped at 128 KiB and the whole
+operation at 512 KiB, including metadata. Caller cancellation uses the same bounded read boundary;
+there are no inline retries. Inputs and provider identities are validated, and evidence entries
+project only the requested IDs and declared evidence fields, without credentials or extra input
+metadata.
+
+Evidence preserves the provider's signed source amount: positive is outflow, negative is inflow
+and zero has unknown direction. Only supported explicit transaction currency permits a normalized
+amount; missing or invalid currency stays unresolved without an account-currency fallback.
+Duplicate IDs or changing totals produce conflicting coverage. An Item/account/window mismatch
+rejects the evidence, including values observed on earlier pages.
+
+Coverage describes a non-atomic provider-available window. Exhausting that window permits a
+requested absent ID to be labeled missing; hitting a cap or a later read failure leaves absent
+IDs unobserved and any retained observations explicitly partial. Complete window enumeration
+never proves complete institution history or that an absent transaction never existed. Conflicts
+and partial observations are not authority to repair financial records.
+
+The composed reader accepts only 1–20 unique native transaction IDs, across at most five accounts
+on one Item and a window shorter than 366 days. Server-owned joins resolve exact provider identities;
+no caller may supply provider IDs, credentials or an initialization flag. It reads an owner-scoped,
+repeatable-read native snapshot, releases the transaction before the provider call, then revalidates
+ownership, topology, source revisions and current read authority. Any changed selection fails closed.
+The credential-private Item service invokes only the optional read adapter; absent capability never
+falls back to sync, refresh, reconnect or product initialization. Responses use explicit native IDs,
+provider-signed amounts and currencies, bounded coverage and separate observation/provider-update
+timestamps. No account-currency default or native economic-direction inference is permitted.
+
+`POST /v1/finances/provider-transaction-evidence` is a read/preview requiring `finances:read` and
+returns `Cache-Control: no-store`. The typed client and `read_finance_provider_transaction_evidence`
+MCP tool expose the same strict request and response. Bearer authority is revalidated after the
+external call. Human requests require an explicit authenticated `Session` header so the exact
+session can be rechecked; cookie-only transport is not supported by this endpoint. No financial
+record, decision, note, split, history, cursor, claim or audit is written by this reader. Ordinary
+request authentication retains its own existing activity bookkeeping; that is not reconciliation.
+Reads may still fail for provider entitlement, retention, transport or partial coverage. They do
+not authorize repair. Runtime provider invocation and production-equivalent authority remain
+separate acceptance; authored tests alone establish neither.

@@ -25,16 +25,19 @@ function AccountIdentity({
   account,
   label,
   count,
+  reference,
 }: {
   account: FinanceAccount;
   label: string;
   count: number;
+  reference: string;
 }) {
   return (
     <section aria-label={label} className="min-w-0 space-y-1">
       <h3 className="font-medium">
         {label}: {account.name}
       </h3>
+      <p className="text-sm break-all">Record {reference}</p>
       <p className="text-sm break-words">
         {account.institution} ·{" "}
         {account.accountMask ? `Ending in ${account.accountMask}` : "Account number unavailable"}
@@ -63,6 +66,11 @@ export function AccountDuplicateDialog({
   const [preview, setPreview] = useState<FinanceAccountDuplicatePreview | null>(null);
   const attempt = useRef<string | null>(null);
   const cancel = useRef<HTMLButtonElement>(null);
+  const accounts = [account, ...candidates];
+  const recordReference = (id: string) => {
+    const suffix = id.slice(-8);
+    return accounts.some((other) => other.id !== id && other.id.endsWith(suffix)) ? id : suffix;
+  };
   const eligible = candidates.filter(
     (candidate) =>
       candidate.id !== account.id &&
@@ -157,7 +165,7 @@ export function AccountDuplicateDialog({
               <NativeSelectOption value="">Choose an account</NativeSelectOption>
               {eligible.map((candidate) => (
                 <NativeSelectOption key={candidate.id} value={candidate.id}>
-                  {candidate.name} ·{" "}
+                  Record {recordReference(candidate.id)} · {candidate.name} ·{" "}
                   {candidate.accountMask
                     ? `Ending in ${candidate.accountMask}`
                     : candidate.institution}{" "}
@@ -177,11 +185,13 @@ export function AccountDuplicateDialog({
               <AccountIdentity
                 account={preview.keptAccount}
                 label="Keep tracking"
+                reference={recordReference(preview.keptAccount.id)}
                 count={preview.keptTransactionCount}
               />
               <AccountIdentity
                 account={preview.redundantAccount}
                 label="Stop tracking"
+                reference={recordReference(preview.redundantAccount.id)}
                 count={preview.redundantTransactionCount}
               />
               <p className="text-sm">

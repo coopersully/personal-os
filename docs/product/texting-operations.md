@@ -695,6 +695,14 @@ subscription-only confirmation, fixed queued batches, invocation claims and pers
 No model API fallback is configured. Claude account extra-usage settings and SMS transport charges
 remain outside nohmi's control.
 
+An existing scheduled Claude routine may also have an API trigger for this conversation. Its
+optional trigger credential is saved against the same active routine and authorization connection;
+the scheduled Finance cadence and instructions remain intact. Adding that credential does not
+convert the registered schedule into an event-only Finance host or enable immediate Finance
+continuation dispatch. Scheduled maintenance needs no API credential when general SMS replies are
+not enabled. The routine branches on the SMS event and handles only its saved batch; other
+invocations retain the existing Finance workflow.
+
 `/messages` displays chronological SMS history, delivery evidence and paginated run recovery.
 STOP/START messages are retained without becoming agent work. Original exact Finance reply flows
 retain their own authority; with general replies enabled, arbitrary text cannot silently become an

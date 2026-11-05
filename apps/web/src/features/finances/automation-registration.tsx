@@ -236,7 +236,7 @@ export function AutomationBinding({
   if (
     schedule.state === "active" &&
     schedule.hostSurface === "claude_code_routine" &&
-    schedule.trigger.type === "event"
+    (schedule.trigger.type === "event" || schedule.trigger.type === "scheduled")
   )
     return (
       <form
@@ -255,6 +255,12 @@ export function AutomationBinding({
         }}
       >
         <FieldGroup>
+          {schedule.trigger.type === "scheduled" && (
+            <p className="text-sm text-muted-foreground">
+              To enable automatic Texting replies, add this routine’s API trigger token. Its
+              scheduled Finance runs continue unchanged and do not require this token.
+            </p>
+          )}
           <Field>
             <FieldLabel htmlFor={`token-${schedule.id}`}>Routine API trigger token</FieldLabel>
             <Input

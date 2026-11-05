@@ -1,6 +1,7 @@
 import type {
   CheckTextingVerificationInput,
   FinanceTextReplyStatus,
+  NotificationAttemptDetail,
   NotificationPreferences,
   NotificationStatus,
   SendTextMessageInput,
@@ -18,6 +19,11 @@ export function createTextingApiClient(request: Request, toQuery: (query: object
   return {
     async getFinanceTextReplyStatus(inboundMessageId: string): Promise<FinanceTextReplyStatus> {
       return request(`/v1/texting/finance-replies/${encodeURIComponent(inboundMessageId)}/status`);
+    },
+    async getNotificationAttempt(attemptId: string): Promise<NotificationAttemptDetail> {
+      return request(`/v1/texting/notifications/attempts/${encodeURIComponent(attemptId)}`, {
+        cache: "no-store",
+      });
     },
     async getNotificationStatus(): Promise<NotificationStatus> {
       return request("/v1/texting/notifications");

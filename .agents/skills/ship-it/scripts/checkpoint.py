@@ -12,11 +12,96 @@ import stat
 import subprocess
 import tempfile
 import time
+import zlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 from acceptance import POLICY, evaluate_delivery, production_criterion_ids, sha, strings
+
+
+RAW_RETENTION_LIMIT = 256 * 1024
+COMPRESSED_RAW_LIMIT = 1024 * 1024
+CODEC_CHUNK_SIZE = 16 * 1024
+
+
+def compressed_retention(request, historical=False):
+    """Dispatch explicitly; older history keeps its original raw-byte semantics."""
+    policy = request.get("policyVersion")
+    if historical and type(policy) is int and policy < 9:
+        return False
+    if "retentionEncodingVersion" not in request:
+        return False
+    if (type(policy) is not int or policy != 9
+            or type(request["retentionEncodingVersion"]) is not int
+            or request["retentionEncodingVersion"] != 1):
+        raise ValueError("Recovery retention encoding or writer policy is unsupported")
+    return True
+
+
+def decode_retained(item, compressed, raw_remaining, stored_remaining):
+    """Bound allocation before decoding; raw identity is always the original file."""
+    if not isinstance(item, dict):
+        raise ValueError("Recovery retained evidence must be an object")
+    encoded = item.get("bytes")
+    if (not isinstance(encoded, str)
+            or len(encoded) > 4 * ((stored_remaining + 2) // 3)):
+        raise ValueError("Recovery retained bytes exceed their bound")
+    try:
+        stored = base64.b64decode(encoded, validate=True)
+        if len(stored) > stored_remaining:
+            raise ValueError("Recovery retained bytes exceed their bound")
+        if not compressed:
+            if item.get("encoding") != "base64" or len(stored) > raw_remaining:
+                raise ValueError("Recovery retained bytes are invalid")
+            return stored, len(stored)
+        length = item.get("rawLength")
+        if (item.get("encoding") != "zlib-base64" or type(length) is not int
+                or length < 0 or length > raw_remaining
+                or base64.b64encode(stored).decode("ascii") != encoded):
+            raise ValueError("Recovery compressed retention metadata is invalid")
+        decoder = zlib.decompressobj(zlib.MAX_WBITS)
+        chunks, size = [], 0
+        for offset in range(0, len(stored), CODEC_CHUNK_SIZE):
+            chunk = decoder.decompress(stored[offset:offset + CODEC_CHUNK_SIZE],
+                                       raw_remaining - size + 1)
+            size += len(chunk)
+            if size > raw_remaining or decoder.unconsumed_tail or decoder.unused_data:
+                raise ValueError("Recovery compressed retention exceeds its bound or has trailing data")
+            chunks.append(chunk)
+        if not decoder.eof or size != length:
+            raise ValueError("Recovery compressed retention is truncated or has the wrong size")
+        return b"".join(chunks), len(stored)
+    except (ValueError, TypeError, UnicodeError, zlib.error):
+        raise ValueError("Recovery retained encoding is invalid or exceeds its bound") from None
+
+
+def encode_retained(raw, compressed, raw_remaining, stored_remaining):
+    """One finite input, fixed codec and bounded compressed-output accumulation."""
+    if len(raw) > raw_remaining:
+        raise ValueError("Retained predecessor evidence exceeds its raw bound")
+    if compressed:
+        encoder = zlib.compressobj(wbits=zlib.MAX_WBITS)
+        parts, size = [], 0
+        for offset in range(0, len(raw), CODEC_CHUNK_SIZE):
+            part = encoder.compress(raw[offset:offset + CODEC_CHUNK_SIZE])
+            size += len(part)
+            if size > stored_remaining:
+                raise ValueError("Retained predecessor evidence exceeds its compressed bound")
+            parts.append(part)
+        # Input and each compressor chunk are bounded; flush drains only zlib's finite buffer.
+        part = encoder.flush(zlib.Z_FINISH)
+        if size + len(part) > stored_remaining:
+            raise ValueError("Retained predecessor evidence exceeds its compressed bound")
+        parts.append(part)
+        row = {"encoding": "zlib-base64", "rawLength": len(raw),
+               "bytes": base64.b64encode(b"".join(parts)).decode("ascii")}
+    else:
+        row = {"encoding": "base64", "bytes": base64.b64encode(raw).decode("ascii")}
+    decoded, stored_size = decode_retained(row, compressed, raw_remaining, stored_remaining)
+    if decoded != raw:
+        raise ValueError("Recovery retention roundtrip failed")
+    return row, stored_size
 
 
 def registry_root():
@@ -264,23 +349,27 @@ def validate_recovery_history(history):
         new_policy = type(request.get("policyVersion")) is int and request["policyVersion"] >= 8
         expected, provenance = recovery_evidence_bindings(
             request, references, entry.get("recoveredAt"), legacy_history=not new_policy)
-        actual, remaining = {}, 256 * 1024
+        compressed = compressed_retention(request, historical=True)
+        if compressed and [item.get("path") for item in retained if isinstance(item, dict)] != references:
+            raise ValueError("Recovery history retained evidence order is invalid")
+        actual = {}
+        remaining = COMPRESSED_RAW_LIMIT if compressed else RAW_RETENTION_LIMIT
+        stored_remaining = RAW_RETENTION_LIMIT
         for item in retained:
             try:
-                if not isinstance(item["bytes"], str) or len(item["bytes"]) > 4 * ((remaining + 2) // 3):
-                    raise ValueError("Recovery history retained bytes exceed their bound")
-                raw = base64.b64decode(item["bytes"], validate=True)
+                raw, stored_size = decode_retained(item, compressed, remaining, stored_remaining)
                 path, digest = item["path"], item["sha256"]
                 if new_policy and ((provenance and canonical_digest(item.get("provenance"))
                                     != canonical_digest(provenance.get(path)))
                                    or (not provenance and "provenance" in item)):
                     raise ValueError("Recovery history provenance is inconsistent")
-                if (item.get("encoding") != "base64" or not isinstance(path, str) or path in actual
+                if (not isinstance(path, str) or path in actual
                         or len(raw) > remaining or hashlib.sha256(raw).hexdigest() != digest):
                     raise ValueError("Recovery history retained bytes are invalid")
             except (KeyError, TypeError, ValueError):
                 raise ValueError("Recovery history retained bytes are invalid") from None
             remaining -= len(raw)
+            stored_remaining -= stored_size
             actual[path] = digest
         if actual != expected or set(actual) != set(references):
             raise ValueError("Recovery history retained evidence is incomplete")
@@ -352,7 +441,10 @@ def recover_plan(root, key, record, owner, payload):
     recovered_at = datetime.now(timezone.utc).isoformat()
     expected, provenance = recovery_evidence_bindings(payload, references, recovered_at)
     validate_provenance_continuity(payload, expected, provenance, unavailable)
-    retained, remaining = [], 256 * 1024
+    compressed = compressed_retention(payload)
+    retained = []
+    remaining = COMPRESSED_RAW_LIMIT if compressed else RAW_RETENTION_LIMIT
+    stored_remaining = RAW_RETENTION_LIMIT
     for reference in references:
         try:
             descriptor = os.open(reference, os.O_RDONLY | os.O_NONBLOCK)
@@ -367,9 +459,13 @@ def recover_plan(root, key, record, owner, payload):
             raise ValueError("Retained predecessor evidence is unavailable") from None
         if len(raw) > remaining or hashlib.sha256(raw).hexdigest() != expected[reference]:
             raise ValueError("Retained predecessor evidence exceeds its bound or differs from the accepted hash")
+        try:
+            encoded, stored_size = encode_retained(raw, compressed, remaining, stored_remaining)
+        except zlib.error:
+            raise ValueError("Recovery retention codec failed") from None
         remaining -= len(raw)
-        retained.append({"path": reference, "sha256": expected[reference], "encoding": "base64",
-                         "bytes": base64.b64encode(raw).decode("ascii")})
+        stored_remaining -= stored_size
+        retained.append({"path": reference, "sha256": expected[reference], **encoded})
         if provenance:
             retained[-1]["provenance"] = copy.deepcopy(provenance[reference])
     predecessor = copy.deepcopy(record)

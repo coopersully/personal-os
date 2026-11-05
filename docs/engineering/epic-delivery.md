@@ -1,8 +1,7 @@
 # Epic planning and launch
 
-Use the user-installed `nohmi-orchestrator` (`~/.codex/skills/nohmi-orchestrator/SKILL.md`)
-as the canonical coordination entrypoint. The repository `oversight` path remains a compatibility
-route with repository-specific kickoff, lifecycle and monitoring constraints; the
+Use the repository `oversight` skill (`.agents/skills/oversight/SKILL.md`)
+as the canonical coordination entrypoint. It owns kickoff, lifecycle and monitoring constraints; the
 [autonomous development contract](autonomous-development.md) governs roles and merge authority.
 This documents a workflow, not a running coordinator or automated admission validator.
 
@@ -63,7 +62,7 @@ never add either as launch ceremony. Preserve one owner for shared paths and con
    for ongoing monitoring, not merely adopting the oversight role.
 2. Verify repository/base, accessible role and acceptance contracts, host tools, isolated worktrees,
    shared claim protocol, provider access, independent review and enforceable merge gates. Use the
-   personal head's launch/recovery reference when installed. Missing capabilities block the affected
+   repository oversight lifecycle and monitoring references. Missing capabilities block the affected
    operation. Never test access with a merge or production mutation. Contracts must exist on the
    actual dispatch base; uncommitted guidance elsewhere is not inherited.
 3. Complete the [mandatory oversight kickoff/adoption gate](../../.agents/skills/oversight/SKILL.md#mandatory-kickoff-and-adoption-gate)
@@ -75,8 +74,8 @@ never add either as launch ceremony. Preserve one owner for shared paths and con
    UI/tracker failure leaves setup incomplete and blocks new implementation dispatch and an
    established-oversight claim. Continue read-only context gathering; do not interrupt already-running
    authorized owners or duplicate them. Reconcile partial effects before retrying.
-4. Reserve each dispatch and claim before creation. Persistent head/outcome chats use app task tools;
-   implementation/review subagents use collaboration tools. Follow [agent handoffs](agent-handoffs.md)
+4. Reserve each dispatch and claim before creation. Persistent head/outcome and one-per-issue implementation chats use app task tools;
+   scoped implementation/review subagents use collaboration tools. Follow [agent handoffs](agent-handoffs.md)
    for typed IDs, packet revisions and acknowledgements. Separately authorized new chats begin with
    setup/context only; verify their names, membership and issue links before implementation dispatch.
    Queued tasks are not ready. Unknown creation or owner liveness requires reconciliation, not retry
@@ -88,8 +87,7 @@ never add either as launch ceremony. Preserve one owner for shared paths and con
    slots for workers and reviewers; reserve scarce verification resources separately.
 6. Establish the real next trigger: bounded waits while active, a saved scoped heartbeat for
    authorized recurring work. Reuse matching monitors and preserve cadence/timezone. Apply the
-   current personal manager/orchestrator scheduled-report preference and the repository reporting
-   constraints (short visible report even unchanged), unless the
+   repository oversight reporting contract (short visible report on every heartbeat, even unchanged), unless the
    user explicitly requests quiet/muted reporting. A checkpoint is not a scheduler. Without a wakeup,
    report waiting and the responsible owner
    rather than claim unattended execution is running.
@@ -107,7 +105,8 @@ Preserve valid verification evidence; do not rerun full suites per reviewer or m
 The Lead owns integrated acceptance and keeps delivery open through production observation and
 reconciliation. Merged children do not prove the integrated journey works. Close issues only when
 all their criteria pass. Section deletion, archival, worktree cleanup and production recovery retain
-their separate authority requirements; completion grants none of them.
+their separate authority requirements. The standing oversight portfolio grant covers completed-chat
+archival after its acceptance/preservation checks; it does not authorize branch/worktree deletion.
 
 ## Monitoring, reset and useful status
 

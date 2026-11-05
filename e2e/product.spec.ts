@@ -488,6 +488,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
   const planningDate = await page.locator("h1 time").getAttribute("datetime");
   if (!planningDate) throw new Error("Today heading did not expose its planning date.");
   await openWorkspace("Calendar");
+  if ((page.viewportSize()?.width ?? 0) < 768)
+    await page.getByRole("button", { name: "Search Calendar", exact: true }).click();
   await page.getByRole("combobox", { name: "Search Calendar" }).fill("new event");
   await page.getByRole("option", { name: /New event/ }).click();
   await page.getByLabel("Event", { exact: true }).fill(eventTitle);
@@ -526,6 +528,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(todayEventLayout.textAlign).toBe("left");
   expect(todayEventLayout.withinTimeline).toBe(true);
   await openWorkspace("Calendar");
+  if ((page.viewportSize()?.width ?? 0) < 768)
+    await page.getByRole("button", { name: "Search Calendar", exact: true }).click();
   await page.getByRole("combobox", { name: "Search Calendar" }).fill("new event");
   await page.getByRole("option", { name: /New event/ }).click();
   await page.getByLabel("Event", { exact: true }).fill(allDayTitle);
@@ -662,7 +666,12 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(
     calendarActions.getByRole("button", { name: "Search calendar", exact: true }),
   ).toHaveCount(0);
-  await expect(page.getByRole("combobox", { name: "Search Calendar", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole((page.viewportSize()?.width ?? 0) < 768 ? "button" : "combobox", {
+      name: "Search Calendar",
+      exact: true,
+    }),
+  ).toBeVisible();
   for (const action of await page
     .getByRole("navigation", { name: "Calendar actions" })
     .getByRole("button")

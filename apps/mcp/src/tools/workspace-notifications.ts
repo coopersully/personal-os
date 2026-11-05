@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import {
+  notificationAttemptLookupSchema,
   notificationScopeSchema,
   resetFinanceNotificationPreferencesSchema,
   saveNotificationPreferencesSchema,
@@ -20,6 +21,17 @@ export function registerWorkspaceNotificationTools(server: McpServer, api: Perso
         await api.disconnectTexting();
         return { disconnected: true };
       }),
+  );
+
+  server.registerTool(
+    "get_notification_attempt",
+    {
+      title: "Get notification attempt",
+      description:
+        "Inspect one exact owned notification attempt and bounded native membership. Requires BOTH finances:read and texting:read. Current policy is labeled current; missing historical basis and callback provenance remain unavailable. This read never reconciles, sends or grants retry authority.",
+      inputSchema: notificationAttemptLookupSchema,
+    },
+    async ({ attemptId }) => apiResult(() => api.getNotificationAttempt(attemptId)),
   );
 
   server.registerTool(

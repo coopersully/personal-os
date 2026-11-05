@@ -112,6 +112,54 @@ they do not each run broad verification. One owner holds heavy shared-host capac
 independent checks and isolated hosted runners can proceed. Use checked-in lifecycle commands;
 never reset another owner’s database or kill their server to repair a test resource collision.
 
+### Classify observed work before admission
+
+Use `.codex/scripts/verification-admission.py` for the reusable, pure inventory classifications.
+It supplements the caller's admission checks; it neither probes the host nor grants capacity.
+The shared `verification-runner.py` still owns the OS lock and candidate freeze. Private one-off
+admission scripts must explicitly adopt the classifier; adding it does not repair their old copies.
+
+- Supply actual tokenized argv, PID, parent PID and observed presence from the same fresh snapshot.
+  `pnpm verify:pr`, `verify-pr.mjs` and the Jest CLI are material verification. Attribute worker
+  descendants through an observed verifier parent chain; a filename or keyword in reader output is
+  not executable identity. Seven queried PIDs do not mean seven active verifiers. Absent identities
+  cannot contribute stale argv or ancestry. Unknown live roles still require attribution.
+- Retain the complete container baseline, including exited and created resources. Classify activity
+  from actual Docker state, not existence in `docker ps -a` or a human-readable status substring.
+  Exited/created containers alone do not establish active verification. Running, restarting and
+  paused resources remain active for ownership/activity assessment; missing/unknown states stay
+  unresolved. Existing baseline-role, current activity, process-chain and resource checks still apply.
+- Never stop or delete another owner's process/container to obtain admission. Classification fixtures
+  prove these decisions only; they are not fresh host inventory, pressure samples or eligibility.
+
+### Complete authoring checks before hosted publication
+
+Before a push or PR creation can trigger hosted source verification, complete applicable native
+changed-file formatting/import checks with the candidate's own configuration and pinned existing
+tool. Record actual completion and final input hashes; a proposed command, later check or successful
+tool installation is not pre-publication proof. When a formatter writes, check the resulting final
+file before publication. Validate the exact proposed Work map with
+`.codex/scripts/check-pr-body.sh` and verify its live Nohmi project/direct issues before creating the PR.
+Metadata-only corrections revalidate the changed body without a source retry.
+
+For fixture changes, bundle the existing owner/reviewer's review of mock defaults, storage/clock
+state, async settlement/cleanup and assertion/error/timeout preservation with those authoring checks.
+Do not create a separate review panel or substitute authoring checks for behavior evidence.
+
+Reuse a completed applicable authoring receipt when file bytes, selected command, native tool and
+configuration/dependencies remain identical and no newer relevant failure exists. A new commit ID
+or base alone does not require repeating unchanged file formatting/import/lint checks. Reconcile
+changed file selection, comparison-sensitive checks and unknown dependencies explicitly. This narrow
+reuse does not waive the delivery contract's complete frozen-candidate verification.
+
+Allocate a finite conditional sequence once: setup only if missing, named focused checks, required
+type/contract closure, then the selected final local **or** equivalent hosted gate. Preserve each
+stage's command, bounds, preconditions and stop conditions. Do not request scheduling approval again
+for every unchanged authorized stage or repeat full local and hosted suites for the same closure.
+Fresh admission and the OS lock remain required at their existing boundaries; old capacity samples
+are never source-reuse evidence. A denial, unexpected failure or changed scope stops the sequence;
+continue only under the applicable recovery condition, not speculative reruns.
+
 The current planner binds whole-step receipts conservatively. It does not implement automatic
 per-check result reuse, a semantic test selector or narrower final readiness. Any future per-check
 reuse must bind command/arguments, working directory, policy/config/tool/runtime, relevant environment

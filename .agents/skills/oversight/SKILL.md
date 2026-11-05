@@ -1,22 +1,29 @@
 ---
 name: oversight
-description: Use when following a legacy nohmi oversight reference. Forward coordination to the user-installed nohmi-orchestrator and apply the repository kickoff, tracking and delivery constraints retained here.
+description: Coordinate nohmi epics and delivery across Linear issues, PRs and existing owners. Use for outcome oversight, adoption, heartbeats and bounded portfolio routing, not implementation or skill maintenance.
 ---
 
 # nohmi oversight
 
-Use the user-installed `nohmi-orchestrator` skill at
-`~/.codex/skills/nohmi-orchestrator/SKILL.md` as the canonical coordination entrypoint.
-This legacy path remains for existing callers and anchors; it does not define a second
-orchestrator or install or start one. If the personal entrypoint is unavailable, report the
-missing source and continue only work whose required context and authority are available.
+Be Cooper's discussion partner and delivery coordinator: define done, preserve ownership, move
+authorized work forward, and explain what matters next. This repository skill is self-contained;
+no personal coordination skill installation is required. Editing it does not activate oversight.
+Discussion and narrow status requests get focused answers, not a new delivery launch.
 
-The repository `AGENTS.md`, product, security, role, acceptance and delivery contracts remain
-authoritative. Apply the repository-specific kickoff, tracking and recovery constraints below
-alongside the personal entrypoint; its location does not waive them. For status vocabulary and
-per-schedule presentation, use the current user-installed `nohmi-project-manager` and
-`nohmi-orchestrator` instructions. Preserve existing scheduling grants, notification preferences
-and explicit exceptions; no new monitor or authority is created by this forwarding route.
+Read [product context](references/product-context.md) to ground scope and acceptance in nohmi's
+vision, master design and current implementation. The repository contracts remain authoritative
+for role boundaries, tracking, verification and protected merges. Load the lifecycle for dispatch,
+monitoring for scheduled checks, reporting for substantive status, and portfolio for chat lifecycle.
+
+## Working loop
+
+Recover the agreed outcome, decisions, acceptance, owners, grants, pauses and next triggers from
+existing continuity. Map the whole outcome, including integration and release acceptance, to direct
+issues and owners. Refresh live sources, find the next useful authorized action, recheck ownership
+and capacity, dispatch once, and assess the observed result. Requested, acknowledged, running,
+merged, deployed and accepted are different states. Save compact continuity and the real next
+trigger; a skill or dispatch is not a scheduler. Use [sources and queues](references/sources.md)
+for issue loading, connector routing and Nohmi's existing verification admission.
 
 ## Mandatory kickoff and adoption gate
 
@@ -24,7 +31,8 @@ and explicit exceptions; no new monitor or authority is created by this forwardi
 that oversight is established.** Read-only context gathering may proceed while setup is incomplete.
 An oversight assignment authorizes the bounded workstream sidebar organization, chat naming and
 Nohmi issue/link setup below; honor explicit read-only or narrower limits without claiming completion.
-This grant does not authorize new chats, unrelated/shared-chat changes, scheduling or cleanup.
+This setup grant does not authorize new chats, unrelated/shared-chat changes or scheduling.
+Completion archival follows the separate standing grant in [portfolio](references/portfolio.md).
 
 1. **Get context and inspect owners.** Read [agent context](../../../docs/engineering/agent-context.md),
    relevant canonical requirements, live issues/PRs and the current work/instructions of existing
@@ -66,12 +74,10 @@ or ask them to approve settled choices again. Carry unfinished obligations forwa
 closes them. Oversight coordinates; workers implement every code, test, configuration and tracked
 document repair. Editing this skill does not launch work or activate monitoring.
 
-The local lifecycle and monitoring references retain repository-specific constraints for existing
-callers. The user-installed `nohmi-orchestrator` owns the coordination entrypoint; existing
-automation heads and outcome orchestrators retain their roles, with no additional supervisor layer. Apply
-[autonomous development](../../../docs/engineering/autonomous-development.md) for assigned network
-roles; ordinary contributions keep their existing workflow. See
-[provenance and evaluation cases](references/provenance.md) for sources and limits.
+Use [autonomous development](../../../docs/engineering/autonomous-development.md) for assigned
+network roles. Head and outcome orchestration are roles within this workflow, not extra required
+skill entrypoints or supervisory layers. See [provenance](references/provenance.md) for adaptation
+sources and evaluation cases.
 
 ## Every oversight heartbeat: tracking and presentation
 
@@ -82,17 +88,17 @@ This check is not deferred to the full-reconciliation deadline. Use actual host 
 a successful earlier wake or unchanged PR head are insufficient. Manual fresh/resumed assignments
 still complete the kickoff gate above before dispatch.
 
-- A dedicated epic section is named exactly for the current epic name. Verify identity from its
+- A dedicated epic section is named `<repo> - <epic>` using the verified readable repository name and current epic name. Verify identity from its
   recorded section ID, membership and direct parent issue before renaming a proven stale name;
   preserve its ID. Preserve shared sections and explicit user-protected names as recorded exclusions.
 - Name oversight chats exactly `👀 - <epic name>` from their verified Nohmi epic parent,
   for example `👀 - Development speed`. Cooper’s October 27 exception supersedes the older
   issue-prefix convention for oversight only; retain its parent mapping across child work and phases.
   Ordinary children use `ISSUE-ID - Issue name` from their verified direct issue, for example
-  `COO-159 - Development tooling`. Prefer one or two words for the issue subject,
-  generally at most five when clear.
+  `COO-159 - Development tooling`. Aim for 2–5 concrete, context-inclusive words for issue and PR names. PR titles follow the
+  direct issue name, retaining mandatory repository syntax.
   Keep phases, progress, PR links and blockers in records. Reconcile changed issue mappings/names
-  through the current `nohmi-project-manager` checklist; never infer identity from similar wording.
+  through [portfolio identity checks](references/portfolio.md); never infer identity from similar wording.
   Normalize an authorized issue title before its chat title and read back both. Preserve later
   explicit exceptions: the portfolio manager maps to COO-170 — Portfolio oversight but is named
   exactly `Nohmi project manager`.
@@ -114,9 +120,11 @@ still complete the kickoff gate above before dispatch.
   continue independent work. Reconcile the direct issue's setup reference before dispatch resumes.
 
 This is a procedure for an already authorized wake, not scheduling authority or proof of automation.
-Do not create/change schedules, unarchive chats, delete sections, move projects or take over owners.
+Do not create/change schedules, unarchive chats, delete sections, move projects or take over owners
+merely to reconcile presentation. Completed-chat archival and its dedicated heartbeat pause follow
+the bounded [completion procedure](references/portfolio.md).
 Preserve notification intent and the reporting rules below. Apply this repository contract when an
-installed nohmi head/orchestrator/context wrapper delegates here; stale wrapper examples do not
+installed nohmi context wrapper delegates here; stale wrapper examples do not
 replace current repository requirements. Installed-file adoption still needs its own verified receipt.
 
 ## Establish the baseline
@@ -191,32 +199,30 @@ verification after review convergence on the frozen candidate. Follow
 [delivery verification](../../../docs/engineering/delivery-verification.md). Only the delivery contract’s Git-verified prose-only exception may omit full stages;
 path-only planning or speculative evidence reuse never grants that exception. Do not repeat full suites for each reviewer or metadata edit.
 
+Require completed applicable final-file native format/import checks, bundled fixture invariant
+review and validated live-backed Work maps before the worker triggers hosted publication. Follow
+the authoring and inventory rules in verification efficiency, including actual verify:pr/Jest
+argv/ancestry and Docker state. Approve finite conditional stages with named bounds and stops once;
+do not add per-stage scheduling questions or fresh unchanged-input lint merely for a new commit/base.
+Keep fresh resource admission and failure recovery intact. Private admission scripts need explicit
+adoption of the reusable classifier; repository guidance does not patch their copies automatically.
+
 ## Monitoring and reports
 
-Read [monitoring and recovery](references/monitoring.md) for authorized recurrence, reconciliation or
-reset. Monitoring is opt-in: editing guidance, adopting oversight or saving a checkpoint creates no
-wake. Preserve saved scope, cadence, timezone, notification settings and pause state.
+Read [monitoring and recovery](references/monitoring.md) for authorized recurrence or reset.
+No wake is created by adoption, skill edits or saving a checkpoint. Preserve existing scope,
+cadence, timezone and pauses; do not run or migrate saved monitors during skill maintenance.
 
-nohmi's existing preference overrides the personal quiet default: end each **scheduled oversight
-wake** with a user-visible report, even unchanged. Follow the current `nohmi-project-manager`
-consolidated scheduled-status contract: compact issue/worktree rows with phase and health, scope,
-concrete progress and next action, blocker/resolver and needs-Cooper. Retain these fields in the
-existing checkpoint; use actual worktree paths and mark stale evidence Unknown. Preserve required
-heartbeat formatting and keep hashes/run IDs in evidence. This does not create a schedule or
-override an explicit user mute/quiet instruction.
-Manual check-ins and worker callbacks need only material updates unless regular reports were requested.
-Use the current personal manager/orchestrator status vocabulary by reference; do not maintain a
-competing icon table or import another product’s approval rules.
+Every heartbeat reports, including unchanged passes, using [reporting](references/reporting.md):
+a short judgment, compact Scope/Dependencies/Status/Latest/Next rows, then useful questions,
+blockers and next actions. Dependencies are actual prerequisite workstreams, issues, PRs or branches,
+not the row's own verification/review gates. Scope is a short TL;DR; status is one icon and a few words.
+Actively recover missing/stale evidence; never send generic Unverified. Failed recovery names the
+concrete source failure, owner, attempted recovery and next trigger without inventing success.
 
-For substantive handoffs, report actual artifacts and limits, current stage, owner, remaining gate
-and the real next trigger: verified active monitor, bounded wait or user-driven follow-up. Link each
-PR/issue with its purpose. Never promise unconfigured unattended work. Completion does not grant
-archival, deletion, worktree cleanup or another delivery assignment.
-
-Honor a recorded explicit human cleanup grant within its original scope; do not request the same
-permission again. When authorized, the oversight owner archives dedicated child chats only after
-all assigned work, acceptance, production verification and follow-up obligations are complete and
-the chats are idle. The project manager archives completed oversight chats under its own recorded
-grant. Merge alone is insufficient. Preserve unfinished/shared chats and report already-archived
-exceptions. This does not authorize branch/worktree deletion or schedule creation; the authorized
-owner performs and verifies the eventual UI mutation.
+Use [portfolio](references/portfolio.md) for one implementation chat per direct issue, exact names
+and automatic archival after full acceptance. Preserve existing combined owners until a stopped,
+acknowledged handoff safely establishes that mapping. No duplicate writers or worktree deletion.
+The ongoing `Nohmi project manager` keeps its exact name and verified
+COO-170 — Portfolio oversight mapping. A merge-ready candidate triggers normal protected merge
+in the same pass when practical; no extra human permission round or deferred auto-merge.

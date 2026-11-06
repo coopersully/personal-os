@@ -144,6 +144,8 @@ export function TransactionBreakdownDialog({
     },
   });
   const remaining = useMemo(() => formatMoney(Math.abs(remainingCents) / 100), [remainingCents]);
+  // Closing must release the modal even if a breakpoint change cancels its exit animation.
+  if (!open || !transaction) return null;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent data-finance-dialog data-finance-size="wide">

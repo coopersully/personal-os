@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 
 /** Exercise real components against the optimized stylesheet produced by serve.ts. */
-export async function useProductionStyles(page: Page): Promise<void> {
+export async function applyProductionStyles(page: Page): Promise<void> {
   const assets = resolve(import.meta.dirname, "../apps/web/dist/assets");
   const assetFiles = await readdir(assets);
   const files = assetFiles.filter((file) => file.endsWith(".css")).sort();

@@ -8880,7 +8880,7 @@ List a bounded page of Projects. A Project is a finite outcome within a List, no
 
 ## list_task_workspace
 
-Read a globally filtered, sorted and grouped page of nohmi Tasks and Reminders, preserving each canonical kind and revision. Mixed discovery requires tasks:read and reminders:read. Omitted status means open in All/Today/Upcoming and all terminal or unavailable-container records in History; Trash is recoverable deletion. Today uses the person's planning timezone and includes overdue due dates. Upcoming begins after today. Exact date bounds are inclusive. groupKey is a planning-local YYYY-MM-DD, a List/Project ID, or none. readOnly marks unavailable containers outside Trash; Trash permits guarded restoration including Inbox fallback. Pass nextCursor with the same filters to continue; total counts all matching records. Due times do not promise notification delivery. Existing kind-specific tools retain least-privilege access.
+Read a globally filtered, sorted and grouped page of nohmi Tasks and Reminders, preserving each canonical kind and revision. Mixed discovery requires tasks:read and reminders:read. Omitted status means open in All/Today/Upcoming. History contains completed or cancelled items in active containers, excluding archived contents; Trash is recoverable deletion. due=today includes dated deadlines before the end of the planning day, including overdue, and excludes undated items. sort=auto ranks open deadlines in the next ten minutes first within each display group, then priority, deadline and stable identity; its observation time stays fixed across pagination. Today uses the person's planning timezone and includes overdue due dates. Upcoming begins after today. Exact date bounds are inclusive. groupKey is a planning-local YYYY-MM-DD, a List/Project ID, or none. readOnly marks unavailable containers outside Trash; Trash permits guarded restoration including Inbox fallback. Pass nextCursor with the same filters to continue; total counts all matching records. Due times do not promise notification delivery. Existing kind-specific tools retain least-privilege access.
 
 - Domain: tasks; stage: inspect; policy: read_only.
 - Grants (all): tasks:read, reminders:read.
@@ -8966,6 +8966,7 @@ Read a globally filtered, sorted and grouped page of nohmi Tasks and Reminders, 
       "type": "string",
       "enum": [
         "any",
+        "today",
         "overdue",
         "none",
         "dated"
@@ -9036,6 +9037,7 @@ Read a globally filtered, sorted and grouped page of nohmi Tasks and Reminders, 
       "default": "default",
       "type": "string",
       "enum": [
+        "auto",
         "default",
         "date",
         "reserved",

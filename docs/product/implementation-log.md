@@ -1,5 +1,45 @@
 # nohmi — Implementation Log
 
+## 2026-11-06 — iOS local due alerts
+
+- Added opt-in task/reminder due alerts using Apple User Notifications via Expo, with generic
+  lock-screen content, explicit permission handling, owner-scoped routing and schedule reconciliation.
+  Settings include OS settings access, refresh and a test action with Sonner outcomes.
+- Verified a test alert in simulator Notification Center after backgrounding Expo Go; focused tests
+  and native/web bundles pass. Physical nohmi/TestFlight delivery remains unverified.
+- This is local scheduling, capped at the next 50 alerts. Cross-device edits while the app is closed
+  require server push delivery, which is not implemented. See
+  [mobile notification boundary](../engineering/mobile-due-notifications.md).
+
+## 2026-11-05 — Expo Tasks workspace (local implementation)
+
+- Mobile refinement: task rows show one urgency-focused metadata line (due date, high priority,
+  reminder identity and read-only state). Detailed notes, tags and estimates stay in the editor;
+  mobile no longer exposes row-detail toggles, while existing web preferences remain preserved.
+  Explicit view overrides/search have removable indicators and Clear all. Container selection uses
+  a shared searchable, virtualized sheet with cancellation and empty states. Row rendering,
+  filter indicators, menu configuration and presentation helpers are separate from API orchestration.
+
+- COO-29 — Deliver native Tasks and Reminders workflows: audited web Tasks navigation,
+  workspace projections, dialogs, moves, archive conflicts, pins and preferences against the shared API.
+- Added API-backed Today, Views (Inbox, All, Upcoming, Scheduled, Reminders, Lists, Projects),
+  Pinned and History, with Trash and archived containers. Native stack editors provide task/reminder
+  creation, editing and lifecycle actions; lists/projects support organization, move previews and
+  open-content resolution. Search, filters, grouping, pagination, bulk actions and shared preferences
+  use the existing domain contracts. Existing native tabs and workspace picker remain intact.
+- Tasks use virtualized rows and native date controls. Writes require API confirmation, revision guards
+  and Sonner feedback; no offline write queue. Queries are session-scoped and late responses are
+  rejected after logout. Task create retries retain their idempotency key and payload. Reminder
+  create has no server idempotency contract, so an uncertain result requires reviewing the list
+  before another create attempt.
+- Local evidence: focused session/task boundary tests, mobile type checking, and authenticated
+  simulator read/editor/date-control smoke checks. Personal records were not modified for acceptance.
+- This is not a TestFlight release or complete CRUD acceptance. Dedicated test-account mutation
+  acceptance, device accessibility checks, large-container picker usability, and reminder-create
+  idempotency remain release work. Workspace agent/setup/import settings and global archived search
+  remain outside this first mobile workspace pass. Container icon/color metadata is editable but
+  the mobile directory currently uses semantic list/project icons.
+
 ## 2026-10-22 — Native settings and populated source rows
 
 - Shipping review added audited profile-zone reconciliation, serialized first/last-name edits,

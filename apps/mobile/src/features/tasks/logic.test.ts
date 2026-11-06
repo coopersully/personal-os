@@ -1,7 +1,7 @@
 import type { createApiClient } from "@personal-os/api-client";
 import type { TaskWorkspaceItem } from "@personal-os/domain";
 import { describe, expect, it, vi } from "vitest";
-import { actOnItem, actWithUndo, allPages, uniqueItems } from "./logic";
+import { actOnItem, actWithUndo, allPages, loadTrashedRecord, uniqueItems } from "./logic";
 
 const task = {
   kind: "task",
@@ -112,4 +112,24 @@ describe("confirmed action undo", () => {
     await receipt.undo();
     expect(api.cancelTask).toHaveBeenCalledWith("same", { expectedRevision: 8 });
   });
+});
+
+it("stops Trash lookup at the matching page and rejects looping or excessive pagination", async () => {
+  const listTaskWorkspace = vi
+    .fn()
+    .mockResolvedValue({ items: [reminder, task], nextCursor: "more" });
+  await expect(loadTrashedRecord({ listTaskWorkspace }, "task", "same")).resolves.toEqual(
+    task.record,
+  );
+  expect(listTaskWorkspace).toHaveBeenCalledOnce();
+  listTaskWorkspace.mockResolvedValue({ items: [], nextCursor: "loop" });
+  await expect(loadTrashedRecord({ listTaskWorkspace }, "task", "missing")).rejects.toThrow(
+    "Repeated pagination cursor",
+  );
+  let cursor = 0;
+  listTaskWorkspace.mockImplementation(async () => ({ items: [], nextCursor: String(++cursor) }));
+  await expect(loadTrashedRecord({ listTaskWorkspace }, "task", "missing")).rejects.toThrow(
+    "Trash is too large",
+  );
+  expect(cursor).toBe(30);
 });

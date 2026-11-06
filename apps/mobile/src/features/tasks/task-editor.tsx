@@ -22,33 +22,56 @@ import { actWithUndo, type ItemAction, useTaskAction, useTaskApi, useTaskResourc
 import { DateField } from "./date-field";
 import { FormSave } from "./form-save";
 import { useDraftField } from "./form-state";
+import { loadTrashedRecord } from "./logic";
 import { RecordIdentity } from "./record-identity";
 import { SearchableChoice } from "./searchable-choice";
 import { TagsField } from "./tags-field";
 import { Action, Choice, confirm, Field, FormBody, Section, State, styles } from "./ui";
 
+type TaskEditorParams = {
+  id?: string;
+  kind?: string;
+  listId?: string;
+  projectId?: string;
+  readOnly?: string;
+  deleted?: string;
+};
 export function TaskEditorScreen() {
-  const params = useLocalSearchParams<{
-    id?: string;
-    kind?: string;
-    listId?: string;
-    projectId?: string;
-    readOnly?: string;
-    deleted?: string;
-  }>();
+  const params = useLocalSearchParams<TaskEditorParams>();
+  return <TaskEditorRecord key={`${params.kind}:${params.id}:${params.deleted}`} params={params} />;
+}
+function TaskEditorRecord({ params }: { params: TaskEditorParams }) {
   const api = useTaskApi();
   const kind = params.kind === "reminder" ? "reminder" : "task";
+  const recordIdentity = `${kind}:${params.id ?? "new"}`;
+  const [openedRecord, setOpenedRecord] = useState<string | null>(null);
   const record = useQuery({
-    queryKey: ["tasks", "detail", kind, params.id],
+    queryKey: ["tasks", "detail", kind, params.id, params.deleted],
     enabled: !!params.id,
-    queryFn: () =>
-      kind === "task" ? api.getTask(params.id as string) : api.getReminder(params.id as string),
+    staleTime: 0,
+    refetchOnMount: "always",
+    queryFn: async () => {
+      if (params.deleted === "1") return loadTrashedRecord(api, kind, params.id as string);
+      return kind === "task"
+        ? api.getTask(params.id as string)
+        : api.getReminder(params.id as string);
+    },
   });
-  if (params.id && !record.data)
+  useEffect(() => {
+    if (record.isFetchedAfterMount && record.isSuccess) setOpenedRecord(recordIdentity);
+  }, [record.isFetchedAfterMount, record.isSuccess, recordIdentity]);
+  if (params.id && (openedRecord !== recordIdentity || !record.data))
     return (
       <>
+        <Stack.Screen
+          options={{
+            title: `${kind} details`,
+            headerRight: () => null,
+            headerLeft: () => <EditorClose label="Close" onPress={() => router.back()} />,
+          }}
+        />
         <State
-          loading={record.isPending}
+          loading={record.isPending || record.isFetching}
           retry={record.isError ? () => void record.refetch() : undefined}
         />
         <AppToaster editor />

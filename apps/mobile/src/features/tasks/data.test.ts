@@ -14,13 +14,17 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
   loading: vi.fn(() => "toast"),
   invalidateQueries: vi.fn(),
+  refetchQueries: vi.fn(),
   refresh: vi.fn(),
 }));
 vi.mock("sonner-native", () => ({ toast: mocks }));
 vi.mock("../notifications/events", () => ({ refreshDueAlerts: mocks.refresh }));
 vi.mock("../auth/context", () => ({ useAuth: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: mocks.invalidateQueries }),
+  useQueryClient: () => ({
+    invalidateQueries: mocks.invalidateQueries,
+    refetchQueries: mocks.refetchQueries,
+  }),
   QueryCache: vi.fn(),
   QueryClient: vi.fn(),
   QueryClientProvider: vi.fn(),

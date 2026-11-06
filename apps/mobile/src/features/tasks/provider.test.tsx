@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { MobileDataProvider, useTaskResources, useTaskSearch } from "./data";
+import { MobileDataProvider, useTaskAction, useTaskResources, useTaskSearch } from "./data";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -17,6 +19,8 @@ const h = vi.hoisted(() => ({
   listTaskProjects: vi.fn(),
   getWorkspaceSettings: vi.fn(),
   error: vi.fn(),
+  success: vi.fn(),
+  loading: vi.fn(() => "action"),
 }));
 vi.mock("../auth/context", () => ({ useAuth: () => ({ session: { api: () => h } }) }));
 vi.mock("sonner-native", () => ({ toast: h }));
@@ -58,4 +62,38 @@ it("reports resource failures through Sonner without silently retrying", async (
   expect(h.listTaskProjects).toHaveBeenCalledOnce();
   expect(h.error).toHaveBeenCalledOnce();
   expect(result.current.projects.data).toBeUndefined();
+});
+
+it.each([
+  "detail",
+  "container",
+])("refreshes lists without refetching a closing %s editor after a successful action", async (kind) => {
+  const record = vi.fn().mockResolvedValue({ id: "one", revision: 1 });
+  const list = vi.fn().mockResolvedValue([]);
+  const key = ["tasks", kind, "task", "one"];
+  const { result, rerender } = renderHook(
+    ({ visible }) => ({
+      record: useQuery({ queryKey: key, queryFn: record, enabled: visible }),
+      list: useQuery({ queryKey: ["tasks", "workspace", {}], queryFn: list }),
+      action: useTaskAction(),
+      client: useQueryClient(),
+    }),
+    { wrapper: MobileDataProvider, initialProps: { visible: true } },
+  );
+  await waitFor(() => expect(result.current.record.data).toEqual({ id: "one", revision: 1 }));
+  await waitFor(() => expect(result.current.list.data).toEqual([]));
+  record.mockRejectedValue(new Error("Deleted record is no longer readable"));
+  await act(async () => {
+    await result.current.action.run("Trashing…", async () => ({ id: "one", revision: 2 }));
+  });
+  expect(record).toHaveBeenCalledOnce();
+  expect(h.error).not.toHaveBeenCalled();
+  expect(h.success).toHaveBeenCalledWith("Saved", expect.anything());
+  expect(list).toHaveBeenCalledTimes(2);
+  expect(result.current.client.getQueryState(key)?.isInvalidated).toBe(true);
+  rerender({ visible: false });
+  record.mockResolvedValue({ id: "one", revision: 3 });
+  rerender({ visible: true });
+  await waitFor(() => expect(result.current.record.data).toEqual({ id: "one", revision: 3 }));
+  expect(record).toHaveBeenCalledTimes(2);
 });

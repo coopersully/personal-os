@@ -78,6 +78,16 @@ export function useTaskResources() {
 }
 export function useTaskAction() {
   const client = useQueryClient();
+  const refresh = async () => {
+    // Native editor sheets remain mounted while dismissing. Mark their snapshots stale,
+    // but do not refetch a just-trashed record until the editor is opened again.
+    await client.invalidateQueries({ queryKey: ["tasks"], refetchType: "none" });
+    await client.refetchQueries({
+      queryKey: ["tasks"],
+      type: "active",
+      predicate: ({ queryKey }) => queryKey[1] !== "detail" && queryKey[1] !== "container",
+    });
+  };
   const lock = useRef(false);
   const [pending, setPending] = useState(false);
   async function run<T>(
@@ -109,7 +119,7 @@ export function useTaskAction() {
                 .catch((error: unknown) => toast.error(errorMessage(error), { id: undoId }))
                 .finally(() => {
                   refreshDueAlerts();
-                  void client.invalidateQueries({ queryKey: ["tasks"] });
+                  void refresh();
                 });
             },
           }
@@ -118,7 +128,7 @@ export function useTaskAction() {
       if (result?.error) toast.error(result.message, options);
       else toast.success(result?.message ?? "Saved", options);
       onSuccess?.(value);
-      await client.invalidateQueries({ queryKey: ["tasks"] });
+      await refresh();
       return true;
     } catch (error) {
       toast.error(errorMessage(error), { id });

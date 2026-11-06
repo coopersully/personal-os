@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import ContainerEditorScreen from "../../app/task-container";
 import TaskEditorScreen from "../../app/task-editor";
+import { MobileDataProvider } from "./data";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -15,6 +16,8 @@ const h = vi.hoisted(() => ({
   record: undefined as unknown,
   isError: false,
   resourceError: false,
+  liveQueries: false,
+  headerOptions: {} as { headerLeft?: () => ReactNode; headerRight?: () => ReactNode },
   timezone: "America/New_York" as string | undefined,
   back: vi.fn(),
   replace: vi.fn(),
@@ -23,6 +26,11 @@ const h = vi.hoisted(() => ({
   error: vi.fn(),
   loading: vi.fn(() => "action"),
   api: {
+    listTaskWorkspace: vi.fn(),
+    getTask: vi.fn(),
+    getReminder: vi.fn(),
+    getTaskList: vi.fn(),
+    getTaskProject: vi.fn(),
     completeTask: vi.fn(),
     reopenTask: vi.fn(),
     cancelTask: vi.fn(),
@@ -156,12 +164,16 @@ vi.mock("expo-router", () => ({
       options,
     }: {
       options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode };
-    }) => (
-      <div>
-        {options.headerLeft?.()}
-        {options.headerRight?.()}
-      </div>
-    ),
+    }) => {
+      // Native navigation merges options; omitting a slot retains the previous action.
+      Object.assign(h.headerOptions, options);
+      return (
+        <div>
+          {h.headerOptions.headerLeft?.()}
+          {h.headerOptions.headerRight?.()}
+        </div>
+      );
+    },
   },
 }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "00000000-0000-4000-8000-000000000099" }));
@@ -176,18 +188,35 @@ vi.mock("sonner-native", () => ({
   Toaster: () => <div data-testid="editor-toaster" />,
 }));
 vi.mock("../notifications/events", () => ({ refreshDueAlerts: vi.fn() }));
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({
-    data: h.record,
-    isPending: !h.record && !h.isError,
-    isError: h.isError,
-    refetch: h.refetch,
-  }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-  QueryClient: vi.fn(),
-  QueryCache: vi.fn(),
-  QueryClientProvider: vi.fn(),
-}));
+vi.mock("@tanstack/react-query", async () => {
+  const { createRequire } = await import("node:module");
+  const real = createRequire(`${process.cwd()}/apps/web/package.json`)(
+    "@tanstack/react-query",
+  ) as typeof import("@tanstack/react-query");
+  return {
+    ...real,
+    // Each test selects its query implementation before mounting, never during a render.
+    useQuery: (options: Parameters<typeof real.useQuery>[0]) => {
+      const useSelectedQuery = h.liveQueries
+        ? real.useQuery
+        : () => ({
+            data: h.record,
+            isPending: !h.record && !h.isError,
+            isError: h.isError,
+            isSuccess: !!h.record && !h.isError,
+            isFetchedAfterMount: !!h.record || h.isError,
+            refetch: h.refetch,
+          });
+      return useSelectedQuery(options);
+    },
+    useQueryClient: () => {
+      const useSelectedClient = h.liveQueries
+        ? real.useQueryClient
+        : () => ({ invalidateQueries: vi.fn(), refetchQueries: vi.fn() });
+      return useSelectedClient();
+    },
+  };
+});
 const inbox = {
   id: "00000000-0000-4000-8000-000000000001",
   name: "Inbox",
@@ -223,6 +252,8 @@ beforeEach(() => {
   h.record = undefined;
   h.isError = false;
   h.resourceError = false;
+  h.liveQueries = false;
+  h.headerOptions = {};
   h.timezone = "America/New_York";
   vi.stubGlobal(
     "confirm",
@@ -823,4 +854,188 @@ it.each([
     expect(
       screen.queryByRole("button", { name: "Retry the same task creation" }),
     ).not.toBeInTheDocument();
+});
+
+it.each([
+  "task",
+  "list",
+])("reopens a %s editor with fresh visible fields and a current revision after a successful edit", async (kind) => {
+  h.liveQueries = true;
+  h.params = { kind, id: garden.id };
+  let serverRecord =
+    kind === "task"
+      ? existingTask()
+      : { ...garden, name: "Original list", icon: "list", color: null, description: null };
+  const get = kind === "task" ? h.api.getTask : h.api.getTaskList;
+  const update = kind === "task" ? h.api.updateTask : h.api.updateTaskList;
+  get.mockImplementation(async () => serverRecord);
+  update.mockImplementation(async (_id, values) => {
+    serverRecord = { ...serverRecord, ...values, revision: 8 };
+    return serverRecord;
+  });
+  const Editor = kind === "task" ? TaskEditorScreen : ContainerEditorScreen;
+  const frame = (visible: boolean) => (
+    <MobileDataProvider>{visible ? <Editor /> : null}</MobileDataProvider>
+  );
+  const { rerender } = render(frame(true));
+  await screen.findByLabelText("Title");
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Accepted edit" } });
+  fireEvent.click(save());
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+  expect(get).toHaveBeenCalledOnce();
+  rerender(frame(false));
+  let finish!: (value: unknown) => void;
+  get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  rerender(frame(true));
+  expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  await act(async () => finish(serverRecord));
+  await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Accepted edit"));
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Second edit" } });
+  fireEvent.click(save());
+  await waitFor(() =>
+    expect(update).toHaveBeenLastCalledWith(
+      garden.id,
+      expect.objectContaining({ expectedRevision: 8 }),
+    ),
+  );
+});
+
+it.each([
+  "task",
+  "list",
+])("does not expose a stale %s form when reopening fails, and can retry", async (kind) => {
+  h.liveQueries = true;
+  h.params = { kind, id: garden.id };
+  const original =
+    kind === "task"
+      ? existingTask()
+      : { ...garden, name: "Original list", icon: "list", color: null, description: null };
+  const get = kind === "task" ? h.api.getTask : h.api.getTaskList;
+  get.mockResolvedValueOnce(original).mockRejectedValueOnce(new Error("offline"));
+  const Editor = kind === "task" ? TaskEditorScreen : ContainerEditorScreen;
+  const frame = (visible: boolean) => (
+    <MobileDataProvider>{visible ? <Editor /> : null}</MobileDataProvider>
+  );
+  const { rerender } = render(frame(true));
+  await screen.findByLabelText("Title");
+  rerender(frame(false));
+  rerender(frame(true));
+  const retry = await screen.findByRole("button", { name: "Retry loading" });
+  expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+  expect(h.error).toHaveBeenCalledOnce();
+  get.mockResolvedValue({ ...original, title: "Current task", name: "Current list" });
+  fireEvent.click(retry);
+  await waitFor(() =>
+    expect(screen.getByLabelText("Title")).toHaveValue(
+      kind === "task" ? "Current task" : "Current list",
+    ),
+  );
+});
+
+it.each([
+  "task",
+  "reminder",
+])("loads a trashed %s through the Trash projection and restores its current version", async (kind) => {
+  h.liveQueries = true;
+  h.params = { kind, id: garden.id, deleted: "1" };
+  const record = {
+    ...existingTask(),
+    updatedAt: "2026-11-06T12:00:00Z",
+    deletedAt: "2026-11-06T11:00:00Z",
+  };
+  h.api.listTaskWorkspace
+    .mockResolvedValueOnce({ items: [], nextCursor: "second" })
+    .mockResolvedValueOnce({ items: [{ kind, record }], nextCursor: null });
+  render(
+    <MobileDataProvider>
+      <TaskEditorScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByLabelText("Title");
+  expect(h.api.listTaskWorkspace).toHaveBeenLastCalledWith({
+    view: "trash",
+    kind,
+    limit: 100,
+    cursor: "second",
+  });
+  expect(h.api.getTask).not.toHaveBeenCalled();
+  expect(h.api.getReminder).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  if (kind === "task")
+    expect(h.api.restoreTask).toHaveBeenCalledWith(garden.id, { expectedRevision: 4 });
+  else expect(h.api.restoreReminder).toHaveBeenCalledWith(garden.id, record.updatedAt);
+});
+it("keeps Close accessible when an item is no longer in Trash", async () => {
+  h.liveQueries = true;
+  h.params = { kind: "task", id: garden.id, deleted: "1" };
+  h.api.listTaskWorkspace.mockResolvedValue({ items: [], nextCursor: null });
+  render(
+    <MobileDataProvider>
+      <TaskEditorScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Retry loading" });
+  expect(h.error).toHaveBeenCalledWith(
+    "This item is no longer in Trash. Close this screen and refresh Trash.",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(h.back).toHaveBeenCalledOnce();
+});
+
+it.each([
+  "task",
+  "list",
+])("isolates the %s initial-load gate when route identity changes A to pending B to A", async (kind) => {
+  h.liveQueries = true;
+  h.params = { kind, id: garden.id };
+  const original =
+    kind === "task"
+      ? existingTask()
+      : { ...garden, name: "Original list", icon: "list", color: null, description: null };
+  const get = kind === "task" ? h.api.getTask : h.api.getTaskList;
+  get.mockResolvedValueOnce(original).mockImplementationOnce(() => new Promise(() => {}));
+  const Editor = kind === "task" ? TaskEditorScreen : ContainerEditorScreen;
+  const { rerender } = render(
+    <MobileDataProvider>
+      <Editor />
+    </MobileDataProvider>,
+  );
+  await screen.findByLabelText("Title");
+  h.params = { kind, id: "another" };
+  rerender(
+    <MobileDataProvider>
+      <Editor />
+    </MobileDataProvider>,
+  );
+  expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+  expect(h.headerOptions.headerRight?.()).toBeNull();
+  let finish!: (value: unknown) => void;
+  get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  h.params = { kind, id: garden.id };
+  rerender(
+    <MobileDataProvider>
+      <Editor />
+    </MobileDataProvider>,
+  );
+  expect(screen.queryByLabelText("Title")).not.toBeInTheDocument();
+  expect(h.headerOptions.headerRight?.()).toBeNull();
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+  await act(async () => finish({ ...original, title: "Updated task", name: "Updated list" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Title")).toHaveValue(
+      kind === "task" ? "Updated task" : "Updated list",
+    ),
+  );
 });

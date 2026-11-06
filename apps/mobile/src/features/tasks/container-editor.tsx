@@ -29,21 +29,38 @@ import { SearchableChoice } from "./searchable-choice";
 import { Action, confirm, Field, FormBody, Section, State, styles } from "./ui";
 export function ContainerEditorScreen() {
   const params = useLocalSearchParams<{ id?: string; kind?: string }>();
+  return <ContainerEditorRecord key={`${params.kind}:${params.id}`} params={params} />;
+}
+function ContainerEditorRecord({ params }: { params: { id?: string; kind?: string } }) {
   const api = useTaskApi();
   const kind = params.kind === "project" ? "project" : "list";
+  const recordIdentity = `${kind}:${params.id ?? "new"}`;
+  const [openedRecord, setOpenedRecord] = useState<string | null>(null);
   const query = useQuery<TaskList | TaskProject>({
     queryKey: ["tasks", "container", kind, params.id],
     enabled: !!params.id,
+    staleTime: 0,
+    refetchOnMount: "always",
     queryFn: () =>
       kind === "list"
         ? api.getTaskList(params.id as string)
         : api.getTaskProject(params.id as string),
   });
-  if (params.id && !query.data)
+  useEffect(() => {
+    if (query.isFetchedAfterMount && query.isSuccess) setOpenedRecord(recordIdentity);
+  }, [query.isFetchedAfterMount, query.isSuccess, recordIdentity]);
+  if (params.id && (openedRecord !== recordIdentity || !query.data))
     return (
       <>
+        <Stack.Screen
+          options={{
+            title: `${kind} details`,
+            headerRight: () => null,
+            headerLeft: () => <EditorClose label="Close" onPress={() => router.back()} />,
+          }}
+        />
         <State
-          loading={query.isPending}
+          loading={query.isPending || query.isFetching}
           retry={query.isError ? () => void query.refetch() : undefined}
         />
         <AppToaster editor />

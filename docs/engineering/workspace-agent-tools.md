@@ -1285,6 +1285,192 @@ Cancel one loaded Project as an explicit finite-outcome lifecycle decision. Pass
 }
 ```
 
+## checkpoint_texting_agent_run
+
+Save pending work before an action and its domain record or operation references afterward. Completed work cannot be overwritten. These are agent reports; domain receipts are the authority for actual effects. Retain stable domain/key identities across sessions. Classify every saved inbound message with annotations (messageId, workspaces and optional replyToMessageIds) before replying; an empty workspace list means general.
+
+- Domain: texting; stage: commit; policy: approved_rule.
+- Grants (all): texting:read, texting:write, texting:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/texting.ts); typed API methods: `checkpointTextingAgentRun`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "invocationId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "work": {
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "enum": [
+              "mail",
+              "tasks",
+              "calendar",
+              "finances",
+              "knowledge"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "completed",
+              "blocked",
+              "uncertain"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "references": {
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            }
+          }
+        },
+        "required": [
+          "domain",
+          "key",
+          "state",
+          "note",
+          "references"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "annotations": {
+      "maxItems": 25,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "workspaces": {
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "mail",
+                "tasks",
+                "calendar",
+                "finances"
+              ]
+            }
+          },
+          "replyToMessageIds": {
+            "maxItems": 25,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          }
+        },
+        "required": [
+          "messageId",
+          "workspaces"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "runId",
+    "invocationId",
+    "work"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## claim_texting_agent_run
+
+Claim the exact run ID supplied by a nohmi_texting_ready routine trigger using a fresh invocation UUID. Reuse that UUID only within this invocation. Returns the fixed inbound batch, pending work from earlier sessions and API-owned instructions. A competing invocation cannot take this run. Domain APIs retain all action authority.
+
+- Domain: texting; stage: commit; policy: approved_rule.
+- Grants (all): texting:read, texting:write, texting:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/texting.ts); typed API methods: `claimTextingAgentRun`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "invocationId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "pendingWorkAfter": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "enum": [
+            "mail",
+            "tasks",
+            "calendar",
+            "finances",
+            "knowledge"
+          ]
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "domain",
+        "key"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "runId",
+    "invocationId"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
 ## classify_finance_transactions
 
 Apply reasoned categories to one or more transactions with confidence, meaning, rationale, and agent provenance. Low-confidence uncertainty belongs in the Inbox.
@@ -12929,6 +13115,77 @@ Persist a contextual reply to exact source messages delivered within this existi
 }
 ```
 
+## reply_to_texting_agent_run
+
+Record a concise topic-specific SMS reply, workspace tags and reply references atomically. Use distinct stable replyKey values and final:false for intermediate replies (at most four); final:true completes the run. Retry only with the same invocation, replyKey and identical content; an uncertain send is never repeated. Preserve blocked or uncertain workspace outcomes honestly. Do not also send_text_message for the same run.
+
+- Domain: texting; stage: commit; policy: approved_rule.
+- Grants (all): texting:read, texting:write, texting:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}`.
+- [Adapter source](../../apps/mcp/src/tools/texting.ts); typed API methods: `replyToTextingAgentRun`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "invocationId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "body": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 480
+    },
+    "workspaces": {
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "mail",
+          "tasks",
+          "calendar",
+          "finances"
+        ]
+      }
+    },
+    "replyToMessageIds": {
+      "minItems": 1,
+      "maxItems": 25,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+      }
+    },
+    "replyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "final": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "runId",
+    "invocationId",
+    "body",
+    "workspaces",
+    "replyToMessageIds"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
 ## reset_finance_notification_settings
 
 Remove the exact observed Finance override so notifications inherit global settings. Agents require texting:write, texting:execute and review bypass, plus texting:read and finances:read. This differs from disabling notifications.
@@ -14875,6 +15132,30 @@ Send an SMS only after reading and understanding the conversation. Texting shoul
 {
   "type": "object",
   "properties": {
+    "workspaces": {
+      "description": "Related workspaces; use [] for general conversation. Tag each message explicitly.",
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "mail",
+          "tasks",
+          "calendar",
+          "finances"
+        ]
+      }
+    },
+    "replyToMessageIds": {
+      "description": "Original messages this reply answers, from this owner conversation.",
+      "maxItems": 25,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+      }
+    },
     "body": {
       "type": "string",
       "minLength": 1,

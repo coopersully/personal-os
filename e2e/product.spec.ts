@@ -463,7 +463,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(applicationSidebar).toHaveCount(0);
   if (!mobile) {
     const rail = page.getByRole("navigation", { name: "Workspace navigation" });
-    await expect(rail.getByRole("link")).toHaveCount(6);
+    await expect(rail.getByRole("link")).toHaveCount(7);
+    await expect(rail.getByRole("link", { name: "Messages" })).toHaveAttribute("href", "/messages");
     const calendarWorkspace = rail.getByRole("link", { name: "Calendar" });
     await calendarWorkspace.hover();
     await expect(page.locator(".workspace-preview")).toHaveCount(0);

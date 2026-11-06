@@ -375,7 +375,7 @@ function HostSchedule({
       ) : null}
       {schedule.state === "active" &&
       schedule.hostSurface === "claude_code_routine" &&
-      schedule.trigger.type === "event" ? (
+      (schedule.trigger.type === "event" || schedule.trigger.type === "scheduled") ? (
         <form
           className="grid gap-2"
           onSubmit={(event) => {
@@ -389,6 +389,12 @@ function HostSchedule({
             });
           }}
         >
+          {schedule.trigger.type === "scheduled" && (
+            <p className="text-sm text-muted-foreground">
+              To enable automatic Texting replies, add this routine’s API trigger token. Its
+              scheduled Finance runs continue unchanged and do not require this token.
+            </p>
+          )}
           <Label htmlFor={`host-token-${schedule.id}`}>Routine API trigger token</Label>
           <Input
             id={`host-token-${schedule.id}`}

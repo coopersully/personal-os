@@ -974,6 +974,34 @@
       "when": 1793300055681,
       "tag": "0131_finance_institution_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1793907000000,
+      "tag": "0132_texting_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1793907100000,
+      "tag": "0133_texting_workspace_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1793907200000,
+      "tag": "0134_texting_host_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1793907300000,
+      "tag": "0135_texting_input_snapshot",
+      "breakpoints": true
     }
   ]
 }

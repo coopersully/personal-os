@@ -8,6 +8,14 @@ import type {
   StartTextingVerificationInput,
   TextConversationPage,
   TextConversationQuery,
+  TextingAgentCheckpoint,
+  TextingAgentClaim,
+  TextingAgentClaimInput,
+  TextingAgentRecovery,
+  TextingAgentReply,
+  TextingAgentRun,
+  TextingAgentSettingsInput,
+  TextingAgentStatus,
   TextingConnection,
   TextingVerificationChallenge,
   TextMessage,
@@ -17,6 +25,36 @@ type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export function createTextingApiClient(request: Request, toQuery: (query: object) => string) {
   return {
+    recoverTextingAgentRun: (runId: string, input: TextingAgentRecovery) =>
+      request<TextingAgentStatus>(`/v1/texting/agent/runs/${encodeURIComponent(runId)}/recover`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    getTextingAgentStatus: (input: { beforeRun?: string } = {}) =>
+      request<TextingAgentStatus>(
+        `/v1/texting/agent${input.beforeRun ? `?${toQuery(input)}` : ""}`,
+        { cache: "no-store" },
+      ),
+    configureTextingAgent: (input: TextingAgentSettingsInput) =>
+      request<TextingAgentStatus>("/v1/texting/agent", {
+        method: "PUT",
+        body: JSON.stringify(input),
+      }),
+    claimTextingAgentRun: (runId: string, input: TextingAgentClaimInput) =>
+      request<TextingAgentClaim>(`/v1/texting/agent/runs/${encodeURIComponent(runId)}/claim`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    checkpointTextingAgentRun: (runId: string, input: TextingAgentCheckpoint) =>
+      request<TextingAgentRun>(`/v1/texting/agent/runs/${encodeURIComponent(runId)}/checkpoint`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    replyToTextingAgentRun: (runId: string, input: TextingAgentReply) =>
+      request<TextingAgentRun>(`/v1/texting/agent/runs/${encodeURIComponent(runId)}/reply`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
     async getFinanceTextReplyStatus(inboundMessageId: string): Promise<FinanceTextReplyStatus> {
       return request(`/v1/texting/finance-replies/${encodeURIComponent(inboundMessageId)}/status`);
     },

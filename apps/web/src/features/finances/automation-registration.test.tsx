@@ -46,7 +46,13 @@ function registration(pending = false) {
   return userEvent.setup();
 }
 const scheduleId = "11111111-1111-4111-8111-111111111111";
-function binding(state: string, hostSurface: string, connectionAvailable = true, pending = false) {
+function binding(
+  state: string,
+  hostSurface: string,
+  connectionAvailable = true,
+  pending = false,
+  scheduled = false,
+) {
   const schedule = automationHostScheduleSchema.parse({
     id: scheduleId,
     tenantAuthorizationConnectionId: "22222222-2222-4222-8222-222222222222",
@@ -58,7 +64,9 @@ function binding(state: string, hostSurface: string, connectionAvailable = true,
     trigger:
       hostSurface === "codex_desktop"
         ? { type: "recurring", recurrence: { type: "interval", everyMinutes: 60, timeZone: "UTC" } }
-        : { type: "event", expectedMaximumLatencyMinutes: 5 },
+        : scheduled
+          ? { type: "scheduled", localTimes: ["08:00", "20:00"], timeZone: "America/New_York" }
+          : { type: "event", expectedMaximumLatencyMinutes: 5 },
     hostAutomationId:
       state === "setup_pending"
         ? null
@@ -66,7 +74,9 @@ function binding(state: string, hostSurface: string, connectionAvailable = true,
           ? "host-job"
           : "trig_abcdefghijklmno",
     nextExpectedAt:
-      state === "active" && hostSurface === "codex_desktop" ? "2026-10-19T13:00:00Z" : null,
+      state === "active" && (hostSurface === "codex_desktop" || scheduled)
+        ? "2026-10-19T13:00:00Z"
+        : null,
     lastObservedAt: null,
     createdAt: "2026-10-19T12:00:00Z",
     updatedAt: "2026-10-19T12:00:00Z",
@@ -226,4 +236,20 @@ it("shows the supplied profile while registering against the authorized connecti
       }),
     ),
   );
+});
+
+it("adds an optional API credential to an existing scheduled Claude host without rebinding it", async () => {
+  const user = binding("active", "claude_code_routine", true, false, true);
+  expect(screen.getByText(/scheduled Finance runs continue unchanged/)).toBeVisible();
+  const input = screen.getByLabelText("Routine API trigger token");
+  expect(input).toHaveAttribute("type", "password");
+  await user.type(input, "optional-trigger-token");
+  await user.click(screen.getByRole("button", { name: "Save trigger token" }));
+  await waitFor(() => expect(input).toHaveValue(""));
+  expect(api.saveAutomationHostFireToken).toHaveBeenCalledWith(scheduleId, {
+    token: "optional-trigger-token",
+    expectedVersion: 9,
+  });
+  expect(api.bindAutomationHostSchedule).not.toHaveBeenCalled();
+  expect(api.createAutomationHostSchedule).not.toHaveBeenCalled();
 });

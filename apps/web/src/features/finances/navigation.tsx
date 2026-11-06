@@ -35,6 +35,7 @@ import { useFinanceConfiguration } from "./use-finance-configuration.js";
 import { useFinanceConversationUnread } from "./use-finance-conversation-unread.js";
 
 export type FinanceSection =
+  | "messages"
   | "chat"
   | "automations"
   | "activity"
@@ -91,6 +92,7 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
   if (section === "reviews") return "overview";
   return (
     [
+      "messages",
       "chat",
       "automations",
       "activity",

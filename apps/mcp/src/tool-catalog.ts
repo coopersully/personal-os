@@ -722,6 +722,27 @@ export const personalOsToolCatalog = {
   list_x_bookmarks: read("bookmarks", ["bookmarks:read"]),
   sync_x_bookmarks: write("bookmarks", ["bookmarks:read"], { openWorld: true }),
 
+  claim_texting_agent_run: {
+    ...write("texting", ["texting:read", "texting:write", "texting:execute"], {
+      openWorld: false,
+      policy: "approved_rule",
+    }),
+    scopeMatch: "all",
+  },
+  checkpoint_texting_agent_run: {
+    ...write("texting", ["texting:read", "texting:write", "texting:execute"], {
+      openWorld: false,
+      policy: "approved_rule",
+    }),
+    scopeMatch: "all",
+  },
+  reply_to_texting_agent_run: {
+    ...write("texting", ["texting:read", "texting:write", "texting:execute"], {
+      openWorld: true,
+      policy: "approved_rule",
+    }),
+    scopeMatch: "all",
+  },
   read_text_conversation: read("texting", ["texting:read"]),
   get_texting_finance_reply_status: {
     ...read("texting", ["texting:read", "finances:read"]),

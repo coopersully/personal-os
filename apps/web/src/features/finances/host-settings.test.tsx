@@ -390,7 +390,7 @@ it("prepares a scheduled-only host with explicit timezone and daily times", asyn
 it.each([
   "scheduled",
   "event",
-] as const)("shows API credentials only for an active event host (%s)", async (type) => {
+] as const)("accepts optional API credentials for an active Claude %s host", async (type) => {
   const active = schedule("claude_code_routine", "active");
   mocks.listAutomationHostSchedules.mockResolvedValue([
     {
@@ -406,7 +406,18 @@ it.each([
   ]);
   show();
   expect(await screen.findByRole("region", { name: "My Finance host" })).toBeInTheDocument();
-  if (type === "event")
-    expect(screen.getByLabelText("Routine API trigger token")).toBeInTheDocument();
-  else expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
+  const user = userEvent.setup();
+  const token = screen.getByLabelText("Routine API trigger token");
+  expect(token).toHaveAttribute("type", "password");
+  if (type === "scheduled")
+    expect(screen.getByText(/scheduled Finance runs continue unchanged/)).toBeVisible();
+  await user.type(token, "optional-trigger-token");
+  await user.click(screen.getByRole("button", { name: "Save trigger token" }));
+  await waitFor(() => expect(token).toHaveValue(""));
+  expect(mocks.saveAutomationHostFireToken).toHaveBeenCalledWith(id, {
+    token: "optional-trigger-token",
+    expectedVersion: 3,
+  });
+  expect(mocks.bindAutomationHostSchedule).not.toHaveBeenCalled();
+  expect(mocks.createAutomationHostSchedule).not.toHaveBeenCalled();
 });

@@ -41,11 +41,12 @@ import {
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
+import { financeProviderSourceAdmissionResultSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
-import { financeActionFingerprint } from "./finance-action-identity.js";
+import { financeActionFingerprint, stableFinanceActionInput } from "./finance-action-identity.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
@@ -11804,8 +11805,22 @@ describe.sequential("finance service", () => {
       });
       expect(await f.actions.performDirect("transaction", f.input, context)).toEqual(result);
       expect(f.readHistory).toHaveBeenCalledTimes(1);
+      if (result.status !== "applied") throw new Error("Source admission did not apply.");
+      const response = financeProviderSourceAdmissionResultSchema.parse(result.result);
+      // sourceKind is part of the canonical persisted hash, not an independent receipt column.
+      const requestHash = `sha256:${createHash("sha256")
+        .update(
+          stableFinanceActionInput({
+            actorId: token.id,
+            actorType: "agent",
+            operation: "finance.transaction.admit_source_facts",
+            payload: { actionKind: "transaction", input: f.input, sourceHash: response.sourceHash },
+            sourceKind: "agent",
+          }),
+        )
+        .digest("hex")}`;
       expect(await f.receipts()).toMatchObject([
-        { actorId: token.id, actorType: "agent", sourceKind: "agent", status: "completed" },
+        { actorId: token.id, actorType: "agent", requestHash, status: "completed" },
       ]);
     });
 

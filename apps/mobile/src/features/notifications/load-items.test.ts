@@ -56,3 +56,19 @@ it("fails without replacing the schedule on repeated cursors or a time limit", a
     ),
   ).rejects.toThrow("timed out");
 });
+it("does not start a queued refresh after its owner or preference changed", async () => {
+  const list = vi.fn().mockResolvedValue({ items: [], nextCursor: null });
+  expect(await loadAlertItems(list, () => false)).toBeNull();
+  expect(list).not.toHaveBeenCalled();
+});
+it("bounds a provider that keeps returning distinct cursors instead of replacing alerts with a partial schedule", async () => {
+  const list = vi.fn(async () => ({ items: [], nextCursor: `page-${list.mock.calls.length}` }));
+  await expect(
+    loadAlertItems(
+      list,
+      () => true,
+      () => start,
+    ),
+  ).rejects.toThrow("could not be refreshed completely");
+  expect(list).toHaveBeenCalledTimes(30);
+});

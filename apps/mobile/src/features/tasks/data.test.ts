@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+
+import { ApiClientError } from "@personal-os/api-client";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { useTaskAction } from "./data";
+import { errorMessage, useTaskAction } from "./data";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -86,4 +88,70 @@ it("does not offer Undo for an unconfirmed mutation", async () => {
   });
   expect(mocks.success).not.toHaveBeenCalled();
   expect(mocks.error).toHaveBeenCalledWith(expect.any(String), { id: "toast" });
+});
+it("rejects repeated actions while a request is in flight and unlocks after failure", async () => {
+  let fail!: (error: Error) => void;
+  const request = vi.fn(
+    () =>
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      }),
+  );
+  const onError = vi.fn();
+  const { result } = renderHook(() => useTaskAction());
+  let pending!: Promise<boolean>;
+  act(() => {
+    pending = result.current.run("Saving…", request, undefined, onError);
+  });
+  expect(result.current.pending).toBe(true);
+  await act(async () => {
+    expect(await result.current.run("Saving…", request)).toBe(false);
+  });
+  expect(request).toHaveBeenCalledOnce();
+  const failure = new Error("offline");
+  await act(async () => {
+    fail(failure);
+    expect(await pending).toBe(false);
+  });
+  expect(onError).toHaveBeenCalledWith(failure);
+  expect(result.current.pending).toBe(false);
+  await act(async () => {
+    expect(await result.current.run("Retrying…", async () => "ok")).toBe(true);
+  });
+  expect(mocks.success).toHaveBeenCalledWith(
+    "Saved",
+    expect.objectContaining({ action: undefined }),
+  );
+});
+it("distinguishes a confirmed preview warning from a successful mutation", async () => {
+  const accepted = vi.fn();
+  const { result } = renderHook(() => useTaskAction());
+  await act(async () => {
+    await result.current.run(
+      "Checking…",
+      async () => ({ blocked: true }),
+      accepted,
+      undefined,
+      () => ({ message: "Choose how to move the contents", error: true }),
+    );
+  });
+  expect(mocks.error).toHaveBeenCalledWith(
+    "Choose how to move the contents",
+    expect.objectContaining({ id: "toast" }),
+  );
+  expect(mocks.success).not.toHaveBeenCalled();
+  expect(accepted).toHaveBeenCalledWith({ blocked: true });
+});
+it("keeps conflict drafts actionable, exposes safe client errors and hides server details", () => {
+  expect(
+    errorMessage(new ApiClientError({ status: 409, code: "CONFLICT", message: "internal" })),
+  ).toContain("your draft is still here");
+  expect(
+    errorMessage(new ApiClientError({ status: 422, code: "INVALID", message: "Choose a list" })),
+  ).toBe("Choose a list");
+  expect(
+    errorMessage(
+      new ApiClientError({ status: 500, code: "ERROR", message: "private server detail" }),
+    ),
+  ).not.toContain("private server detail");
 });

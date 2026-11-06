@@ -175,3 +175,78 @@ describe("native human sessions", () => {
     expect(resolveApiOrigin("http://localhost:8000")).toBe("http://localhost:8000");
   });
 });
+it("preserves the Keychain error even when revoking an unpersisted session also fails", async () => {
+  const t = setup();
+  t.storage.write.mockRejectedValueOnce(new Error("Keychain denied"));
+  t.fetch
+    .mockResolvedValueOnce(ok({ sessionToken: "issued", user }))
+    .mockRejectedValueOnce(new Error("offline"));
+  await expect(t.session.login({ email: user.email, password: "test-password" })).rejects.toThrow(
+    "Keychain denied",
+  );
+  expect(t.states).toEqual([]);
+  expect(() => t.session.api()).toThrow("Sign in");
+});
+it("restores an empty session without network access and safely logs out without a token", async () => {
+  const t = setup();
+  await t.session.restore();
+  await t.session.revalidate();
+  await t.session.logout();
+  expect(t.fetch).not.toHaveBeenCalled();
+  expect(t.states.at(-1)).toEqual({ status: "signedOut", user: null });
+});
+it("rejects login responses without a session and oversized identity responses", async () => {
+  const t = setup();
+  t.fetch.mockResolvedValueOnce(ok({ user }));
+  await expect(t.session.login({ email: user.email, password: "test-password" })).rejects.toThrow(
+    "did not return a session",
+  );
+  expect(t.storage.write).not.toHaveBeenCalled();
+  const large = setup("saved");
+  large.fetch.mockResolvedValueOnce(ok({ user, padding: "x".repeat(64001) }));
+  await expect(large.session.restore()).rejects.toThrow("too large");
+  expect(large.states.at(-1)?.status).toBe("unavailable");
+  expect(large.saved()).toBe("saved");
+});
+it("retains an authenticated owner after a transient foreground check failure", async () => {
+  const t = setup("saved");
+  t.fetch.mockResolvedValueOnce(ok({ user })).mockRejectedValueOnce(new Error("offline"));
+  await t.session.restore();
+  await expect(t.session.revalidate()).rejects.toThrow("offline");
+  expect(t.states.at(-1)).toEqual({ status: "signedIn", user });
+  expect(t.saved()).toBe("saved");
+});
+it("coalesces restore and revalidation during an in-flight login", async () => {
+  const t = setup();
+  let finish!: (value: Response) => void;
+  t.fetch.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const login = t.session.login({ email: user.email, password: "test-password" });
+  await t.session.restore();
+  await t.session.revalidate();
+  expect(t.fetch).toHaveBeenCalledOnce();
+  finish(ok({ sessionToken: "saved", user }));
+  await login;
+  expect(t.states.at(-1)).toEqual({ status: "signedIn", user });
+});
+it("uses the platform fetch transport when no test transport is supplied", async () => {
+  const transport = vi.fn().mockResolvedValue(ok({ user }));
+  vi.stubGlobal("fetch", transport);
+  try {
+    const states: SessionState[] = [];
+    const session = createSession({
+      origin: "https://api.example.test",
+      storage: { read: async () => "stored", write: async () => {} },
+      onChange: (state) => states.push(state),
+    });
+    await session.restore();
+    expect(transport).toHaveBeenCalledOnce();
+    expect(states.at(-1)).toEqual({ status: "signedIn", user });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

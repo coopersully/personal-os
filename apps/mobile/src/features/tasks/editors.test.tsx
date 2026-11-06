@@ -3,8 +3,8 @@ import { ApiClientError } from "@personal-os/api-client";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ContainerEditorScreen } from "./container-editor";
-import { TaskEditorScreen } from "./task-editor";
+import ContainerEditorScreen from "../../app/task-container";
+import TaskEditorScreen from "../../app/task-editor";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
   params: {} as Record<string, string>,
   record: undefined as unknown,
   isError: false,
+  resourceError: false,
+  timezone: "America/New_York" as string | undefined,
   back: vi.fn(),
   replace: vi.fn(),
   refetch: vi.fn(),
@@ -21,6 +23,14 @@ const h = vi.hoisted(() => ({
   error: vi.fn(),
   loading: vi.fn(() => "action"),
   api: {
+    completeTask: vi.fn(),
+    reopenTask: vi.fn(),
+    cancelTask: vi.fn(),
+    trashTask: vi.fn(),
+    restoreTask: vi.fn(),
+    completeReminder: vi.fn(),
+    trashReminder: vi.fn(),
+    restoreReminder: vi.fn(),
     createTaskList: vi.fn(),
     updateTaskList: vi.fn(),
     archiveTaskList: vi.fn(),
@@ -140,6 +150,7 @@ vi.mock("expo-glass-effect", () => ({
 vi.mock("expo-router", () => ({
   router: { back: h.back, replace: h.replace },
   useLocalSearchParams: () => h.params,
+  usePathname: () => "/task-editor",
   Stack: {
     Screen: ({
       options,
@@ -157,14 +168,12 @@ vi.mock("expo-crypto", () => ({ randomUUID: () => "00000000-0000-4000-8000-00000
 vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-icon={name} />,
 }));
-vi.mock("../../components/app-toaster", () => ({
-  AppToaster: () => <div data-testid="editor-toaster" />,
-}));
 vi.mock("../auth/context", () => ({
-  useAuth: () => ({ state: { user: { planningTimezone: "America/New_York" } } }),
+  useAuth: () => ({ state: { user: { planningTimezone: h.timezone } } }),
 }));
 vi.mock("sonner-native", () => ({
   toast: { success: h.success, error: h.error, loading: h.loading },
+  Toaster: () => <div data-testid="editor-toaster" />,
 }));
 vi.mock("../notifications/events", () => ({ refreshDueAlerts: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -199,9 +208,13 @@ vi.mock("./data", async (original) => ({
   ...(await original<typeof import("./data")>()),
   useTaskApi: () => h.api,
   useTaskResources: () => ({
-    lists: { data: [inbox, garden] },
-    projects: { data: [] },
-    settings: { data: { preferences: { defaultCaptureListId: null } } },
+    lists: { data: [inbox, garden], isError: h.resourceError, refetch: h.refetch },
+    projects: { data: [], isError: h.resourceError, refetch: h.refetch },
+    settings: {
+      data: { preferences: { defaultCaptureListId: null } },
+      isError: h.resourceError,
+      refetch: h.refetch,
+    },
   }),
 }));
 beforeEach(() => {
@@ -209,6 +222,8 @@ beforeEach(() => {
   h.params = {};
   h.record = undefined;
   h.isError = false;
+  h.resourceError = false;
+  h.timezone = "America/New_York";
   vi.stubGlobal(
     "confirm",
     vi.fn(() => true),
@@ -307,4 +322,505 @@ it("keeps the toast host available while uncached editors load or fail", () => {
   expect(screen.getByTestId("editor-toaster")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Retry loading" }));
   expect(h.refetch).toHaveBeenCalledOnce();
+});
+it.each([
+  "task",
+  "reminder",
+])("keeps an uncertain %s creation recoverable without silently duplicating it", async (kind) => {
+  h.params = { kind };
+  const create = kind === "task" ? h.api.createTask : h.api.createReminder;
+  create.mockRejectedValueOnce(new Error("Connection lost"));
+  render(<TaskEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Water plants" } });
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(h.back).not.toHaveBeenCalled();
+  if (kind === "task") {
+    fireEvent.click(screen.getByRole("button", { name: "Retry the same task creation" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
+    await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+  } else {
+    expect(save()).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Review reminders before creating again" }));
+    expect(h.replace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pathname: "/task-browser",
+        params: expect.objectContaining({ kind: "reminder" }),
+      }),
+    );
+    expect(create).toHaveBeenCalledOnce();
+  }
+});
+it("validates a task estimate before making a network mutation and permits correction", async () => {
+  render(<TaskEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Plan meals" } });
+  fireEvent.change(screen.getByLabelText("Estimate (minutes)"), { target: { value: "-4" } });
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(h.api.createTask).not.toHaveBeenCalled();
+  expect(screen.queryByText("recovery")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Estimate (minutes)"), { target: { value: "30" } });
+  fireEvent.click(screen.getByRole("button", { name: /Why it matters/ }));
+  fireEvent.change(screen.getByLabelText("Why it matters"), {
+    target: { value: " Calm evenings " },
+  });
+  fireEvent.blur(screen.getByLabelText("Why it matters"));
+  expect(screen.getByRole("button", { name: "Why it matters, Calm evenings" })).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Description"), { target: { value: " Choose dinners " } });
+  fireEvent.click(save());
+  await waitFor(() =>
+    expect(h.api.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        estimateMinutes: 30,
+        why: "Calm evenings",
+        notes: "Choose dinners",
+      }),
+    ),
+  );
+});
+it("confirms discarding drafts and changing between task and reminder", () => {
+  render(<TaskEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Draft" } });
+  vi.mocked(window.confirm).mockReturnValue(false);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.back).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Item type, Task" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Reminder" }));
+  expect(h.replace).not.toHaveBeenCalled();
+  vi.mocked(window.confirm).mockReturnValue(true);
+  fireEvent.click(screen.getByRole("button", { name: "Item type, Task" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Reminder" }));
+  expect(h.replace).toHaveBeenCalledWith({
+    pathname: "/task-editor",
+    params: { kind: "reminder" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.back).toHaveBeenCalledOnce();
+});
+const existingTask = () => ({
+  id: garden.id,
+  title: "Original task",
+  notes: null,
+  priority: "medium",
+  dueAt: null,
+  scheduledAt: null,
+  why: null,
+  estimateMinutes: null,
+  tags: [],
+  listId: inbox.id,
+  projectId: null,
+  lifecycle: "open",
+  deletedAt: null,
+  revision: 4,
+  updatedAt: "2026-11-06T12:00:00Z",
+});
+it.each([
+  "task",
+  "reminder",
+])("updates a %s against its original revision and handles conflicts with explicit reload", async (kind) => {
+  h.params = { kind, id: garden.id };
+  h.record = existingTask();
+  const update = kind === "task" ? h.api.updateTask : h.api.updateReminder;
+  update.mockRejectedValueOnce(
+    new ApiClientError({ status: 409, code: "CONFLICT", message: "Changed elsewhere" }),
+  );
+  render(<TaskEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "My draft" } });
+  fireEvent.click(save());
+  await waitFor(() =>
+    expect(update).toHaveBeenCalledWith(
+      garden.id,
+      expect.objectContaining(
+        kind === "task"
+          ? { expectedRevision: 4, title: "My draft" }
+          : { expectedUpdatedAt: "2026-11-06T12:00:00Z", title: "My draft" },
+      ),
+    ),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Reload current record (discard draft)" }),
+    ).toBeVisible(),
+  );
+  expect(save()).toBeDisabled();
+  vi.mocked(window.confirm).mockReturnValue(false);
+  fireEvent.click(screen.getByRole("button", { name: "Reload current record (discard draft)" }));
+  expect(h.refetch).not.toHaveBeenCalled();
+  vi.mocked(window.confirm).mockReturnValue(true);
+  fireEvent.click(screen.getByRole("button", { name: "Reload current record (discard draft)" }));
+  expect(h.refetch).toHaveBeenCalledOnce();
+  expect(h.back).toHaveBeenCalledOnce();
+});
+it("previews a list move before committing it and saves content against the returned revision", async () => {
+  h.params = { kind: "task", id: garden.id };
+  h.record = existingTask();
+  h.api.previewTaskMove.mockResolvedValue({
+    destinationListId: garden.id,
+    destinationProjectId: null,
+    detachedProjectId: null,
+    previewToken: "preview",
+  });
+  h.api.moveTask.mockResolvedValue({ ...existingTask(), listId: garden.id, revision: 5 });
+  render(<TaskEditorScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "List, Inbox" }));
+  fireEvent.click(screen.getByRole("button", { name: "Garden" }));
+  fireEvent.click(save());
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Confirm move and save" })).toBeVisible(),
+  );
+  expect(h.api.previewTaskMove).toHaveBeenCalledWith(garden.id, {
+    destinationListId: garden.id,
+    destinationProjectId: null,
+    expectedRevision: 4,
+  });
+  expect(h.api.moveTask).not.toHaveBeenCalled();
+  expect(h.api.updateTask).not.toHaveBeenCalled();
+  expect(h.back).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel move" }));
+  expect(screen.queryByText("move preview")).not.toBeInTheDocument();
+  fireEvent.click(save());
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Confirm move and save" })).toBeVisible(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Confirm move and save" }));
+  await waitFor(() =>
+    expect(h.api.updateTask).toHaveBeenCalledWith(
+      garden.id,
+      expect.objectContaining({ expectedRevision: 5 }),
+    ),
+  );
+  expect(h.api.moveTask).toHaveBeenCalledWith(
+    garden.id,
+    expect.objectContaining({ previewToken: "preview", expectedRevision: 4 }),
+  );
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+});
+it("keeps a failed task fetch recoverable with the editor toast host present", () => {
+  h.params = { kind: "task", id: garden.id };
+  h.isError = true;
+  render(<TaskEditorScreen />);
+  expect(screen.getByTestId("editor-toaster")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading" }));
+  expect(h.refetch).toHaveBeenCalledOnce();
+});
+it.each([
+  "list",
+  "project",
+])("prevents uncertain %s recreation and offers reviewing existing containers", async (kind) => {
+  h.params = { kind };
+  const create = kind === "list" ? h.api.createTaskList : h.api.createTaskProject;
+  create.mockRejectedValueOnce(new Error("Disconnected"));
+  render(<ContainerEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Garden" } });
+  fireEvent.click(save());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Review containers before creating again" }),
+    ).toBeVisible(),
+  );
+  expect(save()).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Review containers before creating again" }));
+  expect(h.back).toHaveBeenCalledOnce();
+  expect(create).toHaveBeenCalledOnce();
+});
+it("requires an explicit project move preview and commits its token", async () => {
+  h.params = { kind: "project", id: garden.id };
+  h.record = {
+    ...garden,
+    listId: inbox.id,
+    lifecycle: "open",
+    notes: null,
+    why: null,
+    targetDate: null,
+  };
+  h.api.previewTaskProjectMove.mockResolvedValue({
+    destinationListId: garden.id,
+    affectedTaskCount: 3,
+    previewToken: "approved-move",
+  });
+  render(<ContainerEditorScreen />);
+  expect(screen.getByRole("button", { name: "Preview project move" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Move to list, None" }));
+  fireEvent.click(screen.getByRole("button", { name: "Garden" }));
+  fireEvent.click(screen.getByRole("button", { name: "Preview project move" }));
+  await waitFor(() =>
+    expect(screen.getByText("3 tasks will move with this project.")).toBeVisible(),
+  );
+  expect(h.api.moveTaskProject).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel move" }));
+  expect(screen.queryByText("move preview")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Preview project move" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Confirm move" })).toBeVisible());
+  fireEvent.click(screen.getByRole("button", { name: "Confirm move" }));
+  await waitFor(() =>
+    expect(h.api.moveTaskProject).toHaveBeenCalledWith(garden.id, {
+      destinationListId: garden.id,
+      expectedRevision: 1,
+      previewToken: "approved-move",
+    }),
+  );
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+});
+it.each([
+  "Archive",
+  "Cancel project",
+  "Complete project",
+])("routes %s through the project action menu with revision checks", async (label) => {
+  h.params = { kind: "project", id: garden.id };
+  h.record = { ...garden, listId: inbox.id, lifecycle: "open", notes: null };
+  render(<ContainerEditorScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Record actions" }));
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  const api =
+    label === "Archive"
+      ? h.api.archiveTaskProject
+      : label === "Cancel project"
+        ? h.api.cancelTaskProject
+        : h.api.completeTaskProject;
+  await waitFor(() => expect(api).toHaveBeenCalledWith(garden.id, { expectedRevision: 1 }));
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+});
+it("keeps Inbox permanent and archived containers read-only", () => {
+  h.params = { kind: "list", id: inbox.id };
+  h.record = { ...inbox, icon: "list", color: null, description: null };
+  const { rerender } = render(<ContainerEditorScreen />);
+  expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+  h.params = { kind: "list", id: garden.id };
+  h.record = { ...garden, availability: "archived", icon: "list", color: null, description: null };
+  rerender(<ContainerEditorScreen />);
+  expect(screen.getByText("This container is archived and read-only.")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+});
+it.each([
+  "Complete",
+  "Cancel task",
+  "Move to Trash",
+])("offers Undo for accepted task action %s from the editor", async (label) => {
+  h.params = { kind: "task", id: garden.id };
+  h.record = existingTask();
+  render(<TaskEditorScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Record actions" }));
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  const operation =
+    label === "Complete"
+      ? h.api.completeTask
+      : label === "Cancel task"
+        ? h.api.cancelTask
+        : h.api.trashTask;
+  await waitFor(() => expect(operation).toHaveBeenCalledWith(garden.id, { expectedRevision: 4 }));
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+  const options = h.success.mock.calls.at(-1)?.[1];
+  expect(options.action.label).toBe("Undo");
+  options.action.onClick();
+  await waitFor(() =>
+    expect(label === "Move to Trash" ? h.api.restoreTask : h.api.reopenTask).toHaveBeenCalledWith(
+      "saved",
+      { expectedRevision: 2 },
+    ),
+  );
+});
+it("restores deleted tasks and offers reopening completed reminders", async () => {
+  h.params = { kind: "task", id: garden.id, deleted: "1" };
+  h.record = existingTask();
+  const { unmount } = render(<TaskEditorScreen />);
+  expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await waitFor(() =>
+    expect(h.api.restoreTask).toHaveBeenCalledWith(garden.id, { expectedRevision: 4 }),
+  );
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+  unmount();
+  h.params = { kind: "reminder", id: garden.id };
+  h.record = { ...existingTask(), completedAt: "2026-11-06T10:00:00Z" };
+  render(<TaskEditorScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Record actions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+  await waitFor(() =>
+    expect(h.api.completeReminder).toHaveBeenCalledWith(garden.id, false, "2026-11-06T12:00:00Z"),
+  );
+});
+it("cannot mutate an explicitly read-only task", () => {
+  h.params = { kind: "task", id: garden.id, readOnly: "1" };
+  h.record = existingTask();
+  render(<TaskEditorScreen />);
+  expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Record actions" }));
+  for (const label of ["Complete", "Cancel task", "Move to Trash"])
+    expect(screen.getByRole("button", { name: label })).toBeDisabled();
+});
+it("resolves list archival only after explicitly choosing how to handle active contents", async () => {
+  h.params = { kind: "list", id: garden.id };
+  h.record = { ...garden, description: null, icon: "list", color: null };
+  const details = {
+    code: "task_list_has_active_contents",
+    currentRevisions: { destinationList: null, project: null, sourceList: 1, task: null },
+    openContentCounts: { tasks: 2, projects: 1 },
+    resolutions: ["move_active_contents", "archive_contents_together", "cancel"],
+  };
+  h.api.archiveTaskList.mockRejectedValueOnce(
+    new ApiClientError({ status: 409, code: "CONFLICT", message: "Active contents", details }),
+  );
+  render(<ContainerEditorScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+  await screen.findByText("resolve open contents");
+  expect(screen.getByRole("button", { name: "move active contents" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Destination list, None" }));
+  fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
+  fireEvent.click(screen.getByRole("button", { name: "move active contents" }));
+  await waitFor(() =>
+    expect(h.api.archiveTaskList).toHaveBeenLastCalledWith(garden.id, {
+      expectedRevision: 1,
+      resolution: "move_active_contents",
+      destinationListId: inbox.id,
+    }),
+  );
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+});
+it("edits fallback due-date fields inline and clears them without a timezone selector", async () => {
+  render(<TaskEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Plan meals" } });
+  fireEvent.change(screen.getByLabelText("Due date (ISO date/time)"), {
+    target: { value: "2026-12-01T12:00:00Z" },
+  });
+  fireEvent.change(screen.getByLabelText("Reserved time (ISO date/time)"), {
+    target: { value: "2026-12-01T11:00:00Z" },
+  });
+  fireEvent.change(screen.getByLabelText("Due date (ISO date/time)"), { target: { value: "" } });
+  fireEvent.click(save());
+  await waitFor(() =>
+    expect(h.api.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dueAt: null,
+        scheduledAt: "2026-12-01T11:00:00Z",
+        timezone: "America/New_York",
+      }),
+    ),
+  );
+  expect(screen.queryByLabelText(/time zone/i)).not.toBeInTheDocument();
+});
+it("offers resource retries when task organization cannot load", () => {
+  h.resourceError = true;
+  render(<TaskEditorScreen />);
+  for (const label of ["Retry task organization", "Retry lists", "Retry projects"])
+    fireEvent.click(screen.getByRole("button", { name: label }));
+  expect(h.refetch).toHaveBeenCalledTimes(5);
+});
+it("does not invent a task timezone when account configuration is unavailable", async () => {
+  h.timezone = undefined;
+  render(<TaskEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Plan meals" } });
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(h.api.createTask).not.toHaveBeenCalled();
+  expect(h.back).not.toHaveBeenCalled();
+});
+it.each([
+  "complete open tasks",
+  "cancel open tasks",
+  "move open tasks",
+])("resolves project completion using %s only after confirmation", async (resolution) => {
+  h.params = { kind: "project", id: garden.id };
+  h.record = { ...garden, listId: inbox.id, lifecycle: "open", notes: null };
+  const details = {
+    code: "task_project_has_open_tasks",
+    currentRevisions: { destinationList: null, project: 1, sourceList: 1, task: null },
+    openContentCounts: { tasks: 2, projects: 0 },
+    resolutions: [
+      "complete_open_tasks",
+      "cancel_open_tasks",
+      "move_open_tasks",
+      "keep_project_open",
+    ],
+  };
+  h.api.completeTaskProject.mockRejectedValueOnce(
+    new ApiClientError({ status: 409, code: "CONFLICT", message: "Open tasks", details }),
+  );
+  render(<ContainerEditorScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Record actions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Complete project" }));
+  await screen.findByText("resolve open contents");
+  if (resolution === "move open tasks") {
+    expect(screen.getByRole("button", { name: resolution })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Destination list, None" }));
+    fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Destination project, None" }));
+    fireEvent.click(screen.getByRole("button", { name: "None" }));
+  }
+  vi.mocked(window.confirm).mockReturnValue(false);
+  fireEvent.click(screen.getByRole("button", { name: resolution }));
+  expect(h.api.completeTaskProject).toHaveBeenCalledOnce();
+  vi.mocked(window.confirm).mockReturnValue(true);
+  fireEvent.click(screen.getByRole("button", { name: resolution }));
+  await waitFor(() =>
+    expect(h.api.completeTaskProject).toHaveBeenLastCalledWith(
+      garden.id,
+      expect.objectContaining({ expectedRevision: 1, resolution: resolution.replaceAll(" ", "_") }),
+    ),
+  );
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+});
+it("lets the user leave a conflicted project unchanged and exit a stale container editor", async () => {
+  h.params = { kind: "project", id: garden.id };
+  h.record = { ...garden, listId: inbox.id, lifecycle: "open", notes: null };
+  const details = {
+    code: "task_project_has_open_tasks",
+    currentRevisions: { destinationList: null, project: 1, sourceList: 1, task: null },
+    openContentCounts: { tasks: 1, projects: 0 },
+    resolutions: [
+      "complete_open_tasks",
+      "cancel_open_tasks",
+      "move_open_tasks",
+      "keep_project_open",
+    ],
+  };
+  h.api.completeTaskProject.mockRejectedValueOnce(
+    new ApiClientError({ status: 409, code: "CONFLICT", message: "Open tasks", details }),
+  );
+  render(<ContainerEditorScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Record actions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Complete project" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Keep unchanged" }));
+  expect(screen.queryByText("resolve open contents")).not.toBeInTheDocument();
+  expect(h.back).not.toHaveBeenCalled();
+  h.api.updateTaskProject.mockRejectedValueOnce(
+    new ApiClientError({ status: 409, code: "CONFLICT", message: "Stale" }),
+  );
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Changed" } });
+  fireEvent.click(save());
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Close and reopen to load current version" }),
+  );
+  expect(h.back).toHaveBeenCalledOnce();
+});
+it.each([
+  { listId: "unavailable-list" },
+  { projectId: "unavailable-project" },
+])("protects a task whose organization is unavailable: %j", (overrides) => {
+  h.params = { kind: "task", id: garden.id };
+  h.record = { ...existingTask(), ...overrides };
+  render(<TaskEditorScreen />);
+  expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Record actions" }));
+  expect(screen.getByRole("button", { name: "Complete" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Move to Trash" })).toBeDisabled();
+});
+it.each([
+  422, 503,
+])("distinguishes a rejected task creation from an uncertain server failure (%s)", async (status) => {
+  h.api.createTask.mockRejectedValueOnce(
+    new ApiClientError({ status, code: "REQUEST_FAILED", message: "Unable to save" }),
+  );
+  render(<TaskEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Plan meals" } });
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(h.back).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Title")).toHaveValue("Plan meals");
+  if (status >= 500)
+    expect(screen.getByRole("button", { name: "Retry the same task creation" })).toBeVisible();
+  else
+    expect(
+      screen.queryByRole("button", { name: "Retry the same task creation" }),
+    ).not.toBeInTheDocument();
 });

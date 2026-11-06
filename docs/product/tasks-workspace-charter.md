@@ -101,6 +101,19 @@ These checks are not yet a domain status result. Tasks does not ship persisted h
 checks, questions, a latest review artifact, or the terminal statuses `maintained`,
 `maintained_with_questions`, `blocked`, and `failed`. No current API or MCP tool may claim them.
 
+## Daily review projection
+
+The shared Tasks read projection supports `due=today` for deadlines before the end of the
+person's current planning day, including overdue deadlines and excluding undated items.
+Within each selected display group, `sort=auto` puts open items due in the next ten minutes first, then orders each urgency group
+by priority, then deadline (dated before undated), and stable identity. Pagination retains the
+initial observation time.
+These are query options, not persisted workspace preferences or automatic changes to records.
+
+History contains completed/cancelled items in active containers. Archived container contents
+remain separate from History; Trash contains deleted items. The API keeps these distinctions
+consistent for web, mobile and MCP callers.
+
 ## 5. Surgical operations
 
 The public API, typed client, web workspace, and MCP adapter ship narrow operations for:

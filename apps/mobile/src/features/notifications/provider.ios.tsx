@@ -204,6 +204,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
         }
         if (ownerRef.current !== id) throw new Error("Your account changed. Please try again.");
         await SecureStore.setItemAsync(key(id), value ? "enabled" : "disabled");
+        if (ownerRef.current !== id) throw new Error("Your account changed. Please try again.");
         enabledRef.current = value;
         setEnabledState(value);
         if (value) await syncRef.current(id);

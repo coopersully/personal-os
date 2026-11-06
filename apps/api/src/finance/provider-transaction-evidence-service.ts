@@ -238,9 +238,9 @@ export function createFinanceProviderTransactionEvidenceService({
   }
   return {
     /**
-     * Server-private acquisition prerequisite, NOT mutation/execution authority or a durable receipt.
-     * Unwired until the canonical action caller resolves replay BEFORE acquisition and revalidates
-     * these native snapshots under its existing authority/locks immediately before atomic admission.
+     * Server-private evidence, NOT mutation/execution authority or a durable receipt.
+     * The canonical action caller resolves replay BEFORE acquisition and revalidates these native
+     * snapshots under its existing authority/locks immediately before atomic admission.
      * Public read DTOs are never accepted as source proof. This method performs SELECTs only.
      */
     async acquireSourceFacts(

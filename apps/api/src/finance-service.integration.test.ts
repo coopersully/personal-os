@@ -11846,7 +11846,10 @@ describe.sequential("finance service", () => {
         throw new Error("Synthetic private provider failure.");
       });
       const running = f.run();
-      const failed = expect(running).rejects.toThrow("Synthetic private provider failure.");
+      const failed = expect(running).rejects.toMatchObject({
+        code: "service_unavailable",
+        message: "Historical provider evidence is unavailable.",
+      });
       await arrived;
       try {
         await expect(f.run()).rejects.toMatchObject({ code: "conflict" });

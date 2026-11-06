@@ -480,7 +480,7 @@ export const personalOsToolCatalog = {
   admit_finance_provider_source_facts: write(
     "finances",
     ["finances:read", "finances:write", "finances:execute"],
-    { policy: "approved_rule", openWorld: true },
+    { policy: "approved_rule", openWorld: true, idempotent: true },
   ),
   read_finance_provider_transaction_evidence: read("finances", ["finances:read"], "inspect", {
     openWorld: true,

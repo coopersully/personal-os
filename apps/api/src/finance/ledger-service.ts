@@ -192,6 +192,7 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
         )
         .orderBy(financeTransactions.id)
         .for("update");
+      const rows = locked.map((entry) => entry.row);
       if (
         rows.length !== facts.length ||
         rows.some((row) => {

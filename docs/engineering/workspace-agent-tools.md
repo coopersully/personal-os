@@ -8908,6 +8908,7 @@ Read a globally filtered, sorted and grouped page of nohmi Tasks and Reminders, 
       "type": "string",
       "enum": [
         "any",
+        "today",
         "overdue",
         "none",
         "dated"
@@ -8978,6 +8979,7 @@ Read a globally filtered, sorted and grouped page of nohmi Tasks and Reminders, 
       "default": "default",
       "type": "string",
       "enum": [
+        "auto",
         "default",
         "date",
         "reserved",

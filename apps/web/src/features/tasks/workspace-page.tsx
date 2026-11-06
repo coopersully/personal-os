@@ -516,7 +516,7 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
               : scopeName === "Today"
                 ? "Nothing is due or reserved for today."
                 : scopeName === "History"
-                  ? "Completed items and archived context will appear here."
+                  ? "Completed and cancelled items will appear here."
                   : scopeName === "Trash"
                     ? "Removed items stay here until you restore them."
                     : "Capture something worth keeping."}

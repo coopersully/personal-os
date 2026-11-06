@@ -105,3 +105,43 @@ it("uses a separate exact notification GET with no-store and cannot turn the ID 
   expect(init?.method ?? "GET").toBe("GET");
   expect(init?.body).toBeUndefined();
 });
+
+it("maps the bounded Texting agent protocol to owner-authenticated endpoints", async () => {
+  const request = vi.fn(async () => ({})) as unknown as Parameters<
+    typeof createTextingApiClient
+  >[0];
+  const api = createTextingApiClient(request, () => "");
+  await api.getTextingAgentStatus();
+  expect(request).toHaveBeenLastCalledWith("/v1/texting/agent", { cache: "no-store" });
+  await api.configureTextingAgent({ scheduleId: null });
+  expect(request).toHaveBeenLastCalledWith("/v1/texting/agent", {
+    method: "PUT",
+    body: '{"scheduleId":null}',
+  });
+  const invocationId = crypto.randomUUID();
+  await api.claimTextingAgentRun("run/id", { invocationId });
+  expect(request).toHaveBeenLastCalledWith("/v1/texting/agent/runs/run%2Fid/claim", {
+    method: "POST",
+    body: JSON.stringify({ invocationId }),
+  });
+  await api.checkpointTextingAgentRun("run", { invocationId, work: [] });
+  expect(request).toHaveBeenLastCalledWith("/v1/texting/agent/runs/run/checkpoint", {
+    method: "POST",
+    body: JSON.stringify({ invocationId, work: [] }),
+  });
+  await api.replyToTextingAgentRun("run", {
+    invocationId,
+    body: "Your reply",
+    workspaces: ["tasks"],
+    replyToMessageIds: [invocationId],
+  });
+  expect(request).toHaveBeenLastCalledWith("/v1/texting/agent/runs/run/reply", {
+    method: "POST",
+    body: JSON.stringify({
+      invocationId,
+      body: "Your reply",
+      workspaces: ["tasks"],
+      replyToMessageIds: [invocationId],
+    }),
+  });
+});

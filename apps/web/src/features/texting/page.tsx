@@ -2,7 +2,6 @@ import { textingConsentVersion } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useContext, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronRightIcon } from "@/components/icons";
 import {
   ResponsiveDialog as Dialog,
   ResponsiveDialogContent as DialogContent,
@@ -35,6 +34,7 @@ import { Input } from "../../components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
 import { Switch } from "../../components/ui/switch.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { ProfileRow } from "../settings/profile-rows.js";
 import { SettingsSection } from "../settings/settings-layout";
 
 export function TextingSettings({
@@ -130,32 +130,26 @@ export function TextingSettings({
   if (inline) {
     return (
       <>
-        <div className="settings-inline-row px-4 py-0">
-          <Field orientation="horizontal" className="min-h-10 justify-between">
-            <FieldLabel>Phone</FieldLabel>
-            <Button
-              type="button"
-              variant="ghost"
-              aria-label="Edit Phone"
-              className="font-normal text-muted-foreground"
-              disabled={!connection.isSuccess}
-              onClick={() => {
-                setConsentAccepted(false);
-                setCountry(current?.country ?? "US");
-                setPhoneNumber("");
-                setChallengeId(null);
-                setCode("");
-                setEditing(true);
-              }}
-            >
-              {connection.isPending
+        <div>
+          <ProfileRow
+            label="Phone"
+            disabled={!connection.isSuccess}
+            onClick={() => {
+              setConsentAccepted(false);
+              setCountry(current?.country ?? "US");
+              setPhoneNumber("");
+              setChallengeId(null);
+              setCode("");
+              setEditing(true);
+            }}
+            value={
+              connection.isPending
                 ? "Loading…"
                 : connection.isError
                   ? "Unavailable"
-                  : (current?.state !== "disconnected" && current?.maskedPhoneNumber) || "Not set"}
-              <ChevronRightIcon aria-hidden="true" />
-            </Button>
-          </Field>
+                  : (current?.state !== "disconnected" && current?.maskedPhoneNumber) || "Not set"
+            }
+          />
           <QueryFeedback query={connection} title="Couldn’t load your texting connection." />
         </div>
         <Dialog

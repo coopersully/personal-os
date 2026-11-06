@@ -2,6 +2,7 @@ import {
   type Database,
   financeSmsCompletions,
   textInboundClaims,
+  textingAgentQueue,
   textReplyBindings,
 } from "@personal-os/database";
 import { and, asc, eq, exists, gt, inArray, notExists, or } from "drizzle-orm";
@@ -41,6 +42,12 @@ export function createTextingRecoveryDispatcher(options: { db: Database; recover
       .from(textInboundClaims)
       .where(
         and(
+          notExists(
+            options.db
+              .select({ id: textingAgentQueue.claimId })
+              .from(textingAgentQueue)
+              .where(eq(textingAgentQueue.claimId, textInboundClaims.id)),
+          ),
           notExists(
             options.db
               .select({ id: financeSmsCompletions.claimId })

@@ -41,6 +41,11 @@ describe("workspace navigation ownership", () => {
     expect(rendersApplicationShell(navigationOwnerForLocation("/setup"))).toBe(false);
   });
 
+  it("gives Messages a shared channel shell without settings or workspace navigation", () => {
+    expect(navigationOwnerForLocation("/messages")).toEqual({ kind: "shared-channel" });
+    expect(rendersApplicationShell(navigationOwnerForLocation("/messages"))).toBe(true);
+    expect(workspaceDefinitions.some((workspace) => workspace.path === "/messages")).toBe(false);
+  });
   it("keeps the five workspace defaults in a stable order", () => {
     expect(workspaceDefinitions.map(({ id }) => id)).toEqual([
       "today",

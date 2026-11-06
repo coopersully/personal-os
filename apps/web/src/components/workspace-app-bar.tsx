@@ -3,7 +3,7 @@ import type { WorkspaceId } from "../navigation/manifest.js";
 import { WorkspaceBreadcrumbs } from "./workspace-breadcrumbs";
 import { WorkspaceHeaderControlsSlot } from "./workspace-header-controls";
 
-export type WorkspaceAppBarWorkspace = WorkspaceId | "account";
+export type WorkspaceAppBarWorkspace = WorkspaceId | "account" | "messages";
 
 /**
  * The stable, page-wide frame for every workspace. Consumers supply semantic
@@ -12,6 +12,7 @@ export type WorkspaceAppBarWorkspace = WorkspaceId | "account";
  */
 export function WorkspaceAppBar({
   actions,
+  compact = false,
   attention,
   primaryActions,
   context,
@@ -20,6 +21,7 @@ export function WorkspaceAppBar({
   workspace,
 }: {
   actions?: ReactNode;
+  compact?: boolean;
   attention?: ReactNode;
   primaryActions?: ReactNode;
   context?: ReactNode;
@@ -33,7 +35,7 @@ export function WorkspaceAppBar({
       className="workspace-app-bar"
       data-slot="workspace-app-bar"
       data-workspace={workspace}
-      data-header-layout={title ? "sentence" : undefined}
+      data-header-layout={compact ? "compact" : title ? "sentence" : undefined}
     >
       <div className="workspace-app-bar__identity" data-slot="workspace-app-bar-identity">
         {identity}

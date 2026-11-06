@@ -655,7 +655,7 @@ it.each([
     screen.queryByText("Automation registered. Set it up in your host."),
   ).not.toBeInTheDocument();
 });
-it("shows scheduled cadence and delayed continuation without an API token form", async () => {
+it("preserves scheduled cadence and delayed continuation with an optional Texting token", async () => {
   const scheduled = status("active", true);
   api.listAutomationHostSchedules.mockResolvedValue([
     {
@@ -678,7 +678,10 @@ it("shows scheduled cadence and delayed continuation without an API token form",
     screen.getByText(/Saved answers wait for the next scheduled invocation/),
   ).toBeInTheDocument();
   expect(screen.getByRole("dialog", { name: "Finance host" })).toBeInTheDocument();
-  expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Routine API trigger token")).toBeInTheDocument();
+  expect(
+    screen.getByText(/scheduled Finance runs continue unchanged and do not require this token/),
+  ).toBeInTheDocument();
 });
 
 it("shows the API token control for an event routine inside its setup dialog", async () => {

@@ -26,6 +26,7 @@ export type WorkspaceDefinition = {
 export type NavigationOwner =
   | { kind: "workspace"; workspace: WorkspaceId }
   | { kind: "account-utility" }
+  | { kind: "shared-channel" }
   | { kind: "standalone-flow" };
 
 export const workspaceDefinitions: WorkspaceDefinition[] = [
@@ -43,6 +44,7 @@ export const workspaceDefinitions: WorkspaceDefinition[] = [
 ];
 
 export function navigationOwnerForLocation(pathname: string): NavigationOwner {
+  if (pathname === "/messages") return { kind: "shared-channel" };
   if (pathname === "/setup") return { kind: "standalone-flow" };
   if (["/settings", "/goals", "/motives", "/activity"].includes(pathname)) {
     return { kind: "account-utility" };

@@ -78,3 +78,21 @@ describe("exact Finance SMS reply status MCP catalog", () => {
     expect(availableToolNames(both, false)).not.toContain("get_texting_status");
   });
 });
+
+it("exposes SMS work only with all Texting grants and removes it in read-only mode", () => {
+  for (const name of [
+    "claim_texting_agent_run",
+    "checkpoint_texting_agent_run",
+    "reply_to_texting_agent_run",
+  ]) {
+    expect(
+      availableToolNames(new Set(["texting:read", "texting:write", "texting:execute"]), false),
+    ).toContain(name);
+    expect(availableToolNames(new Set(["texting:read", "texting:write"]), false)).not.toContain(
+      name,
+    );
+    expect(
+      availableToolNames(new Set(["texting:read", "texting:write", "texting:execute"]), true),
+    ).not.toContain(name);
+  }
+});

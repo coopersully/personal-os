@@ -320,6 +320,7 @@ export function TaskNavigation({
   const [params] = useSearchParams();
   const pathname = useLocation().pathname;
   const decisions = pathname === "/tasks/decisions";
+  const messages = pathname === "/tasks/messages";
   const reminders = pathname === "/reminders";
   const rawView = params.get("view");
   const selectedView = reminders
@@ -339,7 +340,7 @@ export function TaskNavigation({
       ? projects.find((project) => project.id === params.get("project"))
       : undefined;
   const selectedListId =
-    decisions || reminders || selectedView || archive
+    decisions || messages || reminders || selectedView || archive
       ? null
       : (selectedProject?.listId ??
         params.get("list") ??

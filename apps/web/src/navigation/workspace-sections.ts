@@ -64,6 +64,7 @@ export function workspaceSectionPages(owner: string, search: string): MobileWork
 }
 
 export function activeWorkspaceSection(owner: string, pathname: string, search: string): string {
+  if (owner === "calendar") return "calendar";
   const params = new URLSearchParams(search);
   const requested = params.get("navigation");
   if (sections[owner]?.some(({ id }) => id === requested)) return requested as string;

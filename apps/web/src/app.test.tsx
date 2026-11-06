@@ -509,6 +509,7 @@ const mocks = vi.hoisted(() => ({
   getXBookmarkAuthorizationUrl: vi.fn(),
   getPinterestWallpaperSettings: vi.fn(),
   getTextingConnection: vi.fn(),
+  getTextingAgentStatus: vi.fn(),
   getMailSetupContext: vi.fn(),
   getMailThread: vi.fn(),
   getMe: vi.fn(),
@@ -1190,6 +1191,18 @@ function defaults() {
     },
   ]);
   mocks.getXBookmarkAccount.mockResolvedValue(null);
+  mocks.getTextingAgentStatus.mockResolvedValue({
+    enabled: false,
+    scheduleId: null,
+    readiness: "disabled",
+    chatReady: false,
+    verifiedAt: null,
+    pendingCount: 0,
+    routines: [],
+    runs: [],
+    nextRunCursor: null,
+    instructions: "",
+  });
   mocks.getTextingConnection.mockResolvedValue({
     consentEpoch: 0,
     country: null,
@@ -3185,7 +3198,22 @@ describe("Personal OS web app", () => {
       within(rail)
         .getAllByRole("link")
         .map((link) => link.getAttribute("aria-label")),
-    ).toEqual(["Today at a Glance", "Calendar", "Tasks", "Mail", "Finances", "Settings"]);
+    ).toEqual([
+      "Today at a Glance",
+      "Calendar",
+      "Tasks",
+      "Mail",
+      "Finances",
+      "Messages",
+      "Settings",
+    ]);
+    expect(within(rail).getByRole("link", { name: "Messages" })).toHaveAttribute(
+      "href",
+      "/messages",
+    );
+    expect(within(rail).getByRole("link", { name: "Messages" })).not.toHaveAttribute(
+      "data-workspace",
+    );
     expect(screen.queryByRole("button", { name: "Switch workspace" })).not.toBeInTheDocument();
     expect(within(rail).getByRole("link", { name: "Today at a Glance" })).toHaveAttribute(
       "aria-current",
@@ -3412,7 +3440,11 @@ describe("Personal OS web app", () => {
       }),
     );
     const workspaceMenu = screen.getByRole("menu", { name: "Switch workspace" });
-    expect(within(workspaceMenu).getAllByRole("menuitem")).toHaveLength(10);
+    expect(within(workspaceMenu).getAllByRole("menuitem")).toHaveLength(11);
+    expect(within(workspaceMenu).getByRole("menuitem", { name: "Messages" })).toHaveAttribute(
+      "href",
+      "/messages",
+    );
     expect(
       within(workspaceMenu)
         .getAllByRole("menuitem")

@@ -937,6 +937,8 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
       .select()
       .from(textMessages)
       .where(eq(textMessages.id, completion.acknowledgementMessageId));
+    expect(message).toMatchObject({ workspaces: ["finances"], senderKind: "system" });
+    expect(message?.replyToMessageIds).toHaveLength(1);
     expect(message?.body).toContain(
       expected === "accepted" ? "Saved your reply" : "No decision was applied",
     );

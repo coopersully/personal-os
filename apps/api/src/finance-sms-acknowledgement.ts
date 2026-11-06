@@ -5,6 +5,7 @@ import {
   financeSmsCompletions,
   notificationPreferences,
   textInboundClaims,
+  textMessages,
   textReplyBindings,
   users,
 } from "@personal-os/database";
@@ -198,6 +199,22 @@ export function createFinanceSmsAcknowledgementDispatcher(options: {
                     ? "nohmi: Your Finance reply could not apply to the current work. No decision was applied. Review the current proposal or question in nohmi."
                     : `nohmi: Saved ${acceptedCount === 1 ? "your reply" : `${acceptedCount} replies`}.${reviewCount ? ` ${reviewCount} other ${reviewCount === 1 ? "reply needs" : "replies need"} review in nohmi.` : ""} Finance maintenance may still be waiting for its host or another decision. Review progress in nohmi.`,
             queued: async (messageId) => {
+              await tx
+                .update(textMessages)
+                .set({
+                  workspaces: ["finances"],
+                  senderKind: "system",
+                  replyToMessageIds: [row.messageId],
+                  classifiedAt: options.now(),
+                })
+                .where(and(eq(textMessages.id, messageId), eq(textMessages.userId, row.userId)));
+              await tx
+                .update(textMessages)
+                .set({ workspaces: ["finances"], senderKind: "human", classifiedAt: options.now() })
+                .where(
+                  and(eq(textMessages.id, row.messageId), eq(textMessages.userId, row.userId)),
+                );
+
               if (stored)
                 await tx
                   .update(financeSmsCompletions)

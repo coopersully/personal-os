@@ -43,7 +43,7 @@ import {
 } from "@personal-os/database";
 import { financeProviderSourceAdmissionResultSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
 import { financeActionFingerprint, stableFinanceActionInput } from "./finance-action-identity.js";
@@ -11751,6 +11751,52 @@ describe.sequential("finance service", () => {
       expect(after.items).toEqual(before.items);
       expect(await f.receipts()).toHaveLength(1);
       expect(await f.revisions()).toHaveLength(2);
+    });
+
+    it("rejects an Item generation change within the same JavaScript millisecond before source admission", async () => {
+      const f = await admissionFixture();
+      await database.db
+        .update(financeProviderItems)
+        .set({
+          updatedAt: sql`date_trunc('milliseconds', ${financeProviderItems.updatedAt}) + interval '100 microseconds'`,
+        })
+        .where(eq(financeProviderItems.id, f.item.id));
+      const [before] = await database.db
+        .select({
+          at: financeProviderItems.updatedAt,
+          exact: sql<string>`${financeProviderItems.updatedAt}::text`,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, f.item.id));
+      if (!before) throw new Error("Missing native Item fence.");
+      f.readHistory.mockImplementationOnce(async () => {
+        await database.db
+          .update(financeProviderItems)
+          .set({ updatedAt: sql`${financeProviderItems.updatedAt} + interval '1 microsecond'` })
+          .where(eq(financeProviderItems.id, f.item.id));
+        return {
+          ...f.response,
+          coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+        };
+      });
+      await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      const [after] = await database.db
+        .select({
+          at: financeProviderItems.updatedAt,
+          exact: sql<string>`${financeProviderItems.updatedAt}::text`,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, f.item.id));
+      if (!after) throw new Error("Missing native Item fence.");
+      expect(after.at).toEqual(before.at);
+      expect(after.exact).not.toBe(before.exact);
+      expect((await f.ledgerSnapshot()).transactions[0]).toMatchObject({
+        currencyCode: null,
+        providerDirection: null,
+      });
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
     });
 
     it("rejects a foreign source admission target before provider acquisition and preserves both owners", async () => {

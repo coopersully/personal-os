@@ -15,7 +15,7 @@ import {
   financeProviderTransactionEvidenceSchema,
   toCents,
 } from "@personal-os/domain";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { createFinanceProviderItemService } from "../finance-provider-item-service.js";
 import type { Principal } from "../types.js";
@@ -115,11 +115,13 @@ export function createFinanceProviderTransactionEvidenceService({
           transactionId: financeTransactions.id,
           transactionRevision: financeTransactions.contextualRevision,
           transactionUpdatedAt: financeTransactions.updatedAt,
+          transactionUpdatedAtFence: sql<string>`${financeTransactions.updatedAt}::text`,
           providerTransactionId: financeTransactions.providerTransactionId,
           date: financeTransactions.transactionDate,
           accountId: financeAccounts.id,
           accountRevision: financeAccounts.contextualRevision,
           accountUpdatedAt: financeAccounts.updatedAt,
+          accountUpdatedAtFence: sql<string>`${financeAccounts.updatedAt}::text`,
           providerAccountId: financeAccounts.providerAccountId,
           accountProviderItemId: financeAccounts.providerItemId,
           accountStatus: financeAccounts.status,
@@ -127,6 +129,7 @@ export function createFinanceProviderTransactionEvidenceService({
           itemRecordId: financeProviderItems.id,
           providerItemId: financeProviderItems.providerItemId,
           itemUpdatedAt: financeProviderItems.updatedAt,
+          itemUpdatedAtFence: sql<string>`${financeProviderItems.updatedAt}::text`,
           itemProvider: financeProviderItems.provider,
         })
         .from(financeTransactions)

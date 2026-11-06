@@ -11528,6 +11528,15 @@ describe.sequential("finance service", () => {
         f.service.readFinanceProviderTransactionEvidence(
           f.principal,
           { transactionIds: [f.transaction.id] },
+        ),
+      ).rejects.toMatchObject({
+        code: "forbidden",
+        message: "Present the authenticated session to read historical evidence.",
+      });
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(
+          f.principal,
+          { transactionIds: [f.transaction.id] },
           hashToken("wrong-session"),
         ),
       ).rejects.toMatchObject({ code: "forbidden" });

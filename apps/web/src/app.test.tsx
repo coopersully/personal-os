@@ -9873,12 +9873,10 @@ describe("Personal OS web app", () => {
             0,
             mocks.listReminders.mock.calls.length - reminderStageCallStart,
           ),
-          remindersSettlements: mocks.listReminders.mock.settledResults
-            .slice(-3)
-            .map((entry) => ({
-              type: entry.type,
-              emptyPage: entry.type === "fulfilled" && emptyPage(entry.value),
-            })),
+          remindersSettlements: mocks.listReminders.mock.settledResults.slice(-3).map((entry) => ({
+            type: entry.type,
+            emptyPage: entry.type === "fulfilled" && emptyPage(entry.value),
+          })),
           workspaceCalls: mocks.listTaskWorkspace.mock.calls.length,
           meSettlements: mocks.getMe.mock.settledResults.slice(-3).map((entry) => entry.type),
           connectorSettlements: mocks.listConnectors.mock.settledResults

@@ -8,9 +8,12 @@ import {
   users,
 } from "@personal-os/database";
 import {
+  type FinanceProviderSourceAdmissionInput,
   type FinanceProviderTransactionEvidenceInput,
+  financeProviderSourceAdmissionInputSchema,
   financeProviderTransactionEvidenceInputSchema,
   financeProviderTransactionEvidenceSchema,
+  toCents,
 } from "@personal-os/domain";
 import { and, eq, inArray } from "drizzle-orm";
 import { AppError } from "../errors.js";
@@ -78,6 +81,9 @@ export function createFinanceProviderTransactionEvidenceService({
         }
         const rows = await tx
           .select({
+            amount: financeTransactions.amount,
+            currencyCode: financeTransactions.currencyCode,
+            providerDirection: financeTransactions.providerDirection,
             transactionId: financeTransactions.id,
             transactionRevision: financeTransactions.contextualRevision,
             transactionUpdatedAt: financeTransactions.updatedAt,
@@ -123,74 +129,180 @@ export function createFinanceProviderTransactionEvidenceService({
       { isolationLevel: "repeatable read", accessMode: "read only" },
     );
   }
+  async function acquireSnapshot(
+    principal: Principal,
+    input: FinanceProviderTransactionEvidenceInput,
+    sessionTokenHash?: string,
+    expectedTargets?: FinanceProviderSourceAdmissionInput["targets"],
+  ) {
+    const before = await snapshot(principal, input.transactionIds, sessionTokenHash);
+    if (
+      expectedTargets &&
+      before.some((row) => {
+        const target = expectedTargets.find((entry) => entry.transactionId === row.transactionId);
+        return (
+          !target ||
+          target.expectedTransactionRevision !== row.transactionRevision.toString() ||
+          target.expectedAccountRevision !== row.accountRevision.toString()
+        );
+      })
+    )
+      throw new AppError("conflict", "The displayed Finance revisions changed.");
+    const first = before[0];
+    if (!first) throw new AppError("invalid_request", "A native Finance selection is required.");
+    if (
+      new Set(before.map((r) => r.itemRecordId)).size !== 1 ||
+      new Set(before.map((r) => r.accountId)).size > 5
+    )
+      throw new AppError(
+        "invalid_request",
+        "Select at most five accounts on one Finance connection.",
+      );
+    if (
+      before.some(
+        (r) =>
+          r.provider !== "plaid" ||
+          r.itemProvider !== "plaid" ||
+          r.accountStatus !== "connected" ||
+          !r.providerAccountId ||
+          !r.providerTransactionId ||
+          !r.providerItemId ||
+          r.accountProviderItemId !== r.providerItemId,
+      )
+    )
+      throw new AppError("conflict", "The Finance source is not eligible for historical evidence.");
+    const dates = before.map((r) => r.date).sort();
+    const startDate = dates[0];
+    const endDate = dates.at(-1);
+    if (
+      !startDate ||
+      !endDate ||
+      !/^\d{4}-\d{2}-\d{2}$/u.test(startDate) ||
+      !/^\d{4}-\d{2}-\d{2}$/u.test(endDate) ||
+      !Number.isFinite(Date.parse(startDate)) ||
+      !Number.isFinite(Date.parse(endDate)) ||
+      Date.parse(endDate) - Date.parse(startDate) >= 366 * 86_400_000
+    )
+      throw new AppError(
+        "invalid_request",
+        "Select a valid historical window shorter than 366 days.",
+      );
+    const targets = before.map((row) => {
+      if (!row.providerAccountId || !row.providerTransactionId)
+        throw new AppError("conflict", "The Finance source changed.");
+      return { accountId: row.providerAccountId, transactionId: row.providerTransactionId };
+    });
+    const evidence = await providerItems.readTransactionHistory({
+      userId: principal.userId,
+      itemRecordId: first.itemRecordId,
+      expectedUpdatedAt: first.itemUpdatedAt.toISOString(),
+      targets,
+      startDate,
+      endDate,
+    });
+    const after = await snapshot(principal, input.transactionIds, sessionTokenHash);
+    const serialize = (value: typeof before) =>
+      JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v));
+    if (serialize(before) !== serialize(after))
+      throw new AppError("conflict", "The Finance source changed during the provider read.");
+    return { before, evidence };
+  }
   return {
+    /**
+     * Server-private acquisition prerequisite, NOT mutation/execution authority or a durable receipt.
+     * Unwired until the canonical action caller resolves replay BEFORE acquisition and revalidates
+     * these native snapshots under its existing authority/locks immediately before atomic admission.
+     * Public read DTOs are never accepted as source proof. This method performs SELECTs only.
+     */
+    async acquireSourceFacts(
+      principal: Principal,
+      rawTargets: FinanceProviderSourceAdmissionInput["targets"],
+      sessionTokenHash?: string,
+    ) {
+      const targets = financeProviderSourceAdmissionInputSchema.shape.targets.parse(rawTargets);
+      const { before, evidence } = await acquireSnapshot(
+        principal,
+        { transactionIds: targets.map((target) => target.transactionId) },
+        sessionTokenHash,
+        targets,
+      );
+      if (
+        !financeProviderTransactionEvidenceSchema.shape.observedAt.safeParse(evidence.observedAt)
+          .success ||
+        !financeProviderTransactionEvidenceSchema.shape.providerUpdatedAt.safeParse(
+          evidence.providerUpdatedAt,
+        ).success ||
+        evidence.snapshotConsistency !== "not_atomic" ||
+        evidence.coverage.scope !== "provider_available_window" ||
+        evidence.coverage.state !== "complete" ||
+        evidence.coverage.reason !== "exhausted" ||
+        evidence.entries.length !== before.length
+      )
+        throw new AppError("conflict", "Historical source facts are not sufficiently proven.");
+      const currencies = new Set(Intl.supportedValuesOf("currency"));
+      // Validate EVERY requested target before returning any candidates; this function never writes.
+      const facts = before.map((row) => {
+        const matches = evidence.entries.filter(
+          (entry) =>
+            entry.accountId === row.providerAccountId &&
+            entry.transactionId === row.providerTransactionId,
+        );
+        const entry = matches.length === 1 ? matches[0] : undefined;
+        if (
+          entry?.status !== "found" ||
+          entry.sourceAmount === null ||
+          !Number.isFinite(entry.sourceAmount) ||
+          entry.sourceAmount === 0 ||
+          !entry.currencyCode ||
+          !currencies.has(entry.currencyCode) ||
+          entry.date !== row.date ||
+          entry.normalizedAmount !== Math.abs(entry.sourceAmount) ||
+          entry.economicDirection !== (entry.sourceAmount < 0 ? "inflow" : "outflow")
+        )
+          throw new AppError("conflict", "Historical source facts are not sufficiently proven.");
+        let sourceCents: number;
+        try {
+          sourceCents = toCents(Math.abs(entry.sourceAmount));
+        } catch {
+          throw new AppError("conflict", "Historical source amount is not exact native cents.");
+        }
+        const providerDirection =
+          entry.sourceAmount < 0 ? ("income" as const) : ("expense" as const);
+        if (
+          sourceCents !== Math.abs(row.amount) ||
+          (row.currencyCode !== null && row.currencyCode !== entry.currencyCode) ||
+          (row.providerDirection !== null && row.providerDirection !== providerDirection)
+        )
+          throw new AppError(
+            "conflict",
+            "Existing Finance source facts conflict with provider evidence.",
+          );
+        return Object.freeze({
+          transactionId: row.transactionId,
+          accountId: row.accountId,
+          transactionRevision: row.transactionRevision.toString(),
+          accountRevision: row.accountRevision.toString(),
+          currencyCode: entry.currencyCode,
+          providerDirection,
+        });
+      });
+      // These values remain inside the API service boundary; never serialize snapshots/provider IDs.
+      return {
+        ownerId: principal.userId,
+        observedAt: evidence.observedAt,
+        providerUpdatedAt: evidence.providerUpdatedAt,
+        snapshotConsistency: "not_atomic" as const,
+        nativeSnapshot: before,
+        facts: Object.freeze(facts),
+      };
+    },
     async read(
       principal: Principal,
       rawInput: FinanceProviderTransactionEvidenceInput,
       sessionTokenHash?: string,
     ) {
       const input = financeProviderTransactionEvidenceInputSchema.parse(rawInput);
-      const before = await snapshot(principal, input.transactionIds, sessionTokenHash);
-      const first = before[0];
-      if (!first) throw new AppError("invalid_request", "A native Finance selection is required.");
-      if (
-        new Set(before.map((r) => r.itemRecordId)).size !== 1 ||
-        new Set(before.map((r) => r.accountId)).size > 5
-      )
-        throw new AppError(
-          "invalid_request",
-          "Select at most five accounts on one Finance connection.",
-        );
-      if (
-        before.some(
-          (r) =>
-            r.provider !== "plaid" ||
-            r.itemProvider !== "plaid" ||
-            r.accountStatus !== "connected" ||
-            !r.providerAccountId ||
-            !r.providerTransactionId ||
-            !r.providerItemId ||
-            r.accountProviderItemId !== r.providerItemId,
-        )
-      )
-        throw new AppError(
-          "conflict",
-          "The Finance source is not eligible for historical evidence.",
-        );
-      const dates = before.map((r) => r.date).sort();
-      const startDate = dates[0];
-      const endDate = dates.at(-1);
-      if (
-        !startDate ||
-        !endDate ||
-        !/^\d{4}-\d{2}-\d{2}$/u.test(startDate) ||
-        !/^\d{4}-\d{2}-\d{2}$/u.test(endDate) ||
-        !Number.isFinite(Date.parse(startDate)) ||
-        !Number.isFinite(Date.parse(endDate)) ||
-        Date.parse(endDate) - Date.parse(startDate) >= 366 * 86_400_000
-      )
-        throw new AppError(
-          "invalid_request",
-          "Select a valid historical window shorter than 366 days.",
-        );
-      const targets = before.map((row) => {
-        if (!row.providerAccountId || !row.providerTransactionId)
-          throw new AppError("conflict", "The Finance source changed.");
-        return { accountId: row.providerAccountId, transactionId: row.providerTransactionId };
-      });
-      const evidence = await providerItems.readTransactionHistory({
-        userId: principal.userId,
-        itemRecordId: first.itemRecordId,
-        expectedUpdatedAt: first.itemUpdatedAt.toISOString(),
-        targets,
-        startDate,
-        endDate,
-      });
-      const after = await snapshot(principal, input.transactionIds, sessionTokenHash);
-      const serialize = (value: typeof before) =>
-        JSON.stringify(value, (_, v) => (typeof v === "bigint" ? v.toString() : v));
-      if (serialize(before) !== serialize(after))
-        throw new AppError("conflict", "The Finance source changed during the provider read.");
+      const { before, evidence } = await acquireSnapshot(principal, input, sessionTokenHash);
       // Never spread a provider row. Native identity is authoritative; unexpected/duplicate provider rows fail closed.
       const entries = before.map((row) => {
         const matches = evidence.entries.filter(

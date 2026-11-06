@@ -55,3 +55,32 @@ export const financeProviderTransactionEvidenceSchema = z.strictObject({
 export type FinanceProviderTransactionEvidence = z.infer<
   typeof financeProviderTransactionEvidenceSchema
 >;
+
+// Separate from the advisory reader: clients select native revisions, never source values or evidence.
+const providerAdmissionRevision = z
+  .string()
+  .regex(/^[1-9][0-9]{0,18}$/u)
+  .refine((value) => value.length < 19 || value <= "9223372036854775807");
+export const financeProviderSourceAdmissionInputSchema = z.strictObject({
+  idempotencyKey: z
+    .string()
+    .min(1)
+    .max(200)
+    .regex(/^[!-~]+$/u),
+  targets: z
+    .array(
+      z.strictObject({
+        transactionId: z.uuid(),
+        expectedTransactionRevision: providerAdmissionRevision,
+        expectedAccountRevision: providerAdmissionRevision,
+      }),
+    )
+    .min(1)
+    .max(20)
+    .refine(
+      (targets) => new Set(targets.map((target) => target.transactionId)).size === targets.length,
+    ),
+});
+export type FinanceProviderSourceAdmissionInput = z.infer<
+  typeof financeProviderSourceAdmissionInputSchema
+>;

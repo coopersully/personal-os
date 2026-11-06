@@ -37,3 +37,13 @@ onlyBuiltDependencies:
   - esbuild
   - protobufjs
   - ssh2
+
+# These declaration files import React types without declaring the peer. Keep
+# their types bound to the consuming web app when Expo uses another React version.
+packageExtensions:
+  reicon-react:
+    peerDependencies:
+      '@types/react': '*'
+  vaul:
+    peerDependencies:
+      '@types/react': '*'

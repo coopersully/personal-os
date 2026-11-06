@@ -1,0 +1,83 @@
+import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { Toaster, toast } from "sonner-native";
+import { AuthProvider, useAuth } from "../features/auth/context";
+import { PreviewProvider } from "../features/briefing/context";
+import { useTheme } from "../theme";
+
+export default function RootLayout() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <AuthenticatedLayout />
+        <Toaster />
+      </AuthProvider>
+    </GestureHandlerRootView>
+  );
+}
+function AuthenticatedLayout() {
+  const t = useTheme();
+  const { state, session } = useAuth();
+  if (state.status === "checking" || state.status === "unavailable") {
+    return (
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 20,
+          backgroundColor: t.canvas,
+        }}
+      >
+        <Text style={{ color: t.ink, fontSize: 26, fontWeight: "600" }}>nohmi</Text>
+        {state.status === "checking" ? (
+          <ActivityIndicator accessibilityLabel="Checking your session" color={t.ink} />
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() =>
+              void session
+                .restore()
+                .catch(() => toast.error("Couldn’t check your session. Please try again."))
+            }
+            style={{ padding: 20 }}
+          >
+            <Text style={{ color: t.ink }}>Retry connection</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+  return (
+    <PreviewProvider>
+      <StatusBar style={t.dark ? "light" : "dark"} />
+      <Stack
+        screenOptions={{
+          headerTintColor: t.ink,
+          headerStyle: { backgroundColor: t.canvas },
+          contentStyle: { backgroundColor: t.canvas },
+          headerShadowVisible: false,
+          headerBackButtonDisplayMode: "minimal",
+        }}
+      >
+        <Stack.Protected guard={state.status === "signedOut"}>
+          <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+        </Stack.Protected>
+        <Stack.Protected guard={state.status === "signedIn"}>
+          <Stack.Screen name="(workspaces)" options={{ headerShown: false, title: "today" }} />
+          <Stack.Screen name="detail/[id]" options={{ title: "sample details" }} />
+          <Stack.Screen
+            name="profile"
+            options={{ title: "preview settings", presentation: "modal" }}
+          />
+          <Stack.Screen
+            name="monitoring"
+            options={{ title: "monitoring", presentation: "modal" }}
+          />
+        </Stack.Protected>
+      </Stack>
+    </PreviewProvider>
+  );
+}

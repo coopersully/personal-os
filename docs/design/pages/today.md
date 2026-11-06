@@ -9,6 +9,33 @@ Today is not a dashboard and does not compete with Calendar, Tasks, Mail, or
 Finances. It is an ordered operating surface that links to those domains when a
 deeper decision is needed.
 
+## Expo mobile briefing (accepted November 5, 2026)
+
+The mobile homepage is a short briefing for an always-on monitoring assistant: **needs you →
+coming up → handled for you**. Each summary contains a concrete title and one useful context line;
+one tap opens evidence, source, authority and the next available action. Completed work is visible
+in the briefing, not hidden behind a generic activity count. Colors and reicon glyphs identify the
+owning workspace; amber attention and green completion have separate semantic meanings.
+
+Keep the wordmark and profile image compact (18-point wordmark, 28-point avatar within a 44-point
+target). The iOS workspace bar uses Expo Router's system native tabs so Liquid Glass, safe areas
+and OS accessibility treatments remain system-owned. Cooper explicitly requested icons only;
+hide visual labels while retaining accessible tab names. This is a deliberate deviation from
+Apple's recommendation to include visible tab labels, not a claim that icon-only tabs satisfy
+every HIG recommendation. Preserve stable destinations and selected icon variants. Web keeps
+visible labels and shares the same screens and record presentation.
+
+The first TestFlight UI increment is an explicitly labeled **sample day**, with normal, quiet and
+interrupted-monitoring scenarios in preview settings. It performs no provider reads, monitoring,
+sign-in or mutations. A generic profile glyph represents the unsigned-in preview; a real profile
+photo must come from the future authenticated account. Sample check times never claim live health.
+Future live briefings must be backed by domain-owned evidence and must distinguish last check
+from source freshness, proposals from completed effects, and missing coverage from an all-clear.
+
+This mobile direction supersedes the schedule-first mobile sequence below for the Expo client.
+The existing web implementation is unchanged by this preview. Live aggregation, authentication,
+notifications and monitoring delivery remain separate acceptance work.
+
 ## Information hierarchy
 
 ```text
@@ -197,3 +224,159 @@ all-day event cards and one timed event in the same shared Calendar grid/event s
 
 The shared Calendar grid on Today inherits the schedule card surface; retain the
 same time rules and event treatment without painting a body-colored rectangle.
+
+### Workspace search header prototype (November 5, 2026)
+
+The next Expo iteration replaces the small wordmark row with a shared full-width search field.
+Its leading control is the current workspace icon, optically centered in the leading curve without a chevron, replacing the
+magnifying glass. It opens a downward vertical picker ordered today, tasks, mail, finances,
+calendar. Tap keeps it open for selection; hold then slide and release chooses the highlighted
+workspace, while release outside cancels. Selection requests a haptic on a changed workspace.
+Labels and selected state accompany workspace colors/icons. The trailing account control opens
+settings. The header remains fixed above scrolling content, and every control has a 44-point or
+larger touch target. Native Liquid Glass belongs to the picker, with readable fallback surfaces.
+
+This is a local Fast Refresh prototype, not a new TestFlight release or completed live search.
+Search uses explicitly labeled sample results. The later contextual-navigation decision below replaces the original global bottom tabs. Physical gesture/haptic and accessibility acceptance remain
+separate from the native rendering and tap-navigation checks.
+
+
+### Contextual bottom navigation (accepted November 5, 2026)
+
+The workspace picker owns workspace switching. Bottom navigation now mirrors the existing web
+mobile dock: Tasks has today/views/pinned/history; Mail has inbox/mailboxes; Finances has
+overview/money/planning/manage; Settings has account/personal/workspaces/app. Today and Calendar
+have no bottom dock. Settings remains an account utility outside the workspace picker and opens
+from the trailing account control. Nested pages retain their workspace identity and search scope.
+
+The Expo preview provides title-only route shells for these destinations, retaining the existing
+Today sample briefing. Domain content and the section pages' child navigation remain later work.
+
+
+### Spatial navigation motion (November 5, 2026)
+
+Workspace selection moves the whole screen vertically in picker order: today, tasks, mail,
+finances, calendar. Moving farther down the list brings the destination up from below; moving
+back up brings it down from above. Page selection within a workspace brings content from the
+right for later tabs and from the left for earlier tabs; the header and native dock stay fixed.
+The selector glyph sits alone in a 50-point square target at the search field's leading curve.
+Reduce Motion skips translation, including when enabled during a transition. Detail routes keep
+the root navigator's behavior. This remains a local preview, not a TestFlight update.
+
+
+### Fixed-region motion refinement (November 5, 2026)
+
+This supersedes whole-screen translation: search field, body viewport and dock slot stay mounted
+at fixed bounds. Only their inner contents move, clipped to each region. Workspace switches use
+18-point search, 24-point body and 20-point dock displacement with opacity, a 70 ms exit and
+130 ms eased entry. Page changes use a 24-point horizontal content entry over 160 ms. Reduce Motion
+retains immediate navigation. The dock reserves its slot even on workspaces with no dock, so body
+bounds do not jump. Its native GlassView material stays stationary while controls change; it is
+now a shared custom dock, rather than a separate native tab controller per workspace.
+
+
+### Account dropdown (November 5, 2026)
+
+The trailing account icon opens a right-aligned glass dropdown instead of immediately navigating.
+It displays account identity followed by settings, workspace settings, agent settings, and log out.
+Settings links open page shells. The local preview explicitly labels its sample Cooper Sullivan
+identity as not signed in and disables log out; authenticated session behavior is not implemented.
+Only one header menu is open at a time, with outside-tap and navigation dismissal.
+
+### Shared-axis timing polish (November 5, 2026)
+
+The local Expo preview now uses a 90 ms accelerating departure and a 190 ms decelerating
+arrival, replacing the abrupt 70/130 ms pair above. Travel is 10 points inside the search
+bar, 20 in the body, and 12 in the dock; their boundaries remain fixed. Opacity stays
+higher through most of the travel and fades near the route handoff. Workspace order
+still determines vertical direction; page navigation remains horizontal. Reduce Motion
+still skips translation. This is a preview tuning choice, not a platform-mandated timing.
+
+References: [Apple Motion](https://developer.apple.com/design/human-interface-guidelines/motion)
+and [Material shared axis](https://m2.material.io/design/motion/the-motion-system.html).
+
+### Contextual dock selection (November 5, 2026)
+
+The selected page uses the filled variant of its canonical glyph and the active workspace's
+color, shared with the workspace selector (including dark-theme variants). Unselected pages
+use neutral outline glyphs. Settings remains neutral because it is an account utility.
+
+### Fast selection and glass restoration (November 5, 2026)
+
+Workspace selection now navigates immediately, then settles vertically over 120 ms,
+replacing the staged 280 ms departure/arrival. Holding the selector opens it after
+220 ms; entering each different drag candidate produces selection haptics on native
+devices, with release selecting that candidate. Fixed boundaries and Reduce Motion remain.
+Search, picker/account menus, dock, and floating add controls share native Liquid Glass
+on supported iOS devices and a blurred translucent approximation on web (opaque fallback
+on unsupported native platforms). Filled, workspace-colored selected icons remain.
+Tasks, Mail, and Calendar show a bottom-right glass plus control above the dock area;
+it is a disabled layout placeholder and performs no action.
+
+### Gesture reliability repair (November 5, 2026)
+
+Keep the same gesture responder throughout a drag, reading fresh callbacks after render.
+The top selector owns its touch stream before the nested button can claim it; dragging
+can open the picker directly as well as after holding. The dock captures horizontal drags,
+previews the candidate with filled/tinted selection, and navigates on release; taps and
+accessibility activation continue to work. Native glass material itself does not implement
+these custom navigation gestures. Content no longer fades to zero during navigation: short
+axis translations preserve spatial direction without blanking the shell like a loading state.
+Verified actual simulator drags from the closed top selector to Finances and across the
+Tasks dock from Today to Pinned. This does not prove physical-device haptic quality.
+
+### Restore native iOS navigation and authenticated entry (November 5, 2026)
+
+Cooper explicitly chose Apple's actual tab bar over custom glass imitation. iOS now
+uses Expo Router NativeTabs within each workspace, retaining icon-only page destinations,
+filled selected glyphs and workspace tint. UIKit owns bar gestures and selection motion;
+custom horizontal page animation and the custom dock are disabled on iOS. The shared
+workspace picker remains a separate control. Web retains its custom dock.
+
+Signed-in routes require API-validated human sessions. Sign-in uses existing nohmi
+accounts, with password recovery, secure native token persistence and revoking logout.
+The account menu displays server-returned identity. Session restoration has a bounded
+checking state and a retry control; action errors use Sonner, not inline result banners.
+Sample Today content remains explicitly sample content after authentication.
+
+### Native workspace menu and tab labels (November 5, 2026)
+
+The iOS workspace picker now uses a system SwiftUI Menu/Picker through Expo UI.
+Apple owns its Liquid Glass material, presentation and dismissal, with the current
+workspace marked by the native selection checkmark. The trigger retains its colored
+canonical glyph. Native tabs now show their page labels beneath the icons using the
+system layout, superseding the earlier icon-only choice. Filled selected icons and
+workspace tint remain. Web retains its custom menu and dock. Simulator verification
+confirmed menu selection and labeled Tasks tabs; physical haptic feel remains unverified.
+
+The native workspace menu includes canonical outline icons for inactive workspaces
+and a filled icon in the selected workspace’s color. Light/dark menu artwork is
+generated from the same registry and palette as the shell. iOS owns transient menu
+tracking highlights; the Expo SwiftUI Menu API does not expose a highlighted-row
+callback for changing custom images while dragging. Web preview icons also reflect
+its hovered/dragged candidate. The circular trigger uses the active filled glyph.
+
+The search-bar workspace trigger is a plain glyph, without an additional glass circle.
+The iOS menu uses native Menu/Button/Label rows rather than Picker rows, avoiding
+the leading checkmark gutter. Selected state remains a filled workspace-colored icon
+and an accessible current-workspace label. Apple owns menu insets and positioning;
+the native source anchor compensates for the menu icon gutter while the visible
+trigger keeps its 50-point slot. The iPhone 18 Pro simulator verifies aligned icon
+centers. The native menu supports hold-to-open and dragging through open rows to
+select on release; it does not expose the native tab bar’s moving glass selection
+indicator. Immediate dragging from the closed trigger was not successful in that
+simulator check.
+
+### Vertical glass workspace control (November 5, 2026)
+
+Cooper approved replacing the system Menu with a vertical selector built from real
+SwiftUI Liquid Glass. The panel and moving selection capsule use Apple's glassEffect
+and native animation. App-owned gestures track the candidate, update filled/tinted
+glyphs and selection haptics, and commit on release. This is a custom control using
+native materials, not a vertically rotated UITabBar or system Menu. Native bottom
+tabs stay unchanged. The panel opens below the persistent search bar; its icon column
+shares the trigger's center. Tap opens it for a second tap; hold or drag from the
+trigger supports immediate selection; releasing outside cancels. Accessibility uses
+labelled selected-state buttons over the decorative SwiftUI view. Reduce Motion
+disables the indicator's spring. Simulator checks cover direct closed-trigger drag
+to Tasks and open-panel drag to Finances. Physical haptic feel remains unverified.

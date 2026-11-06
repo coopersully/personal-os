@@ -42,6 +42,7 @@ try {
           cleanupError: state.cleanupError,
           health: state.health,
           ciOverride: state.ciOverride,
+          ciOverrideHistory: state.ciOverrideHistory,
           releaseEligibility: state.releaseEligibility,
         },
         null,

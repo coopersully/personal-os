@@ -509,6 +509,7 @@ const mocks = vi.hoisted(() => ({
   getXBookmarkAuthorizationUrl: vi.fn(),
   getPinterestWallpaperSettings: vi.fn(),
   getTextingConnection: vi.fn(),
+  getTextingAgentStatus: vi.fn(),
   getMailSetupContext: vi.fn(),
   getMailThread: vi.fn(),
   getMe: vi.fn(),
@@ -1190,6 +1191,18 @@ function defaults() {
     },
   ]);
   mocks.getXBookmarkAccount.mockResolvedValue(null);
+  mocks.getTextingAgentStatus.mockResolvedValue({
+    enabled: false,
+    scheduleId: null,
+    readiness: "disabled",
+    chatReady: false,
+    verifiedAt: null,
+    pendingCount: 0,
+    routines: [],
+    runs: [],
+    nextRunCursor: null,
+    instructions: "",
+  });
   mocks.getTextingConnection.mockResolvedValue({
     consentEpoch: 0,
     country: null,
@@ -3185,7 +3198,22 @@ describe("Personal OS web app", () => {
       within(rail)
         .getAllByRole("link")
         .map((link) => link.getAttribute("aria-label")),
-    ).toEqual(["Today at a Glance", "Calendar", "Tasks", "Mail", "Finances", "Settings"]);
+    ).toEqual([
+      "Today at a Glance",
+      "Calendar",
+      "Tasks",
+      "Mail",
+      "Finances",
+      "Messages",
+      "Settings",
+    ]);
+    expect(within(rail).getByRole("link", { name: "Messages" })).toHaveAttribute(
+      "href",
+      "/messages",
+    );
+    expect(within(rail).getByRole("link", { name: "Messages" })).not.toHaveAttribute(
+      "data-workspace",
+    );
     expect(screen.queryByRole("button", { name: "Switch workspace" })).not.toBeInTheDocument();
     expect(within(rail).getByRole("link", { name: "Today at a Glance" })).toHaveAttribute(
       "aria-current",
@@ -3412,7 +3440,11 @@ describe("Personal OS web app", () => {
       }),
     );
     const workspaceMenu = screen.getByRole("menu", { name: "Switch workspace" });
-    expect(within(workspaceMenu).getAllByRole("menuitem")).toHaveLength(10);
+    expect(within(workspaceMenu).getAllByRole("menuitem")).toHaveLength(11);
+    expect(within(workspaceMenu).getByRole("menuitem", { name: "Messages" })).toHaveAttribute(
+      "href",
+      "/messages",
+    );
     expect(
       within(workspaceMenu)
         .getAllByRole("menuitem")
@@ -10427,7 +10459,7 @@ describe("Personal OS web app", () => {
 
   it("connects and manages the selected X bookmark folder", async () => {
     mocks.isTauri.mockReturnValue(true);
-    mocks.getXBookmarkAccount.mockResolvedValue({
+    const account = {
       displayName: null,
       id,
       lastSyncedAt: null,
@@ -10436,15 +10468,113 @@ describe("Personal OS web app", () => {
       syncError: null,
       syncStatus: "idle",
       username: "cooper",
+    };
+    let finishAccount: ((value: typeof account) => void) | undefined;
+    const accountRead = new Promise<typeof account>((resolve) => {
+      finishAccount = resolve;
     });
-    mocks.listXBookmarkFolders.mockResolvedValue([
+    mocks.getXBookmarkAccount.mockReturnValue(accountRead);
+    const folders = [
       { id, name: "Planning", remoteFolderId: "folder-1" },
       { id: secondId, name: "Reading", remoteFolderId: "folder-2" },
-    ]);
+    ];
+    let finishFolders: ((value: typeof folders) => void) | undefined;
+    const foldersRead = new Promise<typeof folders>((resolve) => {
+      finishFolders = resolve;
+    });
+    mocks.listXBookmarkFolders.mockReturnValue(foldersRead);
     const browser = userEvent.setup();
-    setup("/settings?page=connections");
-
-    const folder = await screen.findByRole("button", { name: "X bookmark folder" });
+    const view = setup("/settings?page=connections");
+    let readinessStage = "account request";
+    let folder: HTMLElement;
+    try {
+      await waitFor(() => expect(mocks.getXBookmarkAccount).toHaveBeenCalled());
+      readinessStage = "account handoff";
+      await act(async () => {
+        finishAccount?.(account);
+        await accountRead;
+      });
+      readinessStage = "folders request";
+      await waitFor(() => expect(mocks.listXBookmarkFolders).toHaveBeenCalled());
+      readinessStage = "folders handoff";
+      await act(async () => {
+        finishFolders?.(folders);
+        await foldersRead;
+      });
+      readinessStage = "folder trigger";
+      folder = await screen.findByRole("button", { name: "X bookmark folder" });
+    } catch (error) {
+      // Failure-only metadata: never serialize query keys, account details, URLs or errors.
+      let diagnostic = '{"captureFailed":true}';
+      try {
+        const query = (queryKey: string[]) => {
+          const entry = view.queryClient.getQueryCache().find({ queryKey, exact: true });
+          return entry
+            ? {
+                status: entry.state.status,
+                fetchStatus: entry.state.fetchStatus,
+                error: Boolean(entry.state.error),
+                observed: entry.getObserversCount() > 0,
+                active: entry.isActive(),
+              }
+            : null;
+        };
+        const accountData = view.queryClient.getQueryData(["x-bookmarks", "account"]);
+        const folderData = view.queryClient.getQueryData(["x-bookmarks", "folders"]);
+        const route = new URL(view.location.value, window.location.origin);
+        const serialized = JSON.stringify({
+          readinessStage,
+          routeIsConnections:
+            route.pathname === "/settings" && route.searchParams.get("page") === "connections",
+          settingsConnected: !!view.container.querySelector('[data-workspace="settings"]'),
+          connectionsHeadings: Math.min(
+            99,
+            screen.queryAllByRole("heading", { name: "Connections" }).length,
+          ),
+          recoveryDialogs: Math.min(
+            99,
+            screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length,
+          ),
+          queries: {
+            me: query(["me"]),
+            connectors: query(["connectors"]),
+            account: query(["x-bookmarks", "account"]),
+            folders: query(["x-bookmarks", "folders"]),
+          },
+          accountPresent: Boolean(accountData),
+          accountMatchesFixture: JSON.stringify(accountData) === JSON.stringify(account),
+          folderCount: Array.isArray(folderData) ? Math.min(999, folderData.length) : null,
+          foldersMatchFixture:
+            Array.isArray(folderData) && JSON.stringify(folderData) === JSON.stringify(folders),
+          controls: {
+            folderButtons: Math.min(
+              99,
+              screen.queryAllByRole("button", { name: "X bookmark folder" }).length,
+            ),
+            nativeSelects: Math.min(
+              99,
+              view.container.querySelectorAll('select[aria-label="X bookmark folder"]').length,
+            ),
+          },
+          calls: {
+            me: Math.min(999, mocks.getMe.mock.calls.length),
+            account: Math.min(999, mocks.getXBookmarkAccount.mock.calls.length),
+            folders: Math.min(999, mocks.listXBookmarkFolders.mock.calls.length),
+            connectors: Math.min(999, mocks.listConnectors.mock.calls.length),
+            openUrl: Math.min(999, mocks.openUrl.mock.calls.length),
+          },
+        });
+        if (serialized.length <= 2048) diagnostic = serialized;
+      } catch {
+        // Capture failure must preserve the original readiness error.
+      }
+      try {
+        console.error("x-bookmark-readiness-v1", diagnostic);
+      } catch {
+        // Diagnostic delivery must never replace the original failed assertion.
+      }
+      throw error;
+    }
     await browser.click(folder);
     await browser.click(screen.getByRole("menuitemradio", { name: "Reading" }));
     await waitFor(() =>
@@ -10814,7 +10944,7 @@ describe("Personal OS web app", () => {
     "settles the current wallpaper apply %s rejection before teardown",
     async (_kind, failure) => {
       mocks.isTauri.mockReturnValue(true);
-      mocks.getPinterestWallpaperSettings.mockResolvedValue({
+      const settings = {
         backgroundColor: "#ffffff",
         backgroundMode: "white",
         boardUrl: "https://www.pinterest.com/",
@@ -10831,14 +10961,23 @@ describe("Personal OS web app", () => {
         paddingTop: 16,
         rotationDegrees: 0,
         tileSize: 64,
+      };
+      let finishSettings: ((value: typeof settings) => void) | undefined;
+      const settingsRead = new Promise<typeof settings>((resolve) => {
+        finishSettings = resolve;
       });
+      mocks.getPinterestWallpaperSettings.mockReturnValue(settingsRead);
       const pins = [
         { id: "pin-1", imageUrl: "https://example.com/1.jpg", title: null },
         { id: "pin-2", imageUrl: "https://example.com/2.jpg", title: null },
         { id: "pin-3", imageUrl: "https://example.com/3.jpg", title: null },
         { id: "pin-4", imageUrl: "https://example.com/4.jpg", title: null },
       ];
-      mocks.listPinterestPins.mockResolvedValue(pins);
+      let finishPins: ((value: typeof pins) => void) | undefined;
+      const pinsRead = new Promise<typeof pins>((resolve) => {
+        finishPins = resolve;
+      });
+      mocks.listPinterestPins.mockReturnValue(pinsRead);
       let finishPreview: ((image: string) => void) | undefined;
       const preview = new Promise<string>((resolve) => {
         finishPreview = resolve;
@@ -10855,7 +10994,24 @@ describe("Personal OS web app", () => {
       });
       const browser = userEvent.setup();
       const view = setup("/settings?page=wallpaper");
+      let readinessStage = "settings request";
       try {
+        await waitFor(() => expect(mocks.getPinterestWallpaperSettings).toHaveBeenCalledTimes(1));
+        readinessStage = "settings handoff";
+        await act(async () => {
+          finishSettings?.(settings);
+          await settingsRead;
+        });
+        readinessStage = "pins request";
+        await waitFor(() =>
+          expect(mocks.listPinterestPins).toHaveBeenCalledWith(12, expect.any(String)),
+        );
+        readinessStage = "pins handoff";
+        await act(async () => {
+          finishPins?.(pins);
+          await pinsRead;
+        });
+        readinessStage = "native preview request";
         await waitFor(() =>
           expect(mocks.invoke).toHaveBeenCalledWith(
             "preview_pinterest_wallpaper",
@@ -10871,25 +11027,74 @@ describe("Personal OS web app", () => {
               .getQueryCache()
               .findAll({ queryKey: [prefix] })
               .slice(0, 3)
-              .map(({ state }) => ({
-                status: state.status,
-                fetchStatus: state.fetchStatus,
-                isInvalidated: state.isInvalidated,
-                error: Boolean(state.error),
+              .map((query) => ({
+                status: query.state.status,
+                fetchStatus: query.state.fetchStatus,
+                isInvalidated: query.state.isInvalidated,
+                error: Boolean(query.state.error),
+                observed: query.getObserversCount() > 0,
+                active: query.isActive(),
               }));
           const countInvocations = (command: string) =>
             Math.min(999, mocks.invoke.mock.calls.filter(([name]) => name === command).length);
-          const pinData = view.queryClient
+          const pinQueries = view.queryClient
             .getQueryCache()
-            .findAll({ queryKey: ["pinterest-wallpaper-preview"] })[0]?.state.data;
+            .findAll({ queryKey: ["pinterest-wallpaper-preview"] })
+            .filter(
+              (query) => query.getObserversCount() > 0 && query.queryKey[1] === settings.boardUrl,
+            );
+          const pinData = pinQueries.length === 1 ? pinQueries[0]?.state.data : undefined;
+          const previewQueries = view.queryClient
+            .getQueryCache()
+            .findAll({ queryKey: ["native-wallpaper-preview"] });
+          const requestMatchesFixture = (request: unknown) => {
+            if (typeof request !== "string") return false;
+            try {
+              const value = JSON.parse(request);
+              return (
+                value.boardLabel === "Pinterest" &&
+                JSON.stringify(value.imageUrls) ===
+                  JSON.stringify(pins.map((pin) => pin.imageUrl)) &&
+                (
+                  [
+                    "backgroundColor",
+                    "backgroundMode",
+                    "cornerRadius",
+                    "frameSpacing",
+                    "layout",
+                    "mosaicFit",
+                    "paddingBottom",
+                    "paddingEnd",
+                    "paddingStart",
+                    "paddingTop",
+                    "rotationDegrees",
+                    "tileSize",
+                  ] as const
+                ).every((key) => value[key] === settings[key])
+              );
+            } catch {
+              return false;
+            }
+          };
           const serialized = JSON.stringify({
+            readinessStage,
             settings: states("pinterest-wallpaper"),
             pins: states("pinterest-wallpaper-preview"),
             preview: states("native-wallpaper-preview"),
+            environment: states("desktop-preview-environment"),
+            previewRequests: previewQueries.slice(0, 3).map((query) => ({
+              observed: query.getObserversCount() > 0,
+              active: query.isActive(),
+              settledRequestMatchesFixture: requestMatchesFixture(query.queryKey[1]),
+            })),
             boardReady:
               view.container.querySelector<HTMLInputElement>("#pinterest-board-url")?.value ===
-              "https://www.pinterest.com/",
-            pinsCount: Array.isArray(pinData) ? Math.min(999, pinData.length) : 0,
+              settings.boardUrl,
+            activePinQueries: Math.min(999, pinQueries.length),
+            activePinsCount: Array.isArray(pinData) ? Math.min(999, pinData.length) : null,
+            activePinsMatchFixture:
+              Array.isArray(pinData) && JSON.stringify(pinData) === JSON.stringify(pins),
+            activePinError: pinQueries.some((query) => Boolean(query.state.error)),
             tauri: mocks.isTauri.mock.results.at(-1)?.value === true,
             invocations: {
               environment: countInvocations("desktop_preview_environment"),

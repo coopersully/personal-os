@@ -685,3 +685,104 @@ schema coordination; it must verify the exact approved budget and resolved recon
 not a host's success label or an empty/partial Activity feed. This source change does not establish
 production activation, actual carrier delivery, original-Claude processing or requested-outcome
 completion. Those remain parent-owned acceptance checks.
+
+## General Claude SMS conversation — November 5 candidate
+
+Cooper selected an existing Claude routine as the event host for one conversation across all
+authorized workspaces. Each trigger starts a fresh session; canonical messages and pending work
+provide continuity. The candidate introduces explicit human opt-in to a registered routine,
+subscription-only confirmation, fixed queued batches, invocation claims and persisted work reports.
+No model API fallback is configured. Claude account extra-usage settings and SMS transport charges
+remain outside nohmi's control.
+
+An existing scheduled Claude routine may also have an API trigger for this conversation. Its
+optional trigger credential is saved against the same active routine and authorization connection;
+the scheduled Finance cadence and instructions remain intact. Adding that credential does not
+convert the registered schedule into an event-only Finance host or enable immediate Finance
+continuation dispatch. Scheduled maintenance needs no API credential when general SMS replies are
+not enabled. The routine branches on the SMS event and handles only its saved batch; other
+invocations retain the existing Finance workflow.
+
+`/messages` displays chronological SMS history, delivery evidence and paginated run recovery.
+STOP/START messages are retained without becoming agent work. Original exact Finance reply flows
+retain their own authority; with general replies enabled, arbitrary text cannot silently become an
+answer to an open Finance question. Explicit bounded choices or numbered answers identify that path.
+Other requests enter the general agent queue. Existing workspace APIs remain the effect authority;
+agent checkpoints are reports, never independently verified evidence or new permission.
+
+New inbound claims are assigned to the general queue in the same transaction as the message.
+Disabling or replacing the routine cancels unassigned work without erasing its ownership, so the
+legacy processor cannot later consume it. A run freezes up to 25 messages and may retain 100 work
+items, submitted in checkpoints of at most 20. Pending-work and run-history reads are paginated.
+Only the original authorized connection may claim, checkpoint or reply. Completed work is retained,
+and uncertain effects require domain readback before any future attempt.
+
+The existing 30-second background tick drains eligible work after a five-second burst window.
+The API commits submitting before transport; crash or ambiguous host response never causes an
+automatic second fire. Pre-transport shutdown releases definitely unsubmitted work. Explicit 429
+rejection delays the queue for one hour; at most 25 general starts per owner are attempted per
+rolling hour. The routine's own shared provider limits can still reject starts. Other definite
+rejections need human repair/retry. Unknown or interrupted sessions require human confirmation that
+the host is stopped before releasing the conversation; closing never replays the old request.
+
+Source and synthetic verification do not establish production availability. Enabling an actual
+routine, installing its protocol instructions, validating subscription billing settings and proving
+a real signed SMS → new session → authorized workspace tools → recorded reply → carrier delivery
+remain release acceptance steps. Broader notification-producer unification in COO-61 — Shared
+Texting general inbox remains separately tracked; this candidate does not claim that work complete.
+
+### Workspace conversation views and verified setup — November 5 candidate
+
+Messages remain one canonical SMS conversation. The agent classifies human messages and its own
+replies into zero or more of Mail, Tasks, Calendar and Finances. Empty tags mean general; a missing
+classification stays global-only. Each workspace filter within Messages displays the full original message,
+without copied records, excerpts or rewritten human text. Reply references preserve context;
+separate topic replies share the original incoming message. Workspace classification describes
+relevance and grants no additional domain authority. Existing Finance Chat is preserved.
+
+`/messages` is a standalone destination in the workspace selector, alongside Settings, with no
+Messages entries inside individual workspaces. Its `workspace` query filter provides a chronological view, workspace labels and a link
+back to full context. The API filters before pagination; a filtered view cannot issue the receipt
+required by the generic SMS sender. Topic replies use stable per-run keys and at most four SMS
+messages; replay of a reserved key never resubmits an uncertain send. Existing unclassified history
+is retained globally; no provider-backed retrospective classification is started automatically.
+
+Chat screens remain behind setup until current active phone consent, routine and agent grants are
+paired with an authenticated agent reply to a real incoming batch and provider-confirmed delivery.
+Proof is bound to the phone consent epoch, routine, authorization connection, current configuration
+and provider-trigger credential fingerprint. Saving an unchanged configuration preserves proof;
+changing the binding requires a fresh delivered reply.
+A queued SMS, accepted host session or system notice never unlocks Messages. Disabled/replaced setup
+locks the screens without deleting records; setup and failed-attempt recovery remain accessible.
+The initial test is a real text from the verified phone, followed by the agent's delivered reply.
+
+nohmi provides system-authored fallback SMS for rejected or uncertain handoffs, rate limits and
+sessions without a completed reply after five minutes without progress. One durable notice per run
+and a fifteen-minute owner cooldown prevent repeated notices. These notices retain honest delivery
+state, do not finish agent work or claim it failed, and are never replayed after an uncertain send.
+Current consent and routine identity are checked again at preparation. Local render-only previews
+are explicitly fictional and cannot manufacture live verification.
+
+Known Finance notification and acknowledgement producers explicitly tag Finance; generic direct sends
+accept optional validated workspace/reply metadata. Legacy outbound records with unknown authorship
+appear as unframed system events in the conversation timeline, never as agent bubbles.
+
+### Message page presentation
+
+Messages uses a compact, single-row app header. The standard Message views menu contains
+All messages, the four workspace filters, and Texting settings. Workspace sidebars and mobile
+navigation do not contain Messages. Older workspace message URLs redirect to the standalone view. Do not repeat workspace tabs or introductory slogans above the
+conversation. Development previews use a quiet fictional-data label, with preview actions in
+the same menu. This presentation preserves the verified-reply gate and full original messages.
+
+Reply references sit outside message bubbles. An adjacent reply uses a small linked reply glyph
+without quoting the immediately preceding message; replies to earlier messages show a compact
+external excerpt linking back to the original. System events use subdued text and a timestamp,
+without speaker, bubble, or delivery-status framing.
+
+Messages remains a standalone account-level destination, available in the workspace selector
+and beside Settings in the expanded desktop rail, never as an individual workspace page.
+A Full conversation deep link resolves its owner-scoped message directly in a bounded window
+(up to 100 records, including the anchor), then scrolls and focuses it after rendering.
+Older and newer history remain explicitly paginated; opening an old link never backfills
+all intervening history. Missing, foreign-owner, or out-of-filter anchors cannot reveal messages.

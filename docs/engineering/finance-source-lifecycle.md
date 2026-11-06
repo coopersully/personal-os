@@ -230,8 +230,7 @@ transport metadata alone do not establish production delivery or original-host c
 
 The Plaid connector implements an optional `readTransactionHistory` adapter for exact provider
 Item, account and transaction identities within a requested date window. This source capability
-has no server, API or MCP consumer yet. It does not grant production access or repair stored
-transactions. Synthetic connector tests establish the bounded adapter behavior; they do not
+is consumed by an owner-scoped historical-evidence service, typed client and MCP read tool in the current source slice. Verification and deployment remain separate; source wiring does not grant production access or repair stored transactions. Synthetic connector tests establish the bounded adapter behavior; they do not
 establish production entitlement, institution retention or availability of any historical ID.
 
 Before `/transactions/get`, the adapter reads `/item/get` and requires the exact Item ID,
@@ -260,8 +259,23 @@ IDs unobserved and any retained observations explicitly partial. Complete window
 never proves complete institution history or that an absent transaction never existed. Conflicts
 and partial observations are not authority to repair financial records.
 
-A future consumer must separately verify the authenticated owner, current Item/account topology,
-exact target transaction identities and current revisions before provider access and again before
-any separately authorized effect. It must preserve partial, missing, invalid-currency and conflict
-states and reject stale evidence. Provider reads, previews and financial field repairs remain
-separate allocations; this adapter performs none of the latter two operations.
+The composed reader accepts only 1–20 unique native transaction IDs, across at most five accounts
+on one Item and a window shorter than 366 days. Server-owned joins resolve exact provider identities;
+no caller may supply provider IDs, credentials or an initialization flag. It reads an owner-scoped,
+repeatable-read native snapshot, releases the transaction before the provider call, then revalidates
+ownership, topology, source revisions and current read authority. Any changed selection fails closed.
+The credential-private Item service invokes only the optional read adapter; absent capability never
+falls back to sync, refresh, reconnect or product initialization. Responses use explicit native IDs,
+provider-signed amounts and currencies, bounded coverage and separate observation/provider-update
+timestamps. No account-currency default or native economic-direction inference is permitted.
+
+`POST /v1/finances/provider-transaction-evidence` is a read/preview requiring `finances:read` and
+returns `Cache-Control: no-store`. The typed client and `read_finance_provider_transaction_evidence`
+MCP tool expose the same strict request and response. Bearer authority is revalidated after the
+external call. Human requests require an explicit authenticated `Session` header so the exact
+session can be rechecked; cookie-only transport is not supported by this endpoint. No financial
+record, decision, note, split, history, cursor, claim or audit is written by this reader. Ordinary
+request authentication retains its own existing activity bookkeeping; that is not reconciliation.
+Reads may still fail for provider entitlement, retention, transport or partial coverage. They do
+not authorize repair. Runtime provider invocation and production-equivalent authority remain
+separate acceptance; authored tests alone establish neither.

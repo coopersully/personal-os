@@ -308,6 +308,15 @@ describe.sequential("durable notifications", () => {
     }
     await service.drain(principal);
     expect(send).toHaveBeenCalledTimes(1);
+    expect(
+      (await database.db.select().from(textMessages)).filter(
+        (message) => message.direction === "outbound",
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ workspaces: ["finances"], senderKind: "system" }),
+      ]),
+    );
     expect(send.mock.calls[0]?.[0].body).toContain(
       kind === "question" ? "Reply with the item number and answer" : "Reply 1 approve or 1 reject",
     );

@@ -710,6 +710,10 @@ export function createNotificationService(options: Options) {
         return {
           body,
           queued: async (messageId: string) => {
+            await tx
+              .update(textMessages)
+              .set({ workspaces: ["finances"], senderKind: "system", classifiedAt: now() })
+              .where(and(eq(textMessages.id, messageId), eq(textMessages.userId, user.id)));
             if (questions.length)
               await createTextReplyBindings(
                 tx,

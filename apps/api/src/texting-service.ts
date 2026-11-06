@@ -8,14 +8,18 @@ import {
   auditEvents,
   type Database,
   textInboundClaims,
+  textingAgentQueue,
+  textingAgentSettings,
   textingConnections,
   textingConsentEvents,
   textingVerificationChallenges,
   textMessages,
+  textReplyBindings,
   users,
 } from "@personal-os/database";
 import {
   normalizeTextingPhoneNumber,
+  parseTextReply,
   type SendTextMessageInput,
   type StartTextingVerificationInput,
   type TextConversationPage,
@@ -23,13 +27,14 @@ import {
   type TextingConnection,
   textingConsentVersion,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import type { NotificationTransaction } from "./notification-work-resolver.js";
 import { decryptJson, encryptJson } from "./security.js";
 import { issueConversationReceipt, verifyConversationReceipt } from "./texting-security.js";
+import { replyDeliveryState } from "./texting-sms-admission.js";
 import { formatTextLocalTime } from "./texting-time.js";
 import type { Principal } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
@@ -57,6 +62,20 @@ export function createTextingService(options: Options) {
       throw new AppError("service_unavailable", "Texting setup is not currently available.");
     return options.twilio;
   };
+
+  async function cancelQueuedAgentMessages(tx: NotificationTransaction, userId: string) {
+    // Keep the immutable routing assignment so legacy Finance cannot later consume this claim.
+    await tx
+      .update(textingAgentQueue)
+      .set({ cancelledAt: now() })
+      .where(
+        and(
+          eq(textingAgentQueue.userId, userId),
+          isNull(textingAgentQueue.runId),
+          isNull(textingAgentQueue.cancelledAt),
+        ),
+      );
+  }
 
   async function connectionRow(userId: string) {
     return options.db.query.textingConnections.findFirst({
@@ -239,6 +258,7 @@ export function createTextingService(options: Options) {
               verifiedAt: now(),
             })
             .where(eq(textingConnections.id, existing.id));
+          await cancelQueuedAgentMessages(tx, userId);
         } else {
           const [createdConnection] = await tx
             .insert(textingConnections)
@@ -293,6 +313,7 @@ export function createTextingService(options: Options) {
         .update(textingConnections)
         .set({ disconnectedAt: now(), state: "disconnected", updatedAt: now() })
         .where(eq(textingConnections.id, row.id));
+      await cancelQueuedAgentMessages(tx, userId);
       if (principal)
         await tx.insert(auditEvents).values(
           auditValues({
@@ -323,6 +344,8 @@ export function createTextingService(options: Options) {
   ): Promise<TextConversationPage> {
     const row = await connectionRow(principal.userId);
     const current = now();
+    if (!row && (query.aroundCursor || query.beforeCursor || query.afterCursor))
+      throw new AppError("invalid_request", "Conversation cursor not found.");
     if (!row)
       return {
         asOf: current.toISOString(),
@@ -335,7 +358,7 @@ export function createTextingService(options: Options) {
         newerCursor: null,
         timeZone,
       };
-    const cursorId = query.beforeCursor ?? query.afterCursor;
+    const cursorId = query.beforeCursor ?? query.afterCursor ?? query.aroundCursor;
     const cursor = cursorId
       ? await options.db.query.textMessages.findFirst({
           where: and(eq(textMessages.connectionId, row.id), eq(textMessages.id, cursorId)),
@@ -357,49 +380,89 @@ export function createTextingService(options: Options) {
       : undefined;
     const conditions = and(
       eq(textMessages.connectionId, row.id),
+      query.workspace
+        ? sql`${textMessages.workspaces} @> ${JSON.stringify([query.workspace])}::jsonb`
+        : undefined,
       query.beforeCursor ? beforeCondition : query.afterCursor ? afterCondition : undefined,
     );
-    const messages = query.afterCursor
-      ? await options.db
-          .select()
-          .from(textMessages)
-          .where(conditions)
-          .orderBy(asc(textMessages.occurredAt), asc(textMessages.id))
-          .limit(query.limit + 1)
-      : await options.db
-          .select()
-          .from(textMessages)
-          .where(conditions)
-          .orderBy(desc(textMessages.occurredAt), desc(textMessages.id))
-          .limit(query.limit + 1);
+    const messages = query.aroundCursor
+      ? []
+      : query.afterCursor
+        ? await options.db
+            .select()
+            .from(textMessages)
+            .where(conditions)
+            .orderBy(asc(textMessages.occurredAt), asc(textMessages.id))
+            .limit(query.limit + 1)
+        : await options.db
+            .select()
+            .from(textMessages)
+            .where(conditions)
+            .orderBy(desc(textMessages.occurredAt), desc(textMessages.id))
+            .limit(query.limit + 1);
     const selected = messages.slice(0, query.limit);
-    const visible = query.afterCursor ? selected : selected.reverse();
+    let visible = query.afterCursor ? selected : selected.reverse();
+    let aroundHasEarlier = false;
+    let aroundHasNewer = false;
+    if (query.aroundCursor && cursor) {
+      if (query.workspace && !cursor.workspaces.includes(query.workspace))
+        throw new AppError("invalid_request", "Conversation cursor not found.");
+      const olderLimit = Math.floor((query.limit - 1) / 2);
+      const newerLimit = query.limit - olderLimit - 1;
+      const [older, newer] = await Promise.all([
+        options.db
+          .select()
+          .from(textMessages)
+          .where(and(conditions, beforeCondition))
+          .orderBy(desc(textMessages.occurredAt), desc(textMessages.id))
+          .limit(olderLimit + 1),
+        options.db
+          .select()
+          .from(textMessages)
+          .where(and(conditions, afterCondition))
+          .orderBy(asc(textMessages.occurredAt), asc(textMessages.id))
+          .limit(newerLimit + 1),
+      ]);
+      aroundHasEarlier = older.length > olderLimit;
+      aroundHasNewer = newer.length > newerLimit;
+      visible = [...older.slice(0, olderLimit).reverse(), cursor, ...newer.slice(0, newerLimit)];
+    }
     const firstVisible = visible[0];
     const lastVisible = visible.at(-1);
     const hasExtra = messages.length > query.limit;
-    const receipt = cursorId
-      ? null
-      : issueConversationReceipt(
-          {
-            actorId: principal.actorId,
-            connectionId: row.id,
-            consentEpoch: row.consentEpoch,
-            exp: current.getTime() + 5 * 60_000,
-            revision: row.conversationRevision,
-            timeZone,
-            userId: principal.userId,
-          },
-          options.encryptionKey,
-        );
+    const hasEarlier = query.aroundCursor
+      ? aroundHasEarlier
+      : Boolean((query.afterCursor && firstVisible) || hasExtra);
+    const hasNewer = query.aroundCursor
+      ? aroundHasNewer
+      : Boolean((query.beforeCursor && lastVisible) || (query.afterCursor && hasExtra));
+    const receipt =
+      cursorId || query.workspace
+        ? null
+        : issueConversationReceipt(
+            {
+              actorId: principal.actorId,
+              connectionId: row.id,
+              consentEpoch: row.consentEpoch,
+              exp: current.getTime() + 5 * 60_000,
+              revision: row.conversationRevision,
+              timeZone,
+              userId: principal.userId,
+            },
+            options.encryptionKey,
+          );
     return {
       asOf: current.toISOString(),
       connection: publicConnection(row),
       conversationReceipt: receipt,
       currentLocalDateTime: formatTextLocalTime(current, timeZone),
-      earlierCursor:
-        (query.afterCursor && firstVisible) || hasExtra ? (firstVisible?.id ?? null) : null,
-      hasEarlierMessages: Boolean((query.afterCursor && firstVisible) || hasExtra),
+      earlierCursor: hasEarlier ? (firstVisible?.id ?? null) : null,
+      hasEarlierMessages: hasEarlier,
       messages: visible.map((message) => ({
+        workspaces: message.workspaces,
+        senderKind: message.senderKind ?? (message.direction === "inbound" ? "human" : "system"),
+        replyToMessageIds: message.replyToMessageIds,
+        classifiedAt: message.classifiedAt?.toISOString() ?? null,
         actualSegments: message.actualSegments,
         contentKind: message.contentKind,
         deliveredAt: message.deliveredAt?.toISOString() ?? null,
@@ -416,10 +479,7 @@ export function createTextingService(options: Options) {
         status: message.status,
         text: message.body,
       })),
-      newerCursor:
-        (query.beforeCursor && lastVisible) || (query.afterCursor && hasExtra)
-          ? (lastVisible?.id ?? null)
-          : null,
+      newerCursor: hasNewer ? (lastVisible?.id ?? null) : null,
       timeZone,
     };
   }
@@ -548,12 +608,37 @@ export function createTextingService(options: Options) {
         options.encryptionKey,
         now(),
       );
+      const replyToMessageIds = input.replyToMessageIds ?? [];
+      if (new Set(replyToMessageIds).size !== replyToMessageIds.length)
+        throw new AppError("invalid_request", "Reply references must be distinct.");
+      if (replyToMessageIds.length) {
+        const referenced = await tx
+          .select({ id: textMessages.id })
+          .from(textMessages)
+          .where(
+            and(
+              eq(textMessages.userId, principal.userId),
+              eq(textMessages.connectionId, locked.id),
+              inArray(textMessages.id, replyToMessageIds),
+              sql`${textMessages.occurredAt} <= ${now()}`,
+            ),
+          );
+        if (referenced.length !== replyToMessageIds.length)
+          throw new AppError(
+            "invalid_request",
+            "Reply references must be earlier messages in this conversation.",
+          );
+      }
       const [created] = await tx
         .insert(textMessages)
         .values({
+          workspaces: [...new Set(input.workspaces ?? [])].sort(),
+          replyToMessageIds,
+          classifiedAt: input.workspaces ? now() : null,
           body,
           connectionId: locked.id,
           contentKind: input.contentKind,
+          senderKind: principal.actorType === "agent" ? "agent" : "human",
           direction: "outbound",
           occurredAt: now(),
           occurredAtSource: "nohmi",
@@ -613,7 +698,7 @@ export function createTextingService(options: Options) {
             )
             .for("update")
             .limit(1);
-          if (currentConnection)
+          if (currentConnection) {
             await tx
               .update(textingConnections)
               .set({
@@ -623,6 +708,8 @@ export function createTextingService(options: Options) {
                 updatedAt: now(),
               })
               .where(eq(textingConnections.id, currentConnection.id));
+            await cancelQueuedAgentMessages(tx, currentConnection.userId);
+          }
           await tx.insert(textingConsentEvents).values({
             connectionId: currentConnection?.id,
             kind: "provider_block",
@@ -666,7 +753,13 @@ export function createTextingService(options: Options) {
       })
       .where(eq(textMessages.id, pendingMessage.id))
       .returning();
-    return requireDatabaseRecord(message, "Could not finalize the outgoing text message.");
+    const stored = requireDatabaseRecord(message, "Could not finalize the outgoing text message.");
+    return {
+      ...stored,
+      senderKind:
+        stored.senderKind ??
+        (stored.direction === "inbound" ? ("human" as const) : ("system" as const)),
+    };
   }
 
   /** Internal notification handoff. The coordinator commits its fenced attempt and message link
@@ -735,6 +828,7 @@ export function createTextingService(options: Options) {
           body,
           connectionId: connection.id,
           contentKind: "concise",
+          senderKind: "system",
           direction: "outbound",
           occurredAt: now(),
           occurredAtSource: "nohmi",
@@ -775,6 +869,7 @@ export function createTextingService(options: Options) {
     });
     if (!routed) return;
     const occurredAt = await options.twilio.getMessageOccurredAt(sid);
+    if (parameters.To && parameters.To !== options.senderPhoneNumber) return;
     const body = parameters.Body ?? "";
     // Advanced Opt-Out supplies OptOutType even when the configured keyword is not literally
     // STOP/START. Treat Twilio's classification as authoritative and retain Body as the fallback.
@@ -829,12 +924,29 @@ export function createTextingService(options: Options) {
           .onConflictDoNothing()
           .returning({ id: textingConsentEvents.id });
         if (!inserted) return;
+        await tx
+          .insert(textMessages)
+          .values({
+            userId: row.userId,
+            connectionId: row.id,
+            providerMessageSid: sid,
+            direction: "inbound",
+            body,
+            status: "delivered",
+            occurredAt,
+            occurredAtSource: "provider",
+          })
+          .onConflictDoNothing();
+        await tx
+          .update(textingConnections)
+          .set({ conversationRevision: row.conversationRevision + 1, updatedAt: now() })
+          .where(eq(textingConnections.id, row.id));
         const isNewer = !latest || occurredAt.getTime() > latest.occurredAt.getTime();
         const stopWinsTie =
           keyword === "STOP" &&
           latest?.kind === "provider_start" &&
           occurredAt.getTime() === latest.occurredAt.getTime();
-        if (isNewer || stopWinsTie)
+        if (isNewer || stopWinsTie) {
           await tx
             .update(textingConnections)
             .set({
@@ -844,6 +956,8 @@ export function createTextingService(options: Options) {
               updatedAt: now(),
             })
             .where(eq(textingConnections.id, row.id));
+          await cancelQueuedAgentMessages(tx, row.userId);
+        }
         return;
       }
       const [inserted] = await tx
@@ -865,13 +979,102 @@ export function createTextingService(options: Options) {
       // This method is registered only behind the signature-validating inbound route.
       // Consent keywords never reach this branch. Disabled Texting keeps transport history
       // while preventing new reply work from becoming agent-readable.
-      if (options.enabled && row.state === "active")
-        await tx.insert(textInboundClaims).values({
-          connectionId: row.id,
-          consentEpoch: row.consentEpoch,
-          messageId: inserted.id,
-          userId: row.userId,
-        });
+      if (options.enabled && row.state === "active" && keyword !== "HELP") {
+        const [claim] = await tx
+          .insert(textInboundClaims)
+          .values({
+            connectionId: row.id,
+            consentEpoch: row.consentEpoch,
+            messageId: inserted.id,
+            userId: row.userId,
+          })
+          .returning();
+        const [agent] = await tx
+          .select()
+          .from(textingAgentSettings)
+          .where(eq(textingAgentSettings.userId, row.userId));
+        // With general texting enabled, an open Finance question is not enough to infer
+        // that arbitrary new text answers it. Only exact bounded answers or explicitly
+        // numbered free-text answers retain the legacy Finance admission path.
+        const candidates = agent
+          ? await tx
+              .select({ binding: textReplyBindings, outbound: textMessages })
+              .from(textReplyBindings)
+              .innerJoin(
+                textMessages,
+                and(
+                  eq(textMessages.id, textReplyBindings.outboundMessageId),
+                  eq(textMessages.userId, row.userId),
+                  eq(textMessages.connectionId, row.id),
+                ),
+              )
+              .where(
+                and(
+                  eq(textReplyBindings.userId, row.userId),
+                  eq(textReplyBindings.connectionId, row.id),
+                  eq(textReplyBindings.consentEpoch, row.consentEpoch),
+                  eq(textReplyBindings.state, "open"),
+                  gt(textReplyBindings.expiresAt, now()),
+                  claim ? lt(textReplyBindings.createdAt, claim.createdAt) : undefined,
+                ),
+              )
+              .orderBy(asc(textReplyBindings.itemNumber))
+              .limit(4)
+          : [];
+        const candidate = candidates[0];
+        const explicitFreeText = /^\s*[1-3]\s*:[ \t]*\S/u.test(body);
+        const boundedReply =
+          candidate &&
+          candidates.length <= 3 &&
+          candidates.every(
+            ({ binding, outbound }) =>
+              binding.outboundMessageId === candidate.binding.outboundMessageId &&
+              ["question", "approval"].includes(binding.workKind) &&
+              (binding.answerMode === "choices" || explicitFreeText) &&
+              outbound.direction === "outbound" &&
+              replyDeliveryState(outbound) === "eligible" &&
+              outbound.providerSubmittedAt !== null &&
+              outbound.providerSubmittedAt < occurredAt,
+          ) &&
+          parseTextReply(
+            body,
+            candidates.map(({ binding }) => binding),
+          ).state === "matched";
+        if (claim && boundedReply) {
+          await tx
+            .update(textMessages)
+            .set({
+              workspaces: ["finances"],
+              senderKind: "human",
+              classifiedAt: now(),
+              replyToMessageIds: [
+                ...new Set(candidates.map(({ binding }) => binding.outboundMessageId)),
+              ],
+            })
+            .where(and(eq(textMessages.userId, row.userId), eq(textMessages.id, claim.messageId)));
+        }
+        if (claim && agent && !boundedReply) {
+          const availableAt = new Date(now().getTime() + 5000);
+          // Debounce the owner's unclaimed burst without shortening provider backoff.
+          await tx
+            .update(textingAgentQueue)
+            .set({ availableAt })
+            .where(
+              and(
+                eq(textingAgentQueue.userId, row.userId),
+                isNull(textingAgentQueue.runId),
+                isNull(textingAgentQueue.cancelledAt),
+                lt(textingAgentQueue.availableAt, availableAt),
+              ),
+            );
+          await tx.insert(textingAgentQueue).values({
+            claimId: claim.id,
+            userId: row.userId,
+            availableAt,
+            createdAt: now(),
+          });
+        }
+      }
       await tx
         .update(textingConnections)
         .set({ conversationRevision: row.conversationRevision + 1, updatedAt: now() })

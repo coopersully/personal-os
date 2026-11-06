@@ -3,7 +3,7 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { loadRuntime } from "./commands.mjs";
-import { authorizeAdoption, tick } from "./continuous.mjs";
+import { authorizeAdoption, authorizeCiOverride, tick } from "./continuous.mjs";
 import { controllerIO, stopOwnedChildren } from "./continuous-io.mjs";
 import { privateFile, writePrivate } from "./safety.mjs";
 
@@ -17,10 +17,12 @@ for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"])
   });
 
 try {
-  const [action, configPath, repository, expectedDeployed, target, acknowledgement] =
+  const [action, configPath, repository, expectedDeployed, target, acknowledgement, reason] =
     process.argv.slice(2);
-  if (!["run", "once", "status", "adopt"].includes(action) || !configPath)
-    throw new Error("Use run|once CONFIG BARE_REPOSITORY, or status CONFIG.");
+  if (!["run", "once", "status", "adopt", "override-ci"].includes(action) || !configPath)
+    throw new Error(
+      "Use run|once CONFIG BARE_REPOSITORY, status CONFIG, or attended adopt|override-ci.",
+    );
   const runtime = loadRuntime(configPath);
   if (action === "status") {
     const statePath = join(runtime.root, "continuous-state.json");
@@ -39,6 +41,8 @@ try {
           error: state.error,
           cleanupError: state.cleanupError,
           health: state.health,
+          ciOverride: state.ciOverride,
+          releaseEligibility: state.releaseEligibility,
         },
         null,
         2,
@@ -51,6 +55,13 @@ try {
     if (!stat.isDirectory() || stat.uid !== process.getuid() || (stat.mode & 0o077) !== 0)
       throw new Error("Source repository must be an owned private directory.");
     const io = controllerIO(repository);
+    if (action === "override-ci") {
+      await authorizeCiOverride(configPath, io, expectedDeployed, target, acknowledgement, reason);
+      console.log(
+        "One exact release attempt authorized without claiming CI success; serving revision unchanged.",
+      );
+      process.exit(0);
+    }
     if (action === "adopt") {
       await authorizeAdoption(configPath, io, expectedDeployed, target, acknowledgement);
       console.log(

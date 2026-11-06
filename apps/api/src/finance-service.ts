@@ -64,6 +64,7 @@ import type {
   FinanceMaintenanceCandidateItemDraft,
   FinanceOverview,
   FinanceProfile,
+  FinanceProviderTransactionEvidenceInput,
   FinanceReceiptReview,
   FinanceReceiptReviewInput,
   FinanceRecurringObligation,
@@ -127,6 +128,7 @@ import {
   createFinanceAccountService,
   serializeFinanceAccountRows,
 } from "./finance/account-service.js";
+import { activeAllocationEvidence } from "./finance/allocation-evidence.js";
 import {
   assertCashflowAccountMayBeDeleted,
   createFinanceBalanceBasisService,
@@ -163,6 +165,7 @@ import {
 } from "./finance/planning-evidence-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
+import { createFinanceProviderTransactionEvidenceService } from "./finance/provider-transaction-evidence-service.js";
 import { createFinanceRecurringOccurrenceService } from "./finance/recurring-occurrence-service.js";
 import { createFinanceRecurringScheduleService } from "./finance/recurring-schedule-service.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
@@ -819,8 +822,16 @@ export function createFinanceService({
     createFinanceProviderItemService({
       db,
       ...(encryptionKey ? { encryptionKey } : {}),
+      ...(plaid ? { plaid } : {}),
       now,
     });
+  const providerTransactionEvidence = createFinanceProviderTransactionEvidenceService({
+    db,
+    now,
+    providerItems: {
+      readTransactionHistory: (input) => providerItems.readTransactionHistory(input, plaid),
+    },
+  });
   const accountHandoff = createFinanceConnectionHandoffService({
     db,
     ...(log ? { log } : {}),
@@ -4008,6 +4019,13 @@ export function createFinanceService({
     resolveScopeAccountId: maintenanceScopeAccountId,
   });
   return {
+    readFinanceProviderTransactionEvidence(
+      principal: Principal,
+      input: FinanceProviderTransactionEvidenceInput,
+      sessionTokenHash?: string,
+    ) {
+      return providerTransactionEvidence.read(principal, input, sessionTokenHash);
+    },
     async reviewReceipt(
       userId: string,
       transactionId: string,
@@ -7817,6 +7835,186 @@ export function createFinanceService({
         review.transactionId,
         readExecutor,
       );
+      if (input.action === "approve") {
+        const existing = await activeAllocationEvidence(readExecutor, current);
+        if (existing.hasHistory) {
+          // An accepted single-category proposal cannot authorize an existing multi-category split.
+          if (
+            !["agent", "user"].includes(context.principal.actorType) ||
+            !context.principal.scopes.has("finances:write")
+          )
+            throw new AppError(
+              "forbidden",
+              "Approving a saved breakdown requires a user or scoped agent session.",
+            );
+          if (input.learnMerchant === "always")
+            throw new AppError(
+              "invalid_request",
+              "A saved breakdown cannot become a single merchant category rule.",
+            );
+          const scope = context.financeReviewBatchScope;
+          if (
+            scope &&
+            (!executor ||
+              scope.transactionId !== current.id ||
+              scope.reviewId !== review.id ||
+              scope.transferReview)
+          )
+            throw new AppError(
+              "invalid_request",
+              "The internal Finance batch scope does not match the saved breakdown review.",
+            );
+          const approve = async (tx: FinanceActionWriteExecutor) => {
+            if (reviewedExecution)
+              await requireWorkspaceExecution(tx, context.principal, "finances", now());
+            await lockReimbursementTopology(tx, context.principal.userId);
+            await assertMaintenanceClaim(tx, context);
+            const [parent] = await tx
+              .select()
+              .from(financeTransactions)
+              .where(
+                and(
+                  eq(financeTransactions.id, current.id),
+                  eq(financeTransactions.userId, context.principal.userId),
+                ),
+              )
+              .for("update")
+              .limit(1);
+            if (!parent || parent.updatedAt.toISOString() !== input.expectedTransactionUpdatedAt)
+              throw new AppError(
+                "conflict",
+                "The transaction changed while its saved breakdown was being reviewed.",
+              );
+            const reviews = await tx
+              .select()
+              .from(financeReviewCases)
+              .where(
+                and(
+                  eq(financeReviewCases.userId, context.principal.userId),
+                  eq(financeReviewCases.transactionId, parent.id),
+                  inArray(financeReviewCases.status, ["deferred", "open"]),
+                ),
+              )
+              .orderBy(financeReviewCases.id)
+              .for("update");
+            const target = reviews.find((item) => item.id === review.id);
+            if (!target || target.contextualRevision !== review.contextualRevision)
+              throw new AppError(
+                "conflict",
+                "The finance review case changed before the decision was applied.",
+              );
+            if (
+              !["ambiguous_merchant", "low_confidence", "unknown_merchant"].includes(
+                target.reason,
+              ) ||
+              !["category_ambiguity", "merchant_identity", "missing_provenance"].includes(
+                target.reasonCode,
+              )
+            )
+              throw new AppError(
+                "invalid_request",
+                "This review needs its own evidence-specific resolution.",
+              );
+            const evidence = await activeAllocationEvidence(tx, parent);
+            if (!evidence.complete)
+              throw new AppError(
+                "invalid_request",
+                "A complete current saved breakdown is required before this review can be approved.",
+              );
+            let threshold = 1;
+            if (context.principal.actorType === "agent") {
+              const allocation = evidence.allocations[0];
+              if (
+                evidence.allocations.length !== 1 ||
+                !allocation ||
+                parent.categoryId !== allocation.categoryId ||
+                reviews.some((item) => item.reason === "possible_transfer")
+              )
+                throw new AppError(
+                  "forbidden",
+                  "An agent category proposal cannot approve a multi-category or ambiguous-transfer breakdown.",
+                );
+              await tx
+                .select({ id: financeCategories.id })
+                .from(financeCategories)
+                .where(eq(financeCategories.userId, context.principal.userId))
+                .orderBy(financeCategories.id)
+                .for("update");
+              const proposal = await categorizationProposal(
+                context.principal.userId,
+                transaction(parent),
+                undefined,
+                tx,
+              );
+              if (
+                proposal.suggestedCategory?.id !== allocation.categoryId ||
+                proposal.confidence !== input.confidence ||
+                proposal.suggestionBasis !== "transaction_evidence"
+              )
+                throw new AppError(
+                  "conflict",
+                  "The accepted categorization no longer matches the server proposal.",
+                );
+              threshold = proposal.threshold;
+              if (!proposal.meetsPolicyThreshold)
+                return {
+                  applied: false,
+                  replayed: false,
+                  threshold,
+                  transaction: await enrichTransaction(parent, tx),
+                };
+            }
+            await tx
+              .update(financeReviewCases)
+              .set({ resolvedAt: now(), status: "resolved", updatedAt: now() })
+              .where(eq(financeReviewCases.id, target.id));
+            const [updated] = await tx
+              .update(financeTransactions)
+              .set({ needsReview: reviews.some((item) => item.id !== target.id), updatedAt: now() })
+              .where(eq(financeTransactions.id, parent.id))
+              .returning();
+            if (!updated)
+              throw new AppError(
+                "conflict",
+                "The transaction changed while its saved breakdown was being reviewed.",
+              );
+            const after = await enrichTransaction(updated, tx);
+            const source = context.maintenance
+              ? await financeTransactionSource(context.principal.userId, parent, tx)
+              : null;
+            await tx.insert(auditEvents).values(
+              auditValues({
+                action: "finance.transaction_categorized",
+                before: transactionAuditSnapshot(transaction(parent)),
+                after: {
+                  ...transactionAuditSnapshot(after),
+                  reviewId: target.id,
+                  allocations: evidence.allocations.map(transactionAllocation),
+                  rationale: input.rationale,
+                  ...(source ? maintenanceAuditAttribution(context, source) : {}),
+                },
+                entityId: parent.id,
+                entityType: "finance_transaction",
+                ...context,
+              }),
+            );
+            return { applied: true, replayed: false, threshold, transaction: after };
+          };
+          // Supplied executors retain their caller's admission/guard contract, as above.
+          return executor
+            ? approve(executor)
+            : db.transaction(async (tx) => {
+                await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+                  actorIds:
+                    context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+                  connectionIds: context.principal.authorizationConnectionId
+                    ? [context.principal.authorizationConnectionId]
+                    : [],
+                });
+                return approve(tx);
+              });
+        }
+      }
       // Signed provider direction is authoritative when available; the user
       // choice is only the fallback for legacy/manual rows without provenance.
       const nonTransferDirection =
@@ -7953,6 +8151,13 @@ export function createFinanceService({
               })();
               if (!parent)
                 throw new AppError("not_found", "The Finance transaction is unavailable.");
+              // A split deliberately has no parent category. Its complete native allocations
+              // already supply categorization evidence; do not overwrite an unrelated review.
+              if (
+                parent.transaction.categoryId !== null ||
+                (await activeAllocationEvidence(tx, parent.transaction)).complete
+              )
+                return;
               return putInReview(
                 row.id,
                 row.userId,

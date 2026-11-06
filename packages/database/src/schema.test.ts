@@ -525,6 +525,10 @@ describe("database schema contracts", () => {
       "0129_finance_review_batches",
       "0130_finance_provider_account_identity",
       "0131_finance_institution_branding",
+      "0132_texting_agent",
+      "0133_texting_workspace_messages",
+      "0134_texting_host_binding",
+      "0135_texting_input_snapshot",
     ]);
   });
 

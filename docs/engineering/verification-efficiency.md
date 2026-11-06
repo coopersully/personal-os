@@ -80,7 +80,8 @@ Measure the slowest shard, setup time, queueing and total runner minutes separat
 trade more runner capacity for lower elapsed time; a large single file or slow browser dependency
 installation can limit gains. Five-minute ordinary PR CI remains a target, not a coverage exception.
 
-Node quality deliberately retains the original unsharded `pnpm check:node`. Vitest 3.2.7 blob
+Node quality retains one unsharded `pnpm test:coverage` execution. The local `pnpm check:node`
+command remains `pnpm typecheck && pnpm test:coverage && pnpm build`. Vitest 3.2.7 blob
 aggregation merges post-conversion Istanbul maps, which can infer hits for an uncovered nested
 branch from an enclosing covered range in another shard. A measured trial changed unchanged-source
 branch coverage from 94.00% to 96.61%; it is not equivalent evidence. Future coverage distribution
@@ -88,10 +89,33 @@ must demonstrate branch-hit equivalence against the single-run raw-V8 aggregatio
 uncovered branches, before replacing the existing coverage gate. Unchanged threshold numbers alone
 do not prove equivalent enforcement.
 
+## Node phase budgets
+
+The hosted Node quality job runs type checking, coverage tests and production builds as separate,
+blocking steps on the same runner after one frozen install and production audit. Their budgets are
+5, 30 and 10 minutes respectively; the outer job allows 50 minutes for these phases plus setup and
+diagnostics. The test execution budget remains 30 minutes. A failed or canceled phase blocks the
+job and later source steps retain the default `success()` condition. The required aggregate still
+uses the actual job result. This split changes neither assertions, test timeouts, coverage floors,
+V8 aggregation, dependency caching nor job selection.
+
+Historical source run 42154693945, attempt 1, reported 7,381 passing tests across 650 files and
+all coverage floors passing, with Vitest taking 1,645.47 seconds (27m25s). Type checking took about
+2m17s and setup about 26s. The former combined 30-minute job limit canceled the job after builds
+started; API and web build completion was unconfirmed. Separate budgets keep that non-test work
+outside the test execution allowance. This is execution headroom, not a measured speedup or proof
+that a future candidate's builds will complete. Hosted verification must still prove every phase.
+
+Attempt-bound diagnostics record each phase outcome and preserve `sourceSteps.node` as an
+aggregate: only three successful phases produce Node success. A successful test phase followed by
+a failed, canceled, skipped or unknown build remains unsuccessful. Legacy callers supplying only
+`NODE_OUTCOME` retain their original manifest shape. Missing reports after successful coverage
+remain an incomplete diagnostic even when builds fail; artifacts never replace the required job.
+
 ## Early production audit
 
 Node quality runs the unchanged `pnpm audit --prod` immediately after frozen dependency
-installation and before `pnpm check:node`. An audit failure stops that job before expensive
+installation and before type checking. An audit failure stops that job before expensive
 type, coverage and build work; successful candidates still run every existing check. The same
 Node job and required aggregate gate enforce failure. Other parallel jobs are not canceled by
 this reorder, so earlier detection does not imply lower whole-workflow elapsed time or runner cost.

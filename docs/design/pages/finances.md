@@ -226,6 +226,28 @@ failed request, or pending request keeps an explicit recovery state. Proposals
 remain visible before approval; a category-only budget view is not a substitute
 for the complete plan shared with MCP.
 
+## Saved transaction breakdowns
+
+The transaction breakdown editor loads supplied active allocations in their saved order,
+including category and personal/reimbursable treatment. Reopening loads the latest supplied
+breakdown; background refreshes preserve an open draft and its original revision guard.
+Cancel and Close release the editor even when the viewport changes during dismissal.
+Saving refreshes the linked transaction as well as transaction lists. Single-transaction reads
+return active native allocations and the parent version from one database snapshot.
+
+A complete, posted, non-transfer allocation set supplies categorization evidence even when a
+multi-category transaction has no parent category. Learning backfill does not replace its existing
+review reasons with a missing-category finding. Incomplete, invalidated, pending or transfer
+evidence remains subject to review.
+
+An interactive owner may approve the exact categorization/provenance case against the displayed
+transaction revision while retaining allocation IDs, amounts, categories, treatment and history.
+Other open review reasons remain open and keep the transaction flagged. This approval does not
+create a merchant rule or grant an agent authority to approve a multi-category breakdown through
+a single-category proposal. A one-category agent approval must still match the current server
+transaction-evidence proposal and confidence under the category locks; below-threshold evidence
+leaves the review open without replacing its allocation.
+
 ## Transaction context questions
 
 For a known manual account, an unresolved, posted, uncategorized expense or income transaction

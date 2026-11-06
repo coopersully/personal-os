@@ -3,8 +3,9 @@ import { renderWithFeedback as render } from "@/test-utils/feedback";
 import "@testing-library/jest-dom/vitest";
 import type { FinanceCategory, FinanceTransaction } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { vi } from "vitest";
 import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
 
@@ -31,6 +32,286 @@ const categories = [
   { id: categoryId, name: "Shopping" },
   { id: "33333333-3333-4333-8333-333333333333", name: "Medical" },
 ] as FinanceCategory[];
+
+it.each([
+  "Cancel",
+  "Close",
+])("releases the editor when %s and resizing interrupt its exit animation", async (controlName) => {
+  const originalMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+  const originalWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+  const originalCss = globalThis.CSS;
+  const listeners = new Set<() => void>();
+  let width = 390;
+  let cleanupView: (() => void) | undefined;
+  let cleanupStyles: (() => void) | undefined;
+  try {
+    Object.defineProperty(window, "innerWidth", { configurable: true, get: () => width });
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (media: string) => ({
+        media,
+        get matches() {
+          return media === "(max-width: 767px)" && width < 768;
+        },
+        addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+      }),
+    });
+    // Browser computed styles are live. JSDOM does not run Vaul's exit animation or
+    // emit animationcancel when the desktop presentation removes that animation.
+    const computed = window.getComputedStyle.bind(window);
+    const styles = vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudo) => {
+      const value = computed(element, pseudo);
+      if (element.hasAttribute("data-finance-dialog"))
+        Object.defineProperty(value, "animationName", {
+          get: () =>
+            element.getAttribute("data-presentation") === "dialog"
+              ? "none"
+              : element.getAttribute("data-state") === "open"
+                ? "slideFromBottom"
+                : "slideToBottom",
+        });
+      return value;
+    });
+    cleanupStyles = () => styles.mockRestore();
+    vi.stubGlobal("CSS", { ...originalCss, escape: (value: string) => value });
+    const client = new QueryClient();
+    function Editor() {
+      const [selected, setSelected] = useState<FinanceTransaction | null>(transaction);
+      return (
+        <QueryClientProvider client={client}>
+          <button type="button" onClick={() => setSelected(transaction)}>
+            Open breakdown
+          </button>
+          <TransactionBreakdownDialog
+            categories={categories}
+            open={selected !== null}
+            onOpenChange={(open) => {
+              if (!open) setSelected(null);
+            }}
+            transaction={selected}
+          />
+        </QueryClientProvider>
+      );
+    }
+    const view = render(<Editor />);
+    cleanupView = () => view.unmount();
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toHaveAttribute("data-presentation", "drawer"));
+    fireEvent.animationStart(dialog, { animationName: "slideFromBottom" });
+    const cancel = screen.getByRole("button", { name: controlName });
+    cancel.focus();
+    await userEvent.keyboard("{Enter}");
+    // Dismissal releases the modal before an orientation change can cancel its
+    // exit animation; it must not depend on the primitive's animation cleanup.
+    expect(dialog).not.toBeInTheDocument();
+    act(() => {
+      width = 1280;
+      for (const listener of listeners) listener();
+    });
+    const cancelled = new Event("animationcancel", { bubbles: true });
+    Object.defineProperty(cancelled, "animationName", { value: "slideToBottom" });
+    fireEvent(dialog, cancelled);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(document.body.style.pointerEvents).not.toBe("none");
+    expect(setFinanceTransactionBreakdown).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Open breakdown" }));
+    expect(await screen.findByRole("dialog", { name: "Split CVS" })).toBeVisible();
+    expect(screen.queryByText(/over-assigned/)).not.toBeInTheDocument();
+  } finally {
+    cleanupView?.();
+    cleanupStyles?.();
+    vi.unstubAllGlobals();
+    if (originalMedia) Object.defineProperty(window, "matchMedia", originalMedia);
+    if (originalWidth) Object.defineProperty(window, "innerWidth", originalWidth);
+  }
+});
+
+it("reopens saved allocations in their order without replacing their categories or treatment", async () => {
+  const saved = {
+    ...transaction,
+    categoryId: null,
+    allocations: [
+      {
+        id: "second",
+        allocationOrder: 1,
+        amount: 220,
+        categoryId: categories[1]?.id,
+        state: "active",
+        treatment: "reimbursable",
+        rationale: "Roommate's items.",
+      },
+      {
+        id: "obsolete",
+        allocationOrder: 0,
+        amount: 310,
+        categoryId,
+        state: "invalidated",
+        treatment: "personal",
+        rationale: "Old classification.",
+      },
+      {
+        id: "first",
+        allocationOrder: 0,
+        amount: 90,
+        categoryId,
+        state: "active",
+        treatment: "personal",
+        rationale: "Receipt: personal items.",
+      },
+    ],
+  } as FinanceTransaction;
+  setFinanceTransactionBreakdown.mockResolvedValue(saved);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["finance-transaction", id], saved);
+  render(
+    <QueryClientProvider client={client}>
+      <TransactionBreakdownDialog
+        categories={categories}
+        onOpenChange={vi.fn()}
+        open
+        transaction={saved}
+      />
+    </QueryClientProvider>,
+  );
+  expect(
+    (await screen.findAllByLabelText("Amount")).map((field) => (field as HTMLInputElement).value),
+  ).toEqual(["90.00", "220.00"]);
+  expect(
+    screen.getAllByLabelText("Category").map((field) => (field as HTMLSelectElement).value),
+  ).toEqual([categoryId, categories[1]?.id]);
+  expect(
+    screen.getAllByLabelText("Treatment").map((field) => (field as HTMLSelectElement).value),
+  ).toEqual(["personal", "reimbursable"]);
+  expect(screen.getByRole("switch", { name: /Use for future purchases/ })).not.toBeChecked();
+  expect(screen.getByText("Every cent assigned")).toBeVisible();
+  expect(setFinanceTransactionBreakdown).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "Save breakdown" }));
+  await waitFor(() =>
+    expect(setFinanceTransactionBreakdown).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({
+        allocations: [
+          { amount: 90, categoryId, rationale: "Receipt: personal items.", treatment: "personal" },
+          {
+            amount: 220,
+            categoryId: categories[1]?.id,
+            rationale: "Roommate's items.",
+            treatment: "reimbursable",
+          },
+        ],
+        expectedTransactionUpdatedAt: now,
+        futureRule: null,
+      }),
+    ),
+  );
+  await waitFor(() =>
+    expect(client.getQueryState(["finance-transaction", id])?.isInvalidated).toBe(true),
+  );
+});
+
+it.each([null, "", "   "])("uses a valid default for saved rationale %j", async (rationale) => {
+  setFinanceTransactionBreakdown.mockClear();
+  const saved = {
+    ...transaction,
+    allocations: [
+      {
+        id: "saved",
+        allocationOrder: 0,
+        amount: 310,
+        categoryId,
+        state: "active",
+        treatment: "personal",
+        rationale,
+      },
+    ],
+  } as FinanceTransaction;
+  const client = new QueryClient();
+  render(
+    <QueryClientProvider client={client}>
+      <TransactionBreakdownDialog
+        categories={categories}
+        onOpenChange={vi.fn()}
+        open
+        transaction={saved}
+      />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "Save breakdown" }));
+  await waitFor(() =>
+    expect(setFinanceTransactionBreakdown).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({
+        allocations: [
+          expect.objectContaining({ rationale: "User-entered transaction breakdown." }),
+        ],
+      }),
+    ),
+  );
+});
+
+it("loads the latest saved allocation when reopened and keeps edits during category refresh", async () => {
+  setFinanceTransactionBreakdown.mockClear();
+  const saved = {
+    ...transaction,
+    allocations: [
+      {
+        id: "saved",
+        allocationOrder: 0,
+        amount: 310,
+        categoryId,
+        state: "active",
+        treatment: "personal",
+        rationale: "Confirmed receipt.",
+      },
+    ],
+  } as FinanceTransaction;
+  const client = new QueryClient();
+  const view = (open: boolean, current = saved, choices = categories) => (
+    <QueryClientProvider client={client}>
+      <TransactionBreakdownDialog
+        categories={choices}
+        onOpenChange={vi.fn()}
+        open={open}
+        transaction={current}
+      />
+    </QueryClientProvider>
+  );
+  const { rerender } = render(view(true));
+  const amount = await screen.findByLabelText("Amount");
+  await userEvent.clear(amount);
+  await userEvent.type(amount, "300");
+  rerender(view(true, saved, [...categories]));
+  expect(screen.getByLabelText("Amount")).toHaveValue("300");
+  const updated = {
+    ...saved,
+    updatedAt: "2026-08-22T12:00:00.000Z",
+    allocations: [
+      {
+        ...saved.allocations?.[0],
+        amount: 310,
+        categoryId: categories[1]?.id,
+        treatment: "reimbursable",
+      },
+    ],
+  } as FinanceTransaction;
+  rerender(view(true, updated));
+  expect(screen.getByLabelText("Amount")).toHaveValue("300");
+  await userEvent.clear(screen.getByLabelText("Amount"));
+  await userEvent.type(screen.getByLabelText("Amount"), "310");
+  await userEvent.click(screen.getByRole("button", { name: "Save breakdown" }));
+  await waitFor(() =>
+    expect(setFinanceTransactionBreakdown).toHaveBeenLastCalledWith(
+      id,
+      expect.objectContaining({ expectedTransactionUpdatedAt: now }),
+    ),
+  );
+  rerender(view(false));
+  rerender(view(true, updated));
+  expect(await screen.findByLabelText("Amount")).toHaveValue("310.00");
+  expect(screen.getByLabelText("Category")).toHaveValue(categories[1]?.id);
+  expect(screen.getByLabelText("Treatment")).toHaveValue("reimbursable");
+});
 
 it("requires every cent and saves a mixed CVS breakdown without a future rule", async () => {
   setFinanceTransactionBreakdown.mockResolvedValue(transaction);
@@ -76,7 +357,7 @@ it("handles an absent transaction and category without inventing a valid split",
       <TransactionBreakdownDialog categories={[]} onOpenChange={vi.fn()} open transaction={null} />
     </QueryClientProvider>,
   );
-  expect(screen.getByText("Split transaction")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   rerender(
     <QueryClientProvider client={client}>
       <TransactionBreakdownDialog
@@ -123,9 +404,16 @@ it("saves a single-category future rule and keeps a failed save recoverable", as
     }),
   );
   rejectSave?.(new Error("Breakdown save failed"));
+  const failure = await screen.findByText(
+    /Couldn’t confirm whether we could save this transaction breakdown/,
+  );
+  expect(failure).toBeVisible();
+  expect(failure.closest("[data-sonner-toast]")).not.toBeNull();
   expect(
-    await screen.findByText(/Couldn’t confirm whether we could save this transaction breakdown/),
-  ).toBeVisible();
+    within(screen.getByRole("dialog")).queryByText(
+      /Couldn’t confirm whether we could save this transaction breakdown/,
+    ),
+  ).not.toBeInTheDocument();
 });
 
 it("does not round sub-cent amounts into a saveable split", async () => {

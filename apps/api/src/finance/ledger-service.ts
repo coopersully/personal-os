@@ -7,6 +7,7 @@ import {
   financeClassificationDecisions,
   financeEconomicEvents,
   financeEventTransactions,
+  financeTransactionAllocations,
   financeTransactionRelationships,
   financeTransactionRevisions,
   financeTransactions,
@@ -154,9 +155,44 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
 
   return {
     async getTransaction(userId: string, id: string) {
-      const row = await ownedTransaction(userId, id);
+      // One statement keeps the parent revision and its allocations in the same snapshot.
+      const rows = await db
+        .select({ parent: financeTransactions, allocation: financeTransactionAllocations })
+        .from(financeTransactions)
+        .leftJoin(
+          financeTransactionAllocations,
+          and(
+            eq(financeTransactionAllocations.transactionId, financeTransactions.id),
+            eq(financeTransactionAllocations.userId, userId),
+            eq(financeTransactionAllocations.state, "active"),
+          ),
+        )
+        .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
+        .orderBy(financeTransactionAllocations.allocationOrder);
+      const row = rows[0]?.parent;
+      if (!row) throw new AppError("not_found", "The transaction was not found.");
       return result(
-        { ...transaction(row), version: transactionVersion(row.contextualRevision) },
+        {
+          ...transaction(row),
+          allocations: rows.flatMap(({ allocation }) =>
+            allocation
+              ? [
+                  {
+                    allocationOrder: allocation.allocationOrder,
+                    amount: allocation.amount / 100,
+                    categoryId: allocation.categoryId,
+                    id: allocation.id,
+                    invalidatedAt: allocation.invalidatedAt?.toISOString() ?? null,
+                    rationale: allocation.rationale,
+                    revision: allocation.revision,
+                    state: allocation.state,
+                    treatment: allocation.treatment,
+                  },
+                ]
+              : [],
+          ),
+          version: transactionVersion(row.contextualRevision),
+        },
         "Transaction loaded.",
       );
     },

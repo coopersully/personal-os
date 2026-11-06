@@ -16,6 +16,7 @@ import {
   financeMaintenanceInputSchema,
   financeOnboardingCompleteInputSchema,
   financeOnboardingSaveInputSchema,
+  financeProviderTransactionEvidenceInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
   financeSpendingQuerySchema,
@@ -145,6 +146,23 @@ const answerFinanceReviewToolInputSchema = z
 
 /** Intent-first Finance MCP surface. Domain policy and accounting stay in the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
+  server.registerTool(
+    "read_finance_provider_transaction_evidence",
+    {
+      annotations: { openWorldHint: true, readOnlyHint: true },
+      description:
+        "Read historical provider evidence for up to 20 exact owned native Finance transactions on one connection. Provider reads never initialize, synchronize or change Finance records. Coverage is bounded and non-atomic; missing evidence is not proof of absence.",
+      inputSchema: financeProviderTransactionEvidenceInputSchema,
+      title: "Read historical Finance evidence",
+    },
+    async (input) =>
+      apiResult(() =>
+        api.readFinanceProviderTransactionEvidence(
+          financeProviderTransactionEvidenceInputSchema.parse(input),
+        ),
+      ),
+  );
+
   server.registerTool(
     "get_finance_playbook",
     {

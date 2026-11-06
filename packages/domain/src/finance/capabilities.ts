@@ -1,5 +1,12 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "readFinanceProviderTransactionEvidence",
+    capability: "ledger.provider_transaction_evidence",
+    mcpTool: "read_finance_provider_transaction_evidence",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
     apiOperation: "getFinanceMaintenanceExecutionAuthorization",
     capability: "workflow.execution_authorization_observation",
     mcpTool: "get_finance_maintenance_execution_authorization",

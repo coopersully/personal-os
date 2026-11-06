@@ -43,6 +43,7 @@ export function WorkspaceBreadcrumbs({ workspace }: { workspace: WorkspaceAppBar
 
 function RouteBreadcrumbs({ workspace }: { workspace: WorkspaceAppBarWorkspace }) {
   const { pathname, search } = useLocation();
+  if (workspace === "messages") return null;
   const owner = workspace === "account" ? "settings" : workspace;
   const definition = workspaceDefinitions.find((item) => item.id === workspace);
   const items = [{ label: definition?.label ?? "Settings", to: definition?.path ?? "/settings" }];

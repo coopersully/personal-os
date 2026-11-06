@@ -16,6 +16,8 @@ import { LoginDestination } from "./features/public-site/login-destination";
 import { GoalProgressEditor } from "./features/settings/goal-progress-editor.js";
 import { RecordDateEditor } from "./features/settings/record-date-editor";
 import { settingsParents, settingsRoute } from "./features/settings/settings-routes";
+import { TextingAgentSettings } from "./features/texting/agent-settings.js";
+import { TextConversation } from "./features/texting/conversation.js";
 
 export {
   positionTimelineEvents,
@@ -162,6 +164,7 @@ import {
   PlusIcon,
   PulseIcon,
   RefreshIcon,
+  ReplyIcon,
   ScissorsIcon,
   SettingsIcon,
   ShieldCheckIcon,
@@ -1295,7 +1298,10 @@ function AuthenticatedApp({ user }: { user: User }) {
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
   const activeWorkspace = workspaceForPath(location.pathname);
   const sectionOwner = activeWorkspace?.id ?? "settings";
-  const sectionPages = workspaceSectionPages(sectionOwner, location.search);
+  const sectionPages =
+    navigationOwnerForLocation(location.pathname).kind === "shared-channel"
+      ? []
+      : workspaceSectionPages(sectionOwner, location.search);
   const navigationSection = sectionPages.find(
     (page) =>
       page.kind === "section" && page.id === new URLSearchParams(location.search).get("navigation"),
@@ -1313,6 +1319,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           ?.label.toLowerCase() ?? "account")
       : activeWorkspaceSection(sectionOwner, location.pathname, location.search));
   const isCalendarWorkspace = activeWorkspace?.id === "calendar";
+  const isMessageView = shellPathname.endsWith("/messages");
   const isSpatialCalendar = shellPathname === "/calendar";
   const navigationOwner = navigationOwnerForLocation(location.pathname);
   const workspacePath = activeWorkspace?.path ?? null;
@@ -1353,11 +1360,13 @@ function AuthenticatedApp({ user }: { user: User }) {
   // A standalone flow never reaches the shell, so an owner here is either a
   // workspace or the account utility. Today has no contextual navigation.
   const sidebarMode: ContextSidebarMode =
-    navigationOwner.kind !== "workspace"
-      ? "settings"
-      : navigationOwner.workspace === "today" || navigationOwner.workspace === "calendar"
-        ? null
-        : navigationOwner.workspace;
+    navigationOwner.kind === "shared-channel"
+      ? null
+      : navigationOwner.kind !== "workspace"
+        ? "settings"
+        : navigationOwner.workspace === "today" || navigationOwner.workspace === "calendar"
+          ? null
+          : navigationOwner.workspace;
   const workspaceSettingsActions = useWorkspaceSettingsActions(sidebarMode === "settings");
   const settingsCounts = useSettingsSidebarCounts(sidebarMode === "settings");
   const activeSettingsSection = settingsSectionFromSearch(location.search);
@@ -1422,7 +1431,7 @@ function AuthenticatedApp({ user }: { user: User }) {
       }}
     >
       <div
-        className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
+        className={`app-shell${isCalendarWorkspace && !isMessageView ? " app-shell--calendar" : sidebarMode === "mail" && !isMessageView ? " app-shell--mail" : ""}${(isTodayWorkspace || navigationOwner.kind === "shared-channel" || (isCalendarWorkspace && isMessageView)) && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
         data-workspace={sectionOwner}
         data-mobile-app-bar={hasMobileAppBar || undefined}
         data-rail-collapsed={!isMobileWorkspaceDock && railCollapsed ? "true" : undefined}
@@ -1472,7 +1481,7 @@ function AuthenticatedApp({ user }: { user: User }) {
             />
           </div>
         ) : null}
-        {!isMobileWorkspaceDock && !isCalendarWorkspace && !isTodayWorkspace ? (
+        {!isMobileWorkspaceDock && sidebarMode ? (
           <ShadcnSidebar
             collapsible="none"
             role="complementary"
@@ -1546,7 +1555,9 @@ function AuthenticatedApp({ user }: { user: User }) {
         />
         <WorkspaceLayout
           contentMode={
-            !navigationSection && (isCalendarWorkspace || sidebarMode === "mail") ? "panes" : "page"
+            !navigationSection && !isMessageView && (isCalendarWorkspace || sidebarMode === "mail")
+              ? "panes"
+              : "page"
           }
           banner={
             !online && (
@@ -1853,10 +1864,30 @@ function WorkspaceRoutes({
           </Suspense>
         }
       />
+      {(["mail", "tasks", "calendar", "finances"] as const).map((workspace) => (
+        <Route
+          key={workspace}
+          path={`/${workspace}/messages`}
+          element={<LegacyMessagesRedirect workspace={workspace} />}
+        />
+      ))}
+      <Route
+        path="/messages"
+        element={
+          <TextConversation key={user.id} userId={user.id} timeZone={user.planningTimezone} />
+        }
+      />
       <Route path="/settings" element={<SettingsPage setEditor={setEditor} user={user} />} />
       <Route path="*" element={<Navigate replace to="/today" />} />
     </Routes>
   );
+}
+
+function LegacyMessagesRedirect({ workspace }: { workspace: string }) {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set("workspace", workspace);
+  return <Navigate replace to={`/messages?${params}${location.hash}`} />;
 }
 
 function LegacySettingsRedirect({ section }: { section: SettingsSectionId }) {
@@ -2011,9 +2042,11 @@ function WorkspaceAppBarForRoute({
   workspaceSwitcher: ReactNode;
 }) {
   const handleSearchAction = useWorkspaceSearchAction(setEditor);
-  const workspace = workspaceForLocation(pathname)?.id ?? "account";
+  const workspace =
+    workspaceForLocation(pathname)?.id ?? (pathname === "/messages" ? "messages" : "account");
   const isSpatialCalendar = pathname === "/calendar";
   const isReviewQueue = pathname.endsWith("/decisions");
+  const isMessages = pathname.endsWith("/messages");
   const identity = isReviewQueue ? (
     <span className="workspace-app-bar__title">Needs review</span>
   ) : pathname === "/tasks" ? null : isSpatialCalendar ? (
@@ -2038,47 +2071,49 @@ function WorkspaceAppBarForRoute({
       {pageTitle ?? workspaceDefinitions.find((item) => item.id === workspace)?.label}
     </span>
   );
-  const context = isReviewQueue ? null : isSpatialCalendar ? (
-    <div className="calendar-header-context">
-      <CalendarAppBarControls
-        search={
-          <WorkspaceFinder
-            workspace="calendar"
-            timeZone={user.planningTimezone}
-            onAction={handleSearchAction}
-          />
-        }
-        accounts={<CalendarAccountsControl />}
-        onToday={onCalendarToday}
-        user={user}
+  const context =
+    isReviewQueue || isMessages ? null : isSpatialCalendar ? (
+      <div className="calendar-header-context">
+        <CalendarAppBarControls
+          search={
+            <WorkspaceFinder
+              workspace="calendar"
+              timeZone={user.planningTimezone}
+              onAction={handleSearchAction}
+            />
+          }
+          accounts={<CalendarAccountsControl />}
+          onToday={onCalendarToday}
+          user={user}
+        />
+      </div>
+    ) : pathname === "/today" ? (
+      <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
+    ) : pathname === "/activity" ? (
+      <ActivityTopbarControls />
+    ) : pathname === "/reminders" ? (
+      <WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />
+    ) : pathname === "/tasks" ? (
+      <TasksAppBarControls
+        timeZone={user.planningTimezone}
+        search={<WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />}
       />
-    </div>
-  ) : pathname === "/today" ? (
-    <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
-  ) : pathname === "/activity" ? (
-    <ActivityTopbarControls />
-  ) : pathname === "/reminders" ? (
-    <WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />
-  ) : pathname === "/tasks" ? (
-    <TasksAppBarControls
-      timeZone={user.planningTimezone}
-      search={<WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />}
-    />
-  ) : workspace === "mail" ? (
-    <MailAppBarControls
-      accounts={<MailAccountsControl />}
-      sync={<MailSyncButton />}
-      search={<WorkspaceFinder workspace="mail" onAction={handleSearchAction} />}
-    />
-  ) : workspace === "finances" ? (
-    <>
-      <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
-    </>
-  ) : null;
+    ) : workspace === "mail" ? (
+      <MailAppBarControls
+        accounts={<MailAccountsControl />}
+        sync={<MailSyncButton />}
+        search={<WorkspaceFinder workspace="mail" onAction={handleSearchAction} />}
+      />
+    ) : workspace === "finances" ? (
+      <>
+        <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
+      </>
+    ) : null;
 
   return (
     <>
       <WorkspaceAppBar
+        compact={isMessages}
         actions={
           <>
             {"__TAURI_INTERNALS__" in window && (
@@ -2119,7 +2154,7 @@ function WorkspaceAppBarForRoute({
       {pathname === "/reminders" && !isReviewQueue ? (
         <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
       ) : null}
-      {workspace === "tasks" && pathname !== "/reminders" && !isReviewQueue ? (
+      {workspace === "tasks" && pathname !== "/reminders" && !isReviewQueue && !isMessages ? (
         <TasksCreateButton
           floating
           onCreate={(placement) => setEditor({ kind: "task", ...(placement ? { placement } : {}) })}
@@ -2174,25 +2209,46 @@ function WorkspaceRail({
           );
         })}
       </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <ShadcnButton
-            asChild
-            className="workspace-rail__link workspace-rail__settings"
-            size="icon"
-            variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
-          >
-            <Link
-              aria-current={owner.kind === "account-utility" ? "page" : undefined}
-              aria-label="Settings"
-              to="/settings"
+      <div className="workspace-rail__settings flex flex-col gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ShadcnButton
+              asChild
+              className="workspace-rail__link"
+              size="icon"
+              variant={owner.kind === "shared-channel" ? "secondary" : "ghost"}
             >
-              <SettingsIcon aria-hidden="true" />
-            </Link>
-          </ShadcnButton>
-        </TooltipTrigger>
-        <TooltipContent side="right">Settings</TooltipContent>
-      </Tooltip>
+              <Link
+                aria-current={owner.kind === "shared-channel" ? "page" : undefined}
+                aria-label="Messages"
+                to="/messages"
+              >
+                <ReplyIcon aria-hidden="true" />
+              </Link>
+            </ShadcnButton>
+          </TooltipTrigger>
+          <TooltipContent side="right">Messages</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ShadcnButton
+              asChild
+              className="workspace-rail__link"
+              size="icon"
+              variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
+            >
+              <Link
+                aria-current={owner.kind === "account-utility" ? "page" : undefined}
+                aria-label="Settings"
+                to="/settings"
+              >
+                <SettingsIcon aria-hidden="true" />
+              </Link>
+            </ShadcnButton>
+          </TooltipTrigger>
+          <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
+      </div>
     </nav>
   );
 }
@@ -2214,7 +2270,8 @@ function WorkspaceSwitcher({
 }) {
   const workspace = workspaceForPath(pathname);
   const isSettings = pathname === "/settings";
-  const section = isSettings ? "Settings" : (workspace?.label ?? "Home OS");
+  const section =
+    pathname === "/messages" ? "Messages" : isSettings ? "Settings" : (workspace?.label ?? "nohmi");
   const activeWorkspaceId = workspace ? workspaceIdForPath(workspace.path) : undefined;
   const CurrentWorkspaceIcon = isSettings
     ? SettingsIcon
@@ -2286,6 +2343,16 @@ function WorkspaceSwitcher({
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
+              <DropdownMenuItem asChild>
+                <Link
+                  to="/messages"
+                  onClick={onNavigate}
+                  aria-current={pathname === "/messages" ? "page" : undefined}
+                >
+                  <textingSettingsNavigationItem.icon aria-hidden="true" />
+                  <span>Messages</span>
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link
                   aria-current={isSettings ? "page" : undefined}
@@ -3025,6 +3092,7 @@ function TodayNavigationTitle({
 
 function workspaceTitleForLocation(pathname: string, search: string): string | null {
   const searchParams = new URLSearchParams(search);
+  if (pathname.endsWith("/messages")) return "Messages";
   if (pathname === "/calendar/review") return "Calendar review";
   if (pathname === "/calendar") return "Calendar";
   if (pathname === "/reminders") {
@@ -3052,6 +3120,7 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/finances/review/legacy") return "Earlier transaction reviews";
   if (pathname === "/finances/subscriptions") return "Subscriptions";
   if (pathname === "/finances/transactions") return "Transactions";
+  if (pathname === "/messages") return "Messages";
   if (pathname === "/activity") return "Activity";
   if (pathname === "/reviews") return "Reviews";
   if (pathname === "/settings") return settingsSectionLabel(settingsSectionFromSearch(search));
@@ -6344,7 +6413,12 @@ function SettingsPageContent({
       {section === "setup" ? <SetupSettings user={user} /> : null}
       {section === "invitations" ? <InvitationsSettings /> : null}
       {section === "sessions" ? <SessionsSettings /> : null}
-      {section === "texting" ? <TextingSettings /> : null}
+      {section === "texting" ? (
+        <>
+          <TextingSettings />
+          <TextingAgentSettings key={user.id} userId={user.id} />
+        </>
+      ) : null}
       {section === "desktop" && !isTauri() ? <DesktopDownloads /> : null}
       {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
       {isTauri() && (section === "desktop" || section === "pet" || section === "notifications") ? (

@@ -2,6 +2,7 @@ import {
   type Database,
   financeSmsCompletions,
   textInboundClaims,
+  textingAgentQueue,
   textingConnections,
   textMessages,
   textReplyBindings,
@@ -157,6 +158,16 @@ export async function bindInboundReply(
               eq(financeSmsCompletions.claimId, claim.id),
             ),
           )
+          .limit(1)
+      ).length
+    )
+      return { state: "unavailable", reason: "unsupported" };
+    if (
+      (
+        await tx
+          .select({ id: textingAgentQueue.claimId })
+          .from(textingAgentQueue)
+          .where(and(eq(textingAgentQueue.userId, userId), eq(textingAgentQueue.claimId, claim.id)))
           .limit(1)
       ).length
     )

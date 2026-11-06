@@ -1131,7 +1131,7 @@ export function createAutomationHostService(options: {
         if (
           row.schedule.version !== expectedVersion ||
           row.schedule.hostSurface !== "claude_code_routine" ||
-          row.schedule.trigger.type !== "event" ||
+          (row.schedule.trigger.type !== "event" && row.schedule.trigger.type !== "scheduled") ||
           row.schedule.state !== "active" ||
           !/^trig_[A-Za-z0-9]{10,100}$/.test(row.schedule.hostAutomationId)
         )

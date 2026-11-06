@@ -2,6 +2,7 @@ import {
   type Database,
   financeSmsCompletions,
   textInboundClaims,
+  textingAgentQueue,
   textingConnections,
   textMessages,
   textReplyBindings,
@@ -54,6 +55,12 @@ export function createFinanceSmsContextDispatcher(options: {
       )
       .where(
         and(
+          notExists(
+            options.db
+              .select({ id: textingAgentQueue.claimId })
+              .from(textingAgentQueue)
+              .where(eq(textingAgentQueue.claimId, textInboundClaims.id)),
+          ),
           notExists(
             options.db
               .select({ id: financeSmsCompletions.claimId })

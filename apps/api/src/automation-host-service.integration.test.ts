@@ -249,20 +249,30 @@ describe.sequential("tenant-bound host schedules", () => {
     expect(bound.schedule.state).toBe("active");
     expect(bound.schedule.version).toBe(2);
   });
-  it("keeps routine tokens encrypted, owner-only and out of public status", async () => {
+  it.each([
+    "event",
+    "scheduled",
+  ] as const)("keeps %s routine tokens encrypted, owner-only and out of public status", async (type) => {
     const f = await fixture();
     const created = await f.service.create(f.human, {
       ...input(f.connectionId),
       hostSurface: "claude_code_routine",
-      trigger: { type: "event", expectedMaximumLatencyMinutes: 15 },
+      trigger:
+        type === "scheduled"
+          ? { type, localTimes: ["08:00", "20:00"], timeZone: "America/New_York" }
+          : { type, expectedMaximumLatencyMinutes: 15 },
     });
-    await f.service.bind(f.human, created.schedule.id, {
+    const token = ["sk", "ant", "oat01", "testfixtureabcdefgh"].join("-");
+    await expect(
+      f.service.saveFireToken(f.human, created.schedule.id, token, 1),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const bound = await f.service.bind(f.human, created.schedule.id, {
       expectedVersion: 1,
       expectedState: "setup_pending",
       hostSurface: "claude_code_routine",
       hostAutomationId: "trig_01ABCDEFGHJKLMNOPQRSTUVW",
     });
-    const token = "sk-ant-oat01-abcdefghijklmno";
+
     await expect(
       f.service.saveFireToken(f.agent, created.schedule.id, token, 2),
     ).rejects.toMatchObject({ code: "forbidden" });
@@ -272,7 +282,28 @@ describe.sequential("tenant-bound host schedules", () => {
     await expect(
       f.service.saveFireToken(f.human, created.schedule.id, token, 1),
     ).rejects.toMatchObject({ code: "conflict" });
-    await f.service.saveFireToken(f.human, created.schedule.id, token, 2);
+    const other = await fixture();
+    await expect(
+      f.service.saveFireToken(other.human, created.schedule.id, token, 2),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const saved = await f.service.saveFireToken(f.human, created.schedule.id, token, 2);
+    expect(saved.schedule).toMatchObject({ ...bound.schedule, version: 3 });
+    expect(saved.schedule.trigger).toEqual(bound.schedule.trigger);
+    expect(saved.schedule.nextExpectedAt).toEqual(bound.schedule.nextExpectedAt);
+    if (type === "scheduled") {
+      await database.db.insert(financeAnswerContinuations).values({
+        userId: f.userId,
+        operationId: randomUUID(),
+        reviewCaseId: randomUUID(),
+        transactionId: randomUUID(),
+        resultingWorkRevision: 2n,
+        automationScheduleId: created.schedule.id,
+      });
+      const fetch = vi.fn();
+      const dispatch = createFinanceHostDispatcher({ db: database.db, now, encryptionKey, fetch });
+      expect(await dispatch()).toEqual({ processed: 0 });
+      expect(fetch).not.toHaveBeenCalled();
+    }
     expect(JSON.stringify(await f.service.list(f.human))).not.toContain(token);
     const [stored] = await database.db
       .select()
@@ -283,6 +314,9 @@ describe.sequential("tenant-bound host schedules", () => {
       .update(accessTokens)
       .set({ revokedAt: now() })
       .where(eq(accessTokens.id, f.token.id));
+    await expect(
+      f.service.saveFireToken(f.human, created.schedule.id, token, 3),
+    ).rejects.toMatchObject({ code: "forbidden" });
     await expect(
       f.service.observe(f.agent, created.schedule.id, {
         expectedVersion: 3,
@@ -360,9 +394,10 @@ describe.sequential("tenant-bound host schedules", () => {
       hostAutomationId: "trig_01ABCDEFGHJKLMNOPQRSTUVW",
     });
     expect(bound.schedule.nextExpectedAt).toBe("2026-11-01T00:00:00.000Z");
-    await expect(
-      service.saveFireToken(f.human, id, "sk-ant-oat01-abcdefghijklmno", 2),
-    ).rejects.toMatchObject({ code: "conflict" });
+    const noCredential = await database.db.query.automationHostSchedules.findFirst({
+      where: eq(automationHostSchedules.id, id),
+    });
+    expect(noCredential?.encryptedFireCredentials).toBeNull();
     const [answer] = await database.db
       .insert(financeAnswerContinuations)
       .values({

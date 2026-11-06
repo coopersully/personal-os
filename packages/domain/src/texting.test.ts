@@ -119,6 +119,19 @@ describe("texting contracts", () => {
 
   it("bounds conversation and send inputs", () => {
     expect(textConversationQuerySchema.parse({})).toEqual({ limit: 100 });
+    expect(textConversationQuerySchema.parse({ aroundCursor: "anchor", limit: 50 })).toEqual({
+      aroundCursor: "anchor",
+      limit: 50,
+    });
+    expect(() =>
+      textConversationQuerySchema.parse({ aroundCursor: "anchor", afterCursor: "a" }),
+    ).toThrow();
+    expect(() =>
+      textConversationQuerySchema.parse({ aroundCursor: "anchor", beforeCursor: "b" }),
+    ).toThrow();
+    expect(() =>
+      textConversationQuerySchema.parse({ aroundCursor: "anchor", limit: 101 }),
+    ).toThrow();
     expect(() =>
       textConversationQuerySchema.parse({ afterCursor: "a", beforeCursor: "b" }),
     ).toThrow();

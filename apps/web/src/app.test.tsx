@@ -9753,14 +9753,61 @@ describe("Personal OS web app", () => {
     expect(await readRecovery()).toBeInTheDocument();
     calendarView.unmount();
 
-    mocks.listReminders.mockRejectedValueOnce(new Error("reminders unavailable"));
+    const reminderPageQueryKey = ["tasks", "workspace", { sort: "default", group: "none", view: "all", kind: "reminder" }] as const;
+    const reminderErrorCallsStart = mocks.listReminders.mock.calls.length;
+    const reminderErrorSettlementsStart = mocks.listReminders.mock.settledResults.length;
+    const intendedReminderFailure = new Error("reminders unavailable");
+    const reminderStageCallStart = mocks.listReminders.mock.calls.length;
+    const reminderStageState = (view: ReturnType<typeof setup>) => {
+      const emptyPage = (data: unknown) =>
+        !!data && typeof data === "object" && "items" in data && Array.isArray(data.items) && data.items.length === 0;
+      const stateFor = (key: readonly unknown[]) => {
+        const state = view.queryClient.getQueryState(key);
+        return { status: state?.status ?? "missing", fetchStatus: state?.fetchStatus ?? "missing", hasData: state?.data !== undefined, errorKind: !state?.error ? "none" : state.error instanceof ApiClientError ? "api_error" : state.error instanceof Error ? "error" : "other" };
+      };
+      const route = new URL(view.location.value, "https://fixture.invalid");
+      return {
+        route: { legacyReminders: route.pathname === "/reminders", canonicalReminders: route.pathname === "/tasks" && route.searchParams.get("view") === "all" && route.searchParams.get("kind") === "reminder" },
+        gates: { me: stateFor(["me"]), connectors: stateFor(["connectors"]), lists: stateFor(["task-lists"]), projects: stateFor(["task-projects"]) },
+        reminderPages: view.queryClient.getQueryCache().findAll({ queryKey: ["tasks", "workspace"] }).filter((query) => { const input = query.queryKey[2]; return !!input && typeof input === "object" && "kind" in input && input.kind === "reminder"; }).slice(0, 3).map((query) => {
+          const data = query.state.data;
+          return { ...stateFor(query.queryKey), emptyPages: !!data && typeof data === "object" && "pages" in data && Array.isArray(data.pages) && data.pages.length > 0 && data.pages.length <= 3 && data.pages.every(emptyPage) };
+        }),
+        mocks: { remindersCallsSinceSubstage: Math.max(0, mocks.listReminders.mock.calls.length - reminderStageCallStart), remindersSettlements: mocks.listReminders.mock.settledResults.slice(-3).map((entry) => ({ type: entry.type, emptyPage: entry.type === "fulfilled" && emptyPage(entry.value) })), workspaceCalls: mocks.listTaskWorkspace.mock.calls.length, meSettlements: mocks.getMe.mock.settledResults.slice(-3).map((entry) => entry.type), connectorSettlements: mocks.listConnectors.mock.settledResults.slice(-3).map((entry) => entry.type) },
+        visible: { main: screen.queryAllByRole("main").length, loading: screen.queryAllByRole("status", { name: "Loading tasks" }).length, recovery: screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length, emptyText: screen.queryAllByText("No matching items").length },
+      };
+    };
+    mocks.listReminders.mockRejectedValueOnce(intendedReminderFailure);
     const remindersErrorView = setup("/reminders");
-    expect(await readRecovery()).toBeInTheDocument();
+    try {
+      expect(await readRecovery()).toBeInTheDocument();
+      expect(remindersErrorView.queryClient.getQueryState(reminderPageQueryKey)).toMatchObject({ status: "error", fetchStatus: "idle", error: intendedReminderFailure });
+      expect(remindersErrorView.queryClient.getQueryState(reminderPageQueryKey)?.error).toBe(intendedReminderFailure);
+      expect(mocks.listReminders.mock.calls.slice(reminderErrorCallsStart)).toContainEqual([{ sort: "default", group: "none", view: "all", kind: "reminder", limit: 50 }]);
+      expect(mocks.listReminders.mock.settledResults.slice(reminderErrorSettlementsStart)).toContainEqual({ type: "rejected", value: intendedReminderFailure });
+    } catch (error) {
+      try { console.error("Reminders error-renderer handoff", JSON.stringify(reminderStageState(remindersErrorView))); } catch { /* Preserve the same original failure. */ }
+      throw error;
+    }
+    const previousReminderStage = reminderStageState(remindersErrorView);
     remindersErrorView.unmount();
 
+    const reminderEmptyCallsStart = mocks.listReminders.mock.calls.length;
+    const reminderEmptySettlementsStart = mocks.listReminders.mock.settledResults.length;
     mocks.listReminders.mockResolvedValue({ items: [], nextCursor: null });
     const remindersView = setup("/reminders");
-    expect(await screen.findByText("No matching items")).toBeInTheDocument();
+    try {
+      expect(await screen.findByText("No matching items")).toBeInTheDocument();
+      expect(remindersView.queryClient).not.toBe(remindersErrorView.queryClient);
+      expect(remindersView.queryClient.getQueryState(reminderPageQueryKey)).toMatchObject({ status: "success", fetchStatus: "idle", error: null, data: { pages: [{ items: [], nextCursor: null, total: 0 }] } });
+      expect(mocks.listReminders.mock.calls.slice(reminderEmptyCallsStart)).toContainEqual([{ sort: "default", group: "none", view: "all", kind: "reminder", limit: 50 }]);
+      expect(mocks.listReminders.mock.settledResults.slice(reminderEmptySettlementsStart)).toContainEqual({ type: "fulfilled", value: { items: [], nextCursor: null } });
+    } catch (error) {
+      try {
+        console.error("Reminders substage diagnostics", JSON.stringify({ previous: previousReminderStage, current: reminderStageState(remindersView) }));
+      } catch { /* Diagnostics must never replace the original lookup error. */ }
+      throw error;
+    }
     expect(screen.getByText("Try another filter or search.")).toBeInTheDocument();
     await browser.click(screen.getByRole("link", { name: "History" }));
     await browser.click(screen.getByRole("button", { name: "Filters" }));

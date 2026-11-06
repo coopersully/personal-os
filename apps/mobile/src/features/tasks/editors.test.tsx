@@ -284,10 +284,7 @@ it.each([
   await waitFor(() => expect(h.error).toHaveBeenCalled());
   expect(save()).toBeDisabled();
 });
-it.each([
-  "task",
-  "reminder",
-])("creates a %s with edited title and priority", async (kind) => {
+it.each(["task", "reminder"])("creates a %s with edited title and priority", async (kind) => {
   h.params = { kind };
   render(<TaskEditorScreen />);
   expect(save()).toBeDisabled();

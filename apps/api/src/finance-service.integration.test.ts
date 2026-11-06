@@ -11554,6 +11554,7 @@ describe.sequential("finance service", () => {
           currencyCode: "USD",
           providerDirection: "income",
           contextualRevision: f.native.contextualRevision + 1n,
+          updatedAt: now,
         }),
       ]);
       expect(after.accounts).toEqual(before.accounts);

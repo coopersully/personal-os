@@ -43,6 +43,7 @@ import {
   financeActionReviewSchema,
   financeConversationCausalClaimSchema,
   financeMaintenanceCandidateItemDraftSchema,
+  financeProviderSourceActionInputSchema,
   financeReimbursementQuestionAnswerSchema,
   idSchema,
   type MaterialSourceReference,
@@ -93,7 +94,13 @@ import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
 
+type SourceAcquisition = Parameters<
+  ReturnType<typeof createFinanceService>["applyProviderSourceFacts"]
+>[0];
 type MutationContext = {
+  sourceFactsSessionHash?: string;
+  sourceFactsAcquisition?: SourceAcquisition;
+  sourceFactsHash?: string;
   financeExecution?: FinanceExecutionFence;
   principal: Principal;
   requestId: string;
@@ -280,6 +287,12 @@ export function semanticTargetKeys(
     case "alert":
       return [input.operation === "refresh" ? "alert:refresh" : `alert:${String(input.id)}`];
     case "transaction":
+      if (input.operation === "admit_source_facts") {
+        const parsed = financeProviderSourceActionInputSchema.safeParse(input);
+        return parsed.success
+          ? parsed.data.targets.map((target) => `transaction:${target.transactionId}`)
+          : [];
+      }
       return [
         "accountId" in input
           ? `transaction-create:${String(input.accountId)}:${String(input.date)}:${String(input.merchant)}`
@@ -1180,6 +1193,62 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
       }
       case "transaction": {
+        if (rawInput.operation === "admit_source_facts") {
+          const source = financeProviderSourceActionInputSchema.parse(rawInput);
+          const ids = source.targets.map((target) => target.transactionId).sort();
+          const references = await executor
+            .select({ id: financeTransactions.id, accountId: financeTransactions.accountId })
+            .from(financeTransactions)
+            .where(
+              and(eq(financeTransactions.userId, userId), inArray(financeTransactions.id, ids)),
+            )
+            .orderBy(financeTransactions.id);
+          const accounts = await lockAccounts(references.map((row) => row.accountId));
+          const rows = await lockRead(
+            executor
+              .select()
+              .from(financeTransactions)
+              .where(
+                and(eq(financeTransactions.userId, userId), inArray(financeTransactions.id, ids)),
+              )
+              .orderBy(financeTransactions.id),
+          );
+          if (
+            rows.length !== ids.length ||
+            rows.some((row) => {
+              const account = accounts.find((entry) => entry.id === row.accountId);
+              const expected = source.targets.find((entry) => entry.transactionId === row.id);
+              return (
+                !account ||
+                !expected ||
+                row.contextualRevision.toString() !== expected.expectedTransactionRevision ||
+                account.contextualRevision.toString() !== expected.expectedAccountRevision
+              );
+            })
+          )
+            return missing("The native source selection changed; refresh it before admission.", []);
+          return prepared(
+            source,
+            snapshotRevision(
+              rows.map((row) => ({
+                id: row.id,
+                revision: row.contextualRevision.toString(),
+                updatedAt: row.updatedAt.toISOString(),
+                currencyCode: row.currencyCode,
+                providerDirection: row.providerDirection,
+              })),
+            ),
+            rows.map((row) => ({
+              entityId: row.id,
+              entityType: "finance_transaction",
+              summary: "Admit only missing provider source facts; preserve economic decisions.",
+            })),
+            rows.flatMap((row) => {
+              const account = accounts.find((entry) => entry.id === row.accountId);
+              return account ? [transactionSource(row, account)] : [];
+            }),
+          );
+        }
         const create = parse<Record<string, unknown>>(createFinanceTransactionInputSchema);
         if (create) {
           const account = await row(
@@ -2650,6 +2719,21 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               executor as never,
             );
       case "transaction":
+        if (input.operation === "admit_source_facts") {
+          const source = financeProviderSourceActionInputSchema.parse(input);
+          if (!executor || !context.sourceFactsAcquisition || !context.sourceFactsHash)
+            throw new AppError(
+              "forbidden",
+              "Source admission requires fresh acquisition outside all effect locks.",
+            );
+          return finances.applyProviderSourceFacts(
+            context.sourceFactsAcquisition,
+            context.sourceFactsHash,
+            source,
+            context,
+            executor as ActionTransaction,
+          );
+        }
         return "accountId" in input
           ? invoke(
               finances.createTransaction,
@@ -3513,6 +3597,42 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       input: Record<string, unknown>,
       context: MutationContext,
     ): Promise<FinanceActionOutcome<T>> {
+      if (actionKind === "transaction" && input.operation === "admit_source_facts") {
+        const source = financeProviderSourceActionInputSchema.parse(input);
+        const result = await finances.runProviderSourceAdmission(
+          source,
+          context,
+          async (tx, acquisition, sourceHash) => {
+            const prepared = await prepare(
+              "transaction",
+              source,
+              context.principal.userId,
+              tx,
+              false,
+              context.principal.actorType,
+            );
+            if ("status" in prepared)
+              throw new AppError(
+                "conflict",
+                "The native source selection changed; refresh it before admission.",
+              );
+            const current = await revalidate(
+              prepared,
+              context.principal.userId,
+              tx,
+              context.principal.actorType,
+            );
+            if ("status" in current)
+              throw new AppError("conflict", "Source admission selection changed before apply.");
+            return applyPrepared(
+              current,
+              { ...context, sourceFactsAcquisition: acquisition, sourceFactsHash: sourceHash },
+              tx,
+            );
+          },
+        );
+        return { status: "applied", result: result as T };
+      }
       const prepared = await prepare(
         actionKind,
         input,

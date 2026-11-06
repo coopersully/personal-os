@@ -19,7 +19,13 @@ import type {
 } from "@personal-os/domain";
 import { and, eq, inArray } from "drizzle-orm";
 import { AppError } from "../errors.js";
-import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
+import {
+  executeFinanceIdempotently,
+  type FinanceMutationContext,
+  requireFinanceMutation,
+  type FinanceTransaction as SourceAdmissionTransaction,
+} from "./context.js";
+import { requireFinanceExecutionGuard } from "./execution-owner-guard.js";
 import { nextFinanceTransactionRevision } from "./transaction-revision-lock.js";
 
 type FinanceExecutor = Pick<Database, "delete" | "insert" | "select" | "update">;
@@ -154,6 +160,110 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
   }
 
   return {
+    /** Only the admitted transaction action calls this writer after locked native/source revalidation. */
+    async admitProviderSourceFacts(
+      facts: readonly {
+        transactionId: string;
+        accountId: string;
+        transactionRevision: string;
+        currencyCode: string;
+        providerDirection: "income" | "expense";
+      }[],
+      sourceHash: string,
+      context: FinanceMutationContext,
+      tx: SourceAdmissionTransaction,
+    ) {
+      requireFinanceMutation(context);
+      requireFinanceExecutionGuard(tx, context.userId);
+      const rows = await tx
+        .select()
+        .from(financeTransactions)
+        .where(
+          and(
+            eq(financeTransactions.userId, context.userId),
+            inArray(
+              financeTransactions.id,
+              facts.map((fact) => fact.transactionId),
+            ),
+          ),
+        )
+        .orderBy(financeTransactions.id)
+        .for("update");
+      if (
+        rows.length !== facts.length ||
+        rows.some((row) => {
+          const fact = facts.find((entry) => entry.transactionId === row.id);
+          return (
+            !fact ||
+            row.accountId !== fact.accountId ||
+            row.contextualRevision.toString() !== fact.transactionRevision ||
+            (row.currencyCode !== null && row.currencyCode !== fact.currencyCode) ||
+            (row.providerDirection !== null && row.providerDirection !== fact.providerDirection)
+          );
+        })
+      )
+        throw new AppError("conflict", "Native source facts changed before admission.");
+      const entries = [];
+      for (const before of rows) {
+        const fact = facts.find((entry) => entry.transactionId === before.id);
+        if (!fact) throw new AppError("conflict", "A source target is unavailable.");
+        const changed = before.currencyCode === null || before.providerDirection === null;
+        let after = before;
+        if (changed) {
+          const version = await nextFinanceTransactionRevision(tx, before.id);
+          const [written] = await tx
+            .update(financeTransactions)
+            .set({
+              currencyCode: before.currencyCode ?? fact.currencyCode,
+              providerDirection: before.providerDirection ?? fact.providerDirection,
+              updatedAt: now(),
+            })
+            .where(
+              and(
+                eq(financeTransactions.id, before.id),
+                eq(financeTransactions.userId, context.userId),
+                eq(financeTransactions.accountId, before.accountId),
+                eq(financeTransactions.contextualRevision, before.contextualRevision),
+                eq(financeTransactions.updatedAt, before.updatedAt),
+              ),
+            )
+            .returning();
+          if (!written)
+            throw new AppError("conflict", "Native source admission lost its revision fence.");
+          after = written;
+          await tx.insert(financeTransactionRevisions).values({
+            userId: context.userId,
+            transactionId: before.id,
+            version: Math.max(2, version),
+            changes: {
+              sourceHash,
+              currencyCode: { before: before.currencyCode, after: after.currencyCode },
+              providerDirection: {
+                before: before.providerDirection,
+                after: after.providerDirection,
+              },
+            },
+            provenance: provenance(context, now()),
+          });
+        }
+        entries.push({
+          transactionId: before.id,
+          accountId: before.accountId,
+          changed,
+          before: {
+            currencyCode: before.currencyCode,
+            providerDirection: before.providerDirection,
+            transactionRevision: before.contextualRevision.toString(),
+          },
+          after: {
+            currencyCode: fact.currencyCode,
+            providerDirection: fact.providerDirection,
+            transactionRevision: after.contextualRevision.toString(),
+          },
+        });
+      }
+      return entries;
+    },
     async getTransaction(userId: string, id: string) {
       // One statement keeps the parent revision and its allocations in the same snapshot.
       const rows = await db

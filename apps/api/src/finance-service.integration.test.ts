@@ -22,6 +22,7 @@ import {
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
+  financeMutationRecords,
   financePeriodReviews,
   financeProfiles,
   financeProviderItems,
@@ -31,6 +32,7 @@ import {
   financeReviewCases,
   financeSetupBackfillState,
   financeTransactionAllocations,
+  financeTransactionRevisions,
   financeTransactions,
   goals,
   migrateDatabase,
@@ -43,6 +45,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
 import { financeActionFingerprint } from "./finance-action-identity.js";
+import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -11447,6 +11450,238 @@ describe.sequential("finance service", () => {
         ledgerSnapshot,
       };
     }
+
+    async function admissionFixture() {
+      const f = await historyCompositionFixture();
+      const [native] = await database.db
+        .update(financeTransactions)
+        .set({ amount: 2425, currencyCode: null, providerDirection: null })
+        .where(eq(financeTransactions.id, f.transaction.id))
+        .returning();
+      if (!native) throw new Error("Missing admission target.");
+      const principal: Principal = {
+        ...f.principal,
+        scopes: new Set(["finances:read", "finances:write"]),
+      };
+      const prior = f.readHistory.getMockImplementation();
+      if (!prior) throw new Error("Missing synthetic history response.");
+      const response = await prior({
+        accountIds: [],
+        startDate: "2026-07-19",
+        endDate: "2026-07-19",
+        transactionIds: [],
+      });
+      f.readHistory.mockResolvedValue({
+        ...response,
+        coverage: {
+          ...response.coverage,
+          state: "complete",
+          reason: "exhausted",
+          pages: 1,
+          returnedTransactions: 1,
+        },
+      });
+      const actions = createFinanceActionService({
+        db: database.db,
+        finances: f.service,
+        now: () => now,
+      });
+      const input = {
+        operation: "admit_source_facts",
+        idempotencyKey: `admission-${crypto.randomUUID()}`,
+        targets: [
+          {
+            transactionId: native.id,
+            expectedTransactionRevision: native.contextualRevision.toString(),
+            expectedAccountRevision: f.account.contextualRevision.toString(),
+          },
+        ],
+      };
+      const context = {
+        principal,
+        requestId: "source-admission",
+        sourceFactsSessionHash: f.sessionTokenHash,
+      };
+      const run = () => actions.performDirect("transaction", input, context);
+      const receipts = () =>
+        database.db
+          .select()
+          .from(financeMutationRecords)
+          .where(eq(financeMutationRecords.userId, f.owner.id));
+      const revisions = () =>
+        database.db
+          .select()
+          .from(financeTransactionRevisions)
+          .where(eq(financeTransactionRevisions.userId, f.owner.id));
+      return {
+        ...f,
+        principal,
+        context,
+        input,
+        actions,
+        run,
+        receipts,
+        revisions,
+        native,
+        response,
+      };
+    }
+
+    it("admits only missing source facts through the public action pipeline and replays its actor-bound receipt without provider access", async () => {
+      const f = await admissionFixture();
+      const before = await f.ledgerSnapshot();
+      const outcome = await f.run();
+      expect(outcome).toMatchObject({
+        status: "applied",
+        result: {
+          snapshotConsistency: "not_atomic",
+          entries: [
+            {
+              transactionId: f.native.id,
+              changed: true,
+              before: { currencyCode: null, providerDirection: null },
+              after: { currencyCode: "USD", providerDirection: "income" },
+            },
+          ],
+        },
+      });
+      const after = await f.ledgerSnapshot();
+      expect(after.transactions).toEqual([
+        expect.objectContaining({
+          ...f.native,
+          currencyCode: "USD",
+          providerDirection: "income",
+          contextualRevision: f.native.contextualRevision + 1n,
+        }),
+      ]);
+      expect(after.accounts).toEqual(before.accounts);
+      expect(after.items).toEqual(before.items);
+      expect(after.allocations).toEqual(before.allocations);
+      expect(after.reviews).toEqual(before.reviews);
+      expect(after.audits).toHaveLength(before.audits.length + 1);
+      expect(await f.revisions()).toHaveLength(1);
+      expect(await f.receipts()).toMatchObject([
+        {
+          status: "completed",
+          actorId: f.principal.actorId,
+          operation: "finance.transaction.admit_source_facts",
+        },
+      ]);
+      expect(await f.run()).toEqual(outcome);
+      expect(await f.ledgerSnapshot()).toEqual(after);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(outcome)).not.toMatch(/composition-private|composition-secret/);
+      expect(f.sync).not.toHaveBeenCalled();
+      expect(f.initialize).not.toHaveBeenCalled();
+      expect(f.transport).not.toHaveBeenCalled();
+    });
+
+    it("rejects missing, wrong and expired presenting sessions before acquisition and keeps every native row and receipt unchanged", async () => {
+      const f = await admissionFixture();
+      const before = await f.ledgerSnapshot();
+      for (const hash of [undefined, "wrong-presented-hash"])
+        await expect(
+          f.actions.performDirect("transaction", f.input, {
+            principal: f.principal,
+            requestId: "denied",
+            ...(hash ? { sourceFactsSessionHash: hash } : {}),
+          }),
+        ).rejects.toMatchObject({ code: "forbidden" });
+      await database.db
+        .update(sessions)
+        .set({ expiresAt: new Date(now.getTime() - 1) })
+        .where(eq(sessions.id, f.session.id));
+      await expect(f.run()).rejects.toMatchObject({ code: "forbidden" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(f.readHistory).not.toHaveBeenCalled();
+    });
+
+    it("rejects changed replay payload, another actor and tampered receipt evidence before another provider acquisition", async () => {
+      const f = await admissionFixture();
+      await f.run();
+      const after = await f.ledgerSnapshot();
+      await expect(
+        f.actions.performDirect(
+          "transaction",
+          { ...f.input, targets: [{ ...f.input.targets[0], expectedTransactionRevision: "999" }] },
+          f.context,
+        ),
+      ).rejects.toMatchObject({ code: "conflict" });
+      await expect(
+        f.actions.performDirect("transaction", f.input, {
+          ...f.context,
+          principal: { ...f.principal, actorId: crypto.randomUUID() },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+      const [receipt] = await f.receipts();
+      if (!receipt) throw new Error("Receipt missing.");
+      await database.db
+        .update(financeMutationRecords)
+        .set({ response: { ...receipt.response, observedAt: "2026-01-01T00:00:00.000Z" } })
+        .where(eq(financeMutationRecords.id, receipt.id));
+      await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      expect(await f.ledgerSnapshot()).toEqual(after);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      "source_changed",
+      "authority_expired",
+      "target_changed",
+    ])("rolls back all admission effects when %s occurs during the external read", async (change) => {
+      const f = await admissionFixture();
+      f.readHistory.mockImplementationOnce(async () => {
+        if (change === "authority_expired")
+          await database.db
+            .update(sessions)
+            .set({ expiresAt: new Date(now.getTime() - 1) })
+            .where(eq(sessions.id, f.session.id));
+        if (change === "target_changed")
+          await database.db
+            .update(financeTransactions)
+            .set({ notes: "Concurrent native edit" })
+            .where(eq(financeTransactions.id, f.native.id));
+        if (change === "source_changed")
+          await database.db
+            .update(financeAccounts)
+            .set({ providerAccountId: "different-private-account" })
+            .where(eq(financeAccounts.id, f.account.id));
+        return {
+          ...f.response,
+          coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+        };
+      });
+      await expect(f.run()).rejects.toMatchObject({
+        code: change === "authority_expired" ? "forbidden" : "conflict",
+      });
+      const after = await f.ledgerSnapshot();
+      expect(after.transactions[0]).toMatchObject({ currencyCode: null, providerDirection: null });
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+      expect(after.audits.filter((a) => a.action === "finance.source_facts_admitted")).toEqual([]);
+    });
+
+    it("validates all targets before writes and preserves an already-identical source without revision churn", async () => {
+      const f = await admissionFixture();
+      await database.db
+        .update(financeTransactions)
+        .set({ currencyCode: "USD", providerDirection: "income" })
+        .where(eq(financeTransactions.id, f.native.id));
+      const [native] = await database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, f.native.id));
+      if (!native) throw new Error("Target missing.");
+      f.input.targets[0].expectedTransactionRevision = native.contextualRevision.toString();
+      const before = await f.ledgerSnapshot();
+      expect(await f.run()).toMatchObject({
+        status: "applied",
+        result: { entries: [{ changed: false }] },
+      });
+      expect((await f.ledgerSnapshot()).transactions).toEqual(before.transactions);
+      expect(await f.revisions()).toEqual([]);
+    });
 
     it("delegates exact owned source through the public facade and preserves safe partial signed evidence without writes", async () => {
       const f = await historyCompositionFixture();

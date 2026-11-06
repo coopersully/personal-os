@@ -84,3 +84,44 @@ export const financeProviderSourceAdmissionInputSchema = z.strictObject({
 export type FinanceProviderSourceAdmissionInput = z.infer<
   typeof financeProviderSourceAdmissionInputSchema
 >;
+
+/** Honest suboperation of the existing transaction action; source values never enter the request. */
+export const financeProviderSourceActionInputSchema =
+  financeProviderSourceAdmissionInputSchema.extend({ operation: z.literal("admit_source_facts") });
+export const financeProviderSourceAdmissionResultSchema = z.strictObject({
+  sourceHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  observedAt: z.iso.datetime(),
+  providerUpdatedAt: z.iso.datetime().nullable(),
+  snapshotConsistency: z.literal("not_atomic"),
+  entries: z
+    .array(
+      z.strictObject({
+        transactionId: z.uuid(),
+        accountId: z.uuid(),
+        changed: z.boolean(),
+        source: z.strictObject({
+          amount: z
+            .number()
+            .finite()
+            .refine((value) => value !== 0),
+          currencyCode: z.string().regex(/^[A-Z]{3}$/u),
+          date: z.iso.date(),
+        }),
+        before: z.strictObject({
+          currencyCode: z.string().nullable(),
+          providerDirection: z.enum(["income", "expense"]).nullable(),
+          transactionRevision: providerAdmissionRevision,
+        }),
+        after: z.strictObject({
+          currencyCode: z.string().regex(/^[A-Z]{3}$/u),
+          providerDirection: z.enum(["income", "expense"]),
+          transactionRevision: providerAdmissionRevision,
+        }),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+export type FinanceProviderSourceAdmissionResult = z.infer<
+  typeof financeProviderSourceAdmissionResultSchema
+>;

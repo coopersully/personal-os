@@ -19,6 +19,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { createFinanceProviderItemService } from "../finance-provider-item-service.js";
 import type { Principal } from "../types.js";
+import type { FinanceTransaction } from "./context.js";
+import { requireFinanceExecutionGuard } from "./execution-owner-guard.js";
 
 type Options = {
   db: Database;
@@ -34,100 +36,127 @@ export function createFinanceProviderTransactionEvidenceService({
   now,
   providerItems,
 }: Options) {
-  async function snapshot(principal: Principal, ids: string[], sessionTokenHash?: string) {
+  const issued = new WeakMap<
+    object,
+    {
+      ownerId: string;
+      actorId: string;
+      actorType: string;
+      connectionId: string | undefined;
+      fingerprint: string;
+      targets: string;
+    }
+  >();
+  const serializeNative = (value: unknown) =>
+    JSON.stringify(value, (_, child) => (typeof child === "bigint" ? child.toString() : child));
+  async function authorize(
+    tx: Pick<Database, "select">,
+    principal: Principal,
+    sessionTokenHash?: string,
+    lock = false,
+  ) {
     if (!principal.scopes.has("finances:read"))
       throw new AppError("forbidden", "Finance read access is required.");
-    return db.transaction(
-      async (tx) => {
-        const [owner] = await tx
-          .select({ id: users.id })
-          .from(users)
-          .where(eq(users.id, principal.userId));
-        if (!owner) throw new AppError("forbidden", "Finance read authority is no longer active.");
-        if (principal.actorType === "user") {
-          if (!sessionTokenHash)
-            throw new AppError(
-              "forbidden",
-              "Present the authenticated session to read historical evidence.",
-            );
-          const [session] = await tx
-            .select({ expiresAt: sessions.expiresAt })
-            .from(sessions)
-            .where(
-              and(eq(sessions.userId, principal.userId), eq(sessions.tokenHash, sessionTokenHash)),
-            );
-          if (!session || session.expiresAt <= now())
-            throw new AppError("forbidden", "Finance read authority is no longer active.");
-        }
-        if (principal.actorType === "agent") {
-          const [token] = await tx
-            .select()
-            .from(accessTokens)
-            .where(
-              and(
-                eq(accessTokens.id, principal.actorId),
-                eq(accessTokens.userId, principal.userId),
-              ),
-            );
-          if (
-            !token ||
-            token.revokedAt ||
-            (token.expiresAt && token.expiresAt <= now()) ||
-            !token.scopes.includes("finances:read") ||
-            (principal.authorizationConnectionId !== undefined &&
-              token.authorizationConnectionId !== principal.authorizationConnectionId)
-          )
-            throw new AppError("forbidden", "Finance read authority is no longer active.");
-        }
-        const rows = await tx
-          .select({
-            amount: financeTransactions.amount,
-            currencyCode: financeTransactions.currencyCode,
-            providerDirection: financeTransactions.providerDirection,
-            transactionId: financeTransactions.id,
-            transactionRevision: financeTransactions.contextualRevision,
-            transactionUpdatedAt: financeTransactions.updatedAt,
-            providerTransactionId: financeTransactions.providerTransactionId,
-            date: financeTransactions.transactionDate,
-            accountId: financeAccounts.id,
-            accountRevision: financeAccounts.contextualRevision,
-            accountUpdatedAt: financeAccounts.updatedAt,
-            providerAccountId: financeAccounts.providerAccountId,
-            accountProviderItemId: financeAccounts.providerItemId,
-            accountStatus: financeAccounts.status,
-            provider: financeAccounts.provider,
-            itemRecordId: financeProviderItems.id,
-            providerItemId: financeProviderItems.providerItemId,
-            itemUpdatedAt: financeProviderItems.updatedAt,
-            itemProvider: financeProviderItems.provider,
-          })
-          .from(financeTransactions)
-          .innerJoin(
-            financeAccounts,
-            and(
-              eq(financeTransactions.accountId, financeAccounts.id),
-              eq(financeAccounts.userId, principal.userId),
-            ),
-          )
-          .innerJoin(
-            financeProviderItems,
-            and(
-              eq(financeAccounts.providerItemRecordId, financeProviderItems.id),
-              eq(financeProviderItems.userId, principal.userId),
-            ),
-          )
-          .where(
-            and(
-              eq(financeTransactions.userId, principal.userId),
-              inArray(financeTransactions.id, ids),
-            ),
-          );
-        if (rows.length !== ids.length)
-          throw new AppError("not_found", "The native Finance selection is unavailable.");
-        return rows.sort((a, b) => a.transactionId.localeCompare(b.transactionId));
-      },
-      { isolationLevel: "repeatable read", accessMode: "read only" },
-    );
+    const [owner] = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, principal.userId));
+    if (!owner) throw new AppError("forbidden", "Finance read authority is no longer active.");
+    if (principal.actorType === "user") {
+      if (!sessionTokenHash)
+        throw new AppError(
+          "forbidden",
+          "Present the authenticated session to read historical evidence.",
+        );
+      const sessionQuery = tx
+        .select({ expiresAt: sessions.expiresAt })
+        .from(sessions)
+        .where(
+          and(eq(sessions.userId, principal.userId), eq(sessions.tokenHash, sessionTokenHash)),
+        );
+      const [session] = lock ? await sessionQuery.for("share") : await sessionQuery;
+      if (!session || session.expiresAt <= now())
+        throw new AppError("forbidden", "Finance read authority is no longer active.");
+    }
+    if (principal.actorType === "agent") {
+      const tokenQuery = tx
+        .select()
+        .from(accessTokens)
+        .where(
+          and(eq(accessTokens.id, principal.actorId), eq(accessTokens.userId, principal.userId)),
+        );
+      const [token] = lock ? await tokenQuery.for("share") : await tokenQuery;
+      if (
+        !token ||
+        token.revokedAt ||
+        (token.expiresAt && token.expiresAt <= now()) ||
+        !token.scopes.includes("finances:read") ||
+        (principal.authorizationConnectionId !== undefined &&
+          token.authorizationConnectionId !== principal.authorizationConnectionId)
+      )
+        throw new AppError("forbidden", "Finance read authority is no longer active.");
+    }
+  }
+  async function snapshot(
+    principal: Principal,
+    ids: string[],
+    sessionTokenHash?: string,
+    executor?: FinanceTransaction,
+  ) {
+    if (!principal.scopes.has("finances:read"))
+      throw new AppError("forbidden", "Finance read access is required.");
+    const read = async (tx: Pick<Database, "select">) => {
+      await authorize(tx, principal, sessionTokenHash);
+      const rows = await tx
+        .select({
+          amount: financeTransactions.amount,
+          currencyCode: financeTransactions.currencyCode,
+          providerDirection: financeTransactions.providerDirection,
+          transactionId: financeTransactions.id,
+          transactionRevision: financeTransactions.contextualRevision,
+          transactionUpdatedAt: financeTransactions.updatedAt,
+          providerTransactionId: financeTransactions.providerTransactionId,
+          date: financeTransactions.transactionDate,
+          accountId: financeAccounts.id,
+          accountRevision: financeAccounts.contextualRevision,
+          accountUpdatedAt: financeAccounts.updatedAt,
+          providerAccountId: financeAccounts.providerAccountId,
+          accountProviderItemId: financeAccounts.providerItemId,
+          accountStatus: financeAccounts.status,
+          provider: financeAccounts.provider,
+          itemRecordId: financeProviderItems.id,
+          providerItemId: financeProviderItems.providerItemId,
+          itemUpdatedAt: financeProviderItems.updatedAt,
+          itemProvider: financeProviderItems.provider,
+        })
+        .from(financeTransactions)
+        .innerJoin(
+          financeAccounts,
+          and(
+            eq(financeTransactions.accountId, financeAccounts.id),
+            eq(financeAccounts.userId, principal.userId),
+          ),
+        )
+        .innerJoin(
+          financeProviderItems,
+          and(
+            eq(financeAccounts.providerItemRecordId, financeProviderItems.id),
+            eq(financeProviderItems.userId, principal.userId),
+          ),
+        )
+        .where(
+          and(
+            eq(financeTransactions.userId, principal.userId),
+            inArray(financeTransactions.id, ids),
+          ),
+        );
+      if (rows.length !== ids.length)
+        throw new AppError("not_found", "The native Finance selection is unavailable.");
+      return rows.sort((a, b) => a.transactionId.localeCompare(b.transactionId));
+    };
+    return executor
+      ? read(executor)
+      : db.transaction(read, { isolationLevel: "repeatable read", accessMode: "read only" });
   }
   async function acquireSnapshot(
     principal: Principal,
@@ -284,17 +313,112 @@ export function createFinanceProviderTransactionEvidenceService({
           accountRevision: row.accountRevision.toString(),
           currencyCode: entry.currencyCode,
           providerDirection,
+          sourceAmount: entry.sourceAmount,
+          date: entry.date,
         });
       });
       // These values remain inside the API service boundary; never serialize snapshots/provider IDs.
-      return {
+      const acquisition = Object.freeze({
         ownerId: principal.userId,
         observedAt: evidence.observedAt,
         providerUpdatedAt: evidence.providerUpdatedAt,
         snapshotConsistency: "not_atomic" as const,
         nativeSnapshot: before,
         facts: Object.freeze(facts),
-      };
+      });
+      issued.set(acquisition, {
+        ownerId: principal.userId,
+        actorId: principal.actorId,
+        actorType: principal.actorType,
+        connectionId: principal.authorizationConnectionId,
+        fingerprint: serializeNative(before),
+        targets: serializeNative(targets),
+      });
+      return acquisition;
+    },
+    async assertCurrentAuthority(
+      principal: Principal,
+      tx: FinanceTransaction,
+      sessionTokenHash?: string,
+    ) {
+      await authorize(tx, principal, sessionTokenHash, true);
+    },
+    async revalidateSourceFacts(
+      principal: Principal,
+      targets: FinanceProviderSourceAdmissionInput["targets"],
+      acquisition: object,
+      tx: FinanceTransaction,
+      sessionTokenHash?: string,
+    ) {
+      requireFinanceExecutionGuard(tx, principal.userId);
+      const proof = issued.get(acquisition);
+      if (
+        !proof ||
+        proof.ownerId !== principal.userId ||
+        proof.actorId !== principal.actorId ||
+        proof.actorType !== principal.actorType ||
+        proof.connectionId !== principal.authorizationConnectionId ||
+        proof.targets !== serializeNative(targets)
+      )
+        throw new AppError(
+          "forbidden",
+          "The source acquisition does not belong to this operation.",
+        );
+      await authorize(tx, principal, sessionTokenHash, true);
+      const ids = targets.map((target) => target.transactionId).sort();
+      const accountRefs = await tx
+        .select({ id: financeTransactions.accountId })
+        .from(financeTransactions)
+        .where(
+          and(
+            eq(financeTransactions.userId, principal.userId),
+            inArray(financeTransactions.id, ids),
+          ),
+        )
+        .orderBy(financeTransactions.accountId);
+      const accountIds = [...new Set(accountRefs.map((row) => row.id))].sort();
+      const accounts = await tx
+        .select()
+        .from(financeAccounts)
+        .where(
+          and(
+            eq(financeAccounts.userId, principal.userId),
+            inArray(financeAccounts.id, accountIds),
+          ),
+        )
+        .orderBy(financeAccounts.id)
+        .for("update");
+      const itemIds = [
+        ...new Set(
+          accounts.flatMap((row) => (row.providerItemRecordId ? [row.providerItemRecordId] : [])),
+        ),
+      ].sort();
+      await tx
+        .select({ id: financeProviderItems.id })
+        .from(financeProviderItems)
+        .where(
+          and(
+            eq(financeProviderItems.userId, principal.userId),
+            inArray(financeProviderItems.id, itemIds),
+          ),
+        )
+        .orderBy(financeProviderItems.id)
+        .for("share");
+      await tx
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(
+          and(
+            eq(financeTransactions.userId, principal.userId),
+            inArray(financeTransactions.id, ids),
+          ),
+        )
+        .orderBy(financeTransactions.id)
+        .for("update");
+      const current = await snapshot(principal, ids, sessionTokenHash, tx);
+      if (serializeNative(current) !== proof.fingerprint)
+        throw new AppError("conflict", "The Finance source changed before admission.");
+      return current;
     },
     async read(
       principal: Principal,

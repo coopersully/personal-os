@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   financeProviderSourceAdmissionInputSchema as admission,
+  financeProviderSourceActionInputSchema,
+  financeProviderSourceAdmissionResultSchema,
   financeProviderTransactionEvidenceInputSchema as input,
   financeProviderTransactionEvidenceSchema as output,
 } from "./finance-provider-transaction-evidence.js";
@@ -98,4 +100,61 @@ describe("source admission selection (not source proof)", () => {
   });
   it.each(["", " ", "key\n", "x".repeat(201)])("rejects invalid replay key", (idempotencyKey) =>
     expect(admission.safeParse({ ...request, idempotencyKey }).success).toBe(false));
+});
+
+describe("source fact action and receipt contract", () => {
+  const target = {
+    transactionId: id,
+    expectedTransactionRevision: "1",
+    expectedAccountRevision: "2",
+  };
+  it("requires the honest source suboperation and rejects economic fields", () => {
+    const input = { operation: "admit_source_facts", idempotencyKey: "exact", targets: [target] };
+    expect(financeProviderSourceActionInputSchema.parse(input)).toEqual(input);
+    for (const extra of [
+      { amount: 1 },
+      { providerDirection: "income" },
+      { operation: "update" },
+      { sourceHash: "fake" },
+    ])
+      expect(financeProviderSourceActionInputSchema.safeParse({ ...input, ...extra }).success).toBe(
+        false,
+      );
+  });
+  it("keeps the outward durable result strictly native and rejects secret-bearing extras", () => {
+    const receipt = {
+      sourceHash: `sha256:${"a".repeat(64)}`,
+      observedAt: "2026-11-06T10:00:00.000Z",
+      providerUpdatedAt: null,
+      snapshotConsistency: "not_atomic",
+      entries: [
+        {
+          transactionId: id,
+          accountId: id,
+          changed: true,
+          source: { amount: -1, currencyCode: "USD", date: "2026-07-19" },
+          before: { currencyCode: null, providerDirection: null, transactionRevision: "1" },
+          after: { currencyCode: "USD", providerDirection: "income", transactionRevision: "2" },
+        },
+      ],
+    };
+    expect(financeProviderSourceAdmissionResultSchema.parse(receipt)).toEqual(receipt);
+    expect(
+      financeProviderSourceAdmissionResultSchema.safeParse({
+        ...receipt,
+        providerItemId: "private",
+      }).success,
+    ).toBe(false);
+    expect(
+      financeProviderSourceAdmissionResultSchema.safeParse({
+        ...receipt,
+        entries: [
+          {
+            ...receipt.entries[0],
+            source: { ...receipt.entries[0]?.source, accessToken: "private" },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
 });

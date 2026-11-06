@@ -477,6 +477,11 @@ export const personalOsToolCatalog = {
     destructive: true,
     policy: "approve_each",
   }),
+  admit_finance_provider_source_facts: write(
+    "finances",
+    ["finances:read", "finances:write", "finances:execute"],
+    { policy: "approved_rule", openWorld: true },
+  ),
   read_finance_provider_transaction_evidence: read("finances", ["finances:read"], "inspect", {
     openWorld: true,
   }),

@@ -1,6 +1,24 @@
 # nohmi — Implementation Log
 
+## 2026-11-06 — iOS local due alerts
+
+- Added opt-in task/reminder due alerts using Apple User Notifications via Expo, with generic
+  lock-screen content, explicit permission handling, owner-scoped routing and schedule reconciliation.
+  Settings include OS settings access, refresh and a test action with Sonner outcomes.
+- Verified a test alert in simulator Notification Center after backgrounding Expo Go; focused tests
+  and native/web bundles pass. Physical nohmi/TestFlight delivery remains unverified.
+- This is local scheduling, capped at the next 50 alerts. Cross-device edits while the app is closed
+  require server push delivery, which is not implemented. See
+  [mobile notification boundary](../engineering/mobile-due-notifications.md).
+
 ## 2026-11-05 — Expo Tasks workspace (local implementation)
+
+- Mobile refinement: task rows show one urgency-focused metadata line (due date, high priority,
+  reminder identity and read-only state). Detailed notes, tags and estimates stay in the editor;
+  mobile no longer exposes row-detail toggles, while existing web preferences remain preserved.
+  Explicit view overrides/search have removable indicators and Clear all. Container selection uses
+  a shared searchable, virtualized sheet with cancellation and empty states. Row rendering,
+  filter indicators, menu configuration and presentation helpers are separate from API orchestration.
 
 - COO-29 — Deliver native Tasks and Reminders workflows: audited web Tasks navigation,
   workspace projections, dialogs, moves, archive conflicts, pins and preferences against the shared API.

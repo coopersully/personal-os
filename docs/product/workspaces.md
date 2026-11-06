@@ -124,6 +124,14 @@ inbox while always preserving account identity, provider capabilities, and sourc
 
 ## Tasks
 
+On Expo mobile, the native tab order is Today, Projects, Lists, Browse. Projects and Lists
+are first-class destinations with separate horizontal pinned rows above their directories.
+Pins use the shared workspace preferences; there is no separate Pinned tab. Browse contains
+Tasks-only and Reminders-only projections, History, Trash, and Archive as direct destinations.
+Upcoming and History are prominent cards above the other view links; Scheduled appears in the Task views group below. Inbox remains the default
+list for unorganized tasks under Lists, with no duplicate Inbox link in Views.
+The floating add action creates a project or list on its corresponding tab.
+
 ### Goal
 
 Tasks is the person's authoritative commitment workspace: a complete task manager with the clarity
@@ -353,3 +361,8 @@ Finance backlog assessment, canonical profile precedence, grouped evidence and b
 follow [Finance review backlog](finance-review-backlog.md). Historical outstanding work and
 selected-period spending are separate scopes; an agent must never report a bounded page as a
 complete backlog or clear review records solely to reduce a count.
+
+On mobile Browse, group task projections (All, Tasks, Reminders, Scheduled), Storage (Archive,
+Trash), and Preferences separately. Browse has no primary Add action. History contains completed
+and cancelled records outside archived containers; Archive contains archived lists/projects
+(including projects inside archived lists), and Trash contains deleted records.

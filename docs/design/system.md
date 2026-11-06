@@ -1428,3 +1428,45 @@ colors are data, validated as hex and paired with a contrast-aware black/white f
 application surfaces without provider branding continue to use semantic theme tokens.
 
 On mobile, workspace discovery collapses to a circular named search button with the same square hit target as neighbouring header controls. Opening it places focus in the existing searchable result popup; Escape returns focus to its trigger. Desktop retains the inline finder.
+
+### Expo trailing record actions
+
+The consolidated [Mobile frontend standards](mobile-frontend.md) govern Expo-specific composition
+and link the detailed form contract. Prefer native iOS navigation/material/selection behavior.
+
+For mobile record rows and pinned cards, use the shared `RowActions` component: omit the
+control for zero actions, show one accessible icon button for one action, and use the native
+iOS vertical-ellipsis (`⋮`) menu for multiple actions. Keep the 44-point target. Action names remain explicit
+in accessibility labels and menus. Pinned Projects/Lists appear only in their pinned section;
+unpinning returns them to the ordinary directory.
+
+Mobile component geometry is anchored to its top edge: leading record icons, including
+icons prefixing wrapped titles, sit at the top left; trailing action buttons/menus sit at
+the top right. Never vertically center them against a multiline title or metadata block.
+Use the vertical ellipsis (`⋮`) consistently for overflow actions. Project/list detail headings
+prefix the title with their semantic icon. Task checkbox and title share the top inset; keep
+the gap compact, with an expanded 44-point hit area that does not steal text taps. This applies
+to content rows and cards. Settings-style key/value rows instead center the icon, label,
+value and accessory vertically, including entity association fields.
+
+### Mobile entity vocabulary and time zones
+
+Association fields identify the entity type with its canonical leading icon before the label,
+including List/Project selection in create/edit forms and move destinations. Resolve identity
+from `apps/mobile/src/product/entities.ts`, independent of workspace, route or field wording.
+Reuse that vocabulary across headings, association controls and record representations so the
+same concept remains recognizable. An association icon conveys entity type, not status; keep its
+label and accessible name. Register future entity identities centrally rather than choosing a
+new glyph in each feature. In content cards, anchor the glyph top-left when labels wrap. In association/settings rows,
+center it vertically with the label, value and accessory.
+
+Mobile records do not expose individual time-zone selectors. Date/time controls and mutations
+inherit the account's `planningTimezone`; never substitute the device zone or a record-specific
+zone. Lists/projects retain calendar-only target dates. Only account preferences own changes to
+the user's default time zone. Existing record timestamps remain instants when editing.
+
+### Mobile settings-style forms
+
+Follow [Mobile forms](mobile-forms.md) for the shared row anatomy, alignment, spacing,
+section structure, entity identity and scan/navigation rules. Fields stay visible in named
+sections; do not hide ordinary or optional form fields behind Show more/More details controls.

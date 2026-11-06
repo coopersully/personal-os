@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { TextingSettings } from "./page.js";
 
 const mocks = vi.hoisted(() => ({
@@ -20,7 +21,12 @@ vi.mock("../../api.js", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Unknown error"),
 }));
 
-function renderSettings(mutationRetry: false | number = false, profile = false, inline = false) {
+function renderSettings(
+  mutationRetry: false | number = false,
+  profile = false,
+  inline = false,
+  settingsPage = false,
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       mutations: { retry: mutationRetry, retryDelay: 0 },
@@ -30,7 +36,9 @@ function renderSettings(mutationRetry: false | number = false, profile = false, 
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <TextingSettings profile={profile} inline={inline} />
+        <SettingsControlsContext.Provider value={settingsPage}>
+          <TextingSettings profile={profile} inline={inline} />
+        </SettingsControlsContext.Provider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -309,4 +317,47 @@ it("dismisses inline phone editing and resets consent before reopening", async (
   expect(screen.getByRole("switch")).not.toBeChecked();
   expect(screen.getByLabelText("Country")).toHaveValue("US");
   expect(mocks.startTextingVerification).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["active", "Connected"],
+  ["opted_out", "Texts are stopped. Reply START to restore delivery."],
+  ["suspended", "Connection needs attention"],
+])("shows the actual %s phone state without inventing a sender", async (state, label) => {
+  mocks.getTextingConnection.mockResolvedValue({
+    id: "phone",
+    state,
+    maskedPhoneNumber: "•••0123",
+    senderPhoneNumber: null,
+    providerReady: true,
+  });
+  renderSettings(false, false, false, true);
+  expect(await screen.findByText(label)).toBeVisible();
+  expect(screen.queryByText(/Messages from/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Disconnect number" })).toBeEnabled();
+});
+
+it("keeps inline enrollment disabled when the deployment lacks SMS capability", async () => {
+  mocks.getTextingConnection.mockResolvedValue({ id: null, state: null, providerReady: false });
+  const user = userEvent.setup();
+  renderSettings(false, true, true);
+  await user.click(await screen.findByRole("button", { name: "Edit Phone" }));
+  expect(screen.getByText("Texting is not available on this nohmi deployment yet.")).toBeVisible();
+  await user.type(screen.getByLabelText("Phone"), "2125550199");
+  await user.click(screen.getByRole("switch"));
+  expect(screen.getByRole("button", { name: "Send verification code" })).toBeDisabled();
+});
+
+it.each([
+  true,
+  false,
+])("keeps a failed phone read unavailable in inline=%s mode", async (inline) => {
+  mocks.getTextingConnection.mockRejectedValue(new Error("Connection read failed"));
+  renderSettings(false, true, inline);
+  expect(
+    await screen.findByText(inline ? "Unavailable" : "Phone status unavailable"),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: inline ? "Edit Phone" : "Add phone number", hidden: true }),
+  ).toBeDisabled();
 });

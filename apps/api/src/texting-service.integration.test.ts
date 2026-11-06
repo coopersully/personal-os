@@ -71,6 +71,108 @@ describe.sequential("texting service", () => {
     await container.stop();
   });
 
+  it("fences missing ownership, duplicate replies, and webhook races before side effects", async () => {
+    const ownerId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: ownerId,
+      displayName: "Boundary fixture",
+      email: `${ownerId}@example.com`,
+      passwordHash: "unused",
+    });
+    const provider: TwilioConnector = {
+      ...twilio,
+      startVerification: async () => ({ sid: "VEboundary", status: "pending" }),
+      checkVerification: async () => "approved",
+      getMessageOccurredAt: vi.fn(async () => current),
+      sendMessage: vi.fn(),
+    };
+    const options = {
+      apiBaseUrl: "https://api.example.com",
+      db: database.db,
+      enabled: true,
+      encryptionKey,
+      senderPhoneNumber: "+18885550100",
+      twilio: provider,
+      now: () => current,
+    };
+    const service = createTextingService(options);
+    const owner = { ...principal, userId: ownerId };
+    for (const cursor of ["aroundCursor", "beforeCursor", "afterCursor"] as const)
+      await expect(
+        service.conversation(owner, "UTC", { limit: 50, [cursor]: crypto.randomUUID() }),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+    const prepare = vi.fn();
+    await expect(service.sendNotification(crypto.randomUUID(), prepare)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(prepare).not.toHaveBeenCalled();
+    const challenge = await service.startVerification(ownerId, {
+      consentAccepted: true,
+      consentVersion: textingConsentVersion,
+      country: "US",
+      phoneNumber: "+12125550777",
+    });
+    await service.checkVerification(ownerId, challenge.id, "123456");
+    await expect(service.disconnect(ownerId, principal)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect((await service.getConnection(ownerId)).state).toBe("active");
+    await service.inbound({
+      From: "+12125550777",
+      To: "+18885550199",
+      MessageSid: "SMwrong-destination",
+      Body: "Do not route",
+    });
+    expect((await service.conversation(owner, "UTC", { limit: 50 })).messages).toEqual([]);
+    await service.inbound({
+      From: "+12125550777",
+      MessageSid: "SMboundary-message",
+      Body: "Hello",
+    });
+    const before = await service.conversation(owner, "UTC", { limit: 50 });
+    const target = before.messages[0];
+    if (!target || !before.conversationReceipt) throw new Error("Expected inbound evidence");
+    await expect(
+      service.send(owner, "UTC", {
+        body: "Duplicate reference",
+        contentKind: "concise",
+        conversationReceipt: before.conversationReceipt,
+        replyToMessageIds: [target.id, target.id],
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(provider.sendMessage).not.toHaveBeenCalled();
+    await service.updateStatus({
+      MessageSid: "SMunknown-delivery",
+      MessageStatus: "delivered",
+      NumSegments: "1",
+    });
+    expect((await service.conversation(owner, "UTC", { limit: 50 })).messages).toEqual(
+      before.messages,
+    );
+    const disabled = createTextingService({
+      db: database.db,
+      enabled: true,
+      apiBaseUrl: "https://api.example.com",
+      encryptionKey,
+      senderPhoneNumber: "+18885550100",
+    });
+    await expect(
+      disabled.inbound({ From: "+12125550777", MessageSid: "SMno-provider" }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    vi.mocked(provider.getMessageOccurredAt).mockImplementationOnce(async () => {
+      await service.disconnect(ownerId);
+      return current;
+    });
+    await service.inbound({
+      From: "+12125550777",
+      MessageSid: "SMdisconnect-race",
+      Body: "Arrives during disconnect",
+    });
+    const after = await service.conversation(owner, "UTC", { limit: 50 });
+    expect(after.connection.state).toBe("disconnected");
+    expect(after.messages).toEqual(before.messages);
+  });
+
   it("loads an old anchor with bounded neighbors and rejects foreign or missing anchors", async () => {
     const ownerId = crypto.randomUUID();
     await database.db.insert(users).values({

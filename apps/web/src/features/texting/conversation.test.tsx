@@ -428,3 +428,76 @@ it("shows only unfinished work in the selected workspace while preserving the pe
     "/messages",
   );
 });
+
+it("removes cached agent settings after authorization is revoked", async () => {
+  const { client } = mount(<TextingAgentSettings userId="one" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Automatic replies" }));
+  await screen.findByText("Personal Claude");
+  mocks.getTextingAgentStatus.mockRejectedValue(
+    new ApiClientError({ code: "forbidden", status: 403, message: "Access denied" }),
+  );
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["texting-agent-settings"] });
+  });
+  await waitFor(() => expect(screen.queryByText("Personal Claude")).not.toBeInTheDocument());
+  expect(screen.queryByRole("button", { name: "Edit Automatic replies" })).not.toBeInTheDocument();
+});
+
+it("keeps development preview isolated from live agent and conversation queries", async () => {
+  mount(<TextConversation userId="one" timeZone="UTC" />, "/messages?preview=messages");
+  expect(await screen.findByText(/fictional messages/)).toBeVisible();
+  expect(mocks.getTextingAgentStatus).not.toHaveBeenCalled();
+  expect(mocks.getTextConversation).not.toHaveBeenCalled();
+  expect(mocks.getTextingConnection).not.toHaveBeenCalled();
+});
+
+it.each([true, false])("polls only while visible (document hidden=%s)", async (isHidden) => {
+  const hidden = Object.getOwnPropertyDescriptor(document, "hidden");
+  Object.defineProperty(document, "hidden", { configurable: true, value: isHidden });
+  vi.useFakeTimers();
+  let view: ReturnType<typeof mount> | undefined;
+  try {
+    mocks.getTextConversation.mockResolvedValue({
+      messages: [message("one", "inbound", "Saved conversation")],
+      hasEarlierMessages: false,
+    });
+    view = mount(<TextConversation userId="one" timeZone="UTC" />);
+    // Resolve status, then the enabled history query and React Query notification timers.
+    for (let turn = 0; turn < 5; turn++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+    }
+    expect(screen.getByText("Saved conversation")).toBeVisible();
+    expect(mocks.getTextConversation).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    for (const query of [mocks.getTextConversation, mocks.getTextingAgentStatus]) {
+      if (isHidden) expect(query).toHaveBeenCalledTimes(1);
+      else expect(query.mock.calls.length).toBeGreaterThan(1);
+    }
+  } finally {
+    view?.unmount();
+    vi.useRealTimers();
+    if (hidden) Object.defineProperty(document, "hidden", hidden);
+    else Reflect.deleteProperty(document, "hidden");
+  }
+});
+
+it("orders equal-time runs deterministically without dropping either record", async () => {
+  mocks.getTextConversation.mockResolvedValue({ messages: [], hasEarlierMessages: false });
+  mocks.getTextingAgentStatus.mockResolvedValue({
+    ...status,
+    runs: [
+      run("a", "blocked", "retry_requested", "2026-11-05T12:00:00Z"),
+      run("z", "blocked", "rate_limited", "2026-11-05T12:00:00Z"),
+    ],
+  });
+  mount(<TextConversation userId="one" timeZone="UTC" />);
+  fireEvent.click(await screen.findByText("Agent runs", { selector: "summary" }));
+  const rows = within(screen.getByRole("list", { name: "Agent runs" })).getAllByRole("article");
+  expect(rows).toHaveLength(2);
+  expect(rows[0]).toHaveTextContent("Waiting for the usage limit to reset");
+  expect(rows[1]).toHaveTextContent("Saved request queued again");
+});

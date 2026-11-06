@@ -113,7 +113,9 @@ export function createTaskWorkspaceService({
           if (query.listId) conditions.push(eq(reminders.taskListId, query.listId));
           if (query.projectId) conditions.push(eq(reminders.taskProjectId, query.projectId));
           if (query.view === "history")
-            conditions.push(sql`(${lifecycle} <> 'open' OR ${unavailable})`);
+            conditions.push(sql`(${lifecycle} <> 'open' AND (${reminders.kind} <> 'task' OR (
+              ${taskLists.availability} = 'active' AND ${taskLists.deletedAt} IS NULL
+              AND (${reminders.taskProjectId} IS NULL OR (${taskProjects.availability} = 'active' AND ${taskProjects.deletedAt} IS NULL)))))`);
           else if (
             query.view !== "trash" &&
             status !== "archived" &&

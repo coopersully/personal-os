@@ -222,6 +222,12 @@ describe.sequential("shared task workspace PostgreSQL projection", () => {
       taskCancelledAt: instant,
     });
     await insert("Archived", { kind: "task", taskListId: archivedListId });
+    await insert("Archived completed", {
+      kind: "task",
+      taskLifecycle: "completed",
+      completedAt: instant,
+      taskListId: archivedListId,
+    });
     await insert("Finished project", { kind: "task", taskProjectId: projectId });
     await insert("Deleted reminder", { deletedAt: instant });
     expect((await list()).items.map((item) => item.record.title)).toEqual(["Open task"]);
@@ -232,12 +238,10 @@ describe.sequential("shared task workspace PostgreSQL projection", () => {
     ).toEqual(["Done", "Open task"]);
     const history = await list({ view: "history", sort: "title" });
     expect(history.items.map((item) => [item.record.title, item.readOnly])).toEqual([
-      ["Archived", true],
       ["Cancelled", false],
       ["Done", false],
-      ["Finished project", true],
     ]);
-    expect((await list({ status: "archived" })).total).toBe(2);
+    expect((await list({ status: "archived" })).total).toBe(3);
     expect((await list({ listId: archivedListId })).items[0]).toMatchObject({ readOnly: true });
     expect((await list({ projectId })).items[0]).toMatchObject({ readOnly: true });
     expect((await list({ view: "trash" })).items[0]).toMatchObject({

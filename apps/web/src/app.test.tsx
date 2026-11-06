@@ -10459,7 +10459,7 @@ describe("Personal OS web app", () => {
 
   it("connects and manages the selected X bookmark folder", async () => {
     mocks.isTauri.mockReturnValue(true);
-    mocks.getXBookmarkAccount.mockResolvedValue({
+    const account = {
       displayName: null,
       id,
       lastSyncedAt: null,
@@ -10468,15 +10468,113 @@ describe("Personal OS web app", () => {
       syncError: null,
       syncStatus: "idle",
       username: "cooper",
+    };
+    let finishAccount: ((value: typeof account) => void) | undefined;
+    const accountRead = new Promise<typeof account>((resolve) => {
+      finishAccount = resolve;
     });
-    mocks.listXBookmarkFolders.mockResolvedValue([
+    mocks.getXBookmarkAccount.mockReturnValue(accountRead);
+    const folders = [
       { id, name: "Planning", remoteFolderId: "folder-1" },
       { id: secondId, name: "Reading", remoteFolderId: "folder-2" },
-    ]);
+    ];
+    let finishFolders: ((value: typeof folders) => void) | undefined;
+    const foldersRead = new Promise<typeof folders>((resolve) => {
+      finishFolders = resolve;
+    });
+    mocks.listXBookmarkFolders.mockReturnValue(foldersRead);
     const browser = userEvent.setup();
-    setup("/settings?page=connections");
-
-    const folder = await screen.findByRole("button", { name: "X bookmark folder" });
+    const view = setup("/settings?page=connections");
+    let readinessStage = "account request";
+    let folder: HTMLElement;
+    try {
+      await waitFor(() => expect(mocks.getXBookmarkAccount).toHaveBeenCalled());
+      readinessStage = "account handoff";
+      await act(async () => {
+        finishAccount?.(account);
+        await accountRead;
+      });
+      readinessStage = "folders request";
+      await waitFor(() => expect(mocks.listXBookmarkFolders).toHaveBeenCalled());
+      readinessStage = "folders handoff";
+      await act(async () => {
+        finishFolders?.(folders);
+        await foldersRead;
+      });
+      readinessStage = "folder trigger";
+      folder = await screen.findByRole("button", { name: "X bookmark folder" });
+    } catch (error) {
+      // Failure-only metadata: never serialize query keys, account details, URLs or errors.
+      let diagnostic = '{"captureFailed":true}';
+      try {
+        const query = (queryKey: string[]) => {
+          const entry = view.queryClient.getQueryCache().find({ queryKey, exact: true });
+          return entry
+            ? {
+                status: entry.state.status,
+                fetchStatus: entry.state.fetchStatus,
+                error: Boolean(entry.state.error),
+                observed: entry.getObserversCount() > 0,
+                active: entry.isActive(),
+              }
+            : null;
+        };
+        const accountData = view.queryClient.getQueryData(["x-bookmarks", "account"]);
+        const folderData = view.queryClient.getQueryData(["x-bookmarks", "folders"]);
+        const route = new URL(view.location.value, window.location.origin);
+        const serialized = JSON.stringify({
+          readinessStage,
+          routeIsConnections:
+            route.pathname === "/settings" && route.searchParams.get("page") === "connections",
+          settingsConnected: !!view.container.querySelector('[data-workspace="settings"]'),
+          connectionsHeadings: Math.min(
+            99,
+            screen.queryAllByRole("heading", { name: "Connections" }).length,
+          ),
+          recoveryDialogs: Math.min(
+            99,
+            screen.queryAllByRole("dialog", { name: "Let’s reconnect" }).length,
+          ),
+          queries: {
+            me: query(["me"]),
+            connectors: query(["connectors"]),
+            account: query(["x-bookmarks", "account"]),
+            folders: query(["x-bookmarks", "folders"]),
+          },
+          accountPresent: Boolean(accountData),
+          accountMatchesFixture: JSON.stringify(accountData) === JSON.stringify(account),
+          folderCount: Array.isArray(folderData) ? Math.min(999, folderData.length) : null,
+          foldersMatchFixture:
+            Array.isArray(folderData) && JSON.stringify(folderData) === JSON.stringify(folders),
+          controls: {
+            folderButtons: Math.min(
+              99,
+              screen.queryAllByRole("button", { name: "X bookmark folder" }).length,
+            ),
+            nativeSelects: Math.min(
+              99,
+              view.container.querySelectorAll('select[aria-label="X bookmark folder"]').length,
+            ),
+          },
+          calls: {
+            me: Math.min(999, mocks.getMe.mock.calls.length),
+            account: Math.min(999, mocks.getXBookmarkAccount.mock.calls.length),
+            folders: Math.min(999, mocks.listXBookmarkFolders.mock.calls.length),
+            connectors: Math.min(999, mocks.listConnectors.mock.calls.length),
+            openUrl: Math.min(999, mocks.openUrl.mock.calls.length),
+          },
+        });
+        if (serialized.length <= 2048) diagnostic = serialized;
+      } catch {
+        // Capture failure must preserve the original readiness error.
+      }
+      try {
+        console.error("x-bookmark-readiness-v1", diagnostic);
+      } catch {
+        // Diagnostic delivery must never replace the original failed assertion.
+      }
+      throw error;
+    }
     await browser.click(folder);
     await browser.click(screen.getByRole("menuitemradio", { name: "Reading" }));
     await waitFor(() =>

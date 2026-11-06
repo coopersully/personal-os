@@ -79,6 +79,34 @@ already-open editors and drafts, and allow nested repair dialogs inside the reco
   the feature body with primary material instead of repeating a title, eyebrow,
   search field, or action bar.
 
+## Expo mobile alignment
+
+Start with `docs/design/mobile-frontend.md`, the canonical mobile frontend contract. It includes
+native glass/navigation, motion, entity identity, geometry, actions, forms, filters, Tasks
+organization, accessibility and notification feedback. Apply its linked forms contract to editors.
+
+Follow `docs/design/system.md#expo-trailing-record-actions`: content-card icons and task checkboxes
+anchor top-left, trailing record actions anchor top-right, and overflow uses vertical `⋮`. A single
+action is an icon button; multiple actions use the native iOS menu. Project/list detail headings
+include their leading semantic icon. Keep title/content gaps compact while preserving 44-point
+touch targets. Apply the shared mobile components rather than page-only positioning overrides.
+
+Settings-style form rows center the icon, label, value and accessory vertically. This takes
+precedence over content-card top alignment. Follow `docs/design/mobile-forms.md`; use visible
+named sections rather than Show more/More details disclosures for ordinary or optional fields.
+Use the shared RecordIdentity title/description block, TagsField badge grid, and leading-icon
+appearance picker. Keep lifecycle actions top-right (single icon or native ⋮ menu). Use the floating bottom-right
+checkmark Save; untouched forms show Close at top-left and disabled Save, while edited forms
+show Cancel with discard confirmation. Automatic defaults do not mark forms edited.
+
+List configuration follows the filter/view contract in docs/design/mobile-forms.md: bounded filter
+sheets, native sort/group selection, readable active chips, explicit reset scope, and an effective
+presentation summary. Keep query configuration out of result-list content.
+
+Association fields must prefix their label with the canonical entity icon from the mobile
+product dictionary. Apply the same entity identity across headings and record controls. Record
+forms never offer per-record time zones; use the account planning timezone in controls and saves.
+
 ## Apply the design system deterministically
 
 - State the page's immediate user job and classify each visible group using the
@@ -612,3 +640,21 @@ value track can overlap the adjacent pair despite no document-level overflow.
   not only recovery states. Flat presentation must preserve authority boundaries:
   server changes require the existing tested Connect flow; color edits retain live
   preview/coalesced saves inside a bounded popover.
+
+## Examples, compact settings, and action grouping
+
+Use plausible, non-personal sample values as text placeholders, not instructions such as
+“What needs doing?” or “Add a description.” Pair examples coherently: “Plan meals for the week”
+and “Choose three dinners and make a grocery list.” Keep persistent accessible labels; examples
+are never defaults or saved data. Search examples demonstrate a meaningful query.
+
+Setting fields rest in one vertically centered row with the label leading and the value trailing.
+Simple short text and numeric values edit directly in the trailing value area without expanding
+the row (for example Estimate in minutes). Use an appropriate keyboard. Expand only controls
+that need more space; Done returns to the compact row without losing draft changes. Title/description are content fields
+and remain visible. Allow rows to grow for accessibility rather than forcing clipping.
+
+Action menus show semantic icons. Put ordinary actions first, then a separated destructive
+group at the bottom in red. Cancelling a record and deleting/trashing are destructive; dismissing
+a picker or cancelling an unsaved editor is not a destructive record action. Preserve confirmations
+and disabled states. Native menus own their section separators and destructive rendering.

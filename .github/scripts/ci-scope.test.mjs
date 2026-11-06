@@ -62,6 +62,7 @@ const cases = [
         "@personal-os/database",
         "@personal-os/domain",
         "@personal-os/mcp",
+        "@personal-os/mobile",
         "@personal-os/web",
       ],
     }),
@@ -95,7 +96,12 @@ const cases = [
       browser: true,
       desktop: true,
       containers: true,
-      changed_packages: ["@personal-os/api-client", "@personal-os/mcp", "@personal-os/web"],
+      changed_packages: [
+        "@personal-os/api-client",
+        "@personal-os/mcp",
+        "@personal-os/mobile",
+        "@personal-os/web",
+      ],
     }),
   ],
   [

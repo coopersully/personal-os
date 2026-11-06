@@ -567,6 +567,11 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 
+The mobile direction is a universal Expo/React Native application with a web target. Shared
+screens and domain/API contracts preserve parity; platform-specific presentation is permitted
+when needed. The first iOS installation preview precedes authentication and workspace UI migration.
+This direction is a target, not a claim of shipped mobile feature parity.
+
 Closing the main desktop window keeps enabled pet, routine presentation, and notification
 refresh active in the menu-bar process. Explicit **Quit nohmi** stops that process until the next
 launch; it does not create a separate companion that survives Quit. Already scheduled operating

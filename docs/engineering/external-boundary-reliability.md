@@ -227,6 +227,28 @@ and logo display, and inspect `branding_failure_code` / `branding_next_refresh_a
 Green local tests can still coexist with missing bank artwork, Plaid configuration rejection,
 provider downtime or browser image-decoder failures. These retain honest fallbacks.
 
+## Expo human session boundary
+
+The native client consumes the existing API's expiring, revocable human sessions using
+its shared typed client. The user submits credentials to the configured HTTPS API origin
+(defaulting to the desktop hosted API); native requests omit cookies and send the session
+in the Authorization header. Redirects are rejected and requests are bounded to 15 seconds.
+SecureStore contains only the session token in an origin-scoped v1 key; passwords and user
+records are never persisted. Login acceptance is the server-issued session plus successful
+secure storage. If storage fails, the client attempts revocation and does not unlock UI;
+a failed compensation can leave a server session until its existing expiry, without a local
+credential. Startup and foreground `/v1/me` validate authority. A 401 purges local identity;
+network failures retain the token for retry and never imply successful restore. Logout waits
+for confirmed server revocation (or an already-invalid session) before clearing local state.
+Keychain deletion failure after revocation cannot restore access because `/v1/me` rejects it.
+There is no new refresh token, permission grant, offline write queue or cached domain data.
+
+Unit tests cover session restore, expiry, transport failure, revocation, persistence failure,
+and concurrent session actions. Hosted unauthenticated `/v1/me` returned 401; iOS/web exports
+and simulator sign-in rendering are separate evidence. These do not prove a successful
+physical-device sign-in, Keychain restore, or haptic quality. Web preview authentication also
+requires its origin to be allowed by existing CORS policy; native requests have no browser CORS.
+
 ## General Texting routine handoff
 
 The Texting coordinator reuses the owner's registered Claude routine and encrypted fire credential,

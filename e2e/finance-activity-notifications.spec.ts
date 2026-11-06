@@ -1,7 +1,7 @@
 import { type FinanceActivityEntry, financeActivityPageSchema } from "@personal-os/domain";
 import { expect, test } from "@playwright/test";
 import { qaFixtureAccounts } from "../apps/api/src/qa-fixtures.js";
-import { useProductionStyles } from "./production-styles.js";
+import { applyProductionStyles } from "./production-styles.js";
 
 const demo = qaFixtureAccounts.find((account) => account.key === "demo-full");
 if (!demo) throw new Error("The existing demo-full QA persona is required.");
@@ -135,7 +135,7 @@ test("Activity separates transport evidence from financial history with keyboard
     });
   });
   await page.goto("/finances/activity");
-  await useProductionStyles(page);
+  await applyProductionStyles(page);
   const acceptedRow = page.getByRole("button", {
     name: `Open activity: ${accepted.explanation}`,
     exact: true,

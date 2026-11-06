@@ -1,0 +1,29 @@
+import type { IconName } from "../components/icons";
+
+// Mobile navigation shares domain data with web, with platform-specific grouping.
+export type WorkspacePageDefinition = { name: string; label: string; icon: IconName };
+export const workspacePages = {
+  tasks: [
+    { name: "index", label: "to-do", icon: "calendar" },
+    { name: "projects", label: "projects", icon: "target" },
+    { name: "lists", label: "lists", icon: "views" },
+    { name: "views", label: "browse", icon: "grid" },
+  ],
+  mail: [
+    { name: "index", label: "inbox", icon: "inbox" },
+    { name: "mailboxes", label: "mailboxes", icon: "inbox" },
+  ],
+  finances: [
+    { name: "index", label: "overview", icon: "grid" },
+    { name: "money", label: "money", icon: "finances" },
+    { name: "planning", label: "planning", icon: "wallet" },
+    { name: "manage", label: "manage", icon: "settings" },
+  ],
+  settings: [
+    { name: "index", label: "account", icon: "profile" },
+    { name: "personal", label: "personal", icon: "target" },
+    { name: "workspaces", label: "workspaces", icon: "grid" },
+    { name: "app", label: "app", icon: "settings" },
+  ],
+} as const satisfies Record<string, readonly WorkspacePageDefinition[]>;
+export type WorkspaceWithPages = keyof typeof workspacePages;

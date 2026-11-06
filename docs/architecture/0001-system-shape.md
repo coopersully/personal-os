@@ -19,6 +19,8 @@ Use a TypeScript monorepo with the following boundaries:
 - `apps/mcp`: stateless MCP adapter that calls the public API with a scoped token.
 - `apps/web`: React PWA used in browsers and as the desktop renderer.
 - `apps/desktop`: Tauri shell and platform capabilities.
+- `apps/mobile`: Expo/React Native universal iOS and web foundation. Workspace UI migration
+  is incremental; the existing web renderer remains authoritative until each workflow is accepted.
 - `packages/domain`: schemas, invariants, and service contracts.
 - `packages/database`: PostgreSQL schema, migrations, and repositories.
 - `packages/connectors`: provider-neutral contract and Google implementation.

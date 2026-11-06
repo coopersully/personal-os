@@ -10846,7 +10846,7 @@ describe("Personal OS web app", () => {
     "settles the current wallpaper apply %s rejection before teardown",
     async (_kind, failure) => {
       mocks.isTauri.mockReturnValue(true);
-      mocks.getPinterestWallpaperSettings.mockResolvedValue({
+      const settings = {
         backgroundColor: "#ffffff",
         backgroundMode: "white",
         boardUrl: "https://www.pinterest.com/",
@@ -10863,14 +10863,23 @@ describe("Personal OS web app", () => {
         paddingTop: 16,
         rotationDegrees: 0,
         tileSize: 64,
+      };
+      let finishSettings: ((value: typeof settings) => void) | undefined;
+      const settingsRead = new Promise<typeof settings>((resolve) => {
+        finishSettings = resolve;
       });
+      mocks.getPinterestWallpaperSettings.mockReturnValue(settingsRead);
       const pins = [
         { id: "pin-1", imageUrl: "https://example.com/1.jpg", title: null },
         { id: "pin-2", imageUrl: "https://example.com/2.jpg", title: null },
         { id: "pin-3", imageUrl: "https://example.com/3.jpg", title: null },
         { id: "pin-4", imageUrl: "https://example.com/4.jpg", title: null },
       ];
-      mocks.listPinterestPins.mockResolvedValue(pins);
+      let finishPins: ((value: typeof pins) => void) | undefined;
+      const pinsRead = new Promise<typeof pins>((resolve) => {
+        finishPins = resolve;
+      });
+      mocks.listPinterestPins.mockReturnValue(pinsRead);
       let finishPreview: ((image: string) => void) | undefined;
       const preview = new Promise<string>((resolve) => {
         finishPreview = resolve;
@@ -10887,7 +10896,24 @@ describe("Personal OS web app", () => {
       });
       const browser = userEvent.setup();
       const view = setup("/settings?page=wallpaper");
+      let readinessStage = "settings request";
       try {
+        await waitFor(() => expect(mocks.getPinterestWallpaperSettings).toHaveBeenCalledTimes(1));
+        readinessStage = "settings handoff";
+        await act(async () => {
+          finishSettings?.(settings);
+          await settingsRead;
+        });
+        readinessStage = "pins request";
+        await waitFor(() =>
+          expect(mocks.listPinterestPins).toHaveBeenCalledWith(12, expect.any(String)),
+        );
+        readinessStage = "pins handoff";
+        await act(async () => {
+          finishPins?.(pins);
+          await pinsRead;
+        });
+        readinessStage = "native preview request";
         await waitFor(() =>
           expect(mocks.invoke).toHaveBeenCalledWith(
             "preview_pinterest_wallpaper",
@@ -10903,25 +10929,74 @@ describe("Personal OS web app", () => {
               .getQueryCache()
               .findAll({ queryKey: [prefix] })
               .slice(0, 3)
-              .map(({ state }) => ({
-                status: state.status,
-                fetchStatus: state.fetchStatus,
-                isInvalidated: state.isInvalidated,
-                error: Boolean(state.error),
+              .map((query) => ({
+                status: query.state.status,
+                fetchStatus: query.state.fetchStatus,
+                isInvalidated: query.state.isInvalidated,
+                error: Boolean(query.state.error),
+                observed: query.getObserversCount() > 0,
+                active: query.isActive(),
               }));
           const countInvocations = (command: string) =>
             Math.min(999, mocks.invoke.mock.calls.filter(([name]) => name === command).length);
-          const pinData = view.queryClient
+          const pinQueries = view.queryClient
             .getQueryCache()
-            .findAll({ queryKey: ["pinterest-wallpaper-preview"] })[0]?.state.data;
+            .findAll({ queryKey: ["pinterest-wallpaper-preview"] })
+            .filter(
+              (query) => query.getObserversCount() > 0 && query.queryKey[1] === settings.boardUrl,
+            );
+          const pinData = pinQueries.length === 1 ? pinQueries[0]?.state.data : undefined;
+          const previewQueries = view.queryClient
+            .getQueryCache()
+            .findAll({ queryKey: ["native-wallpaper-preview"] });
+          const requestMatchesFixture = (request: unknown) => {
+            if (typeof request !== "string") return false;
+            try {
+              const value = JSON.parse(request);
+              return (
+                value.boardLabel === "Pinterest" &&
+                JSON.stringify(value.imageUrls) ===
+                  JSON.stringify(pins.map((pin) => pin.imageUrl)) &&
+                (
+                  [
+                    "backgroundColor",
+                    "backgroundMode",
+                    "cornerRadius",
+                    "frameSpacing",
+                    "layout",
+                    "mosaicFit",
+                    "paddingBottom",
+                    "paddingEnd",
+                    "paddingStart",
+                    "paddingTop",
+                    "rotationDegrees",
+                    "tileSize",
+                  ] as const
+                ).every((key) => value[key] === settings[key])
+              );
+            } catch {
+              return false;
+            }
+          };
           const serialized = JSON.stringify({
+            readinessStage,
             settings: states("pinterest-wallpaper"),
             pins: states("pinterest-wallpaper-preview"),
             preview: states("native-wallpaper-preview"),
+            environment: states("desktop-preview-environment"),
+            previewRequests: previewQueries.slice(0, 3).map((query) => ({
+              observed: query.getObserversCount() > 0,
+              active: query.isActive(),
+              settledRequestMatchesFixture: requestMatchesFixture(query.queryKey[1]),
+            })),
             boardReady:
               view.container.querySelector<HTMLInputElement>("#pinterest-board-url")?.value ===
-              "https://www.pinterest.com/",
-            pinsCount: Array.isArray(pinData) ? Math.min(999, pinData.length) : 0,
+              settings.boardUrl,
+            activePinQueries: Math.min(999, pinQueries.length),
+            activePinsCount: Array.isArray(pinData) ? Math.min(999, pinData.length) : null,
+            activePinsMatchFixture:
+              Array.isArray(pinData) && JSON.stringify(pinData) === JSON.stringify(pins),
+            activePinError: pinQueries.some((query) => Boolean(query.state.error)),
             tauri: mocks.isTauri.mock.results.at(-1)?.value === true,
             invocations: {
               environment: countInvocations("desktop_preview_environment"),

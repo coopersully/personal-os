@@ -397,13 +397,22 @@ export function collect(options) {
   ) {
     throw new Error("Coverage marker identity differs");
   }
+  const phases = ["typecheck", "coverage", "build"];
+  const phased = phases.some((name) => Object.hasOwn(env, `${name.toUpperCase()}_OUTCOME`));
   const sourceSteps = Object.fromEntries(
-    ["install", "audit", "node"].map((name) => {
+    ["install", "audit", ...(phased ? phases : ["node"])].map((name) => {
       const outcome = env[`${name.toUpperCase()}_OUTCOME`] || "unknown";
       if (!OUTCOMES.has(outcome)) throw new Error("Invalid source step outcome");
       return [name, outcome];
     }),
   );
+  if (phased) {
+    // Preserve the legacy aggregate without mistaking test success for completed builds.
+    sourceSteps.node =
+      ["failure", "cancelled", "unknown", "skipped"].find((outcome) =>
+        phases.some((name) => sourceSteps[name] === outcome),
+      ) || "success";
+  }
   const files = [];
   let total = 0;
   for (const name of REPORTS) {
@@ -416,7 +425,8 @@ export function collect(options) {
   }
   const incomplete =
     files.some((file) => file.status === "rejected") ||
-    (sourceSteps.node === "success" && files.some((file) => file.status !== "present"));
+    ((phased ? sourceSteps.coverage : sourceSteps.node) === "success" &&
+      files.some((file) => file.status !== "present"));
   const manifest = {
     schemaVersion: 1,
     identity: actual,

@@ -50,3 +50,28 @@ export async function actOnItem(
   if (action === "trash") return api.trashReminder(id, updatedAt);
   return api.restoreReminder(id, updatedAt);
 }
+
+/** Reverse only a confirmed mutation, using its revision rather than a newer fetched record. */
+export async function actWithUndo(
+  api: ReturnType<typeof createApiClient>,
+  item: TaskWorkspaceItem,
+  action: ItemAction,
+) {
+  const record = await actOnItem(api, item, action);
+  const inverse: ItemAction =
+    action === "trash"
+      ? "restore"
+      : action === "restore"
+        ? "trash"
+        : action === "reopen"
+          ? item.kind === "task" && item.record.lifecycle === "cancelled"
+            ? "cancel"
+            : "complete"
+          : "reopen";
+  const updated = { ...item, record } as TaskWorkspaceItem;
+  return {
+    undo: async () => {
+      await actOnItem(api, updated, inverse);
+    },
+  };
+}

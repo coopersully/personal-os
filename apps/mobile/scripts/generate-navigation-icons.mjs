@@ -8,6 +8,7 @@ import * as registry from "../../web/src/components/icons";
 // The web registry remains the only module importing reicon. Native uses generated template images.
 const names = [
   "Plus",
+  "X",
   "Trash",
   "Check",
   "House",
@@ -56,6 +57,25 @@ try {
             directory,
             `${name}${weight === "Filled" ? "Filled" : ""}${scale === 1 ? "" : `@${scale}x`}.png`,
           ),
+          await page.screenshot({ omitBackground: true }),
+        );
+      }
+    }
+    for (const name of ["Trash", "Archive", "X", "Pin", "Settings", "CircleCheck", "History"]) {
+      // Native menu images preserve original pixels, so ship explicit semantic color variants.
+      for (const [tone, color] of Object.entries({
+        Light: "#202024",
+        Dark: "#fafafa",
+        DestructiveLight: "#ba2944",
+        DestructiveDark: "#ff8190",
+      })) {
+        // biome-ignore lint/performance/noDynamicNamespaceImportAccess: build-time registry asset generation.
+        const svg = renderToStaticMarkup(createElement(registry[`${name}Icon`], { color }));
+        await page.setContent(
+          `<style>html,body{margin:0;background:transparent;color:${color}}svg{display:block;color:${color}}</style>${svg}`,
+        );
+        await writeFile(
+          resolve(directory, `${name}Menu${tone}${scale === 1 ? "" : `@${scale}x`}.png`),
           await page.screenshot({ omitBackground: true }),
         );
       }

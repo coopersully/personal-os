@@ -649,8 +649,9 @@ and “Choose three dinners and make a grocery list.” Keep persistent accessib
 are never defaults or saved data. Search examples demonstrate a meaningful query.
 
 Setting fields rest in one vertically centered row with the label leading and the value trailing.
-Long values truncate in the resting preview. Tapping expands the editing control; blur or Done
-returns to the compact row without losing draft changes. Title/description are content fields
+Simple short text and numeric values edit directly in the trailing value area without expanding
+the row (for example Estimate in minutes). Use an appropriate keyboard. Expand only controls
+that need more space; Done returns to the compact row without losing draft changes. Title/description are content fields
 and remain visible. Allow rows to grow for accessibility rather than forcing clipping.
 
 Action menus show semantic icons. Put ordinary actions first, then a separated destructive

@@ -4,6 +4,7 @@ export interface DateFieldProps {
   value: string | null;
   onChange: (value: string | null) => void;
   dateOnly?: boolean;
+  due?: boolean;
 }
 export function DateField({ label, value, onChange }: DateFieldProps) {
   return (

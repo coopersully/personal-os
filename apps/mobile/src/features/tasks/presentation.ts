@@ -6,7 +6,7 @@ export function taskMetadata(item: TaskWorkspaceItem, timezone = "UTC") {
     item.kind === "reminder" ? "Reminder" : null,
     item.record.priority === "high" ? "High priority" : null,
     item.record.dueAt
-      ? `Due ${new Date(item.record.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: timezone })}`
+      ? `Due ${new Date(item.record.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: timezone })}`
       : null,
   ].filter((value): value is string => !!value);
 }

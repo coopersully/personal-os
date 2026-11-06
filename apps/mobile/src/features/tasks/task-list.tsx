@@ -9,7 +9,7 @@ import { entityDictionary } from "../../product/entities";
 import { spacing, useTheme } from "../../theme";
 import { ActiveFilters } from "./active-filters";
 import {
-  actOnItem,
+  actWithUndo,
   type ItemAction,
   isOpen,
   itemKey,
@@ -40,10 +40,12 @@ export function TaskListScreen({
   title,
   scope,
   standalone = false,
+  initialFilters = {},
 }: {
   title: string;
   scope: Partial<TaskWorkspaceQuery>;
   standalone?: boolean;
+  initialFilters?: Partial<TaskWorkspaceQuery>;
 }) {
   const t = useTheme();
   const api = useTaskApi();
@@ -54,7 +56,7 @@ export function TaskListScreen({
     const timer = setTimeout(() => setDebounced(search.trim()), 250);
     return () => clearTimeout(timer);
   }, [search]);
-  const [filters, setFilters] = useState<Partial<TaskWorkspaceQuery>>({});
+  const [filters, setFilters] = useState<Partial<TaskWorkspaceQuery>>(initialFilters);
   const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const action = useTaskAction();
@@ -82,6 +84,7 @@ export function TaskListScreen({
     queryKey: ["tasks", "workspace", query],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => api.listTaskWorkspace({ ...query, cursor: pageParam, limit: 30 }),
+    refetchInterval: query.sort === "auto" ? 60_000 : false,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const items = uniqueItems(page.data?.pages.flatMap((result) => result.items) ?? []);
@@ -98,28 +101,42 @@ export function TaskListScreen({
       },
     });
   const perform = (records: TaskWorkspaceItem[], operation: ItemAction) => {
+    const outcome = {
+      complete: "completed",
+      reopen: "reopened",
+      cancel: "cancelled",
+      trash: "moved to Trash",
+      restore: "restored",
+    }[operation];
     const execute = () =>
       void action.run(
         "Updating…",
         async () => {
           const failed: string[] = [];
+          const receipts: Awaited<ReturnType<typeof actWithUndo>>[] = [];
           for (const item of records) {
             try {
-              await actOnItem(api, item, operation);
+              receipts.push(await actWithUndo(api, item, operation));
             } catch {
               failed.push(itemKey(item));
             }
           }
-          return failed;
+          if (!receipts.length) throw new Error("No updates confirmed");
+          return { failed, receipts };
         },
-        setSelected,
+        ({ failed }) => setSelected(failed),
         undefined,
-        (failed) => ({
+        ({ failed }) => ({
           message: failed.length
-            ? `${records.length - failed.length} updated; ${failed.length} not confirmed. Refresh before retrying.`
-            : `${records.length} updated`,
+            ? `${records.length - failed.length} ${outcome}; ${failed.length} not confirmed. Refresh before retrying.`
+            : `${records.length} ${outcome}`,
           error: failed.length > 0,
         }),
+        async ({ receipts }) => {
+          const results = await Promise.allSettled(receipts.map((receipt) => receipt.undo()));
+          if (results.some((result) => result.status === "rejected"))
+            throw new Error("Undo not confirmed");
+        },
       );
     if (operation === "trash")
       confirm(
@@ -164,6 +181,7 @@ export function TaskListScreen({
             >
               <View style={{ flex: 1 }}>
                 <Heading
+                  compact
                   icon={
                     scope.projectId
                       ? entityDictionary.project.icon
@@ -175,13 +193,13 @@ export function TaskListScreen({
                   {title}
                 </Heading>
               </View>
-              <View style={{ marginBottom: spacing.lg }}>
+              <View>
                 <OptionsMenu
                   choices={menuChoices}
                   onChange={updateFilter}
                   onAdvanced={() => setShowFilters(true)}
                   onReset={() => {
-                    setFilters({});
+                    setFilters(initialFilters);
                     setSearch("");
                   }}
                 />
@@ -213,7 +231,7 @@ export function TaskListScreen({
                 onChangeText={setSearch}
               />
             )}
-            <View style={styles.toolbar}>
+            <View style={[styles.toolbar, { marginBottom: spacing.md }]}>
               <Text style={{ color: t.secondary, marginRight: "auto" }}>
                 {page.data ? `${page.data.pages[0].total} items` : ""}
                 {` · ${menuChoices.find((choice) => choice.key === "sort")?.options.find((option) => option.value === query.sort)?.label ?? "Recommended"}`}
@@ -398,20 +416,24 @@ export function TaskListScreen({
                 }
               />
             </Section>
-            <Section title="View preferences">
-              <Action
-                disabled={!resources.settings.data || action.pending}
-                label="Save sort and grouping as defaults"
-                onPress={() =>
-                  void action.run("Saving preferences…", () =>
-                    api.updateWorkspaceSettings("tasks", {
-                      expectedRevision: resources.settings.data?.revision ?? 0,
-                      preferences: { taskSort: query.sort, taskGroup: query.group },
-                    }),
-                  )
-                }
-              />
-            </Section>
+            {query.sort !== "auto" && (
+              <Section title="View preferences">
+                <Action
+                  disabled={!resources.settings.data || action.pending}
+                  label="Save sort and grouping as defaults"
+                  onPress={() => {
+                    const sort = query.sort;
+                    if (sort === "auto") return;
+                    void action.run("Saving preferences…", () =>
+                      api.updateWorkspaceSettings("tasks", {
+                        expectedRevision: resources.settings.data?.revision ?? 0,
+                        preferences: { taskSort: sort, taskGroup: query.group },
+                      }),
+                    );
+                  }}
+                />
+              </Section>
+            )}
           </FormBody>
         </SafeAreaView>
       </Modal>

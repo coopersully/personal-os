@@ -31,10 +31,10 @@ export function FormSave({ disabled, onPress }: { disabled: boolean; onPress: ()
             flex: 1,
             alignItems: "center",
             justifyContent: "center",
-            opacity: disabled ? 0.35 : 1,
+            opacity: disabled ? 0.7 : 1,
           }}
         >
-          <Icon name="save" size={27} color={workspaceColor(t, "tasks")} />
+          <Icon name="save" size={27} color={disabled ? t.ink : workspaceColor(t, "tasks")} />
         </Pressable>
       </GlassSurface>
     </KeyboardAvoidingView>

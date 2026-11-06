@@ -1,13 +1,25 @@
 import DateTimePicker from "@expo/ui/community/datetime-picker";
 import { localDateAt, localDateTimeToUtc } from "@personal-os/domain";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
 import { useAuth } from "../auth/context";
 import type { DateFieldProps } from "./date-field";
+import { isPastDue, relativeDueDate } from "./due-date";
 import { Action } from "./ui";
-export function DateField({ label, value, onChange, dateOnly = false }: DateFieldProps) {
+export function DateField({
+  label,
+  value,
+  onChange,
+  dateOnly = false,
+  due = false,
+}: DateFieldProps) {
   const t = useTheme();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   const [editing, setEditing] = useState(false);
   const { state } = useAuth();
   const timezone = state.user?.planningTimezone;
@@ -16,11 +28,12 @@ export function DateField({ label, value, onChange, dateOnly = false }: DateFiel
     return `${local.year}-${String(local.month).padStart(2, "0")}-${String(local.day).padStart(2, "0")}`;
   };
   if (!timezone) return null;
+  const overdue = due && isPastDue(value, now);
   if (value && !editing)
     return (
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${label}, ${value}`}
+        accessibilityLabel={`${label}${overdue ? ", overdue" : ""}, ${value}`}
         onPress={() => setEditing(true)}
         style={{
           padding: spacing.lg,
@@ -31,9 +44,27 @@ export function DateField({ label, value, onChange, dateOnly = false }: DateFiel
         }}
       >
         <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-        <Text numberOfLines={1} style={{ color: t.secondary, fontSize: 17, maxWidth: "60%" }}>
+        <Text
+          numberOfLines={1}
+          style={{ color: overdue ? t.destructive : t.secondary, fontSize: 17, maxWidth: "60%" }}
+        >
           {dateOnly
-            ? value
+            ? new Intl.DateTimeFormat(undefined, {
+                timeZone: timezone,
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              }).format(
+                localDateTimeToUtc(
+                  {
+                    year: Number(value.slice(0, 4)),
+                    month: Number(value.slice(5, 7)),
+                    day: Number(value.slice(8, 10)),
+                  },
+                  720,
+                  timezone,
+                ),
+              )
             : new Intl.DateTimeFormat(undefined, {
                 timeZone: timezone,
                 month: "short",
@@ -72,13 +103,34 @@ export function DateField({ label, value, onChange, dateOnly = false }: DateFiel
       style={{
         padding: spacing.lg,
         gap: spacing.sm,
-        flexDirection: "row",
-        alignItems: "center",
-        flexWrap: "wrap",
+        alignItems: "stretch",
       }}
     >
-      <Text style={{ color: t.ink, fontSize: 17, flexGrow: 1 }}>{label}</Text>
-      <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
+      <Text style={{ color: overdue ? t.destructive : t.ink, fontSize: 17, flexGrow: 1 }}>
+        {label}
+        {overdue ? " · Overdue" : ""}
+      </Text>
+      {due && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs }}>
+          {(
+            [
+              { value: "hour", label: "In 1 hour" },
+              { value: "tomorrow", label: "Tomorrow, 9 AM" },
+              { value: "week", label: "In 1 week, 9 AM" },
+            ] as const
+          ).map((option) => (
+            <Action
+              key={option.value}
+              label={option.label}
+              onPress={() => {
+                onChange(relativeDueDate(option.value, timezone));
+                setEditing(false);
+              }}
+            />
+          ))}
+        </View>
+      )}
+      <View style={{ alignItems: "stretch", gap: spacing.sm }}>
         <DateTimePicker
           value={
             dateOnly
@@ -94,12 +146,25 @@ export function DateField({ label, value, onChange, dateOnly = false }: DateFiel
               : new Date(value)
           }
           timeZoneName={timezone}
-          mode={dateOnly ? "date" : "datetime"}
-          display="compact"
+          accentColor={overdue ? t.destructive : workspaceColor(t, "tasks")}
+          mode="date"
+          display="inline"
           onChange={(_event, date) => {
             if (date) onChange(dateOnly ? dateString(date) : date.toISOString());
           }}
         />
+        {!dateOnly && (
+          <DateTimePicker
+            value={new Date(value)}
+            timeZoneName={timezone}
+            accentColor={overdue ? t.destructive : workspaceColor(t, "tasks")}
+            mode="time"
+            display="spinner"
+            onChange={(_event, date) => {
+              if (date) onChange(date.toISOString());
+            }}
+          />
+        )}
         <Action
           label="Clear"
           onPress={() => {

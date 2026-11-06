@@ -12,12 +12,13 @@ import { randomUUID } from "expo-crypto";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Text, View } from "react-native";
-import { Toaster } from "sonner-native";
+import { AppToaster } from "../../components/app-toaster";
+import { EditorClose } from "../../components/editor-close";
 import { Icon } from "../../components/icons";
 import { RowActions } from "../../components/row-actions";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
-import { actOnItem, type ItemAction, useTaskAction, useTaskApi, useTaskResources } from "./data";
+import { actWithUndo, type ItemAction, useTaskAction, useTaskApi, useTaskResources } from "./data";
 import { DateField } from "./date-field";
 import { FormSave } from "./form-save";
 import { useDraftField } from "./form-state";
@@ -247,7 +248,23 @@ function TaskEditor({
       groupKey: "none",
     } as TaskWorkspaceItem;
     const run = () =>
-      void action.run("Updating…", () => actOnItem(api, item, operation), finish, handleError);
+      void action.run(
+        "Updating…",
+        () => actWithUndo(api, item, operation),
+        finish,
+        handleError,
+        () => ({
+          message:
+            operation === "trash"
+              ? "Moved to Trash"
+              : operation === "complete"
+                ? "Completed"
+                : operation === "cancel"
+                  ? "Task cancelled"
+                  : "Updated",
+        }),
+        (result) => result.undo(),
+      );
     if (operation === "trash" || operation === "cancel")
       confirm(
         operation === "trash" ? "Move to Trash?" : "Cancel task?",
@@ -266,7 +283,7 @@ function TaskEditor({
           title: persisted ? `${kind} details` : `new ${kind}`,
           gestureEnabled: false,
           headerLeft: () => (
-            <Action
+            <EditorClose
               label={edited ? "Cancel" : "Close"}
               disabled={action.pending}
               onPress={() =>
@@ -314,7 +331,7 @@ function TaskEditor({
                                   id: "cancel",
                                   destructive: true,
                                   label: "Cancel task",
-                                  icon: "disconnected" as const,
+                                  icon: "cancel" as const,
                                   disabled: action.pending || readOnly || conflict,
                                   onPress: () => transition("cancel"),
                                 },
@@ -323,7 +340,7 @@ function TaskEditor({
                           {
                             id: "trash",
                             label: "Move to Trash",
-                            icon: "archive",
+                            icon: "trash",
                             destructive: true,
                             disabled: action.pending || readOnly || conflict,
                             onPress: () => transition("trash"),
@@ -362,7 +379,7 @@ function TaskEditor({
             }
           />
           <Section title="Due & priority">
-            <DateField label="Due date" value={dueAt} onChange={setDueAt} />
+            <DateField due label="Due date" value={dueAt} onChange={setDueAt} />
             <Choice
               label="Priority"
               value={priority}
@@ -512,7 +529,7 @@ function TaskEditor({
           onPress={save}
         />
       )}
-      <Toaster />
+      <AppToaster editor />
     </View>
   );
 }

@@ -106,9 +106,12 @@ export function SearchableChoice({
                   }}
                   style={({ pressed }) => [styles.settingRow, { opacity: pressed ? 0.6 : 1 }]}
                 >
+                  {entity && item.label !== "None" && (
+                    <Icon name={entityDictionary[entity].icon} color={t.secondary} size={22} />
+                  )}
                   <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{item.label}</Text>
                   {item.value === value && (
-                    <Icon name="check" size={22} color={workspaceColor(t, "tasks")} />
+                    <Icon name="save" size={22} color={workspaceColor(t, "tasks")} />
                   )}
                 </Pressable>
               )}

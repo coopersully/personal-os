@@ -4,7 +4,7 @@ import type { IconName } from "../components/icons";
 export type WorkspacePageDefinition = { name: string; label: string; icon: IconName };
 export const workspacePages = {
   tasks: [
-    { name: "index", label: "today", icon: "calendar" },
+    { name: "index", label: "to-do", icon: "calendar" },
     { name: "projects", label: "projects", icon: "target" },
     { name: "lists", label: "lists", icon: "views" },
     { name: "views", label: "browse", icon: "grid" },

@@ -76,7 +76,8 @@ Never treat an uncertain write as failure that can be blindly retried. Preserve 
 
 ## Task organization and view controls
 
-Tabs are Today, Projects, Lists, Browse. Pinned lists/projects occupy only their horizontal pinned
+Tabs are To-do, Projects, Lists, Browse. To-do defaults to open items due today or overdue, ungrouped, with Auto ordering.
+The due filter is removable and all view options remain editable; Reset view restores these defaults. Pinned lists/projects occupy only their horizontal pinned
 section; omit an empty pinned row. Inbox remains the default list for unorganized tasks under Lists.
 Browse has no Add action. Upcoming and History share its top cards; below them group Task views
 (All, Tasks, Reminders, Scheduled), Storage (Archive, Trash), and Preferences.
@@ -104,3 +105,58 @@ Notification permission is contextual and user initiated. Use standard OS permis
 flows, account-owned scheduling and generic lock-screen copy. Report only confirmed scheduling
 or delivery outcomes. Local notifications do not guarantee always-on cross-device monitoring;
 see the notification boundary record for current limitations.
+
+## Glass contrast and action consistency
+
+Glass controls must remain readable over their actual rendered material, not merely the page
+background. Header capsules use a legible dark foreground on the native light glass treatment;
+menu content follows its light/dark menu appearance. Keep enabled text/glyphs at primary emphasis
+and disabled buttons visibly present with a distinct disabled state. Inspect both appearances
+and the editor header, floating Save and native popup together. Retain native glass rendering.
+
+Menu text and icons share the same semantic color, including destructive red. UIImage menu
+assets preserve original pixels, so use generated semantic-color assets when template tint is
+unavailable. Reuse the exact Trash/Archive glyphs from their destination pages. Cancel record
+uses the cancel glyph; never substitute a disconnected-link icon. Ordinary actions and their
+icons remain neutral. Keep these rules in shared controls, not page-specific patches.
+
+
+### To-do urgency and rescheduling
+
+Auto ordering is server-side before pagination: open items due within the next ten minutes rank
+first, then High/Medium/Low priority, then earliest deadline, then stable identity. The default
+membership includes only open items with a deadline before the end of today in the account's
+planning timezone; undated, completed and future-due items remain available through filters.
+A reservation today does not pull a future-due item into this default. Display groups, when
+explicitly chosen, take precedence; Auto orders within each group. Cursor pages share their first
+page's clock; a fresh refresh recalculates urgency. Mobile Auto views refresh every minute.
+Auto is a view option and To-do default, not a persisted workspace-wide sort preference.
+
+Overdue means an open, non-trashed item whose due timestamp is in the past, including earlier
+today. Use a subtle destructive-color surface tint and a red, explicitly named Overdue date;
+keep title and other metadata in their normal colors. Include deadline time. The due-date editor
+retains red date treatment while the draft deadline is past. Quick draft-only choices are In 1
+hour, Tomorrow at 9 AM, and In 1 week at 9 AM, all relative to now/today in the account timezone,
+not relative to the old overdue date. Use calendar days across DST. Save/Cancel retain their
+existing semantics; a shortcut never saves automatically. Clear removes the deadline.
+
+
+### Permanent lists, header rhythm, and toast presentation
+
+Inbox is the permanent default List. Show a quiet secondary “Permanent” label alongside its
+name in the directory and below its name when pinned. Do not imply that it is locked or unusable;
+it still opens and can be pinned. Its protected identity has no edit/archive action.
+
+Page titles have 16 points before unfiltered content. A title row containing view actions owns
+12 points below the row; the heading and action must not add their own bottom margins inside it.
+Active filter chips have 8 points below them, then the result summary has 12 points before rows.
+Use the same 20-point page inset across lists and directories. Avoid additive margins that leave
+a large empty band between the title and filters.
+
+Use AppToaster everywhere, with one active default-channel host: the root normally, or the host
+inside the native task/container editor sheet. Enable Sonner stacking with up to three visible
+notices, 8-point separation, and five-second ordinary notices (Undo keeps its longer window).
+Use an opaque contrasting surface, legible text, subtle border/shadow, and an explicit close
+control; never translucent glass for feedback. Keep Undo buttons at least 44 points tall. Update
+one toast ID for loading/result; name outcomes such as “List pinned” rather than a generic Saved
+when the action has a more informative name. Do not duplicate the same toast in root and sheet.

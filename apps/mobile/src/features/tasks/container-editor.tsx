@@ -14,7 +14,8 @@ import { randomUUID } from "expo-crypto";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
-import { Toaster } from "sonner-native";
+import { AppToaster } from "../../components/app-toaster";
+import { EditorClose } from "../../components/editor-close";
 import { Icon } from "../../components/icons";
 import { RowActions } from "../../components/row-actions";
 import { useTheme } from "../../theme";
@@ -183,7 +184,7 @@ function ContainerForm({
           title: `${initial ? "edit" : "new"} ${kind}`,
           gestureEnabled: false,
           headerLeft: () => (
-            <Action
+            <EditorClose
               label={edited ? "Cancel" : "Close"}
               disabled={action.pending}
               onPress={() =>
@@ -217,7 +218,7 @@ function ContainerForm({
                           {
                             id: "cancel",
                             label: "Cancel project",
-                            icon: "disconnected" as const,
+                            icon: "cancel" as const,
                             destructive: true,
                             disabled: action.pending || stale,
                             onPress: () =>
@@ -451,7 +452,7 @@ function ContainerForm({
           onPress={save}
         />
       )}
-      <Toaster />
+      <AppToaster editor />
     </View>
   );
 }

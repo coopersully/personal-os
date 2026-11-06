@@ -120,6 +120,50 @@ describe.sequential("shared task workspace PostgreSQL projection", () => {
   const list = (query: Record<string, unknown> = {}) =>
     service.list(userId, taskWorkspaceQuerySchema.parse(query));
 
+  it("orders Auto globally with imminent deadlines ahead of priority and freezes its pagination clock", async () => {
+    await insert("Overdue high", {
+      kind: "task",
+      priority: "high",
+      dueAt: new Date("2026-09-01T15:00:00Z"),
+    });
+    await insert("Soon low", {
+      kind: "task",
+      priority: "low",
+      dueAt: new Date("2026-09-03T02:10:00Z"),
+    });
+    await insert("Later medium", { priority: "medium", dueAt: new Date("2026-09-03T02:11:00Z") });
+    await insert("Future", { priority: "high", dueAt: new Date("2026-09-04T02:00:00Z") });
+    await insert("Undated", { kind: "task", priority: "high" });
+    await insert("Completed", {
+      priority: "high",
+      dueAt: new Date("2026-09-03T02:02:00Z"),
+      completedAt: instant,
+    });
+    const query = { sort: "auto", due: "today", status: "open", limit: 1 };
+    const first = await list(query);
+    expect(first.total).toBe(3);
+    expect(first.items.map((item) => item.record.title)).toEqual(["Soon low"]);
+    const later = createTaskWorkspaceService({
+      db: database.db,
+      now: () => new Date("2026-09-03T02:20:00Z"),
+      cursorSecret: "workspace-test-secret",
+    });
+    // A full fresh query re-evaluates urgency; continued pages retain their original asOf.
+    expect(
+      (await later.list(userId, taskWorkspaceQuerySchema.parse({ ...query, limit: 10 }))).items.map(
+        (item) => item.record.title,
+      ),
+    ).toEqual(["Overdue high", "Later medium", "Soon low"]);
+    const second = await later.list(
+      userId,
+      taskWorkspaceQuerySchema.parse({ ...query, cursor: first.nextCursor }),
+    );
+    expect(second.items[0]?.record.title).toBe("Overdue high");
+    const third = await list({ ...query, cursor: second.nextCursor });
+    expect(third.items[0]?.record.title).toBe("Later medium");
+    expect(third.nextCursor).toBeNull();
+  });
+
   it("preserves canonical kinds, excludes other users, and keeps Inbox task-owned", async () => {
     await insert("Task", { kind: "task" });
     await insert("Reminder");

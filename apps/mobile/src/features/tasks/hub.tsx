@@ -78,12 +78,19 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
     if (!resources.settings.data) return;
     const key = kind === "list" ? "pinnedListIds" : "pinnedProjectIds";
     const values = resources.settings.data.preferences[key];
-    void action.run("Saving pin…", () =>
-      api.updateWorkspaceSettings("tasks", {
-        expectedRevision: resources.settings.data?.revision ?? 0,
-        preferences: {
-          [key]: values.includes(id) ? values.filter((value) => value !== id) : [...values, id],
-        },
+    void action.run(
+      "Updating pin…",
+      () =>
+        api.updateWorkspaceSettings("tasks", {
+          expectedRevision: resources.settings.data?.revision ?? 0,
+          preferences: {
+            [key]: values.includes(id) ? values.filter((value) => value !== id) : [...values, id],
+          },
+        }),
+      undefined,
+      undefined,
+      () => ({
+        message: `${kind === "list" ? "List" : "Project"} ${values.includes(id) ? "unpinned" : "pinned"}`,
       }),
     );
   };

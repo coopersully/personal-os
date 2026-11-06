@@ -10,6 +10,8 @@ export function buildViewOptions(
       label:
         (
           {
+            auto: "Auto",
+            today: "Today & overdue",
             default: "Recommended",
             open_and_completed: "Open & completed",
             date: "Due date",
@@ -27,6 +29,21 @@ export function buildViewOptions(
         )[value] ?? value.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase()),
     }));
   return [
+    ...(scope.view === "all" && !scope.listId && !scope.projectId
+      ? [
+          {
+            key: "view" as const,
+            label: "When",
+            value: query.view ?? "all",
+            section: "filter" as const,
+            options: [
+              { value: "all", label: "Any date" },
+              { value: "today", label: "Today & overdue" },
+              { value: "upcoming", label: "After today" },
+            ],
+          },
+        ]
+      : []),
     ...(!query.listId && !query.projectId && !scope.kind
       ? [
           {
@@ -64,7 +81,7 @@ export function buildViewOptions(
       label: "Due",
       value: query.due ?? "any",
       section: "filter",
-      options: options(["any", "overdue", "dated", "none"]),
+      options: options(["any", "today", "overdue", "dated", "none"]),
     },
     {
       key: "reserved",
@@ -79,6 +96,7 @@ export function buildViewOptions(
       value: query.sort ?? "default",
       section: "presentation",
       options: options([
+        "auto",
         "default",
         "date",
         "reserved",

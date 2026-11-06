@@ -2,7 +2,8 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { Toaster, toast } from "sonner-native";
+import { toast } from "sonner-native";
+import { AppToaster } from "../components/app-toaster";
 import { AuthProvider, useAuth } from "../features/auth/context";
 import { PreviewProvider } from "../features/briefing/context";
 import { NotificationProvider } from "../features/notifications/provider";
@@ -16,7 +17,7 @@ export default function RootLayout() {
         <NotificationProvider>
           <AuthenticatedLayout />
         </NotificationProvider>
-        <Toaster />
+        <AppToaster />
       </AuthProvider>
     </GestureHandlerRootView>
   );

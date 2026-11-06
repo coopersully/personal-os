@@ -3,6 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { Icon } from "../../components/icons";
 import { spacing, useTheme, workspaceColor } from "../../theme";
 import { useAuth } from "../auth/context";
+import { isPastDue } from "./due-date";
 import { isOpen } from "./logic";
 import { taskMetadata } from "./presentation";
 import { groupEdges, styles } from "./ui";
@@ -29,6 +30,7 @@ export function TaskRow({
 }) {
   const t = useTheme();
   const done = !isOpen(item);
+  const overdue = !done && !item.deletedAt && isPastDue(item.record.dueAt);
   const { state } = useAuth();
   const metadata = taskMetadata(item, state.user?.planningTimezone);
   return (
@@ -38,7 +40,11 @@ export function TaskRow({
         { alignItems: "flex-start", paddingVertical: spacing.lg, gap: spacing.xs },
         groupEdges(first, last),
         {
-          backgroundColor: marked ? `${workspaceColor(t, "tasks")}22` : t.surface,
+          backgroundColor: marked
+            ? `${workspaceColor(t, "tasks")}22`
+            : overdue
+              ? `${t.destructive}0D`
+              : t.surface,
           borderBottomColor: t.line,
           borderBottomWidth: last ? 0 : 0.5,
         },
@@ -100,7 +106,19 @@ export function TaskRow({
         </Text>
         {metadata.length > 0 && (
           <Text numberOfLines={1} style={{ color: t.secondary, fontSize: 12 }}>
-            {metadata.join(" · ")}
+            {metadata.map((part, index) => (
+              <Text
+                key={part}
+                style={
+                  part.startsWith("Due ") && overdue
+                    ? { color: t.destructive, fontWeight: "600" }
+                    : undefined
+                }
+              >
+                {index > 0 ? " · " : ""}
+                {part.startsWith("Due ") && overdue ? part.replace("Due ", "Overdue · ") : part}
+              </Text>
+            ))}
           </Text>
         )}
       </Pressable>

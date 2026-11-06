@@ -1,7 +1,7 @@
 import type { createApiClient } from "@personal-os/api-client";
 import type { TaskWorkspaceItem } from "@personal-os/domain";
 import { describe, expect, it, vi } from "vitest";
-import { actOnItem, allPages, uniqueItems } from "./logic";
+import { actOnItem, actWithUndo, allPages, uniqueItems } from "./logic";
 
 const task = {
   kind: "task",
@@ -59,5 +59,57 @@ describe("mobile task boundaries", () => {
       "read-only",
     );
     await expect(actOnItem(client, reminder, "cancel")).rejects.toThrow("cancelled");
+  });
+});
+
+describe("confirmed action undo", () => {
+  it("uses the completed task revision and preserves conflict rejection", async () => {
+    const api = {
+      completeTask: vi.fn().mockResolvedValue({ ...task.record, revision: 8 }),
+      reopenTask: vi.fn().mockRejectedValue(new Error("conflict")),
+    };
+    const receipt = await actWithUndo(
+      api as unknown as ReturnType<typeof createApiClient>,
+      task,
+      "complete",
+    );
+    await expect(receipt.undo()).rejects.toThrow("conflict");
+    expect(api.reopenTask).toHaveBeenCalledWith("same", { expectedRevision: 8 });
+  });
+  it("restores trashed reminders with the returned timestamp", async () => {
+    const api = {
+      trashReminder: vi.fn().mockResolvedValue({ ...reminder.record, updatedAt: "new-version" }),
+      restoreReminder: vi.fn(),
+    };
+    const receipt = await actWithUndo(
+      api as unknown as ReturnType<typeof createApiClient>,
+      reminder,
+      "trash",
+    );
+    await receipt.undo();
+    expect(api.restoreReminder).toHaveBeenCalledWith("same", "new-version");
+  });
+  it("does not offer an undo receipt for a failed write", async () => {
+    const api = { trashTask: vi.fn().mockRejectedValue(new Error("offline")) };
+    await expect(
+      actWithUndo(api as unknown as ReturnType<typeof createApiClient>, task, "trash"),
+    ).rejects.toThrow("offline");
+  });
+  it("restores the cancelled lifecycle when undoing reopen", async () => {
+    const api = {
+      reopenTask: vi.fn().mockResolvedValue({ ...task.record, revision: 8 }),
+      cancelTask: vi.fn(),
+    };
+    const cancelled = {
+      ...task,
+      record: { ...task.record, lifecycle: "cancelled" },
+    } as TaskWorkspaceItem;
+    const receipt = await actWithUndo(
+      api as unknown as ReturnType<typeof createApiClient>,
+      cancelled,
+      "reopen",
+    );
+    await receipt.undo();
+    expect(api.cancelTask).toHaveBeenCalledWith("same", { expectedRevision: 8 });
   });
 });

@@ -146,6 +146,7 @@ export function createTaskWorkspaceService({
             relevantAt = sql`COALESCE(${reminders.completedAt}, ${reminders.taskCancelledAt},
           ${taskLists.archivedAt}, ${taskProjects.archivedAt}, ${taskProjects.completedAt}, ${taskProjects.cancelledAt}, ${reminders.updatedAt})`;
 
+          if (query.due === "today") conditions.push(lt(reminders.dueAt, new Date(day.to)));
           if (query.due === "none") conditions.push(isNull(reminders.dueAt));
           if (query.due === "dated") conditions.push(isNotNull(reminders.dueAt));
           if (query.due === "overdue")
@@ -184,27 +185,33 @@ export function createTaskWorkspaceService({
           // Today defaults to overdue deadlines, reserved work, then due-only work.
           // Explicit sorts retain their requested order within the selected display groups.
           const rank =
-            query.view === "today" && query.sort === "default"
-              ? sql<number>`CASE WHEN ${reminders.dueAt} < ${day.from}::timestamptz THEN 0
+            query.sort === "auto"
+              ? sql<number>`CASE WHEN ${lifecycle} = 'open' AND ${reminders.dueAt} >= ${asOf}::timestamptz
+                AND ${reminders.dueAt} <= ${asOf}::timestamptz + interval '10 minutes' THEN 0 ELSE 1 END`
+              : query.view === "today" && query.sort === "default"
+                ? sql<number>`CASE WHEN ${reminders.dueAt} < ${day.from}::timestamptz THEN 0
                 WHEN ${scheduled} >= ${day.from}::timestamptz AND ${scheduled} < ${day.to}::timestamptz THEN 1
                 ELSE 2 END`
-              : sql<number>`CAST(0 AS integer)`;
+                : sql<number>`CAST(0 AS integer)`;
           const value =
-            query.sort === "priority"
-              ? sql<
-                  string | null
-                >`CASE ${reminders.priority} WHEN 'high' THEN '0' WHEN 'medium' THEN '1' ELSE '2' END`
-              : query.sort === "title"
-                ? sql<string | null>`lower(${reminders.title})`
-                : query.sort === "estimate"
-                  ? sql<
-                      string | null
-                    >`CASE WHEN ${reminders.kind} = 'task' THEN lpad(${reminders.estimateMinutes}::text, 4, '0') END`
-                  : query.sort === "newest" || query.sort === "oldest"
-                    ? dateKey(sql`${reminders.createdAt}`)
-                    : query.sort === "reserved"
-                      ? dateKey(scheduled)
-                      : dateKey(relevantAt);
+            query.sort === "auto"
+              ? sql<string>`(CASE ${reminders.priority} WHEN 'high' THEN '0' WHEN 'medium' THEN '1' ELSE '2' END)
+                || COALESCE(${dateKey(sql`${reminders.dueAt}`)}, '9999')`
+              : query.sort === "priority"
+                ? sql<
+                    string | null
+                  >`CASE ${reminders.priority} WHEN 'high' THEN '0' WHEN 'medium' THEN '1' ELSE '2' END`
+                : query.sort === "title"
+                  ? sql<string | null>`lower(${reminders.title})`
+                  : query.sort === "estimate"
+                    ? sql<
+                        string | null
+                      >`CASE WHEN ${reminders.kind} = 'task' THEN lpad(${reminders.estimateMinutes}::text, 4, '0') END`
+                    : query.sort === "newest" || query.sort === "oldest"
+                      ? dateKey(sql`${reminders.createdAt}`)
+                      : query.sort === "reserved"
+                        ? dateKey(scheduled)
+                        : dateKey(relevantAt);
           const missing = sql<number>`CASE WHEN ${value} IS NULL THEN 1 ELSE 0 END`;
           const orderedValue = sql<string>`COALESCE(${value}, '') COLLATE "C"`;
           const id = sql<string>`${reminders.id}::text COLLATE "C"`;

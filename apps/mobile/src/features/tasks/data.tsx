@@ -2,7 +2,15 @@ import { ApiClientError } from "@personal-os/api-client";
 import { refreshDueAlerts } from "../notifications/events";
 import { allPages } from "./logic";
 
-export { actOnItem, allPages, type ItemAction, isOpen, itemKey, uniqueItems } from "./logic";
+export {
+  actOnItem,
+  actWithUndo,
+  allPages,
+  type ItemAction,
+  isOpen,
+  itemKey,
+  uniqueItems,
+} from "./logic";
 
 import {
   QueryCache,
@@ -78,6 +86,7 @@ export function useTaskAction() {
     onSuccess?: (value: T) => void,
     onError?: (error: unknown) => void,
     feedback?: (value: T) => { message: string; error?: boolean },
+    undo?: (value: T) => Promise<unknown>,
   ) {
     if (lock.current) return false;
     lock.current = true;
@@ -87,8 +96,27 @@ export function useTaskAction() {
       const value = await action();
       refreshDueAlerts();
       const result = feedback?.(value);
-      if (result?.error) toast.error(result.message, { id });
-      else toast.success(result?.message ?? "Saved", { id });
+      let used = false;
+      const undoAction = undo
+        ? {
+            label: "Undo",
+            onClick: () => {
+              if (used) return;
+              used = true;
+              const undoId = toast.loading("Undoing…");
+              void undo(value)
+                .then(() => toast.success("Action undone", { id: undoId }))
+                .catch((error: unknown) => toast.error(errorMessage(error), { id: undoId }))
+                .finally(() => {
+                  refreshDueAlerts();
+                  void client.invalidateQueries({ queryKey: ["tasks"] });
+                });
+            },
+          }
+        : undefined;
+      const options = { id, action: undoAction, duration: undoAction ? 10000 : undefined };
+      if (result?.error) toast.error(result.message, options);
+      else toast.success(result?.message ?? "Saved", options);
       onSuccess?.(value);
       await client.invalidateQueries({ queryKey: ["tasks"] });
       return true;

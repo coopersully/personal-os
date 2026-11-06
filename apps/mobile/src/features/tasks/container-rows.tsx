@@ -20,8 +20,15 @@ function ContainerRow({
   subtitle,
   icon,
   editable = true,
+  permanent = false,
   ...actions
-}: ContainerRowActions & { name: string; subtitle?: string; icon: IconName; editable?: boolean }) {
+}: ContainerRowActions & {
+  name: string;
+  subtitle?: string;
+  icon: IconName;
+  editable?: boolean;
+  permanent?: boolean;
+}) {
   const t = useTheme();
   return (
     <View
@@ -45,7 +52,17 @@ function ContainerRow({
       >
         <Icon name={icon} size={24} color={t.secondary} />
         <View style={{ flex: 1, gap: spacing.xs }}>
-          <Text style={{ color: t.ink, fontSize: 17 }}>{name}</Text>
+          <View
+            style={{
+              flexDirection: "row",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: spacing.sm,
+            }}
+          >
+            <Text style={{ color: t.ink, fontSize: 17 }}>{name}</Text>
+            {permanent && <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>}
+          </View>
           {!!subtitle && (
             <Text numberOfLines={2} style={{ color: t.secondary, fontSize: 12 }}>
               {subtitle}
@@ -86,6 +103,7 @@ export function ListRow({ record, ...actions }: ContainerRowActions & { record: 
       subtitle={record.description ?? undefined}
       icon={entityDictionary.list.icon}
       editable={record.kind !== "inbox"}
+      permanent={record.kind === "inbox"}
     />
   );
 }
@@ -197,6 +215,9 @@ export function PinnedContainers({
                 <Text numberOfLines={2} style={{ fontSize: 16, fontWeight: "600", color: t.ink }}>
                   {item.name}
                 </Text>
+                {"kind" in item && item.kind === "inbox" && (
+                  <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>
+                )}
               </Pressable>
             </View>
           )}

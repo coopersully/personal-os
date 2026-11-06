@@ -1,7 +1,6 @@
 import type { PropsWithChildren } from "react";
 import { Children, useState } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Platform,
@@ -56,7 +55,11 @@ export function Action({
     </Pressable>
   );
 }
-export function Heading({ children, icon }: PropsWithChildren<{ icon?: IconName }>) {
+export function Heading({
+  children,
+  icon,
+  compact = false,
+}: PropsWithChildren<{ icon?: IconName; compact?: boolean }>) {
   const t = useTheme();
   return (
     <View
@@ -64,7 +67,7 @@ export function Heading({ children, icon }: PropsWithChildren<{ icon?: IconName 
         flexDirection: "row",
         alignItems: "flex-start",
         gap: spacing.md,
-        marginBottom: spacing.lg,
+        marginBottom: compact ? 0 : spacing.lg,
       }}
     >
       {icon && (
@@ -251,6 +254,28 @@ export function Field({
 }: TextInputProps & { label: string; compact?: boolean }) {
   const [editing, setEditing] = useState(false);
   const t = useTheme();
+  if (compact && !props.multiline)
+    return (
+      <View style={styles.settingRow}>
+        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
+        <TextInput
+          {...props}
+          accessibilityLabel={label}
+          placeholderTextColor={t.secondary}
+          style={{
+            color: t.ink,
+            fontSize: 17,
+            minHeight: 44,
+            width:
+              props.keyboardType === "number-pad" || props.keyboardType === "numeric"
+                ? "30%"
+                : "55%",
+            textAlign: "right",
+            padding: 0,
+          }}
+        />
+      </View>
+    );
   if (compact && !editing)
     return (
       <Pressable
@@ -315,23 +340,7 @@ export function Choice({
 }) {
   const t = useTheme();
   const [expanded, setExpanded] = useState(false);
-  const choose = () => {
-    if (Platform.OS === "ios")
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          title: label,
-          options: [
-            ...options.map((option) => `${option.value === value ? "✓ " : ""}${option.label}`),
-            "Cancel",
-          ],
-          cancelButtonIndex: options.length,
-        },
-        (index) => {
-          if (index < options.length) onChange(options[index].value);
-        },
-      );
-    else setExpanded(!expanded);
-  };
+  const choose = () => setExpanded(!expanded);
   return (
     <View>
       <Pressable
@@ -339,7 +348,7 @@ export function Choice({
         accessibilityRole="button"
         accessibilityState={{
           disabled: !!disabled,
-          expanded: Platform.OS === "ios" ? undefined : expanded,
+          expanded,
         }}
         accessibilityLabel={`${label}, ${options.find((option) => option.value === value)?.label ?? "None"}`}
         onPress={choose}
@@ -369,14 +378,19 @@ export function Choice({
       </Pressable>
       {expanded &&
         options.map((option) => (
-          <Action
+          <Pressable
             key={option.value}
-            label={option.label}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: option.value === value }}
             onPress={() => {
               onChange(option.value);
               setExpanded(false);
             }}
-          />
+            style={styles.settingRow}
+          >
+            <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{option.label}</Text>
+            {option.value === value && <Icon name="save" color={workspaceColor(t, "tasks")} />}
+          </Pressable>
         ))}
     </View>
   );

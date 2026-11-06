@@ -92,8 +92,9 @@ and “Choose three dinners and make a grocery list.” Keep persistent accessib
 are never defaults or saved data. Search examples demonstrate a meaningful query.
 
 Setting fields rest in one vertically centered row with the label leading and the value trailing.
-Long values truncate in the resting preview. Tapping expands the editing control; blur or Done
-returns to the compact row without losing draft changes. Title/description are content fields
+Simple short text and numeric values edit directly in the trailing value area without expanding
+the row (for example Estimate in minutes). Use an appropriate keyboard. Expand only controls
+that need more space; Done returns to the compact row without losing draft changes. Title/description are content fields
 and remain visible. Allow rows to grow for accessibility rather than forcing clipping.
 
 Action menus show semantic icons. Put ordinary actions first, then a separated destructive
@@ -148,3 +149,39 @@ Active overrides/search use removable 44-point chips with readable values and ex
 remove labels. Dates are formatted for people. Reset filters preserves presentation and search;
 Reset view returns to the destination's scope and saved defaults. Saving sort/group defaults is
 a distinct explicit action with Sonner feedback and existing revision safeguards.
+
+
+## Inline selection and dates
+
+Short finite choices such as Priority expand below the setting row, with labels start-aligned
+and one plain selected check at the trailing edge. Selection collapses the options. Keep selected
+state accessible; do not prefix labels with check characters or center the options. Native
+sort/group menus remain appropriate for toolbar configuration. Searchable entity sheets remain
+appropriate for long collections: use the dictionary icon in the trigger and before each entity
+option, with selection at the trailing edge. An explicit None option is not an entity.
+
+Use the shared DateField for due dates, reserved time, project targets and date filters. On iPhone,
+expand an Apple native inline calendar and, for timestamps, a native time wheel below the row;
+Clear removes the value and Done collapses it. Date-only values remain date-only. Use the account
+planning timezone for display and conversion, never a record timezone selector. Preserve locale
+ordering and system accessibility. Do not add another custom calendar or raw timestamp editor on iOS.
+
+## Undo feedback
+
+Confirmed reversible task/reminder lifecycle actions offer a ten-second Sonner Undo action,
+including successful members of a batch. Name the confirmed action; never offer Undo for an
+unconfirmed write. Each Undo is consumed once, uses the returned revision/updatedAt, reports its
+own pending/result through Sonner, and refreshes results and notification scheduling. A newer
+change must cause a conflict, never be silently overwritten; the original API session bounds the
+callback. Failed batch members remain selected. No inline action-result messages.
+
+Container transitions can move/archive/complete children: do not advertise a false inverse.
+Until the API supports transactional reversal of that whole operation, retain the explicit
+confirmation and recovery flow instead of offering Undo. This is a bounded implementation gap,
+not an exception to the goal of reversible actions.
+
+References: Apple's [Pickers](https://developer.apple.com/design/human-interface-guidelines/pickers)
+guidance favors contextual, predictably ordered selection and provides inline date and time
+styles. [Undo and redo](https://developer.apple.com/design/human-interface-guidelines/undo-and-redo)
+asks for predictable reversal and visible results. Our inline short-choice rows and Sonner actions
+are nohmi's application of those principles, not claims of native UIKit menu or undo-manager behavior.

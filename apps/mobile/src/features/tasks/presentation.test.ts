@@ -86,6 +86,6 @@ it("renders task dates in the account zone across a midnight boundary", () => {
     readOnly: false,
     record: { priority: "medium", dueAt: "2026-11-06T00:30:00Z" },
   } as TaskWorkspaceItem;
-  expect(taskMetadata(item, "America/Los_Angeles")).toEqual(["Due Nov 5"]);
-  expect(taskMetadata(item, "Asia/Tokyo")).toEqual(["Due Nov 6"]);
+  expect(taskMetadata(item, "America/Los_Angeles")).toEqual(["Due Nov 5, 4:30 PM"]);
+  expect(taskMetadata(item, "Asia/Tokyo")).toEqual(["Due Nov 6, 9:30 AM"]);
 });

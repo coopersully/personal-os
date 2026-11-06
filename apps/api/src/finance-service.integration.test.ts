@@ -34,6 +34,7 @@ import {
   financeTransactions,
   goals,
   migrateDatabase,
+  sessions,
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
@@ -45,7 +46,7 @@ import { financeActionFingerprint } from "./finance-action-identity.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
-import { decryptJson } from "./security.js";
+import { decryptJson, hashToken } from "./security.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
 
@@ -11278,5 +11279,314 @@ describe.sequential("finance service", () => {
     expect(accounts.accountSemantics.possibleDuplicateGroups).toHaveLength(1);
     const wealth = await service.getWealthSummary(owner.id);
     expect(wealth.accountSemantics).toEqual(accounts.accountSemantics);
+  });
+  describe("historical provider evidence composition", () => {
+    async function historyCompositionFixture() {
+      const [owner] = await database.db
+        .insert(users)
+        .values({
+          displayName: "History composition owner",
+          email: `history-composition-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        })
+        .returning();
+      if (!owner) throw new Error("History composition owner missing.");
+      const providerItems = createFinanceProviderItemService({
+        db: database.db,
+        encryptionKey: key,
+        now: () => now,
+      });
+      const [savedAccount] = await providerItems.upsertConnection({
+        accessToken: "composition-secret-canary",
+        itemId: "composition-private-item",
+        institution: "Synthetic history bank",
+        accounts: [
+          {
+            accountId: "composition-private-account",
+            balanceCurrent: 100,
+            currencyCode: "EUR",
+            name: "Synthetic history account",
+            officialName: null,
+          },
+        ],
+        context: { principal: financePrincipal(owner.id), requestId: "history-composition-setup" },
+      });
+      if (!savedAccount) throw new Error("History composition account missing.");
+      const [account] = await database.db
+        .select()
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, savedAccount.id));
+      const [item] = await database.db
+        .select()
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.userId, owner.id));
+      if (!account || !item) throw new Error("History composition native source missing.");
+      const [transaction] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: owner.id,
+          accountId: account.id,
+          amount: 901,
+          direction: "expense",
+          currencyCode: "EUR",
+          merchant: "Synthetic merchant",
+          notes: "Preserve native notes",
+          transactionDate: "2026-07-19",
+          providerTransactionId: "composition-private-transaction",
+        })
+        .returning();
+      if (!transaction) throw new Error("History composition transaction missing.");
+      const sessionTokenHash = hashToken(`synthetic-history-session-${owner.id}`);
+      const [session] = await database.db
+        .insert(sessions)
+        .values({
+          userId: owner.id,
+          tokenHash: sessionTokenHash,
+          expiresAt: new Date(now.getTime() + 60_000),
+        })
+        .returning();
+      if (!session) throw new Error("History composition session missing.");
+      const transport = vi.fn<typeof globalThis.fetch>(async () => {
+        throw new Error("No provider transport is authorized in this fixture.");
+      });
+      const plaid = createPlaidConnector({
+        clientId: "synthetic-client",
+        secret: "synthetic-secret",
+        environment: "sandbox",
+        fetch: transport,
+      });
+      const readHistory = vi
+        .fn<NonNullable<typeof plaid.readTransactionHistory>>()
+        .mockResolvedValue({
+          observedAt: now.toISOString(),
+          providerUpdatedAt: "2026-07-19T11:00:00.000Z",
+          snapshotConsistency: "not_atomic",
+          entries: [
+            {
+              accountId: "composition-private-account",
+              transactionId: "composition-private-transaction",
+              status: "found",
+              sourceAmount: -24.25,
+              normalizedAmount: 24.25,
+              economicDirection: "inflow",
+              currencyCode: "USD",
+              date: "2026-07-19",
+            },
+          ],
+          coverage: {
+            state: "partial",
+            scope: "provider_available_window",
+            reason: "page_limit",
+            pages: 5,
+            returnedTransactions: 500,
+          },
+        });
+      plaid.readTransactionHistory = readHistory;
+      const sync = vi.spyOn(plaid, "syncTransactions");
+      const getAccounts = vi.spyOn(plaid, "getAccounts");
+      const initialize = vi.spyOn(plaid, "createLinkToken");
+      const port = vi.spyOn(providerItems, "readTransactionHistory");
+      // Match real app composition: configured Item service has no connector; FinanceService must forward its exact Plaid instance.
+      const service = createFinanceService({
+        db: database.db,
+        encryptionKey: key,
+        now: () => now,
+        plaid,
+        providerItems,
+      });
+      const principal: Principal = {
+        ...financePrincipal(owner.id),
+        scopes: new Set(["finances:read"]),
+      };
+      async function ledgerSnapshot() {
+        return {
+          transactions: await database.db
+            .select()
+            .from(financeTransactions)
+            .where(eq(financeTransactions.userId, owner.id)),
+          accounts: await database.db
+            .select()
+            .from(financeAccounts)
+            .where(eq(financeAccounts.userId, owner.id)),
+          items: await database.db
+            .select()
+            .from(financeProviderItems)
+            .where(eq(financeProviderItems.userId, owner.id)),
+          allocations: await database.db
+            .select()
+            .from(financeTransactionAllocations)
+            .where(eq(financeTransactionAllocations.userId, owner.id)),
+          reviews: await database.db
+            .select()
+            .from(financeReviewCases)
+            .where(eq(financeReviewCases.userId, owner.id)),
+          audits: await database.db
+            .select()
+            .from(auditEvents)
+            .where(eq(auditEvents.userId, owner.id)),
+        };
+      }
+      return {
+        owner,
+        account,
+        item,
+        transaction,
+        session,
+        sessionTokenHash,
+        principal,
+        service,
+        plaid,
+        port,
+        readHistory,
+        sync,
+        getAccounts,
+        initialize,
+        transport,
+        ledgerSnapshot,
+      };
+    }
+
+    it("delegates exact owned source through the public facade and preserves safe partial signed evidence without writes", async () => {
+      const f = await historyCompositionFixture();
+      const before = await f.ledgerSnapshot();
+      const result = await f.service.readFinanceProviderTransactionEvidence(
+        f.principal,
+        { transactionIds: [f.transaction.id] },
+        f.sessionTokenHash,
+      );
+      expect(f.port).toHaveBeenCalledExactlyOnceWith(
+        {
+          userId: f.owner.id,
+          itemRecordId: f.item.id,
+          expectedUpdatedAt: f.item.updatedAt.toISOString(),
+          targets: [
+            {
+              accountId: "composition-private-account",
+              transactionId: "composition-private-transaction",
+            },
+          ],
+          startDate: "2026-07-19",
+          endDate: "2026-07-19",
+        },
+        f.plaid,
+      );
+      expect(f.readHistory).toHaveBeenCalledExactlyOnceWith({
+        accessToken: "composition-secret-canary",
+        itemId: "composition-private-item",
+        targets: [
+          {
+            accountId: "composition-private-account",
+            transactionId: "composition-private-transaction",
+          },
+        ],
+        startDate: "2026-07-19",
+        endDate: "2026-07-19",
+      });
+      expect(result).toEqual({
+        observedAt: now.toISOString(),
+        providerUpdatedAt: "2026-07-19T11:00:00.000Z",
+        snapshotConsistency: "not_atomic",
+        coverage: "partial",
+        reason: "page_limit",
+        entries: [
+          {
+            transactionId: f.transaction.id,
+            accountId: f.account.id,
+            transactionRevision: f.transaction.contextualRevision.toString(),
+            accountRevision: f.account.contextualRevision.toString(),
+            status: "found",
+            sourceAmount: -24.25,
+            normalizedAmount: 24.25,
+            economicDirection: "inflow",
+            currencyCode: "USD",
+            date: "2026-07-19",
+          },
+        ],
+      });
+      expect(JSON.stringify(result)).not.toContain("composition-private");
+      expect(JSON.stringify(result)).not.toContain("composition-secret");
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(f.sync).not.toHaveBeenCalled();
+      expect(f.getAccounts).not.toHaveBeenCalled();
+      expect(f.initialize).not.toHaveBeenCalled();
+      expect(f.transport).not.toHaveBeenCalled();
+    });
+
+    it("rejects denied sessions and foreign native sources through the public facade before provider access or writes", async () => {
+      const f = await historyCompositionFixture();
+      const before = await f.ledgerSnapshot();
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(
+          { ...f.principal, scopes: new Set() },
+          { transactionIds: [f.transaction.id] },
+          f.sessionTokenHash,
+        ),
+      ).rejects.toMatchObject({ code: "forbidden" });
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(
+          f.principal,
+          { transactionIds: [f.transaction.id] },
+          hashToken("wrong-session"),
+        ),
+      ).rejects.toMatchObject({ code: "forbidden" });
+      const [foreignOwner] = await database.db
+        .insert(users)
+        .values({
+          displayName: "Foreign history owner",
+          email: `foreign-history-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+        })
+        .returning();
+      if (!foreignOwner) throw new Error("Foreign history owner missing.");
+      const [foreignAccount] = await database.db
+        .insert(financeAccounts)
+        .values({
+          userId: foreignOwner.id,
+          institution: "Synthetic foreign",
+          name: "Foreign",
+          provider: "manual",
+        })
+        .returning();
+      if (!foreignAccount) throw new Error("Foreign history account missing.");
+      const [foreignTransaction] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: foreignOwner.id,
+          accountId: foreignAccount.id,
+          amount: 125,
+          direction: "expense",
+          merchant: "Foreign synthetic",
+          transactionDate: "2026-07-19",
+        })
+        .returning();
+      if (!foreignTransaction) throw new Error("Foreign history transaction missing.");
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(
+          f.principal,
+          { transactionIds: [foreignTransaction.id] },
+          f.sessionTokenHash,
+        ),
+      ).rejects.toMatchObject({ code: "not_found" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      await database.db
+        .update(sessions)
+        .set({ expiresAt: new Date(now.getTime() - 1) })
+        .where(eq(sessions.id, f.session.id));
+      await expect(
+        f.service.readFinanceProviderTransactionEvidence(
+          f.principal,
+          { transactionIds: [f.transaction.id] },
+          f.sessionTokenHash,
+        ),
+      ).rejects.toMatchObject({ code: "forbidden" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(f.port).not.toHaveBeenCalled();
+      expect(f.readHistory).not.toHaveBeenCalled();
+      expect(f.sync).not.toHaveBeenCalled();
+      expect(f.getAccounts).not.toHaveBeenCalled();
+      expect(f.initialize).not.toHaveBeenCalled();
+      expect(f.transport).not.toHaveBeenCalled();
+    });
   });
 });

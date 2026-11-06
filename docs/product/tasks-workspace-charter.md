@@ -106,7 +106,8 @@ checks, questions, a latest review artifact, or the terminal statuses `maintaine
 The shared Tasks read projection supports `due=today` for deadlines before the end of the
 person's current planning day, including overdue deadlines and excluding undated items.
 Within each selected display group, `sort=auto` puts open items due in the next ten minutes first, then orders each urgency group
-by priority, deadline and stable identity. Pagination retains the initial observation time.
+by priority, then deadline (dated before undated), and stable identity. Pagination retains the
+initial observation time.
 These are query options, not persisted workspace preferences or automatic changes to records.
 
 History contains completed/cancelled items in active containers. Archived container contents

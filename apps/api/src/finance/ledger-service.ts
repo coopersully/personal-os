@@ -17,7 +17,7 @@ import type {
   FinanceTransaction,
   FinanceTransactionRelationship,
 } from "@personal-os/domain";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
   executeFinanceIdempotently,
@@ -175,8 +175,11 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
     ) {
       requireFinanceMutation(context);
       requireFinanceExecutionGuard(tx, context.userId);
-      const rows = await tx
-        .select()
+      const locked = await tx
+        .select({
+          row: financeTransactions,
+          updatedFence: sql<string>`${financeTransactions.updatedAt}::text`,
+        })
         .from(financeTransactions)
         .where(
           and(
@@ -210,6 +213,9 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
         const changed = before.currencyCode === null || before.providerDirection === null;
         let after = before;
         if (changed) {
+          // PostgreSQL timestamps retain microseconds that a JavaScript Date cannot represent.
+          const fence = locked.find((entry) => entry.row.id === before.id);
+          if (!fence) throw new AppError("conflict", "A native source fence is unavailable.");
           const version = await nextFinanceTransactionRevision(tx, before.id);
           const [written] = await tx
             .update(financeTransactions)
@@ -224,7 +230,7 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
                 eq(financeTransactions.userId, context.userId),
                 eq(financeTransactions.accountId, before.accountId),
                 eq(financeTransactions.contextualRevision, before.contextualRevision),
-                eq(financeTransactions.updatedAt, before.updatedAt),
+                sql`${financeTransactions.updatedAt} = ${fence.updatedFence}::timestamptz`,
               ),
             )
             .returning();

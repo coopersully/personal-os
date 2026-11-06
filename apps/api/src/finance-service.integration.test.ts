@@ -11665,6 +11665,88 @@ describe.sequential("finance service", () => {
       expect(after.audits.filter((a) => a.action === "finance.source_facts_admitted")).toEqual([]);
     });
 
+    it("rolls back every native fill, revision and receipt after a later application failure, then atomically admits all targets", async () => {
+      const f = await admissionFixture();
+      const [second] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: f.owner.id,
+          accountId: f.account.id,
+          amount: 2425,
+          direction: "income",
+          currencyCode: null,
+          providerDirection: null,
+          merchant: "Second missing source",
+          notes: "Preserve second notes",
+          transactionDate: "2026-07-19",
+          providerTransactionId: "second-private-transaction",
+        })
+        .returning();
+      if (!second) throw new Error("Second target missing.");
+      f.input.targets.push({
+        transactionId: second.id,
+        expectedTransactionRevision: second.contextualRevision.toString(),
+        expectedAccountRevision: f.account.contextualRevision.toString(),
+      });
+      const first = f.response.entries[0];
+      if (!first) throw new Error("Source fixture missing.");
+      f.readHistory.mockResolvedValue({
+        ...f.response,
+        entries: [first, { ...first, transactionId: "second-private-transaction" }],
+        coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+      });
+      const before = await f.ledgerSnapshot();
+      await expect(
+        f.service.runProviderSourceAdmission(
+          { ...f.input, operation: "admit_source_facts" },
+          f.context,
+          async (tx, acquisition, sourceHash) => {
+            const applied = await f.service.applyProviderSourceFacts(
+              acquisition,
+              sourceHash,
+              { ...f.input, operation: "admit_source_facts" },
+              f.context,
+              tx,
+            );
+            expect(applied).toHaveLength(2);
+            expect(applied.every((entry) => entry.changed)).toBe(true);
+            throw new Error("Synthetic failure after both native writes.");
+          },
+        ),
+      ).rejects.toThrow("Synthetic failure after both native writes.");
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+      const outcome = await f.run();
+      expect(outcome).toMatchObject({
+        status: "applied",
+        result: {
+          entries: expect.arrayContaining([
+            {
+              transactionId: f.native.id,
+              accountId: f.account.id,
+              changed: true,
+              before: expect.anything(),
+              after: expect.objectContaining({ currencyCode: "USD", providerDirection: "income" }),
+              source: expect.anything(),
+            },
+          ]),
+        },
+      });
+      const after = await f.ledgerSnapshot();
+      expect(after.transactions).toHaveLength(2);
+      expect(
+        after.transactions.every(
+          (row) => row.currencyCode === "USD" && row.providerDirection === "income",
+        ),
+      ).toBe(true);
+      expect(after.allocations).toEqual(before.allocations);
+      expect(after.accounts).toEqual(before.accounts);
+      expect(after.items).toEqual(before.items);
+      expect(await f.receipts()).toHaveLength(1);
+      expect(await f.revisions()).toHaveLength(2);
+    });
+
     it("rejects a conflicting second source target without changing the first target, allocations, receipt or history", async () => {
       const f = await admissionFixture();
       const [second] = await database.db

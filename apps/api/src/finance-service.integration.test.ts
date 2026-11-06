@@ -11292,6 +11292,7 @@ describe.sequential("finance service", () => {
         })
         .returning();
       if (!owner) throw new Error("History composition owner missing.");
+      const historyOwnerId = owner.id;
       const providerItems = createFinanceProviderItemService({
         db: database.db,
         encryptionKey: key,
@@ -11404,27 +11405,27 @@ describe.sequential("finance service", () => {
           transactions: await database.db
             .select()
             .from(financeTransactions)
-            .where(eq(financeTransactions.userId, owner.id)),
+            .where(eq(financeTransactions.userId, historyOwnerId)),
           accounts: await database.db
             .select()
             .from(financeAccounts)
-            .where(eq(financeAccounts.userId, owner.id)),
+            .where(eq(financeAccounts.userId, historyOwnerId)),
           items: await database.db
             .select()
             .from(financeProviderItems)
-            .where(eq(financeProviderItems.userId, owner.id)),
+            .where(eq(financeProviderItems.userId, historyOwnerId)),
           allocations: await database.db
             .select()
             .from(financeTransactionAllocations)
-            .where(eq(financeTransactionAllocations.userId, owner.id)),
+            .where(eq(financeTransactionAllocations.userId, historyOwnerId)),
           reviews: await database.db
             .select()
             .from(financeReviewCases)
-            .where(eq(financeReviewCases.userId, owner.id)),
+            .where(eq(financeReviewCases.userId, historyOwnerId)),
           audits: await database.db
             .select()
             .from(auditEvents)
-            .where(eq(auditEvents.userId, owner.id)),
+            .where(eq(auditEvents.userId, historyOwnerId)),
         };
       }
       return {

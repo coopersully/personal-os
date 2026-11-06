@@ -1,6 +1,11 @@
 import { useColorScheme } from "react-native";
 import { workspacePalette } from "./navigation/workspace-palette";
 
+// Native points mirror the documented 4-unit rhythm and 12px base radius.
+export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, page: 20, xl: 24, xxl: 32 } as const;
+export const radius = { sm: 4, md: 6, control: 8, menu: 12, panel: 16 } as const;
+export const touchTarget = 44;
+
 const common = {
   mail: "#d4005a",
   tasks: "#7928ff",
@@ -18,6 +23,7 @@ export function useTheme() {
     ink: dark ? "#fafafa" : "#202024",
     secondary: dark ? "#b4b4bd" : "#626268",
     line: dark ? "#3b3b40" : "#dad8d3",
+    destructive: dark ? "#ff8190" : "#ba2944",
     warning: dark ? "#efbe6a" : "#89501b",
     success: dark ? "#71d5a0" : "#23784f",
     information: dark ? "#78aaff" : "#235ec5",

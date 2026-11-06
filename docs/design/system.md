@@ -578,6 +578,12 @@ named radius tokens for legacy inputs, badges, segmented controls, events, panel
 and sheets. Do not add fixed pixel corners or local radius arithmetic; `999px`
 and `50%` are reserved for intentional circular marks, progress tracks, and docks.
 
+Expo Tasks expresses this scale in native points through `apps/mobile/src/theme.ts`: regular
+controls use 8-point corners and grouped surfaces use 16-point corners. Shared native
+primitives own row padding (16 points), section gaps (24 points), and 44-point minimum
+touch targets. Virtualized lists round only group boundaries. System-rendered navigation
+and date controls retain their platform geometry, including the approved native Liquid Glass.
+
 The frontend theme owns this contract. Verify Settings search hover/keyboard
 focus, cards, and Mail/Calendar account popovers in both themes when changing it.
 

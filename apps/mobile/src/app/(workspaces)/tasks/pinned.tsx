@@ -1,4 +1,4 @@
-import { WorkspacePage } from "../../../components/workspace-page";
+import { TasksHub } from "../../../features/tasks/hub";
 export default function Page() {
-  return <WorkspacePage title="pinned" />;
+  return <TasksHub mode="pinned" />;
 }

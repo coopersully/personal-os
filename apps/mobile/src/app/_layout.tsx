@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Toaster, toast } from "sonner-native";
 import { AuthProvider, useAuth } from "../features/auth/context";
 import { PreviewProvider } from "../features/briefing/context";
+import { MobileDataProvider } from "../features/tasks/data";
 import { useTheme } from "../theme";
 
 export default function RootLayout() {
@@ -51,33 +52,44 @@ function AuthenticatedLayout() {
     );
   }
   return (
-    <PreviewProvider>
-      <StatusBar style={t.dark ? "light" : "dark"} />
-      <Stack
-        screenOptions={{
-          headerTintColor: t.ink,
-          headerStyle: { backgroundColor: t.canvas },
-          contentStyle: { backgroundColor: t.canvas },
-          headerShadowVisible: false,
-          headerBackButtonDisplayMode: "minimal",
-        }}
-      >
-        <Stack.Protected guard={state.status === "signedOut"}>
-          <Stack.Screen name="sign-in" options={{ headerShown: false }} />
-        </Stack.Protected>
-        <Stack.Protected guard={state.status === "signedIn"}>
-          <Stack.Screen name="(workspaces)" options={{ headerShown: false, title: "today" }} />
-          <Stack.Screen name="detail/[id]" options={{ title: "sample details" }} />
-          <Stack.Screen
-            name="profile"
-            options={{ title: "preview settings", presentation: "modal" }}
-          />
-          <Stack.Screen
-            name="monitoring"
-            options={{ title: "monitoring", presentation: "modal" }}
-          />
-        </Stack.Protected>
-      </Stack>
-    </PreviewProvider>
+    <MobileDataProvider key={state.user?.id ?? "signed-out"}>
+      <PreviewProvider>
+        <StatusBar style={t.dark ? "light" : "dark"} />
+        <Stack
+          screenOptions={{
+            headerTintColor: t.ink,
+            headerStyle: { backgroundColor: t.canvas },
+            contentStyle: { backgroundColor: t.canvas },
+            headerShadowVisible: false,
+            headerBackButtonDisplayMode: "minimal",
+          }}
+        >
+          <Stack.Protected guard={state.status === "signedOut"}>
+            <Stack.Screen name="sign-in" options={{ headerShown: false }} />
+          </Stack.Protected>
+          <Stack.Protected guard={state.status === "signedIn"}>
+            <Stack.Screen name="(workspaces)" options={{ headerShown: false, title: "today" }} />
+            <Stack.Screen name="task-preferences" options={{ title: "task preferences" }} />
+            <Stack.Screen name="task-browser" options={{ title: "tasks" }} />
+            <Stack.Screen name="task-containers" options={{ title: "tasks" }} />
+            <Stack.Screen name="task-editor" options={{ title: "task", presentation: "modal" }} />
+            <Stack.Screen
+              name="task-container"
+              options={{ title: "organize", presentation: "modal" }}
+            />
+            <Stack.Screen name="reminders" options={{ title: "reminders" }} />
+            <Stack.Screen name="detail/[id]" options={{ title: "sample details" }} />
+            <Stack.Screen
+              name="profile"
+              options={{ title: "preview settings", presentation: "modal" }}
+            />
+            <Stack.Screen
+              name="monitoring"
+              options={{ title: "monitoring", presentation: "modal" }}
+            />
+          </Stack.Protected>
+        </Stack>
+      </PreviewProvider>
+    </MobileDataProvider>
   );
 }

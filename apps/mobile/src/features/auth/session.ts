@@ -45,7 +45,11 @@ export function createSession(options: {
       });
       // Keep the deadline active until the body finishes, not just response headers.
       const body = await response.text();
-      if (body.length > 64_000) throw new Error("The session response was too large.");
+      const path = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      ).pathname;
+      const maximum = path.startsWith("/v1/auth/") || path === "/v1/me" ? 64_000 : 2_000_000;
+      if (body.length > maximum) throw new Error("The API response was too large.");
       return new Response(body || null, { status: response.status, headers: response.headers });
     } finally {
       clearTimeout(timer);
@@ -73,6 +77,21 @@ export function createSession(options: {
     }
   };
   return {
+    api: () => {
+      const ownerToken = token;
+      if (!ownerToken) throw new Error("Sign in to continue.");
+      return createApiClient({
+        baseUrl: origin,
+        sessionToken: ownerToken,
+        fetch: async (input, init) => {
+          if (token !== ownerToken) throw new Error("Your session changed. Please try again.");
+          const response = await transport(input, init);
+          if (token !== ownerToken) throw new Error("Your session changed. Please try again.");
+          if (response.status === 401) await signedOut();
+          return response;
+        },
+      });
+    },
     restore: () =>
       busy
         ? Promise.resolve()

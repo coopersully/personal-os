@@ -1,4 +1,4 @@
-import { WorkspacePage } from "../../../components/workspace-page";
+import { TasksHub } from "../../../features/tasks/hub";
 export default function Page() {
-  return <WorkspacePage title="views" />;
+  return <TasksHub mode="views" />;
 }

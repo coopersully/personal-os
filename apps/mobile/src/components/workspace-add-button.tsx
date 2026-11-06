@@ -1,4 +1,4 @@
-import { usePathname } from "expo-router";
+import { router, usePathname } from "expo-router";
 import { Platform, Pressable, StyleSheet } from "react-native";
 import { useTheme, workspaceColor } from "../theme";
 import { GlassSurface } from "./glass-surface";
@@ -18,9 +18,12 @@ export function WorkspaceAddButton() {
         accessibilityLabel={
           owner === "mail" ? "Compose mail" : owner === "tasks" ? "Add task" : "Add event"
         }
-        accessibilityHint="Layout preview; not available yet"
-        accessibilityState={{ disabled: true }}
-        disabled
+        accessibilityHint={
+          owner === "tasks" ? "Create a task or reminder" : "Layout preview; not available yet"
+        }
+        accessibilityState={{ disabled: owner !== "tasks" }}
+        disabled={owner !== "tasks"}
+        onPress={() => router.push({ pathname: "/task-editor", params: { kind: "task" } })}
         style={styles.button}
       >
         <Icon name="add" size={27} color={workspaceColor(theme, owner)} />

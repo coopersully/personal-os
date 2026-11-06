@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner-native";
 import { useAuth } from "../features/auth/context";
 import { sampleItems } from "../features/briefing/sample";
+import { useTaskSearch } from "../features/tasks/data";
 import { useStablePan } from "../navigation/use-stable-pan";
 import { regionMotion, useWorkspaceMotion, workspaceOrder } from "../navigation/workspace-motion";
 import { useTheme, workspaceColor, workspaces } from "../theme";
@@ -55,6 +56,7 @@ export function WorkspaceHeader() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const taskSearch = useTaskSearch();
   const menu = useRef<ComponentRef<typeof View>>(null);
   const geometry = useRef({ x: 0, y: 0, width: 0, rows: [] as { y: number; height: number }[] });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,6 +85,7 @@ export function WorkspaceHeader() {
     setOpen(false);
     setAccountOpen(false);
     setQuery("");
+    taskSearch.setSearch("");
     setHovered(null);
   }, [path]);
   const color = (workspace: Workspace) => workspaceColor(t, workspace.id);
@@ -165,7 +168,7 @@ export function WorkspaceHeader() {
     onPanResponderTerminate: close,
   });
   const results =
-    !isSettings && query.trim()
+    !isSettings && current.id !== "tasks" && query.trim()
       ? sampleItems.filter(
           (item) =>
             (current.id === "index" || item.workspace === current.id) &&
@@ -176,7 +179,7 @@ export function WorkspaceHeader() {
       : [];
   return (
     <View style={styles.layer}>
-      {(open || accountOpen || !!query.trim()) && (
+      {(open || accountOpen || (current.id !== "tasks" && !!query.trim())) && (
         <Pressable
           accessibilityLabel="Dismiss navigation menu or search"
           onPress={() => {
@@ -219,13 +222,14 @@ export function WorkspaceHeader() {
             </Pressable>
           </View>
           <TextInput
-            value={query}
+            value={current.id === "tasks" ? taskSearch.search : query}
             onChangeText={(value) => {
               close();
-              setQuery(value);
+              if (current.id === "tasks") taskSearch.setSearch(value);
+              else setQuery(value);
             }}
             onFocus={() => close()}
-            accessibilityLabel={`Search ${isSettings ? "settings" : current.label} sample data`}
+            accessibilityLabel={`Search ${isSettings ? "settings" : current.label}${current.id === "tasks" ? "" : " sample data"}`}
             placeholder={`Search ${isSettings ? "settings" : current.label}`}
             placeholderTextColor={t.secondary}
             returnKeyType="search"
@@ -391,7 +395,7 @@ export function WorkspaceHeader() {
           </GlassSurface>
         </View>
       )}
-      {!!query.trim() && (
+      {current.id !== "tasks" && !!query.trim() && (
         <View style={[styles.results, { backgroundColor: t.canvas, borderColor: t.line }]}>
           <Text style={[styles.caption, { color: t.secondary }]}>
             sample results · {isSettings ? "settings" : current.label}

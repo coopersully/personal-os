@@ -1,4 +1,4 @@
-import { WorkspacePage } from "../../../components/workspace-page";
+import { TaskListScreen } from "../../../features/tasks/task-list";
 export default function Page() {
-  return <WorkspacePage title="history" />;
+  return <TaskListScreen title="history" scope={{ view: "history" }} />;
 }

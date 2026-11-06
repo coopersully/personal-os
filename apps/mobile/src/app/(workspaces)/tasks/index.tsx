@@ -1,4 +1,4 @@
-import { WorkspacePage } from "../../../components/workspace-page";
+import { TaskListScreen } from "../../../features/tasks/task-list";
 export default function Page() {
-  return <WorkspacePage title="today" />;
+  return <TaskListScreen title="today" scope={{ view: "today" }} />;
 }

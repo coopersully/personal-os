@@ -133,6 +133,37 @@ describe("native human sessions", () => {
     expect(t.saved()).toBeNull();
     expect(t.states.at(-1)?.status).toBe("signedOut");
   });
+  it("authenticates workspace reads and clears the session on API expiry", async () => {
+    const t = setup("sess-valid");
+    t.fetch.mockResolvedValueOnce(ok({ user })).mockResolvedValueOnce(denied());
+    await t.session.restore();
+    await expect(t.session.api().listTaskLists({ limit: 100 })).rejects.toThrow();
+    expect(new Headers(t.fetch.mock.calls[1]?.[1]?.headers).get("authorization")).toBe(
+      "Session sess-valid",
+    );
+    expect(t.saved()).toBeNull();
+    expect(() => t.session.api()).toThrow("Sign in");
+  });
+  it("rejects a late workspace response after logout", async () => {
+    const t = setup("sess-valid");
+    let finish!: (response: Response) => void;
+    t.fetch.mockResolvedValueOnce(ok({ user }));
+    await t.session.restore();
+    const api = t.session.api();
+    t.fetch.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const request = api.listTaskLists({ limit: 100 });
+    t.fetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await t.session.logout();
+    const rejected = expect(request).rejects.toThrow("session changed");
+    finish(ok({ items: [], nextCursor: null }));
+    await rejected;
+    await expect(api.listTaskLists({ limit: 100 })).rejects.toThrow("session changed");
+  });
   it("rejects insecure and credential-bearing API origins", () => {
     for (const origin of [
       "http://api.example.test",

@@ -231,6 +231,7 @@ for the complete plan shared with MCP.
 The transaction breakdown editor loads supplied active allocations in their saved order,
 including category and personal/reimbursable treatment. Reopening loads the latest supplied
 breakdown; background refreshes preserve an open draft and its original revision guard.
+Cancel and Close release the editor even when the viewport changes during dismissal.
 Saving refreshes the linked transaction as well as transaction lists. Single-transaction reads
 return active native allocations and the parent version from one database snapshot.
 

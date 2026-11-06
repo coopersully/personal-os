@@ -3,8 +3,9 @@ import { renderWithFeedback as render } from "@/test-utils/feedback";
 import "@testing-library/jest-dom/vitest";
 import type { FinanceCategory, FinanceTransaction } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { vi } from "vitest";
 import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
 
@@ -31,6 +32,100 @@ const categories = [
   { id: categoryId, name: "Shopping" },
   { id: "33333333-3333-4333-8333-333333333333", name: "Medical" },
 ] as FinanceCategory[];
+
+it.each([
+  "Cancel",
+  "Close",
+])("releases the editor when %s and resizing interrupt its exit animation", async (controlName) => {
+  const originalMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
+  const originalWidth = Object.getOwnPropertyDescriptor(window, "innerWidth");
+  const originalCss = globalThis.CSS;
+  const listeners = new Set<() => void>();
+  let width = 390;
+  let cleanupView: (() => void) | undefined;
+  let cleanupStyles: (() => void) | undefined;
+  try {
+    Object.defineProperty(window, "innerWidth", { configurable: true, get: () => width });
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (media: string) => ({
+        media,
+        get matches() {
+          return media === "(max-width: 767px)" && width < 768;
+        },
+        addEventListener: (_event: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_event: string, listener: () => void) => listeners.delete(listener),
+      }),
+    });
+    // Browser computed styles are live. JSDOM does not run Vaul's exit animation or
+    // emit animationcancel when the desktop presentation removes that animation.
+    const computed = window.getComputedStyle.bind(window);
+    const styles = vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudo) => {
+      const value = computed(element, pseudo);
+      if (element.hasAttribute("data-finance-dialog"))
+        Object.defineProperty(value, "animationName", {
+          get: () =>
+            element.getAttribute("data-presentation") === "dialog"
+              ? "none"
+              : element.getAttribute("data-state") === "open"
+                ? "slideFromBottom"
+                : "slideToBottom",
+        });
+      return value;
+    });
+    cleanupStyles = () => styles.mockRestore();
+    vi.stubGlobal("CSS", { ...originalCss, escape: (value: string) => value });
+    const client = new QueryClient();
+    function Editor() {
+      const [selected, setSelected] = useState<FinanceTransaction | null>(transaction);
+      return (
+        <QueryClientProvider client={client}>
+          <button type="button" onClick={() => setSelected(transaction)}>
+            Open breakdown
+          </button>
+          <TransactionBreakdownDialog
+            categories={categories}
+            open={selected !== null}
+            onOpenChange={(open) => {
+              if (!open) setSelected(null);
+            }}
+            transaction={selected}
+          />
+        </QueryClientProvider>
+      );
+    }
+    const view = render(<Editor />);
+    cleanupView = () => view.unmount();
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toHaveAttribute("data-presentation", "drawer"));
+    fireEvent.animationStart(dialog, { animationName: "slideFromBottom" });
+    const cancel = screen.getByRole("button", { name: controlName });
+    cancel.focus();
+    await userEvent.keyboard("{Enter}");
+    // Dismissal releases the modal before an orientation change can cancel its
+    // exit animation; it must not depend on the primitive's animation cleanup.
+    expect(dialog).not.toBeInTheDocument();
+    act(() => {
+      width = 1280;
+      for (const listener of listeners) listener();
+    });
+    const cancelled = new Event("animationcancel", { bubbles: true });
+    Object.defineProperty(cancelled, "animationName", { value: "slideToBottom" });
+    fireEvent(dialog, cancelled);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(document.body.style.pointerEvents).not.toBe("none");
+    expect(setFinanceTransactionBreakdown).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Open breakdown" }));
+    expect(await screen.findByRole("dialog", { name: "Split CVS" })).toBeVisible();
+    expect(screen.queryByText(/over-assigned/)).not.toBeInTheDocument();
+  } finally {
+    cleanupView?.();
+    cleanupStyles?.();
+    vi.unstubAllGlobals();
+    if (originalMedia) Object.defineProperty(window, "matchMedia", originalMedia);
+    if (originalWidth) Object.defineProperty(window, "innerWidth", originalWidth);
+  }
+});
 
 it("reopens saved allocations in their order without replacing their categories or treatment", async () => {
   const saved = {
@@ -262,7 +357,7 @@ it("handles an absent transaction and category without inventing a valid split",
       <TransactionBreakdownDialog categories={[]} onOpenChange={vi.fn()} open transaction={null} />
     </QueryClientProvider>,
   );
-  expect(screen.getByText("Split transaction")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   rerender(
     <QueryClientProvider client={client}>
       <TransactionBreakdownDialog

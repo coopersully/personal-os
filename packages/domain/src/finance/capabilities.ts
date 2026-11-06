@@ -1,5 +1,12 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "admitFinanceProviderSourceFacts",
+    capability: "ledger.provider_source_fact_admission",
+    mcpTool: "admit_finance_provider_source_facts",
+    mode: "write",
+    requiredScope: "finances:write",
+  },
+  {
     apiOperation: "readFinanceProviderTransactionEvidence",
     capability: "ledger.provider_transaction_evidence",
     mcpTool: "read_finance_provider_transaction_evidence",

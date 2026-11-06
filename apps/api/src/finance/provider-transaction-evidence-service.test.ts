@@ -264,6 +264,8 @@ describe("server-private source fact acquisition prerequisite", () => {
         accountRevision: "2",
         currencyCode: "USD",
         providerDirection: "income",
+        sourceAmount: -10,
+        date: "2026-11-01",
       },
     ]);
     expect(result.nativeSnapshot[0]).toMatchObject({

@@ -1,4 +1,3 @@
-import type { TaskWorkspaceItem } from "@personal-os/domain";
 import * as Notifications from "expo-notifications";
 import { router } from "expo-router";
 import * as SecureStore from "expo-secure-store";
@@ -16,6 +15,7 @@ import { spacing, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { Action, Section, ToggleRow } from "../tasks/ui";
 import { onDueAlertsRefresh } from "./events";
+import { loadAlertItems } from "./load-items";
 import { alertTarget, notificationChanges, notificationPrefix, planAlerts } from "./plan";
 
 // No critical/time-sensitive entitlement, badge inflation, or foreground interruption.
@@ -84,29 +84,11 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       return;
     }
     const api = session.api();
-    const items: TaskWorkspaceItem[] = [];
-    const seen = new Set<string>();
-    let cursor: string | undefined;
-    const started = Date.now();
-    for (let page = 0; page < 30; page++) {
-      if (Date.now() - started > 45_000) throw new Error("Refreshing device alerts timed out.");
-      const result = await api.listTaskWorkspace({
-        view: "all",
-        status: "open",
-        due: "dated",
-        dueAfter: new Date().toISOString(),
-        sort: "date",
-        limit: 100,
-        cursor,
-      });
-      if (ownerRef.current !== id || !enabledRef.current) return;
-      items.push(...result.items);
-      if (!result.nextCursor || planAlerts(id, items, Date.now()).length >= 50) break;
-      if (page === 29 || seen.has(result.nextCursor))
-        throw new Error("The reminder schedule could not be refreshed completely.");
-      seen.add(result.nextCursor);
-      cursor = result.nextCursor;
-    }
+    const items = await loadAlertItems(
+      (query) => api.listTaskWorkspace(query),
+      () => ownerRef.current === id && enabledRef.current,
+    );
+    if (!items) return;
     const desired = planAlerts(id, items, Date.now());
     const existing = await Notifications.getAllScheduledNotificationsAsync();
     const changes = notificationChanges(

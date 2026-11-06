@@ -75,15 +75,13 @@ export function DateField({
         </Text>
       </Pressable>
     );
-  if (!value)
+  if (!value && !editing)
     return (
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Set ${label.toLowerCase()}`}
         onPress={() => {
           setEditing(true);
-          const date = new Date();
-          onChange(dateOnly ? dateString(date) : date.toISOString());
         }}
         style={({ pressed }) => ({
           minHeight: touchTarget,
@@ -133,17 +131,19 @@ export function DateField({
       <View style={{ alignItems: "stretch", gap: spacing.sm }}>
         <DateTimePicker
           value={
-            dateOnly
-              ? localDateTimeToUtc(
-                  {
-                    year: Number(value.slice(0, 4)),
-                    month: Number(value.slice(5, 7)),
-                    day: Number(value.slice(8, 10)),
-                  },
-                  720,
-                  timezone,
-                )
-              : new Date(value)
+            !value
+              ? new Date(now)
+              : dateOnly
+                ? localDateTimeToUtc(
+                    {
+                      year: Number(value.slice(0, 4)),
+                      month: Number(value.slice(5, 7)),
+                      day: Number(value.slice(8, 10)),
+                    },
+                    720,
+                    timezone,
+                  )
+                : new Date(value)
           }
           timeZoneName={timezone}
           accentColor={overdue ? t.destructive : workspaceColor(t, "tasks")}
@@ -155,7 +155,7 @@ export function DateField({
         />
         {!dateOnly && (
           <DateTimePicker
-            value={new Date(value)}
+            value={new Date(value ?? now)}
             timeZoneName={timezone}
             accentColor={overdue ? t.destructive : workspaceColor(t, "tasks")}
             mode="time"
@@ -168,7 +168,7 @@ export function DateField({
         <Action
           label="Clear"
           onPress={() => {
-            onChange(null);
+            if (value) onChange(null);
             setEditing(false);
           }}
         />

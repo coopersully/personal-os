@@ -46,10 +46,13 @@ export function TaskEditorScreen() {
   });
   if (params.id && !record.data)
     return (
-      <State
-        loading={record.isPending}
-        retry={record.isError ? () => void record.refetch() : undefined}
-      />
+      <>
+        <State
+          loading={record.isPending}
+          retry={record.isError ? () => void record.refetch() : undefined}
+        />
+        <AppToaster editor />
+      </>
     );
   return (
     <TaskEditor
@@ -210,6 +213,7 @@ function TaskEditor({
         if (result) finish();
       },
       handleError,
+      (result) => ({ message: result ? "Saved" : "Review the move before saving" }),
     );
   const commitMove = () =>
     void action.run(

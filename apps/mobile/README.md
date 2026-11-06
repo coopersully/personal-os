@@ -1,17 +1,20 @@
 # nohmi mobile foundation
 
-Expo SDK 58 supplies one React Native application with iOS and web targets. This first
-briefing preview has no sign-in, API requests, real workspace data or native permissions.
-The existing `apps/web` and Tauri desktop UI remain unchanged. Live workspace migration is a later
-pass: share domain/API contracts and universal components, with explicit platform adaptations.
+Expo SDK 58 supplies a React Native application with iOS and web targets. The native
+shell uses authenticated API sessions, workspace-specific native tabs and Apple's Liquid Glass
+on supported iOS versions. Tasks includes tasks, reminders, lists, projects, filters, history,
+archive and trash. Other workspaces remain previews; they do not yet provide web feature parity.
+The existing web and Tauri desktop UI remain separate consumers of shared domain/API contracts.
 
-Build 2 adds the compact Today briefing with one-tap details and isolated sample data. Profile
-opens preview settings for attention, quiet and interrupted-monitoring scenarios. The small profile
-glyph is an unsigned-in placeholder, not a fetched account photo. iOS uses Expo Router native tabs
-with system Liquid Glass on supported OS versions, icon-only presentation and accessible names.
-Older iOS versions receive the system's standard tab bar. Web uses labeled tabs and the same screens.
-Reicon template PNGs are generated from the canonical web registry with `pnpm --filter
-@personal-os/mobile icons`; no second icon pack or custom glass overlay is introduced.
+Sessions use SecureStore; domain reads stay in memory and writes require connectivity. Encrypted
+offline caching and Universal Links are not implemented in this increment. Device notifications
+schedule up to 50 future deadlines locally and reconcile while the app is active; web edits made
+while it is closed are not pushed to the device. See the mobile frontend standards and native API
+boundary documentation for the current scope.
+
+Reicon PNGs are generated from the canonical web registry with
+`pnpm --filter @personal-os/mobile icons`. Native tab selection and glass rendering use Apple
+controls; the vertical workspace picker uses custom interaction logic over native glass.
 
 ## Development
 
@@ -37,7 +40,9 @@ pnpm --filter @personal-os/mobile archive
 ```
 
 The Release simulator build needs no signing identity. Archive uses Xcode automatic signing
-for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `2`.
+for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `4`.
+Archive builds explicitly bind to `https://nohmi-api.coopersully.me`, reject development API
+overrides and disable dotenv loading. Verify the signed archive against the committed source.
 Increment `ios.buildNumber` before every new App Store Connect upload and regenerate native files.
 
 ## TestFlight
@@ -60,8 +65,8 @@ Increment `ios.buildNumber` before every new App Store Connect upload and regene
 
 After reviewing the archive, `pnpm --filter @personal-os/mobile upload` explicitly uploads it
 using Xcode’s authenticated account. This export is restricted to internal TestFlight testing.
-Build commands never upload automatically, and there is no OTA update channel. This foundation uses no non-exempt encryption;
-reassess export compliance when authentication or other capabilities are added. Native SDK privacy
+Build commands never upload automatically, and there is no OTA update channel. The app uses standard platform HTTPS and SecureStore cryptography; reassess export compliance
+when adding cryptographic capabilities. Native SDK privacy
 manifests are generated during prebuild; reassess declared collection on every added SDK.
 
 ## External boundary

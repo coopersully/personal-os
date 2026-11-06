@@ -1,15 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { releaseEnvironment } from "./release-environment.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const mode = process.argv[2];
 if (!["simulator", "archive", "upload"].includes(mode)) {
   throw new Error("Usage: ios-build.mjs simulator|archive|upload");
 }
+const buildEnv = mode === "archive" ? releaseEnvironment(process.env) : process.env;
 // Regenerate before every build so app.json, assets and dependencies cannot leave a stale archive.
 function run(command, args, cwd = root) {
-  const result = spawnSync(command, args, { cwd, stdio: "inherit" });
+  const result = spawnSync(command, args, { cwd, stdio: "inherit", env: buildEnv });
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }

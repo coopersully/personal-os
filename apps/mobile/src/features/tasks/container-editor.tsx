@@ -41,16 +41,19 @@ export function ContainerEditorScreen() {
   });
   if (params.id && !query.data)
     return (
-      <State
-        loading={query.isPending}
-        retry={query.isError ? () => void query.refetch() : undefined}
-      />
+      <>
+        <State
+          loading={query.isPending}
+          retry={query.isError ? () => void query.refetch() : undefined}
+        />
+        <AppToaster editor />
+      </>
     );
   return <ContainerForm key={`${kind}:${params.id ?? "new"}`} kind={kind} initial={query.data} />;
 }
 function ContainerForm({
   kind,
-  initial,
+  initial: loaded,
 }: {
   kind: "list" | "project";
   initial?: TaskList | TaskProject;
@@ -59,6 +62,8 @@ function ContainerForm({
   const resources = useTaskResources();
   const action = useTaskAction();
   const t = useTheme();
+  // Keep the revision paired with the draft even when the query refreshes.
+  const [initial] = useState(loaded);
   const list = kind === "list" ? (initial as TaskList | undefined) : undefined;
   const project = kind === "project" ? (initial as TaskProject | undefined) : undefined;
   const [edited, setEdited] = useState(false);

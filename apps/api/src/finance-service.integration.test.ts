@@ -11531,44 +11531,23 @@ describe.sequential("finance service", () => {
           hashToken("wrong-session"),
         ),
       ).rejects.toMatchObject({ code: "forbidden" });
-      const [foreignOwner] = await database.db
-        .insert(users)
-        .values({
-          displayName: "Foreign history owner",
-          email: `foreign-history-${crypto.randomUUID()}@example.com`,
-          passwordHash: "unused",
-        })
-        .returning();
-      if (!foreignOwner) throw new Error("Foreign history owner missing.");
-      const [foreignAccount] = await database.db
-        .insert(financeAccounts)
-        .values({
-          userId: foreignOwner.id,
-          institution: "Synthetic foreign",
-          name: "Foreign",
-          provider: "manual",
-        })
-        .returning();
-      if (!foreignAccount) throw new Error("Foreign history account missing.");
-      const [foreignTransaction] = await database.db
-        .insert(financeTransactions)
-        .values({
-          userId: foreignOwner.id,
-          accountId: foreignAccount.id,
-          amount: 125,
-          direction: "expense",
-          merchant: "Foreign synthetic",
-          transactionDate: "2026-07-19",
-        })
-        .returning();
-      if (!foreignTransaction) throw new Error("Foreign history transaction missing.");
+      const foreign = await historyCompositionFixture();
+      const foreignBefore = await foreign.ledgerSnapshot();
+      expect(foreign.account).toMatchObject({
+        provider: "plaid",
+        status: "connected",
+        providerItemRecordId: foreign.item.id,
+      });
       await expect(
         f.service.readFinanceProviderTransactionEvidence(
           f.principal,
-          { transactionIds: [foreignTransaction.id] },
+          { transactionIds: [foreign.transaction.id] },
           f.sessionTokenHash,
         ),
       ).rejects.toMatchObject({ code: "not_found" });
+      expect(await foreign.ledgerSnapshot()).toEqual(foreignBefore);
+      expect(foreign.port).not.toHaveBeenCalled();
+      expect(foreign.readHistory).not.toHaveBeenCalled();
       expect(await f.ledgerSnapshot()).toEqual(before);
       await database.db
         .update(sessions)

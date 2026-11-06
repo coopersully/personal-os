@@ -9757,6 +9757,13 @@ describe("Personal OS web app", () => {
     const reminderErrorCallsStart = mocks.listReminders.mock.calls.length;
     const reminderErrorSettlementsStart = mocks.listReminders.mock.settledResults.length;
     const intendedReminderFailure = new Error("reminders unavailable");
+    const isExactReminderPageRequest = (input: unknown) => !!input && typeof input === "object" && Object.keys(input).sort().join(",") === "group,kind,limit,sort,view" && "group" in input && input.group === "none" && "kind" in input && input.kind === "reminder" && "limit" in input && input.limit === 50 && "sort" in input && input.sort === "default" && "view" in input && input.view === "all";
+    const isEmptyReminderResponse = (value: unknown) => !!value && typeof value === "object" && Object.keys(value).sort().join(",") === "items,nextCursor" && "items" in value && Array.isArray(value.items) && value.items.length === 0 && "nextCursor" in value && value.nextCursor === null;
+    const hasEmptyWorkspacePage = (value: unknown) => {
+      if (!value || typeof value !== "object" || !("pages" in value) || !Array.isArray(value.pages) || value.pages.length !== 1) return false;
+      const page: unknown = value.pages[0];
+      return !!page && typeof page === "object" && "items" in page && Array.isArray(page.items) && page.items.length === 0 && "nextCursor" in page && page.nextCursor === null && "total" in page && page.total === 0;
+    };
     const reminderStageCallStart = mocks.listReminders.mock.calls.length;
     const reminderStageState = (view: ReturnType<typeof setup>) => {
       const emptyPage = (data: unknown) =>
@@ -9781,10 +9788,12 @@ describe("Personal OS web app", () => {
     const remindersErrorView = setup("/reminders");
     try {
       expect(await readRecovery()).toBeInTheDocument();
-      expect(remindersErrorView.queryClient.getQueryState(reminderPageQueryKey)).toMatchObject({ status: "error", fetchStatus: "idle", error: intendedReminderFailure });
-      expect(remindersErrorView.queryClient.getQueryState(reminderPageQueryKey)?.error).toBe(intendedReminderFailure);
-      expect(mocks.listReminders.mock.calls.slice(reminderErrorCallsStart)).toContainEqual([{ sort: "default", group: "none", view: "all", kind: "reminder", limit: 50 }]);
-      expect(mocks.listReminders.mock.settledResults.slice(reminderErrorSettlementsStart)).toContainEqual({ type: "rejected", value: intendedReminderFailure });
+      const errorState = remindersErrorView.queryClient.getQueryState(reminderPageQueryKey);
+      expect(errorState?.status).toBe("error");
+      expect(errorState?.fetchStatus).toBe("idle");
+      expect(errorState?.error === intendedReminderFailure).toBe(true);
+      expect(mocks.listReminders.mock.calls.slice(reminderErrorCallsStart).some(([input]) => isExactReminderPageRequest(input))).toBe(true);
+      expect(mocks.listReminders.mock.settledResults.slice(reminderErrorSettlementsStart).some((entry) => entry.type === "rejected" && entry.value === intendedReminderFailure)).toBe(true);
     } catch (error) {
       try { console.error("Reminders error-renderer handoff", JSON.stringify(reminderStageState(remindersErrorView))); } catch { /* Preserve the same original failure. */ }
       throw error;
@@ -9798,10 +9807,14 @@ describe("Personal OS web app", () => {
     const remindersView = setup("/reminders");
     try {
       expect(await screen.findByText("No matching items")).toBeInTheDocument();
-      expect(remindersView.queryClient).not.toBe(remindersErrorView.queryClient);
-      expect(remindersView.queryClient.getQueryState(reminderPageQueryKey)).toMatchObject({ status: "success", fetchStatus: "idle", error: null, data: { pages: [{ items: [], nextCursor: null, total: 0 }] } });
-      expect(mocks.listReminders.mock.calls.slice(reminderEmptyCallsStart)).toContainEqual([{ sort: "default", group: "none", view: "all", kind: "reminder", limit: 50 }]);
-      expect(mocks.listReminders.mock.settledResults.slice(reminderEmptySettlementsStart)).toContainEqual({ type: "fulfilled", value: { items: [], nextCursor: null } });
+      expect(remindersView.queryClient !== remindersErrorView.queryClient).toBe(true);
+      const emptyState = remindersView.queryClient.getQueryState(reminderPageQueryKey);
+      expect(emptyState?.status).toBe("success");
+      expect(emptyState?.fetchStatus).toBe("idle");
+      expect(emptyState?.error === null).toBe(true);
+      expect(hasEmptyWorkspacePage(emptyState?.data)).toBe(true);
+      expect(mocks.listReminders.mock.calls.slice(reminderEmptyCallsStart).some(([input]) => isExactReminderPageRequest(input))).toBe(true);
+      expect(mocks.listReminders.mock.settledResults.slice(reminderEmptySettlementsStart).some((entry) => entry.type === "fulfilled" && isEmptyReminderResponse(entry.value))).toBe(true);
     } catch (error) {
       try {
         console.error("Reminders substage diagnostics", JSON.stringify({ previous: previousReminderStage, current: reminderStageState(remindersView) }));

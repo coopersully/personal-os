@@ -11621,6 +11621,11 @@ describe.sequential("finance service", () => {
       if (!receipt) throw new Error("Receipt missing.");
       await database.db
         .update(financeMutationRecords)
+        .set({ response: { ...receipt.response, sourceHash: `sha256:${"b".repeat(64)}` } })
+        .where(eq(financeMutationRecords.id, receipt.id));
+      await expect(f.run()).rejects.toMatchObject({ code: "invalid_request" });
+      await database.db
+        .update(financeMutationRecords)
         .set({ response: { ...receipt.response, observedAt: "2026-01-01T00:00:00.000Z" } })
         .where(eq(financeMutationRecords.id, receipt.id));
       await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
@@ -11745,6 +11750,63 @@ describe.sequential("finance service", () => {
       expect(after.items).toEqual(before.items);
       expect(await f.receipts()).toHaveLength(1);
       expect(await f.revisions()).toHaveLength(2);
+    });
+
+    it("rejects a foreign source admission target before provider acquisition and preserves both owners", async () => {
+      const f = await admissionFixture();
+      const foreign = await historyCompositionFixture();
+      f.input.targets.push({
+        transactionId: foreign.transaction.id,
+        expectedTransactionRevision: foreign.transaction.contextualRevision.toString(),
+        expectedAccountRevision: foreign.account.contextualRevision.toString(),
+      });
+      const before = await f.ledgerSnapshot();
+      const foreignBefore = await foreign.ledgerSnapshot();
+      await expect(f.run()).rejects.toMatchObject({ code: "not_found" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await foreign.ledgerSnapshot()).toEqual(foreignBefore);
+      expect(await f.receipts()).toEqual([]);
+      expect(f.port).not.toHaveBeenCalled();
+      expect(f.readHistory).not.toHaveBeenCalled();
+      expect(foreign.port).not.toHaveBeenCalled();
+      expect(foreign.readHistory).not.toHaveBeenCalled();
+    });
+
+    it("admits and replays for a canonical admitted agent with all three current scopes and persisted owner bypass", async () => {
+      const f = await admissionFixture();
+      const [token] = await database.db
+        .insert(accessTokens)
+        .values({
+          userId: f.owner.id,
+          name: "Admitted source fixture",
+          tokenHash: crypto.randomUUID(),
+          scopes: ["finances:read", "finances:write", "finances:execute"],
+        })
+        .returning();
+      if (!token) throw new Error("Missing source grant.");
+      await database.db
+        .insert(executionPolicySettings)
+        .values({ userId: f.owner.id, reviewBypassEnabled: true });
+      const principal: Principal = {
+        actorId: token.id,
+        actorType: "agent",
+        userId: f.owner.id,
+        authorizationConnectionId: token.authorizationConnectionId,
+        scopes: new Set(token.scopes),
+      };
+      const context = { principal, requestId: "canonical-agent-source" };
+      const result = await f.actions.performDirect("transaction", f.input, context);
+      expect(result).toMatchObject({
+        status: "applied",
+        result: {
+          entries: [{ changed: true, after: { currencyCode: "USD", providerDirection: "income" } }],
+        },
+      });
+      expect(await f.actions.performDirect("transaction", f.input, context)).toEqual(result);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+      expect(await f.receipts()).toMatchObject([
+        { actorId: token.id, actorType: "agent", sourceKind: "agent", status: "completed" },
+      ]);
     });
 
     it("rejects a conflicting second source target without changing the first target, allocations, receipt or history", async () => {

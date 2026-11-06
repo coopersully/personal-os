@@ -4,10 +4,17 @@ import { useTheme, workspaceColor } from "../theme";
 import { GlassSurface } from "./glass-surface";
 import { Icon } from "./icons";
 
-/** Layout placeholder only; creating domain records is not wired yet. */
+/** Contextual capture for Tasks; other workspaces retain layout placeholders. */
 export function WorkspaceAddButton() {
-  const owner = usePathname().split("/")[1];
+  const [, owner, page] = usePathname().split("/");
+  const container =
+    owner === "tasks" && (page === "lists" || page === "projects")
+      ? page === "lists"
+        ? "list"
+        : "project"
+      : null;
   const theme = useTheme();
+  if (owner === "tasks" && page === "views") return null;
   if (owner !== "tasks" && owner !== "mail" && owner !== "calendar") return null;
   return (
     <GlassSurface
@@ -16,14 +23,30 @@ export function WorkspaceAddButton() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={
-          owner === "mail" ? "Compose mail" : owner === "tasks" ? "Add task" : "Add event"
+          container
+            ? `Add ${container}`
+            : owner === "mail"
+              ? "Compose mail"
+              : owner === "tasks"
+                ? "Add task"
+                : "Add event"
         }
         accessibilityHint={
-          owner === "tasks" ? "Create a task or reminder" : "Layout preview; not available yet"
+          container
+            ? `Create a ${container}`
+            : owner === "tasks"
+              ? "Create a task or reminder"
+              : "Layout preview; not available yet"
         }
         accessibilityState={{ disabled: owner !== "tasks" }}
         disabled={owner !== "tasks"}
-        onPress={() => router.push({ pathname: "/task-editor", params: { kind: "task" } })}
+        onPress={() =>
+          router.push(
+            container
+              ? { pathname: "/task-container", params: { kind: container } }
+              : { pathname: "/task-editor", params: { kind: "task" } },
+          )
+        }
         style={styles.button}
       >
         <Icon name="add" size={27} color={workspaceColor(theme, owner)} />

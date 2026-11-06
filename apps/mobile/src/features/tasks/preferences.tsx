@@ -1,7 +1,9 @@
 import type { TasksWorkspacePreferences, WorkspaceSettings } from "@personal-os/domain";
 import { Stack } from "expo-router";
 import { useState } from "react";
+import { NotificationSettings } from "../notifications/provider";
 import { useTaskAction, useTaskApi, useTaskResources } from "./data";
+import { SearchableChoice } from "./searchable-choice";
 import { Action, Choice, FormBody, Section, State, ToggleRow } from "./ui";
 export function TaskPreferencesScreen() {
   const resources = useTaskResources();
@@ -58,8 +60,10 @@ function Preferences({
         }}
       />
       <FormBody>
+        <NotificationSettings />
         <Section title="capture">
-          <Choice
+          <SearchableChoice
+            entity="list"
             label="Default list"
             value={draft.defaultCaptureListId ?? ""}
             options={[{ value: "", label: "Inbox" }, ...lists]}
@@ -105,22 +109,6 @@ function Preferences({
             onChange={(value) => update("showCompletedTasks", value)}
             disabled={action.pending}
           />
-          {(["estimate", "tags", "notes"] as const).map((detail) => (
-            <ToggleRow
-              key={detail}
-              label={`Show ${detail}`}
-              value={draft.taskRowDetails.includes(detail)}
-              disabled={action.pending}
-              onChange={(value) =>
-                update(
-                  "taskRowDetails",
-                  value
-                    ? [...draft.taskRowDetails, detail]
-                    : draft.taskRowDetails.filter((item) => item !== detail),
-                )
-              }
-            />
-          ))}
         </Section>
       </FormBody>
     </>

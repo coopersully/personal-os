@@ -13,9 +13,17 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { Toaster } from "sonner-native";
+import { Icon } from "../../components/icons";
+import { RowActions } from "../../components/row-actions";
 import { useTheme } from "../../theme";
+import { useAuth } from "../auth/context";
 import { actOnItem, type ItemAction, useTaskAction, useTaskApi, useTaskResources } from "./data";
 import { DateField } from "./date-field";
+import { FormSave } from "./form-save";
+import { useDraftField } from "./form-state";
+import { RecordIdentity } from "./record-identity";
+import { SearchableChoice } from "./searchable-choice";
+import { TagsField } from "./tags-field";
 import { Action, Choice, confirm, Field, FormBody, Section, State, styles } from "./ui";
 
 export function TaskEditorScreen() {
@@ -69,19 +77,29 @@ function TaskEditor({
   const action = useTaskAction();
   const [persisted, setPersisted] = useState(initial);
   const task = kind === "task" ? (persisted as Task | undefined) : undefined;
-  const [title, setTitle] = useState(initial?.title ?? "");
-  const [notes, setNotes] = useState(initial?.notes ?? "");
-  const [priority, setPriority] = useState(initial?.priority ?? "medium");
-  const [dueAt, setDueAt] = useState(initial?.dueAt ?? null);
-  const [scheduledAt, setScheduledAt] = useState(task?.scheduledAt ?? null);
-  const [why, setWhy] = useState(task?.why ?? "");
-  const [estimate, setEstimate] = useState(task?.estimateMinutes?.toString() ?? "");
-  const [tags, setTags] = useState(task?.tags.join(", ") ?? "");
-  const [timezone, setTimezone] = useState(
-    initial?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+  const [edited, setEdited] = useState(false);
+  const markEdited = () => setEdited(true);
+  const [title, setTitle] = useDraftField(initial?.title ?? "", markEdited);
+  const [notes, setNotes] = useDraftField(initial?.notes ?? "", markEdited);
+  const [priority, setPriority] = useDraftField(initial?.priority ?? "medium", markEdited);
+  const [dueAt, setDueAt] = useDraftField(initial?.dueAt ?? null, markEdited);
+  const [scheduledAt, setScheduledAt] = useDraftField(task?.scheduledAt ?? null, markEdited);
+  const [why, setWhy] = useDraftField(task?.why ?? "", markEdited);
+  const [estimate, setEstimate] = useDraftField(
+    task?.estimateMinutes?.toString() ?? "",
+    markEdited,
   );
-  const [listId, setListId] = useState(task?.listId ?? params.listId ?? "");
-  const [projectId, setProjectId] = useState(task?.projectId ?? params.projectId ?? "");
+  const [tags, setTags] = useDraftField<string[]>(task?.tags ?? [], markEdited);
+  const { state: authState } = useAuth();
+  const timezone = authState.user?.planningTimezone;
+  const [listId, setListId, initializeListId] = useDraftField(
+    task?.listId ?? params.listId ?? "",
+    markEdited,
+  );
+  const [projectId, setProjectId] = useDraftField(
+    task?.projectId ?? params.projectId ?? "",
+    markEdited,
+  );
   const [uncertain, setUncertain] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [move, setMove] = useState<TaskMovePreview | null>(null);
@@ -110,24 +128,28 @@ function TaskEditor({
     const list =
       resources.lists.data.find((row) => row.id === preferred && row.availability === "active") ??
       resources.lists.data.find((row) => row.kind === "inbox");
-    setListId(project?.listId ?? list?.id ?? "");
-  }, [listId, projectId, resources.lists.data, resources.projects.data, resources.settings.data]);
+    initializeListId(project?.listId ?? list?.id ?? "");
+  }, [
+    listId,
+    projectId,
+    resources.lists.data,
+    resources.projects.data,
+    resources.settings.data,
+    initializeListId,
+  ]);
   const fields = () => ({
     title,
     notes: notes.trim() || null,
     priority,
     dueAt,
-    timezone: timezone.trim() || null,
+    timezone: dueAt || scheduledAt ? timezone : null,
   });
   const taskFields = () => ({
     ...fields(),
     scheduledAt,
     why: why.trim() || null,
     estimateMinutes: estimate.trim() ? Number(estimate) : null,
-    tags: tags
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
+    tags,
   });
   const handleError = (error: unknown) => {
     if (error instanceof ApiClientError && error.status === 409) setConflict(true);
@@ -143,6 +165,8 @@ function TaskEditor({
     void action.run(
       "Saving…",
       async () => {
+        if (!timezone)
+          throw new Error("Your account time zone is unavailable. Reopen nohmi to refresh it.");
         if (kind === "reminder") {
           const values = createReminderInputSchema.parse(fields());
           return persisted
@@ -243,25 +267,73 @@ function TaskEditor({
           gestureEnabled: false,
           headerLeft: () => (
             <Action
-              label="Cancel"
+              label={edited ? "Cancel" : "Close"}
               disabled={action.pending}
-              onPress={() => confirm("Discard changes?", "Unsaved edits will be lost.", finish)}
+              onPress={() =>
+                edited
+                  ? confirm("Discard changes?", "Unsaved edits will be lost.", finish)
+                  : finish()
+              }
             />
           ),
-          headerRight: () =>
-            writable ? (
-              <Action
-                label="Save"
-                disabled={
-                  action.pending ||
-                  conflict ||
-                  (uncertain && kind === "reminder") ||
-                  !title.trim() ||
-                  (kind === "task" && !listId)
-                }
-                onPress={save}
-              />
-            ) : null,
+          headerRight: () => (
+            <View style={styles.toolbar}>
+              {persisted && (
+                <RowActions
+                  label="Record actions"
+                  placement="header"
+                  actions={
+                    deleted
+                      ? [
+                          {
+                            id: "restore",
+                            label: "Restore",
+                            icon: "history",
+                            disabled: action.pending || readOnly || conflict,
+                            onPress: () => transition("restore"),
+                          },
+                        ]
+                      : [
+                          {
+                            id: "complete",
+                            label: (task ? task.lifecycle !== "open" : !!persisted.completedAt)
+                              ? "Reopen"
+                              : "Complete",
+                            icon: "check",
+                            disabled: action.pending || readOnly || conflict,
+                            onPress: () =>
+                              transition(
+                                (task ? task.lifecycle !== "open" : !!persisted.completedAt)
+                                  ? "reopen"
+                                  : "complete",
+                              ),
+                          },
+                          ...(task?.lifecycle === "open"
+                            ? [
+                                {
+                                  id: "cancel",
+                                  destructive: true,
+                                  label: "Cancel task",
+                                  icon: "disconnected" as const,
+                                  disabled: action.pending || readOnly || conflict,
+                                  onPress: () => transition("cancel"),
+                                },
+                              ]
+                            : []),
+                          {
+                            id: "trash",
+                            label: "Move to Trash",
+                            icon: "archive",
+                            destructive: true,
+                            disabled: action.pending || readOnly || conflict,
+                            onPress: () => transition("trash"),
+                          },
+                        ]
+                  }
+                />
+              )}
+            </View>
+          ),
         }}
       />
       <FormBody>
@@ -275,112 +347,106 @@ function TaskEditor({
             }}
           />
         )}
-        {!persisted && (
-          <Section>
-            <Choice
-              label="Create"
-              value={kind}
-              options={[
-                { value: "task", label: "Task" },
-                { value: "reminder", label: "Reminder" },
-              ]}
-              disabled={action.pending || uncertain}
-              onChange={(value) =>
-                confirm("Change item type?", "The current draft will be discarded.", () =>
-                  router.replace({ pathname: "/task-editor", params: { kind: value } }),
-                )
-              }
-            />
-          </Section>
-        )}
         <View pointerEvents={writable && !action.pending && !uncertain ? "auto" : "none"}>
-          <Section>
-            <Field
-              label="Title"
-              value={title}
-              onChangeText={setTitle}
-              maxLength={240}
-              placeholder="What needs doing?"
-            />
-            <Field
-              label="Notes"
-              value={notes}
-              onChangeText={setNotes}
-              multiline
-              maxLength={10000}
-              placeholder="Add details"
-            />
-          </Section>
-          <Section title="planning">
-            <DateField label="Due" value={dueAt} onChange={setDueAt} />
-            {kind === "task" && (
-              <DateField label="Reserved time" value={scheduledAt} onChange={setScheduledAt} />
-            )}
-            <Field
-              label="Time zone"
-              value={timezone}
-              onChangeText={setTimezone}
-              autoCapitalize="none"
-            />
+          <RecordIdentity
+            icon={<Icon name={kind === "task" ? "check" : "clock"} color={t.ink} size={28} />}
+            title={title}
+            onTitleChange={setTitle}
+            description={notes}
+            onDescriptionChange={setNotes}
+            placeholder={kind === "task" ? "Plan meals for the week" : "Water the balcony plants"}
+            descriptionPlaceholder={
+              kind === "task"
+                ? "Choose three dinners and make a grocery list."
+                : "Check the soil and water each pot if it feels dry."
+            }
+          />
+          <Section title="Due & priority">
+            <DateField label="Due date" value={dueAt} onChange={setDueAt} />
             <Choice
               label="Priority"
               value={priority}
-              options={["low", "medium", "high"].map((value) => ({ value, label: value }))}
+              options={[
+                { value: "low", label: "Low" },
+                { value: "medium", label: "Medium" },
+                { value: "high", label: "High" },
+              ]}
               onChange={(value) => setPriority(value as typeof priority)}
             />
-            {kind === "task" && (
+          </Section>
+          {kind === "task" && (
+            <Section title="Schedule & effort">
+              <DateField label="Reserved time" value={scheduledAt} onChange={setScheduledAt} />
               <Field
                 label="Estimate (minutes)"
                 value={estimate}
                 onChangeText={setEstimate}
                 keyboardType="number-pad"
-                placeholder="None"
+                placeholder="30"
               />
-            )}
-          </Section>
+            </Section>
+          )}
           {kind === "task" && (
-            <>
-              <Section title="organization">
-                <Choice
-                  label="List"
-                  value={listId}
-                  options={(resources.lists.data ?? [])
-                    .filter((row) => !row.deletedAt && row.availability === "active")
-                    .map((row) => ({ value: row.id, label: row.name }))}
-                  onChange={(value) => {
-                    setListId(value);
-                    setProjectId("");
-                  }}
-                />
-                <Choice
-                  label="Project"
-                  value={projectId}
-                  options={[
-                    { value: "", label: "None" },
-                    ...(resources.projects.data ?? [])
-                      .filter(
-                        (row) =>
-                          row.listId === listId &&
-                          row.availability === "active" &&
-                          row.lifecycle === "open" &&
-                          !row.deletedAt,
-                      )
-                      .map((row) => ({ value: row.id, label: row.name })),
-                  ]}
-                  onChange={setProjectId}
-                />
-                <Field label="Tags (comma separated)" value={tags} onChangeText={setTags} />
-              </Section>
-              <Section>
-                <Field
-                  label="Why it matters"
-                  value={why}
-                  onChangeText={setWhy}
-                  multiline
-                  maxLength={10000}
-                />
-              </Section>
-            </>
+            <Section title="Organization">
+              <SearchableChoice
+                entity="list"
+                label="List"
+                value={listId}
+                options={(resources.lists.data ?? [])
+                  .filter((row) => !row.deletedAt && row.availability === "active")
+                  .map((row) => ({ value: row.id, label: row.name }))}
+                onChange={(value) => {
+                  setListId(value);
+                  setProjectId("");
+                }}
+              />
+
+              <SearchableChoice
+                entity="project"
+                label="Project"
+                value={projectId}
+                options={[
+                  { value: "", label: "None" },
+                  ...(resources.projects.data ?? [])
+                    .filter(
+                      (row) =>
+                        row.listId === listId &&
+                        row.availability === "active" &&
+                        row.lifecycle === "open" &&
+                        !row.deletedAt,
+                    )
+                    .map((row) => ({ value: row.id, label: row.name })),
+                ]}
+                onChange={setProjectId}
+              />
+              <TagsField value={tags} onChange={setTags} />
+              <Field
+                label="Why it matters"
+                placeholder="Make weeknight dinners less stressful"
+                value={why}
+                onChangeText={setWhy}
+                multiline
+                maxLength={10000}
+              />
+            </Section>
+          )}
+          {!persisted && (
+            <Section>
+              <Choice
+                label="Item type"
+                value={kind}
+                options={[
+                  { value: "task", label: "Task" },
+                  { value: "reminder", label: "Reminder" },
+                ]}
+                disabled={action.pending || uncertain}
+                onChange={(value) =>
+                  confirm("Change item type?", "The current draft will be discarded.", () =>
+                    router.replace({ pathname: "/task-editor", params: { kind: value } }),
+                  )
+                }
+              />
+            </Section>
           )}
         </View>
         {resources.lists.isError && kind === "task" && (
@@ -432,57 +498,20 @@ function TaskEditor({
             <Action label="Cancel move" onPress={() => setMove(null)} />
           </Section>
         )}
-        {persisted && (
-          <Section title={readOnly ? "read-only container" : "actions"}>
-            {deleted ? (
-              <Action
-                label="Restore"
-                disabled={action.pending || readOnly}
-                onPress={() => transition("restore")}
-              />
-            ) : (
-              <View style={styles.toolbar}>
-                <Action
-                  label={
-                    task
-                      ? task.lifecycle === "open"
-                        ? "Complete"
-                        : "Reopen"
-                      : persisted.completedAt
-                        ? "Reopen"
-                        : "Complete"
-                  }
-                  disabled={action.pending || readOnly}
-                  onPress={() =>
-                    transition(
-                      task
-                        ? task.lifecycle === "open"
-                          ? "complete"
-                          : "reopen"
-                        : persisted.completedAt
-                          ? "reopen"
-                          : "complete",
-                    )
-                  }
-                />
-                {task?.lifecycle === "open" && (
-                  <Action
-                    label="Cancel task"
-                    disabled={action.pending || readOnly}
-                    onPress={() => transition("cancel")}
-                  />
-                )}
-                <Action
-                  label="Move to Trash"
-                  destructive
-                  disabled={action.pending || readOnly}
-                  onPress={() => transition("trash")}
-                />
-              </View>
-            )}
-          </Section>
-        )}
       </FormBody>
+      {writable && (
+        <FormSave
+          disabled={
+            !edited ||
+            action.pending ||
+            conflict ||
+            (uncertain && kind === "reminder") ||
+            !title.trim() ||
+            (kind === "task" && !listId)
+          }
+          onPress={save}
+        />
+      )}
       <Toaster />
     </View>
   );

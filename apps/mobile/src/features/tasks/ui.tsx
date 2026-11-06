@@ -56,15 +56,29 @@ export function Action({
     </Pressable>
   );
 }
-export function Heading({ children }: PropsWithChildren) {
+export function Heading({ children, icon }: PropsWithChildren<{ icon?: IconName }>) {
   const t = useTheme();
   return (
-    <Text
-      accessibilityRole="header"
-      style={{ color: t.ink, fontSize: 28, fontWeight: "700", marginBottom: spacing.lg }}
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: spacing.md,
+        marginBottom: spacing.lg,
+      }}
     >
-      {children}
-    </Text>
+      {icon && (
+        <View style={{ paddingTop: 3 }}>
+          <Icon name={icon} size={28} color={t.ink} />
+        </View>
+      )}
+      <Text
+        accessibilityRole="header"
+        style={{ color: t.ink, fontSize: 28, fontWeight: "700", flexShrink: 1 }}
+      >
+        {children}
+      </Text>
+    </View>
   );
 }
 /** A single rounded group: children own row padding; the group owns its seams. */
@@ -181,7 +195,7 @@ export function ToggleRow({
 }) {
   const t = useTheme();
   return (
-    <View style={styles.row}>
+    <View style={styles.settingRow}>
       <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
       <Switch
         accessibilityLabel={label}
@@ -204,8 +218,61 @@ export function groupEdges(first: boolean, last: boolean) {
     borderCurve: "continuous" as const,
   };
 }
-export function Field({ label, ...props }: TextInputProps & { label: string }) {
+export function TitleField({ label, ...props }: TextInputProps & { label: string }) {
   const t = useTheme();
+  return (
+    <View style={{ padding: spacing.lg }}>
+      <TextInput
+        accessibilityLabel={label}
+        placeholderTextColor={t.secondary}
+        multiline
+        scrollEnabled={false}
+        maxLength={240}
+        {...props}
+        style={[
+          {
+            color: t.ink,
+            fontSize: 24,
+            fontWeight: "600",
+            minHeight: 56,
+            padding: 0,
+            textAlignVertical: "top",
+          },
+          props.style,
+        ]}
+      />
+    </View>
+  );
+}
+export function Field({
+  label,
+  compact = true,
+  ...props
+}: TextInputProps & { label: string; compact?: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const t = useTheme();
+  if (compact && !editing)
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label}, ${props.value || "Not set"}`}
+        onPress={() => setEditing(true)}
+        style={styles.settingRow}
+      >
+        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
+        <Text
+          numberOfLines={1}
+          style={{
+            color: props.value ? t.ink : t.secondary,
+            fontSize: 17,
+            maxWidth: "55%",
+            textAlign: "right",
+          }}
+        >
+          {props.value || props.placeholder || "Not set"}
+        </Text>
+      </Pressable>
+    );
   return (
     <View style={{ padding: spacing.lg, gap: spacing.sm }}>
       <Text style={{ fontSize: 13, color: t.secondary }}>{label}</Text>
@@ -213,6 +280,11 @@ export function Field({ label, ...props }: TextInputProps & { label: string }) {
         accessibilityLabel={label}
         placeholderTextColor={t.secondary}
         {...props}
+        autoFocus={compact && editing}
+        onBlur={(event) => {
+          setEditing(false);
+          props.onBlur?.(event);
+        }}
         style={[
           {
             color: t.ink,
@@ -337,10 +409,12 @@ export function FormBody({ children }: PropsWithChildren) {
   const t = useTheme();
   return (
     <ScrollView
+      automaticallyAdjustKeyboardInsets
+      keyboardDismissMode="interactive"
       keyboardShouldPersistTaps="handled"
       contentInsetAdjustmentBehavior="automatic"
       style={{ flex: 1, backgroundColor: t.canvas }}
-      contentContainerStyle={{ padding: spacing.page, paddingBottom: spacing.xxl }}
+      contentContainerStyle={{ padding: spacing.page, paddingBottom: 112 }}
     >
       {children}
     </ScrollView>
@@ -356,6 +430,13 @@ export function confirm(title: string, message: string, accept: () => void, dest
     ]);
 }
 export const styles = StyleSheet.create({
+  settingRow: {
+    minHeight: 56,
+    padding: spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
   row: {
     minHeight: 56,
     paddingVertical: spacing.md,

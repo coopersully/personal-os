@@ -15,10 +15,17 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { Toaster } from "sonner-native";
+import { Icon } from "../../components/icons";
+import { RowActions } from "../../components/row-actions";
 import { useTheme } from "../../theme";
 import { useTaskAction, useTaskApi, useTaskResources } from "./data";
 import { DateField } from "./date-field";
-import { Action, Choice, confirm, Field, FormBody, Section, State } from "./ui";
+import { FormSave } from "./form-save";
+import { useDraftField } from "./form-state";
+import { ListAppearance } from "./list-appearance";
+import { RecordIdentity } from "./record-identity";
+import { SearchableChoice } from "./searchable-choice";
+import { Action, confirm, Field, FormBody, Section, State, styles } from "./ui";
 export function ContainerEditorScreen() {
   const params = useLocalSearchParams<{ id?: string; kind?: string }>();
   const api = useTaskApi();
@@ -53,13 +60,15 @@ function ContainerForm({
   const t = useTheme();
   const list = kind === "list" ? (initial as TaskList | undefined) : undefined;
   const project = kind === "project" ? (initial as TaskProject | undefined) : undefined;
-  const [name, setName] = useState(initial?.name ?? "");
-  const [notes, setNotes] = useState(project?.notes ?? list?.description ?? "");
-  const [why, setWhy] = useState(project?.why ?? "");
-  const [target, setTarget] = useState(project?.targetDate ?? null);
-  const [icon, setIcon] = useState<TaskListIcon>(list?.icon ?? "list");
-  const [color, setColor] = useState(list?.color ?? "");
-  const [listId, setListId] = useState(project?.listId ?? "");
+  const [edited, setEdited] = useState(false);
+  const markEdited = () => setEdited(true);
+  const [name, setName] = useDraftField(initial?.name ?? "", markEdited);
+  const [notes, setNotes] = useDraftField(project?.notes ?? list?.description ?? "", markEdited);
+  const [why, setWhy] = useDraftField(project?.why ?? "", markEdited);
+  const [target, setTarget] = useDraftField(project?.targetDate ?? null, markEdited);
+  const [icon, setIcon] = useDraftField<TaskListIcon>(list?.icon ?? "list", markEdited);
+  const [color, setColor] = useDraftField(list?.color ?? "", markEdited);
+  const [listId, setListId, initializeListId] = useDraftField(project?.listId ?? "", markEdited);
   const [destination, setDestination] = useState("");
   const [destinationProject, setDestinationProject] = useState("");
   const [preview, setPreview] = useState<TaskProjectMovePreview | null>(null);
@@ -73,8 +82,8 @@ function ContainerForm({
   const available = initial?.availability !== "archived" && !initial?.deletedAt;
   useEffect(() => {
     if (!listId && active.length)
-      setListId(active.find((row) => row.kind === "inbox")?.id ?? active[0].id);
-  }, [active, listId]);
+      initializeListId(active.find((row) => row.kind === "inbox")?.id ?? active[0].id);
+  }, [active, listId, initializeListId]);
   const fail = (error: unknown) => {
     if (error instanceof ApiClientError && error.status === 409) {
       const parsed = taskOrganizationConflictSchema.safeParse(error.details);
@@ -175,109 +184,139 @@ function ContainerForm({
           gestureEnabled: false,
           headerLeft: () => (
             <Action
-              label="Cancel"
+              label={edited ? "Cancel" : "Close"}
               disabled={action.pending}
               onPress={() =>
-                confirm(
-                  "Discard draft?",
-                  "Unsaved changes will be lost.",
-                  () => router.back(),
-                  true,
-                )
+                edited
+                  ? confirm(
+                      "Discard draft?",
+                      "Unsaved changes will be lost.",
+                      () => router.back(),
+                      true,
+                    )
+                  : router.back()
               }
             />
           ),
-          headerRight: () =>
-            available ? (
-              <Action
-                label="Save"
-                disabled={
-                  action.pending ||
-                  !name.trim() ||
-                  stale ||
-                  (!listId && kind === "project") ||
-                  uncertain
-                }
-                onPress={save}
-              />
-            ) : null,
+          headerRight: () => (
+            <View style={styles.toolbar}>
+              {initial && available && (
+                <RowActions
+                  label="Record actions"
+                  placement="header"
+                  actions={[
+                    ...(project
+                      ? [
+                          {
+                            id: "complete",
+                            label: "Complete project",
+                            icon: "check" as const,
+                            disabled: action.pending || stale,
+                            onPress: () => lifecycle("complete"),
+                          },
+                          {
+                            id: "cancel",
+                            label: "Cancel project",
+                            icon: "disconnected" as const,
+                            destructive: true,
+                            disabled: action.pending || stale,
+                            onPress: () =>
+                              confirm(
+                                "Cancel project?",
+                                "This changes the project lifecycle. The server will check its contents.",
+                                () => lifecycle("cancel"),
+                                true,
+                              ),
+                          },
+                        ]
+                      : []),
+                    ...(list?.kind !== "inbox"
+                      ? [
+                          {
+                            id: "archive",
+                            label: "Archive",
+                            icon: "archive" as const,
+                            destructive: true,
+                            disabled: action.pending || stale,
+                            onPress: () =>
+                              confirm(
+                                "Archive this container?",
+                                "Its contents may become read-only. You’ll choose how to handle active contents next.",
+                                () => lifecycle("archive"),
+                                true,
+                              ),
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
+              )}
+            </View>
+          ),
         }}
       />
       <FormBody>
         <View pointerEvents={available && !action.pending && !uncertain ? "auto" : "none"}>
-          <Section>
-            <Field label="Name" value={name} onChangeText={setName} maxLength={240} />
-            <Field
-              label={kind === "list" ? "Description" : "Notes"}
-              value={notes}
-              onChangeText={setNotes}
-              multiline
-              maxLength={10000}
-            />
-            {kind === "list" ? (
-              <>
-                <Choice
-                  label="Icon"
-                  value={icon}
-                  options={[
-                    "list",
-                    "home",
-                    "star",
-                    "target",
-                    "calendar",
-                    "wallet",
-                    "people",
-                    "receipt",
-                  ].map((value) => ({ value, label: value }))}
-                  onChange={(value) => setIcon(value as TaskListIcon)}
+          <RecordIdentity
+            title={name}
+            onTitleChange={setName}
+            description={notes}
+            onDescriptionChange={setNotes}
+            placeholder={kind === "list" ? "Home & errands" : "Plant a balcony garden"}
+            descriptionPlaceholder={
+              kind === "list"
+                ? "Repairs, shopping, and small jobs around the house."
+                : "Choose herbs, buy pots, and plant before spring."
+            }
+            icon={
+              kind === "list" ? (
+                <ListAppearance
+                  icon={icon}
+                  color={color}
+                  onChange={(nextIcon, nextColor) => {
+                    setIcon(nextIcon);
+                    setColor(nextColor);
+                  }}
                 />
-                <Field
-                  label="Color (optional)"
-                  value={color}
-                  onChangeText={setColor}
-                  autoCapitalize="none"
-                  placeholder="#7928ff"
+              ) : (
+                <Icon name="target" color={t.ink} size={28} />
+              )
+            }
+          />
+          {kind === "project" && (
+            <Section>
+              {!project && (
+                <SearchableChoice
+                  entity="list"
+                  label="List"
+                  value={listId}
+                  options={active.map((row) => ({ value: row.id, label: row.name }))}
+                  onChange={setListId}
                 />
-              </>
-            ) : (
-              <>
-                <Field label="Why" value={why} onChangeText={setWhy} multiline maxLength={10000} />
-                <DateField label="Target date" dateOnly value={target} onChange={setTarget} />
-                {!project && (
-                  <Choice
-                    label="List"
-                    value={listId}
-                    options={active.map((row) => ({ value: row.id, label: row.name }))}
-                    onChange={setListId}
-                  />
-                )}
-              </>
-            )}
-          </Section>
+              )}
+              <DateField label="Target date" dateOnly value={target} onChange={setTarget} />
+            </Section>
+          )}
+
+          {kind === "project" && (
+            <Section title="Purpose">
+              <Field
+                label="Why it matters"
+                placeholder="Grow fresh herbs for cooking"
+                value={why}
+                onChangeText={setWhy}
+                multiline
+                maxLength={10000}
+              />
+            </Section>
+          )}
         </View>
-        {initial && available && (
-          <Section title="manage">
+        {project && available && (
+          <Section title="Move project">
             {project && (
               <>
-                <Action
-                  label="Complete project"
-                  disabled={action.pending || stale}
-                  onPress={() => lifecycle("complete")}
-                />
-                <Action
-                  label="Cancel project"
-                  destructive
-                  disabled={action.pending || stale}
-                  onPress={() =>
-                    confirm(
-                      "Cancel project?",
-                      "This changes the project lifecycle. The server will check its contents.",
-                      () => lifecycle("cancel"),
-                      true,
-                    )
-                  }
-                />
-                <Choice
+                <SearchableChoice
+                  entity="list"
                   label="Move to list"
                   value={destination}
                   options={active
@@ -303,21 +342,6 @@ function ContainerForm({
                   }
                 />
               </>
-            )}
-            {list?.kind !== "inbox" && (
-              <Action
-                label="Archive"
-                destructive
-                disabled={action.pending || stale}
-                onPress={() =>
-                  confirm(
-                    "Archive this container?",
-                    "Its contents may become read-only. If active contents need a decision, you’ll choose how to handle them next.",
-                    () => lifecycle("archive"),
-                    true,
-                  )
-                }
-              />
             )}
           </Section>
         )}
@@ -352,7 +376,8 @@ function ContainerForm({
               {conflict.openContentCounts.tasks} open tasks · {conflict.openContentCounts.projects}{" "}
               open projects
             </Text>
-            <Choice
+            <SearchableChoice
+              entity="list"
               label="Destination list"
               value={destination}
               options={active
@@ -364,7 +389,8 @@ function ContainerForm({
               }}
             />
             {project && (
-              <Choice
+              <SearchableChoice
+                entity="project"
                 label="Destination project"
                 value={destinationProject}
                 options={[
@@ -412,6 +438,19 @@ function ContainerForm({
           <Text style={{ color: t.secondary }}>This container is archived and read-only.</Text>
         )}
       </FormBody>
+      {available && (
+        <FormSave
+          disabled={
+            !edited ||
+            action.pending ||
+            !name.trim() ||
+            stale ||
+            (!listId && kind === "project") ||
+            uncertain
+          }
+          onPress={save}
+        />
+      )}
       <Toaster />
     </View>
   );

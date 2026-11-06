@@ -1,4 +1,5 @@
 import { ApiClientError } from "@personal-os/api-client";
+import { refreshDueAlerts } from "../notifications/events";
 import { allPages } from "./logic";
 
 export { actOnItem, allPages, type ItemAction, isOpen, itemKey, uniqueItems } from "./logic";
@@ -84,6 +85,7 @@ export function useTaskAction() {
     const id = toast.loading(label);
     try {
       const value = await action();
+      refreshDueAlerts();
       const result = feedback?.(value);
       if (result?.error) toast.error(result.message, { id });
       else toast.success(result?.message ?? "Saved", { id });

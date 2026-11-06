@@ -22,16 +22,14 @@
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
     },
-    "platforms": [
-      "ios",
-      "web"
-    ],
+    "platforms": ["ios", "web"],
     "plugins": [
       "expo-router",
       "expo-image",
       "expo-font",
       "expo-secure-store",
-      "expo-asset"
+      "expo-asset",
+      "expo-notifications"
     ],
     "scheme": "personal-os"
   }

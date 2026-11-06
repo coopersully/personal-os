@@ -1,25 +1,14 @@
 import type { TaskList, TaskProject } from "@personal-os/domain";
 import { router } from "expo-router";
-import { FlatList, Pressable, Text, View } from "react-native";
+import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { Icon, type IconName } from "../../components/icons";
-import { spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
+import { radius, spacing, useTheme, workspaceColor } from "../../theme";
+import { ListRow, PinnedContainers, ProjectRow } from "./container-rows";
 import { useTaskAction, useTaskApi, useTaskResources, useTaskSearch } from "./data";
+import { partitionPinned } from "./presentation";
 import { TaskListScreen } from "./task-list";
-import {
-  Action,
-  Group,
-  groupEdges,
-  Heading,
-  NavigationRow,
-  SearchField,
-  State,
-  styles,
-} from "./ui";
-export function TasksHub({
-  mode,
-}: {
-  mode: "views" | "pinned" | "lists" | "projects" | "archive";
-}) {
+import { Group, Heading, NavigationRow, SearchField, State } from "./ui";
+export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "archive" }) {
   const t = useTheme();
   const api = useTaskApi();
   const resources = useTaskResources();
@@ -51,23 +40,13 @@ export function TasksHub({
                   (row) =>
                     !row.deletedAt &&
                     (row.availability === "archived" ||
-                      row.lifecycle !== "open" ||
                       lists.some(
                         (list) => list.id === row.listId && list.availability === "archived",
                       )),
                 )
                 .map((record) => ({ kind: "project" as const, record })),
             ]
-          : mode === "pinned"
-            ? [
-                ...activeLists
-                  .filter((row) => preferences?.pinnedListIds.includes(row.id))
-                  .map((record) => ({ kind: "list" as const, record })),
-                ...activeProjects
-                  .filter((row) => preferences?.pinnedProjectIds.includes(row.id))
-                  .map((record) => ({ kind: "project" as const, record })),
-              ]
-            : [];
+          : [];
   const filtered = records
     .filter(({ record }) => record.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
     .sort((a, b) => {
@@ -80,8 +59,21 @@ export function TasksHub({
         );
       return a.record.name.localeCompare(b.record.name);
     });
+  const { pinned: pinnedRows, directory: directoryRows } = partitionPinned(
+    filtered,
+    mode === "archive" ? undefined : preferences,
+  );
   const go = (title: string, params: Record<string, string>) =>
     router.push({ pathname: "/task-browser", params: { title, ...params } });
+  const openContainer = (kind: "list" | "project", record: TaskList | TaskProject) =>
+    go(record.name, {
+      view: "all",
+      ...(mode === "archive" ? { status: "all" } : {}),
+      kind: "task",
+      ...(kind === "list"
+        ? { listId: record.id }
+        : { projectId: record.id, listId: (record as TaskProject).listId }),
+    });
   const pin = (kind: "list" | "project", id: string) => {
     if (!resources.settings.data) return;
     const key = kind === "list" ? "pinnedListIds" : "pinnedProjectIds";
@@ -96,14 +88,6 @@ export function TasksHub({
     );
   };
   const links: { label: string; icon: IconName; press: () => void }[] = [
-    {
-      label: "Inbox",
-      icon: "inbox",
-      press: () => {
-        const inbox = lists.find((row) => row.kind === "inbox");
-        if (inbox) go("inbox", { listId: inbox.id, kind: "task", view: "all" });
-      },
-    },
     { label: "All tasks & reminders", icon: "views", press: () => go("all", { view: "all" }) },
     { label: "Upcoming", icon: "clock", press: () => go("upcoming", { view: "upcoming" }) },
     {
@@ -116,25 +100,19 @@ export function TasksHub({
       icon: "attention",
       press: () => go("reminders", { view: "all", kind: "reminder" }),
     },
+    { label: "Tasks", icon: "tasks", press: () => go("tasks", { view: "all", kind: "task" }) },
+    { label: "Trash", icon: "trash", press: () => go("trash", { view: "trash" }) },
     {
-      label: "Lists",
-      icon: "views",
-      press: () => router.push({ pathname: "/task-containers", params: { mode: "lists" } }),
+      label: "Archive",
+      icon: "archive",
+      press: () => router.push({ pathname: "/task-containers", params: { mode: "archive" } }),
     },
-    {
-      label: "Projects",
-      icon: "target",
-      press: () => router.push({ pathname: "/task-containers", params: { mode: "projects" } }),
-    },
+    { label: "History", icon: "history", press: () => go("history", { view: "history" }) },
   ];
   const loading =
-    resources.lists.isPending ||
-    resources.projects.isPending ||
-    (mode === "pinned" && resources.settings.isPending);
+    resources.lists.isPending || resources.projects.isPending || resources.settings.isPending;
   const failed =
-    resources.lists.isError ||
-    resources.projects.isError ||
-    (mode === "pinned" && resources.settings.isError);
+    resources.lists.isError || resources.projects.isError || resources.settings.isError;
   if (mode === "views" && search.trim())
     return <TaskListScreen title="search" scope={{ view: "all" }} />;
   return (
@@ -144,15 +122,15 @@ export function TasksHub({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={{ padding: spacing.page, paddingBottom: 100 }}
-        data={filtered}
+        data={directoryRows}
         keyExtractor={(item) => `${item.kind}:${item.record.id}`}
         ListHeaderComponent={
           <>
-            <Heading>{mode}</Heading>
-            {(mode === "lists" || mode === "projects" || mode === "archive") && (
+            <Heading>{mode === "views" ? "browse" : mode}</Heading>
+            {mode === "archive" && (
               <SearchField
                 accessibilityLabel="Search containers"
-                placeholder="Search lists and projects"
+                placeholder="Home"
                 placeholderTextColor={t.secondary}
                 value={search}
                 onChangeText={setSearch}
@@ -160,44 +138,125 @@ export function TasksHub({
             )}
 
             {mode === "views" && (
-              <Group>
-                {links.map((link) => (
-                  <NavigationRow
-                    key={link.label}
-                    label={link.label}
-                    icon={link.icon}
-                    onPress={link.press}
-                    disabled={link.label === "Inbox" && !lists.some((row) => row.kind === "inbox")}
-                  />
+              <>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.xl }}
+                >
+                  {links
+                    .filter((link) => ["Upcoming", "History"].includes(link.label))
+                    .map((link) => (
+                      <Pressable
+                        key={link.label}
+                        accessibilityRole="button"
+                        accessibilityLabel={link.label}
+                        onPress={link.press}
+                        style={({ pressed }) => ({
+                          width: 160,
+                          minHeight: 104,
+                          padding: spacing.lg,
+                          gap: spacing.md,
+                          borderRadius: radius.panel,
+                          backgroundColor: t.surface,
+                          opacity: pressed ? 0.6 : 1,
+                        })}
+                      >
+                        <Icon name={link.icon} size={24} color={workspaceColor(t, "tasks")} />
+                        <Text style={{ color: t.ink, fontSize: 17, fontWeight: "600" }}>
+                          {link.label}
+                        </Text>
+                        <Text style={{ color: t.secondary, fontSize: 13 }}>
+                          {link.label === "Upcoming"
+                            ? "Due or planned after today"
+                            : link.label === "Scheduled"
+                              ? "Tasks with reserved time"
+                              : "Completed & cancelled"}
+                        </Text>
+                      </Pressable>
+                    ))}
+                </ScrollView>
+                {[
+                  {
+                    title: "Task views",
+                    labels: ["All tasks & reminders", "Tasks", "Reminders", "Scheduled"],
+                  },
+                  { title: "Storage", labels: ["Archive", "Trash"] },
+                ].map((group) => (
+                  <View key={group.title} style={{ marginBottom: spacing.xl }}>
+                    <Text
+                      accessibilityRole="header"
+                      style={{
+                        color: t.secondary,
+                        fontSize: 13,
+                        marginHorizontal: spacing.lg,
+                        marginBottom: spacing.sm,
+                      }}
+                    >
+                      {group.title}
+                    </Text>
+                    <Group>
+                      {group.labels.map((label) => {
+                        const link = links.find((item) => item.label === label);
+                        return link ? (
+                          <NavigationRow
+                            key={label}
+                            label={label}
+                            icon={link.icon}
+                            onPress={link.press}
+                          />
+                        ) : null;
+                      })}
+                    </Group>
+                  </View>
                 ))}
-              </Group>
+                <Text
+                  accessibilityRole="header"
+                  style={{
+                    color: t.secondary,
+                    fontSize: 13,
+                    marginHorizontal: spacing.lg,
+                    marginBottom: spacing.sm,
+                  }}
+                >
+                  Preferences
+                </Text>
+                <Group>
+                  <NavigationRow
+                    label="Task preferences"
+                    icon="settings"
+                    onPress={() => router.push("/task-preferences")}
+                  />
+                </Group>
+              </>
             )}
-            {mode === "views" && (
-              <View style={{ marginTop: spacing.md }}>
-                <Action label="Task preferences" onPress={() => router.push("/task-preferences")} />
-              </View>
-            )}
-            {mode !== "archive" && (
-              <View style={[styles.toolbar, { marginVertical: 12 }]}>
-                <Action
-                  label="New list"
-                  onPress={() =>
-                    router.push({ pathname: "/task-container", params: { kind: "list" } })
-                  }
-                />
-                <Action
-                  label="New project"
-                  disabled={!activeLists.length}
-                  onPress={() =>
-                    router.push({ pathname: "/task-container", params: { kind: "project" } })
-                  }
-                />
-              </View>
+            {(mode === "lists" || mode === "projects") && (
+              <PinnedContainers
+                kind={mode === "lists" ? "list" : "project"}
+                items={pinnedRows.map(({ record }) => record)}
+                disabled={action.pending || !preferences}
+                onPin={(record) => pin(mode === "lists" ? "list" : "project", record.id)}
+                onEdit={(record) =>
+                  router.push({
+                    pathname: "/task-container",
+                    params: { kind: mode === "lists" ? "list" : "project", id: record.id },
+                  })
+                }
+                loading={resources.settings.isPending}
+                onRetry={
+                  resources.settings.isError
+                    ? () => {
+                        void resources.settings.refetch();
+                      }
+                    : undefined
+                }
+                onOpen={(record) => openContainer(mode === "lists" ? "list" : "project", record)}
+              />
             )}
           </>
         }
         ListEmptyComponent={
-          mode === "views" ? undefined : (
+          mode === "views" || (pinnedRows.length > 0 && directoryRows.length === 0) ? undefined : (
             <State
               loading={loading}
               retry={
@@ -210,9 +269,9 @@ export function TasksHub({
                   : undefined
               }
               empty={
-                mode === "pinned"
-                  ? "Pin a list or project from Views to keep it here."
-                  : "No matching containers."
+                mode === "projects"
+                  ? "No matching projects. Add a project to organize your tasks."
+                  : "No matching lists."
               }
             />
           )
@@ -221,71 +280,24 @@ export function TasksHub({
           const pinned = (
             kind === "list" ? preferences?.pinnedListIds : preferences?.pinnedProjectIds
           )?.includes(record.id);
-          return (
-            <View
-              style={[
-                styles.row,
-                groupEdges(index === 0, index === filtered.length - 1),
-                { backgroundColor: t.surface },
-              ]}
-            >
-              <Icon name={kind === "list" ? "views" : "target"} color={t.secondary} />
-              <Pressable
-                accessibilityRole="button"
-                onPress={() =>
-                  go(record.name, {
-                    view: mode === "archive" ? "history" : "all",
-                    kind: "task",
-                    ...(kind === "list"
-                      ? { listId: record.id }
-                      : { projectId: record.id, listId: (record as TaskProject).listId }),
-                  })
-                }
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  minHeight: touchTarget,
-                  justifyContent: "center",
-                  gap: 4,
-                }}
-              >
-                <Text numberOfLines={2} style={{ color: t.ink, fontSize: 17 }}>
-                  {record.name}
-                </Text>
-                <Text style={{ color: t.secondary, fontSize: 12 }}>
-                  {kind === "project"
-                    ? `${lists.find((list) => list.id === (record as TaskProject).listId)?.name ?? "List"} · ${(record as TaskProject).lifecycle}`
-                    : record.availability}
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${pinned ? "Unpin" : "Pin"} ${record.name}`}
-                disabled={action.pending || !preferences || mode === "archive"}
-                onPress={() => pin(kind, record.id)}
-                style={({ pressed }) => ({
-                  minWidth: touchTarget,
-                  minHeight: touchTarget,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  opacity: pressed || action.pending ? 0.5 : 1,
-                })}
-              >
-                <Icon
-                  name="pin"
-                  filled={pinned}
-                  color={pinned ? workspaceColor(t, "tasks") : t.secondary}
-                  size={19}
-                />
-              </Pressable>
-              <Action
-                disabled={"kind" in record && record.kind === "inbox"}
-                label="Edit"
-                onPress={() =>
-                  router.push({ pathname: "/task-container", params: { kind, id: record.id } })
-                }
-              />
-            </View>
+          const props = {
+            first: index === 0,
+            last: index === directoryRows.length - 1,
+            pinned: !!pinned,
+            disabled: action.pending || !preferences || mode === "archive",
+            onOpen: () => openContainer(kind, record),
+            onPin: () => pin(kind, record.id),
+            onEdit: () =>
+              router.push({ pathname: "/task-container", params: { kind, id: record.id } }),
+          };
+          return kind === "list" ? (
+            <ListRow {...props} record={record as TaskList} />
+          ) : (
+            <ProjectRow
+              {...props}
+              record={record as TaskProject}
+              listName={lists.find((list) => list.id === (record as TaskProject).listId)?.name}
+            />
           );
         }}
       />

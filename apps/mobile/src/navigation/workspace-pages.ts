@@ -1,14 +1,13 @@
 import type { IconName } from "../components/icons";
 
-// Mirrors apps/web/src/navigation/workspace-sections.ts. These are page shells,
-// not new task/mail/finance domain data or a second source of business rules.
+// Mobile navigation shares domain data with web, with platform-specific grouping.
 export type WorkspacePageDefinition = { name: string; label: string; icon: IconName };
 export const workspacePages = {
   tasks: [
     { name: "index", label: "today", icon: "calendar" },
-    { name: "views", label: "views", icon: "views" },
-    { name: "pinned", label: "pinned", icon: "pin" },
-    { name: "history", label: "history", icon: "history" },
+    { name: "projects", label: "projects", icon: "target" },
+    { name: "lists", label: "lists", icon: "views" },
+    { name: "views", label: "browse", icon: "grid" },
   ],
   mail: [
     { name: "index", label: "inbox", icon: "inbox" },

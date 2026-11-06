@@ -18,10 +18,9 @@ export type OptionsMenuProps = {
 export function OptionsMenu({ choices, onChange, onAdvanced, onReset }: OptionsMenuProps) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState(false);
+
   const close = () => {
     setOpen(false);
-    setFilter(false);
   };
   return (
     <>
@@ -37,7 +36,7 @@ export function OptionsMenu({ choices, onChange, onAdvanced, onReset }: OptionsM
           justifyContent: "center",
         }}
       >
-        <Text style={{ fontSize: 26, color: t.ink }}>…</Text>
+        <Text style={{ fontSize: 26, color: t.ink }}>⋮</Text>
       </Pressable>
       <Modal transparent visible={open} onRequestClose={close} animationType="fade">
         <Pressable
@@ -60,9 +59,15 @@ export function OptionsMenu({ choices, onChange, onAdvanced, onReset }: OptionsM
           }}
         >
           <ScrollView keyboardShouldPersistTaps="handled">
-            <Action label={filter ? "Back" : "Filter…"} onPress={() => setFilter(!filter)} />
+            <Action
+              label="Filters…"
+              onPress={() => {
+                close();
+                onAdvanced();
+              }}
+            />
             {choices
-              .filter((choice) => choice.section === (filter ? "filter" : "presentation"))
+              .filter((choice) => choice.section === "presentation")
               .map((choice) => (
                 <Choice
                   key={choice.key}
@@ -75,15 +80,6 @@ export function OptionsMenu({ choices, onChange, onAdvanced, onReset }: OptionsM
                   }}
                 />
               ))}
-            {filter && (
-              <Action
-                label="Dates & tags…"
-                onPress={() => {
-                  close();
-                  onAdvanced();
-                }}
-              />
-            )}
             <Action
               label="Reset view"
               onPress={() => {

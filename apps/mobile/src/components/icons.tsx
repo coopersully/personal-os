@@ -1,6 +1,11 @@
 import { Image, type ImageSourcePropType } from "react-native";
 
 export const icons = {
+  home: require("../../assets/navigation/House.png"),
+  star: require("../../assets/navigation/Star.png"),
+  people: require("../../assets/navigation/Users.png"),
+  trash: require("../../assets/navigation/Trash.png"),
+  save: require("../../assets/navigation/Check.png"),
   add: require("../../assets/navigation/Plus.png"),
   views: require("../../assets/navigation/ListTodo.png"),
   pin: require("../../assets/navigation/Pin.png"),

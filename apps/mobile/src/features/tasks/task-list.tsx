@@ -2,9 +2,12 @@ import type { TaskWorkspaceItem, TaskWorkspaceQuery } from "@personal-os/domain"
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
-import { Icon } from "../../components/icons";
-import { spacing, useTheme, workspaceColor } from "../../theme";
+import { FlatList, Modal, RefreshControl, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { FloatingAdd } from "../../components/floating-add";
+import { entityDictionary } from "../../product/entities";
+import { spacing, useTheme } from "../../theme";
+import { ActiveFilters } from "./active-filters";
 import {
   actOnItem,
   type ItemAction,
@@ -17,8 +20,21 @@ import {
   useTaskSearch,
 } from "./data";
 import { DateField } from "./date-field";
-import { OptionsMenu, type OptionsMenuProps } from "./options-menu";
-import { Action, confirm, groupEdges, Heading, SearchField, Section, State, styles } from "./ui";
+import { OptionsMenu } from "./options-menu";
+import { TaskRow } from "./task-row";
+import {
+  Action,
+  Choice,
+  confirm,
+  Field,
+  FormBody,
+  Heading,
+  SearchField,
+  Section,
+  State,
+  styles,
+} from "./ui";
+import { buildViewOptions } from "./view-options";
 
 export function TaskListScreen({
   title,
@@ -56,82 +72,7 @@ export function TaskListScreen({
     ...filters,
     ...(debounced ? { query: debounced } : {}),
   };
-  const options = (values: string[]) =>
-    values.map((value) => ({
-      value,
-      label: value.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase()),
-    }));
-  const menuChoices: OptionsMenuProps["choices"] = [
-    ...(!scope.listId && !scope.projectId
-      ? [
-          {
-            key: "kind" as const,
-            label: "Type",
-            value: query.kind ?? "all",
-            section: "filter" as const,
-            options: [
-              { value: "all", label: "Tasks & reminders" },
-              { value: "task", label: "Tasks" },
-              { value: "reminder", label: "Reminders" },
-            ],
-          },
-        ]
-      : []),
-    {
-      key: "status",
-      label: "Status",
-      value: query.status ?? "",
-      section: "filter",
-      options: [
-        { value: "", label: "View default" },
-        ...options(["all", "open", "open_and_completed", "completed", "cancelled", "archived"]),
-      ],
-    },
-    {
-      key: "priority",
-      label: "Priority",
-      value: query.priority ?? "",
-      section: "filter",
-      options: [{ value: "", label: "Any" }, ...options(["high", "medium", "low"])],
-    },
-    {
-      key: "due",
-      label: "Due",
-      value: query.due ?? "any",
-      section: "filter",
-      options: options(["any", "overdue", "dated", "none"]),
-    },
-    {
-      key: "reserved",
-      label: "Reserved time",
-      value: query.reserved ?? "any",
-      section: "filter",
-      options: options(["any", "scheduled", "none"]),
-    },
-    {
-      key: "sort",
-      label: "Sort by",
-      value: query.sort,
-      section: "presentation",
-      options: options([
-        "default",
-        "date",
-        "reserved",
-        "priority",
-        "newest",
-        "oldest",
-        "title",
-        "estimate",
-      ]),
-    },
-    {
-      key: "group",
-      label: "Group by",
-      value: query.group,
-      section: "presentation",
-      options: options(["none", "date", "list", "project"]),
-    },
-  ];
+  const menuChoices = buildViewOptions(query, scope);
   const identity = JSON.stringify(query);
   // biome-ignore lint/correctness/useExhaustiveDependencies: selection belongs to this exact query scope.
   useEffect(() => {
@@ -216,13 +157,23 @@ export function TaskListScreen({
             <View
               style={{
                 flexDirection: "row",
-                alignItems: "center",
+                alignItems: "flex-start",
                 justifyContent: "space-between",
                 marginBottom: spacing.md,
               }}
             >
               <View style={{ flex: 1 }}>
-                <Heading>{title}</Heading>
+                <Heading
+                  icon={
+                    scope.projectId
+                      ? entityDictionary.project.icon
+                      : scope.listId
+                        ? entityDictionary.list.icon
+                        : undefined
+                  }
+                >
+                  {title}
+                </Heading>
               </View>
               <View style={{ marginBottom: spacing.lg }}>
                 <OptionsMenu
@@ -236,10 +187,27 @@ export function TaskListScreen({
                 />
               </View>
             </View>
+            <ActiveFilters
+              filters={filters}
+              choices={menuChoices}
+              search={search}
+              onRemove={(key) =>
+                setFilters((current) => {
+                  const next = { ...current };
+                  delete next[key];
+                  return next;
+                })
+              }
+              onClearSearch={() => setSearch("")}
+              onClear={() => {
+                setFilters({});
+                setSearch("");
+              }}
+            />
             {standalone && (
               <SearchField
                 accessibilityLabel="Search tasks"
-                placeholder="Search tasks and reminders"
+                placeholder="Plan meals"
                 placeholderTextColor={t.secondary}
                 value={search}
                 onChangeText={setSearch}
@@ -248,94 +216,10 @@ export function TaskListScreen({
             <View style={styles.toolbar}>
               <Text style={{ color: t.secondary, marginRight: "auto" }}>
                 {page.data ? `${page.data.pages[0].total} items` : ""}
+                {` · ${menuChoices.find((choice) => choice.key === "sort")?.options.find((option) => option.value === query.sort)?.label ?? "Recommended"}`}
+                {query.group && query.group !== "none" ? ` · Grouped by ${query.group}` : ""}
               </Text>
-              {scope.view === "history" && (
-                <>
-                  <Action
-                    label="Trash"
-                    onPress={() =>
-                      router.push({
-                        pathname: "/task-browser",
-                        params: { view: "trash", title: "trash" },
-                      })
-                    }
-                  />
-                  <Action
-                    label="Archive"
-                    onPress={() =>
-                      router.push({ pathname: "/task-containers", params: { mode: "archive" } })
-                    }
-                  />
-                </>
-              )}
-              {standalone && (
-                <Action
-                  label="Add"
-                  onPress={() =>
-                    router.push({
-                      pathname: "/task-editor",
-                      params: {
-                        kind: scope.kind === "reminder" ? "reminder" : "task",
-                        listId: scope.listId,
-                        projectId: scope.projectId,
-                      },
-                    })
-                  }
-                />
-              )}
             </View>
-            {showFilters && (
-              <Section title="Dates & tags">
-                <Action label="Done" onPress={() => setShowFilters(false)} />
-                <SearchField
-                  accessibilityLabel="Filter by tag"
-                  placeholder="Tag"
-                  placeholderTextColor={t.secondary}
-                  value={filters.tag ?? ""}
-                  onChangeText={(value) => updateFilter("tag", value.trim())}
-                  style={{ color: t.ink, padding: 12, minHeight: 44 }}
-                />
-                <DateField
-                  label="Due after"
-                  value={filters.dueAfter ?? null}
-                  onChange={(value) => updateFilter("dueAfter", value ?? "")}
-                />
-                <DateField
-                  label="Due before"
-                  value={filters.dueBefore ?? null}
-                  onChange={(value) => updateFilter("dueBefore", value ?? "")}
-                />
-                <DateField
-                  label="Reserved after"
-                  value={filters.scheduledAfter ?? null}
-                  onChange={(value) => updateFilter("scheduledAfter", value ?? "")}
-                />
-                <DateField
-                  label="Reserved before"
-                  value={filters.scheduledBefore ?? null}
-                  onChange={(value) => updateFilter("scheduledBefore", value ?? "")}
-                />
-                <Action
-                  label="Reset filters"
-                  onPress={() => {
-                    setFilters({});
-                    setSearch("");
-                  }}
-                />
-                <Action
-                  disabled={!resources.settings.data || action.pending}
-                  label="Save sort and grouping as defaults"
-                  onPress={() =>
-                    void action.run("Saving preferences…", () =>
-                      api.updateWorkspaceSettings("tasks", {
-                        expectedRevision: resources.settings.data?.revision ?? 0,
-                        preferences: { taskSort: query.sort, taskGroup: query.group },
-                      }),
-                    )
-                  }
-                />
-              </Section>
-            )}
             {selected.length > 0 && (
               <Section>
                 <View style={styles.toolbar}>
@@ -419,108 +303,23 @@ export function TaskListScreen({
                     {groupTitle === "none" || !groupTitle ? "Ungrouped" : groupTitle}
                   </Text>
                 )}
-              <View
-                style={[
-                  styles.row,
-                  groupEdges(
-                    index === 0 ||
-                      (query.group !== "none" && items[index - 1].groupKey !== item.groupKey),
-                    index === items.length - 1 ||
-                      (query.group !== "none" && items[index + 1].groupKey !== item.groupKey),
-                  ),
-                  {
-                    backgroundColor: marked ? `${workspaceColor(t, "tasks")}22` : t.surface,
-                    borderBottomColor: t.line,
-                    borderBottomWidth:
-                      index === items.length - 1 ||
-                      (query.group !== "none" && items[index + 1].groupKey !== item.groupKey)
-                        ? 0
-                        : 0.5,
-                  },
-                ]}
-              >
-                <Pressable
-                  accessibilityRole="checkbox"
-                  accessibilityLabel={`${selected.length ? "Select" : done ? "Reopen" : "Complete"} ${item.record.title}`}
-                  accessibilityState={{
-                    checked: selected.length ? marked : done,
-                    disabled: action.pending || item.readOnly || !!item.deletedAt,
-                  }}
-                  disabled={
-                    action.pending || (!selected.length && (item.readOnly || !!item.deletedAt))
-                  }
-                  onPress={() =>
-                    selected.length ? toggle() : perform([item], done ? "reopen" : "complete")
-                  }
-                  style={{
-                    minWidth: 44,
-                    minHeight: 44,
-                    justifyContent: "center",
-                    alignItems: "center",
-                  }}
-                >
-                  <View
-                    style={{
-                      width: 25,
-                      height: 25,
-                      borderRadius: 13,
-                      borderWidth: 1.5,
-                      borderColor: done || marked ? workspaceColor(t, "tasks") : t.secondary,
-                      backgroundColor: done || marked ? workspaceColor(t, "tasks") : "transparent",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    {(done || marked) && <Icon name="check" size={19} color={t.canvas} />}
-                  </View>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open ${item.kind}: ${item.record.title}`}
-                  onPress={() => (selected.length ? toggle() : edit(item))}
-                  onLongPress={toggle}
-                  style={{ flex: 1, minWidth: 0, minHeight: 44, justifyContent: "center", gap: 5 }}
-                >
-                  <Text
-                    style={{
-                      color: t.ink,
-                      fontSize: 17,
-                      textDecorationLine: done ? "line-through" : "none",
-                    }}
-                  >
-                    {item.record.title}
-                  </Text>
-                  <Text style={{ color: t.secondary, fontSize: 12 }}>
-                    {[
-                      item.kind,
-                      item.record.priority !== "medium" ? `${item.record.priority} priority` : null,
-                      item.record.dueAt
-                        ? new Date(item.record.dueAt).toLocaleString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })
-                        : null,
-                      item.kind === "task" &&
-                      resources.settings.data?.preferences.taskRowDetails.includes("estimate") &&
-                      item.record.estimateMinutes
-                        ? `${item.record.estimateMinutes} min`
-                        : null,
-                      item.kind === "task" &&
-                      resources.settings.data?.preferences.taskRowDetails.includes("tags")
-                        ? item.record.tags.join(", ")
-                        : null,
-                      resources.settings.data?.preferences.taskRowDetails.includes("notes")
-                        ? item.record.notes?.slice(0, 100)
-                        : null,
-                      item.readOnly ? "Read-only" : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </Text>
-                </Pressable>
-              </View>
+              <TaskRow
+                item={item}
+                marked={marked}
+                selecting={selected.length > 0}
+                pending={action.pending}
+                first={
+                  index === 0 ||
+                  (query.group !== "none" && items[index - 1].groupKey !== item.groupKey)
+                }
+                last={
+                  index === items.length - 1 ||
+                  (query.group !== "none" && items[index + 1].groupKey !== item.groupKey)
+                }
+                onSelect={toggle}
+                onOpen={() => edit(item)}
+                onComplete={() => perform([item], done ? "reopen" : "complete")}
+              />
             </View>
           );
         }}
@@ -534,6 +333,103 @@ export function TaskListScreen({
           ) : undefined
         }
       />
+      <Modal
+        visible={showFilters}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowFilters(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
+          <View style={[styles.settingRow, { justifyContent: "space-between" }]}>
+            <Text
+              accessibilityRole="header"
+              style={{ color: t.ink, fontSize: 22, fontWeight: "600" }}
+            >
+              Filters
+            </Text>
+            <Action label="Done" onPress={() => setShowFilters(false)} />
+          </View>
+          <FormBody>
+            <Section title="Match items">
+              {menuChoices
+                .filter((choice) => choice.section === "filter")
+                .map((choice) => (
+                  <Choice
+                    key={choice.key}
+                    label={choice.label}
+                    value={choice.value}
+                    options={choice.options}
+                    onChange={(value) => updateFilter(choice.key, value)}
+                  />
+                ))}
+            </Section>
+            <Section title="Dates & tags">
+              <Field
+                label="Tag"
+                placeholder="errands"
+                value={filters.tag ?? ""}
+                onChangeText={(value) => updateFilter("tag", value.trim())}
+                autoCapitalize="none"
+              />
+              <DateField
+                label="Due after"
+                value={filters.dueAfter ?? null}
+                onChange={(value) => updateFilter("dueAfter", value ?? "")}
+              />
+              <DateField
+                label="Due before"
+                value={filters.dueBefore ?? null}
+                onChange={(value) => updateFilter("dueBefore", value ?? "")}
+              />
+              <DateField
+                label="Reserved after"
+                value={filters.scheduledAfter ?? null}
+                onChange={(value) => updateFilter("scheduledAfter", value ?? "")}
+              />
+              <DateField
+                label="Reserved before"
+                value={filters.scheduledBefore ?? null}
+                onChange={(value) => updateFilter("scheduledBefore", value ?? "")}
+              />
+              <Action
+                label="Reset filters"
+                onPress={() =>
+                  setFilters((current) => ({ sort: current.sort, group: current.group }))
+                }
+              />
+            </Section>
+            <Section title="View preferences">
+              <Action
+                disabled={!resources.settings.data || action.pending}
+                label="Save sort and grouping as defaults"
+                onPress={() =>
+                  void action.run("Saving preferences…", () =>
+                    api.updateWorkspaceSettings("tasks", {
+                      expectedRevision: resources.settings.data?.revision ?? 0,
+                      preferences: { taskSort: query.sort, taskGroup: query.group },
+                    }),
+                  )
+                }
+              />
+            </Section>
+          </FormBody>
+        </SafeAreaView>
+      </Modal>
+      {standalone && scope.view !== "history" && scope.view !== "trash" && (
+        <FloatingAdd
+          label={scope.kind === "reminder" ? "Add reminder" : "Add task"}
+          onPress={() =>
+            router.push({
+              pathname: "/task-editor",
+              params: {
+                kind: scope.kind === "reminder" ? "reminder" : "task",
+                listId: scope.listId,
+                projectId: scope.projectId,
+              },
+            })
+          }
+        />
+      )}
     </View>
   );
 }

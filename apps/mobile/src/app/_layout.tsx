@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Toaster, toast } from "sonner-native";
 import { AuthProvider, useAuth } from "../features/auth/context";
 import { PreviewProvider } from "../features/briefing/context";
+import { NotificationProvider } from "../features/notifications/provider";
 import { MobileDataProvider } from "../features/tasks/data";
 import { useTheme } from "../theme";
 
@@ -12,7 +13,9 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
-        <AuthenticatedLayout />
+        <NotificationProvider>
+          <AuthenticatedLayout />
+        </NotificationProvider>
         <Toaster />
       </AuthProvider>
     </GestureHandlerRootView>

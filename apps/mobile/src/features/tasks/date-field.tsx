@@ -11,7 +11,7 @@ export function DateField({ label, value, onChange }: DateFieldProps) {
       label={`${label} (ISO date/time)`}
       value={value ?? ""}
       onChangeText={(text) => onChange(text || null)}
-      placeholder="No date"
+      placeholder="2026-12-15T09:00:00-05:00"
     />
   );
 }

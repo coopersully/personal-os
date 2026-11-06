@@ -1,5 +1,21 @@
 # nohmi — Implementation Log
 
+## 2026-11-06 — Native Tasks source acceptance
+
+- [Native Tasks iPhone workflows](https://github.com/coopersully/personal-os/pull/367) merged with
+  To-do, Projects, Lists and Browse. To-do defaults to today and overdue; History contains completed
+  and cancelled items, while Archive and Trash remain separate. The web History empty state now
+  describes that same distinction.
+- Added meaningful mobile authentication, notification, editor, navigation and lifecycle coverage:
+  227 mobile tests pass with unchanged coverage floors. The complete repository source gate passed
+  673 test files, production builds, all eight browser shards and both native desktop builds.
+- Local fixture simulator checks verified creation/cancel, completion/Undo, Trash details,
+  Restore/Undo and successful Trash dismissal. Release review fixed closing-editor refetch errors,
+  stale reopened drafts and notification ownership across asynchronous preference persistence.
+- These are source and simulator observations, not physical-iPhone or OS notification-delivery
+  acceptance. The broader native milestone retains its device, encrypted-cache, Universal Links
+  and reminder-create-idempotency work.
+
 ## 2026-11-06 — iOS local due alerts
 
 - Added opt-in task/reminder due alerts using Apple User Notifications via Expo, with generic

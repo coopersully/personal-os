@@ -320,13 +320,13 @@ test("full opt-in rejects a missing gate even when later jobs retain theirs", ()
   }
 });
 
-test("browser shards retain both complete matrices and the original coverage command", () => {
+test("browser shards retain both complete matrices and unsharded coverage", () => {
   const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
   const blocks = workflowJobBlocks(workflow);
   const quality = blocks.find((block) => block.startsWith("  quality:\n"));
   const browser = blocks.find((block) => block.startsWith("  browser:\n"));
   const required = blocks.find((block) => block.startsWith("  required:\n"));
-  assert.match(quality, /pnpm check:node/);
+  assert.match(quality, /run: pnpm test:coverage\n/);
   assert.match(quality, /pnpm audit --prod/);
   assert.doesNotMatch(quality, /merge-reports|shard|thresholds|continue-on-error/);
   assert.match(browser, /project: \[desktop-chromium, mobile-chromium\]/);
@@ -372,14 +372,31 @@ function assertNodeFailureContract(workflow) {
   // Neither the job nor any step may turn a failure into a successful job result.
   assert.doesNotMatch(quality, /continue-on-error/);
   const steps = workflowSteps(quality);
-  const source = steps.filter(({ fields }) => ["install", "audit", "node"].includes(fields.id));
+  const source = steps.filter(({ fields }) =>
+    ["install", "audit", "typecheck", "node", "build"].includes(fields.id),
+  );
   assert.deepEqual(
     source.map(({ fields }) => [fields.id, fields.run]),
     [
       ["install", "pnpm install --frozen-lockfile"],
       ["audit", "pnpm audit --prod"],
-      ["node", "pnpm check:node"],
+      ["typecheck", "pnpm typecheck"],
+      ["node", "pnpm test:coverage"],
+      ["build", "pnpm build"],
     ],
+  );
+  assert.match(quality, /^ {4}timeout-minutes: 50$/m);
+  assert.deepEqual(
+    source.slice(2).map(({ fields }) => fields["timeout-minutes"]),
+    ["5", "30", "10"],
+    "Types and builds must not consume the 30-minute test execution budget.",
+  );
+  const packageJson = JSON.parse(
+    readFileSync(resolve(scriptDirectory, "../../package.json"), "utf8"),
+  );
+  assert.equal(
+    packageJson.scripts["check:node"],
+    "pnpm typecheck && pnpm test:coverage && pnpm build",
   );
   for (const { fields } of source) {
     // Omitted conditions retain GitHub's default success() blocking semantics.
@@ -393,6 +410,13 @@ function assertNodeFailureContract(workflow) {
     collector[0].fields.run,
     /^node \.github\/scripts\/collect-node-coverage\.mjs collect /,
   );
+  for (const [name, id] of [
+    ["TYPECHECK", "typecheck"],
+    ["COVERAGE", "node"],
+    ["BUILD", "build"],
+  ]) {
+    assert.ok(collector[0].block.includes(`${name}_OUTCOME: \${{ steps.${id}.outcome }}`));
+  }
   assert.equal(collector[0].fields.if, "always()");
   assert.equal(
     uploads[0].fields.if,
@@ -403,7 +427,7 @@ function assertNodeFailureContract(workflow) {
     [collector[0], uploads[0]],
     "Only diagnostic collection and upload may run after source failure.",
   );
-  assert.ok(steps.indexOf(source[2]) < steps.indexOf(collector[0]));
+  assert.ok(steps.indexOf(source.at(-1)) < steps.indexOf(collector[0]));
   assert.ok(steps.indexOf(collector[0]) < steps.indexOf(uploads[0]));
   const required = jobs.find((block) => block.startsWith("  required:\n"));
   assert.ok(required);
@@ -430,7 +454,7 @@ test("production audit remains blocking while diagnostics retain failed source e
 test("Node failure contract accepts named steps with reordered properties", () => {
   const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
   const named = workflow.replace(
-    /^( {6})- id: (install|audit|node)\n {8}run: (.+)$/gm,
+    /^( {6})- id: (install|audit|typecheck|node|build)\n {8}run: (.+)$/gm,
     "$1- name: Source $2\n        run: $3\n        id: $2",
   );
   assert.notEqual(named, workflow);
@@ -451,7 +475,7 @@ test("Node failure contract rejects source bypasses and diagnostic masking", () 
           .replace("id: install", "id: audit")
           .replace("id: audit\n        run: pnpm audit", "id: install\n        run: pnpm audit"),
     ],
-    ...["install", "audit", "node"].flatMap((id) => [
+    ...["install", "audit", "typecheck", "node", "build"].flatMap((id) => [
       [
         `${id} unconditional`,
         (text) => text.replace(`- id: ${id}\n`, `- id: ${id}\n        if: always()\n`),
@@ -482,6 +506,34 @@ test("Node failure contract rejects source bypasses and diagnostic masking", () 
     [
       "job ignored failure",
       (text) => text.replace("  quality:\n", "  quality:\n    continue-on-error: true\n"),
+    ],
+    ...[
+      ["typecheck", 5],
+      ["node", 30],
+      ["build", 10],
+    ].map(([id, minutes]) => [
+      `${id} execution budget`,
+      (text) =>
+        text.replace(
+          new RegExp(`(- id: ${id}\\n        run: [^\\n]+\\n        timeout-minutes: )${minutes}`),
+          (_, prefix) => `${prefix}99`,
+        ),
+    ]),
+    [
+      "outer budget",
+      (text) =>
+        text.replace(
+          "# Account for setup, types and builds outside the bounded test execution.\n    timeout-minutes: 50",
+          "timeout-minutes: 30",
+        ),
+    ],
+    [
+      "build diagnostic",
+      (text) =>
+        text.replace(
+          `BUILD_OUTCOME: \${{ steps.build.outcome }}`,
+          `BUILD_OUTCOME: \${{ steps.node.outcome }}`,
+        ),
     ],
     ["aggregate dependency", (text) => text.replace("      - quality\n", "")],
     ["aggregate result", (text) => text.replace("[name, job.result]", "[name, 'success']")],

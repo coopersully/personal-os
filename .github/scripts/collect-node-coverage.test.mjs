@@ -280,7 +280,11 @@ for (const outcome of ["failure", "success"]) {
         0,
         result.exitCode === 0 ? undefined : retainedReportFailure(workspace, staging, result),
       );
-      assert.equal(result.manifest.sourceSteps.node, outcome);
+      assert.deepEqual(result.manifest.sourceSteps, {
+        install: "success",
+        audit: "success",
+        node: outcome,
+      });
       assert.equal(result.manifest.identity.runAttempt, 2);
       assert.equal(result.manifest.identity.checkoutSha, env.GITHUB_SHA);
       assert.equal(result.manifest.sourceReceipt.validated, false);
@@ -293,6 +297,56 @@ for (const outcome of ["failure", "success"]) {
         assert.equal(file.bytes, actual.length);
       }
       assert.ok(readFileSync(join(staging, "manifest.json")).length <= LIMITS.manifest);
+    }));
+}
+
+for (const [typecheck, coverage, build, aggregate] of [
+  ["success", "success", "success", "success"],
+  ["success", "success", "cancelled", "cancelled"],
+  ["success", "success", "failure", "failure"],
+  ["success", "failure", "skipped", "failure"],
+  ["failure", "skipped", "skipped", "failure"],
+  ["success", "cancelled", "skipped", "cancelled"],
+  ["skipped", "skipped", "skipped", "skipped"],
+  ["success", "success", undefined, "unknown"],
+]) {
+  test(`phased diagnostics preserve ${typecheck}/${coverage}/${build} without false Node success`, () =>
+    fixture(({ workspace, env, options }) => {
+      env.TYPECHECK_OUTCOME = typecheck;
+      env.COVERAGE_OUTCOME = coverage;
+      if (build !== undefined) env.BUILD_OUTCOME = build;
+      // A legacy value must not override actual phase outcomes.
+      env.NODE_OUTCOME = "success";
+      writeReports(workspace, reports(workspace));
+      const result = collect(options);
+      assert.equal(result.exitCode, 0);
+      assert.deepEqual(result.manifest.sourceSteps, {
+        install: "success",
+        audit: "success",
+        typecheck,
+        coverage,
+        build: build ?? "unknown",
+        node: aggregate,
+      });
+    }));
+}
+
+test("successful coverage with absent reports stays incomplete even when the build fails", () =>
+  fixture(({ env, options }) => {
+    env.TYPECHECK_OUTCOME = "success";
+    env.COVERAGE_OUTCOME = "success";
+    env.BUILD_OUTCOME = "failure";
+    const result = collect(options);
+    assert.equal(result.manifest.sourceSteps.node, "failure");
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.manifest.diagnostics, "incomplete");
+  }));
+
+for (const name of ["TYPECHECK", "COVERAGE", "BUILD"]) {
+  test(`rejects invalid ${name} phase outcome`, () =>
+    fixture(({ env, options }) => {
+      env[`${name}_OUTCOME`] = "passed";
+      assert.throws(() => collect(options), /Invalid source step outcome/);
     }));
 }
 
@@ -646,7 +700,7 @@ test("repository verification registers fixtures and preserves Node failure gati
   const hook = readFileSync(join(root, ".codex/scripts/check.sh"), "utf8");
   assert.match(hook, /node --test .*collect-node-coverage\.test\.mjs/);
   const quality = workflow.split("  quality:\n")[1].split("  browser:\n")[0];
-  assert.match(quality, /- id: node\n\s+run: pnpm check:node/);
+  assert.match(quality, /- id: node\n\s+run: pnpm test:coverage\n\s+timeout-minutes: 30/);
   assert.doesNotMatch(quality, /continue-on-error|\|\| true/);
   assert.match(quality, /if: always\(\)/);
   assert.match(quality, /steps\.coverage\.outputs\.artifact_ready == 'true'/);

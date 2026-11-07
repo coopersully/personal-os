@@ -412,3 +412,228 @@ it("synchronizes manual Plan selection so the same Overview shortcut can be reus
   );
   await screen.findByText("No goals yet.");
 });
+
+it("opens an account with only its scoped transactions and preserves missing balance state", async () => {
+  const { FinanceAccountScreen } = await import("./details");
+  h.params = { id: account.id };
+  h.api.listFinanceAccounts.mockResolvedValue({
+    accounts: [
+      {
+        ...account,
+        balance: null,
+        ownershipType: "individual",
+        provider: "manual",
+        lastSyncedAt: null,
+      },
+    ],
+    totals: {},
+    accountSemantics: {},
+  });
+  mount(<FinanceAccountScreen />);
+  await screen.findByText("Unavailable");
+  await screen.findByText("Corner market");
+  expect(h.api.listFinanceTransactions).toHaveBeenCalledWith(
+    expect.objectContaining({ accountId: account.id }),
+  );
+});
+it("shows transaction notes, splits, and provenance without inventing a currency", async () => {
+  const { FinanceTransactionScreen } = await import("./details");
+  h.api.getFinanceTransaction.mockResolvedValue({
+    data: {
+      ...transaction,
+      currencyCode: null,
+      pending: true,
+      notes: "Shared lunch",
+      categoryRationale: "Confirmed by owner",
+      allocations: [{ id: "split", treatment: "personal", state: "active", amount: 20 }],
+    },
+  });
+  mount(<FinanceTransactionScreen />);
+  await screen.findByText("Shared lunch");
+  expect(screen.getByText("Pending · Currency unknown")).toBeTruthy();
+  expect(screen.getByText("Confirmed by owner")).toBeTruthy();
+  expect(screen.getByText("personal")).toBeTruthy();
+});
+it("shows unavailable details rather than dereferencing deleted records", async () => {
+  const { FinanceTransactionScreen } = await import("./details");
+  h.api.getFinanceTransaction.mockResolvedValue({ data: null });
+  mount(<FinanceTransactionScreen />);
+  await screen.findByText("This transaction is unavailable.");
+});
+it("distinguishes a proposal from an approved budget and retains assumptions/resources", async () => {
+  h.api.getFinanceBudget.mockResolvedValue({
+    data: {
+      allocatedTotal: 500,
+      effectiveFrom: "2026-11",
+      status: "proposed",
+      version: 2,
+      rationale: "Save before discretionary spending",
+      allocations: [{ key: "food", amount: 500, kind: "spending", description: "Food" }],
+      resources: [{ key: "pay", description: "Salary", amount: 500, kind: "income" }],
+      assumptions: ["Income remains stable"],
+    },
+  });
+  mount(<FinancePlanScreen />);
+  await screen.findByText("Proposal — not approved · revision 2");
+  expect(screen.getByText("Salary")).toBeTruthy();
+  expect(screen.getByText("Income remains stable")).toBeTruthy();
+});
+it("keeps expected bill and income signs and reports unconfirmed source schedules", async () => {
+  h.params = { view: "Cash flow" };
+  h.api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [
+      {
+        key: "rent",
+        displayName: "Rent",
+        localDate: "2026-11-10",
+        source: { kind: "obligation" },
+        remainingExpectedCents: 50000,
+        currencyCode: "USD",
+        matchState: "expected",
+      },
+      {
+        key: "pay",
+        displayName: "Payroll",
+        localDate: "2026-11-12",
+        source: { kind: "income" },
+        remainingExpectedCents: null,
+        currencyCode: "USD",
+        matchState: "expected",
+      },
+    ],
+    unavailableSources: [{ reason: "unknown_amount" }],
+  });
+  mount(<FinancePlanScreen />);
+  await screen.findByText(/−USD\s500.00/);
+  expect(screen.getByText("Unavailable")).toBeTruthy();
+  expect(screen.getByText(/1 sources need schedule confirmation/)).toBeTruthy();
+});
+it("shows goals and suppresses untrustworthy wealth aggregates", async () => {
+  h.params = { view: "Wealth" };
+  h.api.listFinanceAccounts.mockResolvedValue({
+    accounts: [account],
+    totals: { netWorth: 999999 },
+    accountSemantics: { trustworthy: false },
+  });
+  h.api.listFinanceGoals.mockResolvedValue({ data: [{ id: "goal", name: "Emergency fund" }] });
+  mount(<FinancePlanScreen />);
+  await screen.findByText("Emergency fund");
+  expect(screen.getByText("View balances by account")).toBeTruthy();
+  expect(screen.queryByText(/999,999/)).toBeNull();
+});
+it("opens a review's canonical transaction instead of creating a second decision", async () => {
+  h.api.getFinanceReviewQueue.mockResolvedValue([
+    { id: "review", rationale: null, reason: "unknown_merchant", transaction },
+  ]);
+  mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Corner market/ }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/finance-transaction",
+    params: { id: transaction.id },
+  });
+});
+it("paginates recorded activity with its authoritative cursor", async () => {
+  h.params = { view: "Activity" };
+  h.api.listFinanceActivity
+    .mockResolvedValueOnce({
+      entries: [
+        {
+          id: "a",
+          action: "Categorized transaction",
+          explanation: "Owner confirmed the category",
+          status: "applied",
+        },
+      ],
+      nextCursor: "next",
+    })
+    .mockResolvedValueOnce({
+      entries: [
+        {
+          id: "b",
+          action: "Recorded goal progress",
+          explanation: "Statement reviewed",
+          status: "applied",
+        },
+      ],
+      nextCursor: null,
+    });
+  mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Load more activity/ }));
+  await screen.findByText("Recorded goal progress");
+  expect(h.api.listFinanceActivity).toHaveBeenLastCalledWith({ cursor: "next", limit: 25 });
+});
+it("reads user and agent messages from the same ongoing conversation", async () => {
+  h.params = { view: "Conversation" };
+  h.api.getFinanceConversationHistory
+    .mockResolvedValueOnce({
+      messages: [
+        {
+          id: "m1",
+          authorKind: "user",
+          text: "Review spending",
+          createdAt: "2026-11-07T12:00:00Z",
+        },
+      ],
+      nextCursor: "12",
+    })
+    .mockResolvedValueOnce({
+      messages: [
+        {
+          id: "m2",
+          authorKind: "agent",
+          text: "Here are the recorded changes",
+          createdAt: "2026-11-07T12:00:00Z",
+        },
+      ],
+      nextCursor: null,
+    });
+  mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Load more messages/ }));
+  await screen.findByText("Here are the recorded changes");
+  expect(h.api.getFinanceConversationHistory).toHaveBeenLastCalledWith({ after: "12", limit: 50 });
+});
+it("keeps a draft on stale-revision conflicts and reports recovery through Sonner", async () => {
+  const { ApiClientError } = await import("@personal-os/api-client");
+  h.api.updateFinanceTransaction.mockRejectedValue(
+    new ApiClientError({ status: 409, code: "conflict", message: "Changed" }),
+  );
+  mount(<FinanceTransactionEditor />);
+  fireEvent.change(await screen.findByLabelText("Notes"), { target: { value: "Keep this draft" } });
+  fireEvent.click(screen.getByLabelText("Save changes"));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(expect.stringContaining("changed elsewhere"), {
+      id: "save",
+    }),
+  );
+  expect(screen.getByLabelText("Notes")).toHaveValue("Keep this draft");
+  expect(h.back).not.toHaveBeenCalled();
+});
+it("does not resubmit an unchanged draft or send a redundant category update", async () => {
+  mount(<FinanceTransactionEditor />);
+  fireEvent.change(await screen.findByLabelText("Notes"), { target: { value: "Temporary" } });
+  fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "" } });
+  fireEvent.click(screen.getByLabelText("Save changes"));
+  expect(h.api.updateFinanceTransaction).not.toHaveBeenCalled();
+  expect(h.info).toHaveBeenCalledWith("No changes to save");
+});
+it("changes a category without resending untouched notes", async () => {
+  mount(<FinanceTransactionEditor />);
+  fireEvent.click(await screen.findByRole("button", { name: /Category/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Travel" }));
+  fireEvent.click(screen.getByLabelText("Save changes"));
+  await waitFor(() => expect(h.success).toHaveBeenCalled());
+  expect(h.api.updateFinanceTransaction).toHaveBeenCalledWith(transaction.id, {
+    category: "Travel",
+    expectedTransactionUpdatedAt: transaction.updatedAt,
+  });
+});
+it("discards edits only after the explicit Cancel confirmation", async () => {
+  mount(<FinanceTransactionEditor />);
+  fireEvent.change(await screen.findByLabelText("Notes"), { target: { value: "Draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.back).not.toHaveBeenCalled();
+  expect(h.alert).toHaveBeenCalledWith("Discard changes?", expect.any(String), expect.any(Array));
+  const actions = h.alert.mock.calls[0][2];
+  actions.find((action: { text: string }) => action.text === "Discard").onPress();
+  expect(h.back).toHaveBeenCalled();
+});

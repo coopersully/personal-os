@@ -131,7 +131,7 @@ export function FinanceAssistantScreen() {
           <Card>
             <FinanceRow
               title="Your Finance conversation"
-              subtitle="Continue the same conversation as on the web"
+              subtitle="Read your ongoing Finance conversation"
               icon="mail"
               onPress={() => {
                 setMode("Conversation");

@@ -23,11 +23,13 @@ export function FinanceAccountScreen() {
             <Card rows>
               <FinanceRow centered title="Source" value={account.provider} icon="finances" />
               <FinanceRow
+                centered
                 title="Status"
                 value={account.status.replaceAll("_", " ")}
                 icon="attention"
               />
               <FinanceRow
+                centered
                 title="Updated"
                 value={
                   account.lastSyncedAt
@@ -38,6 +40,7 @@ export function FinanceAccountScreen() {
               />
               <FinanceRow centered title="Ownership" value={account.ownershipType} icon="people" />
               <FinanceRow
+                centered
                 title="Planning"
                 value={account.includeInPlanning ? "Included" : "Excluded"}
                 icon="wallet"
@@ -97,6 +100,7 @@ export function FinanceTransactionScreen() {
                 icon="calendar"
               />
               <FinanceRow
+                centered
                 title="Account"
                 value={
                   accounts.data?.accounts.find((account) => account.id === item.accountId)?.name ??

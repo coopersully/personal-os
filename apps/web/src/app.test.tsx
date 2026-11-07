@@ -9891,10 +9891,98 @@ describe("Personal OS web app", () => {
         },
       };
     };
+    // Pair each native request with its own settlement; independent .some checks
+    // could otherwise accept a request and outcome from different invocations.
+    const linkedReminderRequest = (start: number) => {
+      const matching = mocks.listReminders.mock.calls
+        .map(([input], index) => ({ input, index }))
+        .filter(({ input, index }) => index >= start && isExactReminderPageRequest(input));
+      const request = matching.length === 1 ? matching[0] : undefined;
+      const workspaceIndex = request
+        ? mocks.listTaskWorkspace.mock.calls.findIndex(([input]) => input === request.input)
+        : -1;
+      return {
+        unique: matching.length === 1,
+        linked: workspaceIndex >= 0,
+        settlement: request ? mocks.listReminders.mock.settledResults[request.index] : undefined,
+        workspaceSettlement:
+          workspaceIndex >= 0
+            ? mocks.listTaskWorkspace.mock.settledResults[workspaceIndex]
+            : undefined,
+      };
+    };
+    const reminderIdentities = new WeakMap<object, number>();
+    let nextReminderIdentity = 1;
+    const reminderIdentity = (object: object) => {
+      let id = reminderIdentities.get(object);
+      if (id === undefined) {
+        id = nextReminderIdentity++;
+        reminderIdentities.set(object, id);
+      }
+      return id;
+    };
+    const reminderChronology: object[] = [];
+    const recordReminderBoundary = (
+      boundary: string,
+      view: ReturnType<typeof setup>,
+      callsStart: number,
+    ) => {
+      try {
+        const query = view.queryClient
+          .getQueryCache()
+          .find({ queryKey: reminderPageQueryKey, exact: true });
+        const request = linkedReminderRequest(callsStart);
+        reminderChronology.push({
+          boundary,
+          client: reminderIdentity(view.queryClient),
+          query: query ? reminderIdentity(query) : null,
+          status: query?.state.status ?? "missing",
+          fetch: query?.state.fetchStatus ?? "missing",
+          uniqueRequest: request.unique,
+          linkedWorkspaceRequest: request.linked,
+          settlement: request.settlement?.type ?? "missing",
+          intendedRejection:
+            request.settlement?.type === "rejected" &&
+            request.settlement.value === intendedReminderFailure,
+          emptyResponse:
+            request.settlement?.type === "fulfilled" &&
+            isEmptyReminderResponse(request.settlement.value),
+        });
+        if (reminderChronology.length > 10) reminderChronology.shift();
+      } catch {
+        /* Observation must not change the original assertion or unmount behavior. */
+      }
+    };
+    const reportReminderFailure = (stage: string, view: ReturnType<typeof setup>) => {
+      try {
+        const snapshot = {
+          stage,
+          chronology: reminderChronology,
+          current: reminderStageState(view),
+        };
+        const serialized = JSON.stringify(snapshot);
+        // All fields are fixed labels/enums/booleans/local ordinals, never raw data.
+        // ASCII fields make length the byte bound; oversized detail is omitted as a whole.
+        console.error(
+          "Reminders connected renderer chronology",
+          serialized.length <= 4096
+            ? serialized
+            : JSON.stringify({
+                stage,
+                detailOmitted: true,
+                chronology: reminderChronology.slice(-4),
+              }),
+        );
+      } catch {
+        /* Diagnostics must never replace the same original failure. */
+      }
+    };
     mocks.listReminders.mockRejectedValueOnce(intendedReminderFailure);
     const remindersErrorView = setup("/reminders");
+    recordReminderBoundary("error-setup-return", remindersErrorView, reminderErrorCallsStart);
     try {
       expect(await readRecovery()).toBeInTheDocument();
+      recordReminderBoundary("recovery-observed", remindersErrorView, reminderErrorCallsStart);
       const errorState = remindersErrorView.queryClient.getQueryState(reminderPageQueryKey);
       expect(errorState?.status).toBe("error");
       expect(errorState?.fetchStatus).toBe("idle");
@@ -9909,26 +9997,33 @@ describe("Personal OS web app", () => {
           .slice(reminderErrorSettlementsStart)
           .some((entry) => entry.type === "rejected" && entry.value === intendedReminderFailure),
       ).toBe(true);
+      const errorRequest = linkedReminderRequest(reminderErrorCallsStart);
+      expect(errorRequest.unique && errorRequest.linked).toBe(true);
+      expect(
+        errorRequest.settlement?.type === "rejected" &&
+          errorRequest.settlement.value === intendedReminderFailure &&
+          errorRequest.workspaceSettlement?.type === "rejected" &&
+          errorRequest.workspaceSettlement.value === intendedReminderFailure,
+      ).toBe(true);
+      recordReminderBoundary("error-handoff-proven", remindersErrorView, reminderErrorCallsStart);
     } catch (error) {
-      try {
-        console.error(
-          "Reminders error-renderer handoff",
-          JSON.stringify(reminderStageState(remindersErrorView)),
-        );
-      } catch {
-        /* Preserve the same original failure. */
-      }
+      recordReminderBoundary("error-handoff-failed", remindersErrorView, reminderErrorCallsStart);
+      reportReminderFailure("error-handoff", remindersErrorView);
       throw error;
     }
-    const previousReminderStage = reminderStageState(remindersErrorView);
+    recordReminderBoundary("before-error-unmount", remindersErrorView, reminderErrorCallsStart);
     remindersErrorView.unmount();
+    recordReminderBoundary("after-error-unmount", remindersErrorView, reminderErrorCallsStart);
 
     const reminderEmptyCallsStart = mocks.listReminders.mock.calls.length;
     const reminderEmptySettlementsStart = mocks.listReminders.mock.settledResults.length;
     mocks.listReminders.mockResolvedValue({ items: [], nextCursor: null });
     const remindersView = setup("/reminders");
+    recordReminderBoundary("fresh-setup-return", remindersView, reminderEmptyCallsStart);
     try {
+      recordReminderBoundary("before-empty-lookup", remindersView, reminderEmptyCallsStart);
       expect(await screen.findByText("No matching items")).toBeInTheDocument();
+      recordReminderBoundary("empty-lookup-return", remindersView, reminderEmptyCallsStart);
       expect(remindersView.queryClient !== remindersErrorView.queryClient).toBe(true);
       const emptyState = remindersView.queryClient.getQueryState(reminderPageQueryKey);
       expect(emptyState?.status).toBe("success");
@@ -9945,18 +10040,22 @@ describe("Personal OS web app", () => {
           .slice(reminderEmptySettlementsStart)
           .some((entry) => entry.type === "fulfilled" && isEmptyReminderResponse(entry.value)),
       ).toBe(true);
+      const emptyRequest = linkedReminderRequest(reminderEmptyCallsStart);
+      expect(emptyRequest.unique && emptyRequest.linked).toBe(true);
+      expect(
+        emptyRequest.settlement?.type === "fulfilled" &&
+          isEmptyReminderResponse(emptyRequest.settlement.value) &&
+          emptyRequest.workspaceSettlement?.type === "fulfilled" &&
+          hasEmptyWorkspacePage({ pages: [emptyRequest.workspaceSettlement.value] }),
+      ).toBe(true);
+      recordReminderBoundary("fresh-handoff-proven", remindersView, reminderEmptyCallsStart);
     } catch (error) {
-      try {
-        console.error(
-          "Reminders substage diagnostics",
-          JSON.stringify({
-            previous: previousReminderStage,
-            current: reminderStageState(remindersView),
-          }),
-        );
-      } catch {
-        /* Diagnostics must never replace the original lookup error. */
-      }
+      recordReminderBoundary(
+        "empty-lookup-or-handoff-failed",
+        remindersView,
+        reminderEmptyCallsStart,
+      );
+      reportReminderFailure("fresh-empty", remindersView);
       throw error;
     }
     expect(screen.getByText("Try another filter or search.")).toBeInTheDocument();

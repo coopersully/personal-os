@@ -32,6 +32,7 @@ const h = vi.hoisted(() => ({
   foreground: undefined as undefined | ((state: string) => void),
   removeListener: vi.fn(),
   owner: "owner-a",
+  timezone: "America/New_York" as string | undefined,
   params: { id: "transaction-1" } as Record<string, string>,
   push: vi.fn(),
   navigate: vi.fn(),
@@ -144,7 +145,7 @@ vi.mock("../../components/glass-surface", () => ({
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock("../auth/context", () => ({
   useAuth: () => ({
-    state: { user: { id: h.owner, planningTimezone: "America/New_York" } },
+    state: { user: { id: h.owner, planningTimezone: h.timezone } },
     session: { api: () => h.api },
   }),
 }));
@@ -203,6 +204,7 @@ function mount(node: ReactNode) {
 beforeEach(() => {
   vi.clearAllMocks();
   h.owner = "owner-a";
+  h.timezone = "America/New_York";
   h.params = { id: "transaction-1" };
   h.api.listFinanceAccounts.mockResolvedValue({
     accounts: [account],
@@ -319,8 +321,11 @@ it("saves explicit edits with the original revision and only reports confirmed s
   });
   expect(screen.queryByText("Transaction updated")).toBeNull();
 });
-it("does not call a proposed update saved", async () => {
-  h.api.updateFinanceTransaction.mockResolvedValue({ status: "pending_review", review: {} });
+it.each([
+  "pending_review",
+  "needs_input",
+])("closes a %s submission without discarding an already-submitted proposal", async (status) => {
+  h.api.updateFinanceTransaction.mockResolvedValue({ status, review: {} });
   mount(<FinanceTransactionEditor />);
   fireEvent.change(await screen.findByLabelText("Notes"), { target: { value: "Review this" } });
   fireEvent.click(screen.getByLabelText("Save changes"));
@@ -328,6 +333,9 @@ it("does not call a proposed update saved", async () => {
   expect(h.success).not.toHaveBeenCalled();
   expect(h.back).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Save changes")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(h.back).toHaveBeenCalledOnce();
+  expect(h.alert).not.toHaveBeenCalled();
 });
 it("retains the draft and reports an uncertain save through Sonner", async () => {
   h.api.updateFinanceTransaction.mockRejectedValue(new Error("offline"));
@@ -487,6 +495,7 @@ it("shows transaction notes, splits, and provenance without inventing a currency
   expect(screen.getByText("Pending · Currency unknown")).toBeTruthy();
   expect(screen.getByText("Confirmed by owner")).toBeTruthy();
   expect(screen.getByText("personal")).toBeTruthy();
+  expect(screen.getByText("20.00")).toBeTruthy();
 });
 it("shows unavailable details rather than dereferencing deleted records", async () => {
   const { FinanceTransactionScreen } = await import("./details");
@@ -506,13 +515,13 @@ it("distinguishes a proposal from an approved budget and retains assumptions/res
       resources: [
         { key: "pay", inCurrentSchedule: true, description: "Salary", amount: 500, kind: "income" },
       ],
-      assumptions: ["Income remains stable"],
+      assumptions: ["Income remains stable", "Income remains stable"],
     },
   });
   mount(<FinancePlanScreen />);
   await screen.findByText("Proposal — not approved · revision 2");
   expect(screen.getByText("Salary")).toBeTruthy();
-  expect(screen.getByText("Income remains stable")).toBeTruthy();
+  expect(screen.getAllByText("Income remains stable")).toHaveLength(2);
 });
 it("keeps expected bill and income signs and reports unconfirmed source schedules", async () => {
   h.params = { view: "Cash flow" };
@@ -836,4 +845,215 @@ it("keeps modal Save above the keyboard and removes listeners after closing", as
   expect(result.current).toBe(0);
   unmount();
   expect(h.keyboardListeners.size).toBe(0);
+});
+
+it("opens the canonical destinations from Overview metrics, schedules and activity", async () => {
+  h.api.listFinanceActivity.mockResolvedValue({
+    entries: [
+      {
+        id: "changed",
+        action: "Category updated",
+        explanation: "Owner reviewed",
+        status: "applied",
+      },
+    ],
+    nextCursor: null,
+  });
+  mount(<FinanceOverviewScreen />);
+  for (const [name, target] of [
+    [
+      /Spent this month/,
+      { pathname: "/finances/spending", params: { period: "month", mode: "Summary" } },
+    ],
+    [/^Cash/, "/finances/accounts"],
+    [/Net worth/, { pathname: "/finances/plan", params: { view: "Wealth" } }],
+    [
+      /See upcoming income and bills/,
+      { pathname: "/finances/plan", params: { view: "Cash flow" } },
+    ],
+    [/Category updated/, { pathname: "/finances/assistant", params: { view: "Activity" } }],
+  ] as const) {
+    fireEvent.click(await screen.findByRole("button", { name }));
+    expect(h.navigate).toHaveBeenLastCalledWith(target);
+  }
+});
+
+it("keeps Assistant shortcuts on their matching canonical view", async () => {
+  const view = mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Your Finance conversation/ }));
+  await screen.findByText("Your Finance conversation will appear here.");
+  expect(h.setParams).toHaveBeenLastCalledWith({ view: "Conversation" });
+  view.unmount();
+  mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Recorded activity/ }));
+  await screen.findByText("No recorded activity yet.");
+  expect(h.setParams).toHaveBeenLastCalledWith({ view: "Activity" });
+});
+it("resets the spending drill-down when changing period and opens full transaction details", async () => {
+  mount(<FinanceSpendingScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Groceries/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Corner market/ }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-transaction",
+    params: { id: transaction.id },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /All categories/ }));
+  expect(screen.queryByText(/Spending contribution:/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "This month" }));
+  expect(h.setParams).toHaveBeenLastCalledWith({ period: "month" });
+  fireEvent.click(screen.getByRole("button", { name: "This week" }));
+  expect(h.setParams).toHaveBeenLastCalledWith({ period: "week" });
+});
+it("preserves actionable source and planning state across account groups", async () => {
+  h.api.listFinanceAccounts.mockResolvedValue({
+    accounts: [
+      { ...account, status: "needs_reauth", includeInPlanning: false },
+      {
+        ...account,
+        id: "investment",
+        name: "Brokerage",
+        kind: "investment",
+        status: "connected",
+        lastSyncedAt: "2026-11-07T12:00:00Z",
+      },
+      {
+        ...account,
+        id: "debt",
+        name: "Credit card",
+        kind: "debt",
+        status: "connected",
+        lastSyncedAt: null,
+      },
+    ],
+  });
+  mount(<FinanceAccountsScreen />);
+  expect(await screen.findByText(/Reconnect needed.*Excluded from planning/)).toBeTruthy();
+  expect(screen.getByText(/Updated /)).toBeTruthy();
+  expect(screen.getByText(/Not synced/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Search accounts"), { target: { value: "Brokerage" } });
+  expect(screen.queryByText("Credit card")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Brokerage/ }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-account",
+    params: { id: "investment" },
+  });
+});
+
+it.each([
+  "active",
+  "superseded",
+])("preserves the %s budget state and missing-description fallbacks", async (status) => {
+  h.api.getFinanceBudget.mockResolvedValue({
+    data: {
+      allocatedTotal: 0,
+      effectiveFrom: "2026-11",
+      status,
+      version: 3,
+      rationale: "Current allocation",
+      allocations: [{ key: "reserve", kind: "saving", amount: 0 }],
+      resources: [{ key: "salary", kind: "income", amount: 0 }],
+      assumptions: [],
+    },
+  });
+  mount(<FinancePlanScreen />);
+  await screen.findByText(`${status === "active" ? "Approved" : status} · revision 3`);
+  expect(screen.getByText("reserve")).toBeTruthy();
+  expect(screen.getByText("salary")).toBeTruthy();
+  expect(screen.queryByText("Assumptions")).toBeNull();
+});
+it("keeps successful data visible when manual refresh fails again and offers another retry", async () => {
+  const view = mount(<FinanceAccountsScreen />);
+  await screen.findByText("Everyday checking");
+  h.api.listFinanceAccounts.mockRejectedValue(new Error("Still offline"));
+  await act(async () => {
+    await view.client.invalidateQueries({ queryKey: ["finances", "owner-a", "accounts"] });
+  });
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith("Couldn’t load finance data", expect.any(Object)),
+  );
+  const first = h.error.mock.calls.find(([message]) => message === "Couldn’t load finance data");
+  expect(first).toBeTruthy();
+  await act(async () => {
+    first?.[1].action.onClick();
+  });
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Couldn’t refresh finance data",
+      expect.objectContaining({ id: first?.[1].id, action: expect.any(Object) }),
+    ),
+  );
+  expect(screen.getByText("Everyday checking")).toBeTruthy();
+  expect(screen.queryByText("Couldn’t refresh finance data")).toBeNull();
+  h.api.listFinanceAccounts.mockResolvedValue({
+    accounts: [],
+    totals: {},
+    accountSemantics: { trustworthy: true },
+  });
+  const retry = h.error.mock.calls.find(([message]) => message === "Couldn’t refresh finance data");
+  await act(async () => {
+    retry?.[1].action.onClick();
+  });
+  await screen.findByText("No accounts yet. Connected and manual accounts will appear here.");
+  expect(h.success).toHaveBeenCalledWith("Finance data refreshed", { id: first?.[1].id });
+});
+it("shows signs and unknown currency without losing income or transfer records", async () => {
+  h.params = { mode: "Transactions", period: "month" };
+  h.api.listFinanceTransactions.mockResolvedValue({
+    items: [
+      {
+        ...transaction,
+        id: "income",
+        merchant: "Payroll",
+        direction: "income",
+        currencyCode: null,
+        category: null,
+        pending: true,
+      },
+      { ...transaction, id: "transfer", merchant: "Account transfer", direction: "transfer" },
+    ],
+    nextCursor: null,
+  });
+  mount(<FinanceSpendingScreen />);
+  await screen.findByText("Payroll");
+  expect(screen.getByText("+42.00")).toBeTruthy();
+  expect(screen.getByText(/Uncategorized.*Pending.*Currency unknown/)).toBeTruthy();
+  expect(screen.getByText("Account transfer")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Transactions" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+it("does not infer a financial date scope when the user timezone is unavailable", async () => {
+  h.timezone = undefined;
+  mount(<FinanceOverviewScreen />);
+  await screen.findByText("Cash");
+  expect(h.api.getFinanceSpending).not.toHaveBeenCalled();
+  expect(h.api.listFinanceRecurringOccurrences).not.toHaveBeenCalled();
+});
+it("does not fetch or install foreground refresh for an absent owner", async () => {
+  h.owner = "";
+  mount(<FinanceAccountsScreen />);
+  await act(async () => {
+    expect(h.focus?.()).toBeUndefined();
+  });
+  expect(h.api.listFinanceAccounts).not.toHaveBeenCalled();
+});
+it("does not show a late save failure after the editor is closed", async () => {
+  let reject!: (reason: Error) => void;
+  h.api.updateFinanceTransaction.mockReturnValue(
+    new Promise((_resolve, fail) => {
+      reject = fail;
+    }),
+  );
+  const view = mount(<FinanceTransactionEditor />);
+  fireEvent.change(await screen.findByLabelText("Notes"), { target: { value: "Later" } });
+  fireEvent.click(screen.getByLabelText("Save changes"));
+  view.unmount();
+  await act(async () => {
+    reject(new Error("offline"));
+  });
+  expect(h.dismiss).toHaveBeenCalledWith("save");
+  expect(h.error).not.toHaveBeenCalled();
+  expect(h.back).not.toHaveBeenCalled();
 });

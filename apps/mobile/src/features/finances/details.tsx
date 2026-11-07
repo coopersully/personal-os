@@ -135,7 +135,7 @@ export function FinanceTransactionScreen() {
                       key={allocation.id}
                       title={allocation.treatment}
                       subtitle={allocation.state}
-                      value={formatMoney(allocation.amount, item.currencyCode)}
+                      value={recordAmount(allocation.amount, item.currencyCode)}
                     />
                   ))}
                 </Card>

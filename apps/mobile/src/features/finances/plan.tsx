@@ -44,8 +44,9 @@ function Budget() {
           {budget.assumptions.length > 0 && (
             <Section title="Assumptions">
               <Card>
-                {budget.assumptions.map((item) => (
-                  <Copy key={item}>{item}</Copy>
+                {budget.assumptions.map((item, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: immutable text occurrences have no identity or local state; duplicate assumptions must stay visible.
+                  <Copy key={`${index}:${item}`}>{item}</Copy>
                 ))}
               </Card>
             </Section>

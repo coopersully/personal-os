@@ -38,7 +38,7 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
   }, []);
   const categories = useFinanceRead(["categories"], (api) => api.getFinanceCategories());
   const close = () =>
-    edited
+    edited && !submitted
       ? Alert.alert("Discard changes?", "Unsaved edits will be lost.", [
           { text: "Keep editing", style: "cancel" },
           { text: "Discard", style: "destructive", onPress: () => router.back() },
@@ -114,7 +114,9 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
               onPress={close}
               style={{ minHeight: 44, justifyContent: "center" }}
             >
-              <Text style={{ color: t.ink, fontSize: 16 }}>{edited ? "Cancel" : "Close"}</Text>
+              <Text style={{ color: t.ink, fontSize: 16 }}>
+                {edited && !submitted ? "Cancel" : "Close"}
+              </Text>
             </Pressable>
           ),
         }}

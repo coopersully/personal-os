@@ -24,6 +24,8 @@ export function Screen({ children, chrome = false }: PropsWithChildren<{ chrome?
             ]}
           >
             <ScrollView
+              automaticallyAdjustKeyboardInsets
+              keyboardDismissMode="interactive"
               contentInsetAdjustmentBehavior={
                 Platform.OS === "ios" ? "automatic" : chrome ? "never" : "automatic"
               }

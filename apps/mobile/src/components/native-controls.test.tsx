@@ -468,6 +468,12 @@ it("hosts stacked high-contrast feedback only on the active screen layer", () =>
   rerender(<AppToaster editor />);
   expect(h.toaster).toMatchObject({ fullWindowOverlay: false, theme: "light" });
   expect(screen.getByTestId("toaster")).toBeVisible();
+  h.path = "/finance-transaction-edit";
+  rerender(<AppToaster />);
+  expect(screen.queryByTestId("toaster")).not.toBeInTheDocument();
+  rerender(<AppToaster editor />);
+  expect(screen.getByTestId("toaster")).toBeVisible();
+  expect(h.toaster).toMatchObject({ fullWindowOverlay: true });
   h.path = "/tasks";
   rerender(<AppToaster editor />);
   expect(screen.queryByTestId("toaster")).not.toBeInTheDocument();

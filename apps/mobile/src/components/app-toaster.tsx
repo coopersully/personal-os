@@ -9,13 +9,16 @@ export function AppToaster({ editor = false }: { editor?: boolean }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
-  const inEditor = pathname === "/task-editor" || pathname === "/task-container";
+  const inEditor =
+    pathname === "/task-editor" ||
+    pathname === "/task-container" ||
+    pathname === "/finance-transaction-edit";
   if (editor !== inEditor) return null;
   const background = t.dark ? "#fafafa" : "#202024";
   const foreground = t.dark ? "#202024" : "#fafafa";
   return (
     <Toaster
-      fullWindowOverlay={!editor}
+      fullWindowOverlay={!editor || pathname === "/finance-transaction-edit"}
       theme={t.dark ? "light" : "dark"}
       position="top-center"
       offset={insets.top + spacing.md}

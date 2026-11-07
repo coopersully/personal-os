@@ -90,10 +90,6 @@ it("shows sample workspace items and leaves unimplemented financial data clearly
 
 const pages: Record<string, () => Promise<{ default: React.ComponentType }>> = {
   calendar: () => import("../../app/(workspaces)/calendar"),
-  "finances/index": () => import("../../app/(workspaces)/finances/index"),
-  "finances/manage": () => import("../../app/(workspaces)/finances/manage"),
-  "finances/money": () => import("../../app/(workspaces)/finances/money"),
-  "finances/planning": () => import("../../app/(workspaces)/finances/planning"),
   "mail/index": () => import("../../app/(workspaces)/mail/index"),
   "mail/mailboxes": () => import("../../app/(workspaces)/mail/mailboxes"),
   "settings/agents": () => import("../../app/(workspaces)/settings/agents"),
@@ -104,10 +100,6 @@ const pages: Record<string, () => Promise<{ default: React.ComponentType }>> = {
 };
 it.each([
   ["calendar", "calendar"],
-  ["finances/index", "overview"],
-  ["finances/manage", "manage"],
-  ["finances/money", "money"],
-  ["finances/planning", "planning"],
   ["mail/index", "inbox"],
   ["mail/mailboxes", "mailboxes"],
   ["settings/agents", "agent settings"],

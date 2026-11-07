@@ -1249,3 +1249,20 @@ cover failed refresh recovery, reduced-motion clouds, data-view controls and for
 - Retained the adapted cursor and vivid solid workspace identity treatment. Campaign nature scenes, figure silhouettes and device screenshots are locally hosted.
 - Excluded the historical optional premiere capture fixture: current Finance demo enrichment invalidates its fixed category assumptions. The original source remains in `b397f08f`; campaign captures do not certify live actions or provider behavior.
 - This is a review candidate, not a claim of merge or production deployment. Current-candidate independent review, verification and release evidence remain required.
+
+## 2026-11-07 — Native Finance implementation candidate
+
+COO-210 — Mobile Finance adds the approved five native destinations: Overview,
+Spending, Plan, Accounts, and Assistant. The Expo client now reads Finance through
+the shared typed API: monthly spending, expected occurrences, account balances and
+details, scoped/paginated transactions, budget allocations/resources, wealth/goals,
+existing review cases, conversation history, and recorded activity. Category and
+notes edits retain the original transaction revision and distinguish applied,
+review-required, and needs-input responses. The floating Save primitive is shared
+with Tasks, and entity selection uses a searchable native sheet.
+
+This is a local implementation candidate, not a production or TestFlight release.
+Account/manual transaction/goal creation, budget proposal/approval interactions,
+conversation sending, automation/profile setup editing, imports and correction
+workflows, alternate spending visualizations, and preference parity remain tracked
+under the same issue. No live financial records were modified for acceptance.

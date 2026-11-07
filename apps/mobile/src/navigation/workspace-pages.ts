@@ -15,9 +15,10 @@ export const workspacePages = {
   ],
   finances: [
     { name: "index", label: "overview", icon: "grid" },
-    { name: "money", label: "money", icon: "finances" },
-    { name: "planning", label: "planning", icon: "wallet" },
-    { name: "manage", label: "manage", icon: "settings" },
+    { name: "spending", label: "spending", icon: "receipt" },
+    { name: "plan", label: "plan", icon: "wallet" },
+    { name: "accounts", label: "accounts", icon: "finances" },
+    { name: "assistant", label: "assistant", icon: "star" },
   ],
   settings: [
     { name: "index", label: "account", icon: "profile" },

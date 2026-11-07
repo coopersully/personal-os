@@ -36,7 +36,11 @@ export function MobileDataProvider({ children }: PropsWithChildren) {
   const [client] = useState(
     () =>
       new QueryClient({
-        queryCache: new QueryCache({ onError: (error) => toast.error(errorMessage(error)) }),
+        queryCache: new QueryCache({
+          onError: (error, query) => {
+            if (!query.meta?.scopedReadFeedback) toast.error(errorMessage(error));
+          },
+        }),
         defaultOptions: {
           queries: { retry: false, staleTime: 30_000, gcTime: 300_000 },
           mutations: { retry: false },

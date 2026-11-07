@@ -3,7 +3,9 @@
 Expo SDK 58 supplies a React Native application with iOS and web targets. The native
 shell uses authenticated API sessions, workspace-specific native tabs and Apple's Liquid Glass
 on supported iOS versions. Tasks includes tasks, reminders, lists, projects, filters, history,
-archive and trash. Other workspaces remain previews; they do not yet provide web feature parity.
+archive and trash. Finance includes Overview, Spending, Plan, Accounts and Assistant read workflows,
+plus transaction category/notes editing. Other workspaces remain previews. Full Finance web parity
+(creation, approvals, conversation sending, imports and automation configuration) remains in progress.
 The existing web and Tauri desktop UI remain separate consumers of shared domain/API contracts.
 
 Sessions use SecureStore; domain reads stay in memory and writes require connectivity. Encrypted
@@ -40,7 +42,7 @@ pnpm --filter @personal-os/mobile archive
 ```
 
 The Release simulator build needs no signing identity. Archive uses Xcode automatic signing
-for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `4`.
+for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `6`.
 Archive builds explicitly bind to `https://nohmi-api.coopersully.me`, reject development API
 overrides and disable dotenv loading. Verify the signed archive against the committed source.
 Increment `ios.buildNumber` before every new App Store Connect upload and regenerate native files.

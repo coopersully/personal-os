@@ -67,12 +67,12 @@ migration commit by its full SHA to verify ancestry after a squash merge.
 ## Attended one-release CI exception
 
 The normal exact-main CI gate is unchanged. For COO-208 — One-release deployment,
-there is one supported exception pinned in source to
-`76de239aa764cc0642c4b0a15375766353213c16`. Only an explicitly authorized production
+the earlier `76de239a` exception is consumed. A separately authorized new
+exception is pinned in source to `1d0c9462c0642566f8afb943ada9f11025b2d21d`. Only an explicitly authorized production
 operator may install the independently reviewed controller source and authorize it:
 
 ```sh
-node /Users/nohmi-production/controller/deploy/mac-mini/continuous-cli.mjs override-ci /Users/nohmi-production/nohmi-production/config.json /Users/nohmi-production/releases/continuous.git EXPECTED_RUNNING_SHA 76de239aa764cc0642c4b0a15375766353213c16 --attended-ci-override "Cooper-authorized one-release CI exception; COO-208"
+node /Users/nohmi-production/controller/deploy/mac-mini/continuous-cli.mjs override-ci /Users/nohmi-production/nohmi-production/config.json /Users/nohmi-production/releases/continuous.git EXPECTED_RUNNING_SHA 1d0c9462c0642566f8afb943ada9f11025b2d21d --attended-ci-override "Cooper-authorized distinct 1d0c release; COO-208"
 ```
 
 Replace `EXPECTED_RUNNING_SHA` with the inspected full serving revision. This is
@@ -80,8 +80,15 @@ an attended production write, not part of source review or a read-only check. Do
 not include secrets or personal data in the bounded reason. Authorization holds
 the normal operation lock, requires matching state/config/activation revisions,
 idle/non-maintenance operation, exact current main and normal descendant history,
-and checks the existing prepared runtime. It refuses an already recorded override
-and refuses when exact-main CI already succeeded: use the normal path then.
+and checks the existing prepared runtime. It refuses an unused, foreign or new-target
+receipt, and refuses when exact-main CI already succeeded: use the normal path then.
+Only the consumed prior `76de239a` receipt while that exact revision is serving may
+be archived unchanged in `ciOverrideHistory` before recording this new allowance.
+That history is bounded to one previous receipt and must initially be absent; any
+existing history prevents another authorization. No receipt is deleted or reset.
+A runtime that never used the old exception may authorize this target once without
+creating history. `status` exposes both receipts. This is not an arbitrary-target
+or indefinitely renewable exception.
 
 The private state retains expected/target revisions, reason, authorization time
 and CI observation. No run or CI result is invented or changed. The next eligible
@@ -99,11 +106,11 @@ remain active. There is still no automatic schema/config rollback. Authorization
 changes neither serving revision nor runtime configuration. Confirm the actual
 deployed revision and public/provider acceptance separately after completion.
 
-**Release ordering:** target `76de239a` must still be current main at authorization
+**Release ordering:** target `1d0c9462` must still be current main at authorization
 and both switch rechecks. Merging this controller change first advances main and
 correctly invalidates the allowance. A separately authorized attended installation
 from reviewed source may precede that release; do not weaken the main checks to
-compensate. If the original CI succeeds first, stop this exception path and let the
+compensate. If normal CI for this exact new target succeeds first, stop this exception path and let the
 normal controller deploy. Installation, capacity and real transaction behavior
 remain production evidence gaps until the assigned operator verifies them.
 

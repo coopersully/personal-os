@@ -12,8 +12,8 @@ import {
 } from "./continuous.mjs";
 import { privateFile, withLock, writePrivate } from "./safety.mjs";
 
-const old = "a".repeat(40),
-  candidate = "76de239aa764cc0642c4b0a15375766353213c16";
+const old = "76de239aa764cc0642c4b0a15375766353213c16",
+  candidate = "1d0c9462c0642566f8afb943ada9f11025b2d21d";
 const image = `sha256:${"c".repeat(64)}`;
 const successfulRun = {
   id: 20,
@@ -544,5 +544,95 @@ test("normal CI wins and an override cannot retry a failed build or follow chang
         f.state().releaseEligibility,
         mode === "ci-now-green" ? "successful-main-ci" : "attended-ci-override",
       );
+  }
+});
+
+test("new exact release preserves the consumed previous allowance without replay", async (t) => {
+  const f = fixture(t);
+  const previous = {
+    expectedDeployed: "a".repeat(40),
+    target: old,
+    reason: "Earlier attended release",
+    authorizedAt: "2026-11-05T20:39:11.501Z",
+    consumedAt: "2026-11-05T20:39:11.671Z",
+    disposition: "attempt-authorized",
+    ciObservation: "not-successful",
+  };
+  writePrivate(
+    join(f.root, "continuous-state.json"),
+    JSON.stringify({
+      version: 1,
+      phase: "idle",
+      deployed: old,
+      health: {},
+      nextPollAt: 0,
+      ciOverride: previous,
+    }),
+  );
+  f.io.ci = async () => [];
+  await authorizeCiOverride(
+    f.configPath,
+    f.io,
+    old,
+    candidate,
+    "--attended-ci-override",
+    "Separate authorized current release",
+  );
+  assert.deepEqual(f.state().ciOverrideHistory, [previous]);
+  assert.equal(f.state().ciOverride.target, candidate);
+  assert.equal(f.state().ciOverride.consumedAt, undefined);
+  await assert.rejects(
+    authorizeCiOverride(
+      f.configPath,
+      f.io,
+      old,
+      candidate,
+      "--attended-ci-override",
+      "Replay denied",
+    ),
+  );
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.deepEqual(f.state().ciOverrideHistory, [previous]);
+  assert.ok(f.state().ciOverride.consumedAt);
+  assert.equal(f.state().deployed, candidate);
+  await assert.rejects(
+    authorizeCiOverride(
+      f.configPath,
+      f.io,
+      candidate,
+      old,
+      "--attended-ci-override",
+      "Old target denied",
+    ),
+  );
+});
+
+test("replacement refuses unused or foreign receipts and any previously archived allowance", async (t) => {
+  for (const kind of ["unused", "foreign", "history", "stale-serving"]) {
+    const f = fixture(t);
+    const previous = {
+      target: kind === "foreign" ? "e".repeat(40) : old,
+      authorizedAt: "2026-11-05T20:39:11.501Z",
+      reason: "Previous",
+      ...(kind === "unused" ? {} : { consumedAt: "2026-11-05T20:39:11.671Z" }),
+    };
+    const state = { version: 1, phase: "idle", deployed: old, ciOverride: previous };
+    if (kind === "history") state.ciOverrideHistory = [previous];
+    if (kind === "stale-serving") state.deployed = "a".repeat(40);
+    writePrivate(join(f.root, "continuous-state.json"), JSON.stringify(state));
+    const original = privateFile(join(f.root, "continuous-state.json"));
+    f.io.ci = async () => [];
+    await assert.rejects(
+      authorizeCiOverride(
+        f.configPath,
+        f.io,
+        old,
+        candidate,
+        "--attended-ci-override",
+        "New release",
+      ),
+    );
+    assert.equal(privateFile(join(f.root, "continuous-state.json")), original);
+    assert.deepEqual(f.calls, []);
   }
 });

@@ -122,7 +122,8 @@ export async function authorizeAdoption(configPath, io, expectedDeployed, target
 
 // This attended exception is pinned to the one release Cooper authorized. It
 // changes eligibility only, never the build/switch/recovery transaction below.
-const attendedCiTarget = "76de239aa764cc0642c4b0a15375766353213c16";
+const previousAttendedCiTarget = "76de239aa764cc0642c4b0a15375766353213c16";
+const attendedCiTarget = "1d0c9462c0642566f8afb943ada9f11025b2d21d";
 
 export async function authorizeCiOverride(
   configPath,
@@ -148,10 +149,19 @@ export async function authorizeCiOverride(
     const runtime = io.load(configPath);
     const state = readState(runtime.root, runtime.config.revision);
     const activation = JSON.parse(privateFile(join(runtime.root, "activation.json")));
+    const previousOverride = state.ciOverride;
+    // Only the specifically completed prior release may make way for this
+    // separate authorization. Never reset, drop or reuse its consumed receipt.
+    const completedPrevious =
+      previousOverride?.target === previousAttendedCiTarget &&
+      typeof previousOverride.consumedAt === "string" &&
+      Boolean(previousOverride.consumedAt) &&
+      state.deployed === previousAttendedCiTarget;
     if (
       existsSync(join(runtime.root, "maintenance.json")) ||
       state.phase !== "idle" ||
-      state.ciOverride ||
+      (previousOverride && !completedPrevious) ||
+      state.ciOverrideHistory !== undefined ||
       state.deployed !== expectedDeployed ||
       runtime.config.revision !== expectedDeployed ||
       activation.revision !== expectedDeployed ||
@@ -172,6 +182,7 @@ export async function authorizeCiOverride(
     if (eligibleRelease({ candidate: target, deployed: expectedDeployed, descendant: true, runs }))
       throw new Error("Exact main CI already succeeded; use the normal controller path.");
     await io.check(runtime);
+    if (previousOverride) state.ciOverrideHistory = [previousOverride];
     state.ciOverride = {
       expectedDeployed,
       target,

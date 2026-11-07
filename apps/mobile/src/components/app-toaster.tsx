@@ -18,7 +18,7 @@ export function AppToaster({ editor = false }: { editor?: boolean }) {
   const foreground = t.dark ? "#202024" : "#fafafa";
   return (
     <Toaster
-      fullWindowOverlay={!editor}
+      fullWindowOverlay={!editor || pathname === "/finance-transaction-edit"}
       theme={t.dark ? "light" : "dark"}
       position="top-center"
       offset={insets.top + spacing.md}

@@ -7,6 +7,7 @@ import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section, Segments } f
 function Activity() {
   const { api, owner } = useFinance();
   const query = useInfiniteQuery({
+    meta: { scopedReadFeedback: true },
     queryKey: ["finances", owner, "activity"],
     enabled: !!owner,
     initialPageParam: undefined as string | undefined,
@@ -43,6 +44,7 @@ function Activity() {
 function Conversation() {
   const { api, owner } = useFinance();
   const query = useInfiniteQuery({
+    meta: { scopedReadFeedback: true },
     queryKey: ["finances", owner, "conversation"],
     enabled: !!owner,
     initialPageParam: undefined as string | undefined,

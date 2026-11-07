@@ -16,6 +16,7 @@ export function Transactions({
 }) {
   const { api, owner } = useFinance();
   const query = useInfiniteQuery({
+    meta: { scopedReadFeedback: true },
     queryKey: ["finances", owner, "transactions", accountId, reference],
     enabled: !!owner,
     initialPageParam: undefined as string | undefined,

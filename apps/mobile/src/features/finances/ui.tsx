@@ -230,7 +230,10 @@ export function Segments<T extends string>({
   );
 }
 const readNotices = new Map<string, unknown>();
-const readHosts = new Map<string, number>();
+const readHosts = new Map<string, Set<() => Promise<void>>>();
+function retryRead(key: string) {
+  void readHosts.get(key)?.values().next().value?.();
+}
 
 export function ReadState({
   query,
@@ -254,7 +257,6 @@ export function ReadState({
   const latest = useRef(query);
   latest.current = query;
   const busy = useRef(false);
-  const mounted = useRef(true);
   const retry = useCallback(async () => {
     if (busy.current) return;
     busy.current = true;
@@ -264,45 +266,44 @@ export function ReadState({
       const result = await (current.isFetchNextPageError && current.fetchNextPage
         ? current.fetchNextPage()
         : current.refetch());
-      if (!mounted.current) return;
+      if (!readHosts.has(toastId)) return;
       if (result.isError) throw new Error("Read failed");
       toast.success("Finance data refreshed", { id: toastId });
     } catch {
-      if (mounted.current)
+      if (readHosts.has(toastId))
         toast.error("Couldn’t refresh finance data", {
           id: toastId,
-          action: { label: "Retry", onClick: () => void retry() },
+          action: { label: "Retry", onClick: () => retryRead(toastId) },
         });
     } finally {
       busy.current = false;
     }
   }, [toastId]);
   useEffect(() => {
-    mounted.current = true;
-    readHosts.set(toastId, (readHosts.get(toastId) ?? 0) + 1);
+    const hosts = readHosts.get(toastId) ?? new Set();
+    hosts.add(retry);
+    readHosts.set(toastId, hosts);
     return () => {
-      mounted.current = false;
-      const remaining = (readHosts.get(toastId) ?? 1) - 1;
-      if (remaining) readHosts.set(toastId, remaining);
-      else {
+      hosts.delete(retry);
+      if (!hosts.size) {
         readHosts.delete(toastId);
         readNotices.delete(toastId);
         toast.dismiss(toastId);
       }
     };
-  }, [toastId]);
+  }, [toastId, retry]);
   useEffect(() => {
     if (query.isError && query.error && !busy.current && readNotices.get(toastId) !== query.error) {
       readNotices.set(toastId, query.error);
       toast.error("Couldn’t load finance data", {
         id: toastId,
-        action: { label: "Retry", onClick: () => void retry() },
+        action: { label: "Retry", onClick: () => retryRead(toastId) },
       });
     } else if (!query.isError && readNotices.has(toastId) && !busy.current) {
       readNotices.delete(toastId);
       toast.dismiss(toastId);
     }
-  }, [query.isError, query.error, toastId, retry]);
+  }, [query.isError, query.error, toastId]);
   if (query.isPending)
     return (
       <ActivityIndicator

@@ -18,6 +18,7 @@ export function useFinanceRead<T>(
   const queryKey = ["finances", owner, ...key];
   const query = useQuery({
     queryKey,
+    meta: { scopedReadFeedback: true },
     queryFn: () => read(api),
     enabled: Boolean(owner) && enabled,
   });

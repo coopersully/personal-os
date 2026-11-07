@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FinanceAccountsScreen } from "./accounts";
@@ -19,6 +27,7 @@ vi.mock("@tanstack/react-query", async () => {
   return createRequire(`${process.cwd()}/apps/web/package.json`)("@tanstack/react-query");
 });
 const h = vi.hoisted(() => ({
+  keyboardListeners: new Map<string, (event?: { endCoordinates: { screenY: number } }) => void>(),
   focus: undefined as undefined | (() => (() => void) | undefined),
   foreground: undefined as undefined | ((state: string) => void),
   removeListener: vi.fn(),
@@ -59,6 +68,16 @@ vi.mock("react-native", () => {
         return { remove: h.removeListener };
       },
     },
+    Keyboard: {
+      addListener: (
+        name: string,
+        callback: (event?: { endCoordinates: { screenY: number } }) => void,
+      ) => {
+        h.keyboardListeners.set(name, callback);
+        return { remove: () => h.keyboardListeners.delete(name) };
+      },
+    },
+    useWindowDimensions: () => ({ height: 852, width: 393 }),
     View: Box,
     ScrollView: Box,
     Modal: Box,
@@ -757,4 +776,64 @@ it("deduplicates a shared account failure across retained screens and clears rec
     await client.invalidateQueries({ queryKey: ["finances", "owner-a", "accounts"] });
   });
   await waitFor(() => expect(h.dismiss).toHaveBeenCalledWith(id));
+});
+
+it("hands a shared read Retry to a surviving screen when its first observer unmounts", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <FinanceAccountsScreen />
+      <FinanceOverviewScreen />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Everyday checking");
+  h.api.listFinanceAccounts.mockRejectedValueOnce(new Error("Offline"));
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["finances", "owner-a", "accounts"] });
+  });
+  await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
+  const options = h.error.mock.calls[0][1];
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <FinanceOverviewScreen />
+    </QueryClientProvider>,
+  );
+  await act(async () => {
+    options.action.onClick();
+  });
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Finance data refreshed", { id: options.id }),
+  );
+});
+it("emits one scoped failure with the real mobile QueryCache provider", async () => {
+  const { MobileDataProvider } = await import("../tasks/data");
+  h.api.listFinanceAccounts.mockRejectedValue(new Error("Offline"));
+  render(
+    <MobileDataProvider>
+      <FinanceAccountsScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByText("Retry loading");
+  expect(h.error).toHaveBeenCalledOnce();
+  expect(h.error).toHaveBeenCalledWith(
+    "Couldn’t load finance data",
+    expect.objectContaining({ action: expect.any(Object) }),
+  );
+});
+
+it("keeps modal Save above the keyboard and removes listeners after closing", async () => {
+  const { useFormKeyboardOffset } = await import("../../components/forms/form-save");
+  const { result, unmount } = renderHook(useFormKeyboardOffset);
+  act(() =>
+    h.keyboardListeners.get("keyboardWillChangeFrame")?.({ endCoordinates: { screenY: 520 } }),
+  );
+  expect(result.current).toBe(332);
+  act(() =>
+    h.keyboardListeners.get("keyboardWillChangeFrame")?.({ endCoordinates: { screenY: 900 } }),
+  );
+  expect(result.current).toBe(0);
+  act(() => h.keyboardListeners.get("keyboardDidHide")?.());
+  expect(result.current).toBe(0);
+  unmount();
+  expect(h.keyboardListeners.size).toBe(0);
 });

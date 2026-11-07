@@ -7,7 +7,7 @@ import { Alert, Pressable, Text, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { AppToaster } from "../../components/app-toaster";
 import { EntityPicker } from "../../components/forms/entity-picker";
-import { FormSave } from "../../components/forms/form-save";
+import { FormSave, useFormKeyboardOffset } from "../../components/forms/form-save";
 import { useTheme } from "../../theme";
 import { useFinance, useFinanceRead } from "./data";
 import { appliedTransaction } from "./mutations";
@@ -17,6 +17,7 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
   const { api, owner } = useFinance();
   const client = useQueryClient();
   const t = useTheme();
+  const keyboardOffset = useFormKeyboardOffset();
   // Keep the original revision with the draft; background refresh never overwrites edits.
   const [snapshot] = useState(record);
   const [notes, setNotes] = useState(record.notes ?? "");
@@ -176,6 +177,7 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
       </FinanceScreen>
       <FormSave
         workspace="finances"
+        keyboardOffset={keyboardOffset}
         disabled={!edited || pending || submitted}
         onPress={() => void save()}
       />
@@ -186,11 +188,11 @@ export function FinanceTransactionEditor() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const query = useFinanceRead(["transaction", id], (api) => api.getFinanceTransaction(id), !!id);
   return (
-    <>
+    <View style={{ flex: 1 }}>
       <ReadState query={query}>
         {query.data?.data ? <TransactionForm key={id} record={query.data.data} /> : null}
       </ReadState>
       <AppToaster editor />
-    </>
+    </View>
   );
 }

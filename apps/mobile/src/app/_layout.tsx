@@ -73,6 +73,12 @@ function AuthenticatedLayout() {
           </Stack.Protected>
           <Stack.Protected guard={state.status === "signedIn"}>
             <Stack.Screen name="(workspaces)" options={{ headerShown: false, title: "today" }} />
+            <Stack.Screen name="finance-account" options={{ title: "account" }} />
+            <Stack.Screen
+              name="finance-transaction-edit"
+              options={{ title: "edit transaction", presentation: "modal" }}
+            />
+            <Stack.Screen name="finance-transaction" options={{ title: "transaction" }} />
             <Stack.Screen name="task-preferences" options={{ title: "task preferences" }} />
             <Stack.Screen name="task-browser" options={{ title: "tasks" }} />
             <Stack.Screen name="task-containers" options={{ title: "tasks" }} />

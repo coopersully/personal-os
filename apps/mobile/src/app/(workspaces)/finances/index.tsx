@@ -1,4 +1,1 @@
-import { WorkspacePage } from "../../../components/workspace-page";
-export default function Page() {
-  return <WorkspacePage title="overview" />;
-}
+export { FinanceOverviewScreen as default } from "../../../features/finances/overview";

@@ -1,6 +1,7 @@
 import { Image, type ImageSourcePropType } from "react-native";
 
 export const icons = {
+  edit: require("../../assets/navigation/Edit.png"),
   home: require("../../assets/navigation/House.png"),
   star: require("../../assets/navigation/Star.png"),
   people: require("../../assets/navigation/Users.png"),
@@ -34,6 +35,8 @@ export const icons = {
 
 export type IconName = keyof typeof icons;
 export const selectedIcons = {
+  receipt: require("../../assets/navigation/ReceiptFilled.png"),
+  star: require("../../assets/navigation/StarFilled.png"),
   profile: require("../../assets/navigation/UserFilled.png"),
   views: require("../../assets/navigation/ListTodoFilled.png"),
   pin: require("../../assets/navigation/PinFilled.png"),

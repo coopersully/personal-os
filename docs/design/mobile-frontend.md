@@ -160,3 +160,21 @@ Use an opaque contrasting surface, legible text, subtle border/shadow, and an ex
 control; never translucent glass for feedback. Keep Undo buttons at least 44 points tall. Update
 one toast ID for loading/result; name outcomes such as “List pinned” rather than a generic Saved
 when the action has a more informative name. Do not duplicate the same toast in root and sheet.
+
+### Finance workspace destinations
+
+The approved mobile Finance map uses Overview, Spending, Plan, Accounts, and Assistant
+as five stable native tabs. Spending owns Summary and Transactions; Plan owns Budget,
+Cash flow, and Wealth. Assistant presents the existing conversation, review queue,
+and recorded activity; it does not create a second decision store. Preserve the native
+system tab bar, selected workspace tint and filled icons.
+
+Finance summaries must preserve the server's currency, contribution basis, coverage,
+and freshness qualifications. Unknown included balances are not zero. Do not display
+legacy aggregate totals unless included balances, ownership and currencies are known.
+Expected recurring amounts must distinguish income from obligations with signs and labels.
+A scoped spending ledger identifies its contribution total separately from full record
+amounts. Shortcut destinations preserve the intended subview on repeated navigation.
+
+Native Finance implementation and its remaining web-parity work are tracked in
+COO-210 — Mobile Finance; this target map is not a claim of full delivery.

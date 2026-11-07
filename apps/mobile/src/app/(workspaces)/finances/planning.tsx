@@ -1,4 +1,4 @@
-import { WorkspacePage } from "../../../components/workspace-page";
+import { Redirect } from "expo-router";
 export default function Page() {
-  return <WorkspacePage title="planning" />;
+  return <Redirect href="/finances/plan" />;
 }

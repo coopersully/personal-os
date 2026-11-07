@@ -1,4 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useFocusEffect } from "expo-router";
+import { useCallback } from "react";
+import { AppState } from "react-native";
 import { useAuth } from "../auth/context";
 import { periodScope, upcomingScope } from "./presentation";
 
@@ -12,11 +15,13 @@ export function useFinanceRead<T>(
   enabled = true,
 ) {
   const { api, owner } = useFinance();
-  return useQuery({
-    queryKey: ["finances", owner, ...key],
+  const queryKey = ["finances", owner, ...key];
+  const query = useQuery({
+    queryKey,
     queryFn: () => read(api),
     enabled: Boolean(owner) && enabled,
   });
+  return { ...query, feedbackKey: JSON.stringify(queryKey) };
 }
 export function useSpending(period: "week" | "month") {
   const { timezone } = useFinance();
@@ -42,5 +47,22 @@ export function useUpcoming() {
       return api.listFinanceRecurringOccurrences(scope);
     },
     !!scope,
+  );
+}
+
+/** Native tabs remain mounted; revalidate their owner-scoped records on return. */
+export function useFinanceRefresh() {
+  const { owner } = useFinance();
+  const client = useQueryClient();
+  useFocusEffect(
+    useCallback(() => {
+      if (!owner) return;
+      const refresh = () => void client.invalidateQueries({ queryKey: ["finances", owner] });
+      refresh();
+      const listener = AppState.addEventListener("change", (state) => {
+        if (state === "active") refresh();
+      });
+      return () => listener.remove();
+    }, [client, owner]),
   );
 }

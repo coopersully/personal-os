@@ -61,6 +61,7 @@ function Budget() {
 }
 function Cashflow() {
   const query = useUpcoming();
+  const occurrences = query.data?.occurrences.filter((item) => item.inCurrentSchedule) ?? [];
   return (
     <ReadState query={query}>
       <Copy secondary>
@@ -68,8 +69,8 @@ function Cashflow() {
         transactions.
       </Copy>
       <Card>
-        {query.data?.occurrences.length ? (
-          query.data.occurrences.map((item) => (
+        {occurrences.length ? (
+          occurrences.map((item) => (
             <FinanceRow
               key={item.key}
               title={item.displayName}

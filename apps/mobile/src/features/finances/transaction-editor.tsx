@@ -5,6 +5,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
+import { AppToaster } from "../../components/app-toaster";
 import { EntityPicker } from "../../components/forms/entity-picker";
 import { FormSave } from "../../components/forms/form-save";
 import { useTheme } from "../../theme";
@@ -185,8 +186,11 @@ export function FinanceTransactionEditor() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const query = useFinanceRead(["transaction", id], (api) => api.getFinanceTransaction(id), !!id);
   return (
-    <ReadState query={query}>
-      {query.data?.data ? <TransactionForm key={id} record={query.data.data} /> : null}
-    </ReadState>
+    <>
+      <ReadState query={query}>
+        {query.data?.data ? <TransactionForm key={id} record={query.data.data} /> : null}
+      </ReadState>
+      <AppToaster editor />
+    </>
   );
 }

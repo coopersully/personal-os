@@ -1,11 +1,21 @@
 import { ApiClientError } from "@personal-os/api-client";
-import type { PropsWithChildren, ReactNode } from "react";
+import {
+  type PropsWithChildren,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+} from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { toast } from "sonner-native";
 import { Icon, type IconName } from "../../components/icons";
 import { Screen } from "../../components/screen";
 import { radius, spacing, useTheme, workspaceColor } from "../../theme";
+import { useFinanceRefresh } from "./data";
 
 export function FinanceScreen({ title, children }: PropsWithChildren<{ title: string }>) {
+  useFinanceRefresh();
   const t = useTheme();
   return (
     <Screen chrome>
@@ -219,20 +229,80 @@ export function Segments<T extends string>({
     </View>
   );
 }
+const readNotices = new Map<string, unknown>();
+const readHosts = new Map<string, number>();
+
 export function ReadState({
   query,
   children,
 }: {
   query: {
+    feedbackKey?: string;
     isPending: boolean;
     isError: boolean;
     error?: unknown;
     data: unknown;
-    refetch: () => unknown;
+    refetch: () => Promise<{ isError: boolean }>;
+    isFetchNextPageError?: boolean;
+    fetchNextPage?: () => Promise<{ isError: boolean }>;
   };
   children: ReactNode;
 }) {
   const t = useTheme();
+  const instanceId = useId();
+  const toastId = query.feedbackKey ?? instanceId;
+  const latest = useRef(query);
+  latest.current = query;
+  const busy = useRef(false);
+  const mounted = useRef(true);
+  const retry = useCallback(async () => {
+    if (busy.current) return;
+    busy.current = true;
+    toast.loading("Refreshing finance data…", { id: toastId });
+    try {
+      const current = latest.current;
+      const result = await (current.isFetchNextPageError && current.fetchNextPage
+        ? current.fetchNextPage()
+        : current.refetch());
+      if (!mounted.current) return;
+      if (result.isError) throw new Error("Read failed");
+      toast.success("Finance data refreshed", { id: toastId });
+    } catch {
+      if (mounted.current)
+        toast.error("Couldn’t refresh finance data", {
+          id: toastId,
+          action: { label: "Retry", onClick: () => void retry() },
+        });
+    } finally {
+      busy.current = false;
+    }
+  }, [toastId]);
+  useEffect(() => {
+    mounted.current = true;
+    readHosts.set(toastId, (readHosts.get(toastId) ?? 0) + 1);
+    return () => {
+      mounted.current = false;
+      const remaining = (readHosts.get(toastId) ?? 1) - 1;
+      if (remaining) readHosts.set(toastId, remaining);
+      else {
+        readHosts.delete(toastId);
+        readNotices.delete(toastId);
+        toast.dismiss(toastId);
+      }
+    };
+  }, [toastId]);
+  useEffect(() => {
+    if (query.isError && query.error && !busy.current && readNotices.get(toastId) !== query.error) {
+      readNotices.set(toastId, query.error);
+      toast.error("Couldn’t load finance data", {
+        id: toastId,
+        action: { label: "Retry", onClick: () => void retry() },
+      });
+    } else if (!query.isError && readNotices.has(toastId) && !busy.current) {
+      readNotices.delete(toastId);
+      toast.dismiss(toastId);
+    }
+  }, [query.isError, query.error, toastId, retry]);
   if (query.isPending)
     return (
       <ActivityIndicator
@@ -244,19 +314,6 @@ export function ReadState({
   const unavailable =
     query.error instanceof ApiClientError && [401, 403, 404].includes(query.error.status);
   if (query.isError && (!query.data || unavailable))
-    return (
-      <FinanceRow title="Retry loading" icon="disconnected" onPress={() => void query.refetch()} />
-    );
-  return (
-    <>
-      {query.isError && (
-        <FinanceRow
-          title="Refresh saved data"
-          icon="disconnected"
-          onPress={() => void query.refetch()}
-        />
-      )}
-      {children}
-    </>
-  );
+    return <FinanceRow title="Retry loading" icon="disconnected" onPress={() => void retry()} />;
+  return <>{children}</>;
 }

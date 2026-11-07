@@ -69,7 +69,11 @@ export function EntityPicker({
             marginVertical: 16,
           }}
         />
-        <ScrollView keyboardShouldPersistTaps="handled">
+        <ScrollView
+          automaticallyAdjustKeyboardInsets
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+        >
           {matches.map((option) => (
             <Pressable
               key={option.value ?? "none"}

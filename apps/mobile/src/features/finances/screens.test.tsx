@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FinanceAccountsScreen } from "./accounts";
@@ -19,6 +19,9 @@ vi.mock("@tanstack/react-query", async () => {
   return createRequire(`${process.cwd()}/apps/web/package.json`)("@tanstack/react-query");
 });
 const h = vi.hoisted(() => ({
+  focus: undefined as undefined | (() => (() => void) | undefined),
+  foreground: undefined as undefined | ((state: string) => void),
+  removeListener: vi.fn(),
   owner: "owner-a",
   params: { id: "transaction-1" } as Record<string, string>,
   push: vi.fn(),
@@ -50,6 +53,12 @@ const h = vi.hoisted(() => ({
 vi.mock("react-native", () => {
   const Box = ({ children }: PropsWithChildren) => <div>{children}</div>;
   return {
+    AppState: {
+      addEventListener: (_event: string, callback: (state: string) => void) => {
+        h.foreground = callback;
+        return { remove: h.removeListener };
+      },
+    },
     View: Box,
     ScrollView: Box,
     Modal: Box,
@@ -121,9 +130,15 @@ vi.mock("../auth/context", () => ({
   }),
 }));
 vi.mock("sonner-native", () => ({ toast: h }));
+vi.mock("../../components/app-toaster", () => ({
+  AppToaster: () => <div data-testid="editor-feedback" />,
+}));
 vi.mock("expo-router", () => ({
   router: h,
   useLocalSearchParams: () => h.params,
+  useFocusEffect: (callback: () => (() => void) | undefined) => {
+    h.focus = callback;
+  },
   Stack: {
     Screen: ({ options }: { options: { headerLeft?: () => ReactNode } }) =>
       options.headerLeft?.() ?? null,
@@ -469,7 +484,9 @@ it("distinguishes a proposal from an approved budget and retains assumptions/res
       version: 2,
       rationale: "Save before discretionary spending",
       allocations: [{ key: "food", amount: 500, kind: "spending", description: "Food" }],
-      resources: [{ key: "pay", description: "Salary", amount: 500, kind: "income" }],
+      resources: [
+        { key: "pay", inCurrentSchedule: true, description: "Salary", amount: 500, kind: "income" },
+      ],
       assumptions: ["Income remains stable"],
     },
   });
@@ -484,6 +501,7 @@ it("keeps expected bill and income signs and reports unconfirmed source schedule
     occurrences: [
       {
         key: "rent",
+        inCurrentSchedule: true,
         displayName: "Rent",
         localDate: "2026-11-10",
         source: { kind: "obligation" },
@@ -493,6 +511,7 @@ it("keeps expected bill and income signs and reports unconfirmed source schedule
       },
       {
         key: "pay",
+        inCurrentSchedule: true,
         displayName: "Payroll",
         localDate: "2026-11-12",
         source: { kind: "income" },
@@ -636,4 +655,106 @@ it("discards edits only after the explicit Cancel confirmation", async () => {
   const actions = h.alert.mock.calls[0][2];
   actions.find((action: { text: string }) => action.text === "Discard").onPress();
   expect(h.back).toHaveBeenCalled();
+});
+
+it("keeps removed schedule occurrences out of upcoming cash flow", async () => {
+  h.params = { view: "Cash flow" };
+  h.api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [{ key: "old", displayName: "Removed bill", inCurrentSchedule: false }],
+    unavailableSources: [],
+  });
+  mount(<FinancePlanScreen />);
+  await screen.findByText("No scheduled income or bills in the next 30 days.");
+  expect(screen.queryByText("Removed bill")).toBeNull();
+});
+it("refreshes owner-scoped records on tab focus and app foreground, then removes the listener", async () => {
+  const { client } = mount(<FinanceAccountsScreen />);
+  await screen.findByText("Everyday checking");
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  let stop: (() => void) | undefined;
+  await act(async () => {
+    stop = h.focus?.();
+  });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["finances", "owner-a"] });
+  invalidate.mockClear();
+  await act(async () => {
+    h.foreground?.("background");
+  });
+  expect(invalidate).not.toHaveBeenCalled();
+  await act(async () => {
+    h.foreground?.("active");
+  });
+  expect(invalidate).toHaveBeenCalledOnce();
+  stop?.();
+  expect(h.removeListener).toHaveBeenCalledOnce();
+});
+it("preserves cached layout on read failure and retries through one Sonner outcome", async () => {
+  const { client } = mount(<FinanceAccountsScreen />);
+  await screen.findByText("Everyday checking");
+  h.api.listFinanceAccounts.mockRejectedValueOnce(new Error("Offline"));
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["finances", "owner-a", "accounts"] });
+  });
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Couldn’t load finance data",
+      expect.objectContaining({ action: expect.any(Object) }),
+    ),
+  );
+  expect(screen.getByText("Everyday checking")).toBeTruthy();
+  expect(screen.queryByText("Refresh saved data")).toBeNull();
+  const options = h.error.mock.calls.at(-1)?.[1];
+  await act(async () => {
+    options.action.onClick();
+  });
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Finance data refreshed", { id: options.id }),
+  );
+  expect(h.loading).toHaveBeenCalledWith("Refreshing finance data…", { id: options.id });
+});
+it("retries the failed next-page cursor without refreshing loaded transaction pages", async () => {
+  h.params = { mode: "Transactions" };
+  h.api.listFinanceTransactions
+    .mockResolvedValueOnce({ items: [transaction], nextCursor: "next-page" })
+    .mockRejectedValueOnce(new Error("Offline"))
+    .mockResolvedValueOnce({
+      items: [{ ...transaction, id: "next", merchant: "Bookshop" }],
+      nextCursor: null,
+    });
+  mount(<FinanceSpendingScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: "Load more transactions" }));
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(screen.getByText("Corner market")).toBeTruthy();
+  const options = h.error.mock.calls.at(-1)?.[1];
+  await act(async () => {
+    options.action.onClick();
+  });
+  await screen.findByText("Bookshop");
+  expect(h.api.listFinanceTransactions.mock.calls.map(([args]) => args.cursor)).toEqual([
+    undefined,
+    "next-page",
+    "next-page",
+  ]);
+});
+
+it("deduplicates a shared account failure across retained screens and clears recovered notices", async () => {
+  const { client } = mount(
+    <>
+      <FinanceAccountsScreen />
+      <FinanceOverviewScreen />
+    </>,
+  );
+  await screen.findByText("Everyday checking");
+  const failure = new Error("Offline");
+  h.api.listFinanceAccounts.mockRejectedValueOnce(failure);
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["finances", "owner-a", "accounts"] });
+  });
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
+  const id = h.error.mock.calls[0][1].id;
+  h.dismiss.mockClear();
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["finances", "owner-a", "accounts"] });
+  });
+  await waitFor(() => expect(h.dismiss).toHaveBeenCalledWith(id));
 });

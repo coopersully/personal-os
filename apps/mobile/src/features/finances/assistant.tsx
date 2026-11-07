@@ -15,7 +15,7 @@ function Activity() {
   });
   const rows = query.data?.pages.flatMap((page) => page.entries) ?? [];
   return (
-    <ReadState query={query}>
+    <ReadState query={{ ...query, feedbackKey: JSON.stringify(["finances", owner, "activity"]) }}>
       <Card>
         {rows.length ? (
           rows.map((entry) => (
@@ -51,7 +51,9 @@ function Conversation() {
   });
   const messages = query.data?.pages.flatMap((page) => page.messages) ?? [];
   return (
-    <ReadState query={query}>
+    <ReadState
+      query={{ ...query, feedbackKey: JSON.stringify(["finances", owner, "conversation"]) }}
+    >
       {messages.length ? (
         messages.map((message) => (
           <Card key={message.id}>

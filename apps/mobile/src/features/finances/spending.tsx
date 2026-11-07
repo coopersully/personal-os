@@ -29,7 +29,12 @@ export function Transactions({
   const firstPage = query.data?.pages[0];
   const contribution = firstPage && "netCents" in firstPage ? (firstPage.netCents as number) : null;
   return (
-    <ReadState query={query}>
+    <ReadState
+      query={{
+        ...query,
+        feedbackKey: JSON.stringify(["finances", owner, "transactions", accountId, reference]),
+      }}
+    >
       <Card rows={rows.length > 0 && !reference}>
         {reference && (
           <>

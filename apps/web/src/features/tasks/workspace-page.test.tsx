@@ -660,7 +660,7 @@ it("renders grouped workspace fallbacks and every contextual empty message", asy
 
   for (const [path, copy] of [
     ["/tasks?view=today", "Nothing is due or reserved for today."],
-    ["/tasks?view=history", "Completed items and archived context will appear here."],
+    ["/tasks?view=history", "Completed and cancelled items will appear here."],
     ["/tasks?view=trash", "Removed items stay here until you restore them."],
     ["/tasks?view=all&q=missing", "Try another filter or search."],
   ] as const) {

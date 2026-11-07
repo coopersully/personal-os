@@ -180,6 +180,64 @@ Add a manual ledger transaction. Leave category null only when genuinely uncerta
 }
 ```
 
+## admit_finance_provider_source_facts
+
+Admit missing raw currency and provider direction for up to 20 exact owned Finance transactions at their displayed transaction and account revisions. The API obtains fresh bounded provider evidence, validates every target and current execution authority, then commits source facts and a durable receipt atomically. Existing economic decisions and nonmissing facts are preserved. Reuse the exact idempotency key and input for replay; advisory read output is never write authority.
+
+- Domain: finances; stage: commit; policy: approved_rule.
+- Grants (all): finances:read, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `admitFinanceProviderSourceFacts`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[!-~]+$"
+    },
+    "targets": {
+      "minItems": 1,
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "transactionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "expectedTransactionRevision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          },
+          "expectedAccountRevision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$"
+          }
+        },
+        "required": [
+          "transactionId",
+          "expectedTransactionRevision",
+          "expectedAccountRevision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "idempotencyKey",
+    "targets"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## answer_finance_contextual_question
 
 Answer an exact contextual question with provenance and an idempotency key. Do not fabricate missing evidence. Requires finances:write.

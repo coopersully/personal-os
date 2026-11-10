@@ -1,5 +1,6 @@
 import type { CalendarAccount } from "@personal-os/api-client";
 import { connectICloudInputSchema } from "@personal-os/domain";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { AppState, Linking, Modal, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -10,6 +11,7 @@ import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { SearchableChoice } from "../tasks/searchable-choice";
 import { Action, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
+import { AccountAvatar } from "./account-avatar";
 import { useSettingsAction, useSettingsResource } from "./data";
 export async function openAuthorization(url: string) {
   const parsed = new URL(url);
@@ -21,13 +23,19 @@ export function ConnectionsSettingsScreen() {
   const { state, session } = useAuth();
   return state.user ? <Connections key={`${state.user.id}:${session.epoch()}`} /> : null;
 }
-function Connections() {
+export function ConnectionAccountScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { state, session } = useAuth();
+  return state.user ? (
+    <Connections key={`${state.user.id}:${session.epoch()}:${id}`} detailId={id} />
+  ) : null;
+}
+function Connections({ detailId }: { detailId?: string } = {}) {
   const t = useTheme();
   const action = useSettingsAction();
   const accounts = useSettingsResource("connectors", (api) => api.listConnectors());
   const x = useSettingsResource("x-account", (api) => api.getXBookmarkAccount());
   const folders = useSettingsResource("x-folders", (api) => api.listXBookmarkFolders(), !!x.data);
-  const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
   const [icloud, setIcloud] = useState(false);
   const [reconnectIcloud, setReconnectIcloud] = useState<CalendarAccount | null>(null);
   const [mail, setMail] = useState(true);
@@ -64,140 +72,170 @@ function Connections() {
     );
   return (
     <FormBody>
-      <Section title="Accounts">
+      {detailId && (
+        <Stack.Screen
+          options={{
+            title: accounts.data?.find((account) => account.id === detailId)?.label || "Account",
+          }}
+        />
+      )}
+      {detailId && accounts.data && !accounts.data.some((account) => account.id === detailId) && (
+        <State empty="This connection is no longer available." />
+      )}
+      <Section title={detailId ? "Account" : "Accounts"}>
         {!accounts.data && (
           <State loading={accounts.isPending} retry={() => void accounts.refetch()} />
         )}
-        {accounts.data?.length === 0 && <State empty="No connected accounts." />}
-        {accounts.data?.map((account) => (
-          <View key={account.id} style={{ padding: 16, gap: 8 }}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Account ${account.label}, ${account.email ?? account.provider}`}
-              accessibilityState={{ expanded: expandedAccount === account.id }}
-              onPress={() => setExpandedAccount(expandedAccount === account.id ? null : account.id)}
-              style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52 }}
-            >
-              <View
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 10,
-                  backgroundColor: t.canvas,
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
+        {!detailId && accounts.data?.length === 0 && <State empty="No connected accounts." />}
+        {accounts.data
+          ?.filter((account) => !detailId || account.id === detailId)
+          .map((account) => (
+            <View key={account.id} style={{ padding: 16, gap: 8 }}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Account ${account.label}, ${account.email ?? account.provider}`}
+                disabled={!!detailId}
+                onPress={() =>
+                  router.push({
+                    pathname: "/settings/connections/account",
+                    params: { id: account.id },
+                  })
+                }
+                style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52 }}
               >
-                <Icon
-                  name={account.provider === "google" ? "mail" : "disconnected"}
-                  color={t.ink}
-                  size={22}
+                <AccountAvatar
+                  url={account.avatarUrl}
+                  name={account.label || account.email || account.provider}
                 />
-              </View>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={{ color: t.ink, fontSize: 17, fontWeight: "600" }}>
-                  {account.label || (account.provider === "google" ? "Google" : "iCloud")}
-                </Text>
-                <Text style={{ color: t.secondary, fontSize: 14 }}>
-                  {account.email ?? account.provider}
-                </Text>
-                <Text style={{ color: t.secondary, fontSize: 13 }}>
-                  {[
-                    account.mailEnabled ? "Mail" : null,
-                    account.calendarEnabled ? "Calendar" : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ") || "No services enabled"}
-                </Text>
-              </View>
-              <Text
-                style={{
-                  color: account.health.state === "ready" ? t.secondary : t.warning,
-                  fontSize: 13,
-                  maxWidth: "30%",
-                  textAlign: "right",
-                }}
-              >
-                {account.health.state === "ready" ? "Connected" : "Needs attention"}
-              </Text>
-              <Icon name="chevron" color={t.secondary} size={16} />
-            </Pressable>
-            {expandedAccount === account.id && (
-              <View style={{ gap: 8, paddingTop: 12 }}>
-                {account.health.message && (
-                  <Text
-                    style={{ color: account.health.state === "ready" ? t.secondary : t.warning }}
-                  >
-                    {account.health.message}
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Text style={{ color: t.ink, fontSize: 17, fontWeight: "600" }}>
+                    {account.label || (account.provider === "google" ? "Google" : "iCloud")}
                   </Text>
-                )}
-                <Text style={{ color: t.secondary }}>
-                  Last synced{" "}
-                  {account.lastSyncedAt ? new Date(account.lastSyncedAt).toLocaleString() : "Never"}
-                </Text>
-                {Object.entries(account.capabilities ?? {}).map(([service, capability]) => (
-                  <Text
-                    key={service}
-                    style={{ color: capability.health.state === "ready" ? t.secondary : t.warning }}
-                  >
-                    {service.replaceAll("_", " ")}: {capability.health.state.replaceAll("_", " ")}
+                  <Text style={{ color: t.secondary, fontSize: 14 }}>
+                    {account.email ?? account.provider}
                   </Text>
-                ))}
-                <Action
-                  label="Sync now"
-                  disabled={action.pending || account.syncStatus === "syncing"}
-                  onPress={() =>
-                    void action.run(
-                      async (api) => {
-                        const result = await api.syncConnector(account.id);
-                        await accounts.refetch();
-                        return result;
-                      },
-                      (result) =>
-                        result.pending
-                          ? "Sync requested. Check account status for completion."
-                          : `Sync confirmed: ${result.changed} changes.`,
-                    )
-                  }
-                />
-                {account.provider === "google" && (
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+                    {account.mailEnabled && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        <Icon name="mail" color={t.secondary} size={14} />
+                        <Text style={{ color: t.secondary, fontSize: 13 }}>Mail</Text>
+                      </View>
+                    )}
+                    {account.calendarEnabled && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        <Icon name="calendar" color={t.secondary} size={14} />
+                        <Text style={{ color: t.secondary, fontSize: 13 }}>Calendar</Text>
+                      </View>
+                    )}
+                    {!account.mailEnabled && !account.calendarEnabled && (
+                      <Text style={{ color: t.secondary, fontSize: 13 }}>No services enabled</Text>
+                    )}
+                  </View>
+                </View>
+                <Text
+                  style={{
+                    color: account.health.state === "ready" ? t.secondary : t.warning,
+                    fontSize: 13,
+                    maxWidth: "30%",
+                    textAlign: "right",
+                  }}
+                >
+                  {account.health.state === "ready" ? "Connected" : "Needs attention"}
+                </Text>
+                {!detailId && <Icon name="chevron" color={t.secondary} size={16} />}
+              </Pressable>
+              {detailId === account.id && (
+                <View style={{ gap: 8, paddingTop: 12 }}>
+                  {account.health.message && (
+                    <Text
+                      style={{ color: account.health.state === "ready" ? t.secondary : t.warning }}
+                    >
+                      {account.health.message}
+                    </Text>
+                  )}
+                  <Text style={{ color: t.secondary }}>
+                    Last synced{" "}
+                    {account.lastSyncedAt
+                      ? new Date(account.lastSyncedAt).toLocaleString()
+                      : "Never"}
+                  </Text>
+                  {Object.entries(account.capabilities ?? {}).map(([service, capability]) => (
+                    <View
+                      key={service}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                    >
+                      {(service.includes("mail") || service.includes("calendar")) && (
+                        <Icon
+                          name={service.includes("mail") ? "mail" : "calendar"}
+                          color={capability.health.state === "ready" ? t.secondary : t.warning}
+                          size={18}
+                        />
+                      )}
+                      <Text
+                        style={{
+                          color: capability.health.state === "ready" ? t.secondary : t.warning,
+                        }}
+                      >
+                        {service.replaceAll("_", " ")}:{" "}
+                        {capability.health.state.replaceAll("_", " ")}
+                      </Text>
+                    </View>
+                  ))}
                   <Action
-                    label="Reconnect in browser"
-                    disabled={action.pending}
-                    onPress={() => google(account)}
-                  />
-                )}
-                {account.provider === "icloud" && (
-                  <Action
-                    label="Update iCloud credentials"
-                    disabled={action.pending}
-                    onPress={() => {
-                      setReconnectIcloud(account);
-                      setIcloud(true);
-                    }}
-                  />
-                )}
-                <Action
-                  label="Disconnect account"
-                  destructive
-                  disabled={action.pending}
-                  onPress={() =>
-                    confirm(
-                      `Disconnect ${account.label}?`,
-                      "This removes the account connection. Its mail and calendar will stop syncing.",
-                      () =>
-                        void action.run(async (api) => {
-                          await api.deleteConnector(account.id);
+                    label="Sync now"
+                    disabled={action.pending || account.syncStatus === "syncing"}
+                    onPress={() =>
+                      void action.run(
+                        async (api) => {
+                          const result = await api.syncConnector(account.id);
                           await accounts.refetch();
-                        }, "Account disconnected"),
-                      true,
-                    )
-                  }
-                />
-              </View>
-            )}
-          </View>
-        ))}
+                          return result;
+                        },
+                        (result) =>
+                          result.pending
+                            ? "Sync requested. Check account status for completion."
+                            : `Sync confirmed: ${result.changed} changes.`,
+                      )
+                    }
+                  />
+                  {account.provider === "google" && (
+                    <Action
+                      label="Reconnect in browser"
+                      disabled={action.pending}
+                      onPress={() => google(account)}
+                    />
+                  )}
+                  {account.provider === "icloud" && (
+                    <Action
+                      label="Update iCloud credentials"
+                      disabled={action.pending}
+                      onPress={() => {
+                        setReconnectIcloud(account);
+                        setIcloud(true);
+                      }}
+                    />
+                  )}
+                  <Action
+                    label="Disconnect account"
+                    destructive
+                    disabled={action.pending}
+                    onPress={() =>
+                      confirm(
+                        `Disconnect ${account.label}?`,
+                        "This removes the account connection. Its mail and calendar will stop syncing.",
+                        () =>
+                          void action.run(async (api) => {
+                            await api.deleteConnector(account.id);
+                            await accounts.refetch();
+                          }, "Account disconnected"),
+                        true,
+                      )
+                    }
+                  />
+                </View>
+              )}
+            </View>
+          ))}
         <Action
           label="Refresh connections"
           disabled={accounts.isFetching || action.pending}
@@ -209,120 +247,124 @@ function Connections() {
           }
         />
       </Section>
-      <Section title="Add account">
-        <ToggleRow label="Mail" value={mail} onChange={setMail} />
-        <ToggleRow label="Calendar" value={calendar} onChange={setCalendar} />
-        <Action
-          label="Connect Google in browser"
-          disabled={action.pending || (!mail && !calendar)}
-          onPress={() => google()}
-        />
-        <Action
-          label="Connect iCloud"
-          disabled={action.pending}
-          onPress={() => {
-            setReconnectIcloud(null);
-            setIcloud(true);
-          }}
-        />
-      </Section>
-      <Section title="X bookmarks">
-        {x.isPending ? (
-          <State loading />
-        ) : x.isError ? (
-          <State retry={() => void x.refetch()} />
-        ) : x.data ? (
-          <>
-            <Text style={{ padding: 16, color: t.ink, fontSize: 17 }}>
-              @{x.data.username} · {x.data.syncStatus}
-            </Text>
-            {x.data.syncError && (
-              <Text style={{ padding: 16, color: t.warning }}>{x.data.syncError}</Text>
-            )}
-            <SearchableChoice
-              label="Bookmark folder"
-              value={x.data.selectedFolderId ?? ""}
-              options={[
-                ...(x.data.selectedFolderId &&
-                !(folders.data ?? []).some(
-                  (folder) => folder.remoteFolderId === x.data?.selectedFolderId,
-                )
-                  ? [
-                      {
-                        value: x.data.selectedFolderId,
-                        label: x.data.selectedFolderName ?? "Unavailable folder",
+      {!detailId && (
+        <>
+          <Section title="Add account">
+            <ToggleRow icon="mail" label="Mail" value={mail} onChange={setMail} />
+            <ToggleRow icon="calendar" label="Calendar" value={calendar} onChange={setCalendar} />
+            <Action
+              label="Connect Google in browser"
+              disabled={action.pending || (!mail && !calendar)}
+              onPress={() => google()}
+            />
+            <Action
+              label="Connect iCloud"
+              disabled={action.pending}
+              onPress={() => {
+                setReconnectIcloud(null);
+                setIcloud(true);
+              }}
+            />
+          </Section>
+          <Section title="X bookmarks">
+            {x.isPending ? (
+              <State loading />
+            ) : x.isError ? (
+              <State retry={() => void x.refetch()} />
+            ) : x.data ? (
+              <>
+                <Text style={{ padding: 16, color: t.ink, fontSize: 17 }}>
+                  @{x.data.username} · {x.data.syncStatus}
+                </Text>
+                {x.data.syncError && (
+                  <Text style={{ padding: 16, color: t.warning }}>{x.data.syncError}</Text>
+                )}
+                <SearchableChoice
+                  label="Bookmark folder"
+                  value={x.data.selectedFolderId ?? ""}
+                  options={[
+                    ...(x.data.selectedFolderId &&
+                    !(folders.data ?? []).some(
+                      (folder) => folder.remoteFolderId === x.data?.selectedFolderId,
+                    )
+                      ? [
+                          {
+                            value: x.data.selectedFolderId,
+                            label: x.data.selectedFolderName ?? "Unavailable folder",
+                          },
+                        ]
+                      : []),
+                    ...(folders.data ?? []).map((folder) => ({
+                      value: folder.remoteFolderId,
+                      label: folder.name,
+                    })),
+                  ]}
+                  disabled={action.pending || folders.isError || folders.isPending}
+                  onChange={(value) =>
+                    void action.run(async (api) => {
+                      await api.selectXBookmarkFolder(value);
+                      await x.refetch();
+                    }, "Bookmark folder selected")
+                  }
+                />
+                {folders.isError && (
+                  <Action label="Retry loading folders" onPress={() => void folders.refetch()} />
+                )}
+                <Action
+                  label="Sync bookmarks"
+                  disabled={
+                    action.pending || x.data.syncStatus === "syncing" || !x.data.selectedFolderId
+                  }
+                  onPress={() =>
+                    void action.run(
+                      async (api) => {
+                        const changed = await api.syncXBookmarks();
+                        await x.refetch();
+                        return changed;
                       },
-                    ]
-                  : []),
-                ...(folders.data ?? []).map((folder) => ({
-                  value: folder.remoteFolderId,
-                  label: folder.name,
-                })),
-              ]}
-              disabled={action.pending || folders.isError || folders.isPending}
-              onChange={(value) =>
-                void action.run(async (api) => {
-                  await api.selectXBookmarkFolder(value);
-                  await x.refetch();
-                }, "Bookmark folder selected")
-              }
-            />
-            {folders.isError && (
-              <Action label="Retry loading folders" onPress={() => void folders.refetch()} />
+                      (changed) => `Bookmark sync confirmed: ${changed} changes.`,
+                    )
+                  }
+                />
+                <Action
+                  label="Disconnect X"
+                  destructive
+                  disabled={action.pending}
+                  onPress={() =>
+                    confirm(
+                      "Disconnect X?",
+                      "Bookmark syncing will stop.",
+                      () =>
+                        void action.run(async (api) => {
+                          await api.deleteXBookmarkAccount();
+                          await x.refetch();
+                        }, "X disconnected"),
+                      true,
+                    )
+                  }
+                />
+              </>
+            ) : (
+              <Text style={{ padding: 16, color: t.secondary }}>No X account connected.</Text>
             )}
             <Action
-              label="Sync bookmarks"
-              disabled={
-                action.pending || x.data.syncStatus === "syncing" || !x.data.selectedFolderId
-              }
-              onPress={() =>
-                void action.run(
-                  async (api) => {
-                    const changed = await api.syncXBookmarks();
-                    await x.refetch();
-                    return changed;
-                  },
-                  (changed) => `Bookmark sync confirmed: ${changed} changes.`,
-                )
-              }
-            />
-            <Action
-              label="Disconnect X"
-              destructive
+              label={x.data ? "Reconnect X in browser" : "Connect X in browser"}
               disabled={action.pending}
               onPress={() =>
                 confirm(
-                  "Disconnect X?",
-                  "Bookmark syncing will stop.",
+                  "Continue in browser?",
+                  "Finish X authorization in the browser, then return to nohmi to refresh the connection.",
                   () =>
-                    void action.run(async (api) => {
-                      await api.deleteXBookmarkAccount();
-                      await x.refetch();
-                    }, "X disconnected"),
-                  true,
+                    void action.run(
+                      async (api) => openAuthorization(await api.getXBookmarkAuthorizationUrl()),
+                      "Browser opened. Return to nohmi to check the connection.",
+                    ),
                 )
               }
             />
-          </>
-        ) : (
-          <Text style={{ padding: 16, color: t.secondary }}>No X account connected.</Text>
-        )}
-        <Action
-          label={x.data ? "Reconnect X in browser" : "Connect X in browser"}
-          disabled={action.pending}
-          onPress={() =>
-            confirm(
-              "Continue in browser?",
-              "Finish X authorization in the browser, then return to nohmi to refresh the connection.",
-              () =>
-                void action.run(
-                  async (api) => openAuthorization(await api.getXBookmarkAuthorizationUrl()),
-                  "Browser opened. Return to nohmi to check the connection.",
-                ),
-            )
-          }
-        />
-      </Section>
+          </Section>
+        </>
+      )}
       {icloud && (
         <ICloudForm
           mail={reconnectIcloud?.mailEnabled ?? mail}
@@ -402,12 +444,14 @@ function ICloudForm({
               editable={!action.pending}
             />
             <ToggleRow
+              icon="mail"
               label="Mail"
               value={useMail}
               onChange={setUseMail}
               disabled={action.pending}
             />
             <ToggleRow
+              icon="calendar"
               label="Calendar"
               value={useCalendar}
               onChange={setUseCalendar}

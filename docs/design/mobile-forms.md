@@ -276,3 +276,7 @@ Peer views such as Goals, Completed and Motives use a compact horizontal view sw
 than a vertical list of form choices. Activity separates compact filters from readable event rows;
 metadata and identifiers are disclosed on demand. Connections leads with account identity,
 services and actual status, then discloses sync details and consequential account actions.
+
+Connected-account rows use provider-supplied profile photos with initials when missing or failed.
+Account details open a native child page; they never expand inside the account list. Every Mail
+or Calendar service label in connection permissions and status includes its workspace icon.

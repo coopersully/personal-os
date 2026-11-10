@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Icon } from "../../components/icons";
+import { Icon, type IconName } from "../../components/icons";
 import { SheetHeader } from "../../components/sheet-header";
 import { type EntityKind, entityDictionary } from "../../product/entities";
 import { spacing, useTheme, workspaceColor } from "../../theme";
@@ -21,6 +21,7 @@ import { type Option, SearchField, State, styles } from "./ui";
 export function SearchableChoice({
   label,
   entity,
+  icon,
   value,
   options,
   onChange,
@@ -28,12 +29,14 @@ export function SearchableChoice({
 }: {
   label: string;
   entity?: EntityKind;
+  icon?: IconName;
   value: string;
   options: readonly Option[];
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
   const t = useTheme();
+  const leadingIcon = entity ? entityDictionary[entity].icon : icon;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const close = () => {
@@ -53,7 +56,7 @@ export function SearchableChoice({
           { alignItems: "center", opacity: disabled ? 0.4 : pressed ? 0.6 : 1 },
         ]}
       >
-        {entity && <Icon name={entityDictionary[entity].icon} size={22} color={t.secondary} />}
+        {leadingIcon && <Icon name={leadingIcon} size={22} color={t.secondary} />}
         <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
         <Text
           numberOfLines={1}

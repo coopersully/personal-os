@@ -1,6 +1,8 @@
 import { Image, type ImageSourcePropType } from "react-native";
 
 export const icons = {
+  search: require("../../assets/navigation/Search.png"),
+  location: require("../../assets/navigation/MapPin.png"),
   send: require("../../assets/navigation/CircleArrowUp.png"),
   categoryTags: require("../../assets/navigation/Tags.png"),
   categoryLayers: require("../../assets/navigation/Layers.png"),

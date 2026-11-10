@@ -1,4 +1,5 @@
-import { TextInput } from "react-native";
+import { TextInput, View } from "react-native";
+import { Icon } from "../../components/icons";
 import { useTheme } from "../../theme";
 export function SettingsSearch({
   value,
@@ -9,23 +10,35 @@ export function SettingsSearch({
 }) {
   const t = useTheme();
   return (
-    <TextInput
-      accessibilityLabel="Search settings"
-      placeholder="Search settings"
-      placeholderTextColor={t.secondary}
-      value={value}
-      onChangeText={onChangeText}
-      autoCorrect={false}
-      returnKeyType="search"
-      clearButtonMode="while-editing"
+    <View
       style={{
         minHeight: 44,
         backgroundColor: t.surface,
-        color: t.ink,
         borderRadius: 12,
         paddingHorizontal: 16,
-        fontSize: 17,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
       }}
-    />
+    >
+      <Icon name="search" color={t.secondary} />
+      <TextInput
+        accessibilityLabel="Search settings"
+        placeholder="Search settings"
+        placeholderTextColor={t.secondary}
+        value={value}
+        onChangeText={onChangeText}
+        autoCorrect={false}
+        returnKeyType="search"
+        clearButtonMode="while-editing"
+        style={{
+          minHeight: 44,
+          flex: 1,
+          color: t.ink,
+
+          fontSize: 17,
+        }}
+      />
+    </View>
   );
 }

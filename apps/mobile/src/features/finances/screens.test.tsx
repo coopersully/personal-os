@@ -1363,7 +1363,7 @@ it.each([
   });
   mount(<FinancePlanScreen />);
   await screen.findByText(`${percent}%`);
-  expect(screen.getByText("v1")).toBeTruthy();
+  expect(screen.queryByText("v1")).toBeNull();
   expect(screen.queryByText(/Approved/)).toBeNull();
   expect(screen.getByText("Partial total")).toBeTruthy();
 });

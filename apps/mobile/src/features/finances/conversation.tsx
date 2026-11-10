@@ -84,6 +84,7 @@ export function Conversation() {
               keyboardDismissMode="interactive"
               keyboardShouldPersistTaps="handled"
               scrollEventThrottle={32}
+              maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
               onScroll={({ nativeEvent: { contentOffset, layoutMeasurement, contentSize } }) => {
                 nearBottom.current =
                   contentSize.height - layoutMeasurement.height - contentOffset.y < 80;
@@ -96,12 +97,16 @@ export function Conversation() {
               }}
               contentContainerStyle={{ flexGrow: 1, gap: spacing.md, paddingVertical: spacing.sm }}
             >
-              {query.hasNextPage && (
-                <FinanceRow
-                  title={query.isFetchingNextPage ? "Loading…" : "Load older messages"}
-                  onPress={query.isFetchingNextPage ? undefined : () => void query.fetchNextPage()}
-                />
-              )}
+              <View key="older-messages">
+                {query.hasNextPage && (
+                  <FinanceRow
+                    title={query.isFetchingNextPage ? "Loading…" : "Load older messages"}
+                    onPress={
+                      query.isFetchingNextPage ? undefined : () => void query.fetchNextPage()
+                    }
+                  />
+                )}
+              </View>
               {messages.map((message) => {
                 const mine = message.authorKind === "user";
                 return (

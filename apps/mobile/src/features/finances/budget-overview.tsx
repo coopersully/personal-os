@@ -141,7 +141,7 @@ export function BudgetOverview() {
             }}
           >
             <View style={{ gap: spacing.sm, flexShrink: 1 }}>
-              <Copy secondary>{`Budget · ${budgetMonth}`}</Copy>
+              <Copy secondary>{`${totals ? "Spending budget" : "Plan"} · ${budgetMonth}`}</Copy>
               <Text
                 style={{
                   color: t.ink,
@@ -150,11 +150,13 @@ export function BudgetOverview() {
                   fontVariant: ["tabular-nums"],
                 }}
               >
-                {formatMoney(budget.allocatedTotal, "USD")}
+                {formatMoney(totals ? totals.budgetCents / 100 : budget.allocatedTotal, "USD")}
               </Text>
-              <Copy
-                secondary
-              >{`${budget.status === "active" ? "" : budget.status === "proposed" ? "Proposal — not approved · " : `${financeLabel(budget.status)} · `}v${budget.version}`}</Copy>
+              {!totals && (
+                <Copy
+                  secondary
+                >{`${budget.status === "active" ? "" : budget.status === "proposed" ? "Proposal — not approved · " : `${financeLabel(budget.status)} · `}v${budget.version}`}</Copy>
+              )}
             </View>
             <ReadState query={spending}>
               <View

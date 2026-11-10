@@ -13,7 +13,6 @@ import { Switch, Text, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FloatingAdd, FormSave } from "../../components/forms/form-save";
-import { InlineOptions } from "../../components/forms/inline-options";
 import { PlanningPicker } from "../../components/forms/planning-picker";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { Icon } from "../../components/icons";
@@ -21,6 +20,7 @@ import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
+import { SettingsViewSwitcher } from "../settings/view-switcher";
 import { Action, confirmDelete, Field, ReadState } from "./controls";
 import { goalChanges, motiveChanges, personalDraft } from "./logic";
 export function GoalsSettingsScreen() {
@@ -54,12 +54,12 @@ function GoalsHome() {
         }}
       >
         <Stack.Screen options={{ title: "Goals & Motives" }} />
-        <InlineOptions
+        <SettingsViewSwitcher
           value={tab}
           options={[
-            { label: "Goals", value: "goals" },
-            { label: "Completed outcomes", value: "completed" },
-            { label: "Motives", value: "motives" },
+            { label: "Goals", value: "goals", icon: "target" },
+            { label: "Completed", value: "completed", icon: "history" },
+            { label: "Motives", value: "motives", icon: "star" },
           ]}
           onChange={setTab}
         />
@@ -76,6 +76,7 @@ function GoalsHome() {
                 key={record.id}
                 title={record.title}
                 subtitle={record.detail ?? undefined}
+                subtitleLines={2}
                 value={record.isActive ? "Active" : "Paused"}
                 onPress={() =>
                   router.push({
@@ -95,7 +96,8 @@ function GoalsHome() {
                   key={record.id}
                   title={record.title}
                   subtitle={record.description ?? undefined}
-                  value={`${record.progress}% · ${record.status}`}
+                  subtitleLines={2}
+                  value={`${record.progress}%`}
                   onPress={() =>
                     router.push({
                       pathname: "/settings/goals/edit",

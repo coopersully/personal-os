@@ -63,7 +63,21 @@ vi.mock("./data", () => ({
     },
   }),
 }));
+vi.mock("../../components/icons", () => ({ Icon: () => <span /> }));
 vi.mock("react-native", () => ({
+  Pressable: ({
+    children,
+    onPress,
+    accessibilityLabel,
+  }: {
+    children: React.ReactNode;
+    onPress: () => void;
+    accessibilityLabel: string;
+  }) => (
+    <button type="button" aria-label={accessibilityLabel} onClick={onPress}>
+      {children}
+    </button>
+  ),
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   Modal: ({
@@ -468,4 +482,30 @@ it("reconciles an uncertain policy response already committed without duplicatin
   act(() => h.confirmation?.());
   expect((screen.getByText("Save global text policy") as HTMLButtonElement).disabled).toBe(true);
   expect(h.api.saveNotificationPreferences).toHaveBeenCalledTimes(1);
+});
+
+it("discloses connection details on demand without performing a provider action", () => {
+  h.resources.connectors = [
+    {
+      id: "account",
+      label: "Work Google",
+      email: "alex@example.com",
+      provider: "google",
+      health: { state: "ready", message: null },
+      mailEnabled: true,
+      calendarEnabled: true,
+      lastSyncedAt: null,
+      capabilities: {},
+      syncStatus: "idle",
+    },
+  ];
+  render(<ConnectionsSettingsScreen />);
+  expect(screen.getByText("Connected")).toBeVisible();
+  expect(screen.queryByText("Sync now")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Account Work Google, alex@example.com" }));
+  expect(screen.getByText("Sync now")).toBeVisible();
+  expect(screen.getByText("Disconnect account")).toBeVisible();
+  expect(h.api.syncConnector).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Account Work Google, alex@example.com" }));
+  expect(screen.queryByText("Sync now")).toBeNull();
 });

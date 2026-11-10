@@ -11,6 +11,7 @@ import { useAssets } from "expo-asset";
 import { useTheme } from "../../theme";
 import { enumMenuIcons } from "../enum-menu-icons";
 import { icons } from "../icons";
+import { useSettingsAccent } from "../settings-accent";
 import { EnumChoiceLabel, type EnumChoiceProps } from "./enum-choice-label";
 
 export type { EnumChoiceProps } from "./enum-choice-label";
@@ -18,6 +19,7 @@ export type { EnumChoiceProps } from "./enum-choice-label";
 /** SwiftUI owns popup placement, Liquid Glass, dismissal and platform selection marks. */
 export function EnumChoice(props: EnumChoiceProps) {
   const t = useTheme();
+  const accent = useSettingsAccent();
   const [assets] = useAssets([
     ...props.options.map(
       (option) =>
@@ -33,6 +35,7 @@ export function EnumChoice(props: EnumChoiceProps) {
     <Host
       matchContents={{ vertical: true }}
       colorScheme={t.dark ? "dark" : "light"}
+      seedColor={accent}
       style={{ width: "100%", opacity: props.disabled ? 0.4 : 1 }}
       ignoreSafeArea="all"
     >

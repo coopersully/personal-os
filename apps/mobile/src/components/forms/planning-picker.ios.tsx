@@ -3,6 +3,8 @@ import { localDateAt, localDateTimeToUtc } from "@personal-os/domain";
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTheme } from "../../theme";
+import { useSettingsAccentColor } from "../settings-accent";
+import { SettingLabel, SettingValue } from "../settings-row-content";
 import type { PlanningPickerProps } from "./planning-picker";
 export function PlanningPicker({
   label,
@@ -13,6 +15,7 @@ export function PlanningPicker({
   optional = false,
 }: PlanningPickerProps) {
   const t = useTheme();
+  const accent = useSettingsAccentColor(t.information);
   const [editing, setEditing] = useState(false);
   const today = localDateAt(new Date(), timeZone);
   const day =
@@ -34,13 +37,14 @@ export function PlanningPicker({
         onPress={() => setEditing(!editing)}
         style={{ minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12 }}
       >
-        <Text style={{ color: t.ink, flex: 1 }}>{label}</Text>
-        <Text style={{ color: t.secondary }}>{value || "Not set"}</Text>
+        <SettingLabel>{label}</SettingLabel>
+        <SettingValue>{value || "Not set"}</SettingValue>
       </Pressable>
       {editing && (
         <>
           <DateTimePicker
             value={date}
+            accentColor={accent}
             timeZoneName={timeZone}
             mode={mode}
             display={mode === "date" ? "inline" : "spinner"}
@@ -68,7 +72,7 @@ export function PlanningPicker({
             onPress={() => setEditing(false)}
             style={{ minHeight: 44, justifyContent: "center" }}
           >
-            <Text style={{ color: t.information }}>Done</Text>
+            <Text style={{ color: accent }}>Done</Text>
           </Pressable>
           {optional && (
             <Pressable
@@ -79,7 +83,7 @@ export function PlanningPicker({
               }}
               style={{ minHeight: 44, justifyContent: "center" }}
             >
-              <Text style={{ color: t.information }}>Clear {label.toLowerCase()}</Text>
+              <Text style={{ color: accent }}>Clear {label.toLowerCase()}</Text>
             </Pressable>
           )}
         </>

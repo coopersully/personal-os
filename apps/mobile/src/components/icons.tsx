@@ -1,4 +1,6 @@
-import { Image, type ImageSourcePropType } from "react-native";
+import type { ImageSourcePropType } from "react-native";
+
+import { IconImage } from "./icon-image";
 
 export const icons = {
   project: require("../../assets/navigation/Project.png"),
@@ -91,14 +93,15 @@ export function Icon({
   filled?: boolean;
 }) {
   return (
-    <Image
-      accessible={false}
+    <IconImage
+      name={name}
+      color={color}
+      size={size}
       source={
         filled && name in selectedIcons
           ? selectedIcons[name as keyof typeof selectedIcons]
           : icons[name]
       }
-      style={{ width: size, height: size, tintColor: color }}
     />
   );
 }

@@ -1,11 +1,15 @@
 import DateTimePicker from "@expo/ui/community/datetime-picker";
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Icon } from "../../components/icons";
+import { useSettingsAccent } from "../../components/settings-accent";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { useTheme } from "../../theme";
 import { Action, styles } from "../tasks/ui";
 import type { ProfileTimeProps } from "./profile-time";
 export function ProfileTime({ label, value, onChange, end, disabled }: ProfileTimeProps) {
   const t = useTheme();
+  const accent = useSettingsAccent();
   const [editing, setEditing] = useState(false);
   const date = new Date(Date.UTC(2000, 0, 1, 0, value === 1440 ? 0 : value));
   const display =
@@ -26,13 +30,16 @@ export function ProfileTime({ label, value, onChange, end, disabled }: ProfileTi
         onPress={() => setEditing(!editing)}
         style={styles.settingRow}
       >
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-        <Text style={{ color: t.secondary, fontSize: 17 }}>{display}</Text>
+        <Icon name="clock" size={22} color={t.secondary} />
+        <SettingLabel>{label}</SettingLabel>
+        <SettingValue>{display}</SettingValue>
+        <Icon name="chevron" size={16} color={t.secondary} />
       </Pressable>
       {editing && !disabled && (
         <View>
           <DateTimePicker
             value={date}
+            accentColor={accent}
             timeZoneName="UTC"
             mode="time"
             display="spinner"

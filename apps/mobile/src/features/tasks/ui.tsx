@@ -15,7 +15,9 @@ import {
 } from "react-native";
 import { Icon, type IconName } from "../../components/icons";
 import { PageRefreshControl } from "../../components/page-refresh";
-import { radius, spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
+import { useSettingsAccent, useSettingsAccentColor } from "../../components/settings-accent";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
+import { radius, spacing, touchTarget, useTheme } from "../../theme";
 
 export function Action({
   label,
@@ -29,6 +31,7 @@ export function Action({
   destructive?: boolean;
 }) {
   const t = useTheme();
+  const accent = useSettingsAccent();
   return (
     <Pressable
       accessibilityRole="button"
@@ -48,7 +51,7 @@ export function Action({
         style={{
           fontSize: 16,
           fontWeight: "600",
-          color: destructive ? t.destructive : workspaceColor(t, "tasks"),
+          color: destructive ? t.destructive : accent,
         }}
       >
         {label}
@@ -158,7 +161,7 @@ export function NavigationRow({
       style={({ pressed }) => [styles.row, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}
     >
       <Icon name={icon} color={t.secondary} size={22} />
-      <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
+      <SettingLabel>{label}</SettingLabel>
       <Icon name="chevron" color={t.secondary} size={16} />
     </Pressable>
   );
@@ -207,16 +210,18 @@ export function ToggleRow({
   disabled?: boolean;
 }) {
   const t = useTheme();
+  const fallbackAccent = useSettingsAccent();
+  const accent = useSettingsAccentColor(fallbackAccent, t.secondary);
   return (
     <View style={styles.settingRow}>
       {icon && <Icon name={icon} size={22} color={t.secondary} />}
-      <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
+      <SettingLabel>{label}</SettingLabel>
       <Switch
         accessibilityLabel={label}
         value={value}
         onValueChange={onChange}
         disabled={disabled}
-        trackColor={{ true: workspaceColor(t, "tasks") }}
+        trackColor={{ true: accent }}
       />
     </View>
   );
@@ -265,16 +270,31 @@ export function Field({
   ...props
 }: TextInputProps & { label: string; compact?: boolean; icon?: IconName }) {
   const [editing, setEditing] = useState(false);
+  const [inlineEditing, setInlineEditing] = useState(false);
   const t = useTheme();
-  if (compact && !props.multiline)
+  const expandedValue =
+    !props.secureTextEntry &&
+    (!!props.multiline ||
+      props.keyboardType === "email-address" ||
+      props.autoComplete === "email" ||
+      (props.value?.length ?? 0) > 24);
+  if (compact && !editing && (!expandedValue || inlineEditing))
     return (
       <View style={styles.settingRow}>
         {icon && <Icon name={icon} size={22} color={t.secondary} />}
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
+        <SettingLabel>{label}</SettingLabel>
         <TextInput
           {...props}
           accessibilityLabel={label}
           placeholderTextColor={t.secondary}
+          onFocus={(event) => {
+            setInlineEditing(true);
+            props.onFocus?.(event);
+          }}
+          onBlur={(event) => {
+            setInlineEditing(false);
+            props.onBlur?.(event);
+          }}
           style={{
             color: t.ink,
             fontSize: 17,
@@ -294,26 +314,25 @@ export function Field({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${label}, ${props.value || "Not set"}`}
+        disabled={props.editable === false}
+        accessibilityState={{ disabled: props.editable === false }}
         onPress={() => setEditing(true)}
         style={styles.settingRow}
       >
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-        <Text
-          numberOfLines={1}
-          style={{
-            color: props.value ? t.ink : t.secondary,
-            fontSize: 17,
-            maxWidth: "55%",
-            textAlign: "right",
-          }}
-        >
+        {icon && <Icon name={icon} size={22} color={t.secondary} />}
+        <SettingLabel>{label}</SettingLabel>
+        <SettingValue style={{ color: props.value ? t.ink : t.secondary }}>
           {props.value || props.placeholder || "Not set"}
-        </Text>
+        </SettingValue>
       </Pressable>
     );
   return (
     <View style={{ padding: spacing.lg, gap: spacing.sm }}>
-      <Text style={{ fontSize: 13, color: t.secondary }}>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+        {icon && <Icon name={icon} size={22} color={t.secondary} />}
+        <SettingLabel>{label}</SettingLabel>
+        {compact && <Action label="Done" onPress={() => setEditing(false)} />}
+      </View>
       <TextInput
         accessibilityLabel={label}
         placeholderTextColor={t.secondary}

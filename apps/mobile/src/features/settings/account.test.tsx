@@ -45,7 +45,9 @@ vi.mock("./data", () => ({
     return { data: key === "activity" ? h.data : [], isPending: false, refetch: h.refetch };
   },
 }));
+vi.mock("../../components/icons", () => ({ Icon: () => <span /> }));
 vi.mock("react-native", () => ({
+  ScrollView: ({ children }: PropsWithChildren) => <div>{children}</div>,
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   Pressable: ({ children, onPress }: PropsWithChildren<{ onPress: () => void }>) => (
@@ -64,7 +66,10 @@ vi.mock("../../components/forms/form-save", () => ({
   ),
 }));
 vi.mock("../tasks/data", () => ({ errorMessage: (error: Error) => error.message }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../theme", () => ({
+  spacing: { sm: 8, md: 12 },
+  useTheme: () => ({}),
+}));
 vi.mock("sonner-native", () => ({ toast: { error: h.error, success: h.success } }));
 vi.mock("expo-constants", () => ({
   default: { nativeAppVersion: "2.4.1", nativeBuildVersion: "81" },
@@ -200,11 +205,12 @@ it("shows an honest bounded audit history without exposing before/after content"
   ];
   render(<ActivitySettingsScreen />);
   expect(screen.getByText(/Latest 100 events/)).toBeTruthy();
-  fireEvent.click(screen.getByText("update task"));
-  expect(screen.getByText("Request: request")).toBeTruthy();
+  fireEvent.click(screen.getByText("Update task"));
+  expect(screen.getByText("Request")).toBeTruthy();
+  expect(screen.getByText("request")).toBeTruthy();
   expect(screen.queryByText(/private|password|secret/)).toBeNull();
   fireEvent.change(screen.getByLabelText("Search activity"), { target: { value: "calendar" } });
-  expect(screen.queryByText("update task")).toBeNull();
+  expect(screen.queryByText("Update task")).toBeNull();
 });
 it("omits owner invitation controls for other users", () => {
   render(<SecuritySettingsScreen />);
@@ -246,6 +252,6 @@ it("refreshes cached Activity with explicit success/error feedback and retains c
   h.refetch.mockResolvedValueOnce({ error: new Error("Refresh denied") });
   fireEvent.click(screen.getByText("Refresh activity"));
   await waitFor(() => expect(h.error).toHaveBeenCalledWith("Refresh denied"));
-  expect(screen.getByText("update task")).toBeTruthy();
+  expect(screen.getByText("Update task")).toBeTruthy();
   expect(screen.queryByText("Refresh denied")).toBeNull();
 });

@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ListAppearance } from "./list-appearance";
 import { SearchableChoice } from "./searchable-choice";
 import { TagsField } from "./tags-field";
-import { Choice } from "./ui";
+import { Choice, Field } from "./ui";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -151,4 +151,50 @@ it("renders an unavailable setting as None and permits choosing a supported repl
     />,
   );
   expect(screen.getByRole("button", { name: "Priority, High" })).toBeDisabled();
+});
+
+it("reveals a long compact value fully and keeps its label and icon while editing", () => {
+  const value = "alex.morgan+personal@example.com";
+  render(<Field label="Email" icon="mail" value={value} onChangeText={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: `Email, ${value}` }));
+  expect(screen.getByLabelText("Email")).toHaveValue(value);
+  expect(screen.getByText("Email")).toBeVisible();
+  expect(document.querySelector('[data-icon="mail"]')).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(screen.getByRole("button", { name: `Email, ${value}` })).toBeVisible();
+});
+it("keeps an inline editor mounted while typing a value past the compact threshold", () => {
+  function Editor() {
+    const [value, setValue] = useState("Alex");
+    return <Field label="Name" value={value} onChangeText={setValue} />;
+  }
+  render(<Editor />);
+  const input = screen.getByLabelText("Name");
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: "Alex Morgan with a longer display name" } });
+  expect(screen.getByLabelText("Name")).toBe(input);
+});
+
+it("reveals email values regardless of character threshold and keeps secrets in secure inputs", () => {
+  const { rerender } = render(
+    <Field
+      label="Email"
+      keyboardType="email-address"
+      value="alex@example.test"
+      onChangeText={() => {}}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "Email, alex@example.test" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Email, alex@example.test" }));
+  expect(screen.getByLabelText("Email")).toHaveValue("alex@example.test");
+  rerender(
+    <Field
+      label="Password"
+      secureTextEntry
+      value="this-is-a-long-private-password"
+      onChangeText={() => {}}
+    />,
+  );
+  expect(screen.queryByText("this-is-a-long-private-password")).toBeNull();
+  expect(screen.getByLabelText("Password")).toBeVisible();
 });

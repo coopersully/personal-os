@@ -10,9 +10,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Icon, type IconName } from "../../components/icons";
+import { useSettingsAccent } from "../../components/settings-accent";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { SheetHeader } from "../../components/sheet-header";
 import { type EntityKind, entityDictionary } from "../../product/entities";
-import { spacing, useTheme, workspaceColor } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 import { listTint } from "./list-presentation";
 import { matchingOptions } from "./presentation";
 import { type Option, SearchField, State, styles } from "./ui";
@@ -36,6 +38,7 @@ export function SearchableChoice({
   disabled?: boolean;
 }) {
   const t = useTheme();
+  const accent = useSettingsAccent();
   const leadingIcon = entity ? entityDictionary[entity].icon : icon;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -57,13 +60,10 @@ export function SearchableChoice({
         ]}
       >
         {leadingIcon && <Icon name={leadingIcon} size={22} color={t.secondary} />}
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-        <Text
-          numberOfLines={1}
-          style={{ color: workspaceColor(t, "tasks"), fontSize: 17, maxWidth: "55%" }}
-        >
+        <SettingLabel>{label}</SettingLabel>
+        <SettingValue style={{ color: accent }}>
           {options.find((option) => option.value === value)?.label ?? "None"}
-        </Text>
+        </SettingValue>
         <Icon name="chevron" size={16} color={t.secondary} />
       </Pressable>
       <Modal
@@ -111,9 +111,7 @@ export function SearchableChoice({
                     />
                   )}
                   <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{item.label}</Text>
-                  {item.value === value && (
-                    <Icon name="save" size={22} color={workspaceColor(t, "tasks")} />
-                  )}
+                  {item.value === value && <Icon name="save" size={22} color={accent} />}
                 </Pressable>
               )}
             />

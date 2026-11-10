@@ -1,15 +1,19 @@
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Icon, type IconName } from "../../components/icons";
-import { useTheme } from "../../theme";
+import type { SettingsWorkspace } from "../../components/settings-accent";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
+import { useTheme, workspaceColor } from "../../theme";
 export function SettingsRow({
   label,
   value,
   icon,
+  workspace,
   onPress,
 }: {
   label: string;
   value?: string;
   icon?: IconName;
+  workspace?: SettingsWorkspace;
   onPress: () => void;
 }) {
   const t = useTheme();
@@ -28,9 +32,26 @@ export function SettingsRow({
         opacity: pressed ? 0.6 : 1,
       })}
     >
-      {icon && <Icon name={icon} color={t.ink} size={22} />}
-      <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-      {value && <Text style={{ color: t.secondary, fontSize: 16, flexShrink: 1 }}>{value}</Text>}
+      {icon &&
+        (workspace ? (
+          <View
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              flexShrink: 0,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: `${workspaceColor(t, workspace)}18`,
+            }}
+          >
+            <Icon name={icon} color={workspaceColor(t, workspace)} size={22} />
+          </View>
+        ) : (
+          <Icon name={icon} color={t.secondary} size={22} />
+        ))}
+      <SettingLabel>{label}</SettingLabel>
+      {value && <SettingValue>{value}</SettingValue>}
       <View>
         <Icon name="chevron" color={t.secondary} size={16} />
       </View>

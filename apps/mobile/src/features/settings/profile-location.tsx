@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Icon } from "../../components/icons";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { SheetHeader } from "../../components/sheet-header";
 import { useTheme } from "../../theme";
 import { Action, SearchField, State, styles } from "../tasks/ui";
@@ -49,10 +50,8 @@ export function ProfileLocation({
         style={styles.settingRow}
       >
         <Icon name="location" color={t.secondary} size={22} />
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>Home location</Text>
-        <Text numberOfLines={1} style={{ color: t.secondary, fontSize: 17, maxWidth: "55%" }}>
-          {value?.label ?? "Not set"}
-        </Text>
+        <SettingLabel>Home location</SettingLabel>
+        <SettingValue>{value?.label ?? "Not set"}</SettingValue>
         <Icon name="chevron" color={t.secondary} size={16} />
       </Pressable>
       <Modal

@@ -170,7 +170,10 @@ it.each([
   await push.change(true);
   vi.mocked(ports.api.getNativePushEvent).mockResolvedValue({ audience: "audience", destination });
   await push.tap(payload);
-  expect(ports.open).toHaveBeenCalledWith(destination);
+  expect(ports.open).toHaveBeenCalledWith(destination, {
+    eventId: "event",
+    installationId: "installation",
+  });
 });
 it("still unregisters when persisting opt-out fails", async () => {
   const { ports, push } = setup();

@@ -125,18 +125,16 @@ export function FinancePushProvider({ children }: PropsWithChildren) {
         return permitted(permission);
       },
       token: nativeToken,
-      open: (destination) =>
+      open: (destination, event) => {
+        if (destination === "finance_attention") {
+          router.push({ pathname: "/finance-notification", params: event });
+          return;
+        }
         router.push({
           pathname: "/(workspaces)/finances/assistant",
-          params: {
-            view:
-              destination === "finance_chat"
-                ? "Conversation"
-                : destination === "finance_activity"
-                  ? "Activity"
-                  : "For you",
-          },
-        }),
+          params: { view: destination === "finance_chat" ? "Conversation" : "Activity" },
+        });
+      },
     });
     setController(next);
     // Background success stays silent; repeated synchronization failures share one toast.

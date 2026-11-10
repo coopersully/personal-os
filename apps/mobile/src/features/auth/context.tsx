@@ -8,6 +8,9 @@ import { sessionStorage } from "./storage";
 export const mobileApiOrigin = resolveApiOrigin(
   process.env.EXPO_PUBLIC_API_URL ?? "https://nohmi-api.coopersully.me",
 );
+export const mobileAppOrigin = resolveApiOrigin(
+  process.env.EXPO_PUBLIC_APP_URL ?? "https://nohmi.coopersully.me",
+);
 const Context = createContext<{
   state: SessionState;
   session: ReturnType<typeof createSession>;

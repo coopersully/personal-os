@@ -1,3 +1,4 @@
+export const productionAppOrigin = "https://nohmi.coopersully.me";
 export const productionApiOrigin = "https://nohmi-api.coopersully.me";
 
 export function releaseEnvironment(env) {
@@ -13,5 +14,6 @@ export function releaseEnvironment(env) {
     PERSONAL_OS_APNS_ENVIRONMENT: "production",
     EXPO_NO_DOTENV: "1",
     EXPO_PUBLIC_API_URL: productionApiOrigin,
+    EXPO_PUBLIC_APP_URL: productionAppOrigin,
   };
 }

@@ -223,3 +223,26 @@ it("replays a cold tap after offline registration recovers", async () => {
   await waitFor(() => expect(h.register).toHaveBeenCalledTimes(3));
   expect(h.push).toHaveBeenCalledTimes(1);
 });
+it("opens the authenticated per-event detail for an attention notification", async () => {
+  h.enabled = true;
+  h.target.mockResolvedValue({ audience: "audience", destination: "finance_attention" });
+  render(<Settings />);
+  await waitFor(() => expect(h.register).toHaveBeenCalled());
+  await act(async () =>
+    h.response?.({
+      notification: {
+        request: {
+          content: {
+            data: { version: 1, kind: "finance", eventId: "event", audience: "audience" },
+          },
+        },
+      },
+    }),
+  );
+  await waitFor(() =>
+    expect(h.push).toHaveBeenCalledWith({
+      pathname: "/finance-notification",
+      params: { eventId: "event", installationId: "installation" },
+    }),
+  );
+});

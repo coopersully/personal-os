@@ -24,7 +24,10 @@ export interface FinancePushPorts {
   readEnabled: () => Promise<boolean>;
   saveEnabled: (enabled: boolean) => Promise<void>;
   clearPresented: () => Promise<void>;
-  open: (destination: "finance_chat" | "finance_attention" | "finance_activity") => void;
+  open: (
+    destination: "finance_chat" | "finance_attention" | "finance_activity",
+    event: { eventId: string; installationId: string },
+  ) => void;
   update: (enabled: boolean) => void;
   environment: "sandbox" | "production";
 }
@@ -147,7 +150,7 @@ export function createFinancePush(ports: FinancePushPorts) {
         check();
         if (!enabled || target.audience !== audience || payload.audience !== audience) return true;
         handled.add(payload.eventId);
-        ports.open(target.destination);
+        ports.open(target.destination, { eventId: payload.eventId, installationId });
         return true;
       }),
     dispose: () => {

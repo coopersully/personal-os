@@ -266,7 +266,13 @@ and backend environment/topic must agree. Device tokens remain private authentic
 
 Payload data is limited to `{version: 1, kind: "finance", eventId, audience}`. Taps require a
 matching current registration audience and an authenticated event lookup bound to this installation
-before opening Conversation, For you, or Activity in the existing Finance assistant. Payloads never carry money, transcript text, an
+before opening Conversation or Activity in the existing Finance assistant. Attention updates open
+an authenticated native detail that rereads the current source summary/status and offers its
+server-generated existing web review destination plus Finance chat. It does not introduce native
+approval controls. Resolved or replaced notifications explain that the update is unavailable.
+Web handoff revalidates the source and only permits the configured `EXPO_PUBLIC_APP_URL` origin
+and supported Finance paths. Archive builds bind that origin to production; synthetic QA must set
+it to the synthetic API's configured app origin. Payloads never carry money, transcript text, an
 owner ID or a raw account/session token. Logout/account replacement removes response and token
 listeners, invalidates outstanding callbacks and clears presented Finance notifications; the server
 revokes session-bound registrations on logout. Previously delivered OS banners may already have

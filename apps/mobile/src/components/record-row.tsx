@@ -71,6 +71,10 @@ export function RecordRow({
     <Pressable accessibilityRole="button" accessibilityHint={accessibilityHint} onPress={onPress}>
       {body}
     </Pressable>
+  ) : accessibilityHint ? (
+    <View accessible accessibilityHint={accessibilityHint}>
+      {body}
+    </View>
   ) : (
     body
   );

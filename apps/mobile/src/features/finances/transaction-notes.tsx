@@ -13,7 +13,11 @@ export function TransactionNotes({ item }: { item: FinanceTransaction }) {
   const { api, owner } = useFinance();
   const client = useQueryClient();
   const t = useTheme();
-  const [draft, setDraft] = useState<{ notes: string; revision: string } | null>(null);
+  const [draft, setDraft] = useState<{
+    notes: string;
+    revision: string;
+    baseNotes: string | null;
+  } | null>(null);
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const busy = useRef(false);
@@ -24,6 +28,15 @@ export function TransactionNotes({ item }: { item: FinanceTransaction }) {
       active.current = undefined;
     };
   }, [owner]);
+  // A category-only change can advance the transaction without changing the note's base.
+  // Keep the typed draft, and never silently rebase over somebody else's note edit.
+  useEffect(() => {
+    setDraft((current) =>
+      current && current.baseNotes === item.notes && current.revision !== item.updatedAt
+        ? { ...current, revision: item.updatedAt }
+        : current,
+    );
+  }, [item.notes, item.updatedAt]);
   async function save() {
     if (!owner || !draft || busy.current || submitted) return;
     busy.current = true;
@@ -49,12 +62,13 @@ export function TransactionNotes({ item }: { item: FinanceTransaction }) {
         toast.info("Submitted for review. The note has not changed.", { id });
       }
     } catch {
-      if (active.current === owner)
+      if (active.current === owner) {
+        void client.invalidateQueries({ queryKey: ["finances", owner, "transaction", item.id] });
         toast.error(
           "Couldn’t confirm the save. Your note is still here; check the transaction before retrying.",
           { id },
         );
-      else toast.dismiss(id);
+      } else toast.dismiss(id);
     } finally {
       busy.current = false;
       if (active.current === owner) setPending(false);
@@ -68,7 +82,14 @@ export function TransactionNotes({ item }: { item: FinanceTransaction }) {
         value={draft ? "Editing" : item.notes ? "Added" : "Add a note"}
         icon="edit"
         onPress={
-          draft ? undefined : () => setDraft({ notes: item.notes ?? "", revision: item.updatedAt })
+          draft
+            ? undefined
+            : () =>
+                setDraft({
+                  notes: item.notes ?? "",
+                  revision: item.updatedAt,
+                  baseNotes: item.notes,
+                })
         }
       />
       {draft ? (

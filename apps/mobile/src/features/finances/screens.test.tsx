@@ -21,7 +21,7 @@ import { FinanceTransactionScreen } from "./details";
 import { InstitutionLogo } from "./institution-logo";
 import { FinanceOverviewScreen } from "./overview";
 import { FinancePlanScreen } from "./plan";
-import { FinanceSpendingScreen } from "./spending";
+import { FinanceSpendingScreen, Transactions } from "./spending";
 import { FinanceTransactionEditor } from "./transaction-editor";
 
 vi.mock("react-native-svg", () => ({
@@ -171,7 +171,11 @@ vi.mock("react-native", () => {
     ),
     Text: Box,
     KeyboardAvoidingView: Box,
-    ActivityIndicator: () => <span>Loading</span>,
+    ActivityIndicator: ({ accessibilityLabel }: { accessibilityLabel?: string }) => (
+      <span role="progressbar" aria-label={accessibilityLabel}>
+        Loading
+      </span>
+    ),
     Alert: { alert: h.alert },
     Platform: { OS: "web" },
     useColorScheme: () => "light",
@@ -2885,4 +2889,265 @@ it.each([
   expect(screen.getByText("Unavailable")).toBeTruthy();
   await waitFor(() => expect(h.error).toHaveBeenCalled());
   expect(screen.queryByText("offline")).toBeNull();
+});
+
+it.each([
+  [0.29, "29"],
+  [0.3333333333, "33.33"],
+])("opens joint ownership %s with the same rounded percentage as its row", async (share, expected) => {
+  const { FinanceAccountScreen } = await import("./details");
+  h.params = { id: account.id };
+  h.api.listFinanceAccounts.mockResolvedValue({
+    accounts: [{ ...account, ownershipType: "joint", ownershipShare: share }],
+  });
+  mount(<FinanceAccountScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Ownership.*Joint/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Joint" }));
+  expect(screen.getByLabelText("Ownership percentage")).toHaveProperty("value", expected);
+  expect(h.api.updateFinanceAccount).not.toHaveBeenCalled();
+});
+
+it.each([
+  {},
+  { id: "budget-1" },
+  { id: "budget-1", month: "2026-13" },
+  { id: " ", month: "2026-11" },
+])("finishes invalid budget deep links without a perpetual spinner: %j", async (params) => {
+  h.params = Object.fromEntries(
+    Object.entries(params).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+  const category = mount(<BudgetCategoryRoute />);
+  expect(screen.getByText("Budget not found.")).toBeTruthy();
+  expect(screen.queryByText("Loading")).toBeNull();
+  expect(h.api.getFinanceBudgetStatus).not.toHaveBeenCalled();
+  category.unmount();
+  mount(<BudgetEditRoute />);
+  expect(screen.getByText("Budget not found.")).toBeTruthy();
+  expect(screen.queryByText("Loading")).toBeNull();
+  expect(h.api.getFinanceBudgetStatus).not.toHaveBeenCalled();
+});
+
+it("reopens a stale inline budget with the freshly read revision and saves the next edit", async () => {
+  h.params = { id: categoryBudget.id, month: categoryBudget.month };
+  const latest = { ...categoryBudget, limit: 700, updatedAt: "2026-11-02T12:00:00Z" };
+  h.api.getFinanceBudgetStatus
+    .mockResolvedValueOnce([{ budget: categoryBudget, spent: 42, remaining: 558 }])
+    .mockResolvedValue([{ budget: latest, spent: 42, remaining: 658 }]);
+  h.api.createFinanceBudget.mockResolvedValue({ ...latest, limit: 800 });
+  mount(<FinanceBudgetCategoryScreen />);
+  fireEvent.click(await screen.findByText("Monthly limit"));
+  fireEvent.change(screen.getByLabelText("Monthly budget limit"), { target: { value: "750" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget limit" }));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "This limit changed elsewhere. Close and reopen it before saving.",
+      expect.anything(),
+    ),
+  );
+  expect(screen.getByLabelText("Monthly budget limit")).toHaveProperty("value", "750");
+  expect(h.api.createFinanceBudget).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  act(() => h.alert.mock.calls.at(-1)?.[2][1].onPress());
+  fireEvent.click(screen.getByText("Monthly limit"));
+  expect(screen.getByLabelText("Monthly budget limit")).toHaveProperty("value", "700");
+  fireEvent.change(screen.getByLabelText("Monthly budget limit"), { target: { value: "800" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget limit" }));
+  await waitFor(() =>
+    expect(h.api.createFinanceBudget).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 800, expectedBudgetUpdatedAt: latest.updatedAt }),
+    ),
+  );
+  expect(h.success).toHaveBeenCalledWith("Budget limit updated", expect.anything());
+});
+
+it("loads transactions even when the separate spending summary fails", async () => {
+  h.params = { mode: "Transactions", period: "week" };
+  h.api.getFinanceSpending.mockRejectedValue(new Error("summary unavailable"));
+  mount(<FinanceSpendingScreen />);
+  expect(await screen.findByText(transaction.merchant)).toBeTruthy();
+  expect(screen.getByLabelText("Search transactions")).toBeTruthy();
+  expect(h.api.listFinanceTransactions).toHaveBeenCalled();
+});
+
+it("retains transaction search and status while a new period's summary is pending", async () => {
+  h.params = { mode: "Transactions", period: "week" };
+  h.api.getFinanceSpending
+    .mockResolvedValueOnce(spending)
+    .mockImplementation(() => new Promise(() => {}));
+  mount(<FinanceSpendingScreen />);
+  fireEvent.change(await screen.findByLabelText("Search transactions"), {
+    target: { value: "coffee" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Pending" }));
+  await waitFor(() =>
+    expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: "coffee", pending: true }),
+    ),
+  );
+  const previousFrom = h.api.listFinanceTransactions.mock.calls.at(-1)?.[0].from;
+  fireEvent.click(screen.getByRole("button", { name: "This month" }));
+  await waitFor(() =>
+    expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: "coffee", pending: true }),
+    ),
+  );
+  expect(h.api.listFinanceTransactions.mock.calls.at(-1)?.[0].from).not.toBe(previousFrom);
+  expect(screen.getByLabelText("Search transactions")).toHaveProperty("value", "coffee");
+  expect(screen.getByRole("button", { name: "Pending" }).getAttribute("aria-pressed")).toBe("true");
+});
+
+it("preserves a typed note and rebases its revision after saving a category on the same transaction", async () => {
+  const updated = { ...transaction, category: "Travel", updatedAt: "2026-11-10T12:00:00Z" };
+  h.api.updateFinanceTransaction.mockImplementation(async (_id, input) => {
+    if (input.category) {
+      h.api.getFinanceTransaction.mockResolvedValue({ data: updated });
+      return updated;
+    }
+    return { ...updated, notes: input.notes };
+  });
+  mount(<FinanceTransactionScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Notes.*Add a note/ }));
+  fireEvent.change(screen.getByLabelText("Transaction note"), {
+    target: { value: "Expense for the trip" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Category/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Travel" }));
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Category updated", expect.anything()),
+  );
+  await screen.findByRole("button", { name: /^Category.*Travel/ });
+  expect(screen.getByLabelText("Transaction note")).toHaveProperty("value", "Expense for the trip");
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  await waitFor(() =>
+    expect(h.api.updateFinanceTransaction).toHaveBeenLastCalledWith(transaction.id, {
+      notes: "Expense for the trip",
+      expectedTransactionUpdatedAt: updated.updatedAt,
+    }),
+  );
+  expect(h.success).toHaveBeenCalledWith("Note updated", expect.anything());
+});
+
+it("refreshes a failed note's transaction and retries unchanged server notes with the newer revision", async () => {
+  const updated = { ...transaction, category: "Travel", updatedAt: "2026-11-10T12:00:00Z" };
+  h.api.getFinanceTransaction
+    .mockResolvedValueOnce({ data: transaction })
+    .mockResolvedValue({ data: updated });
+  h.api.updateFinanceTransaction
+    .mockRejectedValueOnce(new Error("conflict"))
+    .mockResolvedValue({ ...updated, notes: "Keep my draft" });
+  mount(<FinanceTransactionScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Notes.*Add a note/ }));
+  fireEvent.change(screen.getByLabelText("Transaction note"), {
+    target: { value: "Keep my draft" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  await waitFor(() => expect(h.api.getFinanceTransaction).toHaveBeenCalledTimes(2));
+  await screen.findByRole("button", { name: /^Category.*Travel/ });
+  expect(screen.getByLabelText("Transaction note")).toHaveProperty("value", "Keep my draft");
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  await waitFor(() =>
+    expect(h.api.updateFinanceTransaction).toHaveBeenLastCalledWith(transaction.id, {
+      notes: "Keep my draft",
+      expectedTransactionUpdatedAt: updated.updatedAt,
+    }),
+  );
+});
+
+it("does not silently overwrite a concurrently changed server note while preserving the local draft", async () => {
+  const view = mount(<FinanceTransactionScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Notes.*Add a note/ }));
+  fireEvent.change(screen.getByLabelText("Transaction note"), {
+    target: { value: "My local note" },
+  });
+  const updated = {
+    ...transaction,
+    notes: "A newer note from another device",
+    updatedAt: "2026-11-10T12:00:00Z",
+  };
+  h.api.getFinanceTransaction.mockResolvedValue({ data: updated });
+  h.api.updateFinanceTransaction.mockRejectedValue(new Error("conflict"));
+  act(() =>
+    view.client.setQueryData(["finances", h.owner, "transaction", transaction.id], {
+      data: updated,
+    }),
+  );
+  expect(screen.getByLabelText("Transaction note")).toHaveProperty("value", "My local note");
+  fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+  await waitFor(() =>
+    expect(h.api.updateFinanceTransaction).toHaveBeenCalledWith(transaction.id, {
+      notes: "My local note",
+      expectedTransactionUpdatedAt: transaction.updatedAt,
+    }),
+  );
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(h.success).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Transaction note")).toHaveProperty("value", "My local note");
+});
+
+it("keeps loaded transactions during filter refresh but withholds their stale pagination", async () => {
+  h.params = { mode: "Transactions" };
+  let finish!: (value: unknown) => void;
+  h.api.listFinanceTransactions
+    .mockResolvedValueOnce({ items: [transaction], nextCursor: "old-cursor" })
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  mount(<FinanceSpendingScreen />);
+  await screen.findByText(transaction.merchant);
+  fireEvent.click(screen.getByRole("button", { name: "Pending" }));
+  expect(screen.getByText(transaction.merchant)).toBeTruthy();
+  expect(screen.getByLabelText("Updating transactions")).toBeTruthy();
+  expect(screen.queryByText("Load more transactions")).toBeNull();
+  await act(async () => finish({ items: [], nextCursor: null }));
+  expect(await screen.findByText("No transactions in this view.")).toBeTruthy();
+  expect(screen.queryByText(transaction.merchant)).toBeNull();
+});
+
+it("never retains a previous owner's transactions while a new owner's query is pending", async () => {
+  h.params = { mode: "Transactions" };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <FinanceSpendingScreen />
+    </QueryClientProvider>,
+  );
+  await screen.findByText(transaction.merchant);
+  h.owner = "owner-b";
+  h.api.listFinanceTransactions.mockImplementation(() => new Promise(() => {}));
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <FinanceSpendingScreen />
+    </QueryClientProvider>,
+  );
+  expect(screen.queryByText(transaction.merchant)).toBeNull();
+  expect(screen.getByLabelText("Loading finance data")).toBeTruthy();
+});
+
+it.each([
+  "account",
+  "budget",
+])("does not retain transactions across a changed %s scope", async (scope) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <Transactions accountId="account-a" budgetId="budget-a" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText(transaction.merchant);
+  h.api.listFinanceTransactions.mockImplementation(() => new Promise(() => {}));
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <Transactions
+        accountId={scope === "account" ? "account-b" : "account-a"}
+        budgetId={scope === "budget" ? "budget-b" : "budget-a"}
+      />
+    </QueryClientProvider>,
+  );
+  expect(screen.queryByText(transaction.merchant)).toBeNull();
+  expect(screen.getByLabelText("Loading finance data")).toBeTruthy();
 });

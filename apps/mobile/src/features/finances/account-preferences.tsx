@@ -18,7 +18,7 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
   const [picker, setPicker] = useState<"ownership" | "planning" | null>(null);
   const [joint, setJoint] = useState(false);
   const [share, setShare] = useState(
-    account.ownershipShare ? String(account.ownershipShare * 100) : "",
+    account.ownershipShare ? String(Number((account.ownershipShare * 100).toFixed(2))) : "",
   );
   const [pending, setPending] = useState(false);
   const busy = useRef(false);

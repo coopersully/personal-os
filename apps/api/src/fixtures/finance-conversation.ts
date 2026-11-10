@@ -1,9 +1,11 @@
 import type { financeConversationMessages } from "@personal-os/database";
 
 /** Illustrative history only: seeding never dispatches agent work or changes a transaction. */
-export function fixtureFinanceConversation(userId: string, now: Date) {
-  const id = (record: number) =>
-    `${userId.slice(0, 8)}-0000-4000-8000-${record.toString(16).padStart(12, "0")}`;
+export function fixtureFinanceConversation(
+  userId: string,
+  now: Date,
+  references: { transactionId: string; messageId: (record: number) => string },
+) {
   const messages = [
     {
       authorKind: "user",
@@ -34,12 +36,12 @@ export function fixtureFinanceConversation(userId: string, now: Date) {
     conversation: { userId, nextSequence: BigInt(messages.length) },
     messages: messages.map((message, index) => ({
       ...message,
-      id: id(9000 + index),
+      id: references.messageId(9000 + index),
       userId,
       sequence: BigInt(index + 1),
       idempotencyKey: `fixture-finance-conversation-${index + 1}`,
       createdAt: new Date(now.getTime() - (messages.length - index) * 120_000),
-      recordRefs: [{ kind: "transaction" as const, id: id(445) }],
+      recordRefs: [{ kind: "transaction" as const, id: references.transactionId }],
     })) satisfies (typeof financeConversationMessages.$inferInsert)[],
   };
 }

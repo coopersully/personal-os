@@ -1,8 +1,8 @@
 import type { FinanceSpendingReferenceFilter } from "@personal-os/domain";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { type InfiniteData, keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { TextInput } from "react-native";
+import { ActivityIndicator, TextInput } from "react-native";
 import { radius, spacing, useTheme } from "../../theme";
 import { categoryIcon } from "./category-presentation";
 import { useFinance, useSpending } from "./data";
@@ -39,11 +39,28 @@ export function Transactions({
     search: term || undefined,
     pending: status === "All" ? undefined : status === "Pending",
   };
-  const query = useInfiniteQuery({
+  type TransactionPage =
+    | Awaited<ReturnType<typeof api.listFinanceTransactions>>
+    | Awaited<ReturnType<typeof api.listFinanceSpendingTransactions>>;
+  const query = useInfiniteQuery<
+    TransactionPage,
+    Error,
+    InfiniteData<TransactionPage>,
+    readonly unknown[],
+    string | undefined
+  >({
     meta: { scopedReadFeedback: true },
     queryKey: ["finances", owner, "transactions", accountId, reference, filters],
     enabled: !!owner,
     staleTime: 30_000,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery &&
+      previousQuery.queryKey[1] === owner &&
+      previousQuery.queryKey[3] === accountId &&
+      previousQuery.queryKey[4] === reference &&
+      (previousQuery.queryKey[5] as typeof filters).budgetId === budgetId
+        ? keepPreviousData(previous)
+        : undefined,
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) =>
       reference
@@ -91,6 +108,9 @@ export function Transactions({
         }}
       >
         <Card rows={rows.length > 0 && !reference}>
+          {query.isPlaceholderData && (
+            <ActivityIndicator accessibilityLabel="Updating transactions" color={t.secondary} />
+          )}
           {reference && (
             <>
               <Copy>
@@ -122,7 +142,7 @@ export function Transactions({
               />
             ))
           )}
-          {query.hasNextPage && (
+          {query.hasNextPage && !query.isPlaceholderData && (
             <FinanceRow
               title={query.isFetchingNextPage ? "Loading…" : "Load more transactions"}
               onPress={query.isFetchingNextPage ? undefined : () => void query.fetchNextPage()}
@@ -173,9 +193,11 @@ export function FinanceSpendingScreen() {
       />
 
       {mode === "Transactions" ? (
-        <ReadState query={query}>
-          {query.scope && <Transactions from={query.scope.from} through={query.scope.through} />}
-        </ReadState>
+        query.scope ? (
+          <Transactions from={query.scope.from} through={query.scope.through} />
+        ) : (
+          <ReadState query={query}>{null}</ReadState>
+        )
       ) : (
         <ReadState query={query}>
           {query.data && query.scope && (

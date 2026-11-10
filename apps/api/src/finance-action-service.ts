@@ -491,6 +491,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     executor: Pick<Database, "execute" | "select"> = db,
     lockTargets = false,
     actorType: Principal["actorType"] = "agent",
+    staleBudget: "conflict" | "needs_input" = "conflict",
   ): Promise<PreparedAction | { status: "needs_input"; question: FinanceQuestion }> {
     const missing = (
       why: string,
@@ -885,10 +886,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             existing.id !== input.budgetId ||
             existing.updatedAt.toISOString() !== input.expectedBudgetUpdatedAt)
         ) {
-          throw new AppError(
-            "conflict",
-            "This budget changed. Reload it before editing the limit.",
-          );
+          const message = "This budget changed. Reload it before editing the limit.";
+          // Queued work must reach its normal supersede/rebuild path. A fresh
+          // direct edit still reports a conflict rather than claiming submission.
+          if (staleBudget === "needs_input") return missing(message, []);
+          throw new AppError("conflict", message);
         }
         // A complete replacement can remove this category and leave it absent.
         // Bind to the whole month so that absence cannot revive an old approval.
@@ -2734,6 +2736,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       executor,
       true,
       actorType,
+      "needs_input",
     );
     if ("status" in current) return current;
     if (current.expectedRevision !== prepared.expectedRevision) {
@@ -3102,6 +3105,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         executor,
         true,
         context.principal.actorType,
+        "needs_input",
       );
       if (
         "status" in prepared ||

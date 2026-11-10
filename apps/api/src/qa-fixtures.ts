@@ -432,7 +432,7 @@ function addLoadedWorkspace(
   account: QaFixtureAccount,
   now: Date,
   degraded: boolean,
-): void {
+): { reviewTransactionId: string } {
   const timezone = "America/New_York";
   const today = localDateAt(now, timezone);
   const yesterday = addLocalDays(today, -1);
@@ -1898,6 +1898,7 @@ function addLoadedWorkspace(
       userId: account.id,
     },
   );
+  return { reviewTransactionId: transaction(5) };
 }
 
 function seedMailStewardshipFixtures({
@@ -2082,9 +2083,12 @@ export async function loadQaFixtures(
     const passwordHash = passwordHashes.get(account.password);
     if (!passwordHash) throw new Error(`A password hash was not created for ${account.key}.`);
     addBaseAccount(data, account, passwordHash, now);
-    if (account.scenario === "complete") addLoadedWorkspace(data, account, now, false);
-    if (account.scenario === "degraded") addLoadedWorkspace(data, account, now, true);
+    const loaded =
+      account.scenario === "complete" || account.scenario === "degraded"
+        ? addLoadedWorkspace(data, account, now, account.scenario === "degraded")
+        : undefined;
     if (
+      loaded &&
       account.scenario === "complete" &&
       (account.key === "demo-full" || account.key === "qa-loaded")
     ) {
@@ -2099,7 +2103,10 @@ export async function loadQaFixtures(
         createdAt: now,
         updatedAt: now,
       });
-      const conversation = fixtureFinanceConversation(account.id, now);
+      const conversation = fixtureFinanceConversation(account.id, now, {
+        transactionId: loaded.reviewTransactionId,
+        messageId: (record) => fixtureId(account, record),
+      });
       data.financeConversations.push(conversation.conversation);
       data.financeConversationMessages.push(...conversation.messages);
       const planning = financePlanningFixture(account.id, now, account.key === "demo-full");
@@ -2346,9 +2353,10 @@ export async function loadQaFixtures(
     if (data.mailStewardshipQuestions.length)
       await transaction.insert(mailStewardshipQuestions).values(data.mailStewardshipQuestions);
     if (data.mailReviews.length) await transaction.insert(mailReviews).values(data.mailReviews);
-    if (data.financeAccounts.length)
+    if (data.financeProviderItems.length)
       await transaction.insert(financeProviderItems).values(data.financeProviderItems);
-    await transaction.insert(financeAccounts).values(data.financeAccounts);
+    if (data.financeAccounts.length)
+      await transaction.insert(financeAccounts).values(data.financeAccounts);
     if (data.financeCategories.length)
       await transaction.insert(financeCategories).values(data.financeCategories);
     if (data.financeMerchants.length)

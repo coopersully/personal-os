@@ -1,18 +1,5 @@
 # nohmi — Implementation Log
 
-## 2026-11-09 — Native Today briefing (local implementation)
-
-- Today now reads authenticated Tasks and Finance APIs instead of the sample briefing. It shows
-  up to three attention items, chronologically ordered upcoming work/payments, and confirmed applied
-  Finance agent actions. Task Auto ranking, owner-scoped queries, user-local dates, bounded previews,
-  refresh feedback, partial coverage and canonical detail links are preserved.
-- Shared record rows place descriptions below the entire heading/value line; Finance Activity,
-  What changed and other Finance rows reuse that structure. Task container descriptions likewise
-  use the width below their trailing actions. Settings rows retain centered label/value alignment.
-- Focused tests and mobile types passed; the iPhone simulator verified live local demo reads,
-  reminder and transaction navigation, refresh feedback, and Finance description wrapping. This
-  does not establish production/TestFlight acceptance or live Mail/Calendar/monitoring coverage.
-
 ## 2026-11-06 — Native Tasks source acceptance
 
 - [Native Tasks iPhone workflows](https://github.com/coopersully/personal-os/pull/367) merged with
@@ -1279,6 +1266,29 @@ Account/manual transaction/goal creation, budget proposal/approval interactions,
 conversation sending, automation/profile setup editing, imports and correction
 workflows, alternate spending visualizations, and preference parity remain tracked
 under the same issue. No live financial records were modified for acceptance.
+
+## 2026-11-09 — Native Today briefing (local implementation)
+
+- Today now reads authenticated Tasks and Finance APIs instead of the sample briefing. It shows
+  up to three attention items, chronologically ordered upcoming work/payments, and confirmed applied
+  Finance agent actions. Task Auto ranking, owner-scoped queries, user-local dates, bounded previews,
+  refresh feedback, partial coverage and canonical detail links are preserved.
+- Shared record rows place descriptions below the entire heading/value line; Finance Activity,
+  What changed and other Finance rows reuse that structure. Task container descriptions likewise
+  use the width below their trailing actions. Settings rows retain centered label/value alignment.
+- Focused tests and mobile types passed; the iPhone simulator verified live local demo reads,
+  reminder and transaction navigation, refresh feedback, and Finance description wrapping. This
+  does not establish production/TestFlight acceptance or live Mail/Calendar/monitoring coverage.
+
+
+## 2026-11-09 — Native Finance fixture refinements (local implementation)
+
+- Local Finance fixtures include realistic named institutions and full-color institution artwork,
+  plus illustrative user/agent conversation history linked to an actual seeded transaction.
+  Provider-shaped branding projections contain no usable credentials and schedule no provider sync.
+- These fixtures demonstrate account recognition and conversation/attachment rendering. They do
+  not establish a live provider connection, dispatch agent work, or change personal financial data.
+  Production and TestFlight acceptance remain release-owner checks.
 
 ## 2026-11-09 — Native Today atmospheric sky candidate
 

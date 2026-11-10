@@ -24,7 +24,11 @@ function monthLabel(month: string) {
 
 function useBudgetCategory() {
   const { id, month } = useLocalSearchParams<{ id: string; month: string }>();
-  const valid = typeof month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(month) && !!id;
+  const valid =
+    typeof month === "string" &&
+    /^\d{4}-(0[1-9]|1[0-2])$/.test(month) &&
+    typeof id === "string" &&
+    !!id.trim();
   const query = useFinanceRead(
     ["budget-status", month],
     (api) => api.getFinanceBudgetStatus(month),
@@ -35,6 +39,12 @@ function useBudgetCategory() {
 export function FinanceBudgetCategoryScreen() {
   const { query, item, valid } = useBudgetCategory();
   const [editing, setEditing] = useState(false);
+  if (!valid)
+    return (
+      <FinanceScreen title="Category budget">
+        <Copy>Budget not found.</Copy>
+      </FinanceScreen>
+    );
   return (
     <FinanceScreen title={item?.budget.category ?? "Category budget"}>
       <ReadState query={query}>
@@ -67,7 +77,7 @@ export function FinanceBudgetCategoryScreen() {
             </Card>
             <Transactions budgetId={item.budget.id} />
           </>
-        ) : !query.isPending || !valid ? (
+        ) : !query.isPending ? (
           <Copy>Budget not found.</Copy>
         ) : null}
       </ReadState>
@@ -116,15 +126,15 @@ function LimitForm({ record, onDone }: { record: FinanceBudget; onDone?: () => v
     const id = toast.loading("Saving budget limit…");
     try {
       // Recheck before submitting so a stale editor does not silently replace a newer limit.
-      const latest = (await api.getFinanceBudgetStatus(snapshot.month)).find(
-        (item) => item.budget.id === snapshot.id,
-      )?.budget;
-      if (!latest || latest.updatedAt !== snapshot.updatedAt) {
-        toast.error("This limit changed elsewhere. Close and reopen it before saving.", { id });
-        return;
-      }
+      const status = await api.getFinanceBudgetStatus(snapshot.month);
       if (!active.current || currentOwner.current !== owner) {
         toast.dismiss(id);
+        return;
+      }
+      const latest = status.find((item) => item.budget.id === snapshot.id)?.budget;
+      if (!latest || latest.updatedAt !== snapshot.updatedAt) {
+        client.setQueryData(["finances", owner, "budget-status", snapshot.month], status);
+        toast.error("This limit changed elsewhere. Close and reopen it before saving.", { id });
         return;
       }
       const result = await api.createFinanceBudget({
@@ -278,11 +288,21 @@ function LimitForm({ record, onDone }: { record: FinanceBudget; onDone?: () => v
   );
 }
 export function FinanceBudgetEditor() {
-  const { query, item } = useBudgetCategory();
+  const { query, item, valid } = useBudgetCategory();
+  if (!valid)
+    return (
+      <FinanceScreen title="Category budget">
+        <Copy>Budget not found.</Copy>
+      </FinanceScreen>
+    );
   return (
     <View style={{ flex: 1 }}>
       <ReadState query={query}>
-        {item ? <LimitForm key={item.budget.id} record={item.budget} /> : null}
+        {item ? (
+          <LimitForm key={item.budget.id} record={item.budget} />
+        ) : (
+          <Copy>Budget not found.</Copy>
+        )}
       </ReadState>
       <AppToaster editor />
     </View>

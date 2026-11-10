@@ -86,29 +86,52 @@ export function useTodayData() {
     }, [owner, timezone, refetch]),
   );
   const failed = reads.some((query) => query.isError);
+  const feedback = useRef<"manual" | "error" | "success" | null>(null);
+  const feedbackId = `today-read-${owner}`;
+  const feedbackOwner = useRef(owner);
+  feedbackOwner.current = owner;
+  const feedbackGeneration = useRef(0);
   const refresh = async () => {
-    const id = toast.loading("Refreshing Today…");
+    if (feedback.current === "manual") return;
+    const generation = feedbackGeneration.current;
+    feedback.current = "manual";
+    toast.loading("Refreshing Today…", { id: feedbackId });
     const results = await refetch();
-    if (results.some((result) => result.isError))
+    if (feedbackOwner.current !== owner || feedbackGeneration.current !== generation) return;
+    if (results.some((result) => result.isError)) {
+      feedback.current = "error";
       toast.error("Some of Today couldn’t refresh. Try again when your connection is available.", {
-        id,
+        id: feedbackId,
+        action: { label: "Retry", onClick: () => void refreshRef.current() },
       });
-    else toast.success("Today refreshed", { id });
+    } else {
+      feedback.current = "success";
+      toast.success("Today refreshed", { id: feedbackId });
+    }
   };
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
   useEffect(() => {
-    const id = `today-read-${owner}`;
-    if (failed)
+    if (feedback.current === "manual") return;
+    if (failed && feedback.current !== "error") {
+      feedback.current = "error";
       toast.error("Some of Today couldn’t refresh.", {
-        id,
+        id: feedbackId,
         action: { label: "Retry", onClick: () => void refreshRef.current() },
       });
-    else toast.dismiss(id);
-    return () => {
-      toast.dismiss(id);
-    };
-  }, [failed, owner]);
+    } else if (!failed && feedback.current === "error") {
+      feedback.current = null;
+      toast.dismiss(feedbackId);
+    }
+  }, [failed, feedbackId]);
+  useEffect(
+    () => () => {
+      feedbackGeneration.current++;
+      feedback.current = null;
+      toast.dismiss(feedbackId);
+    },
+    [feedbackId],
+  );
   return {
     owner,
     timezone,

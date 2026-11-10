@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RitualEditorScreen } from "./settings";
 
@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   invalidate: vi.fn(),
   params: { kind: "night" },
   revision: 2,
+  lateType: undefined as undefined | ((value: string) => void),
 }));
 const definition = {
   id: "ritual",
@@ -111,21 +112,32 @@ vi.mock("../../components/forms/enum-choice", () => ({
   EnumChoice: ({
     options,
     onChange,
+    disabled,
   }: {
+    disabled?: boolean;
     options: { label: string; value: string }[];
     onChange: (value: string) => void;
-  }) => (
-    <div>
-      {options.map((option) => (
-        <button type="button" key={option.value} onClick={() => onChange(option.value)}>
-          {option.label}
-        </button>
-      ))}
-    </div>
-  ),
+  }) => {
+    if (!h.lateType) h.lateType = onChange;
+    return (
+      <div>
+        {options.map((option) => (
+          <button
+            type="button"
+            disabled={disabled}
+            key={option.value}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    );
+  },
 }));
 beforeEach(() => {
   vi.clearAllMocks();
+  h.lateType = undefined;
   h.save.mockResolvedValue(definition);
   h.list.mockResolvedValue({ rituals: [{ ...definition, revision: 3 }] });
 });
@@ -248,4 +260,46 @@ it("saves schedule and step configuration edits together without issuing prematu
       ],
     }),
   );
+});
+
+it("freezes ritual fields and open day choices during save, rejects late native changes and retains the failed draft", async () => {
+  let reject: (reason: Error) => void = () => {};
+  h.save.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  render(<RitualEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Submitted ritual" } });
+  fireEvent.click(screen.getByRole("button", { name: "Step 1 days, Every day" }));
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.save).toHaveBeenCalledOnce());
+  for (const label of [
+    "Title",
+    "Time",
+    "Reminder time (optional)",
+    "Step 1",
+    "Step 2 options (one per line)",
+  ])
+    expect(screen.getByLabelText(label)).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "Step 1 days, Sunday" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Add step" })).toBeDisabled();
+  expect(
+    screen.getAllByText("Remove step").every((button) => button.closest("button")?.disabled),
+  ).toBe(true);
+  expect(screen.getAllByText("Number").every((button) => button.closest("button")?.disabled)).toBe(
+    true,
+  );
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Late title" } });
+  act(() => h.lateType?.("number"));
+  await act(async () => reject(new Error("Offline")));
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(screen.getByLabelText("Title")).toHaveValue("Submitted ritual");
+  expect(screen.getByLabelText("Title")).not.toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  expect(h.save.mock.calls[1]?.[0].steps).toEqual(definition.steps);
+  expect(h.save.mock.calls[1]?.[0].title).toBe("Submitted ritual");
 });

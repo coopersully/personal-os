@@ -1,6 +1,6 @@
 import DateTimePicker from "@expo/ui/community/datetime-picker";
 import { localDateAt, localDateTimeToUtc } from "@personal-os/domain";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTheme } from "../../theme";
 import { useSettingsAccentColor } from "../settings-accent";
@@ -13,7 +13,10 @@ export function PlanningPicker({
   mode,
   timeZone,
   optional = false,
+  disabled = false,
 }: PlanningPickerProps) {
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
   const t = useTheme();
   const accent = useSettingsAccentColor(t.information);
   const [editing, setEditing] = useState(false);
@@ -40,9 +43,13 @@ export function PlanningPicker({
   return (
     <View style={{ paddingVertical: 8 }}>
       <Pressable
+        disabled={disabled}
+        accessibilityState={{ disabled }}
         accessibilityRole="button"
         accessibilityLabel={`${label}, ${displayValue}`}
-        onPress={() => setEditing(!editing)}
+        onPress={() => {
+          if (!disabledRef.current) setEditing(!editing);
+        }}
         style={{ minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12 }}
       >
         <SettingLabel>{label}</SettingLabel>
@@ -52,12 +59,13 @@ export function PlanningPicker({
         <>
           <DateTimePicker
             value={date}
+            disabled={disabled}
             accentColor={accent}
             timeZoneName={timeZone}
             mode={mode}
             display={mode === "date" ? "inline" : "spinner"}
             onChange={(_event, next) => {
-              if (!next) return;
+              if (disabledRef.current || !next) return;
               if (mode === "date") {
                 const local = localDateAt(next, timeZone);
                 onChange(
@@ -85,7 +93,10 @@ export function PlanningPicker({
           {optional && (
             <Pressable
               accessibilityRole="button"
+              disabled={disabled}
+              accessibilityState={{ disabled }}
               onPress={() => {
+                if (disabledRef.current) return;
                 onChange("");
                 setEditing(false);
               }}

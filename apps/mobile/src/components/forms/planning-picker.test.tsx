@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PlanningPicker } from "./planning-picker.ios";
 
@@ -11,12 +11,28 @@ vi.mock("react-native", () => import("../../../test/native"));
 vi.mock("../../theme", () => ({
   useTheme: () => ({ ink: "black", secondary: "gray", information: "blue" }),
 }));
+const h = vi.hoisted(() => ({
+  nativeChange: undefined as undefined | ((event: unknown, date: Date) => void),
+}));
 vi.mock("@expo/ui/community/datetime-picker", () => ({
-  default: ({ onChange }: { onChange: (event: unknown, date: Date) => void }) => (
-    <button type="button" onClick={() => onChange({}, new Date("2026-11-10T01:30:00Z"))}>
-      Pick date
-    </button>
-  ),
+  default: ({
+    onChange,
+    disabled,
+  }: {
+    onChange: (event: unknown, date: Date) => void;
+    disabled?: boolean;
+  }) => {
+    if (!disabled) h.nativeChange = onChange;
+    return (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange({}, new Date("2026-11-10T01:30:00Z"))}
+      >
+        Pick date
+      </button>
+    );
+  },
 }));
 afterEach(cleanup);
 it("uses the account calendar day rather than UTC and clears optional date", () => {
@@ -50,6 +66,29 @@ it("stores native time selection as wall time in profile timezone", () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: /Time, .*8:00/ }));
+  fireEvent.click(screen.getByText("Pick date"));
+  expect(change).toHaveBeenCalledWith("20:30");
+});
+
+it("disables an already open native picker and rejects a late native value event until unlocked", () => {
+  const change = vi.fn();
+  const props = {
+    label: "Time",
+    value: "20:00",
+    mode: "time" as const,
+    timeZone: "America/New_York",
+    optional: true,
+    onChange: change,
+  };
+  const view = render(<PlanningPicker {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: /Time, .*8:00/ }));
+  const late = h.nativeChange;
+  view.rerender(<PlanningPicker {...props} disabled />);
+  expect(screen.getByText("Pick date")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Clear time" })).toBeDisabled();
+  act(() => late?.({}, new Date("2026-11-10T01:30:00Z")));
+  expect(change).not.toHaveBeenCalled();
+  view.rerender(<PlanningPicker {...props} />);
   fireEvent.click(screen.getByText("Pick date"));
   expect(change).toHaveBeenCalledWith("20:30");
 });

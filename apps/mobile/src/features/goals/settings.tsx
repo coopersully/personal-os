@@ -188,7 +188,10 @@ function PersonalEditor({
   const lock = useRef(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(personalDraft(record));
   const permitDismiss = useDirtyDismiss(dirty, pending);
-  const change = (patch: Partial<typeof draft>) => setDraft({ ...draft, ...patch });
+  const change = (patch: Partial<typeof draft>) => {
+    if (lock.current) return;
+    setDraft((current) => ({ ...current, ...patch }));
+  };
   const run = async (remove = false) => {
     if (lock.current) return;
     lock.current = true;
@@ -243,12 +246,14 @@ function PersonalEditor({
       <Screen>
         <Section title="Identity">
           <Field
+            disabled={pending}
             label="Title"
             value={draft.title}
             onChange={(title) => change({ title })}
             placeholder={kind === "goal" ? "Learn to swim" : "Make time for family"}
           />
           <Field
+            disabled={pending}
             label={kind === "goal" ? "Description" : "Detail"}
             value={draft.detail}
             onChange={(detail) => change({ detail })}
@@ -258,6 +263,7 @@ function PersonalEditor({
         {kind === "goal" && (
           <Section title="Planning">
             <PlanningPicker
+              disabled={pending}
               mode="date"
               optional
               timeZone={state.user?.planningTimezone ?? "UTC"}
@@ -267,6 +273,7 @@ function PersonalEditor({
             />
             {record && (
               <Field
+                disabled={pending}
                 label="Progress (%)"
                 value={draft.progress}
                 onChange={(progress) => change({ progress })}

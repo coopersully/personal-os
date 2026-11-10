@@ -27,18 +27,23 @@ export function Field({
   onChange,
   placeholder,
   multiline = false,
+  disabled = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   multiline?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <SharedField
       label={label}
       value={value}
-      onChangeText={onChange}
+      editable={!disabled}
+      onChangeText={(value) => {
+        if (!disabled) onChange(value);
+      }}
       placeholder={placeholder}
       multiline={multiline}
       compact={!multiline}

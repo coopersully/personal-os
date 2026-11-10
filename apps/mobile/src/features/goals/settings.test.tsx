@@ -362,3 +362,29 @@ it("saves a changed motive explanation without rewriting its title", async () =>
   await waitFor(() => expect(h.back).toHaveBeenCalled());
   expect(h.update).toHaveBeenCalledWith("motive", { detail: "Time together" });
 });
+
+it("locks all goal draft inputs during save and reopens them with the submitted draft after failure", async () => {
+  let reject: (reason: Error) => void = () => {};
+  h.update.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  render(<GoalEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Submitted title" } });
+  fireEvent.click(screen.getByText("Save changes"));
+  for (const label of ["Title", "Description", "Target date", "Progress (%)"])
+    expect(screen.getByLabelText(label)).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Late title" } });
+  fireEvent.change(screen.getByLabelText("Progress (%)"), { target: { value: "100" } });
+  await act(async () => reject(new Error("Offline")));
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(screen.getByLabelText("Title")).toHaveValue("Submitted title");
+  expect(screen.getByLabelText("Progress (%)")).toHaveValue("30");
+  expect(screen.getByLabelText("Title")).not.toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Corrected title" } });
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  expect(h.update).toHaveBeenLastCalledWith("goal", { title: "Corrected title" });
+});

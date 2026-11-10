@@ -236,11 +236,17 @@ function RitualEditor({
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
   const t = useTheme();
   const permitDismiss = useDirtyDismiss(dirty, pending);
-  const stepChange = (index: number, patch: Partial<RitualStep>) =>
-    setDraft({
-      ...draft,
-      steps: draft.steps.map((s, i) => (i === index ? { ...s, ...patch } : s)),
-    });
+  const change = (patch: Partial<typeof draft>) => {
+    if (lock.current) return;
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+  const stepChange = (index: number, patch: Partial<RitualStep>) => {
+    if (lock.current) return;
+    setDraft((current) => ({
+      ...current,
+      steps: current.steps.map((step, i) => (i === index ? { ...step, ...patch } : step)),
+    }));
+  };
   const moveStep = (stepId: string, offset: -1 | 1) => {
     if (lock.current) return;
     setDraft((current) => {
@@ -317,34 +323,37 @@ function RitualEditor({
       <Screen>
         <Section title="Identity">
           <Field
+            disabled={pending}
             label="Title"
             value={draft.title}
-            onChange={(title) => setDraft({ ...draft, title })}
+            onChange={(title) => change({ title })}
           />
         </Section>
         <Section title="State">
           <ToggleRow
             label="Enabled"
             value={draft.enabled}
-            onChange={(enabled) => setDraft({ ...draft, enabled })}
+            onChange={(enabled) => change({ enabled })}
             disabled={pending}
           />
         </Section>
         <Section title="Planning">
           <PlanningPicker
+            disabled={pending}
             mode="time"
             timeZone={state.user?.planningTimezone ?? "UTC"}
             label="Time"
             value={draft.time}
-            onChange={(time) => setDraft({ ...draft, time })}
+            onChange={(time) => change({ time })}
           />
           <PlanningPicker
+            disabled={pending}
             mode="time"
             optional
             timeZone={state.user?.planningTimezone ?? "UTC"}
             label="Reminder time (optional)"
             value={draft.reminderTime}
-            onChange={(reminderTime) => setDraft({ ...draft, reminderTime })}
+            onChange={(reminderTime) => change({ reminderTime })}
           />
           <Text style={{ color: t.secondary }}>
             Uses your Profile timezone:{" "}
@@ -354,11 +363,13 @@ function RitualEditor({
         {draft.steps.map((step, index) => (
           <Section key={step.id} title={`Step ${index + 1}`}>
             <Field
+              disabled={pending}
               label={`Step ${index + 1}`}
               value={step.label}
               onChange={(label) => stepChange(index, { label })}
             />
             <EnumChoice
+              disabled={pending}
               label="Step type"
               value={step.kind}
               options={["checkbox", "short_text", "time", "date", "number", "multiple_choice"].map(
@@ -379,12 +390,14 @@ function RitualEditor({
               disabled={pending}
             />
             <DaySelection
+              disabled={pending}
               label={`Step ${index + 1} days`}
               value={step.days}
               onChange={(days) => stepChange(index, { days })}
             />
             {step.kind === "multiple_choice" && (
               <Field
+                disabled={pending}
                 label={`Step ${index + 1} options (one per line)`}
                 multiline
                 value={step.options?.join("\n") ?? ""}
@@ -403,19 +416,17 @@ function RitualEditor({
               </Action>
             </View>
             <Action
-              onPress={() =>
-                setDraft({ ...draft, steps: draft.steps.filter((_, i) => i !== index) })
-              }
+              disabled={pending}
+              onPress={() => change({ steps: draft.steps.filter((_, i) => i !== index) })}
             >
               Remove step
             </Action>
           </Section>
         ))}
         <Action
-          disabled={draft.steps.length >= 20}
+          disabled={pending || draft.steps.length >= 20}
           onPress={() =>
-            setDraft({
-              ...draft,
+            change({
               steps: [...draft.steps, { id: randomUUID(), label: "", kind: "checkbox" }],
             })
           }

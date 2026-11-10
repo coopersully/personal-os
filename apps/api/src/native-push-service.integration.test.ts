@@ -3,7 +3,13 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
+  financeAccounts,
   financeAgentActionReviews,
+  financeConversationMessages,
+  financeConversations,
+  financeMaintenanceCandidates,
+  financeReviewCases,
+  financeTransactions,
   migrateDatabase,
   nativePushDeliveries,
   nativePushDevices,
@@ -16,6 +22,8 @@ import {
 import { defaultNotificationPreferences } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
+import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
+import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
 import { createNativePushRuntime } from "./native-push-runtime.js";
 import { createNativePushService, enqueueNativePushEvent } from "./native-push-service.js";
 import type { NativePushProviderResult } from "./native-push-transport.js";
@@ -411,5 +419,306 @@ describe.sequential("private native Finance delivery", () => {
     await expect(service().resolve(principal, push.id, input.installationId)).rejects.toMatchObject(
       { code: "not_found" },
     );
+  });
+  it("bounds discovery to 25, resumes the cursor and honors disabled delivery", async () => {
+    const principal = await owner(),
+      input = deviceInput();
+    await service().register(principal, input);
+    const ids = Array.from({ length: 26 }, () => randomUUID()).sort();
+    await database.db.insert(workspaceMaintenanceRuns).values(
+      ids.map((id) => ({
+        id,
+        userId: principal.userId,
+        domain: "finances" as const,
+        status: "completed" as const,
+        scope: { type: "all_outstanding" as const },
+        rulebookVersion: "1",
+        createdAt: clock,
+        updatedAt: clock,
+      })),
+    );
+    let enabled = false;
+    const runtime = createNativePushRuntime({
+      db: database.db,
+      enabled: () => enabled,
+      dispatch: service().dispatch,
+    });
+    await runtime.run();
+    expect(transport).not.toHaveBeenCalled();
+    enabled = true;
+    await runtime.run();
+    expect(await database.db.select().from(nativePushEvents)).toHaveLength(25);
+    await runtime.run();
+    expect(await database.db.select().from(nativePushEvents)).toHaveLength(26);
+    expect(transport).toHaveBeenCalledTimes(26);
+    const [completion] = await database.db.select().from(nativePushEvents);
+    if (!completion) throw new Error("missing completion");
+    expect(await service().resolve(principal, completion.id, input.installationId)).toMatchObject({
+      destination: "finance_activity",
+    });
+  });
+
+  it("routes a committed agent reply to chat and denies a principal without a session", async () => {
+    const principal = await owner(),
+      input = deviceInput();
+    const { sessionId: _sessionId, ...noSession } = principal;
+    await expect(service().register(noSession, input)).rejects.toMatchObject({ code: "forbidden" });
+    expect(await service().register(principal, { ...input, financeEnabled: false })).toMatchObject({
+      status: "disabled",
+    });
+    await service().register(principal, input);
+    await database.db
+      .insert(financeConversations)
+      .values({ userId: principal.userId, nextSequence: 2n });
+    const sourceId = randomUUID();
+    await database.db.insert(financeConversationMessages).values({
+      id: sourceId,
+      userId: principal.userId,
+      authorKind: "agent",
+      text: "Private reply",
+      sequence: 1n,
+      idempotencyKey: randomUUID(),
+      createdAt: clock,
+    });
+    await database.db.transaction((tx) =>
+      enqueueNativePushEvent(tx, {
+        userId: principal.userId,
+        sourceId,
+        kind: "reply",
+        sourceRevision: "1",
+        createdAt: clock,
+      }),
+    );
+    await service().dispatch();
+    const [reply] = await database.db.select().from(nativePushEvents);
+    if (!reply) throw new Error("missing reply event");
+    expect(await service().resolve(principal, reply.id, input.installationId)).toMatchObject({
+      destination: "finance_chat",
+    });
+  });
+
+  it("defers an unavailable timezone and fences a thrown transport outcome", async () => {
+    const principal = await owner();
+    await service().register(principal, deviceInput());
+    await event(principal);
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "Invalid/Timezone" })
+      .where(eq(users.id, principal.userId));
+    await service().dispatch();
+    expect(transport).not.toHaveBeenCalled();
+    expect((await database.db.select().from(nativePushDeliveries))[0]).toMatchObject({
+      state: "pending",
+      attempts: 0,
+      outcomeCode: "timezone_unavailable",
+    });
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "UTC" })
+      .where(eq(users.id, principal.userId));
+    clock = new Date(clock.getTime() + 120_000);
+    transport.mockRejectedValueOnce(new Error("provider connection lost"));
+    await service().dispatch();
+    clock = new Date(clock.getTime() + 120_000);
+    await service().dispatch();
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect((await database.db.select().from(nativePushDeliveries))[0]).toMatchObject({
+      state: "uncertain",
+      outcomeCode: "uncertain",
+    });
+  });
+
+  it("inherits global notification opt-out and stops a claim when quiescing", async () => {
+    const principal = await owner();
+    await service().register(principal, deviceInput());
+    await event(principal);
+    await database.db.insert(notificationPreferences).values({
+      userId: principal.userId,
+      scope: "global",
+      revision: 1,
+      preferences: { ...defaultNotificationPreferences, enabled: false },
+    });
+    await service().dispatch(() => false);
+    expect((await database.db.select().from(nativePushDeliveries))[0]?.state).toBe("pending");
+    let checks = 0;
+    await service().dispatch(() => ++checks < 2);
+    expect((await database.db.select().from(nativePushDeliveries))[0]?.state).toBe("pending");
+    await service().dispatch();
+    expect((await database.db.select().from(nativePushDeliveries))[0]).toMatchObject({
+      state: "suppressed",
+      outcomeCode: "preferences_disabled",
+    });
+    expect(transport).not.toHaveBeenCalled();
+  });
+  it("distinguishes bookkeeping approval from failure and links to the supported surface", async () => {
+    const principal = await owner(),
+      input = deviceInput();
+    await service().register(principal, input);
+    const [approval, failure] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values(
+        (["awaiting_approval", "failed_terminal"] as const).map((status) => ({
+          userId: principal.userId,
+          domain: "finances" as const,
+          status,
+          scope: { type: "all_outstanding" as const },
+          rulebookVersion: "1",
+          createdAt: clock,
+          updatedAt: clock,
+        })),
+      )
+      .returning();
+    const runtime = createNativePushRuntime({
+      db: database.db,
+      enabled: () => true,
+      dispatch: service().dispatch,
+    });
+    await runtime.run();
+    const events = await database.db.select().from(nativePushEvents);
+    const approvalEvent = events.find((row) => row.sourceId === approval?.id);
+    const failureEvent = events.find((row) => row.sourceId === failure?.id);
+    if (!approvalEvent || !failureEvent) throw new Error("missing maintenance notifications");
+    expect(
+      await service().resolve(principal, approvalEvent.id, input.installationId),
+    ).toMatchObject({
+      detail: {
+        status: "awaiting_approval",
+        summary: expect.stringContaining("waiting for approval"),
+        webPath: "/finances/review",
+      },
+    });
+    expect(await service().resolve(principal, failureEvent.id, input.installationId)).toMatchObject(
+      {
+        detail: {
+          status: "failed_terminal",
+          summary: expect.stringContaining("encountered a problem"),
+          webPath: "/finances/activity",
+        },
+      },
+    );
+  });
+  it("routes contextual questions and maintenance review cases to their own answer forms", async () => {
+    const principal = await owner(),
+      input = deviceInput();
+    await service().register(principal, input);
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({ userId: principal.userId, provider: "manual", institution: "Manual", name: "Cash" })
+      .returning();
+    if (!account) throw new Error("missing account");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: principal.userId,
+        accountId: account.id,
+        amount: 1200,
+        merchant: "Lunch",
+        direction: "expense",
+        transactionDate: "2026-09-21",
+      })
+      .returning();
+    if (!transaction) throw new Error("missing transaction");
+    const questions = createFinanceContextualQuestionService({ db: database.db, now: () => clock });
+    const context = {
+      principal: { ...principal, scopes: new Set(["finances:read", "finances:write"] as const) },
+      requestId: randomUUID(),
+    };
+    const created = await questions.createQuestion(
+      transaction.id,
+      { operationId: randomUUID() },
+      context,
+    );
+    if (created.state !== "available") throw new Error("missing question");
+    const runtime = createNativePushRuntime({
+      db: database.db,
+      enabled: () => true,
+      dispatch: service().dispatch,
+    });
+    await runtime.run();
+    const [push] = await database.db.select().from(nativePushEvents);
+    if (!push) throw new Error("missing question notification");
+    expect(await service().resolve(principal, push.id, input.installationId)).toMatchObject({
+      detail: {
+        status: "open",
+        summary: created.question.prompt,
+        webPath: `/finances/review?contextualQuestion=${created.question.id}`,
+      },
+    });
+    expect(JSON.stringify(transport.mock.calls[0]?.[0].payload)).not.toContain(
+      created.question.prompt,
+    );
+    const [run] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: principal.userId,
+        domain: "finances",
+        scope: { type: "all_outstanding" },
+        rulebookVersion: "1",
+        status: "completed_with_questions",
+        createdAt: clock,
+        updatedAt: clock,
+      })
+      .returning();
+    if (!run) throw new Error("missing run");
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({
+        userId: principal.userId,
+        runId: run.id,
+        revision: "native-push-review",
+        state: "challenged",
+      })
+      .returning();
+    if (!candidate) throw new Error("missing candidate");
+    await database.db
+      .update(financeReviewCases)
+      .set({
+        rationale: null,
+        updatedAt: clock,
+        evidence: {
+          prompt: "What did this transaction represent?",
+          maintenanceRunId: run.id,
+          candidateId: candidate.id,
+          candidateRevision: candidate.revision,
+        },
+      })
+      .where(eq(financeReviewCases.id, created.question.reviewCaseId));
+    await database.db.transaction((tx) =>
+      issueMaintenanceReviewQuestion(tx, principal.userId, created.question.reviewCaseId),
+    );
+    await runtime.run();
+    const reviewEvent = (await database.db.select().from(nativePushEvents)).find(
+      (row) => row.sourceId === created.question.reviewCaseId,
+    );
+    if (!reviewEvent) throw new Error("missing maintenance case notification");
+    expect(await service().resolve(principal, reviewEvent.id, input.installationId)).toMatchObject({
+      detail: {
+        status: "open",
+        summary: expect.stringContaining("Review this transaction"),
+        webPath: `/finances/review?case=${created.question.reviewCaseId}`,
+      },
+    });
+  });
+  it("quiesces while reading discovery and leaves work for the next runtime", async () => {
+    const principal = await owner();
+    await service().register(principal, deviceInput());
+    await event(principal);
+    await database.db.delete(nativePushEvents);
+    const options = { db: database.db, enabled: () => true, dispatch: service().dispatch };
+    const runtime = createNativePushRuntime(options);
+    const execute = database.db.execute.bind(database.db);
+    const spy = vi.spyOn(database.db, "execute").mockImplementationOnce((query) => {
+      runtime.quiesce();
+      return execute(query);
+    });
+    try {
+      await runtime.run();
+      expect(await database.db.select().from(nativePushEvents)).toHaveLength(0);
+      expect(transport).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+    await createNativePushRuntime(options).run();
+    expect(transport).toHaveBeenCalledTimes(1);
   });
 });

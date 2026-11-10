@@ -116,4 +116,15 @@ describe("direct APNs boundary", () => {
     });
     expect(await createApnsTransport(config)(input)).toBe("uncertain");
   });
+  it("does not submit a request when HTTP2 connects after the deadline", async () => {
+    vi.useFakeTimers();
+    const { session } = socket();
+    mocks.connect.mockReturnValue(session);
+    const pending = createApnsTransport(config)(input);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await pending).toBe("uncertain");
+    session.emit("connect");
+    expect(session.request).not.toHaveBeenCalled();
+    expect(session.destroy).toHaveBeenCalledOnce();
+  });
 });

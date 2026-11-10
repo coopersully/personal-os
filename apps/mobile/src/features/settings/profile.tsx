@@ -103,6 +103,7 @@ function Profile({ initial }: { initial: User }) {
           />
           <Field
             label="Email"
+            icon="mail"
             placeholder="alex@example.com"
             value={draft.email}
             onChangeText={(value) => update("email", value)}
@@ -126,6 +127,7 @@ function Profile({ initial }: { initial: User }) {
         <Section title="Planning">
           <SearchableChoice
             label="Timezone"
+            icon="clock"
             value={draft.timezone}
             options={timezoneOptions}
             onChange={(value) => update("timezone", value)}
@@ -159,6 +161,7 @@ function Profile({ initial }: { initial: User }) {
             (workspace) => (
               <ToggleRow
                 key={workspace}
+                icon={workspace}
                 label={workspace.charAt(0).toUpperCase() + workspace.slice(1)}
                 value={userSettings.user?.setup.selectedWorkspaces.includes(workspace) ?? false}
                 disabled={action.pending}

@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Icon } from "../../components/icons";
 import { SheetHeader } from "../../components/sheet-header";
 import { useTheme } from "../../theme";
 import { Action, SearchField, State, styles } from "../tasks/ui";
@@ -47,10 +48,12 @@ export function ProfileLocation({
         onPress={() => setOpen(true)}
         style={styles.settingRow}
       >
+        <Icon name="location" color={t.secondary} size={22} />
         <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>Home location</Text>
         <Text numberOfLines={1} style={{ color: t.secondary, fontSize: 17, maxWidth: "55%" }}>
           {value?.label ?? "Not set"}
         </Text>
+        <Icon name="chevron" color={t.secondary} size={16} />
       </Pressable>
       <Modal
         visible={open}

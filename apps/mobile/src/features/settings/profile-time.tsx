@@ -17,6 +17,7 @@ export function ProfileTime({ label, value, onChange, end, disabled }: ProfileTi
   return (
     <Field
       label={label}
+      icon="clock"
       editable={!disabled}
       value={text}
       placeholder="09:00"

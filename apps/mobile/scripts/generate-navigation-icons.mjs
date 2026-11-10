@@ -7,6 +7,8 @@ import * as registry from "../../web/src/components/icons";
 
 // The web registry remains the only module importing reicon. Native uses generated template images.
 const names = [
+  "Search",
+  "MapPin",
   "FileText",
   "Download",
   "Reply",

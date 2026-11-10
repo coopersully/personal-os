@@ -195,11 +195,13 @@ export function SearchField(props: TextInputProps & { accessibilityLabel: string
 }
 export function ToggleRow({
   label,
+  icon,
   value,
   onChange,
   disabled,
 }: {
   label: string;
+  icon?: IconName;
   value: boolean;
   onChange: (value: boolean) => void;
   disabled?: boolean;
@@ -207,6 +209,7 @@ export function ToggleRow({
   const t = useTheme();
   return (
     <View style={styles.settingRow}>
+      {icon && <Icon name={icon} size={22} color={t.secondary} />}
       <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
       <Switch
         accessibilityLabel={label}
@@ -257,14 +260,16 @@ export function TitleField({ label, ...props }: TextInputProps & { label: string
 }
 export function Field({
   label,
+  icon,
   compact = true,
   ...props
-}: TextInputProps & { label: string; compact?: boolean }) {
+}: TextInputProps & { label: string; compact?: boolean; icon?: IconName }) {
   const [editing, setEditing] = useState(false);
   const t = useTheme();
   if (compact && !props.multiline)
     return (
       <View style={styles.settingRow}>
+        {icon && <Icon name={icon} size={22} color={t.secondary} />}
         <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
         <TextInput
           {...props}

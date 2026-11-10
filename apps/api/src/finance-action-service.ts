@@ -2716,6 +2716,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     userId: string,
     executor: FinanceExecutor,
     actorType: Principal["actorType"] = "agent",
+    staleBudget: "conflict" | "needs_input" = "needs_input",
   ) {
     if (prepared.actionKind === "reimbursement") await lockReimbursementTopology(executor, userId);
     // There is no row lock for an absent target. The target-key advisory lock
@@ -2736,10 +2737,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       executor,
       true,
       actorType,
-      "needs_input",
+      staleBudget,
     );
     if ("status" in current) return current;
     if (current.expectedRevision !== prepared.expectedRevision) {
+      if (prepared.actionKind === "budget_plan" && staleBudget === "conflict") {
+        throw new AppError(
+          "conflict",
+          "The Finance records changed after this action was prepared. Refresh the evidence and submit a new action.",
+        );
+      }
       return {
         question: question(
           prepared.actionKind,
@@ -3594,7 +3601,13 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         !(await readBypass(db, context.principal.userId))
       ) {
         return db.transaction(async (tx) => {
-          const current = await revalidate(prepared, context.principal.userId, tx, "user");
+          const current = await revalidate(
+            prepared,
+            context.principal.userId,
+            tx,
+            "user",
+            "conflict",
+          );
           if ("status" in current) return current;
           return {
             review: (await queue(current, context, tx)) as FinancePendingActionReview,
@@ -3616,14 +3629,26 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           if (prepared.actionKind === "reimbursement")
             await lockReimbursementTopology(tx, context.principal.userId);
           if (!(await readBypass(tx, context.principal.userId, true))) {
-            const current = await revalidate(prepared, context.principal.userId, tx, "agent");
+            const current = await revalidate(
+              prepared,
+              context.principal.userId,
+              tx,
+              "agent",
+              "conflict",
+            );
             if ("status" in current) return current;
             return {
               review: (await queue(current, context, tx)) as FinancePendingActionReview,
               status: "pending_review",
             };
           }
-          const current = await revalidate(prepared, context.principal.userId, tx, "agent");
+          const current = await revalidate(
+            prepared,
+            context.principal.userId,
+            tx,
+            "agent",
+            "conflict",
+          );
           if ("status" in current) return current;
           return {
             result: (await applyPrepared(current, context, tx)) as T,

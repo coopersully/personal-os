@@ -35,3 +35,7 @@ to the exact existing approval or question in Reviews. Only an applied action ou
 legacy confirmed budget response clears the form and announces a saved budget. Rejected requests
 retain the draft and use Sonner without exposing raw server errors. This consumer behavior is
 compatible with the existing typed client and does not grant budget activation authority.
+
+Direct category-budget edits return a conflict if the budget becomes stale, including between
+initial preparation and locked revalidation; queued reviews and maintenance retain their
+`needs_input` recovery and stale-review supersession behavior.

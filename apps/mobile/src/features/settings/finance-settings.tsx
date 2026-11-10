@@ -904,7 +904,7 @@ function FinancialCollections({
       })}
       {accounts.isError && (
         <Action label="Retry loading related accounts" onPress={() => void accounts.refetch()} />
-      )}{" "}
+      )}
       {goals.isError && (
         <Action label="Retry loading financial goals" onPress={() => void goals.refetch()} />
       )}

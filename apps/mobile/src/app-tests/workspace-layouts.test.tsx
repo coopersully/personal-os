@@ -59,5 +59,5 @@ it("returns Settings to its invoking context and gives cold deep links a root", 
   navigation.canGoBack.mockReturnValue(false);
   navigation.dismiss?.();
   expect(navigation.replace).toHaveBeenCalledWith("/");
-  expect(unstable_settings.initialRouteName).toBe("index");
+  expect(unstable_settings.anchor).toBe("index");
 });

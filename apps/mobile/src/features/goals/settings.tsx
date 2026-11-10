@@ -12,7 +12,7 @@ import { useRef, useState } from "react";
 import { Switch, Text, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
-import { FormSave } from "../../components/forms/form-save";
+import { FloatingAdd, FormSave } from "../../components/forms/form-save";
 import { InlineOptions } from "../../components/forms/inline-options";
 import { PlanningPicker } from "../../components/forms/planning-picker";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
@@ -44,85 +44,87 @@ function GoalsHome() {
   });
   const [tab, setTab] = useState("goals");
   return (
-    <Screen
-      onRefresh={async () => {
-        await Promise.all([
-          goals.refetch({ throwOnError: true }),
-          motives.refetch({ throwOnError: true }),
-        ]);
-      }}
-    >
-      <Stack.Screen options={{ title: "Goals & Motives" }} />
-      <InlineOptions
-        value={tab}
-        options={[
-          { label: "Goals", value: "goals" },
-          { label: "Completed outcomes", value: "completed" },
-          { label: "Motives", value: "motives" },
-        ]}
-        onChange={setTab}
-      />
-      <Action
+    <View style={{ flex: 1 }}>
+      <Screen
+        onRefresh={async () => {
+          await Promise.all([
+            goals.refetch({ throwOnError: true }),
+            motives.refetch({ throwOnError: true }),
+          ]);
+        }}
+      >
+        <Stack.Screen options={{ title: "Goals & Motives" }} />
+        <InlineOptions
+          value={tab}
+          options={[
+            { label: "Goals", value: "goals" },
+            { label: "Completed outcomes", value: "completed" },
+            { label: "Motives", value: "motives" },
+          ]}
+          onChange={setTab}
+        />
+
+        <ReadState
+          pending={tab === "motives" ? motives.isPending : goals.isPending}
+          error={tab === "motives" ? motives.isError : goals.isError}
+          retry={() => void (tab === "motives" ? motives.refetch() : goals.refetch())}
+        />
+        {tab === "motives"
+          ? motives.data?.map((record) => (
+              <RecordRow
+                leading={<Icon name="target" color={t.secondary} />}
+                key={record.id}
+                title={record.title}
+                subtitle={record.detail ?? undefined}
+                value={record.isActive ? "Active" : "Paused"}
+                onPress={() =>
+                  router.push({
+                    pathname: "/settings/goals/edit",
+                    params: { kind: "motive", id: record.id },
+                  })
+                }
+              />
+            ))
+          : goals.data
+              ?.filter((g) =>
+                tab === "completed" ? g.status === "completed" : g.status !== "completed",
+              )
+              .map((record) => (
+                <RecordRow
+                  leading={<Icon name="target" color={t.secondary} />}
+                  key={record.id}
+                  title={record.title}
+                  subtitle={record.description ?? undefined}
+                  value={`${record.progress}% · ${record.status}`}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/settings/goals/edit",
+                      params: { kind: "goal", id: record.id },
+                    })
+                  }
+                />
+              ))}
+        {(tab === "motives"
+          ? motives.isSuccess && motives.data.length === 0
+          : goals.isSuccess &&
+            goals.data.filter((g) =>
+              tab === "completed" ? g.status === "completed" : g.status !== "completed",
+            ).length === 0) && (
+          <Text style={{ color: t.ink }}>
+            No {tab === "completed" ? "completed outcomes" : tab} yet.
+          </Text>
+        )}
+      </Screen>
+      <FloatingAdd
+        label={`Add ${tab === "motives" ? "motive" : "goal"}`}
         onPress={() =>
           router.push({
             pathname: "/settings/goals/edit",
             params: { kind: tab === "motives" ? "motive" : "goal" },
           })
         }
-      >
-        Add {tab === "motives" ? "motive" : "goal"}
-      </Action>
-      <ReadState
-        pending={tab === "motives" ? motives.isPending : goals.isPending}
-        error={tab === "motives" ? motives.isError : goals.isError}
-        retry={() => void (tab === "motives" ? motives.refetch() : goals.refetch())}
       />
-      {tab === "motives"
-        ? motives.data?.map((record) => (
-            <RecordRow
-              leading={<Icon name="target" color={t.secondary} />}
-              key={record.id}
-              title={record.title}
-              subtitle={record.detail ?? undefined}
-              value={record.isActive ? "Active" : "Paused"}
-              onPress={() =>
-                router.push({
-                  pathname: "/settings/goals/edit",
-                  params: { kind: "motive", id: record.id },
-                })
-              }
-            />
-          ))
-        : goals.data
-            ?.filter((g) =>
-              tab === "completed" ? g.status === "completed" : g.status !== "completed",
-            )
-            .map((record) => (
-              <RecordRow
-                leading={<Icon name="target" color={t.secondary} />}
-                key={record.id}
-                title={record.title}
-                subtitle={record.description ?? undefined}
-                value={`${record.progress}% · ${record.status}`}
-                onPress={() =>
-                  router.push({
-                    pathname: "/settings/goals/edit",
-                    params: { kind: "goal", id: record.id },
-                  })
-                }
-              />
-            ))}
-      {(tab === "motives"
-        ? motives.isSuccess && motives.data.length === 0
-        : goals.isSuccess &&
-          goals.data.filter((g) =>
-            tab === "completed" ? g.status === "completed" : g.status !== "completed",
-          ).length === 0) && (
-        <Text style={{ color: t.ink }}>
-          No {tab === "completed" ? "completed outcomes" : tab} yet.
-        </Text>
-      )}
-    </Screen>
+    </View>
   );
 }
 export function GoalEditorScreen() {

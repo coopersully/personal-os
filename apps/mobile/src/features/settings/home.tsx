@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import { router } from "expo-router";
 import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
@@ -53,6 +54,10 @@ export function SettingsHome() {
           </View>
         ) : null;
       })}
+      <Text selectable style={{ color: t.secondary, textAlign: "center", fontSize: 13 }}>
+        nohmi {Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? "Development"} · Build{" "}
+        {Constants.nativeBuildVersion ?? Constants.expoConfig?.ios?.buildNumber ?? "Development"}
+      </Text>
       {destinations.length === 0 && (
         <Text style={{ color: t.secondary, textAlign: "center" }}>No settings found</Text>
       )}

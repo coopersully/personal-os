@@ -469,3 +469,40 @@ it("does not select a workspace in Settings until a gesture resolves to a concre
   await act(async () => menu.onPanResponderRelease?.(event(20, 144), gesture(0, 0)));
   expect(h.navigate).toHaveBeenLastCalledWith("/tasks");
 });
+
+it("leaves Settings transitions to the native stack and resets workspace motion on return", async () => {
+  h.path = "/tasks";
+  const { rerender } = render(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  await act(async () => {});
+  const count = h.animations.length;
+  h.path = "/settings";
+  rerender(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  h.path = "/settings/calendar/new";
+  rerender(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  h.path = "/tasks";
+  rerender(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  expect(h.animations).toHaveLength(count);
+  h.path = "/tasks/projects";
+  rerender(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  expect(h.animations).toHaveLength(count + 1);
+});

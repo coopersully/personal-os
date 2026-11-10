@@ -2,6 +2,7 @@ import { Image, type ImageSourcePropType } from "react-native";
 
 export const icons = {
   reply: require("../../assets/navigation/Reply.png"),
+  project: require("../../assets/navigation/Project.png"),
   search: require("../../assets/navigation/Search.png"),
   location: require("../../assets/navigation/MapPin.png"),
   send: require("../../assets/navigation/CircleArrowUp.png"),
@@ -55,6 +56,7 @@ export const icons = {
 
 export type IconName = keyof typeof icons;
 export const selectedIcons = {
+  project: require("../../assets/navigation/ProjectFilled.png"),
   send: require("../../assets/navigation/CircleArrowUpFilled.png"),
   receipt: require("../../assets/navigation/ReceiptFilled.png"),
   star: require("../../assets/navigation/StarFilled.png"),

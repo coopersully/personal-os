@@ -114,6 +114,11 @@ vi.mock("../../components/record-row", () => ({
   ),
 }));
 vi.mock("../../components/forms/form-save", () => ({
+  FloatingAdd: ({ label, onPress }: { label: string; onPress: () => void }) => (
+    <button type="button" onClick={onPress}>
+      {label}
+    </button>
+  ),
   FormSave: ({ disabled, onPress }: { disabled: boolean; onPress: () => void }) => (
     <button type="button" disabled={disabled} onClick={onPress}>
       Save changes

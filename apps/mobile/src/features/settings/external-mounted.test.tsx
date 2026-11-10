@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MobileDataProvider } from "../tasks/data";
-import { ConnectionsSettingsScreen } from "./connections";
+import { ConnectionAccountScreen, ConnectionsSettingsScreen } from "./connections";
 import { NotificationsSettingsScreen } from "./notifications";
 import { TextingSettingsScreen } from "./texting";
 
@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   resources: {} as Record<string, unknown>,
   pending: false,
   signedIn: true,
+  params: {} as { id?: string },
   modalDismiss: undefined as (() => void) | undefined,
   allowSwipeDismissal: undefined as boolean | undefined,
   refetch: vi.fn(async () => ({})),
@@ -84,6 +85,9 @@ vi.mock("react-native", () => ({
       {children}
     </button>
   ),
+  Image: ({ accessibilityLabel }: { accessibilityLabel?: string }) => (
+    <span role="img" aria-label={accessibilityLabel} />
+  ),
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   Modal: ({
@@ -131,6 +135,7 @@ vi.mock("../../components/editor-header", () => ({
 }));
 vi.mock("expo-router", () => ({
   router: { push: h.push, back: h.back },
+  useLocalSearchParams: () => h.params,
   Stack: { Screen: () => null },
 }));
 vi.mock("../notifications/provider", () => ({
@@ -327,6 +332,7 @@ beforeEach(() => {
   h.confirmation = undefined;
   h.pending = false;
   h.signedIn = true;
+  h.params = {};
   h.resources = {
     connectors: [],
     "x-account": null,
@@ -364,6 +370,32 @@ beforeEach(() => {
 afterEach(cleanup);
 const show = (children: React.ReactNode) =>
   render(<MobileDataProvider>{children}</MobileDataProvider>);
+const openAccount = async (
+  view: ReturnType<typeof show>,
+  id: string,
+  label: string,
+  emailOrProvider: string,
+) => {
+  const row = await screen.findByRole("button", { name: `Account ${label}, ${emailOrProvider}` });
+  expect(row).not.toBeDisabled();
+  expect(screen.queryByText("Sync now")).toBeNull();
+  fireEvent.click(row);
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/settings/connections/account",
+    params: { id },
+  });
+  h.params = { id };
+  view.rerender(
+    <MobileDataProvider>
+      <ConnectionAccountScreen />
+    </MobileDataProvider>,
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: `Account ${label}, ${emailOrProvider}` }),
+    ).toBeDisabled(),
+  );
+};
 const confirm = () =>
   act(async () => {
     h.confirmation?.();
@@ -378,13 +410,8 @@ const enroll = async () => {
 it("reconnects only the current Google services after confirmation and reports browser rejection honestly", async () => {
   h.resources.connectors = [account()];
   h.open.mockRejectedValueOnce(new Error("No browser"));
-  show(<ConnectionsSettingsScreen />);
-  await screen.findByText("Sample Google");
-  const accountRow = screen.getByRole("button", {
-    name: "Account Sample Google, fixture@nohmi.test",
-  });
-  expect(accountRow).toHaveAttribute("aria-expanded", "false");
-  fireEvent.click(accountRow);
+  const view = show(<ConnectionsSettingsScreen />);
+  await openAccount(view, "google", "Sample Google", "fixture@nohmi.test");
   fireEvent.click(screen.getByText("Reconnect in browser"));
   expect(h.api.getGoogleAuthorizationUrl).not.toHaveBeenCalled();
   await confirm();
@@ -404,13 +431,8 @@ it("confirms pending/settled sync outcomes and named disconnect without treating
   h.api.syncConnector
     .mockResolvedValueOnce({ pending: true, changed: 0 })
     .mockResolvedValueOnce({ pending: false, changed: 3 });
-  show(<ConnectionsSettingsScreen />);
-  await screen.findByText("Sample Google");
-  const accountRow = screen.getByRole("button", {
-    name: "Account Sample Google, fixture@nohmi.test",
-  });
-  expect(accountRow).toHaveAttribute("aria-expanded", "false");
-  fireEvent.click(accountRow);
+  const view = show(<ConnectionsSettingsScreen />);
+  await openAccount(view, "google", "Sample Google", "fixture@nohmi.test");
   fireEvent.click(screen.getByText("Sync now"));
   await waitFor(() =>
     expect(h.success).toHaveBeenCalledWith("Sync requested. Check account status for completion.", {
@@ -430,13 +452,8 @@ it("confirms pending/settled sync outcomes and named disconnect without treating
 });
 it("refreshes Google/X status on foreground and returns failed explicit reads through Sonner while preserving cached accounts", async () => {
   h.resources.connectors = [account()];
-  show(<ConnectionsSettingsScreen />);
-  await screen.findByText("Sample Google");
-  const accountRow = screen.getByRole("button", {
-    name: "Account Sample Google, fixture@nohmi.test",
-  });
-  expect(accountRow).toHaveAttribute("aria-expanded", "false");
-  fireEvent.click(accountRow);
+  const view = show(<ConnectionsSettingsScreen />);
+  await openAccount(view, "google", "Sample Google", "fixture@nohmi.test");
   const before = h.api.listConnectors.mock.calls.length;
   act(() => {
     for (const listener of h.listeners) listener("active");
@@ -729,13 +746,9 @@ it("prefills iCloud reconnect identity/services and submits only its chosen capa
     },
   ];
   h.api.connectICloud.mockResolvedValue({ accountId: "icloud", email: "alex@icloud.com" });
-  show(<ConnectionsSettingsScreen />);
-  await screen.findByText("Sample Google");
-  const reconnectRow = screen.getByRole("button", {
-    name: "Account Sample Google, alex@icloud.com",
-  });
+  const view = show(<ConnectionsSettingsScreen />);
   expect(screen.queryByText("Update iCloud credentials")).toBeNull();
-  fireEvent.click(reconnectRow);
+  await openAccount(view, "google", "Sample Google", "alex@icloud.com");
   await screen.findByText("Update iCloud credentials");
   fireEvent.click(screen.getByText("Update iCloud credentials"));
   expect((screen.getByLabelText("Apple Account") as HTMLInputElement).value).toBe(
@@ -814,9 +827,8 @@ it("does not expose protected account data after sign-out and tolerates unknown 
       health: { state: "reconnect", message: "Reconnect required" },
     },
   ];
-  show(<ConnectionsSettingsScreen />);
-  await screen.findByText("Other provider");
-  fireEvent.click(screen.getByRole("button", { name: "Account Other provider, future" }));
+  const view = show(<ConnectionsSettingsScreen />);
+  await openAccount(view, "unknown", "Other provider", "future");
   expect(screen.getByText("future")).toBeTruthy();
   expect(screen.getByText("No services enabled")).toBeTruthy();
   expect(screen.getByText("Needs attention")).toBeTruthy();

@@ -18,6 +18,19 @@ vi.mock("react-native-safe-area-context", () => ({
 vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-icon={name} />,
 }));
+vi.mock("../../theme", () => ({
+  spacing: { xs: 4, sm: 8, md: 12, lg: 16, page: 20, xl: 24 },
+  radius: { panel: 16 },
+  touchTarget: 44,
+  useTheme: () => ({
+    ink: "black",
+    secondary: "gray",
+    canvas: "white",
+    surface: "white",
+    line: "gray",
+  }),
+  workspaceColor: () => "purple",
+}));
 afterEach(cleanup);
 function Tags({ initial = [] }: { initial?: string[] }) {
   const [tags, setTags] = useState(initial);

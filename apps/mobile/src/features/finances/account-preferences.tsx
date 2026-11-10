@@ -4,18 +4,16 @@ import { randomUUID } from "expo-crypto";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
-import { InlineOptions } from "../../components/forms/inline-options";
+import { EnumChoice } from "../../components/forms/enum-choice";
 import { Icon } from "../../components/icons";
 import { useTheme, workspaceColor } from "../../theme";
 import { useFinance } from "./data";
 import { financeLabel } from "./presentation";
-import { FinanceRow } from "./ui";
 
 export function AccountPreferences({ account }: { account: FinanceAccount }) {
   const { api, owner } = useFinance();
   const client = useQueryClient();
   const t = useTheme();
-  const [picker, setPicker] = useState<"ownership" | "planning" | null>(null);
   const [joint, setJoint] = useState(false);
   const [share, setShare] = useState(
     account.ownershipShare ? String(Number((account.ownershipShare * 100).toFixed(2))) : "",
@@ -71,38 +69,32 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
   }
   return (
     <>
-      <FinanceRow
-        centered
-        title="Ownership"
+      <EnumChoice
+        label="Ownership"
         icon="people"
-        value={
-          account.ownershipType === "joint"
-            ? `Joint · ${((account.ownershipShare ?? 0) * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`
-            : financeLabel(account.ownershipType)
+        value={joint ? "joint" : account.ownershipType}
+        valueLabel={
+          joint
+            ? "Joint"
+            : account.ownershipType === "joint"
+              ? `Joint · ${((account.ownershipShare ?? 0) * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`
+              : financeLabel(account.ownershipType)
         }
-        valueTone={account.ownershipType === "unknown" ? "attention" : undefined}
-        accessibilityHint={
-          account.ownershipType === "unknown"
-            ? "Confirm your ownership so balances can be included accurately."
-            : "Edit account ownership"
-        }
-        onPress={pending ? undefined : () => setPicker(picker === "ownership" ? null : "ownership")}
-      />
-      {picker === "ownership" && (
-        <InlineOptions
-          value={account.ownershipType}
-          options={[
-            { label: "Individual", value: "individual", icon: "people" },
-            { label: "Joint", value: "joint", icon: "people" },
-          ]}
-          onChange={(value) => {
-            setPicker(null);
-            if (value === "joint") setJoint(true);
-            else if (value === "individual" && account.ownershipType !== "individual")
+        valueColor={account.ownershipType === "unknown" ? t.warning : undefined}
+        disabled={pending}
+        options={[
+          { label: "Individual", value: "individual", icon: "people" },
+          { label: "Joint", value: "joint", icon: "people" },
+        ]}
+        onChange={(value) => {
+          if (value === "joint") setJoint(true);
+          else if (value === "individual") {
+            setJoint(false);
+            if (account.ownershipType !== "individual")
               void save({ ownershipType: "individual", ownershipShare: 1 });
-          }}
-        />
-      )}
+          }
+        }}
+      />
       {joint && (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <Text style={{ flex: 1, color: t.ink }}>Your share</Text>
@@ -149,27 +141,20 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
           </Pressable>
         </View>
       )}
-      <FinanceRow
-        centered
-        title="Planning"
+      <EnumChoice
+        label="Planning"
         icon="wallet"
-        value={account.includeInPlanning ? "Included" : "Excluded"}
-        onPress={pending ? undefined : () => setPicker(picker === "planning" ? null : "planning")}
+        value={account.includeInPlanning ? "included" : "excluded"}
+        disabled={pending}
+        options={[
+          { label: "Included", value: "included" },
+          { label: "Excluded", value: "excluded" },
+        ]}
+        onChange={(value) => {
+          if ((value === "included") !== account.includeInPlanning)
+            void save({ includeInPlanning: value === "included" });
+        }}
       />
-      {picker === "planning" && (
-        <InlineOptions
-          value={account.includeInPlanning ? "included" : "excluded"}
-          options={[
-            { label: "Included", value: "included" },
-            { label: "Excluded", value: "excluded" },
-          ]}
-          onChange={(value) => {
-            setPicker(null);
-            if ((value === "included") !== account.includeInPlanning)
-              void save({ includeInPlanning: value === "included" });
-          }}
-        />
-      )}
     </>
   );
 }

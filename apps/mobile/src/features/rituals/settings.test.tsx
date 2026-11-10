@@ -106,8 +106,8 @@ vi.mock("../../components/forms/form-save", () => ({
     </button>
   ),
 }));
-vi.mock("../../components/forms/inline-options", () => ({
-  InlineOptions: ({
+vi.mock("../../components/forms/enum-choice", () => ({
+  EnumChoice: ({
     options,
     onChange,
   }: {

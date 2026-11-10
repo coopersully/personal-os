@@ -15,8 +15,8 @@ import { useRef, useState } from "react";
 import { Alert, Share, Switch, Text, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
+import { EnumChoice } from "../../components/forms/enum-choice";
 import { FormSave } from "../../components/forms/form-save";
-import { InlineOptions } from "../../components/forms/inline-options";
 import { PlanningPicker } from "../../components/forms/planning-picker";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { Icon } from "../../components/icons";
@@ -350,7 +350,8 @@ function RitualEditor({
               value={step.label}
               onChange={(label) => stepChange(index, { label })}
             />
-            <InlineOptions
+            <EnumChoice
+              label="Step type"
               value={step.kind}
               options={["checkbox", "short_text", "time", "date", "number", "multiple_choice"].map(
                 (value) => ({ label: value.replaceAll("_", " "), value }),
@@ -497,7 +498,8 @@ function RitualHistory({ close }: { close: () => void }) {
         </>
       ) : (
         <>
-          <InlineOptions
+          <EnumChoice
+            label="Ritual"
             value={kind}
             options={[
               { label: "All rituals", value: "all" },
@@ -506,7 +508,8 @@ function RitualHistory({ close }: { close: () => void }) {
             ]}
             onChange={setKind}
           />
-          <InlineOptions
+          <EnumChoice
+            label="Status"
             value={status}
             options={[
               "all",
@@ -528,7 +531,8 @@ function RitualHistory({ close }: { close: () => void }) {
             onChange={setDateFrom}
           />
           <Field label="To date" placeholder="YYYY-MM-DD" value={dateTo} onChange={setDateTo} />
-          <InlineOptions
+          <EnumChoice
+            label="Order"
             value={sort}
             options={[
               { label: "Newest first", value: "newest" },

@@ -97,8 +97,8 @@ vi.mock("../../components/record-row", () => ({
   ),
 }));
 vi.mock("../../components/forms/form-save", () => ({ FormSave: () => null }));
-vi.mock("../../components/forms/inline-options", () => ({
-  InlineOptions: ({
+vi.mock("../../components/forms/enum-choice", () => ({
+  EnumChoice: ({
     options,
     onChange,
   }: {

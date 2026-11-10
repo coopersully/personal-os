@@ -480,8 +480,26 @@ function RitualHistory({ close }: { close: () => void }) {
   const denied =
     history.error instanceof ApiClientError &&
     (history.error.status === 401 || history.error.status === 403);
-  // A selected snapshot is also private data: fail closed before effects clear local memory.
-  const detail = denied ? null : selectedDetail;
+  // Native events can outlive their row. Keep denial latched through retry, then accept only
+  // selections from the currently authorized page objects rather than a queued old snapshot.
+  const denialLatch = useRef(false);
+  if (denied) denialLatch.current = true;
+  else if (history.isSuccess && history.isFetchedAfterMount && history.data)
+    denialLatch.current = false;
+  const selectionBoundary = useRef<{ blocked: boolean; items: RitualOccurrence[] }>({
+    blocked: true,
+    items: [],
+  });
+  selectionBoundary.current = {
+    blocked: denialLatch.current,
+    items: history.data?.pages.flatMap((page) => page.items) ?? [],
+  };
+  const selectDetail = (item: RitualOccurrence) => {
+    const current = selectionBoundary.current;
+    if (current.blocked || !current.items.includes(item)) return;
+    setDetail(item);
+  };
+  const detail = denialLatch.current ? null : selectedDetail;
   useEffect(() => {
     if (denied) setDetail(null);
   }, [denied]);
@@ -610,7 +628,7 @@ function RitualHistory({ close }: { close: () => void }) {
                 key={item.id}
                 title={item.definition.title}
                 subtitle={`${item.scheduledLocalDate} · ${item.status}`}
-                onPress={() => setDetail(item)}
+                onPress={() => selectDetail(item)}
               />
             ))}
           {history.isSuccess && history.data.pages.every((p) => !p.items.length) && (

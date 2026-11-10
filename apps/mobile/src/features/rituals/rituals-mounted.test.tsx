@@ -17,6 +17,7 @@ vi.mock("@tanstack/react-query", async () => {
 });
 const h = vi.hoisted(() => ({
   owner: "owner",
+  rowCallbacks: {} as Record<string, () => void>,
   push: vi.fn(),
   back: vi.fn(),
   params: { kind: "morning" },
@@ -127,11 +128,14 @@ vi.mock("../../components/record-row", () => ({
     title: string;
     subtitle: string;
     onPress: () => void;
-  }) => (
-    <button type="button" onClick={onPress}>
-      {title} {subtitle}
-    </button>
-  ),
+  }) => {
+    h.rowCallbacks[title] = onPress;
+    return (
+      <button type="button" onClick={onPress}>
+        {title} {subtitle}
+      </button>
+    );
+  },
 }));
 vi.mock("../../components/forms/form-save", () => ({ FormSave: () => null }));
 vi.mock("../../components/forms/enum-choice", () => ({
@@ -167,6 +171,7 @@ const wrap = (node: React.ReactNode) => (
 );
 beforeEach(() => {
   vi.clearAllMocks();
+  h.rowCallbacks = {};
   h.owner = "owner";
   h.params = { kind: "morning" };
   h.definitions.mockResolvedValue({ rituals: [definition] });
@@ -340,4 +345,43 @@ it("retains the selected occurrence and private responses after a transient500 r
   expect(h.history).toHaveBeenCalledTimes(2);
   expect(h.loading).not.toHaveBeenCalled();
   expect(h.success).not.toHaveBeenCalled();
+});
+
+it("rejects a queued predenial row event after detail cleanup, throughout retry, and after fresh authorized data", async () => {
+  h.history.mockResolvedValue({ items: [privateOccurrence], nextCursor: null });
+  render(wrap(<RitualHistoryScreen />));
+  fireEvent.click(await screen.findByText(/Private ritual/));
+  const queued = h.rowCallbacks["Private ritual"];
+  if (!queued) throw new Error("Missing native row callback");
+  expect(screen.getByText(/Private reflection answer/)).toBeVisible();
+  h.history.mockRejectedValueOnce(
+    new ApiClientError({ status: 403, code: "forbidden", message: "Access revoked" }),
+  );
+  fireEvent.click(screen.getByText("Refresh records"));
+  await screen.findByText("Unable to load. Retry");
+  act(() => queued());
+  expect(screen.queryByText(/Private reflection answer|Private ritual/)).toBeNull();
+  let resolve: (value: unknown) => void = () => {};
+  h.history.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  fireEvent.click(screen.getByText("Unable to load. Retry"));
+  await waitFor(() => expect(h.history).toHaveBeenCalledTimes(3));
+  act(() => queued());
+  expect(screen.queryByText(/Private reflection answer|Private ritual/)).toBeNull();
+  await act(async () =>
+    resolve({
+      items: [{ ...privateOccurrence, definition: { ...definition, title: "Fresh ritual" } }],
+      nextCursor: null,
+    }),
+  );
+  await screen.findByText(/Fresh ritual/);
+  expect(screen.queryByText(/Private reflection answer/)).toBeNull();
+  act(() => queued());
+  expect(screen.queryByText(/Private reflection answer|Private ritual/)).toBeNull();
+  expect(screen.getByText(/Fresh ritual/)).toBeVisible();
+  expect(h.history).toHaveBeenCalledTimes(3);
 });

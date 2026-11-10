@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { ApiClientError } from "@personal-os/api-client";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MobileDataProvider } from "../tasks/data";
@@ -23,6 +24,9 @@ vi.mock("@tanstack/react-query", async () => {
 const h = vi.hoisted(() => ({
   owner: "owner",
   epoch: 1,
+  callbacks: new Map<string, () => void>(),
+  confirm: vi.fn(),
+  open: vi.fn(),
   push: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
@@ -54,7 +58,7 @@ vi.mock("expo-router", () => ({
 vi.mock("react-native", () => ({
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
-  Linking: { openURL: vi.fn() },
+  Linking: { openURL: h.open },
 }));
 vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
 vi.mock("../../components/forms/form-save", () => ({ FormSave: () => null }));
@@ -101,11 +105,14 @@ vi.mock("../tasks/ui", () => ({
     label: string;
     onPress: () => void;
     disabled?: boolean;
-  }) => (
-    <button type="button" disabled={disabled} onClick={onPress}>
-      {label}
-    </button>
-  ),
+  }) => {
+    h.callbacks.set(label, onPress);
+    return (
+      <button type="button" disabled={disabled} onClick={onPress}>
+        {label}
+      </button>
+    );
+  },
   Choice: ({
     label,
     value,
@@ -144,10 +151,11 @@ vi.mock("../tasks/ui", () => ({
       onChange={() => onChange(!value)}
     />
   ),
-  confirm: vi.fn(),
+  confirm: h.confirm,
 }));
 beforeEach(() => {
   vi.clearAllMocks();
+  h.callbacks.clear();
   h.owner = "owner";
   h.epoch = 1;
   h.api.listAgentAccounts.mockReset().mockResolvedValue({ accounts: [], connections: [] });
@@ -302,4 +310,123 @@ it("announces explicit cached policy refresh once and preserves policy on denied
     ),
   ).toBeNull();
   expect(screen.queryByText("Cached refresh denied")).toBeNull();
+});
+
+it.each([
+  401, 403, 500,
+])("fails closed for authoritative %s after accumulating review pages, retaining only ordinary failures", async (status) => {
+  const first = {
+    id: "private-first",
+    domain: "tasks",
+    priority: "high",
+    kind: "review",
+    title: "Private first review",
+    summary: "Private first summary",
+    preview: [{ label: "Private field", value: "Private value" }],
+    action: { label: "Review", to: "/tasks/review?id=first" },
+  };
+  h.api.listAgentAccessWorkItems
+    .mockResolvedValueOnce({ items: [first], unavailableDomains: [], nextCursor: "second" })
+    .mockRejectedValueOnce(
+      new ApiClientError({
+        code: status === 500 ? "UNAVAILABLE" : "FORBIDDEN",
+        status,
+        message: "Review access denied",
+      }),
+    )
+    .mockResolvedValue({ items: [], unavailableDomains: [], nextCursor: null });
+  show(<AgentReviewsScreen />);
+  await screen.findByText("Private first summary");
+  fireEvent.click(screen.getByRole("button", { name: "Load more agent work" }));
+  await screen.findByRole("button", { name: "Retry loading agent work" });
+  expect(h.api.listAgentAccessWorkItems).toHaveBeenCalledTimes(2);
+  expect(h.error).toHaveBeenCalledOnce();
+  if (status === 500) expect(screen.getByText("Private first summary")).toBeTruthy();
+  else {
+    expect(screen.queryByText("Private first summary")).toBeNull();
+    expect(screen.queryByText(/Private field/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Review on the web" })).toBeNull();
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading agent work" }));
+  await waitFor(() => expect(h.api.listAgentAccessWorkItems).toHaveBeenCalledTimes(3));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Retry loading agent work" })).toBeNull(),
+  );
+  if (status === 500) expect(screen.getByText("Private first summary")).toBeTruthy();
+  else {
+    await screen.findByText("No agent work is waiting.");
+    expect(screen.queryByText("Private first summary")).toBeNull();
+  }
+  expect(h.api.listAgentAccessWorkItems).toHaveBeenCalledTimes(3);
+});
+
+it("fences queued page, review and confirmation callbacks through denial, pending retry and fresh authorization", async () => {
+  const first = {
+    id: "private-first",
+    domain: "tasks",
+    priority: "high",
+    kind: "review",
+    title: "Private first review",
+    summary: "Private queued summary",
+    action: { label: "Review", to: "/tasks/review?id=private" },
+  };
+  let finish!: (value: unknown) => void;
+  h.api.listAgentAccessWorkItems
+    .mockResolvedValueOnce({ items: [first], unavailableDomains: [], nextCursor: "second" })
+    .mockRejectedValueOnce(
+      new ApiClientError({ code: "FORBIDDEN", status: 403, message: "Denied" }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const view = show(<AgentReviewsScreen />);
+  await screen.findByText("Private queued summary");
+  await screen.findByRole("button", { name: "Review on the web" });
+  const oldLoad = h.callbacks.get("Load more agent work");
+  const oldReview = h.callbacks.get("Review on the web");
+  if (!oldLoad || !oldReview) throw new Error("Expected mounted native callbacks");
+  act(() => oldReview());
+  const oldConfirm = h.confirm.mock.calls.at(-1)?.[2] as () => void;
+  expect(oldConfirm).toBeTypeOf("function");
+  act(() => oldLoad());
+  await screen.findByRole("button", { name: "Retry loading agent work" });
+  expect(screen.queryByText("Private queued summary")).toBeNull();
+  const confirmations = h.confirm.mock.calls.length;
+  await act(async () => {
+    oldLoad();
+    oldReview();
+    oldConfirm();
+  });
+  expect(h.confirm).toHaveBeenCalledTimes(confirmations);
+  expect(h.open).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading agent work" }));
+  await waitFor(() => expect(h.api.listAgentAccessWorkItems).toHaveBeenCalledTimes(3));
+  await act(async () => {
+    oldLoad();
+    oldReview();
+    oldConfirm();
+  });
+  expect(screen.queryByText("Private queued summary")).toBeNull();
+  expect(h.open).not.toHaveBeenCalled();
+  await act(async () => finish({ items: [], unavailableDomains: [], nextCursor: null }));
+  await screen.findByText("No agent work is waiting.");
+  await act(async () => {
+    oldLoad();
+    oldReview();
+    oldConfirm();
+  });
+  expect(screen.queryByText("Private queued summary")).toBeNull();
+  expect(h.api.listAgentAccessWorkItems).toHaveBeenCalledTimes(3);
+  expect(h.open).not.toHaveBeenCalled();
+  expect(h.confirm).toHaveBeenCalledTimes(confirmations);
+  view.unmount();
+  await act(async () => {
+    oldLoad();
+    oldReview();
+    oldConfirm();
+  });
+  expect(h.open).not.toHaveBeenCalled();
 });

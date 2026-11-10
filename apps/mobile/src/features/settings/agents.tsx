@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import {
   type AccessScope,
   type AgentAccessWorkItem,
@@ -735,12 +736,64 @@ function AgentWorkItems() {
   const page = useSettingsResource(`agent-work-items-${cursor ?? "root"}`, (api) =>
     api.listAgentAccessWorkItems({ limit: 10, ...(cursor ? { cursor } : {}) }),
   );
-  const items = [
-    ...new Map([...previous, ...(page.data?.items ?? [])].map((item) => [item.id, item])).values(),
-  ];
+  const access = useRef({
+    live: true,
+    epoch: 0,
+    pageBlocked: false,
+    contextBlocked: false,
+    items: [] as AgentAccessWorkItem[],
+    nextCursor: null as string | null,
+  });
+  const pageDenied =
+    page.error instanceof ApiClientError &&
+    (page.error.status === 401 || page.error.status === 403);
+  const contextDenied =
+    context.error instanceof ApiClientError &&
+    (context.error.status === 401 || context.error.status === 403);
+  if (
+    (pageDenied && !access.current.pageBlocked) ||
+    (contextDenied && !access.current.contextBlocked)
+  )
+    access.current.epoch += 1;
+  if (pageDenied) access.current.pageBlocked = true;
+  else if (page.isSuccess && !page.isFetching && page.data) access.current.pageBlocked = false;
+  if (contextDenied) access.current.contextBlocked = true;
+  else if (context.isSuccess && !context.isFetching && context.data)
+    access.current.contextBlocked = false;
+  const denied = access.current.pageBlocked || access.current.contextBlocked;
+  useEffect(() => {
+    access.current.live = true;
+    return () => {
+      access.current.live = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (denied) setPrevious([]);
+  }, [denied]);
+  // The denial latch survives retry's error reset; captured native callbacks use the live fence.
+  const items = denied
+    ? []
+    : [
+        ...new Map(
+          [...previous, ...(page.data?.items ?? [])].map((item) => [item.id, item]),
+        ).values(),
+      ];
+  access.current.items = items;
+  access.current.nextCursor = denied ? null : (page.data?.nextCursor ?? null);
+  const callbackEpoch = access.current.epoch;
+  const canAct = () =>
+    access.current.live &&
+    !access.current.pageBlocked &&
+    !access.current.contextBlocked &&
+    access.current.epoch === callbackEpoch;
+  const canOpen = (item: AgentAccessWorkItem) =>
+    canAct() &&
+    access.current.items.some(
+      (current) => current.id === item.id && current.action?.to === item.action?.to,
+    );
   return (
     <Section title="Agent work and reviews">
-      {page.data?.unavailableDomains.length ? (
+      {!denied && page.data?.unavailableDomains.length ? (
         <Text style={{ color: t.warning, padding: 16 }}>
           Could not load: {page.data.unavailableDomains.join(", ")}. Other work remains visible.
         </Text>
@@ -760,18 +813,22 @@ function AgentWorkItems() {
             <Action
               label={`${item.action.label} on the web`}
               disabled={action.pending}
-              onPress={() =>
+              onPress={() => {
+                if (!canOpen(item)) return;
                 confirm(
                   "Continue on the web?",
                   "Open this item's existing web flow. Review and complete any action there; opening it does not approve or apply anything.",
-                  () =>
+                  () => {
+                    if (!canOpen(item)) return;
                     void action.run(async () => {
+                      if (!canOpen(item)) return;
                       await Linking.openURL(
                         agentWorkItemUrl(context.data.links.agentAccess, item.action?.to ?? ""),
                       );
-                    }, "Requested opening the web flow"),
-                )
-              }
+                    }, "Requested opening the web flow");
+                  },
+                );
+              }}
             />
           )}
         </Section>
@@ -780,14 +837,15 @@ function AgentWorkItems() {
       {page.isError && (
         <Action label="Retry loading agent work" onPress={() => void page.refetch()} />
       )}
-      {page.data && items.length === 0 && <State empty="No agent work is waiting." />}
-      {page.data?.nextCursor && (
+      {!denied && page.data && items.length === 0 && <State empty="No agent work is waiting." />}
+      {!denied && page.data?.nextCursor && (
         <Action
           label="Load more agent work"
           disabled={page.isFetching}
           onPress={() => {
-            setPrevious(items);
-            setCursor(page.data?.nextCursor ?? undefined);
+            if (!canAct() || access.current.nextCursor !== page.data?.nextCursor) return;
+            setPrevious(access.current.items);
+            setCursor(access.current.nextCursor ?? undefined);
           }}
         />
       )}

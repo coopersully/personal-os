@@ -18,6 +18,9 @@ vi.mock("expo-router", () => ({
   Stack: { Screen: ({ options }: { options: { title: string } }) => <h1>{options.title}</h1> },
   Redirect: ({ href }: { href: string }) => <a href={href}>Return to Settings</a>,
 }));
+vi.mock("expo-constants", () => ({
+  default: { nativeAppVersion: "2.4.1", nativeBuildVersion: "81" },
+}));
 vi.mock("../../theme", () => ({ useTheme: () => ({ ink: "black", secondary: "gray" }) }));
 vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-testid={`icon-${name}`} />,
@@ -101,6 +104,8 @@ it("opens every registered destination from the grouped root without a Settings 
     expect(h.push).toHaveBeenLastCalledWith(`/settings/${destination.id}`);
   }
   expect(screen.queryByRole("tablist")).toBeNull();
+  expect(screen.queryByRole("button", { name: "About" })).toBeNull();
+  expect(screen.getByText("nohmi 2.4.1 · Build 81")).toBeTruthy();
 });
 
 it("filters mounted rows by field keywords, reports no results, and restores the root without navigation", () => {

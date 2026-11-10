@@ -539,7 +539,8 @@ it("retries preferences loading and reports a save failure through Sonner", asyn
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
   expect(screen.queryByText("offline")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Load latest preferences" })).toBeEnabled();
 });
 it("applies date boundaries and clears filters without losing sort or grouping", async () => {
   show();
@@ -804,4 +805,79 @@ it("retains the opened draft and reviewed revision when background preferences c
       }),
     ),
   );
+});
+
+it("blocks stale retries until latest preferences are explicitly reviewed, preserving the local draft and unrelated remote fields", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("Conflict"));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  const reload = await screen.findByRole("button", { name: "Load latest preferences" });
+  await waitFor(() => expect(reload).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  h.getWorkspaceSettings.mockRejectedValueOnce(new Error("Read offline"));
+  fireEvent.click(reload);
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  h.getWorkspaceSettings.mockResolvedValue({
+    revision: 19,
+    preferences: { ...h.preferences, taskGroup: "list", taskRowDetails: ["tags"] },
+  });
+  vi.mocked(globalThis.confirm).mockReturnValueOnce(false);
+  fireEvent.click(reload);
+  await waitFor(() =>
+    expect(globalThis.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("Review latest preferences"),
+    ),
+  );
+  await waitFor(() => expect(reload).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  fireEvent.click(reload);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Group, List" })).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  expect(globalThis.confirm).toHaveBeenLastCalledWith(
+    expect.stringContaining("saved tags; your draft estimate, notes"),
+  );
+  expect(h.updateWorkspaceSettings).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(h.updateWorkspaceSettings).toHaveBeenLastCalledWith("tasks", {
+      expectedRevision: 19,
+      preferences: expect.objectContaining({
+        taskGroup: "list",
+        taskRowDetails: ["estimate", "notes"],
+      }),
+    }),
+  );
+});
+it("recognizes an uncertain already-committed preference draft without sending it again", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("Response interrupted"));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  const reload = await screen.findByRole("button", { name: "Load latest preferences" });
+  await waitFor(() => expect(reload).toBeEnabled());
+  h.getWorkspaceSettings.mockResolvedValue({
+    revision: 4,
+    preferences: { ...h.preferences, taskRowDetails: ["estimate", "notes"] },
+  });
+  fireEvent.click(reload);
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Load latest preferences" })).toBeNull(),
+  );
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  expect(h.updateWorkspaceSettings).toHaveBeenCalledOnce();
 });

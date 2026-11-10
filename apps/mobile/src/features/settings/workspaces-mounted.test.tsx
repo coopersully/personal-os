@@ -56,6 +56,11 @@ vi.mock("../../components/forms/use-dirty-dismiss", () => ({
   useDirtyDismiss: () => h.allowDismiss,
 }));
 vi.mock("../../components/forms/form-save", () => ({
+  FloatingAdd: ({ label, onPress }: { label: string; onPress: () => void }) => (
+    <button type="button" onClick={onPress}>
+      {label}
+    </button>
+  ),
   FormSave: ({ disabled, onPress }: { disabled: boolean; onPress: () => void }) => (
     <button
       type="button"
@@ -511,7 +516,7 @@ it("rejects a chosen Calendar source that disappears before Save and exposes a r
   fireEvent.click(screen.getByRole("button", { name: "Retry loading" }));
   expect(h.refetch).toHaveBeenCalledWith("calendar-sources");
 });
-it("configures Calendar visibility and local source lifecycle without provider deletion or fake success", async () => {
+it("configures Calendar visibility and local deletion, opening creation without writing", async () => {
   h.domain = "calendar";
   h.resources["calendar-sources"] = [
     { id: identifier(2), name: "Work", isWritable: true, isSelected: true, provider: "local" },
@@ -535,19 +540,9 @@ it("configures Calendar visibility and local source lifecycle without provider d
   expect(screen.queryByRole("button", { name: "Delete Subscribed" })).not.toBeInTheDocument();
   await act(async () => fireEvent.click(screen.getByLabelText("Show Work")));
   expect(select).toHaveBeenCalledWith(identifier(2), false);
-  edit("Calendar name", "Personal projects");
-  edit("Color (optional)", "#7928ff");
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create calendar" })));
-  expect(screen.getByLabelText("Calendar name")).toHaveValue("Personal projects");
-  expect(h.success).not.toHaveBeenCalledWith("Calendar created");
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Create calendar" })));
-  expect(create).toHaveBeenCalledWith({
-    name: "Personal projects",
-    color: "#7928ff",
-    timezone: "America/New_York",
-  });
-  expect(screen.getByLabelText("Calendar name")).toHaveValue("");
-  expect(h.success).toHaveBeenCalledWith("Calendar created");
+  fireEvent.click(screen.getByRole("button", { name: "Add calendar" }));
+  expect(h.push).toHaveBeenLastCalledWith("/settings/calendar/new");
+  expect(create).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Delete Work" }));
   expect(remove).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenLastCalledWith(

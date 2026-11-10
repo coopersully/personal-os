@@ -119,3 +119,28 @@ it("does not enable creation without the account planning timezone", () => {
   });
   expect(screen.getByRole("button", { name: "Create calendar" })).toBeDisabled();
 });
+
+it("retains an invalid color until corrected, then saves the explicit color with the account timezone", async () => {
+  render(<CalendarCreateScreen />);
+  fireEvent.change(screen.getByLabelText("Calendar name"), {
+    target: { value: "Project calendar" },
+  });
+  fireEvent.change(screen.getByLabelText("Color (optional)"), {
+    target: { value: "invalid-color" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create calendar" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Create calendar" })).toBeEnabled(),
+  );
+  expect(h.create).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Color (optional)")).toHaveValue("invalid-color");
+  fireEvent.change(screen.getByLabelText("Color (optional)"), { target: { value: "#7928ff" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create calendar" }));
+  await waitFor(() =>
+    expect(h.create).toHaveBeenCalledWith({
+      name: "Project calendar",
+      color: "#7928ff",
+      timezone: "America/New_York",
+    }),
+  );
+});

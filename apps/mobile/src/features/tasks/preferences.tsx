@@ -10,7 +10,7 @@ import { NotificationSettings } from "../notifications/provider";
 import { useTaskAction, useTaskApi, useTaskResources } from "./data";
 import { listOption } from "./list-presentation";
 import { SearchableChoice } from "./searchable-choice";
-import { Choice, confirm, FormBody, Section, State, ToggleRow } from "./ui";
+import { Action, Choice, confirm, FormBody, Section, State, ToggleRow } from "./ui";
 export function TaskPreferencesScreen() {
   const { state, session } = useAuth();
   const resources = useTaskResources();
@@ -41,8 +41,9 @@ function Preferences({
   const t = useTheme();
   const api = useTaskApi();
   const action = useTaskAction();
-  const [initial] = useState(opened);
+  const [initial, setInitial] = useState(opened);
   const [edited, setEdited] = useState(false);
+  const [needsReview, setNeedsReview] = useState(false);
   const [draft, setDraft] = useState(initial.preferences);
   const update = <K extends keyof TasksWorkspacePreferences>(
     key: K,
@@ -204,9 +205,67 @@ function Preferences({
             onChange={(value) => update("includeArchivedInSearch", value)}
           />
         </Section>
+        {needsReview && (
+          <Action
+            label="Load latest preferences"
+            disabled={action.pending}
+            onPress={() =>
+              void action.run(
+                "Loading preferences…",
+                () => api.getWorkspaceSettings("tasks"),
+                (latest) => {
+                  if (latest.revision < initial.revision)
+                    throw new Error("The loaded preferences are older than your reviewed version.");
+                  const changes = Object.entries(draft).filter(
+                    ([key, value]) =>
+                      JSON.stringify(value) !==
+                      JSON.stringify(initial.preferences[key as keyof TasksWorkspacePreferences]),
+                  );
+                  const retained = { ...latest.preferences, ...Object.fromEntries(changes) };
+                  const labels: Record<string, string> = {
+                    defaultCaptureListId: "Default list",
+                    taskSort: "Sort",
+                    taskGroup: "Group",
+                    taskContainerSort: "Container sort",
+                    showCompletedTasks: "Show completed tasks",
+                    taskRowDetails: "Row details",
+                    includeArchivedInSearch: "Include archived in search",
+                  };
+                  const display = (key: string, value: unknown): string => {
+                    if (key === "defaultCaptureListId")
+                      return value
+                        ? (lists.find((list) => list.value === value)?.label ?? "Unavailable list")
+                        : "Inbox";
+                    if (typeof value === "boolean") return value ? "On" : "Off";
+                    if (Array.isArray(value)) return value.join(", ") || "None";
+                    return String(value ?? "None").replaceAll("_", " ");
+                  };
+                  const summary = changes
+                    .map(
+                      ([key, value]) =>
+                        `${labels[key] ?? key}: saved ${display(key, latest.preferences[key as keyof TasksWorkspacePreferences])}; your draft ${display(key, value)}`,
+                    )
+                    .join("\n");
+                  confirm(
+                    "Review latest preferences",
+                    `${summary || "Your draft has no changes."}\n\nKeep your edits with the latest saved preferences? Review the result, then save separately.`,
+                    () => {
+                      setInitial(latest);
+                      setDraft(retained);
+                      setEdited(JSON.stringify(retained) !== JSON.stringify(latest.preferences));
+                      setNeedsReview(false);
+                    },
+                  );
+                },
+                undefined,
+                () => ({ message: "Latest preferences loaded for review" }),
+              )
+            }
+          />
+        )}
       </FormBody>
       <FormSave
-        disabled={!edited || action.pending}
+        disabled={!edited || action.pending || needsReview}
         onPress={() =>
           void action.run(
             "Saving preferences…",
@@ -216,6 +275,7 @@ function Preferences({
                 preferences: draft,
               }),
             () => router.back(),
+            () => setNeedsReview(true),
           )
         }
       />

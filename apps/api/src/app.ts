@@ -96,6 +96,9 @@ import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-a
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
+import { createNativePushRuntime } from "./native-push-runtime.js";
+import { createNativePushService } from "./native-push-service.js";
+import { createApnsTransport } from "./native-push-transport.js";
 import { createNotificationService } from "./notification-service.js";
 import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
@@ -119,6 +122,7 @@ import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
+import { registerNativePushRoutes } from "./routes/native-push.js";
 import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerReminderRoutes } from "./routes/reminders.js";
 import { registerRitualRoutes } from "./routes/rituals.js";
@@ -185,6 +189,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
   dispatchDueFinanceMaintenance: () => Promise<void>;
   runTextingRecovery: () => Promise<void> | null;
   runFinanceNotifications: () => Promise<void> | null;
+  dispatchNativePush: () => Promise<void> | null;
   quiesceTextingRecovery: () => void;
   superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
@@ -806,6 +811,26 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     transport: texting,
     now,
   });
+  const pushConfig = dependencies.config.nativePush ?? {
+    enabled: false,
+    teamId: "",
+    keyId: "",
+    privateKey: "",
+    topic: "app.personal-os.mobile",
+    environment: "production" as const,
+  };
+  const nativePush = createNativePushService({
+    db: dependencies.db,
+    encryptionKey: dependencies.config.encryptionKey,
+    config: pushConfig,
+    transport: createApnsTransport(pushConfig),
+    ...(dependencies.now ? { now: dependencies.now } : {}),
+  });
+  const nativePushRuntime = createNativePushRuntime({
+    db: dependencies.db,
+    enabled: () => pushConfig.enabled,
+    dispatch: nativePush.dispatch,
+  });
   const dispatchFinanceNotifications = createFinanceNotificationDispatcher({
     db: dependencies.db,
     notifications,
@@ -1234,6 +1259,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/automation-hosts/*", authenticate);
   app.use("/v1/finances/*", authenticate);
   app.use("/v1/finances", authenticate);
+  app.use("/v1/native-push/*", authenticate, requireHuman);
   app.use("/v1/mailboxes", authenticate);
   app.use("/v1/audit", authenticate, requireScope("audit:read"));
   app.use("/v1/daily-brief", authenticate, requireScope("automations:read"));
@@ -1621,6 +1647,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     }),
   });
   registerNotificationRoutes({ app, notifications });
+  registerNativePushRoutes(app, nativePush);
 
   app.get("/v1/audit", async (context) => {
     const query = auditQuerySchema.parse(context.req.query());
@@ -1655,7 +1682,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     runFinanceNotifications() {
       return financeNotificationRuntime.run();
     },
+    dispatchNativePush() {
+      return nativePushRuntime.run();
+    },
     quiesceTextingRecovery() {
+      nativePushRuntime.quiesce();
       financeNotificationRuntime.quiesce();
       textingRecoveryRuntime.quiesce();
     },

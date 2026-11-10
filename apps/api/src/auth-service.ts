@@ -263,6 +263,7 @@ export function createAuthService(options: AuthServiceOptions) {
       return {
         actorId: record.user.id,
         actorType: "user",
+        sessionId: record.session.id,
         scopes: allScopes,
         userId: record.user.id,
       };

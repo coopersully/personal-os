@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text, useWindowDimensions, View } from "react-native";
 import { Icon, type IconName } from "../../components/icons";
 import { type SettingsWorkspace, useSettingsAccent } from "../../components/settings-accent";
 import { SettingLabel, SettingValue } from "../../components/settings-row-content";
@@ -51,8 +51,7 @@ export function SettingsRow({
         ) : (
           <Icon name={icon} color={t.secondary} size={22} />
         ))}
-      <SettingLabel>{label}</SettingLabel>
-      {value && <SettingValue>{value}</SettingValue>}
+      <SettingsRowText label={label} value={value} />
       <View>
         <Icon name="chevron" color={t.secondary} size={16} />
       </View>
@@ -109,11 +108,48 @@ export function SettingsDetailRow({
   return (
     <View accessibilityLabel={`${label}, ${value}`} style={rowStyle}>
       {icon && <Icon name={icon} size={22} color={t.secondary} />}
-      <SettingLabel>{label}</SettingLabel>
-      <SettingValue style={attention ? { color: t.warning } : undefined}>{value}</SettingValue>
+      <SettingsRowText label={label} value={value} attention={attention} />
     </View>
   );
 }
+
+/** Large text needs separate lines so the trailing value cannot squeeze the label. */
+function SettingsRowText({
+  label,
+  value,
+  attention = false,
+}: {
+  label: string;
+  value?: string;
+  attention?: boolean;
+}) {
+  const t = useTheme();
+  const { fontScale } = useWindowDimensions();
+  const stacked = fontScale >= 1.3 && !!value;
+  const content = (
+    <>
+      <SettingLabel style={stacked ? { flex: 0 } : undefined}>{label}</SettingLabel>
+      {value && (
+        <SettingValue
+          style={{
+            ...(stacked ? { maxWidth: "100%", textAlign: "left" } : {}),
+            ...(attention ? { color: t.warning } : {}),
+          }}
+        >
+          {value}
+        </SettingValue>
+      )}
+    </>
+  );
+  return stacked ? (
+    <View style={{ flex: 1, minWidth: 0, flexDirection: "column", gap: spacing.xs }}>
+      {content}
+    </View>
+  ) : (
+    content
+  );
+}
+
 export function SettingsIdentity({
   name,
   detail,

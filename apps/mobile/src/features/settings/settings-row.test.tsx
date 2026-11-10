@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { PropsWithChildren } from "react";
-import { afterEach, expect, it, vi } from "vitest";
+import type { CSSProperties, PropsWithChildren } from "react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import {
   SettingsActionRow,
@@ -14,7 +14,9 @@ vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/package.json`)("react");
 });
+const h = vi.hoisted(() => ({ fontScale: 1 }));
 vi.mock("react-native", () => ({
+  useWindowDimensions: () => ({ width: 390, height: 844, fontScale: h.fontScale }),
   Pressable: ({
     children,
     onPress,
@@ -29,8 +31,14 @@ vi.mock("react-native", () => ({
       {children}
     </button>
   ),
-  View: ({ children, accessibilityLabel }: PropsWithChildren<{ accessibilityLabel?: string }>) => (
-    <fieldset aria-label={accessibilityLabel}>{children}</fieldset>
+  View: ({
+    children,
+    accessibilityLabel,
+    style,
+  }: PropsWithChildren<{ accessibilityLabel?: string; style?: CSSProperties }>) => (
+    <fieldset aria-label={accessibilityLabel} style={style}>
+      {children}
+    </fieldset>
   ),
   Text: ({ children, style }: PropsWithChildren<{ style?: object | object[] }>) => (
     <span style={Object.assign({}, ...(Array.isArray(style) ? style : [style]))}>{children}</span>
@@ -52,6 +60,9 @@ vi.mock("../../components/icons", () => ({
   ),
 }));
 afterEach(cleanup);
+beforeEach(() => {
+  h.fontScale = 1;
+});
 it("uses neutral account actions, one semantic icon and disabled state without a navigation accessory", () => {
   const press = vi.fn();
   const view = render(
@@ -128,4 +139,51 @@ it("keeps long read-only identities and metadata available without adding focusa
   expect(screen.getByRole("group", { name: `Last synced, ${value}` })).toHaveTextContent(value);
   expect(screen.queryByRole("button")).toBeNull();
   expect(screen.getByText(value)).toHaveStyle({ color: "#626268" });
+});
+
+it("stacks navigation labels and full values at larger text sizes while preserving the action and accessories", () => {
+  const navigate = vi.fn();
+  const label = "Global Policy";
+  const value = "Important notifications only, quiet hours from 10 PM to 8 AM";
+  const row = () => <SettingsRow label={label} value={value} icon="attention" onPress={navigate} />;
+  const view = render(row());
+  expect(screen.getByText(label).parentElement).toBe(screen.getByRole("button"));
+  expect(screen.getByText(value)).toHaveStyle({ maxWidth: "65%", textAlign: "right" });
+  h.fontScale = 1.35;
+  view.rerender(row());
+  expect(screen.getByText(label).parentElement).toBe(screen.getByText(value).parentElement);
+  expect(screen.getByText(label).parentElement).toHaveStyle({
+    flexDirection: "column",
+  });
+  expect(screen.getByText(value)).toHaveStyle({ maxWidth: "100%", textAlign: "left" });
+  expect(screen.getByTestId("icon-attention")).toBeTruthy();
+  expect(screen.getByTestId("icon-chevron")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: `${label}, ${value}` }));
+  expect(navigate).toHaveBeenCalledOnce();
+  h.fontScale = 1;
+  view.rerender(row());
+  expect(screen.getByText(label).parentElement).toBe(screen.getByRole("button"));
+  expect(screen.getByText(value)).toHaveStyle({ maxWidth: "65%", textAlign: "right" });
+});
+it("gives large-text metadata both full-width lines without losing attention color or readonly semantics", () => {
+  h.fontScale = 2;
+  render(
+    <SettingsDetailRow
+      label="Connection status"
+      value="Needs attention before synchronization can continue"
+      attention
+      icon="attention"
+    />,
+  );
+  const label = screen.getByText("Connection status");
+  const value = screen.getByText("Needs attention before synchronization can continue");
+  expect(label.parentElement).toBe(value.parentElement);
+  expect(label.parentElement).toHaveStyle({ flexDirection: "column" });
+  expect(value).toHaveStyle({ maxWidth: "100%", textAlign: "left", color: "#89501b" });
+  expect(
+    screen.getByRole("group", {
+      name: "Connection status, Needs attention before synchronization can continue",
+    }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button")).toBeNull();
 });

@@ -2,7 +2,7 @@
 
 import { workspacePreferenceSchemas } from "@personal-os/domain";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   FinanceConfigurationSettings,
@@ -32,6 +32,8 @@ const h = vi.hoisted(() => ({
   writeWorkspace: vi.fn(),
   loadWorkspace: vi.fn(),
   push: vi.fn(),
+  back: vi.fn(),
+  allowDismiss: vi.fn(),
   session: {} as { epoch: () => number; api: () => Record<string, unknown> },
 }));
 vi.mock("react-native", () => ({
@@ -42,11 +44,32 @@ vi.mock("expo-crypto", () => ({
   randomUUID: () => `00000000-0000-4000-8000-${String(++h.uuid).padStart(12, "0")}`,
 }));
 vi.mock("expo-router", () => ({
-  router: { back: vi.fn(), push: h.push },
-  Stack: { Screen: () => null },
+  router: { back: h.back, push: h.push },
+  Stack: {
+    Screen: ({ options }: { options?: { headerLeft?: () => ReactNode } }) =>
+      options?.headerLeft?.() ?? null,
+  },
 }));
-vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
-vi.mock("../../components/forms/use-dirty-dismiss", () => ({ useDirtyDismiss: () => () => {} }));
+vi.mock("../../components/editor-header", () => ({
+  editorDismissOptions: ({
+    label,
+    disabled,
+    onPress,
+  }: {
+    label: string;
+    disabled?: boolean;
+    onPress: () => void;
+  }) => ({
+    headerLeft: () => (
+      <button type="button" disabled={disabled} onClick={onPress}>
+        {label}
+      </button>
+    ),
+  }),
+}));
+vi.mock("../../components/forms/use-dirty-dismiss", () => ({
+  useDirtyDismiss: () => h.allowDismiss,
+}));
 vi.mock("../../components/forms/form-save", () => ({
   FormSave: ({ disabled, onPress }: { disabled: boolean; onPress: () => void }) => (
     <button type="button" aria-label="Save changes" disabled={disabled} onClick={onPress} />
@@ -849,4 +872,65 @@ it("offers initial profile and payroll loading recovery without rendering empty-
   fireEvent.click(screen.getByRole("button", { name: "Retry loading" }));
   expect(h.refetch).toHaveBeenCalledWith("finance-configuration");
   expect(screen.queryByLabelText("Employer")).not.toBeInTheDocument();
+});
+
+it.each([
+  "financial",
+  "payroll",
+] as const)("retains an unsaved %s draft until discard is explicitly accepted", async (kind) => {
+  h.resources["finance-configuration"] = {
+    income: { state: "loaded", value: null },
+    accounts: { state: "loaded", value: { accounts: [] } },
+  };
+  render(kind === "financial" ? <FinancialProfileSettingsScreen /> : <PayrollSettingsScreen />);
+  const label = kind === "financial" ? "Country and state or region" : "Employer";
+  const value = kind === "financial" ? "US, NY" : "Fixture employer";
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.confirm).toHaveBeenCalledWith(
+    kind === "financial" ? "Discard financial changes?" : "Discard payroll changes?",
+    "Unsaved changes will be lost.",
+    expect.any(Function),
+    true,
+  );
+  expect(h.back).not.toHaveBeenCalled();
+  expect(h.allowDismiss).not.toHaveBeenCalled();
+  expect(screen.getByLabelText(label)).toHaveValue(value);
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  await accept();
+  expect(h.allowDismiss).toHaveBeenCalledOnce();
+  expect(h.back).toHaveBeenCalledOnce();
+  expect(h.save).not.toHaveBeenCalled();
+  expect(h.payroll).not.toHaveBeenCalled();
+});
+
+it.each([
+  "financial",
+  "payroll",
+] as const)("leaves a pristine %s editor without a discard prompt or write", (kind) => {
+  h.resources["finance-configuration"] = {
+    income: { state: "loaded", value: null },
+    accounts: { state: "loaded", value: { accounts: [] } },
+  };
+  render(kind === "financial" ? <FinancialProfileSettingsScreen /> : <PayrollSettingsScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  expect(h.back).toHaveBeenCalledOnce();
+  expect(h.confirm).not.toHaveBeenCalled();
+  expect(h.save).not.toHaveBeenCalled();
+  expect(h.payroll).not.toHaveBeenCalled();
+});
+
+it("retries missing related Finance reads while retaining an entered planning draft", () => {
+  h.errors.add("finance-accounts");
+  h.errors.add("finance-goals");
+  render(<FinancialProfileSettingsScreen />);
+  fireEvent.change(screen.getByLabelText("Country and state or region"), {
+    target: { value: "US, NY" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading related accounts" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading financial goals" }));
+  expect(h.refetch.mock.calls).toEqual([["finance-accounts"], ["finance-goals"]]);
+  expect(screen.getByLabelText("Country and state or region")).toHaveValue("US, NY");
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  expect(h.save).not.toHaveBeenCalled();
 });

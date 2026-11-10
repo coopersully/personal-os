@@ -228,9 +228,9 @@ it("keeps a rejected draft local without falsely publishing it as accepted serve
   });
   expect(h.success).not.toHaveBeenCalled();
 });
-it("does not replace a newer queued native choice when the earlier accepted reply is published", async () => {
+it("rejects an already queued native choice before optimism and lets the human retry after the accepted write", async () => {
   let finish!: (value: WorkspaceSettings<"mail">) => void;
-  h.writeA.mockReturnValue(
+  h.writeA.mockReturnValueOnce(
     new Promise((resolve) => {
       finish = resolve;
     }),
@@ -241,11 +241,29 @@ it("does not replace a newer queued native choice when the earlier accepted repl
   await waitFor(() => expect(h.writeA).toHaveBeenCalledOnce());
   // Model an already queued native selection event delivered after pending disables the control.
   fireEvent.change(screen.getByLabelText("List density"), { target: { value: "expanded" } });
-  await act(async () => finish(settings(1, "compact")));
-  expect(screen.getByLabelText("List density")).toHaveValue("expanded");
+  const feedback = "Your previous choice is still saving. Choose again when it finishes.";
+  expect(h.error).toHaveBeenCalledWith(feedback);
+  expect(screen.queryByText(feedback)).not.toBeInTheDocument();
+  expect(screen.getByLabelText("List density")).toHaveValue("compact");
+  h.serverA = settings(1, "compact");
+  await act(async () => finish(h.serverA as WorkspaceSettings<"mail">));
+  await waitFor(() => expect(screen.getByLabelText("List density")).toBeEnabled());
   expect(client().getQueryData(key())).toMatchObject({
     revision: 1,
     preferences: { mailListDensity: "compact" },
+  });
+  fireEvent.change(screen.getByLabelText("List density"), { target: { value: "expanded" } });
+  await waitFor(() =>
+    expect(client().getQueryData(key())).toMatchObject({
+      revision: 2,
+      preferences: { mailListDensity: "expanded" },
+    }),
+  );
+  expect(h.serverA).toMatchObject({ revision: 2, preferences: { mailListDensity: "expanded" } });
+  expect(screen.getByLabelText("List density")).toHaveValue("expanded");
+  expect(h.writeA).toHaveBeenLastCalledWith("mail", {
+    expectedRevision: 1,
+    preferences: { mailListDensity: "expanded" },
   });
 });
 it("cancels an older in-flight Settings read before publishing the accepted reply", async () => {

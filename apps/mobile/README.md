@@ -44,7 +44,7 @@ pnpm --filter @personal-os/mobile archive
 ```
 
 The Release simulator build needs no signing identity. Archive uses Xcode automatic signing
-for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `7`.
+for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `8`.
 Archive builds explicitly bind to `https://nohmi-api.coopersully.me`, reject development API
 overrides and disable dotenv loading. Verify the signed archive against the committed source.
 Increment `ios.buildNumber` before every new App Store Connect upload and regenerate native files.

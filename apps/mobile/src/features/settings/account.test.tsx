@@ -47,6 +47,8 @@ vi.mock("./data", () => ({
   },
 }));
 vi.mock("react-native", () => ({
+  AppState: { addEventListener: () => ({ remove: vi.fn() }) },
+  Linking: { openURL: vi.fn() },
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   Pressable: ({ children, onPress }: PropsWithChildren<{ onPress: () => void }>) => (

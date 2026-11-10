@@ -1,8 +1,8 @@
 import type { AccountSetupWorkspace, User } from "@personal-os/domain";
 import { updateUserInputSchema } from "@personal-os/domain";
 import { router, Stack } from "expo-router";
-import { useState } from "react";
-import { View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { AppState, Linking, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
@@ -13,6 +13,17 @@ import { useSettingsAction, useUserSettings } from "./data";
 import { planningTimezoneChoices } from "./planning-timezones";
 import { ProfileLocation } from "./profile-location";
 import { ProfileTime } from "./profile-time";
+export function setupReplayUrl(base: string) {
+  const url = new URL(base);
+  if (
+    url.username ||
+    url.password ||
+    (url.protocol !== "https:" &&
+      !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))
+  )
+    throw new Error("The setup address is invalid.");
+  return new URL("/setup?replay=1", url.origin).toString();
+}
 export function ProfileSettingsScreen() {
   const { state, session } = useAuth();
   return state.user ? (
@@ -49,6 +60,19 @@ function Profile({ initial }: { initial: User }) {
   const { session } = useAuth();
   const userSettings = useUserSettings();
   const action = useSettingsAction();
+  const setupBrowserOpened = useRef(false);
+  useEffect(() => {
+    const listener = AppState.addEventListener("change", (next) => {
+      if (next !== "active" || !setupBrowserOpened.current) return;
+      setupBrowserOpened.current = false;
+      void action.run(async (api) => {
+        const epoch = session.epoch();
+        const user = await api.getMe();
+        session.acceptUserUpdate(user, epoch);
+      }, "Account setup status refreshed");
+    });
+    return () => listener.remove();
+  }, [action.run, session]);
   const [baseline, setBaseline] = useState(initial);
   const [draft, setDraft] = useState({
     first: initial.displayName.split(" ")[0] ?? "",
@@ -157,6 +181,23 @@ function Profile({ initial }: { initial: User }) {
           />
         </Section>
         <Section title="Workspace setup">
+          <Action
+            label="View setup experience on the web"
+            disabled={action.pending || userSettings.pending}
+            onPress={() =>
+              confirm(
+                "Open guided setup on the web?",
+                "This opens the existing web setup experience. You may need to sign in there. Return to nohmi to refresh account setup status; opening the browser does not complete setup.",
+                () =>
+                  void action.run(async (api) => {
+                    const context = await api.getPersonalOsContext();
+                    await Linking.openURL(setupReplayUrl(context.links.today));
+                    setupBrowserOpened.current = true;
+                  }, "Guided setup opened in browser. Return to nohmi to refresh its status."),
+              )
+            }
+          />
+
           {(["tasks", "mail", "calendar", "finances"] as AccountSetupWorkspace[]).map(
             (workspace) => (
               <ToggleRow

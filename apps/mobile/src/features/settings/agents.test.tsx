@@ -2,7 +2,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { AgentsSettingsScreen, agentIdentityInput, agentWorkItemUrl, tokenInput } from "./agents";
+import {
+  AgentsSettingsScreen,
+  agentIdentityInput,
+  agentWorkItemUrl,
+  tokenInput,
+  tokenPresets,
+} from "./agents";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -594,4 +600,53 @@ it.each([
   render(<AgentsSettingsScreen />);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retry loading" })));
   expect(h.refresh).toHaveBeenCalledWith(key);
+});
+
+it("matches web permission presets, changes only draft scopes, and keeps custom toggles behind explicit grant confirmation", async () => {
+  h.createToken.mockResolvedValue({ token: "preset-secret" });
+  render(<AgentsSettingsScreen />);
+  expect(tokenPresets.map((preset) => preset.name)).toEqual([
+    "Mail setup",
+    "Calendar & planning",
+    "Daily brief",
+    "Full nohmi",
+  ]);
+  for (const preset of tokenPresets) {
+    fireEvent.change(screen.getByLabelText("Permission preset"), {
+      target: { value: preset.name },
+    });
+    for (const scope of preset.scopes) expect(screen.getByLabelText(scope)).toBeChecked();
+    expect(h.createToken).not.toHaveBeenCalled();
+  }
+  fireEvent.change(screen.getByLabelText("Permission preset"), { target: { value: "Mail setup" } });
+  expect(screen.getByLabelText("mail:read")).toBeChecked();
+  expect(screen.getByLabelText("mail:write")).toBeChecked();
+  expect(screen.getByLabelText("tasks:read")).not.toBeChecked();
+  fireEvent.click(screen.getByLabelText("tasks:read"));
+  expect(screen.getByLabelText("Permission preset")).toHaveValue("custom");
+  expect(h.createToken).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "Preset helper" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+  expect(h.createToken).not.toHaveBeenCalled();
+  expect(h.confirm).toHaveBeenLastCalledWith(
+    "Grant agent access?",
+    expect.stringContaining("mail:read, mail:write, tasks:read"),
+    expect.any(Function),
+  );
+  await act(async () => h.confirm.mock.calls.at(-1)?.[2]());
+  expect(h.createToken).toHaveBeenCalledWith({
+    name: "Preset helper",
+    scopes: ["mail:read", "mail:write", "tasks:read"],
+  });
+});
+
+it("retries failed workspace setup status and authoritative web review links without granting scopes", async () => {
+  h.errors.add("agent-setup-status");
+  h.errors.add("agent-context");
+  render(<AgentsSettingsScreen />);
+  fireEvent.click(screen.getByText("Retry setup status"));
+  await waitFor(() => expect(h.refresh).toHaveBeenCalledWith("agent-setup-status"));
+  fireEvent.click(screen.getByText("Retry web review links"));
+  await waitFor(() => expect(h.refresh).toHaveBeenCalledWith("agent-context"));
+  expect(h.createToken).not.toHaveBeenCalled();
 });

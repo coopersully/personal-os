@@ -23,6 +23,57 @@ import { errorMessage } from "../tasks/data";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
 import { type SettingsApi, useSettingsAction, useSettingsResource } from "./data";
 
+export const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
+  {
+    description: "Learn your inbox preferences, preview rules, and run approved Mail rules.",
+    name: "Mail setup",
+    scopes: ["mail:read", "mail:write"],
+  },
+  {
+    description: "Plan, create, and complete your day.",
+    name: "Calendar & planning",
+    scopes: [
+      "calendar:read",
+      "calendar:write",
+      "reminders:read",
+      "reminders:write",
+      "tasks:read",
+      "tasks:write",
+      "automations:read",
+    ],
+  },
+  {
+    description: "Read your agenda, mail, and generated daily brief without changing them.",
+    name: "Daily brief",
+    scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read"],
+  },
+  {
+    description: "Create, manage, and audit all supported nohmi material.",
+    name: "Full nohmi",
+    scopes: [
+      "calendar:read",
+      "calendar:write",
+      "reminders:read",
+      "reminders:write",
+      "tasks:read",
+      "tasks:write",
+      "tracking:read",
+      "mail:read",
+      "mail:write",
+      "finances:read",
+      "finances:write",
+      "finances:maintain",
+      "goals:read",
+      "goals:write",
+      "automations:read",
+      "audit:read",
+      "bookmarks:read",
+      "texting:read",
+      "texting:write",
+    ],
+  },
+];
+
 export function agentIdentityInput(
   displayName: string,
   accountLabel: string,
@@ -201,6 +252,12 @@ function Authority({ onPendingChange }: { onPendingChange: (pending: boolean) =>
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<AccessScope[]>([]);
   const [secret, setSecret] = useState<string | null>(null);
+  const selectedPreset =
+    tokenPresets.find(
+      (preset) =>
+        preset.scopes.length === scopes.length &&
+        preset.scopes.every((scope) => scopes.includes(scope)),
+    )?.name ?? "custom";
   useEffect(() => {
     onPendingChange(action.pending);
   }, [action.pending, onPendingChange]);
@@ -307,6 +364,19 @@ function Authority({ onPendingChange }: { onPendingChange: (pending: boolean) =>
           editable={!action.pending && !secret}
           maxLength={80}
           placeholder="My agent connection"
+        />
+        <Choice
+          label="Permission preset"
+          value={selectedPreset}
+          disabled={action.pending || !!secret}
+          options={[
+            { value: "custom", label: "Custom permissions" },
+            ...tokenPresets.map((preset) => ({ value: preset.name, label: preset.name })),
+          ]}
+          onChange={(name) => {
+            const preset = tokenPresets.find((preset) => preset.name === name);
+            if (preset) setScopes([...preset.scopes]);
+          }}
         />
         {accessScopeSchema.options
           .filter((scope) => scope !== "automations:write" && scope !== "tracking:write")

@@ -11,7 +11,9 @@ API contracts and existing ownership/revision rules continue to determine mutati
 A settings row reads as **entity icon (when meaningful) → label → current value → accessory**.
 Center all four vertically within the row. Give the label and value bounded, flexible width;
 long values truncate in the trigger and remain available in the picker. Labels may wrap without
-clipping, and larger accessibility type must grow the row. Use explicit accessible names containing
+clipping, and larger accessibility type must grow the row. At larger text sizes, shared navigation
+and read-only detail rows stack the label above the full-width value so neither becomes a narrow
+word column; retain the semantic icon, accessory and complete accessible name. Use explicit accessible names containing
 both the label and current value. Preserve disabled and selected states.
 
 Content cards are a different pattern: their identity icons, task checkboxes and trailing record

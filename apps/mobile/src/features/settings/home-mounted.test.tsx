@@ -30,6 +30,7 @@ vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-testid={`icon-${name}`} />,
 }));
 vi.mock("react-native", () => ({
+  useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1, scale: 3 }),
   ScrollView: ({ children }: PropsWithChildren) => <div>{children}</div>,
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Text: ({ children, accessibilityRole }: PropsWithChildren<{ accessibilityRole?: string }>) =>

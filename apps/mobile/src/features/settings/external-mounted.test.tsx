@@ -71,6 +71,7 @@ vi.mock("../auth/context", () => {
   };
 });
 vi.mock("react-native", () => ({
+  useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1, scale: 3 }),
   Alert: { alert: h.alert },
   Pressable: ({
     children,

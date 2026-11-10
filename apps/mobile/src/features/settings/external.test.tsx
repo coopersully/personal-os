@@ -14,6 +14,9 @@ vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/package.json`)("react");
 });
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({ getQueryCache: () => ({ find: () => undefined }) }),
+}));
 vi.hoisted(() => vi.stubGlobal("require", (path: string) => path));
 const h = vi.hoisted(() => ({
   resources: {} as Record<string, unknown>,
@@ -91,6 +94,7 @@ vi.mock("../../components/forms/form-save", () => ({
 }));
 vi.mock("../../components/icons", () => ({ Icon: () => <span /> }));
 vi.mock("react-native", () => ({
+  useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1, scale: 3 }),
   Image: ({ accessibilityLabel }: { accessibilityLabel?: string }) => (
     <span role="img" aria-label={accessibilityLabel} />
   ),

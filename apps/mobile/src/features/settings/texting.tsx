@@ -5,11 +5,13 @@ import {
   startTextingVerificationInputSchema,
   textingConsentVersion,
 } from "@personal-os/domain";
+import { useQueryClient } from "@tanstack/react-query";
 import { router, Stack, usePreventRemove } from "expo-router";
 import { useEffect, useState } from "react";
 import { AppState, Linking, Text } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
+import { holdReadFeedback } from "../../components/read-feedback-scope";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
@@ -21,6 +23,8 @@ export function TextingSettingsScreen() {
 }
 function Texting() {
   const t = useTheme();
+  const { state, session } = useAuth();
+  const cache = useQueryClient();
   const action = useSettingsAction();
   const connection = useSettingsResource("texting", (api) => api.getTextingConnection());
   const [country, setCountry] = useState<"US" | "CA">("US");
@@ -166,9 +170,18 @@ function Texting() {
             disabled={action.pending}
             onPress={() =>
               void action.run(async () => {
-                const result = await connection.refetch();
-                if (result.error) throw result.error;
-                return result.data;
+                const query = cache.getQueryCache().find({
+                  queryKey: ["settings", state.user?.id, session.epoch(), "texting"],
+                  exact: true,
+                });
+                const release = holdReadFeedback(query ? [query] : []);
+                try {
+                  const result = await connection.refetch();
+                  if (result.error) throw result.error;
+                  return result.data;
+                } finally {
+                  release();
+                }
               }, "Texting status refreshed")
             }
           />

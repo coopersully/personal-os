@@ -252,10 +252,25 @@ it("does not expose setup or claim a refreshed capability after an unavailable-s
   await screen.findByText(/Phone setup and verification are unavailable/);
   h.api.getTextingConnection.mockRejectedValueOnce(new Error("Offline"));
   fireEvent.click(screen.getByText("Refresh texting status"));
-  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
+  const feedback =
+    "Couldn’t confirm the result. Check your connection and refresh before retrying.";
+  expect(h.error).toHaveBeenCalledWith(feedback, { id: "toast" });
   expect(screen.queryByLabelText("Mobile number")).toBeNull();
+  expect(screen.getByText(/Phone setup and verification are unavailable/)).toBeVisible();
   expect(h.success).not.toHaveBeenCalled();
   expect(screen.queryByText("Offline")).toBeNull();
+  expect(screen.queryByText(feedback)).toBeNull();
+  h.api.getTextingConnection.mockResolvedValue(disconnected);
+  fireEvent.click(screen.getByText("Refresh texting status"));
+  await screen.findByLabelText("Mobile number");
+  expect(h.success).toHaveBeenCalledWith("Texting status refreshed", { id: "toast" });
+  expect(h.api.startTextingVerification).not.toHaveBeenCalled();
+  expect(h.api.checkTextingVerification).not.toHaveBeenCalled();
+  h.api.getTextingConnection.mockRejectedValueOnce(new Error("Background offline"));
+  act(() => h.foreground?.());
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
+  expect(screen.getByLabelText("Mobile number")).toBeVisible();
 });
 it("isolates retained policy drafts when authenticated owner changes", async () => {
   const view = render(wrap(<GlobalNotificationPolicyScreen />));

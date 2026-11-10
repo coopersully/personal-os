@@ -61,6 +61,8 @@ const h = vi.hoisted(() => ({
 vi.mock("react-native", () => {
   const Box = ({ children }: PropsWithChildren) => <div>{children}</div>;
   return {
+    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1, scale: 3 }),
+    Keyboard: { addListener: () => ({ remove: () => {} }) },
     View: Box,
     Text: Box,
     ScrollView: Box,

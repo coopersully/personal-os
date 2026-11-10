@@ -82,3 +82,23 @@ it("retrieves exact issued prompt versions and sends replay identity without reg
     "https://example.test/v1/automation-hosts/host%2Fid/prompts",
   );
 });
+
+it("uses exact instruction operation, receipt and version identities through authenticated transport", async () => {
+  const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => Response.json({}));
+  const api = createApiClient({ baseUrl: "https://example.test", fetch });
+  await api.loadFinanceHostInstructions("host/id", { operationId: "operation" });
+  await api.acknowledgeFinanceHostInstructions("host/id", {
+    receiptId: "receipt",
+    instructionVersion: 2,
+  });
+  await api.getFinanceHostInstructionHistory("host/id", { before: "receipt/id", limit: 1 });
+  expect(fetch.mock.calls.map((call) => call[0])).toEqual([
+    "https://example.test/v1/automation-hosts/host%2Fid/instructions",
+    "https://example.test/v1/automation-hosts/host%2Fid/instructions/acknowledgments",
+    "https://example.test/v1/automation-hosts/host%2Fid/instructions/history?before=receipt%2Fid&limit=1",
+  ]);
+  expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body))).toEqual({
+    receiptId: "receipt",
+    instructionVersion: 2,
+  });
+});

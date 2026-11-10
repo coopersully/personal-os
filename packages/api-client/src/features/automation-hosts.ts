@@ -10,6 +10,10 @@ import type {
   AutomationHostScheduleObservationInput,
   AutomationHostScheduleRevokeInput,
   AutomationHostScheduleUpdateInput,
+  FinanceConversationReadiness,
+  FinanceHostInstructionDelivery,
+  FinanceHostInstructionReceipt,
+  FinanceHostInstructionSummary,
 } from "@personal-os/domain";
 
 type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -24,7 +28,12 @@ export type HostScheduleStatus = {
     currentTemplateVersion: number;
     upgradeAvailable: boolean;
   };
-  chatCapability?: { state: "unverified"; reason: "message_protocol_unavailable" };
+  instructions?: FinanceHostInstructionSummary;
+  chatCapability?: {
+    state: FinanceConversationReadiness["messageCapability"];
+    reason: FinanceConversationReadiness["reason"];
+    canSend: boolean;
+  };
 };
 export type FinanceContinuation = {
   id: string;
@@ -35,6 +44,30 @@ export type FinanceContinuation = {
 export function createAutomationHostApi(request: Request) {
   const path = (id: string) => `/v1/automation-hosts/${encodeURIComponent(id)}`;
   return {
+    loadFinanceHostInstructions: (id: string, input: { operationId: string }) =>
+      request<FinanceHostInstructionDelivery>(`${path(id)}/instructions`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    acknowledgeFinanceHostInstructions: (
+      id: string,
+      input: { receiptId: string; instructionVersion: number },
+    ) =>
+      request<FinanceHostInstructionReceipt>(`${path(id)}/instructions/acknowledgments`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    getFinanceHostInstructionHistory: (
+      id: string,
+      input: { before?: string; limit?: number } = {},
+    ) => {
+      const query = new URLSearchParams();
+      if (input.before) query.set("before", input.before);
+      if (input.limit !== undefined) query.set("limit", String(input.limit));
+      return request<{ receipts: FinanceHostInstructionReceipt[]; nextCursor: string | null }>(
+        `${path(id)}/instructions/history${query.size ? `?${query}` : ""}`,
+      );
+    },
     getAutomationHostPromptHistory: (
       id: string,
       input: { beforeVersion?: number; limit?: number } = {},

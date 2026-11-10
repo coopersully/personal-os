@@ -16,6 +16,9 @@ function fixture() {
     scopes: new Set<AccessScope>(["finances:read", "finances:write", "finances:maintain"]),
   };
   const service = {
+    beginTurn: vi.fn(async () => ({ turn: null, messages: [] })),
+    acknowledgeTurn: vi.fn(async () => ({ acknowledgedMessageIds: [] })),
+    replyToTurn: vi.fn(async () => ({ id: runId })),
     getReadiness: vi.fn(async () => ({ canSend: false })),
     getHostReadiness: vi.fn(async () => ({ canSend: true })),
     messageContext: vi.fn(async () => ({ targetMessageId: runId, messages: [] })),
@@ -54,6 +57,36 @@ const post = (body: unknown): RequestInit => ({
 });
 
 describe("Finance conversation leaf routes", () => {
+  it("routes bounded turn capture, acknowledgment and causal reply through authenticated service", async () => {
+    const f = fixture();
+    expect(
+      (await f.app.request(`/v1/finances/conversation/hosts/${runId}/turns`, post({}))).status,
+    ).toBe(200);
+    expect(f.service.beginTurn).toHaveBeenCalledWith(f.principal, runId);
+    expect(
+      (
+        await f.app.request(
+          `/v1/finances/conversation/hosts/${runId}/turns`,
+          post({ userId: ownerId }),
+        )
+      ).status,
+    ).toBe(400);
+    await f.app.request(
+      `/v1/finances/conversation/turns/${runId}/acknowledgments`,
+      post({ messageIds: [runId] }),
+    );
+    expect(f.service.acknowledgeTurn).toHaveBeenCalledWith(f.principal, runId, [runId]);
+    const input = {
+      text: "Hello",
+      idempotencyKey: "retry",
+      sourceMessageIds: [runId],
+      caseId: null,
+    };
+    expect(
+      (await f.app.request(`/v1/finances/conversation/turns/${runId}/replies`, post(input))).status,
+    ).toBe(201);
+    expect(f.service.replyToTurn).toHaveBeenCalledWith(f.principal, runId, input);
+  });
   it("uses authenticated owner identity, prevents private caching and rejects foreign-owner overrides", async () => {
     const f = fixture();
     const response = await f.app.request(

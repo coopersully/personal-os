@@ -10,14 +10,38 @@ import type {
   FinanceConversationReadiness,
   FinanceConversationReplyInput,
   FinanceConversationSendInput,
+  FinanceConversationTurnPage,
 } from "@personal-os/domain";
 import type { FinanceRequest } from "./finances.js";
 
-/** Uses the shared authenticated transport; agents have no live history/queue operation. */
+/** Shared authenticated transport; agent access uses bounded immutable batches/turns. */
 export function createFinanceConversationApi(request: FinanceRequest) {
   const root = "/v1/finances/conversation";
   const post = (body: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(body) });
   return {
+    beginFinanceConversationTurn(scheduleId: string) {
+      return request<FinanceConversationTurnPage>(
+        `${root}/hosts/${encodeURIComponent(scheduleId)}/turns`,
+        post({}),
+      );
+    },
+    acknowledgeFinanceConversationTurn(
+      turnId: string,
+      input: FinanceConversationAcknowledgmentInput,
+    ) {
+      return request<{ acknowledgedMessageIds: string[] }>(
+        `${root}/turns/${encodeURIComponent(turnId)}/acknowledgments`,
+        post(input),
+      );
+    },
+    async replyToFinanceConversationTurn(turnId: string, input: FinanceConversationReplyInput) {
+      return (
+        await request<{ message: FinanceConversationMessage }>(
+          `${root}/turns/${encodeURIComponent(turnId)}/replies`,
+          post(input),
+        )
+      ).message;
+    },
     async getFinanceConversationReadiness() {
       return (await request<{ readiness: FinanceConversationReadiness }>(`${root}/readiness`))
         .readiness;

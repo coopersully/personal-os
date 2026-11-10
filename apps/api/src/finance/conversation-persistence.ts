@@ -13,6 +13,8 @@ import {
   financeConversationMessages,
   financeConversationReadCursors,
   financeConversations,
+  financeConversationTurnMessages,
+  financeConversationTurns,
   financeReviewCases,
   financeTransactions,
   workspaceMaintenanceRuns,
@@ -31,6 +33,7 @@ import {
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import { activeHostConnectionGrant } from "../automation-host-grant.js";
 import { AppError } from "../errors.js";
+import { enqueueNativePushEvent } from "../native-push-service.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
 import {
@@ -136,7 +139,7 @@ async function nextSequence(tx: Transaction, userId: string) {
   return row.nextSequence;
 }
 
-/** No model or independent dispatcher: all agent access is to an existing maintenance run. */
+/** API-owned durable conversation protocol; no independent model dispatcher. */
 export function createFinanceConversationService({
   db,
   now = () => new Date(),
@@ -392,14 +395,316 @@ export function createFinanceConversationService({
     );
     return saved;
   }
+  async function turnAuthority(
+    tx: Transaction,
+    principal: Principal,
+    scheduleId: string,
+    connectionId: string,
+  ) {
+    await requireHostRunAuthority(
+      tx,
+      {
+        userId: principal.userId,
+        automationScheduleId: scheduleId,
+        authorizationConnectionId: connectionId,
+      },
+      principal,
+      now(),
+    );
+    await requireWorkspaceExecution(tx, principal, "finances", now());
+    await requireCurrentFinanceExecutionProof(tx, principal.userId, scheduleId, connectionId);
+  }
+  async function ownedTurn(tx: Transaction, principal: Principal, turnId: string) {
+    const [turn] = await tx
+      .select()
+      .from(financeConversationTurns)
+      .where(
+        and(
+          eq(financeConversationTurns.userId, principal.userId),
+          eq(financeConversationTurns.id, turnId),
+        ),
+      )
+      .for("update");
+    if (!turn) throw new AppError("not_found", "The Finance conversation turn was not found.");
+    await turnAuthority(tx, principal, turn.automationScheduleId, turn.authorizationConnectionId);
+    return turn;
+  }
+  async function guardTurn(tx: Transaction, principal: Principal) {
+    await guardFinanceExecutionTransaction(tx, principal.userId, {
+      actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+      connectionIds: principal.authorizationConnectionId
+        ? [principal.authorizationConnectionId]
+        : [],
+      hostSchedules: true,
+    });
+    await lockOwner(tx, principal.userId);
+  }
   return {
+    /** Atomic bounded capture/resume; no financial run is created, rebound or advanced. */
+    async beginTurn(principal: Principal, scheduleId: string) {
+      return db.transaction(async (tx) => {
+        await guardTurn(tx, principal);
+        const { schedule } = await liveSchedule(tx, principal.userId, scheduleId);
+        await turnAuthority(tx, principal, scheduleId, schedule.authorizationConnectionId);
+        let [turn] = await tx
+          .select()
+          .from(financeConversationTurns)
+          .where(
+            and(
+              eq(financeConversationTurns.userId, principal.userId),
+              eq(financeConversationTurns.automationScheduleId, scheduleId),
+              eq(
+                financeConversationTurns.authorizationConnectionId,
+                schedule.authorizationConnectionId,
+              ),
+              sql`EXISTS (SELECT 1 FROM ${financeConversationTurnMessages} tm WHERE tm.user_id = ${principal.userId}::uuid AND tm.turn_id = ${financeConversationTurns.id} AND tm.reply_message_id IS NULL)`,
+            ),
+          )
+          .orderBy(asc(financeConversationTurns.createdAt), asc(financeConversationTurns.id))
+          .limit(1)
+          .for("update");
+        if (!turn) {
+          const pending = await tx
+            .select()
+            .from(financeConversationMessages)
+            .where(
+              and(
+                eq(financeConversationMessages.userId, principal.userId),
+                eq(financeConversationMessages.authorKind, "user"),
+                sql`NOT EXISTS (SELECT 1 FROM ${financeConversationTurnMessages} tm WHERE tm.user_id = ${principal.userId}::uuid AND tm.message_id = ${financeConversationMessages.id})`,
+                sql`NOT EXISTS (SELECT 1 FROM ${financeConversationBatchMessages} bm WHERE bm.user_id = ${principal.userId}::uuid AND bm.message_id = ${financeConversationMessages.id})`,
+              ),
+            )
+            .orderBy(asc(financeConversationMessages.sequence))
+            .limit(100);
+          const lastPending = pending.at(-1);
+          if (!lastPending) return { turn: null, messages: [] };
+          [turn] = await tx
+            .insert(financeConversationTurns)
+            .values({
+              userId: principal.userId,
+              automationScheduleId: scheduleId,
+              authorizationConnectionId: schedule.authorizationConnectionId,
+              cutoffSequence: lastPending.sequence,
+              createdAt: now(),
+            })
+            .returning();
+          if (!turn) throw new AppError("internal_error", "The conversation turn was not saved.");
+          const turnId = turn.id;
+          await tx.insert(financeConversationTurnMessages).values(
+            pending.map((message) => ({
+              userId: principal.userId,
+              turnId,
+              messageId: message.id,
+            })),
+          );
+        }
+        const sources = await tx
+          .select({ message: financeConversationMessages })
+          .from(financeConversationTurnMessages)
+          .innerJoin(
+            financeConversationMessages,
+            and(
+              eq(financeConversationMessages.userId, financeConversationTurnMessages.userId),
+              eq(financeConversationMessages.id, financeConversationTurnMessages.messageId),
+            ),
+          )
+          .where(
+            and(
+              eq(financeConversationTurnMessages.userId, principal.userId),
+              eq(financeConversationTurnMessages.turnId, turn.id),
+              isNull(financeConversationTurnMessages.replyMessageId),
+            ),
+          )
+          .orderBy(asc(financeConversationMessages.sequence));
+        await tx
+          .update(financeConversationTurnMessages)
+          .set({
+            deliveredAt: sql`coalesce(${financeConversationTurnMessages.deliveredAt}, ${now()})`,
+          })
+          .where(
+            and(
+              eq(financeConversationTurnMessages.userId, principal.userId),
+              eq(financeConversationTurnMessages.turnId, turn.id),
+              isNull(financeConversationTurnMessages.replyMessageId),
+            ),
+          );
+        return {
+          turn: {
+            id: turn.id,
+            automationScheduleId: turn.automationScheduleId,
+            authorizationConnectionId: turn.authorizationConnectionId,
+            cutoffSequence: turn.cutoffSequence.toString(),
+            createdAt: turn.createdAt.toISOString(),
+          },
+          messages: await messageValues(
+            tx,
+            sources.map((row) => row.message),
+          ),
+        };
+      });
+    },
+    async acknowledgeTurn(principal: Principal, turnId: string, messageIds: string[]) {
+      if (messageIds.length > 100)
+        throw new AppError("invalid_request", "Acknowledge at most 100 delivered messages.");
+      return db.transaction(async (tx) => {
+        await guardTurn(tx, principal);
+        await ownedTurn(tx, principal, turnId);
+        const rows = await tx
+          .select()
+          .from(financeConversationTurnMessages)
+          .where(
+            and(
+              eq(financeConversationTurnMessages.userId, principal.userId),
+              eq(financeConversationTurnMessages.turnId, turnId),
+              isNotNull(financeConversationTurnMessages.deliveredAt),
+              inArray(financeConversationTurnMessages.messageId, messageIds),
+            ),
+          );
+        requireDeliveredConversationAcknowledgment(
+          rows.map((row) => row.messageId),
+          messageIds,
+        );
+        if (messageIds.length)
+          await tx
+            .update(financeConversationTurnMessages)
+            .set({
+              acknowledgedAt: sql`coalesce(${financeConversationTurnMessages.acknowledgedAt}, ${now()})`,
+            })
+            .where(
+              and(
+                eq(financeConversationTurnMessages.userId, principal.userId),
+                eq(financeConversationTurnMessages.turnId, turnId),
+                inArray(financeConversationTurnMessages.messageId, messageIds),
+              ),
+            );
+        return { acknowledgedMessageIds: messageIds };
+      });
+    },
+    async replyToTurn(
+      principal: Principal,
+      turnId: string,
+      input: {
+        text: string;
+        idempotencyKey: string;
+        sourceMessageIds: string[];
+        caseId?: string | null;
+      },
+    ) {
+      const parsed = financeConversationSendInputSchema.parse({
+        text: input.text,
+        idempotencyKey: input.idempotencyKey,
+        caseId: input.caseId ?? null,
+      });
+      if (
+        !input.sourceMessageIds.length ||
+        input.sourceMessageIds.length > 100 ||
+        new Set(input.sourceMessageIds).size !== input.sourceMessageIds.length
+      )
+        throw new AppError("invalid_request", "Choose one to 100 exact source messages.");
+      return db.transaction(async (tx) => {
+        await guardTurn(tx, principal);
+        const turn = await ownedTurn(tx, principal, turnId);
+        const sources = await tx
+          .select({ member: financeConversationTurnMessages, message: financeConversationMessages })
+          .from(financeConversationTurnMessages)
+          .innerJoin(
+            financeConversationMessages,
+            and(
+              eq(financeConversationMessages.userId, financeConversationTurnMessages.userId),
+              eq(financeConversationMessages.id, financeConversationTurnMessages.messageId),
+            ),
+          )
+          .where(
+            and(
+              eq(financeConversationTurnMessages.userId, principal.userId),
+              eq(financeConversationTurnMessages.turnId, turnId),
+              isNotNull(financeConversationTurnMessages.deliveredAt),
+              inArray(financeConversationTurnMessages.messageId, input.sourceMessageIds),
+            ),
+          );
+        if (
+          sources.length !== input.sourceMessageIds.length ||
+          sources.some((row) => row.message.sequence > turn.cutoffSequence)
+        )
+          throw new AppError(
+            "conflict",
+            "Cite only delivered messages from this fixed conversation turn.",
+          );
+        if (
+          parsed.caseId &&
+          !sources.some((row) => messageValue(row.message).caseId === parsed.caseId)
+        )
+          throw new AppError("conflict", "The reply case must match its sources.");
+        const [existing] = await tx
+          .select()
+          .from(financeConversationMessages)
+          .where(
+            and(
+              eq(financeConversationMessages.userId, principal.userId),
+              eq(financeConversationMessages.authorKind, "agent"),
+              eq(financeConversationMessages.idempotencyKey, parsed.idempotencyKey),
+            ),
+          );
+        if (existing) {
+          if (
+            existing.runId ||
+            existing.text !== parsed.text ||
+            messageValue(existing).caseId !== parsed.caseId ||
+            !isDeepStrictEqual(existing.sourceMessageIds, input.sourceMessageIds) ||
+            sources.some((row) => row.member.replyMessageId !== existing.id)
+          )
+            throw new AppError(
+              "conflict",
+              "This reply identity already has different content or sources.",
+            );
+          return messageValue(existing);
+        }
+        if (sources.some((row) => row.member.replyMessageId))
+          throw new AppError("conflict", "A source message already has a committed reply.");
+        const [message] = await tx
+          .insert(financeConversationMessages)
+          .values({
+            ...parsed,
+            userId: principal.userId,
+            authorKind: "agent",
+            caseOwnerId: parsed.caseId ? principal.userId : null,
+            recordRefs: parsed.caseId ? [{ kind: "review_case", id: parsed.caseId }] : [],
+            runId: null,
+            sourceMessageIds: input.sourceMessageIds,
+            sequence: await nextSequence(tx, principal.userId),
+            createdAt: now(),
+          })
+          .returning();
+        if (!message) throw new AppError("internal_error", "The Finance reply was not saved.");
+        await tx
+          .update(financeConversationTurnMessages)
+          .set({ replyMessageId: message.id })
+          .where(
+            and(
+              eq(financeConversationTurnMessages.userId, principal.userId),
+              eq(financeConversationTurnMessages.turnId, turnId),
+              inArray(financeConversationTurnMessages.messageId, input.sourceMessageIds),
+            ),
+          );
+        await enqueueNativePushEvent(tx, {
+          userId: principal.userId,
+          sourceId: message.id,
+          kind: "reply",
+          sourceRevision: "1",
+          createdAt: message.createdAt,
+        });
+        return messageValue(message);
+      });
+    },
     async getReadiness(userId: string) {
       return db.transaction(async (tx) => {
         await guardFinanceExecutionTransaction(tx, userId, { hostSchedules: true });
         return readiness(tx, userId);
       });
     },
-    async getHostReadiness(userId: string, scheduleId: string) {
+    async getHostReadiness(userId: string, scheduleId: string, transaction?: Transaction) {
+      if (transaction) return readiness(transaction, userId, scheduleId);
       return db.transaction(async (tx) => {
         await guardFinanceExecutionTransaction(tx, userId, { hostSchedules: true });
         return readiness(tx, userId, scheduleId);
@@ -799,6 +1104,13 @@ export function createFinanceConversationService({
           })
           .returning();
         if (!row) throw new AppError("internal_error", "The Finance reply was not persisted.");
+        await enqueueNativePushEvent(tx, {
+          userId: principal.userId,
+          sourceId: row.id,
+          kind: "reply",
+          sourceRevision: "1",
+          createdAt: row.createdAt,
+        });
         return messageValue(row);
       });
     },

@@ -339,3 +339,21 @@ export const financeConversationEvidenceReadResultSchema = z.discriminatedUnion(
 export type FinanceConversationEvidenceReadResult = z.infer<
   typeof financeConversationEvidenceReadResultSchema
 >;
+
+/** A bounded chat turn has no financial run/effect authority. */
+export const financeConversationTurnPageSchema = z
+  .object({
+    turn: z
+      .object({
+        id: idSchema,
+        automationScheduleId: idSchema,
+        authorizationConnectionId: idSchema,
+        cutoffSequence: financeConversationSequenceSchema,
+        createdAt: isoDateTimeSchema,
+      })
+      .strict()
+      .nullable(),
+    messages: z.array(financeConversationMessageSchema).max(100),
+  })
+  .strict();
+export type FinanceConversationTurnPage = z.infer<typeof financeConversationTurnPageSchema>;

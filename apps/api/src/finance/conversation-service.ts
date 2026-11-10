@@ -6,6 +6,7 @@ import {
   financeConversationBatchMessages,
   financeConversationMessages,
   financeConversations,
+  financeConversationTurnMessages,
   type workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import type { FinanceConversationBatch, FinanceConversationMessage } from "@personal-os/domain";
@@ -226,7 +227,8 @@ export const postgresConversationBatchStore: ConversationBatchStore<Transaction>
     await tx.execute(sql`INSERT INTO ${financeConversationBatchMessages} (user_id, run_id, message_id)
       SELECT ${userId}::uuid, ${batch.runId}::uuid, m.id FROM ${financeConversationMessages} m
       WHERE m.user_id = ${userId}::uuid AND m.author_kind = 'user' AND m.sequence <= ${batch.cutoffSequence}::bigint
-      AND NOT EXISTS (SELECT 1 FROM ${financeConversationBatchMessages} old WHERE old.user_id = m.user_id AND old.message_id = m.id)`);
+      AND NOT EXISTS (SELECT 1 FROM ${financeConversationBatchMessages} old WHERE old.user_id = m.user_id AND old.message_id = m.id)
+      AND NOT EXISTS (SELECT 1 FROM ${financeConversationTurnMessages} chat WHERE chat.user_id = m.user_id AND chat.message_id = m.id)`);
   },
 };
 

@@ -13,7 +13,10 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 /** A saved host run never acquires authority from a different connection. */
 export async function requireHostRunAuthority(
   tx: Transaction,
-  run: typeof workspaceMaintenanceRuns.$inferSelect,
+  run: Pick<
+    typeof workspaceMaintenanceRuns.$inferSelect,
+    "userId" | "automationScheduleId" | "authorizationConnectionId"
+  >,
   principal: Principal,
   now: Date,
 ) {

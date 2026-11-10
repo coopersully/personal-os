@@ -1,13 +1,16 @@
 import { financeMaintenanceInputSchema } from "@personal-os/domain";
-import { renderFinanceAutomationPrompt } from "./automation-prompts.js";
+import {
+  renderFinanceAutomationPrompt,
+  renderFinanceHostInstructions,
+} from "./automation-prompts.js";
 
 describe("issued Finance automation prompts", () => {
   it("keeps each internal schedule identity in current supported maintenance instructions", () => {
     const first = "11111111-1111-4111-8111-111111111111";
     const second = "22222222-2222-4222-8222-222222222222";
     for (const hostSurface of ["codex_desktop", "claude_code_routine"] as const) {
-      const a = renderFinanceAutomationPrompt({ id: first, hostSurface });
-      const b = renderFinanceAutomationPrompt({ id: second, hostSurface });
+      const a = renderFinanceHostInstructions({ id: first, hostSurface });
+      const b = renderFinanceHostInstructions({ id: second, hostSurface });
       expect(a).toContain(first);
       expect(a).not.toContain(second);
       expect(b).toContain(second);
@@ -28,7 +31,7 @@ it.each([
   const scheduleId = "11111111-1111-4111-8111-111111111111";
   const runId = "22222222-2222-4222-8222-222222222222";
   const continuationId = "33333333-3333-4333-8333-333333333333";
-  const text = renderFinanceAutomationPrompt({ id: scheduleId, hostSurface });
+  const text = renderFinanceHostInstructions({ id: scheduleId, hostSurface });
   const commands = [...text.matchAll(/maintain_finances (\{[^}]+\})/g)].map((match) =>
     financeMaintenanceInputSchema.parse(
       JSON.parse(
@@ -53,7 +56,7 @@ it.each([
 });
 
 it("makes scheduled-only continuation latency and server-owned slots explicit", () => {
-  const text = renderFinanceAutomationPrompt({
+  const text = renderFinanceHostInstructions({
     id: "schedule",
     hostSurface: "claude_code_routine",
     trigger: { type: "scheduled", localTimes: ["08:00", "20:00"], timeZone: "America/New_York" },
@@ -62,4 +65,12 @@ it("makes scheduled-only continuation latency and server-owned slots explicit", 
   expect(text).toContain("do not submit nextExpectedAt");
   expect(text).toContain("No API trigger or trigger bearer is required");
   expect(text).toContain("wait for the next scheduled invocation");
+});
+
+it("issues a stable fail-closed bootstrap that fetches current API-owned instructions every invocation", () => {
+  const text = renderFinanceAutomationPrompt({ id: "schedule" });
+  expect(text).toContain("load_finance_host_instructions");
+  expect(text).toContain("acknowledge_finance_host_instructions");
+  expect(text).toContain("do not use cached workflow instructions");
+  expect(text).not.toContain("maintain_finances");
 });

@@ -491,6 +491,21 @@ export const personalOsToolCatalog = {
     "inspect",
     { openWorld: false },
   ),
+  begin_finance_conversation_turn: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "inspect", idempotent: true, openWorld: false },
+  ),
+  acknowledge_finance_conversation_turn: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "verify", idempotent: true, openWorld: false },
+  ),
+  reply_to_finance_conversation_turn: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "commit", idempotent: true, openWorld: false },
+  ),
   get_finance_conversation_batch: write(
     "finances",
     ["finances:maintain", "finances:write", "finances:execute"],
@@ -510,6 +525,22 @@ export const personalOsToolCatalog = {
     "finances",
     ["finances:maintain", "finances:write", "finances:execute"],
     { policy: "approved_rule", stage: "verify", idempotent: true, openWorld: false },
+  ),
+  load_finance_host_instructions: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "inspect", idempotent: true, openWorld: false },
+  ),
+  acknowledge_finance_host_instructions: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "verify", idempotent: true, openWorld: false },
+  ),
+  get_finance_host_instruction_history: read(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    "inspect",
+    { openWorld: false },
   ),
   get_finance_host_prompt_history: read("finances", ["finances:maintain"], "inspect", {
     openWorld: false,

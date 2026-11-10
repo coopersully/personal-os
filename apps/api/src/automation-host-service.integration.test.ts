@@ -386,7 +386,7 @@ describe.sequential("tenant-bound host schedules", () => {
     });
     const id = created.schedule.id;
     expect(created.schedule).toMatchObject({ state: "setup_pending", nextExpectedAt: null });
-    expect(created.prompt.latestIssued?.text).toContain("wait for the next scheduled invocation");
+    expect(created.prompt.latestIssued?.text).toContain("load_finance_host_instructions");
     const bound = await service.bind(f.human, id, {
       hostSurface: "claude_code_routine",
       expectedVersion: 1,

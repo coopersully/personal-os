@@ -1055,6 +1055,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         "List ledger transactions for investigation, accounting, or audit. Treat cursor as opaque and pass it back unchanged.",
       inputSchema: {
         accountId: id.optional(),
+        budgetId: id.optional(),
         categoryId: id.optional(),
         cursor: z.string().max(600).optional(),
         from: z.iso.date().optional(),

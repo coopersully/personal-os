@@ -22,6 +22,7 @@ vi.mock("expo-constants", () => ({
   default: { nativeAppVersion: "2.4.1", nativeBuildVersion: "81" },
 }));
 vi.mock("../../theme", () => ({
+  spacing: { xs: 4, md: 12, lg: 16 },
   useTheme: () => ({ ink: "black", secondary: "gray" }),
   workspaceColor: () => "#123456",
 }));

@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MobileDataProvider } from "../tasks/data";
-import { AgentsSettingsScreen } from "./agents";
+import { AgentPolicyScreen } from "./agents";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -40,7 +40,11 @@ vi.mock("expo-router", () => ({ Stack: { Screen: () => null } }));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
 vi.mock("../../components/forms/form-save", () => ({ FormSave: () => null }));
 vi.mock("../../components/forms/use-dirty-dismiss", () => ({ useDirtyDismiss: () => () => {} }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../theme", () => ({
+  useTheme: () => ({}),
+  spacing: { xs: 4, md: 12, lg: 16 },
+  workspaceColor: () => "#123456",
+}));
 vi.mock("../tasks/ui", () => ({
   Section: ({ children }: PropsWithChildren) => <div>{children}</div>,
   FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,
@@ -84,7 +88,7 @@ beforeEach(() => {
 const show = () =>
   render(
     <MobileDataProvider>
-      <AgentsSettingsScreen />
+      <AgentPolicyScreen />
     </MobileDataProvider>,
   );
 it("uses exactly one loading-to-error toast for a cached policy refresh with the real provider QueryCache", async () => {

@@ -465,8 +465,17 @@ export function createFinanceConversationService({
         return messageValue(row);
       });
     },
-    async history(userId: string, after = "0", limit = 50) {
+    async history(
+      userId: string,
+      after = "0",
+      limit = 50,
+      backward?: { before?: string | undefined },
+    ) {
       const sequence = BigInt(financeConversationSequenceSchema.parse(after));
+      const before =
+        backward?.before === undefined
+          ? undefined
+          : BigInt(financeConversationSequenceSchema.parse(backward.before));
       if (!Number.isInteger(limit) || limit < 1 || limit > 100)
         throw new AppError("invalid_request", "Choose a page size between 1 and 100.");
       const rows = await db
@@ -475,15 +484,29 @@ export function createFinanceConversationService({
         .where(
           and(
             eq(financeConversationMessages.userId, userId),
-            gt(financeConversationMessages.sequence, sequence),
+            backward
+              ? before === undefined
+                ? undefined
+                : lt(financeConversationMessages.sequence, before)
+              : gt(financeConversationMessages.sequence, sequence),
           ),
         )
-        .orderBy(asc(financeConversationMessages.sequence))
+        .orderBy(
+          backward
+            ? desc(financeConversationMessages.sequence)
+            : asc(financeConversationMessages.sequence),
+        )
         .limit(limit + 1);
-      const messages = await messageValues(db, rows.slice(0, limit));
+      const messages = await messageValues(
+        db,
+        backward ? rows.slice(0, limit).reverse() : rows.slice(0, limit),
+      );
       return {
         messages,
-        nextCursor: rows.length > limit ? (messages.at(-1)?.sequence ?? null) : null,
+        nextCursor:
+          rows.length > limit
+            ? ((backward ? messages[0] : messages.at(-1))?.sequence ?? null)
+            : null,
       };
     },
     async messageContext(userId: string, messageId: string) {

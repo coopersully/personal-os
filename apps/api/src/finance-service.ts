@@ -2503,12 +2503,117 @@ export function createFinanceService({
     });
   }
 
+  async function budgetProjection(userId: string, month: string) {
+    const [budgets, allocations, transactions] = await Promise.all([
+      db
+        .select()
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, month)))
+        .orderBy(financeBudgets.category),
+      db
+        .select({
+          allocation: financeTransactionAllocations,
+          category: financeCategories,
+          transaction: financeTransactions,
+        })
+        .from(financeTransactionAllocations)
+        .innerJoin(
+          financeTransactions,
+          eq(financeTransactions.id, financeTransactionAllocations.transactionId),
+        )
+        .innerJoin(
+          financeCategories,
+          eq(financeCategories.id, financeTransactionAllocations.categoryId),
+        )
+        .where(
+          and(
+            eq(financeTransactionAllocations.userId, userId),
+            eq(financeTransactions.userId, userId),
+            gte(financeTransactions.transactionDate, `${month}-01`),
+            lt(financeTransactions.transactionDate, `${nextMonth(month)}-01`),
+          ),
+        ),
+      db
+        .select()
+        .from(financeTransactions)
+        .where(
+          and(
+            eq(financeTransactions.userId, userId),
+            gte(financeTransactions.transactionDate, `${month}-01`),
+            lt(financeTransactions.transactionDate, `${nextMonth(month)}-01`),
+          ),
+        ),
+    ]);
+    const allocationTransactionIds = new Set(allocations.map((item) => item.transaction.id));
+    const reimbursement = await reimbursementProjection(
+      userId,
+      allocations.map((item) => item.allocation.id),
+    );
+    return budgets.map((item) => {
+      const transactionIds = new Set<string>();
+      const allocationSpent = allocations
+        .filter(
+          ({ allocation, category }) =>
+            allocation.state === "active" && category.name === item.category,
+        )
+        .reduce((sum, { allocation, transaction }) => {
+          const personalAmount =
+            allocation.treatment === "personal"
+              ? allocation.amount
+              : Math.max(
+                  0,
+                  allocation.amount - (reimbursement.excludedByAllocation.get(allocation.id) ?? 0),
+                );
+          if (personalAmount > 0 && budgetImpact(transaction) !== 0)
+            transactionIds.add(transaction.id);
+          return (
+            sum +
+            (budgetImpact(transaction) < 0
+              ? -personalAmount
+              : budgetImpact(transaction) > 0
+                ? personalAmount
+                : 0)
+          );
+        }, 0);
+      const legacySpent = transactions
+        .filter(
+          (transaction) =>
+            !allocationTransactionIds.has(transaction.id) && transaction.category === item.category,
+        )
+        .reduce((sum, transaction) => {
+          const impact = budgetImpact(transaction);
+          if (impact !== 0) transactionIds.add(transaction.id);
+          return sum + impact;
+        }, 0);
+      const spent = allocationSpent + legacySpent;
+      return {
+        transactionIds: [...transactionIds],
+        budget: budget(item),
+        remaining: (item.limit - spent) / 100,
+        spent: spent / 100,
+      };
+    });
+  }
+
   async function listTransactionsPage(
     userId: string,
     query: TransactionListQuery,
     executor: FinanceReadExecutor = db,
   ) {
     const conditions = [eq(financeTransactions.userId, userId)];
+    if (query.budgetId) {
+      const [selected] = await executor
+        .select()
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.id, query.budgetId), eq(financeBudgets.userId, userId)))
+        .limit(1);
+      if (!selected) throw new AppError("not_found", "Budget not found.");
+      const projection = (await budgetProjection(userId, selected.month)).find(
+        (item) => item.budget.id === selected.id,
+      );
+      const ids = projection?.transactionIds ?? [];
+      conditions.push(ids.length ? inArray(financeTransactions.id, ids) : sql`false`);
+    }
     const sortBy = query.sortBy ?? "date";
     const sortDirection = query.sortDirection ?? "desc";
     if (query.accountId) conditions.push(eq(financeTransactions.accountId, query.accountId));
@@ -6034,89 +6139,9 @@ export function createFinanceService({
       return merchants.mergeMerchants(input, context, executor);
     },
     async getBudgetStatus(userId: string, month = now().toISOString().slice(0, 7)) {
-      const [budgets, allocations, transactions] = await Promise.all([
-        db
-          .select()
-          .from(financeBudgets)
-          .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, month)))
-          .orderBy(financeBudgets.category),
-        db
-          .select({
-            allocation: financeTransactionAllocations,
-            category: financeCategories,
-            transaction: financeTransactions,
-          })
-          .from(financeTransactionAllocations)
-          .innerJoin(
-            financeTransactions,
-            eq(financeTransactions.id, financeTransactionAllocations.transactionId),
-          )
-          .innerJoin(
-            financeCategories,
-            eq(financeCategories.id, financeTransactionAllocations.categoryId),
-          )
-          .where(
-            and(
-              eq(financeTransactionAllocations.userId, userId),
-              eq(financeTransactions.userId, userId),
-              gte(financeTransactions.transactionDate, `${month}-01`),
-              lt(financeTransactions.transactionDate, `${nextMonth(month)}-01`),
-            ),
-          ),
-        db
-          .select()
-          .from(financeTransactions)
-          .where(
-            and(
-              eq(financeTransactions.userId, userId),
-              gte(financeTransactions.transactionDate, `${month}-01`),
-              lt(financeTransactions.transactionDate, `${nextMonth(month)}-01`),
-            ),
-          ),
-      ]);
-      const allocationTransactionIds = new Set(allocations.map((item) => item.transaction.id));
-      const reimbursement = await reimbursementProjection(
-        userId,
-        allocations.map((item) => item.allocation.id),
+      return (await budgetProjection(userId, month)).map(
+        ({ transactionIds: _ids, ...status }) => status,
       );
-      return budgets.map((item) => {
-        const allocationSpent = allocations
-          .filter(
-            ({ allocation, category }) =>
-              allocation.state === "active" && category.name === item.category,
-          )
-          .reduce((sum, { allocation, transaction }) => {
-            const personalAmount =
-              allocation.treatment === "personal"
-                ? allocation.amount
-                : Math.max(
-                    0,
-                    allocation.amount -
-                      (reimbursement.excludedByAllocation.get(allocation.id) ?? 0),
-                  );
-            return (
-              sum +
-              (budgetImpact(transaction) < 0
-                ? -personalAmount
-                : budgetImpact(transaction) > 0
-                  ? personalAmount
-                  : 0)
-            );
-          }, 0);
-        const legacySpent = transactions
-          .filter(
-            (transaction) =>
-              !allocationTransactionIds.has(transaction.id) &&
-              transaction.category === item.category,
-          )
-          .reduce((sum, transaction) => sum + budgetImpact(transaction), 0);
-        const spent = allocationSpent + legacySpent;
-        return {
-          budget: budget(item),
-          remaining: (item.limit - spent) / 100,
-          spent: spent / 100,
-        };
-      });
     },
     async listTransactions(userId: string, query: TransactionListQuery) {
       return listTransactionsPage(userId, query);
@@ -8284,24 +8309,50 @@ export function createFinanceService({
           if (!membership)
             throw new AppError("invalid_request", "The budget category is not in that bucket.");
         }
+        const [before] = input.budgetId
+          ? await tx
+              .select()
+              .from(financeBudgets)
+              .where(
+                and(
+                  eq(financeBudgets.id, input.budgetId),
+                  eq(financeBudgets.userId, context.principal.userId),
+                  eq(financeBudgets.month, input.month),
+                  eq(financeBudgets.category, categoryName),
+                ),
+              )
+              .limit(1)
+          : [];
+        if (
+          input.budgetId &&
+          (!before || before.updatedAt.toISOString() !== input.expectedBudgetUpdatedAt)
+        )
+          throw new AppError(
+            "conflict",
+            "This budget changed. Reload it before editing the limit.",
+          );
         const created = requireDatabaseRecord(
-          (
-            await tx
-              .insert(financeBudgets)
-              .values({
-                bucketId: input.bucketId,
-                category: categoryName,
-                limit: toCents(input.limit),
-                month: input.month,
-                userId: context.principal.userId,
-              })
-              .returning()
-          )[0],
-          "The budget could not be created.",
+          (before
+            ? await tx
+                .update(financeBudgets)
+                .set({ limit: toCents(input.limit), updatedAt: now() })
+                .where(eq(financeBudgets.id, before.id))
+                .returning()
+            : await tx
+                .insert(financeBudgets)
+                .values({
+                  bucketId: input.bucketId,
+                  category: categoryName,
+                  limit: toCents(input.limit),
+                  month: input.month,
+                  userId: context.principal.userId,
+                })
+                .returning())[0],
+          "The budget could not be saved.",
         );
         await tx.insert(auditEvents).values(
           auditValues({
-            action: "finance.budget_created",
+            action: before ? "finance.budget_updated" : "finance.budget_created",
             after: {
               ...approval,
               id: created.id,
@@ -8310,7 +8361,7 @@ export function createFinanceService({
               month: created.month,
               updatedAt: created.updatedAt.toISOString(),
             },
-            before: null,
+            before: before ? budget(before) : null,
             entityId: created.id,
             entityType: "finance_budget",
             ...context,

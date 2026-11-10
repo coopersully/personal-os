@@ -111,10 +111,10 @@ describe("Finance MCP workflows", () => {
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
     await client.callTool({
       name: "list_finance_transactions",
-      arguments: { search: "market", accountId: id },
+      arguments: { search: "market", accountId: id, budgetId: id },
     });
     expect(api.listFinanceTransactions).toHaveBeenCalledWith(
-      expect.objectContaining({ search: "market", accountId: id }),
+      expect.objectContaining({ search: "market", accountId: id, budgetId: id }),
     );
     const input = {
       accountId: id,

@@ -29,9 +29,13 @@ export function createFinanceConversationApi(request: FinanceRequest) {
         )
       ).readiness;
     },
-    getFinanceConversationHistory(query: { after?: string; limit?: number } = {}) {
+    getFinanceConversationHistory(
+      query: { after?: string; before?: string; latest?: true; limit?: number } = {},
+    ) {
       const params = new URLSearchParams();
       if (query.after !== undefined) params.set("after", query.after);
+      if (query.before !== undefined) params.set("before", query.before);
+      if (query.latest) params.set("latest", "true");
       if (query.limit !== undefined) params.set("limit", String(query.limit));
       return request<FinanceConversationHistoryPage>(
         `${root}/messages${params.size ? `?${params}` : ""}`,

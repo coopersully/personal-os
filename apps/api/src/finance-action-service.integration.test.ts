@@ -418,6 +418,7 @@ describe.sequential("finance action service", () => {
   async function createSettlementFixture(options: {
     bypass: boolean;
     includeQuestion?: boolean;
+    categoryBudget?: boolean;
     itemCount?: number;
     label: string;
   }) {
@@ -542,6 +543,18 @@ describe.sequential("finance action service", () => {
         },
       ],
     });
+    const [categoryBudget] = options.categoryBudget
+      ? await database.db
+          .insert(financeBudgets)
+          .values({
+            userId: ownerId,
+            category: category.name,
+            month: "2026-08",
+            limit: 100,
+            updatedAt: now,
+          })
+          .returning()
+      : [];
     const drafts =
       options.itemCount && options.itemCount > 3
         ? await Promise.all(
@@ -570,15 +583,23 @@ describe.sequential("finance action service", () => {
             ),
             await actions.prepareMaintenanceCandidateDraft(
               "budget_plan",
-              {
-                allocations: [{ categoryId: category.id, limit: 75 }],
-                assumptions: [],
-                goalIds: [],
-                month: "2026-08",
-                rationale: "Settlement budget evidence.",
-                replace: true,
-                scenarioFingerprint: null,
-              },
+              categoryBudget
+                ? {
+                    budgetId: categoryBudget.id,
+                    expectedBudgetUpdatedAt: categoryBudget.updatedAt.toISOString(),
+                    category: category.name,
+                    month: "2026-08",
+                    limit: 75,
+                  }
+                : {
+                    allocations: [{ categoryId: category.id, limit: 75 }],
+                    assumptions: [],
+                    goalIds: [],
+                    month: "2026-08",
+                    rationale: "Settlement budget evidence.",
+                    replace: true,
+                    scenarioFingerprint: null,
+                  },
               ownerId,
             ),
           ];
@@ -1320,6 +1341,48 @@ describe.sequential("finance action service", () => {
         .from(financeProfiles)
         .where(eq(financeProfiles.userId, fixture.ownerId)),
     ).resolves.toEqual([]);
+  });
+
+  it("supersedes maintenance approval when a bound category budget changed", async () => {
+    const fixture = await createSettlementFixture({
+      bypass: false,
+      categoryBudget: true,
+      label: "Stale category maintenance",
+    });
+    const queued = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      { principal: agent(fixture.ownerId), requestId: "category-maintenance-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected maintenance review.");
+    await database.db
+      .update(financeBudgets)
+      .set({ limit: 150, updatedAt: new Date(now.getTime() + 1000) })
+      .where(eq(financeBudgets.userId, fixture.ownerId));
+    await expect(
+      fixture.actions.approve(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "category-maintenance-approve",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "superseded" }]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+    await expect(
+      database.db
+        .select({ limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(eq(financeBudgets.userId, fixture.ownerId)),
+    ).resolves.toEqual([{ limit: 150 }]);
   });
 
   it("rolls back every candidate item when a later audit write fails and retries safely", async () => {
@@ -2355,6 +2418,80 @@ describe.sequential("finance action service", () => {
       );
       expect(outcome.question).not.toHaveProperty("privatePayload");
     }
+  });
+
+  it("supersedes a stale category-budget review while direct stale edits still conflict", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        email: `stale-budget-${crypto.randomUUID()}@example.com`,
+        displayName: "Stale budget review",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Owner fixture missing.");
+    const userId = owner.id;
+    await database.db
+      .insert(executionPolicySettings)
+      .values({ userId, reviewBypassEnabled: false })
+      .onConflictDoUpdate({
+        target: executionPolicySettings.userId,
+        set: { reviewBypassEnabled: false },
+      });
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const [budget] = await database.db
+      .insert(financeBudgets)
+      .values({
+        userId,
+        category: `Stale category ${crypto.randomUUID()}`,
+        month: "2026-08",
+        limit: 100,
+        updatedAt: now,
+      })
+      .returning();
+    if (!budget) throw new Error("Budget fixture missing.");
+    const input = {
+      budgetId: budget.id,
+      expectedBudgetUpdatedAt: budget.updatedAt.toISOString(),
+      category: budget.category,
+      month: budget.month,
+      limit: 125,
+    };
+    const queued = await actions.performDirect("budget_plan", input, {
+      principal: agent(userId),
+      requestId: "category-budget-queue",
+    });
+    if (queued.status !== "pending_review") throw new Error("Expected queued category budget.");
+    await database.db
+      .update(financeBudgets)
+      .set({ limit: 150, updatedAt: new Date(now.getTime() + 1000) })
+      .where(eq(financeBudgets.id, budget.id));
+    await expect(
+      actions.performDirect("budget_plan", input, {
+        principal: user(userId),
+        requestId: "category-budget-direct-stale",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      actions.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "category-budget-stale-review",
+      }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+    await expect(
+      database.db
+        .select({ limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(eq(financeBudgets.id, budget.id)),
+    ).resolves.toEqual([{ limit: 150 }]);
   });
 
   it("lets bypass execution agents approve legacy plans and rejects stale or foreign reviews", async () => {

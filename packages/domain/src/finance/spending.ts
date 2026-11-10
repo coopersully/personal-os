@@ -151,6 +151,8 @@ export const financeSpendingMonthlyBudgetSchema = z.discriminatedUnion("state", 
     period: z.object({ from: z.iso.date(), through: z.iso.date(), timezone: z.string() }),
     currency: z.literal("USD"),
     accountIds: z.array(reference),
+    // Canonical whole-month spending totals, independent of nested display groups.
+    totals: z.object({ budgetCents: cents.nonnegative(), usedCents: cents }).optional(),
     qualificationId: reference,
     confirmedAt: z.iso.datetime(),
     qualificationKind: z.enum(["current", "retrospective"]),

@@ -2,12 +2,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import BriefingHome from "../../app/(workspaces)/index";
 import Detail from "../../app/detail/[id]";
 import Monitoring from "../../app/monitoring";
 import Profile from "../../app/profile";
 import { WorkspacePage } from "../../components/workspace-page";
 import { PreviewProvider } from "./context";
+import BriefingHome from "./home";
 import { WorkspacePreview } from "./workspace";
 
 vi.mock("react", async () => {

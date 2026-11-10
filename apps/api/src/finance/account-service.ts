@@ -14,7 +14,7 @@ import type {
   FinanceToolResult,
   ResolveFinanceAccountDuplicateInput,
 } from "@personal-os/domain";
-import { projectFinanceInstitutionBranding } from "@personal-os/domain";
+import { financeAccountBalances, projectFinanceInstitutionBranding } from "@personal-os/domain";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import {
@@ -420,6 +420,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
           ? matching
           : matching.filter((item) => item.includeInPlanning),
         accountSemantics,
+        balances: financeAccountBalances(matching, accountSemantics),
         totals,
       };
     },

@@ -21,6 +21,8 @@ import {
   financeCategories,
   financeCategoryRules,
   financeClassificationDecisions,
+  financeConversationMessages,
+  financeConversations,
   financeGoals,
   financeIncomeStreams,
   financeMerchantAliases,
@@ -30,6 +32,7 @@ import {
   financePlanningEvidence,
   financeProfiles,
   financeProfileVersions,
+  financeProviderItems,
   financeRecurringObligations,
   financeRecurringScheduleVersions,
   financeReviewCases,
@@ -58,6 +61,8 @@ import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from "@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
+import { fixtureFinanceConversation } from "./fixtures/finance-conversation.js";
+import { fixtureInstitutionBranding } from "./fixtures/institution-branding.js";
 import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
 import { financeActivityFixture } from "./qa-finance-activity.js";
@@ -211,6 +216,7 @@ type FixtureData = {
   financeBudgetBuckets: Array<typeof financeBudgetBuckets.$inferInsert>;
   financeBudgetBucketCategories: Array<typeof financeBudgetBucketCategories.$inferInsert>;
   financeAccounts: Array<typeof financeAccounts.$inferInsert>;
+  financeProviderItems: Array<typeof financeProviderItems.$inferInsert>;
   financeAlerts: Array<typeof financeAlerts.$inferInsert>;
   financeBudgets: Array<typeof financeBudgets.$inferInsert>;
   financeCategories: Array<typeof financeCategories.$inferInsert>;
@@ -221,6 +227,8 @@ type FixtureData = {
   financeMerchants: Array<typeof financeMerchants.$inferInsert>;
   financeProfiles: Array<typeof financeProfiles.$inferInsert>;
   financeRecurringObligations: Array<typeof financeRecurringObligations.$inferInsert>;
+  financeConversations: Array<typeof financeConversations.$inferInsert>;
+  financeConversationMessages: Array<typeof financeConversationMessages.$inferInsert>;
   financeReviewCases: Array<typeof financeReviewCases.$inferInsert>;
   financeTransactionCoverage: (typeof financeTransactionCoverage.$inferInsert)[];
   financeTransactions: Array<typeof financeTransactions.$inferInsert>;
@@ -267,6 +275,7 @@ function emptyFixtureData(): FixtureData {
     financeBudgetBuckets: [],
     financeBudgetBucketCategories: [],
     financeAccounts: [],
+    financeProviderItems: [],
     financeAlerts: [],
     financeBudgets: [],
     financeCategories: [],
@@ -278,6 +287,8 @@ function emptyFixtureData(): FixtureData {
     financeProfiles: [],
     financeRecurringObligations: [],
     financeReviewCases: [],
+    financeConversations: [],
+    financeConversationMessages: [],
     financeTransactionCoverage: [],
     financeTransactions: [],
     goals: [],
@@ -421,7 +432,7 @@ function addLoadedWorkspace(
   account: QaFixtureAccount,
   now: Date,
   degraded: boolean,
-): void {
+): { reviewTransactionId: string } {
   const timezone = "America/New_York";
   const today = localDateAt(now, timezone);
   const yesterday = addLocalDays(today, -1);
@@ -1370,7 +1381,8 @@ function addLoadedWorkspace(
       balance: 842_534,
       createdAt: ago(24 * 90),
       id: checkingId,
-      institution: "Fixture Credit Union",
+      institution: "Chase",
+      providerAccountMask: "4821",
       kind: "cash",
       lastSyncedAt: ago(2),
       name: "Everyday checking",
@@ -1383,7 +1395,8 @@ function addLoadedWorkspace(
       balance: 1_520_000,
       createdAt: ago(24 * 90),
       id: savingsId,
-      institution: "Fixture Credit Union",
+      institution: "Discover",
+      providerAccountMask: "3906",
       kind: "cash",
       lastSyncedAt: ago(2),
       name: "Emergency savings",
@@ -1396,7 +1409,8 @@ function addLoadedWorkspace(
       balance: 4_285_000,
       createdAt: ago(24 * 90),
       id: brokerageId,
-      institution: "Fixture Investments",
+      institution: "Wells Fargo",
+      providerAccountMask: "7624",
       kind: "investment",
       lastSyncedAt: ago(6),
       name: "Brokerage",
@@ -1409,7 +1423,8 @@ function addLoadedWorkspace(
       balance: 124_750,
       createdAt: ago(24 * 90),
       id: creditCardId,
-      institution: "Fixture Card",
+      institution: "American Express",
+      providerAccountMask: "1008",
       kind: "debt",
       lastSyncedAt: degraded ? ago(24 * 7) : ago(3),
       name: "Travel card",
@@ -1420,6 +1435,37 @@ function addLoadedWorkspace(
       userId: account.id,
     },
   );
+  // Provider-shaped, offline projections: no usable credentials or scheduled network sync.
+  for (const row of data.financeAccounts.filter((row) => row.userId === account.id)) {
+    const brand =
+      fixtureInstitutionBranding[row.institution as keyof typeof fixtureInstitutionBranding];
+    if (!brand || !row.id) continue;
+    const itemId = row.id;
+    row.provider = "plaid";
+    row.status = row.status === "needs_reauth" ? "needs_reauth" : "connected";
+    row.providerItemRecordId = itemId;
+    row.providerItemId = `fixture-${row.id}`;
+    row.providerAccountId = `fixture-account-${row.id}`;
+    data.financeProviderItems.push({
+      id: itemId,
+      userId: account.id,
+      provider: "plaid",
+      providerItemId: row.providerItemId,
+      institutionId: brand.institutionId,
+      institutionBranding: brand,
+      encryptedCredentials: {
+        version: 1,
+        ciphertext: "fixture-not-a-credential",
+        iv: "fixture",
+        tag: "fixture",
+      },
+      syncState: "current",
+      nextSyncAt: null,
+      lastSyncedAt: row.lastSyncedAt,
+      createdAt: row.createdAt,
+      updatedAt: now,
+    });
+  }
   data.financeCategories.push(
     {
       color: "#F59E0B",
@@ -1852,6 +1898,7 @@ function addLoadedWorkspace(
       userId: account.id,
     },
   );
+  return { reviewTransactionId: transaction(5) };
 }
 
 function seedMailStewardshipFixtures({
@@ -2036,12 +2083,32 @@ export async function loadQaFixtures(
     const passwordHash = passwordHashes.get(account.password);
     if (!passwordHash) throw new Error(`A password hash was not created for ${account.key}.`);
     addBaseAccount(data, account, passwordHash, now);
-    if (account.scenario === "complete") addLoadedWorkspace(data, account, now, false);
-    if (account.scenario === "degraded") addLoadedWorkspace(data, account, now, true);
+    const loaded =
+      account.scenario === "complete" || account.scenario === "degraded"
+        ? addLoadedWorkspace(data, account, now, account.scenario === "degraded")
+        : undefined;
     if (
+      loaded &&
       account.scenario === "complete" &&
       (account.key === "demo-full" || account.key === "qa-loaded")
     ) {
+      data.financeCategories.push({
+        id: fixtureId(account, 9010),
+        userId: account.id,
+        name: "Gifts",
+        slug: "gifts",
+        group: "Spending",
+        color: "#EC4899",
+        isSystem: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const conversation = fixtureFinanceConversation(account.id, now, {
+        transactionId: loaded.reviewTransactionId,
+        messageId: (record) => fixtureId(account, record),
+      });
+      data.financeConversations.push(conversation.conversation);
+      data.financeConversationMessages.push(...conversation.messages);
       const planning = financePlanningFixture(account.id, now, account.key === "demo-full");
       data.financeProfileVersions.push(planning.profile);
       data.financeBudgetPlans.push(planning.plan);
@@ -2286,6 +2353,8 @@ export async function loadQaFixtures(
     if (data.mailStewardshipQuestions.length)
       await transaction.insert(mailStewardshipQuestions).values(data.mailStewardshipQuestions);
     if (data.mailReviews.length) await transaction.insert(mailReviews).values(data.mailReviews);
+    if (data.financeProviderItems.length)
+      await transaction.insert(financeProviderItems).values(data.financeProviderItems);
     if (data.financeAccounts.length)
       await transaction.insert(financeAccounts).values(data.financeAccounts);
     if (data.financeCategories.length)
@@ -2304,6 +2373,12 @@ export async function loadQaFixtures(
         .values(data.financeClassificationDecisions);
     if (data.financeReviewCases.length)
       await transaction.insert(financeReviewCases).values(data.financeReviewCases);
+    if (data.financeConversations.length)
+      await transaction.insert(financeConversations).values(data.financeConversations);
+    if (data.financeConversationMessages.length)
+      await transaction
+        .insert(financeConversationMessages)
+        .values(data.financeConversationMessages);
     if (data.financeCategoryRules.length)
       await transaction.insert(financeCategoryRules).values(data.financeCategoryRules);
     if (data.financeBudgets.length)

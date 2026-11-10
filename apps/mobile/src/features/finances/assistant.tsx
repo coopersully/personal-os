@@ -1,7 +1,11 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
+import { View } from "react-native";
+import { categoryIcon } from "./category-presentation";
+import { Conversation } from "./conversation";
 import { useFinance, useFinanceRead } from "./data";
+import { financeLabel, recordAmount } from "./presentation";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section, Segments } from "./ui";
 
 function Activity() {
@@ -22,9 +26,9 @@ function Activity() {
           rows.map((entry) => (
             <FinanceRow
               key={entry.id}
-              title={entry.action}
+              title={financeLabel(entry.action)}
               subtitle={entry.explanation}
-              value={entry.status}
+              value={financeLabel(entry.status)}
               icon="history"
             />
           ))
@@ -41,82 +45,56 @@ function Activity() {
     </ReadState>
   );
 }
-function Conversation() {
-  const { api, owner } = useFinance();
-  const query = useInfiniteQuery({
-    meta: { scopedReadFeedback: true },
-    queryKey: ["finances", owner, "conversation"],
-    enabled: !!owner,
-    initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => api.getFinanceConversationHistory({ after: pageParam, limit: 50 }),
-    getNextPageParam: (page) => page.nextCursor ?? undefined,
-  });
-  const messages = query.data?.pages.flatMap((page) => page.messages) ?? [];
-  return (
-    <ReadState
-      query={{ ...query, feedbackKey: JSON.stringify(["finances", owner, "conversation"]) }}
-    >
-      {messages.length ? (
-        messages.map((message) => (
-          <Card key={message.id}>
-            <Copy secondary>
-              {message.authorKind === "user" ? "You" : "nohmi"} ·{" "}
-              {new Date(message.createdAt).toLocaleDateString()}
-            </Copy>
-            <Copy>{message.text}</Copy>
-          </Card>
-        ))
-      ) : (
-        <Card>
-          <Copy secondary>Your Finance conversation will appear here.</Copy>
-        </Card>
-      )}
-      {query.hasNextPage && (
-        <FinanceRow
-          title={query.isFetchingNextPage ? "Loading…" : "Load more messages"}
-          onPress={query.isFetchingNextPage ? undefined : () => void query.fetchNextPage()}
-        />
-      )}
-    </ReadState>
-  );
-}
 function Attention() {
   const query = useFinanceRead(["reviews"], (api) => api.getFinanceReviewQueue());
   return (
     <Section title="Needs your input">
       <ReadState query={query}>
-        <Card>
+        <View style={{ gap: 12 }}>
           {query.data?.length ? (
             query.data.map((review) => (
-              <FinanceRow
-                key={review.id}
-                title={review.transaction.merchant}
-                subtitle={review.rationale ?? review.reason.replaceAll("_", " ")}
-                icon="attention"
-                onPress={() =>
-                  router.push({
-                    pathname: "/finance-transaction",
-                    params: { id: review.transaction.id },
-                  })
-                }
-              />
+              <Card key={review.id}>
+                <View style={{ flex: 1 }}>
+                  <FinanceRow
+                    title={review.transaction.merchant}
+                    value={recordAmount(review.transaction.amount, review.transaction.currencyCode)}
+                    subtitle={
+                      review.transaction.category ??
+                      review.suggestedCategory?.name ??
+                      "Choose a category"
+                    }
+                    icon={categoryIcon(
+                      review.transaction.category ??
+                        review.suggestedCategory?.name ??
+                        "Uncategorized",
+                    )}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/finance-transaction",
+                        params: { id: review.transaction.id },
+                      })
+                    }
+                  />
+                </View>
+              </Card>
             ))
           ) : (
             <Copy secondary>No transaction reviews waiting.</Copy>
           )}
-        </Card>
+        </View>
       </ReadState>
     </Section>
   );
 }
 export function FinanceAssistantScreen() {
+  const { owner } = useFinance();
   const [mode, setMode] = useState<"For you" | "Conversation" | "Activity">("For you");
   const { view } = useLocalSearchParams<{ view?: string }>();
   useEffect(() => {
     if (view === "Activity" || view === "Conversation" || view === "For you") setMode(view);
   }, [view]);
   return (
-    <FinanceScreen title="Assistant">
+    <FinanceScreen title="Assistant" scroll={mode !== "Conversation"}>
       <Segments
         value={mode}
         options={["For you", "Conversation", "Activity"]}
@@ -126,7 +104,7 @@ export function FinanceAssistantScreen() {
         }}
       />
       {mode === "Conversation" ? (
-        <Conversation />
+        <Conversation key={owner} />
       ) : mode === "Activity" ? (
         <Activity />
       ) : (
@@ -135,7 +113,7 @@ export function FinanceAssistantScreen() {
           <Card>
             <FinanceRow
               title="Your Finance conversation"
-              subtitle="Read your ongoing Finance conversation"
+              subtitle="Ask a question or continue your conversation"
               icon="mail"
               onPress={() => {
                 setMode("Conversation");

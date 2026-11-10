@@ -1,10 +1,10 @@
 import {
   financeConversationAcknowledgmentInputSchema,
+  financeConversationHistoryQuerySchema,
   financeConversationProofOperationSchema,
   financeConversationRenderedInputSchema,
   financeConversationReplyInputSchema,
   financeConversationSendInputSchema,
-  financeConversationSequenceSchema,
   idSchema,
 } from "@personal-os/domain";
 import type { Hono } from "hono";
@@ -13,12 +13,6 @@ import type { createFinanceConversationService } from "../finance/conversation-p
 import type { AppEnv } from "../types.js";
 import { parseBody, requireHuman, requireScope } from "./support.js";
 
-const querySchema = z
-  .object({
-    after: financeConversationSequenceSchema.default("0"),
-    limit: z.coerce.number().int().min(1).max(100).default(50),
-  })
-  .strict();
 const batchQuerySchema = z
   .object({
     cursor: z.string().min(1).max(2000).default("0"),
@@ -56,9 +50,14 @@ export function registerFinanceConversationRoutes({
   );
   // Only the human owner can read live conversation history. Agents page a saved run batch.
   app.get(`${root}/messages`, requireScope("finances:read"), requireHuman, async (context) => {
-    const query = querySchema.parse(context.req.query());
+    const query = financeConversationHistoryQuerySchema.parse(context.req.query());
     return context.json(
-      await conversation.history(context.get("principal").userId, query.after, query.limit),
+      await conversation.history(
+        context.get("principal").userId,
+        query.after,
+        query.limit,
+        query.before !== undefined || query.latest ? { before: query.before } : undefined,
+      ),
     );
   });
   app.get(

@@ -61,11 +61,33 @@ describe("Finance conversation leaf routes", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(f.service.history).toHaveBeenCalledWith(ownerId, "9007199254740993", 1);
+    expect(f.service.history).toHaveBeenCalledWith(ownerId, "9007199254740993", 1, undefined);
     expect((await f.app.request("/v1/finances/conversation/messages?userId=foreign")).status).toBe(
       400,
     );
     expect(f.service.history).toHaveBeenCalledTimes(1);
+  });
+  it("accepts latest and before history modes without allowing ambiguous cursors", async () => {
+    const f = fixture();
+    expect(
+      (await f.app.request("/v1/finances/conversation/messages?latest=true&limit=50")).status,
+    ).toBe(200);
+    expect(f.service.history).toHaveBeenLastCalledWith(ownerId, undefined, 50, {
+      before: undefined,
+    });
+    expect(
+      (await f.app.request("/v1/finances/conversation/messages?before=9007199254740993")).status,
+    ).toBe(200);
+    expect(f.service.history).toHaveBeenLastCalledWith(ownerId, undefined, 50, {
+      before: "9007199254740993",
+    });
+    for (const query of [
+      "latest=true&after=1",
+      "before=2&after=1",
+      "latest=true&before=2",
+      "latest=false",
+    ])
+      expect((await f.app.request(`/v1/finances/conversation/messages?${query}`)).status).toBe(400);
   });
   it("prohibits agent live history scans and owner send impersonation, while forwarding only a run-bound batch", async () => {
     const f = fixture();

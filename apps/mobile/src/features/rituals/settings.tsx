@@ -11,7 +11,7 @@ import { randomUUID } from "expo-crypto";
 import { File, Paths } from "expo-file-system";
 import { router, Stack, useLocalSearchParams, usePreventRemove } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Share, Text, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
@@ -461,8 +461,7 @@ function RitualHistory({ close }: { close: () => void }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
-  const [detail, setDetail] = useState<RitualOccurrence | null>(null);
-  usePreventRemove(!!detail, () => setDetail(null));
+  const [selectedDetail, setDetail] = useState<RitualOccurrence | null>(null);
   const filters = {
     kind: kind === "all" ? undefined : kind,
     status: status === "all" ? undefined : (status as RitualOccurrence["status"]),
@@ -478,6 +477,15 @@ function RitualHistory({ close }: { close: () => void }) {
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     enabled: !!state.user,
   });
+  const denied =
+    history.error instanceof ApiClientError &&
+    (history.error.status === 401 || history.error.status === 403);
+  // A selected snapshot is also private data: fail closed before effects clear local memory.
+  const detail = denied ? null : selectedDetail;
+  useEffect(() => {
+    if (denied) setDetail(null);
+  }, [denied]);
+  usePreventRemove(!!detail, () => setDetail(null));
   const { refresh: refreshHistory } = useSettingsRefresh(
     [["personal-rituals", state.user?.id, "history", filters]],
     [() => history.refetch({ throwOnError: true })],

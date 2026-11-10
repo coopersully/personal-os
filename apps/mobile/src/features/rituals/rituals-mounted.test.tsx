@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { ApiClientError } from "@personal-os/api-client";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { usePageRefresh } from "../../components/page-refresh";
@@ -273,4 +274,70 @@ it("announces one failed ritual-history refresh without dropping cached history 
   expect(screen.getByText(/Evening record/)).toBeVisible();
   expect(screen.queryByText("History offline")).toBeNull();
   expect(h.remove).not.toHaveBeenCalled();
+});
+
+const privateOccurrence = {
+  id: "private-history",
+  definition: { ...definition, title: "Private ritual" },
+  scheduledLocalDate: "2026-11-10",
+  status: "completed",
+  timeZone: "UTC",
+  definitionRevision: 1,
+  dueAt: "2026-11-10T08:00:00Z",
+  expiresAt: "2026-11-10T20:00:00Z",
+  settledAt: null,
+  snoozedUntil: null,
+  responses: [
+    {
+      id: "response",
+      stepId: "step",
+      value: "Private reflection answer",
+      submitted: true,
+      observedAt: "2026-11-10T08:01:00Z",
+      recordedAt: "2026-11-10T08:01:00Z",
+    },
+  ],
+  actions: [],
+};
+it.each([
+  401, 403,
+])("removes a selected private occurrence immediately after authoritative%s and does not reopen it on retry", async (status) => {
+  h.history.mockResolvedValue({ items: [privateOccurrence], nextCursor: null });
+  render(wrap(<RitualHistoryScreen />));
+  fireEvent.click(await screen.findByText(/Private ritual/));
+  expect(screen.getByText(/Private reflection answer/)).toBeVisible();
+  h.history.mockRejectedValueOnce(
+    new ApiClientError({
+      status,
+      code: status === 401 ? "unauthorized" : "forbidden",
+      message: "Access revoked",
+    }),
+  );
+  fireEvent.click(screen.getByText("Refresh records"));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith("Access revoked", { id: undefined }),
+  );
+  expect(screen.queryByText(/Private reflection answer/)).toBeNull();
+  expect(screen.queryByText(/Private ritual/)).toBeNull();
+  expect(h.history).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByText("Unable to load. Retry"));
+  await screen.findByText(/Private ritual/);
+  expect(screen.queryByText(/Private reflection answer/)).toBeNull();
+  expect(h.history).toHaveBeenCalledTimes(3);
+});
+it("retains the selected occurrence and private responses after a transient500 refresh failure", async () => {
+  h.history.mockResolvedValue({ items: [privateOccurrence], nextCursor: null });
+  render(wrap(<RitualHistoryScreen />));
+  fireEvent.click(await screen.findByText(/Private ritual/));
+  expect(screen.getByText(/Private reflection answer/)).toBeVisible();
+  h.history.mockRejectedValueOnce(
+    new ApiClientError({ status: 500, code: "internal_error", message: "Temporary failure" }),
+  );
+  fireEvent.click(screen.getByText("Refresh records"));
+  await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
+  expect(screen.getByText(/Private reflection answer/)).toBeVisible();
+  expect(screen.getByText(/Private ritual/)).toBeVisible();
+  expect(h.history).toHaveBeenCalledTimes(2);
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
 });

@@ -64,3 +64,36 @@ it("cancels its location watch when the caller backgrounds or changes owner", as
   expect(await read).toEqual({ granted: true, coordinates: undefined });
   expect(h.remove).toHaveBeenCalledOnce();
 });
+
+it("does not start location work after cancellation, even when permission resolves late", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  expect(await readSkyLocation(false, controller.signal)).toEqual({ granted: false });
+  expect(h.get).not.toHaveBeenCalled();
+  const pending = new AbortController();
+  let finish!: (value: { granted: boolean }) => void;
+  h.get.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const read = readSkyLocation(false, pending.signal);
+  await vi.waitFor(() => expect(h.get).toHaveBeenCalledOnce());
+  pending.abort();
+  finish({ granted: true });
+  expect(await read).toEqual({ granted: false });
+  expect(h.watch).not.toHaveBeenCalled();
+});
+it.each([
+  "callback",
+  "promise",
+])("returns no coordinates when the location watch fails by %s", async (mode) => {
+  h.get.mockResolvedValue({ granted: true });
+  h.watch.mockImplementation(async (_options, _position, fail) => {
+    if (mode === "promise") throw new Error("provider failed");
+    fail("provider failed");
+    return { remove: h.remove };
+  });
+  expect(await readSkyLocation()).toEqual({ granted: true, coordinates: undefined });
+  if (mode === "callback") expect(h.remove).toHaveBeenCalledOnce();
+});

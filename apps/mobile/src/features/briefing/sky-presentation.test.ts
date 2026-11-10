@@ -52,3 +52,20 @@ describe("Today atmospheric wash", () => {
     expect(stale.hazeOpacity).toBe(0.1);
   });
 });
+
+it("keeps nighttime rain and storms dark with readable foregrounds instead of the daytime pastel wash", () => {
+  const at = Date.parse("2026-11-10T02:00:00Z");
+  const rainy = weather(63);
+  if (!rainy.atmosphere) throw new Error("Weather fixture requires atmosphere");
+  rainy.atmosphere = { ...rainy.atmosphere, observedAt: new Date(at).toISOString() };
+  const stormy = { ...rainy, atmosphere: { ...rainy.atmosphere, weatherCode: 95 } };
+  for (const observation of [rainy, stormy]) {
+    const sky = todaySky(at, "UTC", observation);
+    expect(sky.phase).toBe("night");
+    expect(sky.source).toBe("weather");
+    expect(sky.ink).toBe("#f8f8fc");
+    expect(sky.secondary).toBe("#d0d6e8");
+    expect(sky.chromeDark).toBe(true);
+  }
+  expect(todaySky(at, "UTC", stormy).condition).toBe("storm");
+});

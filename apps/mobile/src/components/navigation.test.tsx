@@ -31,6 +31,7 @@ vi.mock("@tanstack/react-query", async () => {
 });
 const h = vi.hoisted(() => ({
   path: "/",
+  accessibilityTap: undefined as undefined | (() => void),
   platform: { OS: "web" },
   reduced: false,
   navigate: vi.fn(),
@@ -104,8 +105,10 @@ vi.mock("react-native", async () => {
       onLayout?: (event: { nativeEvent: { layout: { y: number; height: number } } }) => void;
       onHoverIn?: () => void;
       onHoverOut?: () => void;
+      onAccessibilityTap?: () => void;
     },
   ) {
+    if (props.onAccessibilityTap) h.accessibilityTap = props.onAccessibilityTap;
     useEffect(() => {
       const index = ["today", "tasks", "mail", "finances", "calendar"].findIndex(
         (name) => props.accessibilityLabel === `Open ${name}`,
@@ -412,4 +415,56 @@ it("routes Finance account search to the real account list without sample result
   fireEvent.change(screen.getByLabelText("Search accounts"), { target: { value: "Checking" } });
   expect(h.setParams).toHaveBeenCalledWith({ accountSearch: "Checking" });
   expect(screen.queryByText(/sample results/)).toBeNull();
+});
+
+it("supports accessibility activation, pointer preview and focus dismissal without replacing search", async () => {
+  render(<Shell />);
+  await act(async () => {});
+  const search = screen.getByLabelText("Search today sample data");
+  act(() => h.accessibilityTap?.());
+  const mail = screen.getByRole("button", { name: "Open mail" });
+  fireEvent.mouseEnter(mail);
+  expect(mail.querySelector('[data-icon="mail"]')).toHaveAttribute("data-filled", "true");
+  fireEvent.mouseLeave(mail);
+  expect(mail.querySelector('[data-icon="mail"]')).toHaveAttribute("data-filled", "false");
+  fireEvent.focus(search);
+  expect(screen.queryByRole("button", { name: "Open mail" })).toBeNull();
+  expect(screen.getByLabelText("Search today sample data")).toBe(search);
+  expect(h.responders[0].onPanResponderTerminationRequest?.(event(), gesture())).toBe(false);
+});
+it("keeps workspace glyph contrast aligned with dark and light Today hero chrome", () => {
+  const view = render(<WorkspaceHeader chromeDark />);
+  expect(
+    screen.getByRole("button", { name: "Switch workspace, today" }).querySelector("[data-icon]"),
+  ).toHaveAttribute("data-color", "#f8f8fc");
+  view.rerender(<WorkspaceHeader chromeDark={false} />);
+  expect(
+    screen.getByRole("button", { name: "Switch workspace, today" }).querySelector("[data-icon]"),
+  ).toHaveAttribute("data-color", "#202024");
+});
+it("cancels a pending workspace hold when the header unmounts", async () => {
+  h.platform.OS = "ios";
+  const view = render(<Shell />);
+  await act(async () => {});
+  vi.useFakeTimers();
+  act(() => h.responders[0].onPanResponderGrant?.(event(), gesture()));
+  view.unmount();
+  await act(async () => vi.advanceTimersByTimeAsync(250));
+  expect(h.selection).not.toHaveBeenCalled();
+  expect(h.navigate).not.toHaveBeenCalled();
+});
+it("does not select a workspace in Settings until a gesture resolves to a concrete menu row", async () => {
+  h.path = "/settings";
+  h.platform.OS = "ios";
+  render(<Shell />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Switch workspace, settings" }));
+  expect(screen.getByTestId("native-picker")).not.toHaveAttribute("data-selected");
+  const menu = h.responders[1];
+  act(() => menu.onPanResponderRelease?.(event(500, 500), gesture(0, 0)));
+  expect(h.navigate).not.toHaveBeenCalled();
+  expect(screen.queryByTestId("native-picker")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Switch workspace, settings" }));
+  await act(async () => menu.onPanResponderRelease?.(event(20, 144), gesture(0, 0)));
+  expect(h.navigate).toHaveBeenLastCalledWith("/tasks");
 });

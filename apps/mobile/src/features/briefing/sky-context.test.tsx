@@ -8,7 +8,9 @@ vi.mock("react", async () => {
   return createRequire(`${process.cwd()}/package.json`)("react");
 });
 const h = vi.hoisted(() => ({
-  owner: "a",
+  owner: "a" as string | undefined,
+  appState: "active",
+  remove: vi.fn(),
   location: vi.fn(),
   weather: vi.fn(),
   listener: undefined as undefined | ((value: string) => void),
@@ -19,10 +21,12 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock("react-native", () => ({
   AppState: {
-    currentState: "active",
+    get currentState() {
+      return h.appState;
+    },
     addEventListener: (_name: string, callback: (value: string) => void) => {
       h.listener = callback;
-      return { remove: vi.fn() };
+      return { remove: h.remove };
     },
   },
 }));
@@ -39,6 +43,10 @@ function Consumer() {
   return (
     <>
       <span>{sky.label}</span>
+      <span>{sky.busy ? "Busy" : "Ready"}</span>
+      <button type="button" onClick={() => void sky.refresh()}>
+        Refresh sky
+      </button>
       <button type="button" onClick={() => void sky.requestLocation()}>
         Use location
       </button>
@@ -68,10 +76,15 @@ function snapshot(city: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   h.owner = "a";
+  h.appState = "active";
   h.location.mockResolvedValue({ granted: false });
   h.weather.mockResolvedValue(snapshot("Saved city"));
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 it("reads saved-location weather without requesting permission", async () => {
   render(<App />);
   expect(await screen.findByText("Saved city · 55° · Cloudy")).toBeTruthy();
@@ -133,4 +146,125 @@ it("stops applying pending reads after backgrounding", async () => {
   act(() => h.listener?.("background"));
   await act(async () => resolve(snapshot("Late city")));
   expect(screen.queryByText(/Late city/)).toBeNull();
+});
+
+it("falls back to saved weather after a denied or failing device location request", async () => {
+  h.location.mockRejectedValue(new Error("location service unavailable"));
+  render(<App />);
+  await screen.findByText("Saved city · 55° · Cloudy");
+  fireEvent.click(screen.getByText("Use location"));
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Using saved-location weather", {
+      id: "today-weather-a",
+    }),
+  );
+  expect(h.weather).toHaveBeenLastCalledWith(undefined);
+  expect(screen.queryByText("Using saved-location weather")).toBeNull();
+});
+it("bounds slow weather reads and never lets a late provider result replace the fallback", async () => {
+  vi.useFakeTimers();
+  let finish!: (value: unknown) => void;
+  h.weather.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  render(<App />);
+  await act(async () => {});
+  expect(screen.getByText("Busy")).toBeVisible();
+  fireEvent.click(screen.getByText("Refresh sky"));
+  expect(h.weather).toHaveBeenCalledOnce();
+  await act(async () => vi.advanceTimersByTimeAsync(12_001));
+  expect(screen.getByText("Ready")).toBeVisible();
+  expect(screen.getByText("Time-based sky")).toBeVisible();
+  await act(async () => finish(snapshot("Too late")));
+  expect(screen.queryByText(/Too late/)).toBeNull();
+  expect(h.error).not.toHaveBeenCalled();
+});
+it("aborts a pending explicit location request and dismisses its toast on workspace exit", async () => {
+  render(<App />);
+  await screen.findByText("Saved city · 55° · Cloudy");
+  let finish!: (value: unknown) => void;
+  let signal!: AbortSignal;
+  h.location.mockImplementation((_request, value) => {
+    signal = value;
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  fireEvent.click(screen.getByText("Use location"));
+  expect(signal.aborted).toBe(false);
+  cleanup();
+  expect(signal.aborted).toBe(true);
+  await act(async () => finish({ granted: false }));
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.dismiss).toHaveBeenCalledWith("today-weather-a");
+  expect(h.remove).toHaveBeenCalledOnce();
+});
+it("refreshes active weather on its cadence and foregrounding, but suspends background and disabled reads", async () => {
+  vi.useFakeTimers();
+  const view = render(<App />);
+  await act(async () => {});
+  expect(h.weather).toHaveBeenCalledOnce();
+  await act(async () => vi.advanceTimersByTimeAsync(600_000));
+  expect(h.weather).toHaveBeenCalledTimes(2);
+  h.appState = "background";
+  act(() => h.listener?.("background"));
+  fireEvent.click(screen.getByText("Refresh sky"));
+  await act(async () => vi.advanceTimersByTimeAsync(600_000));
+  expect(h.weather).toHaveBeenCalledTimes(2);
+  h.appState = "active";
+  await act(async () => h.listener?.("active"));
+  expect(h.weather).toHaveBeenCalledTimes(3);
+  view.rerender(
+    <TodaySkyProvider enabled={false}>
+      <Consumer />
+    </TodaySkyProvider>,
+  );
+  fireEvent.click(screen.getByText("Refresh sky"));
+  await act(async () => vi.advanceTimersByTimeAsync(600_000));
+  expect(h.weather).toHaveBeenCalledTimes(3);
+  expect(h.remove).toHaveBeenCalledOnce();
+});
+it("does not access weather before authentication and ignores preview overrides in a production build", async () => {
+  h.owner = undefined;
+  vi.stubGlobal("__DEV__", false);
+  render(
+    <TodaySkyProvider enabled preview="rain">
+      <Consumer />
+    </TodaySkyProvider>,
+  );
+  fireEvent.click(screen.getByText("Use location"));
+  expect(h.location).not.toHaveBeenCalled();
+  expect(h.weather).not.toHaveBeenCalled();
+  expect(screen.getByText("Time-based sky")).toBeVisible();
+});
+
+it("labels intentional development sky previews instead of presenting them as live weather", async () => {
+  vi.stubGlobal("__DEV__", true);
+  render(
+    <TodaySkyProvider enabled preview="rainy">
+      <Consumer />
+    </TodaySkyProvider>,
+  );
+  expect(screen.getByText("Preview · rainy · Rain")).toBeVisible();
+  await waitFor(() => expect(h.weather).toHaveBeenCalledOnce());
+  expect(screen.getByText("Preview · rainy · Rain")).toBeVisible();
+});
+
+it("dismisses an explicit request that fails after backgrounding without showing an obsolete error", async () => {
+  render(<App />);
+  await screen.findByText("Saved city · 55° · Cloudy");
+  let fail!: (error: Error) => void;
+  h.weather.mockReturnValue(
+    new Promise((_resolve, reject) => {
+      fail = reject;
+    }),
+  );
+  fireEvent.click(screen.getByText("Use location"));
+  await waitFor(() => expect(h.weather).toHaveBeenCalledTimes(2));
+  act(() => h.listener?.("background"));
+  await act(async () => fail(new Error("late network error")));
+  expect(h.error).not.toHaveBeenCalled();
+  expect(h.dismiss).toHaveBeenCalledWith("today-weather-a");
 });

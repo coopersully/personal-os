@@ -4338,6 +4338,50 @@ describe.sequential("finance service", () => {
         }),
       ]),
     );
+    const healthBudget = (await service.getBudgetStatus(owner.id, "2026-07")).find(
+      (item) => item.budget.category === "Health",
+    )?.budget;
+    if (!healthBudget) throw new Error("Health budget was not created.");
+    const contributing = await service.listTransactions(owner.id, {
+      budgetId: healthBudget.id,
+      limit: 50,
+      review: "all",
+    });
+    expect(contributing.items.map((item) => item.id)).toContain(transaction.id);
+    await expect(
+      service.listTransactions(other.id, { budgetId: healthBudget.id, limit: 50, review: "all" }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const changed = await reviewedCreateBudget(
+      service,
+      {
+        budgetId: healthBudget.id,
+        expectedBudgetUpdatedAt: healthBudget.updatedAt,
+        category: healthBudget.category,
+        month: healthBudget.month,
+        limit: 125,
+      },
+      context,
+    );
+    expect(changed.id).toBe(healthBudget.id);
+    expect(changed.limit).toBe(125);
+    expect(
+      (await service.getBudgetStatus(owner.id, "2026-07")).filter(
+        (item) => item.budget.category === "Health",
+      ),
+    ).toHaveLength(1);
+    await expect(
+      reviewedCreateBudget(
+        service,
+        {
+          budgetId: healthBudget.id,
+          expectedBudgetUpdatedAt: "2020-01-01T00:00:00.000Z",
+          category: healthBudget.category,
+          month: healthBudget.month,
+          limit: 999,
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
     await expect(service.listOverview(owner.id, "2026-07")).resolves.toMatchObject({
       spendingThisMonth: 62.14,
       transactions: expect.arrayContaining([

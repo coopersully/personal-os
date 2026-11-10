@@ -15,6 +15,12 @@ import { WorkspaceAddButton } from "./workspace-add-button";
 import { WorkspaceDock } from "./workspace-dock";
 import { WorkspaceHeader } from "./workspace-header";
 
+vi.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+vi.mock("../features/briefing/sky-context", () => ({
+  TodaySkyProvider: ({ children }: PropsWithChildren) => <>{children}</>,
+  useTodaySky: () => ({ sky: { topColor: "#141f41", chromeDark: true } }),
+}));
+
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/package.json`)("react");
@@ -28,6 +34,7 @@ const h = vi.hoisted(() => ({
   platform: { OS: "web" },
   reduced: false,
   navigate: vi.fn(),
+  setParams: vi.fn(),
   push: vi.fn(),
   selection: vi.fn(),
   logout: vi.fn(),
@@ -41,8 +48,10 @@ const h = vi.hoisted(() => ({
   changeReduced: undefined as undefined | ((value: boolean) => void),
 }));
 vi.mock("expo-router", () => ({
-  router: { navigate: h.navigate, push: h.push },
+  router: { navigate: h.navigate, push: h.push, setParams: h.setParams },
   usePathname: () => h.path,
+  useLocalSearchParams: () => ({}),
+  useGlobalSearchParams: () => ({}),
   Stack: () => <div data-testid="page-stack" />,
 }));
 vi.mock("react-native-safe-area-context", () => ({
@@ -391,4 +400,16 @@ it("keeps shared search chrome around the page stack and uses the dock only on w
   );
   expect(screen.getByTestId("page-stack")).toBeVisible();
   expect(screen.queryByRole("tab", { name: "projects" })).not.toBeInTheDocument();
+});
+
+it("routes Finance account search to the real account list without sample results", () => {
+  h.path = "/finances/accounts";
+  render(
+    <WorkspaceMotion>
+      <WorkspaceHeader />
+    </WorkspaceMotion>,
+  );
+  fireEvent.change(screen.getByLabelText("Search accounts"), { target: { value: "Checking" } });
+  expect(h.setParams).toHaveBeenCalledWith({ accountSearch: "Checking" });
+  expect(screen.queryByText(/sample results/)).toBeNull();
 });

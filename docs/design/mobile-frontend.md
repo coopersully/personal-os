@@ -178,3 +178,115 @@ amounts. Shortcut destinations preserve the intended subview on repeated navigat
 
 Native Finance implementation and its remaining web-parity work are tracked in
 COO-210 — Mobile Finance; this target map is not a claim of full delivery.
+
+## Finance totals and recovery
+
+Money uses `$1,234.56` for USD; missing currencies remain explicit and other currencies retain
+their code. Cash, investments, debt and net worth qualify independently through the shared domain
+calculation. A source issue must not suppress an unrelated position. Unknown balances are never
+zero; preserve signed assets and liability credits. Show an unavailable amount with its specific
+reason and link to the affected account, not a repeated “View by account” placeholder. Never
+combine currencies or include possible duplicates without resolution.
+
+Spending retains its date range between summary and transactions. Search and posted/pending
+filters operate on server results, not only loaded pages. Exact category drill-downs retain their
+server revision and contribution scope. Native tab return refreshes relevant stale reads rather
+than invalidating the whole workspace. Missing account timezone offers a Settings destination.
+
+Plan separates monthly category limits, budget proposals, upcoming schedules and wealth; a bill
+schedule must never imply a projected bank balance. Conversation sends require server readiness,
+retain the draft and delivery key after uncertain results, and acknowledge only confirmed delivery.
+Review actions use displayed revisions and disclose whether a decision was actually applied.
+
+Sonner status icons must be visually distinct from the single dismiss X. Action labels are centered
+in consistently rounded controls with at least 44-point height.
+
+Overview KPI cards show their label and amount, with a separate 44-point information trigger.
+Calculation assumptions, included accounts, coverage and source freshness belong in a scrollable
+native info sheet. Healthy cards have no explanatory subtitle. Meaningful limitations retain a
+short tappable status (Partial total, Needs update, Unavailable); the sheet explains all applicable
+limitations. Keep the amount’s destination separate from the information action.
+
+Accounts uses the shared header search and the same segmented control as Spending for Cash,
+Investments and Debt; show Other only when needed to keep uncategorized assets reachable.
+Budget summary and monthly category utilization share one card. Each progress track compares
+spending with its own category limit, with spent/limit amounts and explicit remaining or over-limit
+text. The total-budget ring uses the monthly spending snapshot, including uncategorized spending,
+against total plan allocations; never sum only limited categories to imply total spending. Only
+show a percentage for a matching month and positive budget, and retain spending limitations. Preserve approved/proposed state and the period for each source.
+
+Budget headers use a readable month name and compact version (v1). Hide the normal Approved
+state; retain proposal and other exceptional states.
+
+Budget category bars use the Finance tint within pace, warning amber when the spent fraction
+exceeds the elapsed local-day fraction of the current month, and destructive red after spending
+exceeds the limit. Use the account timezone and the real month length, allowing the whole current
+day. Pair amber with “Pacing high” and red with an explicit over-limit amount; color is not the only
+signal. Do not duplicate the category heading/month within the monthly budget card. Category
+progress and allocation rows reuse the domain's semantic category icon mapping and native generated
+registry assets, with a category glyph fallback for custom labels.
+
+Budget category rows open a detail view of their contributing transactions and a monthly limit
+editor. Drill-downs must share the budget calculation's split, reimbursement, refund and posted-only
+rules; a transaction's top-level category is insufficient. Limit edits retain the record identity,
+bind to the displayed revision, and preserve server approval/input outcomes. Use the standard
+Close/Cancel, discard confirmation, floating Save and above-sheet Sonner feedback.
+
+Account identities use validated provider institution artwork without recoloring it. Missing or
+failed artwork falls back to institution initials, never a fabricated company logo. Reuse the same
+identity component in account rows and details.
+
+### Transaction conversations and review
+
+- Needs your input cards show merchant, amount and category, and open the canonical transaction details page. Details place attention on the category row itself, with direct selection and approval. Do not duplicate the field with a separate Choose category banner/button. Notes remain optional and never count as a missing required field. This is record state, not action-result feedback.
+- Money uses a currency prefix, with `$` for USD and legacy records without a currency. Explicit non-USD source currencies remain identified; missing amounts remain unavailable and mixed-currency totals are not combined.
+- Message nohmi from transaction details opens the workspace conversation with a removable transaction attachment. Show merchant and amount before sending. Attachment removal preserves the draft; confirmed delivery clears it. Unavailable references block sending until removed, and uncertain retries retain both the reference and delivery key.
+- Sent references remain accessible in conversation history. Chat context is distinct from a transaction note and does not itself confirm a categorization change.
+
+### Workspace conversations
+
+Chat uses a bounded, flex-sized transcript beneath fixed page controls. Only the transcript
+scrolls; the composer stays at the bottom above navigation and follows the keyboard. User
+messages align right and assistant messages left, with readable theme-aware bubbles and sender
+labels. The multiline input has a maximum height and scrolls internally after that. Keep
+pagination explicit and preserve reading position when the user is away from the latest
+messages. Sending retains the draft and idempotency key until the API confirms delivery;
+connection readiness must remain honest and action outcomes use Sonner.
+
+### Fields needing input
+
+Preserve the standard settings-row layout, spacing, icon, label and background. Color only the value yellow when it needs attention or a decision (for example, Uncategorized). Color the value red when it is known to be incorrect or past its deadline (for example, an overdue task date). Do not add yellow row backgrounds, borders, warning icons or duplicate callout panels. Keep the actual value readable and expose the reason through an accessibility hint so color is not the only signal. Keep the label/value row vertically centered and tappable. Open a focused picker directly from details instead of requiring the full edit form for one field. Put suggestion approval beside the suggested value. Optional empty fields do not need attention styling. Clear attention only after a confirmed save or review resolution; pending, failed and unconfirmed writes retain the real record state and use Sonner for feedback. Refresh associated queues so the item also leaves Needs your input after resolution.
+
+Finance applies value-only attention styling to unknown ownership, reconnect/sync status and unavailable expected amounts. Intentional states such as excluded-from-planning, manual accounts, optional notes and ordinary debt balances are neutral, not errors. Invalid entered amounts or ownership percentages are red; pacing high is yellow and overspending is red. Source-owned values stay read-only. User-owned planning/ownership, notes and monthly limits are editable from their detail rows with bounded controls and revision checks.
+
+Category identity follows the record throughout transaction lists, detail rows, editor options, conversation attachments and spending/budget groups. Prefer the validated group icon supplied by the API, then the shared semantic category mapping; custom buckets use the bucket fallback. Never substitute a generic receipt/wallet for a known category, and never invent an identity for an unavailable category.
+
+Coming next and Cash flow show the scheduled date, saved recurring type and matching icon, signed amount, and expected status. Recurring types (Income, Bill, Subscription, Savings) are distinct from transaction-category assignments; never infer a transaction category from the merchant name. Upcoming previews sort chronologically and exclude matched or superseded occurrences.
+
+### Briefings and compact record rows
+
+Today is a short, cross-workspace briefing: Needs you, Coming up, and Handled for you. Bound each preview to three entries and link directly to the existing entity detail or workspace view. Use Tasks' authoritative Auto ordering for today's open work, including overdue tasks; combine upcoming tasks/reminders with expected Finance occurrences using the user's timezone. Label expected amounts rather than implying payment. Only confirmed applied agent actions belong under Handled for you; pending proposals and the user's actions do not. Distinguish partial/unavailable reads from an empty or all-clear state and make freshness and refresh accessible. The current native slice covers Tasks and Finance, not Mail/Calendar or complete connection monitoring.
+
+Record-row trailing values and disclosure/actions occupy the heading line only. Descriptions below it use the full available content width, aligned with the title; do not reserve an empty trailing column beside every description line. Leading identity icons remain top-left and actions top-right. Use the shared `RecordRow` for informational rows; preserve vertically centered settings rows for editable label/value fields.
+
+Today’s date/title sits in a decorative hero whose sky color continues behind the native search bar and top safe area. The briefing below uses the standard page canvas with rounded top corners, exposing the hero at the corners like a resting drawer. This is a static page composition, not a draggable sheet. Keep decoration noninteractive and hidden from accessibility; preserve native search and workspace interactions and readable contrast in both themes.
+
+Today’s accepted sky direction is Atmospheric wash: smooth location/time/weather-driven gradients
+and soft haze, with no dithering, rings, illustrated sun/moon, or particles. Sky color follows solar
+conditions independently of app light/dark mode; keep the briefing canvas opaque and theme-standard.
+Use a small weather/location caption for opt-in and fallback clarity. See
+[the mobile sky boundary](../engineering/mobile-today-sky.md) for permission, freshness and lifecycle rules.
+
+### Transparent sticky workspace search
+
+The workspace search header floats above page content without an opaque full-width backing strip.
+Keep its native Liquid Glass capsule and reserve its safe-area-plus-header height inside page content
+so initial headings never sit under the controls. Shared Screen and virtualized Tasks lists use the
+same header inset; scrolling content and decorative backgrounds can pass behind the fixed header.
+Keep the glass material's system appearance stable during scrolling; adapt foreground contrast
+without changing the navigator or scroll surface's identity.
+
+Today’s sky belongs to the hero, not the page canvas. The page and bottom safe area use the standard
+canvas color; the rounded briefing drawer overlaps the hero’s final band. Today disables elastic
+overscroll so pulling past either end never reveals an empty sky-colored gap. Status-bar and search
+foregrounds follow the sky while it is behind them and return to page contrast once it scrolls away.

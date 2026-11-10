@@ -56,8 +56,10 @@ function ContainerRow({
             style={{
               flexDirection: "row",
               flexWrap: "wrap",
-              alignItems: "center",
+              alignItems: "flex-start",
               gap: spacing.sm,
+              paddingRight: touchTarget + spacing.sm,
+              minHeight: touchTarget,
             }}
           >
             <Text style={{ color: t.ink, fontSize: 17 }}>{name}</Text>
@@ -70,31 +72,34 @@ function ContainerRow({
           )}
         </View>
       </Pressable>
-      <RowActions
-        label={`Actions for ${name}`}
-        actions={[
-          {
-            id: "pin",
-            label: `${actions.pinned ? "Unpin" : "Pin"} ${name}`,
-            icon: "pin",
-            onPress: actions.onPin,
-            disabled: actions.disabled,
-          },
-          ...(editable
-            ? [
-                {
-                  id: "edit",
-                  label: `Edit ${name}`,
-                  icon: "settings" as const,
-                  onPress: actions.onEdit,
-                },
-              ]
-            : []),
-        ]}
-      />
+      <View style={{ position: "absolute", top: spacing.md, right: spacing.lg }}>
+        <RowActions
+          label={`Actions for ${name}`}
+          actions={[
+            {
+              id: "pin",
+              label: `${actions.pinned ? "Unpin" : "Pin"} ${name}`,
+              icon: "pin",
+              onPress: actions.onPin,
+              disabled: actions.disabled,
+            },
+            ...(editable
+              ? [
+                  {
+                    id: "edit",
+                    label: `Edit ${name}`,
+                    icon: "settings" as const,
+                    onPress: actions.onEdit,
+                  },
+                ]
+              : []),
+          ]}
+        />
+      </View>
     </View>
   );
 }
+
 export function ListRow({ record, ...actions }: ContainerRowActions & { record: TaskList }) {
   return (
     <ContainerRow

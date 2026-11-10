@@ -1,4 +1,4 @@
-import type { FinanceAccount } from "@personal-os/domain";
+import { type FinanceAccount, financeAccountBalances } from "@personal-os/domain";
 import {
   accountMatchesQuery,
   financeAccountKindFromProviderType,
@@ -137,5 +137,60 @@ describe("Finance account planning semantics", () => {
     expect(accountMatchesQuery(investment, { includeExcluded: true, query: "checking" })).toBe(
       false,
     );
+  });
+});
+
+describe("independent balance positions", () => {
+  const summary = (accounts: FinanceAccount[]) =>
+    financeAccountBalances(accounts, summarizeFinanceAccounts(accounts).accountSemantics);
+  it("retains cash when investment ownership is unresolved", () => {
+    const result = summary([
+      account(),
+      account({
+        name: "Portfolio",
+        kind: "investment",
+        ownershipType: "unknown",
+        ownershipShare: null,
+      }),
+    ]);
+    expect(result.cash.amount).toBe(100);
+    expect(result.investments.amount).toBeNull();
+    expect(result.netWorth.issues[0]?.reason).toBe("ownership");
+  });
+  it("preserves overdrafts, negative assets and liability credits with ownership shares", () => {
+    const result = summary([
+      account({ balance: -100 }),
+      account({
+        name: "Portfolio",
+        kind: "investment",
+        balance: -40,
+        ownershipType: "joint",
+        ownershipShare: 0.5,
+      }),
+      account({ name: "Card", kind: "debt", balance: -30 }),
+    ]);
+    expect(result.cash.amount).toBe(-100);
+    expect(result.investments.amount).toBe(-20);
+    expect(result.debt.amount).toBe(-30);
+    expect(result.netWorth.amount).toBe(-90);
+  });
+  it("does not invent zeros, combine currencies or count duplicates", () => {
+    expect(summary([]).netWorth.amount).toBeNull();
+    expect(summary([account({ balance: null })]).cash.issues[0]?.reason).toBe("balance");
+    expect(
+      summary([account(), account({ name: "Euro", currencyCode: "EUR" })]).cash.issues[0]?.reason,
+    ).toBe("currency");
+    expect(summary([account(), account()]).cash.issues[0]?.reason).toBe("duplicate");
+    expect(summary([account(), account({ includeInPlanning: false })]).cash.amount).toBe(100);
+  });
+  it("qualifies source recovery independently and reports absent categories as zero", () => {
+    const stale = account({ name: "Card", kind: "debt" });
+    stale.synchronization.state = "stale";
+    const result = summary([account(), stale]);
+    expect(result.cash.amount).toBe(100);
+    expect(result.investments.amount).toBe(0);
+    expect(result.debt.issues[0]?.reason).toBe("sync");
+    stale.status = "needs_reauth";
+    expect(summary([stale]).debt.issues[0]?.reason).toBe("reconnect");
   });
 });

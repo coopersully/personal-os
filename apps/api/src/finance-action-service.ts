@@ -879,6 +879,17 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .orderBy(financeBudgets.id),
         );
         const existing = allocations.find((item) => item.category === String(input.category));
+        if (
+          input.budgetId &&
+          (!existing ||
+            existing.id !== input.budgetId ||
+            existing.updatedAt.toISOString() !== input.expectedBudgetUpdatedAt)
+        ) {
+          throw new AppError(
+            "conflict",
+            "This budget changed. Reload it before editing the limit.",
+          );
+        }
         // A complete replacement can remove this category and leave it absent.
         // Bind to the whole month so that absence cannot revive an old approval.
         const revision = snapshotRevision({

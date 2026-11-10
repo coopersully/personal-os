@@ -7,6 +7,23 @@ import * as registry from "../../web/src/components/icons";
 
 // The web registry remains the only module importing reicon. Native uses generated template images.
 const names = [
+  "CircleArrowUp",
+  "Tags",
+  "Layers",
+  "CircleHelp",
+  "GroceryCart",
+  "Dining",
+  "Transport",
+  "Travel",
+  "Health",
+  "Merchant",
+  "Dollar",
+  "Education",
+  "Gift",
+  "Entertainment",
+  "Sparkles",
+
+  "Info",
   "Plus",
   "Edit",
   "X",
@@ -46,7 +63,9 @@ try {
       viewport: { width: 24, height: 24 },
       deviceScaleFactor: scale,
     });
-    for (const name of names) {
+    for (const name of names.filter(
+      (name) => !process.env.ICON_NAMES || process.env.ICON_NAMES.split(",").includes(name),
+    )) {
       for (const weight of ["Outline", "Filled"]) {
         // biome-ignore lint/performance/noDynamicNamespaceImportAccess: build-time asset generation, never bundled into the client.
         const svg = renderToStaticMarkup(createElement(registry[`${name}Icon`], { weight }));

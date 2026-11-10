@@ -1,6 +1,7 @@
 export * from "./finance/configuration.js";
 
 import { z } from "zod";
+import { financeAccountBalancesSchema } from "./finance/account-balances.js";
 import { financeObligationPlanningEvidenceSchema } from "./finance/planning-evidence.js";
 
 export * from "./finance/setup-planning.js";
@@ -434,6 +435,7 @@ export const financeAccountTotalsSchema = z.object({
 export type FinanceAccountTotals = z.infer<typeof financeAccountTotalsSchema>;
 
 export const financeAccountListSchema = z.object({
+  balances: financeAccountBalancesSchema.optional(),
   accounts: z.array(financeAccountSchema),
   accountSemantics: financeAccountSemanticsSchema,
   totals: financeAccountTotalsSchema,
@@ -1182,6 +1184,7 @@ export const financeGuidedSetupContextSchema = z.object({
 export type FinanceGuidedSetupContext = z.infer<typeof financeGuidedSetupContextSchema>;
 
 export const financeTransactionQuerySchema = z.object({
+  budgetId: idSchema.optional(),
   search: z.string().trim().min(1).max(160).optional(),
   accountId: idSchema.optional(),
   categoryId: idSchema.optional(),
@@ -1425,12 +1428,19 @@ export const updateFinanceTransactionInputSchema = z
   );
 export type UpdateFinanceTransactionInput = z.infer<typeof updateFinanceTransactionInputSchema>;
 
-export const createFinanceBudgetInputSchema = z.object({
-  bucketId: idSchema.optional(),
-  category: categorySchema,
-  limit: moneySchema.positive(),
-  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
-});
+export const createFinanceBudgetInputSchema = z
+  .object({
+    budgetId: idSchema.optional(),
+    expectedBudgetUpdatedAt: isoDateTimeSchema.optional(),
+    bucketId: idSchema.optional(),
+    category: categorySchema,
+    limit: moneySchema.positive(),
+    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  })
+  .refine(
+    (value) => Boolean(value.budgetId) === Boolean(value.expectedBudgetUpdatedAt),
+    "Budget edits require the record ID and displayed revision.",
+  );
 export type CreateFinanceBudgetInput = z.infer<typeof createFinanceBudgetInputSchema>;
 
 export const exchangePlaidTokenInputSchema = z.object({

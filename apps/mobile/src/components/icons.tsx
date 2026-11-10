@@ -1,6 +1,23 @@
 import { Image, type ImageSourcePropType } from "react-native";
 
 export const icons = {
+  send: require("../../assets/navigation/CircleArrowUp.png"),
+  categoryTags: require("../../assets/navigation/Tags.png"),
+  categoryLayers: require("../../assets/navigation/Layers.png"),
+  categoryCircleHelp: require("../../assets/navigation/CircleHelp.png"),
+  categoryGroceryCart: require("../../assets/navigation/GroceryCart.png"),
+  categoryDining: require("../../assets/navigation/Dining.png"),
+  categoryTransport: require("../../assets/navigation/Transport.png"),
+  categoryTravel: require("../../assets/navigation/Travel.png"),
+  categoryHealth: require("../../assets/navigation/Health.png"),
+  categoryMerchant: require("../../assets/navigation/Merchant.png"),
+  categoryDollar: require("../../assets/navigation/Dollar.png"),
+  categoryEducation: require("../../assets/navigation/Education.png"),
+  categoryGift: require("../../assets/navigation/Gift.png"),
+  categoryEntertainment: require("../../assets/navigation/Entertainment.png"),
+  categorySparkles: require("../../assets/navigation/Sparkles.png"),
+
+  info: require("../../assets/navigation/Info.png"),
   edit: require("../../assets/navigation/Edit.png"),
   home: require("../../assets/navigation/House.png"),
   star: require("../../assets/navigation/Star.png"),
@@ -35,6 +52,7 @@ export const icons = {
 
 export type IconName = keyof typeof icons;
 export const selectedIcons = {
+  send: require("../../assets/navigation/CircleArrowUpFilled.png"),
   receipt: require("../../assets/navigation/ReceiptFilled.png"),
   star: require("../../assets/navigation/StarFilled.png"),
   profile: require("../../assets/navigation/UserFilled.png"),

@@ -1,4 +1,5 @@
 import { ApiClientError } from "@personal-os/api-client";
+import { router } from "expo-router";
 import {
   type PropsWithChildren,
   type ReactNode,
@@ -10,16 +11,31 @@ import {
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { toast } from "sonner-native";
 import { Icon, type IconName } from "../../components/icons";
+import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
 import { radius, spacing, useTheme, workspaceColor } from "../../theme";
 import { useFinanceRefresh } from "./data";
 
-export function FinanceScreen({ title, children }: PropsWithChildren<{ title: string }>) {
-  useFinanceRefresh();
+const refreshKeys: Record<string, readonly string[]> = {
+  Overview: ["spending", "upcoming", "accounts", "recent-activity"],
+  Spending: ["spending", "transactions"],
+  Accounts: ["accounts"],
+  Plan: ["budget-status", "budget", "upcoming", "accounts", "goals"],
+  Assistant: ["conversation-readiness", "reviews", "activity", "conversation"],
+};
+const noKeys: readonly string[] = [];
+export function FinanceScreen({
+  title,
+  children,
+  scroll = true,
+}: PropsWithChildren<{ title: string; scroll?: boolean }>) {
+  useFinanceRefresh(refreshKeys[title] ?? noKeys);
   const t = useTheme();
   return (
-    <Screen chrome>
-      <View style={{ gap: spacing.lg, paddingTop: 8 }}>
+    <Screen chrome scroll={scroll}>
+      <View
+        style={{ gap: spacing.lg, paddingTop: 8, ...(!scroll ? { flex: 1, minHeight: 0 } : {}) }}
+      >
         <Text accessibilityRole="header" style={{ color: t.ink, fontSize: 28, fontWeight: "700" }}>
           {title}
         </Text>
@@ -72,59 +88,37 @@ export function FinanceRow({
   subtitle,
   value,
   icon = "receipt",
+  leading,
   centered = false,
+  valueTone,
+  accessibilityHint,
   onPress,
 }: {
   title: string;
   subtitle?: string;
   value?: string;
   icon?: IconName;
+  leading?: ReactNode;
   centered?: boolean;
+  valueTone?: "attention" | "incorrect";
+  accessibilityHint?: string;
   onPress?: () => void;
 }) {
   const t = useTheme();
-  const content = (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: centered ? "center" : "flex-start",
-        gap: 12,
-        paddingVertical: 14,
-        minHeight: 56,
-      }}
-    >
-      <View style={{ paddingTop: centered ? 0 : 2 }}>
-        <Icon name={icon} color={workspaceColor(t, "finances")} />
-      </View>
-      <View style={{ flex: 1, gap: 4 }}>
-        <Text style={{ color: t.ink, fontSize: 16, fontWeight: "500" }}>{title}</Text>
-        {subtitle && <Copy secondary>{subtitle}</Copy>}
-      </View>
-      {value && (
-        <Text
-          style={{
-            color: t.ink,
-            fontSize: 15,
-            fontWeight: "600",
-            maxWidth: "42%",
-            textAlign: "right",
-            fontVariant: ["tabular-nums"],
-          }}
-        >
-          {value}
-        </Text>
-      )}
-      {onPress && <Icon name="chevron" size={16} color={t.secondary} />}
-    </View>
-  );
-  return onPress ? (
-    <Pressable accessibilityRole="button" onPress={onPress}>
-      {content}
-    </Pressable>
-  ) : (
-    content
+  return (
+    <RecordRow
+      title={title}
+      subtitle={subtitle}
+      value={value}
+      centered={centered}
+      valueTone={valueTone}
+      accessibilityHint={accessibilityHint}
+      onPress={onPress}
+      leading={leading ?? <Icon name={icon} color={workspaceColor(t, "finances")} />}
+    />
   );
 }
+
 export function Metric({
   label,
   value,
@@ -241,6 +235,7 @@ export function ReadState({
 }: {
   query: {
     feedbackKey?: string;
+    configurationMissing?: boolean;
     isPending: boolean;
     isError: boolean;
     error?: unknown;
@@ -304,6 +299,15 @@ export function ReadState({
       toast.dismiss(toastId);
     }
   }, [query.isError, query.error, toastId]);
+  if (query.configurationMissing)
+    return (
+      <FinanceRow
+        title="Set your timezone"
+        subtitle="Choose your account timezone to see spending and upcoming bills."
+        icon="settings"
+        onPress={() => router.navigate("/settings")}
+      />
+    );
   if (query.isPending)
     return (
       <ActivityIndicator

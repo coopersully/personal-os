@@ -16,7 +16,7 @@ export function EntityPicker({
   title: string;
   icon: IconName;
   value: string | null;
-  options: { label: string; value: string | null }[];
+  options: { label: string; value: string | null; icon?: IconName }[];
   onChange: (value: string | null) => void;
   onClose: () => void;
 }) {
@@ -92,7 +92,7 @@ export function EntityPicker({
                 paddingVertical: 12,
               }}
             >
-              <Icon name={icon} color={t.secondary} />
+              <Icon name={option.icon ?? icon} color={t.secondary} />
               <Text style={{ flex: 1, color: t.ink, fontSize: 17 }}>{option.label}</Text>
               {value === option.value && <Icon name="save" color={t.ink} />}
             </Pressable>

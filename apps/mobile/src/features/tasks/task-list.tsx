@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { FlatList, Modal, RefreshControl, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { FloatingAdd } from "../../components/floating-add";
+import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { entityDictionary } from "../../product/entities";
 import { spacing, useTheme } from "../../theme";
 import { ActiveFilters } from "./active-filters";
@@ -48,6 +49,7 @@ export function TaskListScreen({
   initialFilters?: Partial<TaskWorkspaceQuery>;
 }) {
   const t = useTheme();
+  const headerInset = useWorkspaceHeaderInset();
   const api = useTaskApi();
   const resources = useTaskResources();
   const { search, setSearch } = useTaskSearch();
@@ -156,10 +158,11 @@ export function TaskListScreen({
         keyExtractor={itemKey}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentInsetAdjustmentBehavior="automatic"
+        contentInsetAdjustmentBehavior={headerInset ? "never" : "automatic"}
+        scrollIndicatorInsets={{ top: headerInset }}
         contentContainerStyle={{
           paddingHorizontal: spacing.page,
-          paddingTop: spacing.page,
+          paddingTop: headerInset + spacing.page,
           paddingBottom: 100,
         }}
         refreshControl={

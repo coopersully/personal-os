@@ -1,1 +1,1 @@
-export { default } from "../../features/briefing/home";
+export { default } from "../../features/briefing/today";

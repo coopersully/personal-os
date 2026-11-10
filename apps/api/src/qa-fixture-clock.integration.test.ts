@@ -7,7 +7,9 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
+import { createFinanceAccountService } from "./finance/account-service.js";
 import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
+import { fixtureInstitutionBranding } from "./fixtures/institution-branding.js";
 import { refreshQaFinanceFixtures } from "./qa-fixture-clock.js";
 import { loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
 
@@ -23,6 +25,40 @@ it("catches up through DST/month rollover without duplicates, lost edits, sessio
       now: seed,
     });
     const owner = qaFixtureAccounts[0].id;
+    const accountService = createFinanceAccountService({ db: database.db, now: () => seed });
+    const demoAccounts = await accountService.list(owner, { includeExcluded: true }, true);
+    expect(demoAccounts.accounts).toHaveLength(4);
+    for (const account of demoAccounts.accounts) {
+      expect(account.institutionBranding?.logo).toBe(
+        fixtureInstitutionBranding[account.institution as keyof typeof fixtureInstitutionBranding]
+          .logo,
+      );
+      expect(account.accountMask).toMatch(/^\d{4}$/);
+    }
+
+    const messages = await database.db.query.financeConversationMessages.findMany({
+      where: (row, { eq }) => eq(row.userId, owner),
+      orderBy: (row, { asc }) => [asc(row.sequence)],
+    });
+    expect(messages.map((message) => message.authorKind)).toEqual([
+      "user",
+      "agent",
+      "user",
+      "agent",
+      "user",
+      "agent",
+    ]);
+    expect(messages[1]?.text).toContain("$78.25");
+    expect(messages[3]?.text).toContain("I haven’t changed it yet");
+    expect(
+      await database.db.query.financeConversations.findFirst({
+        where: (row, { eq }) => eq(row.userId, owner),
+      }),
+    ).toMatchObject({ nextSequence: 6n });
+    const linked = await database.db.query.financeTransactions.findFirst({
+      where: (row, { eq }) => eq(row.id, messages[1]?.recordRefs[0]?.id ?? ""),
+    });
+    expect(linked).toMatchObject({ merchant: "SQ *UNKNOWN POPUP 8821", needsReview: true });
     const original = await database.db.query.financeTransactions.findFirst({
       where: (row, { eq }) => eq(row.userId, owner),
     });

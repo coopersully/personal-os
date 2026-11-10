@@ -52,7 +52,14 @@ const args = [
   "-derivedDataPath",
   "build/DerivedData",
   ...(mode === "simulator"
-    ? ["-destination", "generic/platform=iOS Simulator", "CODE_SIGNING_ALLOWED=NO", "build"]
+    ? [
+        "-destination",
+        "generic/platform=iOS Simulator",
+        // Simulator Keychain access requires Xcode's generated entitlements and ad-hoc signing.
+        "CODE_SIGNING_ALLOWED=YES",
+        "CODE_SIGN_IDENTITY=-",
+        "build",
+      ]
     : [
         "-destination",
         "generic/platform=iOS",

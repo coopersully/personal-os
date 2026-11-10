@@ -10,6 +10,7 @@ export function releaseEnvironment(env) {
   return {
     ...env,
     NODE_ENV: "production",
+    PERSONAL_OS_APNS_ENVIRONMENT: "production",
     EXPO_NO_DOTENV: "1",
     EXPO_PUBLIC_API_URL: productionApiOrigin,
   };

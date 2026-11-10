@@ -96,8 +96,16 @@ vi.mock("./settings-row", () => ({
 vi.mock("../tasks/ui", () => ({
   Section: ({ children }: PropsWithChildren) => <section>{children}</section>,
   FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,
-  State: ({ loading, empty }: { loading?: boolean; empty?: string }) =>
-    loading ? <span role="progressbar" /> : <span>{empty}</span>,
+  State: ({ loading, empty, retry }: { loading?: boolean; empty?: string; retry?: () => void }) =>
+    loading ? (
+      <span role="progressbar" />
+    ) : retry ? (
+      <button type="button" onClick={retry}>
+        Retry
+      </button>
+    ) : (
+      <span>{empty}</span>
+    ),
   Field: () => null,
   Choice: () => null,
   confirm: (...args: unknown[]) => h.confirm(...args),
@@ -511,4 +519,48 @@ it("a rejected local deletion leaves the named calendar available and never navi
   expect(screen.getByRole("button", { name: "Delete Personal" })).toBeEnabled();
   expect(screen.queryByText("transport detail")).not.toBeInTheDocument();
   expect(screen.queryByText("Calendar deleted")).not.toBeInTheDocument();
+});
+
+it.each([
+  "mail",
+  "rule",
+  "calendar",
+  "source",
+] as const)("%s read failure retries the actual resource and never mistakes denial for empty records", async (route) => {
+  h.route = route;
+  h.params = { id: route === "rule" ? ruleId : localId };
+  const read = route === "mail" || route === "rule" ? h.listRules : h.listCalendars;
+  read.mockRejectedValueOnce(new Error("Record read unavailable"));
+  render(app());
+  await screen.findByRole("button", { name: "Retry" });
+  expect(h.error).toHaveBeenCalledOnce();
+  expect(
+    screen.queryByText(/no longer available|No Mail rules|No calendars connected/i),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Retry" })).toBeNull());
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(screen.getAllByText(/Receipts|Personal/).length).toBeGreaterThan(0);
+  expect(h.updateRule).not.toHaveBeenCalled();
+  expect(h.selectCalendar).not.toHaveBeenCalled();
+  expect(h.deleteCalendar).not.toHaveBeenCalled();
+});
+
+it("keeps disabled Mail rules navigable without presenting them as enabled", async () => {
+  h.route = "mail";
+  h.rules = [rule(4, false)];
+  render(app());
+  await screen.findByRole("button", { name: /Receipts Off/ });
+  expect(screen.queryByRole("button", { name: "Disable Receipts" })).toBeNull();
+  expect(h.updateRule).not.toHaveBeenCalled();
+});
+it("shows a read-only provider calendar without fabricated source details or local deletion", async () => {
+  h.route = "source";
+  h.params = { id: providerId };
+  h.calendars = [{ ...calendar(providerId, "google"), isWritable: false, source: undefined }];
+  render(app());
+  await screen.findByText(/Read only/);
+  expect(screen.getByText(/Source.*google/i)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Delete/ })).toBeNull();
+  expect(h.deleteCalendar).not.toHaveBeenCalled();
 });

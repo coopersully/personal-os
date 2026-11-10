@@ -370,3 +370,23 @@ it("retains setup dismissal protection through outage and safely cancels an alre
   expect(h.api.startTextingVerification).toHaveBeenCalledOnce();
   expect(h.api.checkTextingVerification).not.toHaveBeenCalled();
 });
+
+it("retries an unavailable policy child from the server without showing empty editable defaults", async () => {
+  h.api.getNotificationStatus.mockRejectedValueOnce(new Error("Offline"));
+  render(wrap(<GlobalNotificationPolicyScreen />));
+  const retry = await screen.findByText("Retry loading");
+  expect(screen.queryByLabelText("Repeat after days")).toBeNull();
+  fireEvent.click(retry);
+  await screen.findByLabelText("Repeat after days");
+  expect(h.api.getNotificationStatus).toHaveBeenCalledTimes(2);
+  expect(h.api.saveNotificationPreferences).not.toHaveBeenCalled();
+});
+it("opens Terms and SMS legal disclosures from an unavailable Texting deployment without requesting codes", async () => {
+  h.api.getTextingConnection.mockResolvedValue({ ...disconnected, providerReady: false });
+  render(wrap(<TextingSettingsScreen />));
+  fireEvent.click(await screen.findByText("Terms of use"));
+  await waitFor(() => expect(h.open).toHaveBeenCalledWith("https://nohmi.coopersully.me/terms/"));
+  fireEvent.click(screen.getByText("SMS terms"));
+  await waitFor(() => expect(h.open).toHaveBeenCalledWith("https://nohmi.coopersully.me/sms/"));
+  expect(h.api.startTextingVerification).not.toHaveBeenCalled();
+});

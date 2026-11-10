@@ -16,6 +16,7 @@ vi.mock("react", async () => {
   return createRequire(`${process.cwd()}/package.json`)("react");
 });
 const h = vi.hoisted(() => ({
+  timezone: "America/New_York" as string | undefined,
   confirm: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
@@ -104,7 +105,7 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
 vi.mock("../auth/context", () => ({
   useAuth: () => ({
-    state: { user: { id: "fixture", planningTimezone: "America/New_York" } },
+    state: { user: { id: "fixture", planningTimezone: h.timezone } },
     session: h.session,
   }),
 }));
@@ -236,6 +237,7 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   h.uuid = 0;
+  h.timezone = "America/New_York";
   h.session = { epoch: () => 1, api: () => h.api };
   h.writeWorkspace.mockReset();
   h.loadWorkspace.mockReset();
@@ -933,4 +935,176 @@ it("retries missing related Finance reads while retaining an entered planning dr
   expect(screen.getByLabelText("Country and state or region")).toHaveValue("US, NY");
   expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
   expect(h.save).not.toHaveBeenCalled();
+});
+
+it("clears optional stated facts without zero coercion while preserving other debt, insurance and planning rows", async () => {
+  const profile = loadPopulatedProfile();
+  const secondDebt = { ...profile.debts[0], name: "Second loan" };
+  const secondInsurance = { ...profile.insurance[0], name: "Second cover" };
+  const secondIncome = {
+    ...profile.planning.uncertainIncome[0],
+    id: id(98),
+    name: "Second income",
+  };
+  h.resources["financial-profile"] = {
+    ...profile,
+    debts: [...profile.debts, secondDebt],
+    insurance: [...profile.insurance, secondInsurance],
+    planning: {
+      ...profile.planning,
+      uncertainIncome: [...profile.planning.uncertainIncome, secondIncome],
+    },
+  };
+  render(<FinancialProfileSettingsScreen />);
+  for (const label of [
+    "Country and state or region",
+    "Reliable monthly income",
+    "Next reliable payment",
+    "Debt priority",
+  ])
+    change(label, "");
+  const debt = screen.getByRole("region", { name: "Loan" });
+  change("Balance", "", debt);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await accept();
+  expect(h.save).not.toHaveBeenCalled();
+  change("Balance", "500", debt);
+  change("Monthly minimum", "", debt);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await accept();
+  expect(h.save).not.toHaveBeenCalled();
+  change("Monthly minimum", "20", debt);
+  change("Debt account", "", debt);
+  change("Interest rate (%)", "", debt);
+  const insurance = screen.getByRole("region", { name: "Life policy" });
+  change("Annual premium", "", insurance);
+  change("Coverage amount", "", insurance);
+  const income = screen.getByRole("region", { name: "Consulting" });
+  change("Expected amount", "", income);
+  change("Expected date", "", income);
+  const bill = screen.getByRole("region", { name: "Internet" });
+  change("Debt account", "", bill);
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await accept();
+  expect(h.save).toHaveBeenCalledOnce();
+  expect(h.save.mock.calls[0]?.[0].changes).toMatchObject({
+    jurisdiction: null,
+    debts: [
+      {
+        name: "Loan",
+        accountId: null,
+        balance: 500,
+        minimumMonthlyPayment: 20,
+        interestRate: null,
+      },
+      secondDebt,
+    ],
+    insurance: [
+      { name: "Life policy", annualPremium: null, coverageAmount: null },
+      secondInsurance,
+    ],
+    planning: {
+      recurringIncome: { amountCents: null, nextDate: null },
+      uncertainIncome: [
+        { name: "Consulting", amountCents: null, expectedDate: null },
+        secondIncome,
+      ],
+    },
+  });
+});
+it("requires confirmation to remove unnamed new stated records instead of treating deletion as cancelling a policy", async () => {
+  render(<FinancialProfileSettingsScreen />);
+  fireEvent.click(screen.getByText("Add debt"));
+  fireEvent.click(screen.getByText("Remove debt 1"));
+  expect(h.confirm).toHaveBeenLastCalledWith(
+    "Remove debt?",
+    expect.any(String),
+    expect.any(Function),
+    true,
+  );
+  await accept();
+  expect(screen.queryByLabelText("Debt name")).toBeNull();
+  fireEvent.click(screen.getByText("Add insurance"));
+  fireEvent.click(screen.getByText("Remove insurance 1"));
+  expect(h.confirm).toHaveBeenLastCalledWith(
+    "Remove insurance?",
+    expect.any(String),
+    expect.any(Function),
+    true,
+  );
+  await accept();
+  expect(screen.queryByLabelText("Policy name")).toBeNull();
+  fireEvent.click(screen.getByText("Add other possible income"));
+  fireEvent.click(screen.getByText("Remove other possible income item 1"));
+  expect(h.confirm).toHaveBeenLastCalledWith(
+    "Remove item?",
+    expect.any(String),
+    expect.any(Function),
+    true,
+  );
+  await accept();
+  expect(h.save).not.toHaveBeenCalled();
+});
+it("creates a partial payroll statement with unknown optional values and an account-timezone effective date", async () => {
+  h.resources["finance-configuration"] = {
+    income: { state: "loaded", value: null },
+    accounts: { state: "unavailable", reason: "not_connected" },
+  };
+  h.payroll.mockImplementation(async (input) => ({ ...payrollFixture(), ...input }));
+  render(<PayrollSettingsScreen />);
+  expect(screen.getByLabelText("Pay account")).toBeDisabled();
+  change("Employer", "Part-time role");
+  change("Gross annual income", "");
+  change("Expected net paycheck", "");
+  change("Next payday", "");
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() => expect(h.payroll).toHaveBeenCalledOnce());
+  expect(h.payroll.mock.calls[0]?.[0]).toMatchObject({
+    employer: "Part-time role",
+    expectedUpdatedAt: null,
+    grossAnnualIncome: null,
+    expectedNetPay: null,
+    nextPayday: null,
+    effectiveDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+  });
+});
+
+it("keeps payroll account selection unavailable while related account data is missing and uses explicit optional facts", async () => {
+  h.timezone = undefined;
+  h.resources["finance-configuration"] = {
+    income: { state: "loaded", value: null },
+    accounts: { state: "unavailable", reason: "not_connected" },
+  };
+  render(<PayrollSettingsScreen />);
+  expect(screen.getByLabelText("Next payday")).toHaveAttribute("data-timezone", "UTC");
+  expect(screen.getByLabelText("Pay account")).toBeDisabled();
+  change("Employer", "New employer");
+  change("Next payday", "2026-12-15");
+  expect(h.payroll).not.toHaveBeenCalled();
+});
+it("renders an unanswered planning profile honestly while related accounts and goals are unavailable", () => {
+  h.timezone = undefined;
+  delete h.resources["finance-accounts"];
+  delete h.resources["finance-goals"];
+  render(<FinancialProfileSettingsScreen />);
+  expect(screen.getByLabelText("Next reliable payment")).toHaveAttribute("data-timezone", "UTC");
+  change("Reliable monthly income", "1200");
+  fireEvent.click(screen.getByText("Add other possible income"));
+  expect(screen.getByLabelText("Expected date")).toHaveAttribute("data-timezone", "UTC");
+  fireEvent.click(screen.getByText("Add goal contributions"));
+  expect(screen.getByLabelText("Goal")).toBeDisabled();
+  expect(h.save).not.toHaveBeenCalled();
+});
+it("shows initial pending configuration/profile reads rather than a retry error or blank editor", () => {
+  delete h.resources["finance-configuration"];
+  h.pending.add("finance-configuration");
+  const view = render(<FinanceConfigurationSettings />);
+  expect(screen.getByRole("progressbar")).toBeVisible();
+  expect(screen.queryByText("Retry loading")).toBeNull();
+  view.unmount();
+  delete h.resources["financial-profile"];
+  h.pending.add("financial-profile");
+  render(<FinancialProfileSettingsScreen />);
+  expect(screen.getByRole("progressbar")).toBeVisible();
+  expect(screen.queryByLabelText("Country and state or region")).toBeNull();
 });

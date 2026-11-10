@@ -92,3 +92,22 @@ it("disables an already open native picker and rejects a late native value event
   fireEvent.click(screen.getByText("Pick date"));
   expect(change).toHaveBeenCalledWith("20:30");
 });
+
+it("closes an opened native time picker with Done without changing the retained wall time", () => {
+  const change = vi.fn();
+  render(
+    <PlanningPicker
+      label="Time"
+      value="20:00"
+      mode="time"
+      timeZone="America/New_York"
+      onChange={change}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Time, .*8:00/ }));
+  expect(screen.getByText("Pick date")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(screen.queryByText("Pick date")).toBeNull();
+  expect(screen.getByRole("button", { name: /Time, .*8:00/ })).toBeVisible();
+  expect(change).not.toHaveBeenCalled();
+});

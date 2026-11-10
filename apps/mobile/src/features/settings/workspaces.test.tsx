@@ -112,3 +112,34 @@ vi.mock("../../components/forms/form-save", () => ({
     />
   ),
 }));
+
+it("explains archival, return to review-only and disabling calendar automation using the actual proposed policy", () => {
+  expect(
+    guidanceConfirmation(profile, {
+      ...profile.preferences,
+      noiseDisposition: "archive_after_days",
+      noiseRetentionDays: 14,
+    }),
+  ).toContain("archive after 14 days");
+  const before = {
+    ...profile,
+    preferences: {
+      ...profile.preferences,
+      noiseDisposition: "trash_after_days",
+      noiseRetentionDays: 30,
+    },
+  };
+  const review = guidanceConfirmation(before, {
+    ...profile.preferences,
+    noiseDisposition: "review_only",
+    noiseRetentionDays: null,
+  });
+  expect(review).toContain("review only");
+  expect(review).not.toContain("after null days");
+  expect(
+    guidanceConfirmation(
+      { ...profile, domain: "calendar", preferences: { automaticEventCreation: true } },
+      { automaticEventCreation: false },
+    ),
+  ).toContain("Automatic event creation will be disabled");
+});

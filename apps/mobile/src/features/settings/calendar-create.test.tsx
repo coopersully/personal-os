@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   back: vi.fn(),
   permitDismiss: vi.fn(),
   timezone: "America/New_York",
+  close: undefined as undefined | (() => void),
 }));
 vi.mock("react-native", () => ({
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
@@ -22,7 +23,12 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: h.invalidate }),
 }));
 vi.mock("expo-router", () => ({ router: { back: h.back }, Stack: { Screen: () => null } }));
-vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
+vi.mock("../../components/editor-header", () => ({
+  editorDismissOptions: ({ onPress }: { onPress: () => void }) => {
+    h.close = onPress;
+    return {};
+  },
+}));
 vi.mock("../../components/forms/use-dirty-dismiss", () => ({
   useDirtyDismiss: () => h.permitDismiss,
 }));
@@ -94,6 +100,7 @@ it("requires a name and planning timezone, then creates once from the explicit f
     name: "Personal projects",
     color: null,
     timezone: "America/New_York",
+    close: undefined as undefined | (() => void),
   });
   expect(h.invalidate).toHaveBeenCalledWith({ queryKey: ["settings"] });
   expect(h.invalidate).toHaveBeenCalledWith({ queryKey: ["calendar"] });
@@ -141,6 +148,15 @@ it("retains an invalid color until corrected, then saves the explicit color with
       name: "Project calendar",
       color: "#7928ff",
       timezone: "America/New_York",
+      close: undefined as undefined | (() => void),
     }),
   );
+});
+
+it("closes a pristine calendar form without submitting or invalidating data", () => {
+  render(<CalendarCreateScreen />);
+  h.close?.();
+  expect(h.back).toHaveBeenCalledOnce();
+  expect(h.create).not.toHaveBeenCalled();
+  expect(h.invalidate).not.toHaveBeenCalled();
 });

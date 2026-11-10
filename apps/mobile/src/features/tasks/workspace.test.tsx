@@ -55,6 +55,7 @@ const h = vi.hoisted(() => ({
   trashReminder: vi.fn(),
   restoreReminder: vi.fn(),
   push: vi.fn(),
+  back: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
   loading: vi.fn(() => "task-toast"),
@@ -67,10 +68,17 @@ vi.mock("../auth/context", () => ({
   }),
 }));
 vi.mock("expo-router", () => ({
-  router: { push: h.push },
+  router: { push: h.push, back: h.back },
   Stack: {
-    Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => (
-      <div>{options.headerRight?.()}</div>
+    Screen: ({
+      options,
+    }: {
+      options: { headerRight?: () => ReactNode; headerLeft?: () => ReactNode };
+    }) => (
+      <div>
+        {options.headerLeft?.()}
+        {options.headerRight?.()}
+      </div>
     ),
   },
 }));
@@ -880,4 +888,83 @@ it("recognizes an uncertain already-committed preference draft without sending i
   expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
   expect(h.updateWorkspaceSettings).toHaveBeenCalledOnce();
+});
+
+it("closes untouched Task preferences, confirms dirty cancellation, and links notification controls without saving", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(h.back).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "iPhone notifications" }));
+  expect(h.push).toHaveBeenCalledWith("/settings/notifications");
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  vi.mocked(globalThis.confirm).mockReturnValueOnce(false);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.back).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.back).toHaveBeenCalledTimes(2);
+  expect(h.updateWorkspaceSettings).not.toHaveBeenCalled();
+});
+
+it("rejects an older authoritative preference reload and keeps the reviewed local draft locked", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("Conflict"));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  const reload = await screen.findByRole("button", { name: "Load latest preferences" });
+  await waitFor(() => expect(reload).toBeEnabled());
+  h.getWorkspaceSettings.mockResolvedValueOnce({
+    revision: 2,
+    preferences: { ...h.preferences, taskRowDetails: [] },
+  });
+  fireEvent.click(reload);
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(h.updateWorkspaceSettings).toHaveBeenCalledOnce();
+});
+it("reviews an unavailable saved capture list and explicitly empty row details without losing local choices", async () => {
+  h.lists = [list("garden", "Garden")];
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Default list, Inbox" }));
+  fireEvent.click(screen.getByRole("button", { name: "Garden" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Show estimate" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Include archived in search" }));
+  h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("Conflict"));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  const reload = await screen.findByRole("button", { name: "Load latest preferences" });
+  await waitFor(() => expect(reload).toBeEnabled());
+  h.getWorkspaceSettings.mockResolvedValueOnce({
+    revision: 4,
+    preferences: {
+      ...h.preferences,
+      defaultCaptureListId: "missing",
+      taskRowDetails: ["notes"],
+      includeArchivedInSearch: true,
+    },
+  });
+  fireEvent.click(reload);
+  await waitFor(() =>
+    expect(globalThis.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("saved Unavailable list; your draft Garden"),
+    ),
+  );
+  expect(globalThis.confirm).toHaveBeenCalledWith(expect.stringContaining("your draft None"));
+  expect(globalThis.confirm).toHaveBeenCalledWith(
+    expect.stringContaining("saved On; your draft Off"),
+  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
 });

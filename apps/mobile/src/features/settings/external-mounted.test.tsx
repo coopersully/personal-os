@@ -1090,3 +1090,176 @@ it.each([
   ).toBeNull();
   expect(screen.queryByText(failure ? "Refresh denied" : "Connections refreshed")).toBeNull();
 });
+
+it("closes Google setup through native dismissal and header while preventing either dismissal during authorization", async () => {
+  show(<ConnectionsSettingsScreen />);
+  await screen.findByText("No connected accounts.");
+  fireEvent.click(screen.getByText("Connect Google"));
+  act(() => h.modalDismiss?.());
+  expect(screen.queryByText("Continue in browser")).toBeNull();
+  fireEvent.click(screen.getByText("Connect Google"));
+  fireEvent.click(screen.getByText("Close sheet"));
+  expect(screen.queryByText("Continue in browser")).toBeNull();
+  fireEvent.click(screen.getByText("Connect Google"));
+  let finish!: (value: string) => void;
+  h.api.getGoogleAuthorizationUrl.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByText("Continue in browser"));
+  act(() => h.confirmation?.());
+  await waitFor(() => expect(h.api.getGoogleAuthorizationUrl).toHaveBeenCalledOnce());
+  act(() => h.modalDismiss?.());
+  fireEvent.click(screen.getByText("Close sheet"));
+  expect(screen.getByText("Continue in browser")).toBeTruthy();
+  await act(async () => finish("https://accounts.google.com/fixture"));
+  await waitFor(() => expect(h.open).toHaveBeenCalled());
+  act(() => h.modalDismiss?.());
+  expect(screen.queryByText("Continue in browser")).toBeNull();
+});
+it.each([
+  ["syncing", "Syncing"],
+  ["retrying", "Retrying"],
+  ["failed", "Needs attention"],
+])("shows real connector health %s and provider identity fallback", async (state, label) => {
+  h.params = { id: "google" };
+  h.resources.connectors = [
+    {
+      ...account(),
+      label: "",
+      email: null,
+      health: { state, message: "Provider reports its current health" },
+      lastSyncedAt: "2026-11-01T12:00:00Z",
+    },
+  ];
+  show(<ConnectionAccountScreen />);
+  await screen.findByText(label);
+  expect(screen.getAllByText("google").length).toBeGreaterThan(0);
+  expect(screen.getByText("Provider reports its current health")).toBeTruthy();
+  expect(screen.queryByText("Never")).toBeNull();
+  expect(h.api.syncConnector).not.toHaveBeenCalled();
+});
+it("keeps ready provider health metadata and handles a removed selected account", async () => {
+  h.params = { id: "google" };
+  h.resources.connectors = [
+    { ...account(), label: "", health: { state: "ready", message: "Up to date" } },
+  ];
+  const view = show(<ConnectionAccountScreen />);
+  await screen.findByText("Up to date");
+  expect(screen.getAllByText("fixture@nohmi.test").length).toBeGreaterThan(0);
+  h.params = { id: "removed" };
+  view.rerender(
+    <MobileDataProvider>
+      <ConnectionAccountScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByText("This connection is no longer available.");
+  expect(screen.queryByText("Sync now")).toBeNull();
+});
+it("keeps iCloud invalid credentials local and allows correcting provider validation", async () => {
+  show(<ConnectionsSettingsScreen />);
+  await screen.findByText("No connected accounts.");
+  fireEvent.click(screen.getByText("Connect iCloud"));
+  fireEvent.change(screen.getByLabelText("Apple Account"), { target: { value: "invalid-email" } });
+  fireEvent.change(screen.getByLabelText("App-specific password"), {
+    target: { value: "abcd-efgh-ijkl-mnop" },
+  });
+  fireEvent.click(screen.getByText("Connect account"));
+  expect(h.error).toHaveBeenCalledOnce();
+  expect(h.api.connectICloud).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Apple Account")).toHaveValue("invalid-email");
+});
+
+it("does not read a signed-out connection detail route", () => {
+  h.signedIn = false;
+  h.params = { id: "google" };
+  show(<ConnectionAccountScreen />);
+  expect(h.api.listConnectors).not.toHaveBeenCalled();
+  expect(h.api.getXBookmarkAccount).not.toHaveBeenCalled();
+});
+it("retries an unavailable connector list instead of announcing a false empty state", async () => {
+  h.api.listConnectors.mockRejectedValueOnce(new Error("Connector list offline"));
+  show(<ConnectionsSettingsScreen />);
+  await screen.findByText("Retry data");
+  expect(screen.queryByText("No connected accounts.")).toBeNull();
+  expect(h.error).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByText("Retry data"));
+  await screen.findByText("No connected accounts.");
+  expect(h.api.listConnectors).toHaveBeenCalledTimes(2);
+  expect(h.api.syncConnector).not.toHaveBeenCalled();
+});
+it.each([
+  [null, null, [], ""],
+  ["remote", null, [], "Unavailable folder"],
+  [
+    "remote",
+    "Saved",
+    [{ id: "folder", remoteFolderId: "remote", name: "Current folder" }],
+    "Current folder",
+  ],
+])("represents actual X folder selection %s without inventing folder metadata", async (selectedFolderId, selectedFolderName, folders, label) => {
+  h.resources["x-account"] = {
+    id: "x",
+    username: "fixture",
+    syncStatus: "idle",
+    selectedFolderId,
+    selectedFolderName,
+  };
+  h.resources["x-folders"] = folders;
+  show(<ConnectionsSettingsScreen />);
+  await screen.findByLabelText("Bookmark folder");
+  await waitFor(() => expect(h.api.listXBookmarkFolders).toHaveBeenCalledOnce());
+  if (label) expect(await screen.findByRole("option", { name: label })).toBeTruthy();
+  else expect(screen.getByLabelText("Bookmark folder").querySelectorAll("option")).toHaveLength(0);
+  expect(h.api.selectXBookmarkFolder).not.toHaveBeenCalled();
+});
+it("uses the known provider label for an unlabeled iCloud account and preserves actual disabled services", async () => {
+  h.resources.connectors = [
+    {
+      ...account(),
+      provider: "icloud",
+      label: "",
+      email: null,
+      mailEnabled: false,
+      calendarEnabled: false,
+    },
+  ];
+  show(<ConnectionsSettingsScreen />);
+  await screen.findByText("iCloud");
+  expect(screen.queryByText("Mail")).toBeNull();
+  expect(screen.queryByText("Calendar")).toBeNull();
+  expect(h.api.connectICloud).not.toHaveBeenCalled();
+});
+it.each([
+  [false, true, ["calendar"]],
+  [true, false, ["mail"]],
+])("reconnects a Google account with only its existing services mail=%s calendar=%s", async (mailEnabled, calendarEnabled, services) => {
+  h.params = { id: "google" };
+  h.resources.connectors = [{ ...account(), mailEnabled, calendarEnabled }];
+  show(<ConnectionAccountScreen />);
+  fireEvent.click(await screen.findByText("Reconnect in browser"));
+  await confirm();
+  await waitFor(() =>
+    expect(h.api.getGoogleAuthorizationUrl).toHaveBeenCalledWith({
+      accountId: "google",
+      returnTo: "/settings?section=connections",
+      services,
+    }),
+  );
+});
+it("requests only Mail scope when Calendar is deselected during new Google setup", async () => {
+  show(<ConnectionsSettingsScreen />);
+  await screen.findByText("No connected accounts.");
+  fireEvent.click(screen.getByText("Connect Google"));
+  fireEvent.click(screen.getByLabelText("Calendar"));
+  fireEvent.click(screen.getByText("Continue in browser"));
+  await confirm();
+  await waitFor(() =>
+    expect(h.api.getGoogleAuthorizationUrl).toHaveBeenCalledWith({
+      returnTo: "/settings?section=connections",
+      services: ["mail"],
+    }),
+  );
+});

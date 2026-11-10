@@ -677,3 +677,66 @@ it("retries failed workspace setup status and authoritative web review links wit
   await waitFor(() => expect(h.refresh).toHaveBeenCalledWith("agent-context"));
   expect(h.createToken).not.toHaveBeenCalled();
 });
+
+it("closes pristine identity edits without unnecessary confirmation", () => {
+  h.resources["agent-directory"] = { accounts: [account], connections: [] };
+  render(<ConnectedAgentsScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
+  act(() => h.dismiss?.());
+  expect(screen.queryByLabelText("Name")).toBeNull();
+  expect(h.confirm).not.toHaveBeenCalled();
+});
+it("requires named confirmation before narrowing review bypass using the reviewed version", async () => {
+  h.resources["agent-execution-policy"] = { version: 12, reviewBypassEnabled: true };
+  render(<AgentPolicyScreen />);
+  fireEvent.click(screen.getByLabelText("Allow eligible actions without review"));
+  expect(h.confirm).toHaveBeenCalledWith(
+    "Require review?",
+    "Eligible actions will return to the review queue.",
+    expect.any(Function),
+  );
+  await approve();
+  expect(h.updatePolicy).toHaveBeenCalledWith({ expectedVersion: 12, reviewBypassEnabled: false });
+});
+it("labels returned OAuth clients with no scopes without inventing authority", () => {
+  h.resources["agent-oauth-clients"] = [
+    { id: "empty-client", name: "No authority client", scopes: [] },
+  ];
+  render(<AgentAccessScreen />);
+  expect(screen.getByText("No scopes")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Revoke No authority client" }));
+  expect(h.confirm).toHaveBeenCalledWith(
+    "Revoke No authority client?",
+    expect.any(String),
+    expect.any(Function),
+    true,
+  );
+});
+
+it("rejects control-character-normalized cross-origin review paths", () => {
+  expect(() =>
+    agentWorkItemUrl("https://fixture.test/settings", "/\t/foreign.test/private"),
+  ).toThrow("The web review address is invalid.");
+});
+
+it("identifies account-level agent work without assigning a workspace or fabricating an action", () => {
+  h.resources["agent-context"] = { links: { agentAccess: "https://fixture.test/settings" } };
+  h.resources["agent-work-items-root"] = {
+    items: [
+      {
+        id: "account-work",
+        domain: null,
+        priority: "normal",
+        kind: "review",
+        title: "Account review",
+        summary: "Account-level work",
+        action: null,
+      },
+    ],
+    unavailableDomains: [],
+    nextCursor: null,
+  };
+  render(<AgentReviewsScreen />);
+  expect(screen.getByText(/Account · normal · review/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Review on the web" })).toBeNull();
+});

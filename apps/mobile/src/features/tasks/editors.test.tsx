@@ -1040,3 +1040,29 @@ it.each([
     ),
   );
 });
+
+it("closes an unavailable existing container without inventing an editable record", () => {
+  h.params = { kind: "list", id: garden.id };
+  h.isError = true;
+  render(<ContainerEditorScreen />);
+  expect(screen.queryByLabelText("Title")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(h.back).toHaveBeenCalledOnce();
+  expect(h.api.updateTaskList).not.toHaveBeenCalled();
+});
+it("retains a reviewed list appearance in the draft and submits its identity only on Save", async () => {
+  h.params = { kind: "list" };
+  render(<ContainerEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Home improvements" } });
+  fireEvent.click(screen.getByRole("button", { name: "Edit list icon and color" }));
+  fireEvent.click(screen.getByRole("button", { name: "home icon" }));
+  fireEvent.click(screen.getByRole("button", { name: "#22c55e" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(h.api.createTaskList).not.toHaveBeenCalled();
+  fireEvent.click(save());
+  await waitFor(() =>
+    expect(h.api.createTaskList).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Home improvements", icon: "home", color: "#22c55e" }),
+    ),
+  );
+});

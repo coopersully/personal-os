@@ -17,6 +17,7 @@ vi.mock("@tanstack/react-query", async () => {
 });
 const h = vi.hoisted(() => ({
   owner: "owner",
+  timezone: "UTC" as string | undefined,
   rowCallbacks: {} as Record<string, () => void>,
   push: vi.fn(),
   back: vi.fn(),
@@ -37,7 +38,7 @@ const h = vi.hoisted(() => ({
 vi.mock("../auth/context", () => ({
   useOptionalAuth: () => null,
   useAuth: () => ({
-    state: { user: { id: h.owner, planningTimezone: "UTC" } },
+    state: { user: { id: h.owner, planningTimezone: h.timezone } },
     session: {
       epoch: () => 1,
       api: () => ({
@@ -123,16 +124,18 @@ vi.mock("../../components/record-row", () => ({
   RecordRow: ({
     title,
     subtitle,
+    value,
     onPress,
   }: {
     title: string;
     subtitle: string;
+    value?: string;
     onPress: () => void;
   }) => {
     h.rowCallbacks[title] = onPress;
     return (
       <button type="button" onClick={onPress}>
-        {title} {subtitle}
+        {title} {subtitle} {value}
       </button>
     );
   },
@@ -173,6 +176,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.rowCallbacks = {};
   h.owner = "owner";
+  h.timezone = "UTC";
   h.params = { kind: "morning" };
   h.definitions.mockResolvedValue({ rituals: [definition] });
   h.history.mockResolvedValue({ items: [], nextCursor: null });
@@ -182,12 +186,12 @@ it("retries failed ritual reads and navigates to configured/unconfigured kinds o
   h.definitions.mockRejectedValueOnce(new Error("Offline"));
   render(wrap(<RitualsSettingsScreen />));
   fireEvent.click(await screen.findByText("Unable to load. Retry"));
-  fireEvent.click(await screen.findByRole("button", { name: "Morning" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Morning/ }));
   expect(h.push).toHaveBeenLastCalledWith({
     pathname: "/settings/rituals/edit",
     params: { kind: "morning" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Evening" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Evening/ }));
   expect(h.push).toHaveBeenLastCalledWith({
     pathname: "/settings/rituals/edit",
     params: { kind: "night" },
@@ -199,7 +203,7 @@ it("retries failed ritual reads and navigates to configured/unconfigured kinds o
 });
 it("refreshes definitions from the authority and allows cancelling named deletion without mutation", async () => {
   render(wrap(<RitualsSettingsScreen />));
-  await screen.findByRole("button", { name: "Morning" });
+  await screen.findByRole("button", { name: /^Morning/ });
   fireEvent.click(screen.getByText("Refresh records"));
   await waitFor(() => expect(h.definitions).toHaveBeenCalledTimes(2));
   await waitFor(() =>
@@ -384,4 +388,63 @@ it("rejects a queued predenial row event after detail cleanup, throughout retry,
   expect(screen.queryByText(/Private reflection answer|Private ritual/)).toBeNull();
   expect(screen.getByText(/Fresh ritual/)).toBeVisible();
   expect(h.history).toHaveBeenCalledTimes(3);
+});
+
+it("filters actual history by ritual/status and renders optional follow-up plus removed-step response provenance", async () => {
+  const snapshot = {
+    ...privateOccurrence,
+    status: "missed",
+    definition: {
+      ...privateOccurrence.definition,
+      title: "Historical check-in",
+      steps: [{ id: "step", label: "Optional reflection", kind: "checkbox", optional: true }],
+    },
+    responses: [
+      {
+        ...privateOccurrence.responses[0],
+        stepId: "removed-step",
+        value: "Historical response",
+        submitted: false,
+      },
+    ],
+    optionalFollowUp: { dueAt: "2026-11-11T08:00:00Z", stepIds: ["step"] },
+  };
+  h.history.mockResolvedValue({ items: [snapshot], nextCursor: null });
+  render(wrap(<RitualHistoryScreen />));
+  await screen.findByText(/Historical check-in/);
+  fireEvent.click(screen.getByText("Evening"));
+  fireEvent.click(screen.getByText("Missed"));
+  await waitFor(() =>
+    expect(h.history).toHaveBeenLastCalledWith(
+      undefined,
+      expect.objectContaining({ kind: "night", status: "missed" }),
+    ),
+  );
+  fireEvent.click(await screen.findByText(/Historical check-in/));
+  expect(screen.getByText(/Optional reflection \(checkbox, optional\)/)).toBeVisible();
+  expect(screen.getByText(/removed-step: Historical response · Draft/)).toBeVisible();
+  expect(screen.getByText(/Optional follow-up due 2026-11-11/)).toBeVisible();
+  act(() => h.close?.());
+  expect(screen.queryByText(/Historical response/)).toBeNull();
+});
+
+it("keeps a disabled ritual visibly configured instead of treating it as absent", async () => {
+  h.definitions.mockResolvedValue({ rituals: [{ ...definition, enabled: false }] });
+  render(wrap(<RitualsSettingsScreen />));
+  expect(await screen.findByRole("button", { name: /Morning.*Disabled/ })).toBeVisible();
+  expect(h.remove).not.toHaveBeenCalled();
+});
+it("uses entered history date boundaries without requiring a record-specific timezone", async () => {
+  h.timezone = undefined;
+  render(wrap(<RitualHistoryScreen />));
+  await screen.findByText("No matching history.");
+  fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-11-01" } });
+  fireEvent.change(screen.getByLabelText("To date"), { target: { value: "2026-11-30" } });
+  await waitFor(() =>
+    expect(h.history).toHaveBeenLastCalledWith(
+      undefined,
+      expect.objectContaining({ dateFrom: "2026-11-01", dateTo: "2026-11-30" }),
+    ),
+  );
+  expect(h.remove).not.toHaveBeenCalled();
 });

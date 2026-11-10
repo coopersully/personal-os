@@ -8,6 +8,7 @@ import {
   SecurityInvitationCreateScreen,
   SecurityInvitationsScreen,
   SecuritySettingsScreen,
+  sessionDeviceName,
 } from "./security";
 
 vi.mock("react", async () => {
@@ -21,6 +22,7 @@ vi.mock("@tanstack/react-query", async () => {
 const h = vi.hoisted(() => ({
   params: { id: "fixture-session" },
   push: vi.fn(),
+  signedIn: true,
   owner: true,
   epoch: 1,
   api: {} as Record<string, unknown>,
@@ -40,7 +42,9 @@ const h = vi.hoisted(() => ({
 vi.mock("../auth/context", () => ({
   useAuth: () => ({
     state: {
-      user: { id: "security-fixture", email: "fixture@nohmi.test", canManageInvitations: h.owner },
+      user: h.signedIn
+        ? { id: "security-fixture", email: "fixture@nohmi.test", canManageInvitations: h.owner }
+        : null,
     },
     session: { epoch: () => h.epoch, api: () => h.api, logout: h.logout, revalidate: h.revalidate },
   }),
@@ -132,6 +136,7 @@ vi.mock("../tasks/ui", () => ({
 }));
 beforeEach(() => {
   vi.clearAllMocks();
+  h.signedIn = true;
   h.owner = true;
   h.epoch = 1;
   h.sessions.mockReset().mockResolvedValue([]);
@@ -339,4 +344,74 @@ it.each([
     isCurrent === true ? "This is your current session" : "This may be your current session",
   );
   expect(h.revoke).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["Mozilla/5.0 Edg/130 Windows", "Edge on Windows"],
+  ["Chrome/130 Android", "Chrome on Android"],
+  ["Firefox/130 Linux", "Firefox on Linux"],
+  ["Safari/604 Macintosh", "Safari on Mac"],
+  ["Safari/604 iPad", "Safari on iPad"],
+  ["iPhone native client", "iPhone"],
+  ["unrecognized client", "Signed-in device"],
+] as const)("summarizes actual user agent %s without exposing technical text on the device list", (ua, summary) => {
+  expect(sessionDeviceName(ua)).toBe(summary);
+});
+it.each([
+  SecuritySettingsScreen,
+  SecurityDeviceScreen,
+  SecurityInvitationsScreen,
+  SecurityInvitationCreateScreen,
+])("does not read security data after sign-out", (Page) => {
+  h.signedIn = false;
+  show(<Page />);
+  expect(h.sessions).not.toHaveBeenCalled();
+  expect(h.invitations).not.toHaveBeenCalled();
+  expect(screen.queryByText("Sign out")).toBeNull();
+});
+it("retries invitation read failure and displays returned redemption/expiry states honestly", async () => {
+  h.invitations.mockRejectedValueOnce(new Error("Invitations offline")).mockResolvedValueOnce([
+    {
+      id: "redeemed",
+      email: "redeemed@nohmi.test",
+      redeemedAt: "2026-11-01",
+      expiresAt: "2099-12-31",
+    },
+    { id: "expired", email: null, redeemedAt: null, expiresAt: "2000-01-01" },
+    { id: "valid", email: "valid@nohmi.test", redeemedAt: null, expiresAt: "2099-12-31" },
+  ]);
+  show(<SecurityInvitationsScreen />);
+  await screen.findByRole("button", { name: "Retry" });
+  expect(h.error).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByText("Redeemed");
+  expect(screen.getByText("Expired")).toBeTruthy();
+  expect(screen.getByText("Any recipient")).toBeTruthy();
+  expect(screen.getByText(/Expires /)).toBeTruthy();
+  expect(h.invitations).toHaveBeenCalledTimes(2);
+  expect(h.create).not.toHaveBeenCalled();
+});
+it("handles a selected session removed elsewhere without offering revocation", async () => {
+  h.sessions.mockResolvedValue([
+    {
+      id: "other",
+      userAgent: null,
+      ipAddress: null,
+      createdAt: "2026-01-01",
+      lastSeenAt: "2026-01-01",
+      expiresAt: "2099-01-01",
+    },
+  ]);
+  show(<SecurityDeviceScreen />);
+  await screen.findByText("This session is no longer active.");
+  expect(screen.queryByRole("button", { name: "Revoke session" })).toBeNull();
+});
+it("retains nonnumeric invitation expiry as a correction draft without transport", async () => {
+  show(<SecurityInvitationCreateScreen />);
+  await screen.findByLabelText("Expires after days");
+  fireEvent.change(screen.getByLabelText("Expires after days"), { target: { value: "tomorrow" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create invitation" }));
+  expect(h.error).toHaveBeenCalledOnce();
+  expect(h.create).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Expires after days")).toHaveValue("tomorrow");
 });

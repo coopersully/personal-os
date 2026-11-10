@@ -17,6 +17,8 @@ const h = vi.hoisted(() => ({
   invalidate: vi.fn(),
   params: { kind: "night" },
   revision: 2,
+  timezone: "America/New_York" as string | undefined,
+  definitions: undefined as unknown[] | undefined,
   lateType: undefined as undefined | ((value: string) => void),
 }));
 const definition = {
@@ -44,12 +46,12 @@ const definition = {
 vi.mock("../auth/context", () => ({
   useOptionalAuth: () => null,
   useAuth: () => ({
-    state: { user: { id: "owner", planningTimezone: "America/New_York" } },
+    state: { user: { id: "owner", planningTimezone: h.timezone } },
     session: { epoch: () => 1, api: () => ({ saveRitual: h.save, listRituals: h.list }) },
   }),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: { rituals: [definition] } }),
+  useQuery: () => ({ data: { rituals: h.definitions ?? [definition] } }),
   useQueryClient: () => ({ invalidateQueries: h.invalidate }),
   useInfiniteQuery: () => ({}),
 }));
@@ -138,6 +140,8 @@ vi.mock("../../components/forms/enum-choice", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   h.lateType = undefined;
+  h.definitions = undefined;
+  h.timezone = "America/New_York";
   h.save.mockResolvedValue(definition);
   h.list.mockResolvedValue({ rituals: [{ ...definition, revision: 3 }] });
 });
@@ -302,4 +306,40 @@ it("freezes ritual fields and open day choices during save, rejects late native 
   await waitFor(() => expect(h.back).toHaveBeenCalled());
   expect(h.save.mock.calls[1]?.[0].steps).toEqual(definition.steps);
   expect(h.save.mock.calls[1]?.[0].title).toBe("Submitted ritual");
+});
+
+it.each([
+  "morning",
+  "night",
+])("configures an absent%s definition from honest native defaults with creation revision0", async (kind) => {
+  h.params = { kind };
+  h.definitions = [];
+  render(<RitualEditorScreen />);
+  expect(screen.getByLabelText("Title")).toHaveValue(kind === "morning" ? "Morning" : "Evening");
+  expect(screen.getByLabelText("Time")).toHaveValue(kind === "morning" ? "08:00" : "20:00");
+  expect(screen.getByLabelText("Enabled")).not.toBeChecked();
+  expect(screen.getByLabelText("Step 1")).toHaveValue("Check in");
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "My check-in" } });
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  expect(h.save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      kind,
+      title: "My check-in",
+      expectedRevision: 0,
+      enabled: false,
+      steps: [expect.objectContaining({ label: "Check in", kind: "checkbox" })],
+    }),
+  );
+});
+
+it("retains an unconfigured ritual draft but blocks persistence when Profile timezone is unavailable", () => {
+  h.definitions = [];
+  h.timezone = undefined;
+  render(<RitualEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Retained draft" } });
+  expect(screen.getByText(/Set a timezone in Profile/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(screen.getByLabelText("Title")).toHaveValue("Retained draft");
+  expect(h.save).not.toHaveBeenCalled();
 });

@@ -4,6 +4,7 @@ import { workspacePreferenceSchemas } from "@personal-os/domain";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import LegacyWorkspaceRoute from "../../app/settings/workspaces";
 import {
   CalendarSettingsScreen,
   CalendarSourceSettingsScreen,
@@ -47,6 +48,7 @@ vi.mock("react-native", () => ({
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock("expo-router", () => ({
+  Redirect: ({ href }: { href: string }) => <a href={href}>Continue to Settings</a>,
   router: { push: h.push, back: h.back },
   Stack: { Screen: () => null },
   useLocalSearchParams: () => ({ domain: h.domain, id: h.recordId }),
@@ -704,4 +706,65 @@ it("preserves honest unavailable reads and exposes retry/setup paths across work
   rerender(<FinanceSettingsScreen />);
   expect(screen.getByRole("button", { name: "Notifications" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Connections" })).not.toBeInTheDocument();
+});
+
+it.each([
+  ["Mail settings guidance", MailSettingsScreen, "guidance-mail", "mail"],
+  ["Task settings guidance", TaskSettingsScreen, "guidance-tasks", "tasks"],
+  ["Guidance editor", GuidanceSettingsScreen, "guidance-mail", "mail"],
+  ["Mail rule list", MailSettingsScreen, "mail-rules", "mail"],
+  ["Mail rule detail", MailRuleSettingsScreen, "mail-rules", "mail"],
+  ["Calendar list", CalendarSettingsScreen, "calendar-sources", "calendar"],
+  ["Calendar detail", CalendarSourceSettingsScreen, "calendar-sources", "calendar"],
+] as const)("%s preserves unavailable read and wires explicit retry to its owning resource", (_name, Page, key, domain) => {
+  h.domain = domain;
+  h.recordId = identifier(2);
+  h.errors.add(key);
+  if (!key.startsWith("guidance-")) h.resources[key] = undefined;
+  render(<Page />);
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading" }));
+  expect(h.refetch).toHaveBeenCalledExactlyOnceWith(key);
+  expect(h.write).not.toHaveBeenCalled();
+  expect(h.saveGuidance).not.toHaveBeenCalled();
+});
+it("Task workspace with no guidance offers the actual agent setup route without inventing a profile", () => {
+  render(<TaskSettingsScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Set up workspace guidance" }));
+  expect(h.push).toHaveBeenCalledWith("/settings/agents");
+  expect(h.saveGuidance).not.toHaveBeenCalled();
+});
+
+it("lets an older Calendar draft with absent preferences choose reviewed defaults and toggle evidence without granting authority", () => {
+  h.domain = "calendar";
+  h.guidance = { ...calendarGuidance(), status: "draft", preferences: {} };
+  h.resources["calendar-sources"] = [
+    {
+      id: identifier(2),
+      name: "Work",
+      isWritable: true,
+      source: { accountLabel: "Fixture provider" },
+    },
+  ];
+  render(<GuidanceSettingsScreen />);
+  expect(screen.getByLabelText("Before-event buffer (minutes)")).toHaveValue("0");
+  expect(screen.getByLabelText("After-event buffer (minutes)")).toHaveValue("0");
+  expect(screen.getByLabelText("Busy-block privacy")).toHaveValue("busy");
+  expect(
+    within(screen.getByLabelText("Default calendar")).getByRole("option", {
+      name: "Work · Fixture provider",
+    }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByLabelText("Allow evidence: Booking"));
+  expect(screen.getByLabelText("Allow evidence: Booking")).toBeChecked();
+  fireEvent.click(screen.getByLabelText("Allow evidence: Booking"));
+  expect(screen.getByLabelText("Allow evidence: Booking")).not.toBeChecked();
+  expect(h.saveGuidance).not.toHaveBeenCalled();
+});
+
+it("redirects the obsolete workspace settings entry to the current native Settings root", () => {
+  render(<LegacyWorkspaceRoute />);
+  expect(screen.getByRole("link", { name: "Continue to Settings" })).toHaveAttribute(
+    "href",
+    "/settings",
+  );
 });

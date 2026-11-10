@@ -9,6 +9,7 @@ vi.mock("react", async () => {
 });
 const h = vi.hoisted(() => ({
   owner: "owner",
+  extra: { apnsEnvironment: "production" as string | undefined },
   epoch: 1,
   enabled: false,
   register: vi.fn(async () => ({ audience: "audience" })),
@@ -42,7 +43,7 @@ vi.mock("react-native", async () => ({
   },
 }));
 vi.mock("expo-constants", () => ({
-  default: { expoConfig: { extra: { apnsEnvironment: "production" } } },
+  default: { expoConfig: { extra: h.extra } },
 }));
 vi.mock("expo-crypto", () => ({ randomUUID: () => "installation" }));
 vi.mock("expo-secure-store", () => ({
@@ -113,6 +114,10 @@ function Settings() {
 beforeEach(() => {
   vi.clearAllMocks();
   h.owner = "owner";
+  h.extra.apnsEnvironment = "production";
+  h.disable.mockResolvedValue({ disabled: true });
+  h.target.mockResolvedValue({ audience: "audience", destination: "finance_chat" });
+  h.token.mockResolvedValue({ type: "ios", data: "apple-token" });
   h.epoch = 1;
   h.enabled = false;
   h.removes = [];
@@ -245,4 +250,124 @@ it("opens the authenticated per-event detail for an attention notification", asy
       params: { eventId: "event", installationId: "installation" },
     }),
   );
+});
+
+it("requests permission on opt-in and allows revoking a successful subscription", async () => {
+  h.permission.mockResolvedValue({ granted: false, canAskAgain: true });
+  h.request.mockResolvedValue({ granted: false, ios: { status: 3 } });
+  render(<Settings />);
+  const toggle = screen.getByRole("switch", { name: "Finance notifications" });
+  await waitFor(() => expect(h.lastResponse).toHaveBeenCalled());
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle).toBeChecked());
+  expect(h.request).toHaveBeenCalledOnce();
+  expect(h.register).toHaveBeenCalledOnce();
+  await waitFor(() => expect(toggle).not.toBeDisabled());
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Finance notifications disabled.", {
+      id: "finance-toast",
+    }),
+  );
+  expect(h.loading).toHaveBeenLastCalledWith("Disabling Finance notifications…");
+  expect(toggle).not.toBeChecked();
+});
+
+it("keeps unsupported builds from attempting registration", async () => {
+  h.extra.apnsEnvironment = undefined;
+  render(<Settings />);
+  expect(screen.getByRole("switch", { name: "Finance notifications" })).toBeDisabled();
+  expect(h.register).not.toHaveBeenCalled();
+  expect(h.removes).toHaveLength(0);
+});
+
+it("offers a retry when the native token API returns an unsupported token", async () => {
+  h.token.mockResolvedValueOnce({ type: "android", data: "invalid-token" });
+  render(<Settings />);
+  const toggle = screen.getByRole("switch", { name: "Finance notifications" });
+  await waitFor(() => expect(h.lastResponse).toHaveBeenCalled());
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith("Native iPhone push registration is unavailable.", {
+      id: "finance-toast",
+    }),
+  );
+  expect(h.register).not.toHaveBeenCalled();
+  expect(toggle).not.toBeChecked();
+  await waitFor(() => expect(toggle).not.toBeDisabled());
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle).toBeChecked());
+});
+
+it("drops a pending permission result when logout replaces the session", async () => {
+  const permission = Promise.withResolvers<{ granted: boolean; canAskAgain: boolean }>();
+  h.permission.mockReturnValueOnce(permission.promise);
+  const view = render(<Settings />);
+  await waitFor(() => expect(h.lastResponse).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("switch", { name: "Finance notifications" }));
+  await waitFor(() => expect(h.permission).toHaveBeenCalledOnce());
+  h.owner = "";
+  h.epoch += 1;
+  view.rerender(<Settings />);
+  await act(async () => permission.resolve({ granted: false, canAskAgain: true }));
+  await waitFor(() => expect(h.toastDismiss).toHaveBeenCalledWith("finance-toast"));
+  expect(h.request).not.toHaveBeenCalled();
+  expect(h.register).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
+});
+
+it("ignores unrelated taps, retains a failed lookup and opens Activity on retry", async () => {
+  h.enabled = true;
+  const response = (data: unknown) => ({ notification: { request: { content: { data } } } });
+  const event = response({ version: 1, kind: "finance", eventId: "event", audience: "audience" });
+  h.target.mockRejectedValueOnce(new Error("offline"));
+  h.target.mockResolvedValue({ audience: "audience", destination: "finance_activity" });
+  render(<Settings />);
+  await waitFor(() => expect(h.lastResponse).toHaveBeenCalled());
+  await act(async () => h.response?.(response({ owner: "owner" })));
+  expect(h.target).not.toHaveBeenCalled();
+  await act(async () => h.response?.(event));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith("Couldn’t open Finance. Open nohmi to review it."),
+  );
+  expect(h.clearLast).not.toHaveBeenCalled();
+  await act(async () => h.response?.(event));
+  await waitFor(() =>
+    expect(h.push).toHaveBeenCalledWith({
+      pathname: "/(workspaces)/finances/assistant",
+      params: { view: "Activity" },
+    }),
+  );
+});
+
+it("deduplicates foreground sync failures until a successful sync", async () => {
+  h.enabled = true;
+  h.register.mockRejectedValue(new Error("offline"));
+  render(<Settings />);
+  await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
+  await act(async () => h.app?.("active"));
+  expect(h.register).toHaveBeenCalledTimes(2);
+  expect(h.error).toHaveBeenCalledOnce();
+
+  h.register.mockResolvedValueOnce({ audience: "audience" });
+  await act(async () => h.app?.("active"));
+  expect(h.lastResponse).toHaveBeenCalledOnce();
+  expect(h.success).not.toHaveBeenCalled();
+
+  await act(async () => h.app?.("active"));
+  expect(h.error).toHaveBeenCalledTimes(2);
+});
+
+it("does not show a sync error after logout while registration was pending", async () => {
+  h.enabled = true;
+  const registration = Promise.withResolvers<{ audience: string }>();
+  h.register.mockReturnValueOnce(registration.promise);
+  const view = render(<Settings />);
+  await waitFor(() => expect(h.register).toHaveBeenCalledOnce());
+  h.owner = "";
+  h.epoch += 1;
+  view.rerender(<Settings />);
+  await act(async () => registration.reject(new Error("offline")));
+  expect(h.error).not.toHaveBeenCalled();
+  expect(h.lastResponse).not.toHaveBeenCalled();
 });

@@ -2,10 +2,12 @@ import { ApiClientError } from "@personal-os/api-client";
 import { useQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef } from "react";
-import { AppState, Linking } from "react-native";
+import { AppState, Linking, View } from "react-native";
 import { toast } from "sonner-native";
+import { Screen } from "../../components/screen";
+import { spacing } from "../../theme";
 import { mobileAppOrigin, useAuth } from "../auth/context";
-import { Card, Copy, FinanceRow, FinanceScreen, ReadState } from "../finances/ui";
+import { Card, Copy, FinanceRow, ReadState } from "../finances/ui";
 
 /** Only authenticated server-generated web destinations may leave the app. */
 export function financeNotificationWebUrl(value: string) {
@@ -23,6 +25,15 @@ export function financeNotificationWebUrl(value: string) {
     throw new Error("This Finance destination is unavailable.");
   return url.href;
 }
+const statusPresentation: Record<string, { label: string; tone: "attention" | "incorrect" }> = {
+  open: { label: "Needs your input", tone: "attention" },
+  pending: { label: "Approval needed", tone: "attention" },
+  awaiting_approval: { label: "Approval needed", tone: "attention" },
+  blocked: { label: "Needs attention", tone: "attention" },
+  failed_recoverable: { label: "Retry needed", tone: "attention" },
+  failed_terminal: { label: "Bookkeeping failed", tone: "incorrect" },
+};
+
 export function FinanceNotificationScreen() {
   const { state, session } = useAuth();
   const params = useLocalSearchParams<{ eventId?: string; installationId?: string }>();
@@ -79,6 +90,7 @@ function NotificationDetail({
     !available ||
     (query.error instanceof ApiClientError && [403, 404].includes(query.error.status));
   const detail = !query.isError ? query.data?.detail : undefined;
+  const status = detail ? statusPresentation[detail.status] : undefined;
   async function openWeb(url: string) {
     if (pending.current) return;
     pending.current = true;
@@ -104,51 +116,54 @@ function NotificationDetail({
     }
   }
   return (
-    <FinanceScreen title="Finance update">
-      {unavailable ? (
-        <Card>
-          <Copy secondary>
-            This update is no longer available. It may have been resolved or replaced.
-          </Copy>
+    <Screen chrome>
+      <View style={{ gap: spacing.lg, paddingTop: spacing.sm }}>
+        {unavailable ? (
+          <Card>
+            <Copy secondary>
+              This update is no longer available. It may have been resolved or replaced.
+            </Copy>
+          </Card>
+        ) : (
+          <ReadState query={{ ...query, feedbackKey: JSON.stringify(queryKey) }}>
+            {detail ? (
+              <Card>
+                <Copy>{detail.title}</Copy>
+                <Copy>{detail.summary}</Copy>
+                <FinanceRow
+                  title="Status"
+                  value={status?.label ?? "Needs attention"}
+                  valueTone={status?.tone ?? "attention"}
+                  icon="attention"
+                />
+                <FinanceRow
+                  title="Open in web"
+                  subtitle="Review this update in your browser. You may need to sign in."
+                  icon="finances"
+                  onPress={() => void openWeb(detail.webUrl)}
+                />
+              </Card>
+            ) : (
+              <Card>
+                <Copy secondary>This update has no available detail.</Copy>
+              </Card>
+            )}
+          </ReadState>
+        )}
+        <Card rows>
+          <FinanceRow
+            title="Continue in Finance chat"
+            subtitle="Ask a question or discuss the next step"
+            icon="reply"
+            onPress={() =>
+              router.push({
+                pathname: "/(workspaces)/finances/assistant",
+                params: { view: "Conversation" },
+              })
+            }
+          />
         </Card>
-      ) : (
-        <ReadState query={{ ...query, feedbackKey: JSON.stringify(queryKey) }}>
-          {detail ? (
-            <Card>
-              <Copy>{detail.title}</Copy>
-              <Copy>{detail.summary}</Copy>
-              <FinanceRow
-                title="Status"
-                value={detail.status.replaceAll("_", " ")}
-                icon="attention"
-              />
-              <FinanceRow
-                title="Open in web"
-                subtitle="Review this update in your browser. You may need to sign in."
-                icon="finances"
-                onPress={() => void openWeb(detail.webUrl)}
-              />
-            </Card>
-          ) : (
-            <Card>
-              <Copy secondary>This update has no available detail.</Copy>
-            </Card>
-          )}
-        </ReadState>
-      )}
-      <Card rows>
-        <FinanceRow
-          title="Continue in Finance chat"
-          subtitle="Ask a question or discuss the next step"
-          icon="reply"
-          onPress={() =>
-            router.push({
-              pathname: "/(workspaces)/finances/assistant",
-              params: { view: "Conversation" },
-            })
-          }
-        />
-      </Card>
-    </FinanceScreen>
+      </View>
+    </Screen>
   );
 }

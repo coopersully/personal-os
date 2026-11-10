@@ -120,6 +120,7 @@ vi.mock("react-native", () => {
   return {
     StyleSheet: { absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 } },
     AppState: {
+      currentState: "active",
       addEventListener: (_event: string, callback: (state: string) => void) => {
         h.foreground = callback;
         return { remove: h.removeListener };
@@ -750,9 +751,9 @@ it("reads user and agent messages from the same ongoing conversation", async () 
       nextCursor: null,
     });
   mount(<FinanceAssistantScreen />);
-  fireEvent.click(await screen.findByRole("button", { name: /Load more messages/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Load older messages/ }));
   await screen.findByText("Here are the recorded changes");
-  expect(h.api.getFinanceConversationHistory).toHaveBeenLastCalledWith({ after: "12", limit: 50 });
+  expect(h.api.getFinanceConversationHistory).toHaveBeenLastCalledWith({ before: "12", limit: 50 });
 });
 it("keeps a draft on stale-revision conflicts and reports recovery through Sonner", async () => {
   const { ApiClientError } = await import("@personal-os/api-client");
@@ -1352,7 +1353,13 @@ it.each([
   });
   h.api.getFinanceSpending.mockResolvedValue({
     ...spending,
-    snapshot: { ...spending.snapshot, netCents: percent * 100 },
+    snapshot: { ...spending.snapshot, netCents: 999999 },
+    monthlyBudget: {
+      state: "qualified",
+      month,
+      coverage: "complete",
+      totals: { budgetCents: 10000, usedCents: percent * 100 },
+    },
   });
   mount(<FinancePlanScreen />);
   await screen.findByText(`${percent}%`);
@@ -2066,4 +2073,58 @@ it("Today routes budget exceptions directly to their category and respects missi
     pathname: "/finance-budget-category",
     params: { id: "dining-limit", month: "2026-11" },
   });
+});
+
+it("refreshes delayed Finance replies only while focused and foregrounded", async () => {
+  h.params = { view: "Conversation" };
+  h.api.getFinanceConversationHistory.mockResolvedValue({ messages: [], nextCursor: null });
+  const intervals = vi.spyOn(globalThis, "setInterval");
+  mount(<FinanceAssistantScreen />);
+  await screen.findByLabelText("Message nohmi");
+  let stop: (() => void) | undefined;
+  act(() => {
+    stop = h.focus?.();
+  });
+  const poll = intervals.mock.calls.findLast((call) => call[1] === 5000)?.[0] as () => void;
+  expect(poll).toBeTypeOf("function");
+  h.api.getFinanceConversationHistory.mockResolvedValue({
+    messages: [
+      {
+        id: "delayed",
+        authorKind: "agent",
+        text: "I reviewed that transaction.",
+        createdAt: "2026-11-09T12:00:00Z",
+      },
+    ],
+    nextCursor: null,
+  });
+  act(() => poll());
+  await screen.findByText("I reviewed that transaction.");
+  const reads = h.api.getFinanceConversationHistory.mock.calls.length;
+  act(() => {
+    h.foreground?.("background");
+    poll();
+  });
+  expect(h.api.getFinanceConversationHistory).toHaveBeenCalledTimes(reads);
+  act(() => stop?.());
+  intervals.mockRestore();
+});
+
+it("does not derive a budget percentage from an unqualified proposal", async () => {
+  h.api.getFinanceBudget.mockResolvedValue({
+    data: {
+      allocatedTotal: 100,
+      effectiveFrom: "2026-11",
+      status: "proposed",
+      version: 2,
+      allocations: [],
+      resources: [],
+      assumptions: [],
+    },
+  });
+  h.api.getFinanceSpending.mockResolvedValue(spending);
+  mount(<FinancePlanScreen />);
+  await screen.findByText("$100.00");
+  expect(await screen.findByText("Unavailable")).toBeTruthy();
+  expect(screen.queryByText("42%")).toBeNull();
 });

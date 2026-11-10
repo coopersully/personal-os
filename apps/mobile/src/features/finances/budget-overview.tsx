@@ -99,15 +99,18 @@ export function BudgetOverview() {
   );
   const spending = useSpending("month");
   const budget = plan.data?.data;
-  const spent = spending.data ? spending.data.snapshot.netCents / 100 : null;
-  const comparable =
-    budget &&
-    budget.effectiveFrom.slice(0, 7) === month &&
-    budget.allocatedTotal > 0 &&
-    spent !== null &&
-    Number.isFinite(spent);
-  const percent = comparable
-    ? Math.max(0, Math.round((spent / budget.allocatedTotal) * 100))
+  const baseline = spending.data?.monthlyBudget;
+  const totals =
+    baseline?.state === "qualified" &&
+    baseline.month === month &&
+    baseline.coverage === "complete" &&
+    baseline.totals &&
+    baseline.totals.budgetCents > 0
+      ? baseline.totals
+      : null;
+  const spent = totals ? totals.usedCents / 100 : null;
+  const percent = totals
+    ? Math.max(0, Math.round((totals.usedCents / totals.budgetCents) * 100))
     : null;
   const ringColor =
     percent !== null && percent > 100 ? t.destructive : workspaceColor(t, "finances");
@@ -159,7 +162,7 @@ export function BudgetOverview() {
                 accessibilityLabel={
                   percent === null
                     ? "Budget spending unavailable"
-                    : `${percent}% spent: ${formatMoney(spent, "USD")} of ${formatMoney(budget.allocatedTotal, "USD")}${spendingStatus ? `, ${spendingStatus}` : ""}`
+                    : `${percent}% spent: ${formatMoney(spent, "USD")} of ${formatMoney((totals?.budgetCents ?? 0) / 100, "USD")}${spendingStatus ? `, ${spendingStatus}` : ""}`
                 }
                 style={{ alignItems: "center", gap: spacing.xs }}
               >
@@ -192,7 +195,9 @@ export function BudgetOverview() {
                   <Text style={{ color: t.ink, fontSize: 22, fontWeight: "600" }}>
                     {percent === null ? "—" : `${percent}%`}
                   </Text>
-                  <Text style={{ color: t.secondary, fontSize: 12 }}>spent</Text>
+                  <Text style={{ color: t.secondary, fontSize: 12 }}>
+                    {percent === null ? "Unavailable" : "spent"}
+                  </Text>
                 </View>
                 {spendingStatus && percent !== null && (
                   <Text style={{ color: t.secondary, fontSize: 12 }}>{spendingStatus}</Text>

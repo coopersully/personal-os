@@ -3,6 +3,16 @@ import { createFinanceConversationApi } from "./finance-conversation.js";
 import type { FinanceRequest } from "./finances.js";
 
 describe("Finance conversation client leaf", () => {
+  it("requests recent history and older pages without lossy cursor conversion", async () => {
+    const request = vi.fn().mockResolvedValue({ messages: [], nextCursor: null });
+    const api = createFinanceConversationApi(request);
+    await api.getFinanceConversationHistory({ latest: true, limit: 50 });
+    await api.getFinanceConversationHistory({ before: "9007199254740993", limit: 50 });
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/finances/conversation/messages?latest=true&limit=50",
+      "/v1/finances/conversation/messages?before=9007199254740993&limit=50",
+    ]);
+  });
   it("preserves lossless cursors, source IDs and challenge exchange without self-reported proof", async () => {
     const request = vi.fn(async (path: string) =>
       path.endsWith("/messages")

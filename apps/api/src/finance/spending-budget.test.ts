@@ -246,6 +246,7 @@ describe("Whole-month budget usage independent from bubble selection", () => {
     });
     expect(bucket.monthlyBudget).toMatchObject({
       state: "qualified",
+      totals: { budgetCents: 1000, usedCents: 1600 },
       groups: [
         expect.objectContaining({ groupId: id(8), usedCents: 1600 }),
         expect.objectContaining({ groupId: id(3), usedCents: 1600 }),
@@ -434,5 +435,21 @@ describe("Whole-month budget usage independent from bubble selection", () => {
           qualification: { ...qualified(baseline), period },
         }),
       ).toMatchObject({ state: "unavailable", reason: "baseline_incomplete" });
+  });
+  it("counts whole-month unbudgeted spending without duplicating nested groups", () => {
+    const result = projectFinanceSpendingMonthlyBudget(
+      {
+        ...evidence,
+        transactions: [...evidence.transactions, transaction(12, 200, "2026-03-10", id(1), id(99))],
+      },
+      { ...query, scope: { ...query.scope, categoryIds: [] } },
+      [],
+      baseline,
+    );
+    expect(result).toMatchObject({
+      state: "qualified",
+      totals: { budgetCents: 1000, usedCents: 1800 },
+      groups: [],
+    });
   });
 });

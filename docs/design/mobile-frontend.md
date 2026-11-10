@@ -211,9 +211,13 @@ Accounts uses the shared header search and the same segmented control as Spendin
 Investments and Debt; show Other only when needed to keep uncategorized assets reachable.
 Budget summary and monthly category utilization share one card. Each progress track compares
 spending with its own category limit, with spent/limit amounts and explicit remaining or over-limit
-text. The total-budget ring uses the monthly spending snapshot, including uncategorized spending,
-against total plan allocations; never sum only limited categories to imply total spending. Only
-show a percentage for a matching month and positive budget, and retain spending limitations. Preserve approved/proposed state and the period for each source.
+text. The spending-budget ring uses authoritative whole-month totals from the human-qualified
+baseline, including unbudgeted/uncategorized spending in that baseline's account universe. Never
+compare to the latest proposal or sum nested display groups. Require a matching month, complete
+coverage and a positive baseline spending budget; otherwise show unavailable. The proposal amount
+remains separate because it can also allocate money to savings, debt or goals. Expose the ring's
+baseline spending denominator in its accessible description. Preserve approved/proposed state and
+the period for each source.
 
 Budget headers use a readable month name and compact version (v1). Hide the normal Approved
 state; retain proposal and other exceptional states.
@@ -249,7 +253,9 @@ Chat uses a bounded, flex-sized transcript beneath fixed page controls. Only the
 scrolls; the composer stays at the bottom above navigation and follows the keyboard. User
 messages align right and assistant messages left, with readable theme-aware bubbles and sender
 labels. The multiline input has a maximum height and scrolls internally after that. Keep
-pagination explicit and preserve reading position when the user is away from the latest
+pagination explicit: open the latest 50 messages and load older pages above them. Refresh every
+five seconds only while the transcript is focused and foregrounded, so asynchronous replies appear
+without reopening the workspace. Stop polling on blur/background. Preserve reading position when the user is away from the latest
 messages. Sending retains the draft and idempotency key until the API confirms delivery;
 connection readiness must remain honest and action outcomes use Sonner.
 

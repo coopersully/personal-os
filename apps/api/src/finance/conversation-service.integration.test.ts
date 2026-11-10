@@ -106,6 +106,38 @@ describe.sequential("durable Finance conversation intake", () => {
       answer,
     };
   }
+  it("pages latest history backwards losslessly and isolates owners", async () => {
+    const f = await fixture();
+    const other = await fixture();
+    const service = createFinanceConversationService({ db: database.db });
+    const start = 9007199254740993n;
+    await database.db.insert(financeConversationMessages).values(
+      Array.from({ length: 53 }, (_, index) => ({
+        userId: f.userId,
+        sequence: start + BigInt(index),
+        authorKind: "user" as const,
+        text: `Message ${index}`,
+        idempotencyKey: `history-${index}`,
+        createdAt: new Date(),
+      })),
+    );
+    const latest = await service.history(f.userId, "0", 50, {});
+    expect(latest.messages).toHaveLength(50);
+    expect(latest.messages[0]?.sequence).toBe(String(start + 3n));
+    expect(latest.messages.at(-1)?.text).toBe("Message 52");
+    const older = await service.history(f.userId, "0", 50, {
+      before: latest.nextCursor ?? undefined,
+    });
+    expect(older.messages.map((m) => m.sequence)).toEqual(
+      [start, start + 1n, start + 2n].map(String),
+    );
+    expect(older.nextCursor).toBeNull();
+    expect((await service.history(other.userId, "0", 50, {})).messages).toEqual([]);
+    expect((await service.history(f.userId, String(start), 1)).messages[0]?.sequence).toBe(
+      String(start + 1n),
+    );
+  });
+
   async function canonicalRun(userId: string) {
     const [run] = await database.db
       .insert(workspaceMaintenanceRuns)

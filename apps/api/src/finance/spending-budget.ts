@@ -71,6 +71,10 @@ export function projectFinanceSpendingMonthlyBudget(
     period: baseline.period,
     currency: "USD",
     accountIds: baseline.accountIds,
+    totals: {
+      budgetCents: baseline.allocations.reduce((sum, row) => sum + row.amountCents, 0),
+      usedCents: monthly.contributions.reduce((sum, row) => sum + row.netCents, 0),
+    },
     qualificationId: baseline.id,
     confirmedAt: baseline.confirmedAt,
     qualificationKind: baseline.qualificationKind,

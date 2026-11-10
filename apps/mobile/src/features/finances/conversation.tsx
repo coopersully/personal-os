@@ -1,7 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { router } from "expo-router";
-import { type ComponentRef, useEffect, useRef, useState } from "react";
-import { Keyboard, Platform, ScrollView, Text, View } from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { type ComponentRef, useCallback, useEffect, useRef, useState } from "react";
+import { AppState, Keyboard, Platform, ScrollView, Text, View } from "react-native";
 import { radius, spacing, useTheme } from "../../theme";
 import { ConversationComposer } from "./conversation-composer";
 import { useFinance } from "./data";
@@ -20,10 +20,37 @@ export function Conversation() {
     queryKey: ["finances", owner, "conversation"],
     enabled: !!owner,
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => api.getFinanceConversationHistory({ after: pageParam, limit: 50 }),
+    queryFn: ({ pageParam }) =>
+      api.getFinanceConversationHistory(
+        pageParam ? { before: pageParam, limit: 50 } : { latest: true, limit: 50 },
+      ),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
   });
-  const messages = query.data?.pages.flatMap((page) => page.messages) ?? [];
+  // Replies arrive after the send receipt. Refresh only while this transcript is visible.
+  const refresh = query.refetch;
+  useFocusEffect(
+    useCallback(() => {
+      if (!owner) return;
+      let active = AppState.currentState === "active";
+      const poll = () => {
+        if (active) void refresh();
+      };
+      const timer = setInterval(poll, 5_000);
+      const listener = AppState.addEventListener("change", (state) => {
+        active = state === "active";
+        if (active) poll();
+      });
+      return () => {
+        clearInterval(timer);
+        listener.remove();
+      };
+    }, [owner, refresh]),
+  );
+  const messages =
+    query.data?.pages
+      .slice()
+      .reverse()
+      .flatMap((page) => page.messages) ?? [];
   // Measure the actual composer region, accounting for the native tab bar and workspace header.
   useEffect(() => {
     let active = true;
@@ -62,15 +89,19 @@ export function Conversation() {
                   contentSize.height - layoutMeasurement.height - contentOffset.y < 80;
               }}
               onContentSizeChange={() => {
-                if (nearBottom.current && !query.hasNextPage)
-                  transcript.current?.scrollToEnd({ animated: false });
+                if (nearBottom.current) transcript.current?.scrollToEnd({ animated: false });
               }}
               onLayout={() => {
-                if (nearBottom.current && !query.hasNextPage)
-                  transcript.current?.scrollToEnd({ animated: false });
+                if (nearBottom.current) transcript.current?.scrollToEnd({ animated: false });
               }}
               contentContainerStyle={{ flexGrow: 1, gap: spacing.md, paddingVertical: spacing.sm }}
             >
+              {query.hasNextPage && (
+                <FinanceRow
+                  title={query.isFetchingNextPage ? "Loading…" : "Load older messages"}
+                  onPress={query.isFetchingNextPage ? undefined : () => void query.fetchNextPage()}
+                />
+              )}
               {messages.map((message) => {
                 const mine = message.authorKind === "user";
                 return (
@@ -128,12 +159,6 @@ export function Conversation() {
               })}
               {!messages.length && (
                 <Copy secondary>Your Finance conversation will appear here.</Copy>
-              )}
-              {query.hasNextPage && (
-                <FinanceRow
-                  title={query.isFetchingNextPage ? "Loading…" : "Load more messages"}
-                  onPress={query.isFetchingNextPage ? undefined : () => void query.fetchNextPage()}
-                />
               )}
             </ScrollView>
           </ReadState>

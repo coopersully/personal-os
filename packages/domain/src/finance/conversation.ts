@@ -163,6 +163,19 @@ export function projectFinanceConversationReadiness(input: {
   return { ...base, canSend: true, reason: "ready", recovery: "none" };
 }
 
+export const financeConversationHistoryQuerySchema = z
+  .object({
+    after: financeConversationSequenceSchema.optional(),
+    before: financeConversationSequenceSchema.optional(),
+    latest: z.literal("true").optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  })
+  .strict()
+  .refine(
+    (q) => [q.after, q.before, q.latest].filter((v) => v !== undefined).length <= 1,
+    "Choose one history direction.",
+  );
+
 export const financeConversationHistoryPageSchema = z
   .object({
     messages: z.array(financeConversationMessageSchema).max(100),

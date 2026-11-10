@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type { TaskWorkspaceItem } from "@personal-os/domain";
+import { useQueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -26,6 +27,7 @@ vi.mock("expo-glass-effect", () => ({
   GlassView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
 const h = vi.hoisted(() => ({
+  epoch: 1,
   items: [] as TaskWorkspaceItem[],
   lists: [] as object[],
   projects: [] as object[],
@@ -59,7 +61,10 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock("../auth/context", () => ({
   useOptionalAuth: () => null,
-  useAuth: () => ({ state: { user: { planningTimezone: "UTC" } }, session: { api: () => h } }),
+  useAuth: () => ({
+    state: { user: { id: "fixture", planningTimezone: "UTC" } },
+    session: { api: () => h, epoch: () => h.epoch },
+  }),
 }));
 vi.mock("expo-router", () => ({
   router: { push: h.push },
@@ -134,6 +139,7 @@ const project = (id: string, name: string, overrides: object = {}) => ({
 });
 beforeEach(() => {
   vi.clearAllMocks();
+  h.epoch = 1;
   h.items = [task("one")];
   h.lists = [list("inbox", "Inbox", { kind: "inbox" })];
   h.projects = [];
@@ -753,6 +759,48 @@ it("clears a custom capture list back to the default Inbox", async () => {
       "tasks",
       expect.objectContaining({
         preferences: expect.objectContaining({ defaultCaptureListId: null }),
+      }),
+    ),
+  );
+});
+
+function RefreshPreferencesFixture() {
+  const query = useQueryClient();
+  return (
+    <button
+      type="button"
+      onClick={() => void query.refetchQueries({ queryKey: ["tasks", "settings"] })}
+    >
+      Background preferences refresh
+    </button>
+  );
+}
+it("retains the opened draft and reviewed revision when background preferences change", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+      <RefreshPreferencesFixture />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  h.getWorkspaceSettings.mockResolvedValueOnce({
+    revision: 19,
+    preferences: { ...h.preferences, taskRowDetails: ["tags"] },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Background preferences refresh" }));
+  await waitFor(() => expect(h.getWorkspaceSettings).toHaveBeenCalledTimes(2));
+  await act(async () => {});
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  expect(screen.getByRole("switch", { name: "Show tags" })).not.toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(h.updateWorkspaceSettings).toHaveBeenCalledWith(
+      "tasks",
+      expect.objectContaining({
+        expectedRevision: 3,
+        preferences: expect.objectContaining({ taskRowDetails: ["estimate", "notes"] }),
       }),
     ),
   );

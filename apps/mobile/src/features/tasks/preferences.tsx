@@ -5,12 +5,14 @@ import { Text, View } from "react-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
 import { useTheme } from "../../theme";
+import { useAuth } from "../auth/context";
 import { NotificationSettings } from "../notifications/provider";
 import { useTaskAction, useTaskApi, useTaskResources } from "./data";
 import { listOption } from "./list-presentation";
 import { SearchableChoice } from "./searchable-choice";
 import { Choice, confirm, FormBody, Section, State, ToggleRow } from "./ui";
 export function TaskPreferencesScreen() {
+  const { state, session } = useAuth();
   const resources = useTaskResources();
   if (!resources.settings.data)
     return (
@@ -21,7 +23,7 @@ export function TaskPreferencesScreen() {
     );
   return (
     <Preferences
-      key={resources.settings.data.revision}
+      key={`${state.user?.id}:${session.epoch()}`}
       initial={resources.settings.data}
       lists={(resources.lists.data ?? [])
         .filter((row) => row.availability === "active")
@@ -30,7 +32,7 @@ export function TaskPreferencesScreen() {
   );
 }
 function Preferences({
-  initial,
+  initial: opened,
   lists,
 }: {
   initial: WorkspaceSettings<"tasks">;
@@ -39,6 +41,7 @@ function Preferences({
   const t = useTheme();
   const api = useTaskApi();
   const action = useTaskAction();
+  const [initial] = useState(opened);
   const [edited, setEdited] = useState(false);
   const [draft, setDraft] = useState(initial.preferences);
   const update = <K extends keyof TasksWorkspacePreferences>(

@@ -47,6 +47,7 @@ vi.mock("react-native", async () => ({
   ),
 }));
 vi.mock("../features/auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({ state: { user: { planningTimezone: h.timezone } } }),
 }));
 vi.mock("expo-router", () => ({ usePathname: () => h.path }));
@@ -106,7 +107,7 @@ vi.mock("@expo/ui/swift-ui/modifiers", () => {
     (kind: string) =>
     (value?: unknown, ...rest: unknown[]) => ({ kind, value, rest });
   return Object.fromEntries([
-    ..."accessibilityLabel disabled font foregroundStyle frame pickerStyle tag accessibilityHidden animation glassEffect offset padding resizable"
+    ..."accessibilityLabel disabled font foregroundStyle frame pickerStyle tag accessibilityHidden animation glassEffect offset padding resizable buttonStyle buttonBorderShape"
       .split(" ")
       .map((name) => [name, modifier(name)]),
     ["Animation", { snappy: modifier("snappy") }],

@@ -86,3 +86,7 @@ it("keeps web page motion separate from workspace motion and leaves room for sti
     expect.arrayContaining([expect.objectContaining({ paddingTop: 84 })]),
   );
 });
+
+vi.mock("../features/auth/context", () => ({ useOptionalAuth: () => null }));
+
+vi.mock("sonner-native", () => ({ toast: { error: vi.fn() } }));

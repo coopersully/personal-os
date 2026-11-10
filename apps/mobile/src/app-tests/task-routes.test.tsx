@@ -97,3 +97,5 @@ it("defaults To-do to today and auto sorting and keeps projects/lists/browse sep
   rerender(<Browse />);
   expect(screen.getByText("views")).toBeVisible();
 });
+
+vi.mock("../features/auth/context", () => ({ useOptionalAuth: () => null }));

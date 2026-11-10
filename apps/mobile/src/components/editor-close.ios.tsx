@@ -1,12 +1,16 @@
 import { Button, Host, Text } from "@expo/ui/swift-ui";
 import {
   accessibilityLabel,
+  buttonBorderShape,
+  buttonStyle,
   disabled,
   font,
-  foregroundStyle,
   frame,
+  padding,
 } from "@expo/ui/swift-ui/modifiers";
-/** Let the native header choose its glass appearance and adaptive label color. */
+import { Platform } from "react-native";
+import { useTheme } from "../theme";
+/** Standalone sheet action. Stack headers use UIKit items via editorDismissOptions. */
 export function EditorClose({
   label,
   onPress,
@@ -16,14 +20,23 @@ export function EditorClose({
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const t = useTheme();
   return (
-    <Host colorScheme="light" style={{ width: 76, height: 44 }} ignoreSafeArea="all">
-      <Button onPress={onPress} modifiers={[disabled(inactive), accessibilityLabel(label)]}>
+    <Host matchContents colorScheme={t.dark ? "dark" : "light"} ignoreSafeArea="all">
+      <Button
+        onPress={onPress}
+        modifiers={[
+          buttonStyle(Number(Platform.Version) >= 26 ? "glass" : "bordered"),
+          buttonBorderShape("capsule"),
+          disabled(inactive),
+          accessibilityLabel(label),
+        ]}
+      >
         <Text
           modifiers={[
-            font({ size: 17, weight: "semibold" }),
-            foregroundStyle("#202024"),
-            frame({ minWidth: 60, minHeight: 44 }),
+            font({ size: 17, weight: "regular" }),
+            padding({ horizontal: 8 }),
+            frame({ minHeight: 28 }),
           ]}
         >
           {label}

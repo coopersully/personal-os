@@ -185,3 +185,38 @@ guidance favors contextual, predictably ordered selection and provides inline da
 styles. [Undo and redo](https://developer.apple.com/design/human-interface-guidelines/undo-and-redo)
 asks for predictable reversal and visible results. Our inline short-choice rows and Sonner actions
 are nohmi's application of those principles, not claims of native UIKit menu or undo-manager behavior.
+
+## Native Settings contracts
+
+Settings uses the account utility navigation tree in [mobile frontend standards](mobile-frontend.md#settings-navigation-target).
+Keep root search non-mutating: matching a preference opens its existing destination; it never saves,
+creates or grants access. Profile, Security & Access, Connections, Activity Log, Goals & Motives,
+Rituals, workspace configuration, Agents and app settings remain separate native-stack children.
+
+Independent preference writes use partial updates and the revision the person reviewed. Serialize
+writes shared by sibling editors; a rejection or uncertain result blocks further writes until an
+explicit reload/review. Keep the attempted value visible. Do not adopt a remote revision and replay
+an unreviewed draft. Dependent Profile, guidance, personal-record, ritual and financial-profile
+forms use explicit Save. Preserve their immutable editing baseline and untouched server fields.
+Close becomes Cancel after edits; confirm discard and block dismissal during pending writes.
+All dismissal paths, including system modal dismissal, use the same guard. Confirmation and a
+separate Save reconcile text-policy conflicts; an already-committed result must not produce a
+duplicate write. Current implementation gaps belong in the parity matrix rather than being
+reclassified as platform exceptions.
+
+Use searchable native sheets for timezone/place choices, the complete bundled timezone catalog
+filtered through available DateTimeFormat support, and native time/date controls. Keep the one
+account planning timezone; record editors do not create their own. A selected home place retains
+its coordinates and adopts its returned timezone. Credentials use secure inputs and remain only
+in their pending form; never persist an app-specific password, phone verification code or one-time
+agent token in a receipt. Failed writes retain safe drafts; accepted or discarded credential forms
+clear their secrets.
+
+Provider setup is an explicit browser handoff when no registered native return exists. Browser
+launch is not provider authorization; refresh authoritative connection state on return. Activity
+states its latest-100 contract and filters only that loaded history; detail omits private before/after
+payloads. iPhone due-alert permission/scheduling and server text-message policy are distinct
+capabilities. Sonner owns every discrete action and error, including explicit refresh; successful
+background autosaves stay silent. Configuration state and correction controls are allowed inline,
+not action-result messages. Device acceptance never proves a visible banner, provider grant,
+SMS delivery or background execution.

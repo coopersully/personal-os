@@ -235,6 +235,7 @@ vi.mock("../../components/glass-surface", () => ({
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({
     state: { user: { id: h.owner, planningTimezone: h.timezone } },
     session: { api: () => h.api },
@@ -1489,7 +1490,7 @@ it("makes category and empty notes directly editable on transaction details", as
   fireEvent.click(await screen.findByRole("button", { name: /^Category/ }));
   await screen.findByLabelText("Search categories");
   expect(h.push).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Close picker" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   fireEvent.click(screen.getByRole("button", { name: /Notes.*Add a note/ }));
   expect(screen.getByLabelText("Transaction note")).toBeTruthy();
   expect(h.push).not.toHaveBeenCalled();

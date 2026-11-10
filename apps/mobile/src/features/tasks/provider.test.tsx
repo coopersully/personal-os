@@ -22,7 +22,10 @@ const h = vi.hoisted(() => ({
   success: vi.fn(),
   loading: vi.fn(() => "action"),
 }));
-vi.mock("../auth/context", () => ({ useAuth: () => ({ session: { api: () => h } }) }));
+vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
+  useAuth: () => ({ session: { api: () => h } }),
+}));
 vi.mock("sonner-native", () => ({ toast: h }));
 beforeEach(() => {
   vi.clearAllMocks();

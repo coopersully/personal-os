@@ -22,6 +22,7 @@ const h = vi.hoisted(() => ({
   mounts: [] as string[],
 }));
 vi.mock("../features/auth/context", () => ({
+  useOptionalAuth: () => null,
   AuthProvider: ({ children }: PropsWithChildren) => <>{children}</>,
   useAuth: () => ({ state: { status: h.status, user: h.user }, session: { restore: h.restore } }),
 }));

@@ -1,4 +1,5 @@
 import { useColorScheme } from "react-native";
+import { useOptionalAuth } from "./features/auth/context";
 import { workspacePalette } from "./navigation/workspace-palette";
 
 // Native points mirror the documented 4-unit rhythm and 12px base radius.
@@ -14,7 +15,9 @@ const common = {
   white: "#ffffff",
 };
 export function useTheme() {
-  const dark = useColorScheme() === "dark";
+  const system = useColorScheme();
+  const choice = useOptionalAuth()?.state.user?.theme ?? "system";
+  const dark = choice === "system" ? system === "dark" : choice === "dark";
   return {
     ...common,
     dark,

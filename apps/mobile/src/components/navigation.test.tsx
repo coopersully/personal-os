@@ -61,6 +61,7 @@ vi.mock("react-native-safe-area-context", () => ({
 vi.mock("expo-haptics", () => ({ selectionAsync: h.selection }));
 vi.mock("sonner-native", () => ({ toast: h }));
 vi.mock("../features/auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({
     state: { user: { id: "owner", displayName: "Test Person", email: "person@example.test" } },
     session: { logout: h.logout },
@@ -207,7 +208,7 @@ it("keeps search mounted while selecting a workspace and shows account/settings 
   expect(screen.queryByRole("button", { name: "Open mail" })).not.toBeInTheDocument();
   for (const [label, path] of [
     ["settings", "/settings"],
-    ["workspace settings", "/settings/workspaces"],
+    ["workspace settings", "/settings"],
     ["agent settings", "/settings/agents"],
   ]) {
     fireEvent.click(screen.getByRole("button", { name: "Account menu" }));

@@ -69,3 +69,5 @@ it("retains the hint and action on an editable row, and leaves ordinary static c
   expect(screen.getByText("Checking")).toBeVisible();
   expect(screen.queryByRole("group")).toBeNull();
 });
+
+vi.mock("../features/auth/context", () => ({ useOptionalAuth: () => null }));

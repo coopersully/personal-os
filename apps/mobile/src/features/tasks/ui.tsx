@@ -324,7 +324,7 @@ export function Field({
     </View>
   );
 }
-export type Option = { value: string; label: string };
+export type Option = { value: string; label: string; icon?: IconName; color?: string };
 export function Choice({
   label,
   value,

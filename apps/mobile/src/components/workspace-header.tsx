@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner-native";
 import { useAuth } from "../features/auth/context";
 import { sampleItems } from "../features/briefing/sample";
+import { workspaceSettingsPath } from "../features/settings/navigation";
 import { useTaskSearch } from "../features/tasks/data";
 import { useStablePan } from "../navigation/use-stable-pan";
 import { regionMotion, useWorkspaceMotion, workspaceOrder } from "../navigation/workspace-motion";
@@ -369,7 +370,11 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
             {(
               [
                 { label: "settings", icon: "settings", path: "/settings" },
-                { label: "workspace settings", icon: "grid", path: "/settings/workspaces" },
+                {
+                  label: "workspace settings",
+                  icon: "grid",
+                  path: workspaceSettingsPath(current.id),
+                },
                 { label: "agent settings", icon: "target", path: "/settings/agents" },
               ] as const
             ).map((item) => (

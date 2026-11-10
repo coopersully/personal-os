@@ -20,11 +20,5 @@ export const workspacePages = {
     { name: "accounts", label: "accounts", icon: "finances" },
     { name: "assistant", label: "assistant", icon: "star" },
   ],
-  settings: [
-    { name: "index", label: "account", icon: "profile" },
-    { name: "personal", label: "personal", icon: "target" },
-    { name: "workspaces", label: "workspaces", icon: "grid" },
-    { name: "app", label: "app", icon: "settings" },
-  ],
 } as const satisfies Record<string, readonly WorkspacePageDefinition[]>;
 export type WorkspaceWithPages = keyof typeof workspacePages;

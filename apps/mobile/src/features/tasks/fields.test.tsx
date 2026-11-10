@@ -136,3 +136,5 @@ it("renders an unavailable setting as None and permits choosing a supported repl
   );
   expect(screen.getByRole("button", { name: "Priority, High" })).toBeDisabled();
 });
+
+vi.mock("../auth/context", () => ({ useOptionalAuth: () => null }));

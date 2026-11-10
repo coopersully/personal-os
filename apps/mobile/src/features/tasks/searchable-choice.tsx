@@ -10,10 +10,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Icon } from "../../components/icons";
+import { SheetHeader } from "../../components/sheet-header";
 import { type EntityKind, entityDictionary } from "../../product/entities";
 import { spacing, useTheme, workspaceColor } from "../../theme";
+import { listTint } from "./list-presentation";
 import { matchingOptions } from "./presentation";
-import { Action, type Option, SearchField, State, styles } from "./ui";
+import { type Option, SearchField, State, styles } from "./ui";
 
 /** Shared searchable container selection. Cancel preserves the current value. */
 export function SearchableChoice({
@@ -72,15 +74,7 @@ export function SearchableChoice({
             style={{ flex: 1 }}
             behavior={Platform.OS === "ios" ? "padding" : undefined}
           >
-            <View style={[styles.settingRow, { justifyContent: "space-between" }]}>
-              <Text
-                accessibilityRole="header"
-                style={{ color: t.ink, fontSize: 20, fontWeight: "600", flex: 1 }}
-              >
-                {label}
-              </Text>
-              <Action label="Cancel" onPress={close} />
-            </View>
+            <SheetHeader title={label} label="Cancel" onClose={close} />
             <View style={{ paddingHorizontal: spacing.page }}>
               <SearchField
                 accessibilityLabel={`Search ${label.toLowerCase()}`}
@@ -107,7 +101,11 @@ export function SearchableChoice({
                   style={({ pressed }) => [styles.settingRow, { opacity: pressed ? 0.6 : 1 }]}
                 >
                   {entity && item.label !== "None" && (
-                    <Icon name={entityDictionary[entity].icon} color={t.secondary} size={22} />
+                    <Icon
+                      name={item.icon ?? entityDictionary[entity].icon}
+                      color={listTint(item.color, t.dark, t.secondary)}
+                      size={22}
+                    />
                   )}
                   <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{item.label}</Text>
                   {item.value === value && (

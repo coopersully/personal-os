@@ -296,3 +296,18 @@ Today’s sky belongs to the hero, not the page canvas. The page and bottom safe
 canvas color; the rounded briefing drawer overlaps the hero’s final band. Today disables elastic
 overscroll so pulling past either end never reveals an empty sky-colored gap. Status-bar and search
 foregrounds follow the sky while it is behind them and return to page contrast once it scrolls away.
+
+## Settings navigation target
+
+Settings is an account utility, reached from the account menu. It has no bottom app bar or tabs.
+Use a searchable root list of top-level destinations organized by section headings; each row
+opens a child page in a native navigation stack with standard Back navigation. Account, Personal,
+Workspaces, Intelligence and App are groups in the list, not additional mandatory landing pages.
+Workspace Settings and Agent Settings entry points deep-link into the same tree. Follow Apple's
+Settings hierarchy when an interaction is unspecified, while retaining this document's row,
+identity, feedback, glass, attention-color and form contracts.
+
+The migration includes Goals, Motives, Rituals and their history alongside account, workspace,
+connection, agent and app configuration. Desktop-only controls stay platform-specific. This is
+the approved target; implementation and release evidence are tracked separately under
+COO-211 — Mobile Settings and the mobile Settings implementation plan.

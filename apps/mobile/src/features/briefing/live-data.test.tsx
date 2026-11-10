@@ -39,6 +39,7 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("sonner-native", () => ({ toast: h }));
 vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({
     state: { user: { id: h.owner, planningTimezone: h.timezone } },
     session: {

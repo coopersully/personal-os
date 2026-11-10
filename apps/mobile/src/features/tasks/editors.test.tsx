@@ -181,6 +181,7 @@ vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-icon={name} />,
 }));
 vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({ state: { user: { planningTimezone: h.timezone } } }),
 }));
 vi.mock("sonner-native", () => ({

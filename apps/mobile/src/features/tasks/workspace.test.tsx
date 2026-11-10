@@ -36,6 +36,8 @@ const h = vi.hoisted(() => ({
     taskGroup: "none",
     showCompletedTasks: false,
     taskContainerSort: "name",
+    taskRowDetails: ["estimate"],
+    includeArchivedInSearch: true,
   },
   listTaskWorkspace: vi.fn(),
   listTaskLists: vi.fn(),
@@ -56,6 +58,7 @@ const h = vi.hoisted(() => ({
   loading: vi.fn(() => "task-toast"),
 }));
 vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({ state: { user: { planningTimezone: "UTC" } }, session: { api: () => h } }),
 }));
 vi.mock("expo-router", () => ({
@@ -141,6 +144,8 @@ beforeEach(() => {
     taskGroup: "none",
     showCompletedTasks: false,
     taskContainerSort: "name",
+    taskRowDetails: ["estimate"],
+    includeArchivedInSearch: true,
   };
   h.listTaskWorkspace
     .mockReset()
@@ -485,15 +490,18 @@ it("saves task preferences with a searchable default list and the loaded revisio
   fireEvent.change(screen.getByLabelText("Search default list"), { target: { value: "garden" } });
   fireEvent.click(screen.getByRole("button", { name: "Garden" }));
   for (const [label, value] of [
-    ["Sort, default", "priority"],
-    ["Group, none", "list"],
-    ["Container sort, name", "target"],
+    ["Sort, Recommended", "Priority"],
+    ["Group, None", "List"],
+    ["Container sort, Name (A–Z)", "Target date"],
   ] as const) {
     fireEvent.click(screen.getByRole("button", { name: label }));
     fireEvent.click(screen.getByRole("radio", { name: value }));
   }
   fireEvent.click(screen.getByRole("switch", { name: "Show completed tasks" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Show tags" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Include archived in search" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() =>
     expect(h.updateWorkspaceSettings).toHaveBeenCalledWith("tasks", {
       expectedRevision: 3,
@@ -503,6 +511,8 @@ it("saves task preferences with a searchable default list and the loaded revisio
         taskGroup: "list",
         taskContainerSort: "target",
         showCompletedTasks: true,
+        taskRowDetails: ["estimate", "tags", "notes"],
+        includeArchivedInSearch: false,
       }),
     }),
   );
@@ -519,10 +529,11 @@ it("retries preferences loading and reports a save failure through Sonner", asyn
   await screen.findByRole("button", { name: "Default list, Inbox" });
   h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("offline"));
   h.error.mockClear();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Show completed tasks" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
   expect(screen.queryByText("offline")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
 });
 it("applies date boundaries and clears filters without losing sort or grouping", async () => {
   show();
@@ -736,7 +747,7 @@ it("clears a custom capture list back to the default Inbox", async () => {
   );
   fireEvent.click(await screen.findByRole("button", { name: "Default list, Garden" }));
   fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() =>
     expect(h.updateWorkspaceSettings).toHaveBeenCalledWith(
       "tasks",

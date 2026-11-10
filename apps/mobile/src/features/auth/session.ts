@@ -33,6 +33,8 @@ export function createSession(options: {
   const origin = resolveApiOrigin(options.origin);
   let token: string | null = null;
   let busy = false;
+  let epoch = 0;
+  let userVersion = 0;
   const transport: typeof fetch = async (input, init) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15_000);
@@ -64,6 +66,7 @@ export function createSession(options: {
   const signedOut = async () => {
     // Clear visible identity even if Keychain removal fails; never expose a stale owner.
     token = null;
+    epoch += 1;
     options.onChange({ status: "signedOut", user: null });
     await options.storage.write(null);
   };
@@ -77,6 +80,14 @@ export function createSession(options: {
     }
   };
   return {
+    epoch: () => epoch,
+    /** Apply only a server-returned User from this exact human session. */
+    acceptUserUpdate: (user: User, expectedEpoch: number) => {
+      if (!token || epoch !== expectedEpoch) return false;
+      userVersion += 1;
+      options.onChange({ status: "signedIn", user });
+      return true;
+    },
     api: () => {
       const ownerToken = token;
       if (!ownerToken) throw new Error("Sign in to continue.");
@@ -132,6 +143,7 @@ export function createSession(options: {
           throw error;
         }
         token = issued;
+        epoch += 1;
         options.onChange({ status: "signedIn", user });
       }),
     revalidate: () =>
@@ -140,7 +152,9 @@ export function createSession(options: {
         : exclusive(async () => {
             if (!token) return;
             try {
-              options.onChange({ status: "signedIn", user: await client().getMe() });
+              const version = userVersion;
+              const user = await client().getMe();
+              if (version === userVersion) options.onChange({ status: "signedIn", user });
             } catch (error) {
               if (error instanceof ApiClientError && error.status === 401) await signedOut();
               else throw error;

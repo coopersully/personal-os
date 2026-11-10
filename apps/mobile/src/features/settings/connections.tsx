@@ -6,6 +6,7 @@ import { AppState, Linking, Modal, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { Icon } from "../../components/icons";
+import { Screen } from "../../components/screen";
 import { SheetHeader } from "../../components/sheet-header";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
@@ -13,6 +14,8 @@ import { SearchableChoice } from "../tasks/searchable-choice";
 import { Action, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
 import { AccountAvatar } from "./account-avatar";
 import { useSettingsAction, useSettingsResource } from "./data";
+import { ProviderMark } from "./provider-mark";
+import { SettingsActionRow, SettingsDetailRow, SettingsIdentity } from "./settings-row";
 export async function openAuthorization(url: string) {
   const parsed = new URL(url);
   if (parsed.protocol !== "https:" || parsed.username || parsed.password)
@@ -36,6 +39,7 @@ function Connections({ detailId }: { detailId?: string } = {}) {
   const accounts = useSettingsResource("connectors", (api) => api.listConnectors());
   const x = useSettingsResource("x-account", (api) => api.getXBookmarkAccount());
   const folders = useSettingsResource("x-folders", (api) => api.listXBookmarkFolders(), !!x.data);
+  const [googleSetup, setGoogleSetup] = useState(false);
   const [icloud, setIcloud] = useState(false);
   const [reconnectIcloud, setReconnectIcloud] = useState<CalendarAccount | null>(null);
   const [mail, setMail] = useState(true);
@@ -70,8 +74,12 @@ function Connections({ detailId }: { detailId?: string } = {}) {
           await openAuthorization(url);
         }, "Browser opened. Finish authorization, then return to nohmi."),
     );
+  // TanStack QueryCache owns read-error announcements; pull refresh never replays writes.
+  const refresh = async () => {
+    await Promise.all([accounts.refetch(), x.refetch(), ...(x.data ? [folders.refetch()] : [])]);
+  };
   return (
-    <FormBody>
+    <Screen onRefresh={refresh}>
       {detailId && (
         <Stack.Screen
           options={{
@@ -82,19 +90,18 @@ function Connections({ detailId }: { detailId?: string } = {}) {
       {detailId && accounts.data && !accounts.data.some((account) => account.id === detailId) && (
         <State empty="This connection is no longer available." />
       )}
-      <Section title={detailId ? "Account" : "Accounts"}>
-        {!accounts.data && (
-          <State loading={accounts.isPending} retry={() => void accounts.refetch()} />
-        )}
-        {!detailId && accounts.data?.length === 0 && <State empty="No connected accounts." />}
-        {accounts.data
-          ?.filter((account) => !detailId || account.id === detailId)
-          .map((account) => (
-            <View key={account.id} style={{ padding: 16, gap: 8 }}>
+      {!accounts.data && (
+        <State loading={accounts.isPending} retry={() => void accounts.refetch()} />
+      )}
+      {!detailId ? (
+        <Section title="Accounts">
+          {accounts.data?.length === 0 && <State empty="No connected accounts." />}
+          {accounts.data?.map((account) => (
+            <View key={account.id}>
+              {" "}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Account ${account.label}, ${account.email ?? account.provider}`}
-                disabled={!!detailId}
                 onPress={() =>
                   router.push({
                     pathname: "/settings/connections/account",
@@ -142,122 +149,157 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                 >
                   {account.health.state === "ready" ? "Connected" : "Needs attention"}
                 </Text>
-                {!detailId && <Icon name="chevron" color={t.secondary} size={16} />}
+                <Icon name="chevron" color={t.secondary} size={16} />
               </Pressable>
-              {detailId === account.id && (
-                <View style={{ gap: 8, paddingTop: 12 }}>
-                  {account.health.message && (
-                    <Text
-                      style={{ color: account.health.state === "ready" ? t.secondary : t.warning }}
-                    >
-                      {account.health.message}
-                    </Text>
-                  )}
-                  <Text style={{ color: t.secondary }}>
-                    Last synced{" "}
-                    {account.lastSyncedAt
-                      ? new Date(account.lastSyncedAt).toLocaleString()
-                      : "Never"}
-                  </Text>
-                  {Object.entries(account.capabilities ?? {}).map(([service, capability]) => (
-                    <View
-                      key={service}
-                      style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-                    >
-                      {(service.includes("mail") || service.includes("calendar")) && (
-                        <Icon
-                          name={service.includes("mail") ? "mail" : "calendar"}
-                          color={capability.health.state === "ready" ? t.secondary : t.warning}
-                          size={18}
-                        />
-                      )}
-                      <Text
-                        style={{
-                          color: capability.health.state === "ready" ? t.secondary : t.warning,
-                        }}
-                      >
-                        {service.replaceAll("_", " ")}:{" "}
-                        {capability.health.state.replaceAll("_", " ")}
-                      </Text>
-                    </View>
-                  ))}
-                  <Action
-                    label="Sync now"
-                    disabled={action.pending || account.syncStatus === "syncing"}
-                    onPress={() =>
-                      void action.run(
-                        async (api) => {
-                          const result = await api.syncConnector(account.id);
-                          await accounts.refetch();
-                          return result;
-                        },
-                        (result) =>
-                          result.pending
-                            ? "Sync requested. Check account status for completion."
-                            : `Sync confirmed: ${result.changed} changes.`,
-                      )
-                    }
-                  />
-                  {account.provider === "google" && (
-                    <Action
-                      label="Reconnect in browser"
-                      disabled={action.pending}
-                      onPress={() => google(account)}
-                    />
-                  )}
-                  {account.provider === "icloud" && (
-                    <Action
-                      label="Update iCloud credentials"
-                      disabled={action.pending}
-                      onPress={() => {
-                        setReconnectIcloud(account);
-                        setIcloud(true);
-                      }}
-                    />
-                  )}
-                  <Action
-                    label="Disconnect account"
-                    destructive
-                    disabled={action.pending}
-                    onPress={() =>
-                      confirm(
-                        `Disconnect ${account.label}?`,
-                        "This removes the account connection. Its mail and calendar will stop syncing.",
-                        () =>
-                          void action.run(async (api) => {
-                            await api.deleteConnector(account.id);
-                            await accounts.refetch();
-                          }, "Account disconnected"),
-                        true,
-                      )
-                    }
-                  />
-                </View>
-              )}
             </View>
           ))}
-        <Action
-          label="Refresh connections"
-          disabled={accounts.isFetching || action.pending}
-          onPress={() =>
-            void action.run(async () => {
-              const results = await Promise.all([accounts.refetch(), x.refetch()]);
-              for (const result of results) if (result.error) throw result.error;
-            }, "Connection status refreshed")
-          }
-        />
-      </Section>
+        </Section>
+      ) : (
+        accounts.data
+          ?.filter((account) => account.id === detailId)
+          .map((account) => (
+            <View key={account.id}>
+              <Section>
+                <SettingsIdentity
+                  name={account.label || account.email || account.provider}
+                  detail={account.email ?? account.provider}
+                  leading={
+                    <AccountAvatar
+                      url={account.avatarUrl}
+                      name={account.label || account.email || account.provider}
+                    />
+                  }
+                />
+              </Section>
+              <Section title="Connection">
+                <SettingsDetailRow
+                  label="Status"
+                  value={
+                    account.health.state === "ready"
+                      ? "Connected"
+                      : account.health.state === "syncing"
+                        ? "Syncing"
+                        : account.health.state === "retrying"
+                          ? "Retrying"
+                          : "Needs attention"
+                  }
+                  icon={account.health.state === "ready" ? "check" : "attention"}
+                  attention={account.health.state !== "ready"}
+                />
+                <SettingsDetailRow
+                  label="Last synced"
+                  value={
+                    account.lastSyncedAt ? new Date(account.lastSyncedAt).toLocaleString() : "Never"
+                  }
+                  icon="clock"
+                />
+                {account.health.message && (
+                  <Text
+                    style={{
+                      color: account.health.state === "ready" ? t.secondary : t.warning,
+                      padding: 16,
+                    }}
+                  >
+                    {account.health.message}
+                  </Text>
+                )}
+              </Section>
+              <Section title="Services">
+                <SettingsDetailRow
+                  label="Mail"
+                  value={account.mailEnabled ? "Enabled" : "Not enabled"}
+                  icon="mail"
+                />
+                <SettingsDetailRow
+                  label="Calendar"
+                  value={account.calendarEnabled ? "Enabled" : "Not enabled"}
+                  icon="calendar"
+                />
+                {!account.mailEnabled && !account.calendarEnabled && (
+                  <Text style={{ color: t.secondary, padding: 16 }}>No services enabled</Text>
+                )}
+                {Object.entries(account.capabilities ?? {}).map(([service, capability]) => (
+                  <SettingsDetailRow
+                    key={service}
+                    label={`${service.replaceAll("_", " ")} status`}
+                    value={capability.health.state.replaceAll("_", " ")}
+                    attention={capability.health.state !== "ready"}
+                  />
+                ))}
+              </Section>
+              <Section title="Account actions">
+                <SettingsActionRow
+                  label="Sync now"
+                  icon="refresh"
+                  disabled={action.pending || account.syncStatus === "syncing"}
+                  onPress={() =>
+                    void action.run(
+                      async (api) => {
+                        const result = await api.syncConnector(account.id);
+                        await accounts.refetch();
+                        return result;
+                      },
+                      (result) =>
+                        result.pending
+                          ? "Sync requested. Check account status for completion."
+                          : `Sync confirmed: ${result.changed} changes.`,
+                    )
+                  }
+                />
+                {account.provider === "google" && (
+                  <SettingsActionRow
+                    label="Reconnect in browser"
+                    icon="profile"
+                    disabled={action.pending}
+                    onPress={() => google(account)}
+                  />
+                )}
+                {account.provider === "icloud" && (
+                  <SettingsActionRow
+                    label="Update iCloud credentials"
+                    icon="profile"
+                    disabled={action.pending}
+                    onPress={() => {
+                      setReconnectIcloud(account);
+                      setIcloud(true);
+                    }}
+                  />
+                )}
+              </Section>
+              <Section>
+                <SettingsActionRow
+                  label="Disconnect account"
+                  icon="disconnected"
+                  destructive
+                  disabled={action.pending}
+                  onPress={() =>
+                    confirm(
+                      `Disconnect ${account.label}?`,
+                      "This removes the account connection. Its mail and calendar will stop syncing.",
+                      () =>
+                        void action.run(async (api) => {
+                          await api.deleteConnector(account.id);
+                          await accounts.refetch();
+                        }, "Account disconnected"),
+                      true,
+                    )
+                  }
+                />
+              </Section>
+            </View>
+          ))
+      )}
       {!detailId && (
         <>
           <Section title="Add account">
-            <ToggleRow icon="mail" label="Mail" value={mail} onChange={setMail} />
-            <ToggleRow icon="calendar" label="Calendar" value={calendar} onChange={setCalendar} />
-            <Action
-              label="Connect Google in browser"
-              disabled={action.pending || (!mail && !calendar)}
-              onPress={() => google()}
+            <SettingsActionRow
+              leading={<ProviderMark brand="google" decorative />}
+              label="Connect Google"
+              disabled={action.pending}
+              onPress={() => setGoogleSetup(true)}
             />
-            <Action
+            <SettingsActionRow
+              leading={<ProviderMark brand="icloud" decorative />}
               label="Connect iCloud"
               disabled={action.pending}
               onPress={() => {
@@ -347,7 +389,8 @@ function Connections({ detailId }: { detailId?: string } = {}) {
             ) : (
               <Text style={{ padding: 16, color: t.secondary }}>No X account connected.</Text>
             )}
-            <Action
+            <SettingsActionRow
+              leading={<ProviderMark brand="x" decorative />}
               label={x.data ? "Reconnect X in browser" : "Connect X in browser"}
               disabled={action.pending}
               onPress={() =>
@@ -365,6 +408,56 @@ function Connections({ detailId }: { detailId?: string } = {}) {
           </Section>
         </>
       )}
+      {googleSetup && (
+        <Modal
+          visible
+          animationType="slide"
+          presentationStyle="pageSheet"
+          allowSwipeDismissal={false}
+          onRequestClose={() => {
+            if (!action.pending) setGoogleSetup(false);
+          }}
+        >
+          <SafeAreaView edges={["top", "bottom"]} style={{ flex: 1, backgroundColor: t.canvas }}>
+            <SheetHeader
+              title="Connect Google"
+              label="Close"
+              onClose={() => {
+                if (!action.pending) setGoogleSetup(false);
+              }}
+            />
+            <FormBody>
+              <Section>
+                <SettingsIdentity
+                  leading={<ProviderMark brand="google" decorative />}
+                  name="Google"
+                  detail="Choose the services to authorize in your browser."
+                />
+                <ToggleRow
+                  icon="mail"
+                  label="Mail"
+                  value={mail}
+                  onChange={setMail}
+                  disabled={action.pending}
+                />
+                <ToggleRow
+                  icon="calendar"
+                  label="Calendar"
+                  value={calendar}
+                  onChange={setCalendar}
+                  disabled={action.pending}
+                />
+                <SettingsActionRow
+                  label="Continue in browser"
+                  icon="send"
+                  disabled={action.pending || (!mail && !calendar)}
+                  onPress={() => google()}
+                />
+              </Section>
+            </FormBody>
+          </SafeAreaView>
+        </Modal>
+      )}
       {icloud && (
         <ICloudForm
           mail={reconnectIcloud?.mailEnabled ?? mail}
@@ -377,7 +470,7 @@ function Connections({ detailId }: { detailId?: string } = {}) {
           }}
         />
       )}
-    </FormBody>
+    </Screen>
   );
 }
 function ICloudForm({
@@ -424,7 +517,13 @@ function ICloudForm({
         />
         <FormBody>
           <Section>
+            <SettingsIdentity
+              leading={<ProviderMark brand="icloud" decorative />}
+              name="iCloud"
+              detail="Connect with your Apple Account and an app-specific password."
+            />
             <Field
+              icon="mail"
               label="Apple Account"
               placeholder="alex@icloud.com"
               keyboardType="email-address"

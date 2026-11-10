@@ -3,6 +3,7 @@ import type { ImageSourcePropType } from "react-native";
 import { IconImage } from "./icon-image";
 
 export const icons = {
+  refresh: require("../../assets/navigation/Refresh.png"),
   reply: require("../../assets/navigation/Reply.png"),
   project: require("../../assets/navigation/Project.png"),
   search: require("../../assets/navigation/Search.png"),

@@ -4,7 +4,11 @@ import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MobileDataProvider } from "../tasks/data";
 import { ConnectionAccountScreen, ConnectionsSettingsScreen } from "./connections";
-import { NotificationsSettingsScreen } from "./notifications";
+import {
+  FinanceNotificationPolicyScreen,
+  GlobalNotificationPolicyScreen,
+  NotificationsSettingsScreen,
+} from "./notifications";
 import { TextingSettingsScreen } from "./texting";
 
 vi.mock("react", async () => {
@@ -15,6 +19,7 @@ vi.mock("@tanstack/react-query", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/apps/web/package.json`)("@tanstack/react-query");
 });
+vi.hoisted(() => vi.stubGlobal("require", (path: string) => path));
 const h = vi.hoisted(() => ({
   resources: {} as Record<string, unknown>,
   pending: false,
@@ -30,6 +35,8 @@ const h = vi.hoisted(() => ({
   loading: vi.fn(() => "external-toast"),
   dismiss: vi.fn(),
   back: vi.fn(),
+  prevent: undefined as undefined | ((event: { repeat: () => void }) => void),
+  alert: vi.fn(),
   push: vi.fn(),
   close: undefined as (() => void) | undefined,
   error: vi.fn(),
@@ -63,6 +70,7 @@ vi.mock("../auth/context", () => {
   };
 });
 vi.mock("react-native", () => ({
+  Alert: { alert: h.alert },
   Pressable: ({
     children,
     onPress,
@@ -115,8 +123,42 @@ vi.mock("react-native", () => ({
 vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
+vi.mock("../../components/forms/form-save", () => ({
+  FormSave: ({
+    label,
+    disabled,
+    onPress,
+  }: {
+    label: string;
+    disabled: boolean;
+    onPress: () => void;
+  }) => (
+    <button type="button" disabled={disabled} onClick={onPress}>
+      {label}
+    </button>
+  ),
+}));
 vi.mock("../../components/icons", () => ({ Icon: () => null }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../components/screen", () => ({
+  Screen: ({ children, onRefresh }: PropsWithChildren<{ onRefresh: () => Promise<unknown> }>) => (
+    <div>
+      <button type="button" onClick={() => void onRefresh()}>
+        Pull to refresh connections
+      </button>
+      {children}
+    </div>
+  ),
+}));
+vi.mock("../../theme", () => ({
+  useTheme: () => ({
+    ink: "#202024",
+    secondary: "#626268",
+    destructive: "#ba2944",
+    warning: "#89501b",
+  }),
+  workspaceColor: () => "#202024",
+  spacing: { lg: 16, md: 12, xs: 4 },
+}));
 vi.mock("../../components/sheet-header", () => ({
   SheetHeader: ({ title, onClose }: { title: string; onClose: () => void }) => (
     <div>
@@ -134,19 +176,16 @@ vi.mock("../../components/editor-header", () => ({
   },
 }));
 vi.mock("expo-router", () => ({
-  router: { push: h.push, back: h.back },
+  usePreventRemove: (enabled: boolean, callback: (event: { repeat: () => void }) => void) => {
+    h.prevent = enabled ? callback : undefined;
+    return vi.fn();
+  },
+  router: { push: h.push, back: () => (h.prevent ? h.prevent({ repeat: h.back }) : h.back()) },
   useLocalSearchParams: () => h.params,
   Stack: { Screen: () => null },
 }));
 vi.mock("../notifications/provider", () => ({
   NotificationSettings: () => <div>Native notification controls</div>,
-}));
-vi.mock("./settings-row", () => ({
-  SettingsRow: ({ label, onPress }: { label: string; onPress: () => void }) => (
-    <button type="button" onClick={onPress}>
-      {label}
-    </button>
-  ),
 }));
 vi.mock("sonner-native", () => ({
   toast: { error: h.error, success: h.success, loading: h.loading, dismiss: h.dismiss },
@@ -390,11 +429,9 @@ const openAccount = async (
       <ConnectionAccountScreen />
     </MobileDataProvider>,
   );
-  await waitFor(() =>
-    expect(
-      screen.getByRole("button", { name: `Account ${label}, ${emailOrProvider}` }),
-    ).toBeDisabled(),
-  );
+  await screen.findByText("Sync now");
+  expect(screen.queryByRole("button", { name: `Account ${label}, ${emailOrProvider}` })).toBeNull();
+  expect(screen.getByText(label)).toBeTruthy();
 };
 const confirm = () =>
   act(async () => {
@@ -460,9 +497,10 @@ it("refreshes Google/X status on foreground and returns failed explicit reads th
   });
   await waitFor(() => expect(h.api.listConnectors.mock.calls.length).toBeGreaterThan(before));
   h.api.listConnectors.mockRejectedValueOnce(new Error("Unavailable"));
-  fireEvent.click(screen.getByText("Refresh connections"));
+  fireEvent.click(screen.getByText("Pull to refresh connections"));
   await waitFor(() => expect(h.error).toHaveBeenCalled());
   expect(screen.getByText("Sample Google")).toBeTruthy();
+  expect(h.error).toHaveBeenCalledTimes(1);
   expect(screen.queryByText("Unavailable")).toBeNull();
 });
 it("supports X folder recovery, sync and explicit browser reconnect/disconnect using existing server identity", async () => {
@@ -495,12 +533,12 @@ it("supports X folder recovery, sync and explicit browser reconnect/disconnect u
   await waitFor(() => expect(h.api.deleteXBookmarkAccount).toHaveBeenCalledOnce());
 });
 it("saves notification quiet-mode/detail/reminder configuration using real revisioned writes and confirms Finance reset", async () => {
-  show(<NotificationsSettingsScreen />);
-  await screen.findByText("Save global text policy");
+  const view = show(<GlobalNotificationPolicyScreen />);
+  await screen.findByText("Save policy");
   fireEvent.change(screen.getAllByLabelText("Quiet hours")[0], { target: { value: "any_time" } });
   fireEvent.change(screen.getAllByLabelText("Message detail")[0], { target: { value: "minimal" } });
   fireEvent.click(screen.getAllByLabelText("Repeat reminders")[0]);
-  fireEvent.click(screen.getByText("Save global text policy"));
+  fireEvent.click(screen.getByText("Save policy"));
   await waitFor(() =>
     expect(h.api.saveNotificationPreferences).toHaveBeenCalledWith("global", {
       expectedRevision: 4,
@@ -510,6 +548,12 @@ it("saves notification quiet-mode/detail/reminder configuration using real revis
   await waitFor(() =>
     expect(h.success).toHaveBeenCalledWith("Text-message policy saved", { id: "external-toast" }),
   );
+  view.rerender(
+    <MobileDataProvider>
+      <FinanceNotificationPolicyScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByText("Use global text policy");
   fireEvent.click(screen.getByText("Use global text policy"));
   expect(h.api.resetFinanceNotificationPreferences).not.toHaveBeenCalled();
   await confirm();
@@ -519,10 +563,10 @@ it("saves notification quiet-mode/detail/reminder configuration using real revis
   await screen.findByText("Using global preferences. Saving creates a Finances override.");
 });
 it("retains invalid policy days and permits explicit draft discard instead of writing invalid values", async () => {
-  show(<NotificationsSettingsScreen />);
-  await screen.findByText("Save global text policy");
+  show(<GlobalNotificationPolicyScreen />);
+  await screen.findByText("Save policy");
   fireEvent.change(screen.getAllByLabelText("Repeat after days")[0], { target: { value: "bad" } });
-  fireEvent.click(screen.getByText("Save global text policy"));
+  fireEvent.click(screen.getByText("Save policy"));
   expect(h.error).toHaveBeenCalled();
   expect(h.api.saveNotificationPreferences).not.toHaveBeenCalled();
   expect((screen.getAllByLabelText("Repeat after days")[0] as HTMLInputElement).value).toBe("bad");
@@ -532,17 +576,21 @@ it("retains invalid policy days and permits explicit draft discard instead of wr
 });
 it("recovers a denied reset and declines review without adopting a remote revision", async () => {
   h.api.resetFinanceNotificationPreferences.mockRejectedValueOnce(new Error("Offline"));
-  show(<NotificationsSettingsScreen />);
+  show(<FinanceNotificationPolicyScreen />);
   await screen.findByText("Use global text policy");
   fireEvent.click(screen.getByText("Use global text policy"));
   await confirm();
   await screen.findByText("Load latest finances policy for review");
-  expect((screen.getByText("Use global text policy") as HTMLButtonElement).disabled).toBe(true);
+  expect(
+    (screen.getByText("Use global text policy").closest("button") as HTMLButtonElement).disabled,
+  ).toBe(true);
   fireEvent.click(screen.getByText("Load latest finances policy for review"));
   await waitFor(() =>
     expect(h.confirm).toHaveBeenLastCalledWith("Review latest policy", expect.any(String)),
   );
-  expect((screen.getByText("Use global text policy") as HTMLButtonElement).disabled).toBe(true);
+  expect(
+    (screen.getByText("Use global text policy").closest("button") as HTMLButtonElement).disabled,
+  ).toBe(true);
   expect(h.api.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(1);
 });
 it("enforces current SMS consent/provider availability and retains pending code across foreground/error until confirmed connection", async () => {
@@ -556,7 +604,9 @@ it("enforces current SMS consent/provider availability and retains pending code 
     });
   show(<TextingSettingsScreen />);
   await screen.findByLabelText("Mobile number");
-  expect((screen.getByText("Send verification code") as HTMLButtonElement).disabled).toBe(true);
+  expect(
+    (screen.getByText("Send verification code").closest("button") as HTMLButtonElement).disabled,
+  ).toBe(true);
   await enroll();
   expect(h.api.startTextingVerification).toHaveBeenCalledWith({
     country: "US",
@@ -588,7 +638,9 @@ it("marks expired SMS challenges honestly, permits explicit start-again and neve
   show(<TextingSettingsScreen />);
   await enroll();
   expect(screen.getByText(/This code has expired/)).toBeTruthy();
-  expect((screen.getByText("Verify and connect") as HTMLButtonElement).disabled).toBe(true);
+  expect(
+    (screen.getByText("Verify and connect").closest("button") as HTMLButtonElement).disabled,
+  ).toBe(true);
   fireEvent.click(screen.getByText("Start again"));
   expect(screen.getByLabelText("Mobile number")).toBeTruthy();
   expect(h.api.startTextingVerification).toHaveBeenCalledOnce();
@@ -651,10 +703,10 @@ it("keeps an actual pending iCloud submission guarded until the server confirms 
 it("shows provider unavailability without sending and requires named confirmation for active destination disconnect", async () => {
   h.resources.texting = { ...disconnected(), providerReady: false };
   const first = show(<TextingSettingsScreen />);
-  await screen.findByLabelText("Mobile number");
-  fireEvent.change(screen.getByLabelText("Mobile number"), { target: { value: "5555550123" } });
-  fireEvent.click(screen.getByLabelText("Allow agent text messages"));
-  expect((screen.getByText("Send verification code") as HTMLButtonElement).disabled).toBe(true);
+  await screen.findByText(/Texting is unavailable on this deployment/);
+  expect(screen.queryByLabelText("Mobile number")).toBeNull();
+  expect(screen.queryByLabelText("Allow agent text messages")).toBeNull();
+  expect(screen.queryByText("Send verification code")).toBeNull();
   expect(h.api.startTextingVerification).not.toHaveBeenCalled();
   first.unmount();
   h.resources.texting = {
@@ -769,20 +821,30 @@ it("prefills iCloud reconnect identity/services and submits only its chosen capa
 });
 it("retries unavailable notification policy, confirms dirty close, navigates Texting and saves disabled quiet-end changes", async () => {
   h.api.getNotificationStatus.mockRejectedValueOnce(new Error("Policy unavailable"));
-  show(<NotificationsSettingsScreen />);
+  const view = show(<NotificationsSettingsScreen />);
   await screen.findByText("Retry data");
   fireEvent.click(screen.getByText("Retry data"));
-  await screen.findByText("Save global text policy");
-  act(() => h.close?.());
-  expect(h.back).toHaveBeenCalledOnce();
+  await screen.findByText("Texting");
   fireEvent.click(screen.getByText("Texting"));
   expect(h.push).toHaveBeenCalledWith("/settings/texting");
+  view.rerender(
+    <MobileDataProvider>
+      <GlobalNotificationPolicyScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByText("Save policy");
+  act(() => h.close?.());
+  expect(h.back).toHaveBeenCalledOnce();
   fireEvent.click(screen.getAllByLabelText("Enabled")[0]);
   fireEvent.change(screen.getAllByLabelText("Quiet hours end")[0], { target: { value: "450" } });
   act(() => h.close?.());
-  expect(h.confirm).toHaveBeenLastCalledWith("Discard policy changes?", expect.any(String));
+  expect(h.alert).toHaveBeenLastCalledWith(
+    "Discard changes?",
+    expect.any(String),
+    expect.any(Array),
+  );
   expect(h.back).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByText("Save global text policy"));
+  fireEvent.click(screen.getByText("Save policy"));
   await waitFor(() =>
     expect(h.api.saveNotificationPreferences).toHaveBeenCalledWith("global", {
       expectedRevision: 4,
@@ -833,7 +895,7 @@ it("does not expose protected account data after sign-out and tolerates unknown 
   expect(screen.getByText("No services enabled")).toBeTruthy();
   expect(screen.getByText("Needs attention")).toBeTruthy();
   expect(screen.getByText("Reconnect required")).toBeTruthy();
-  expect((screen.getByText("Sync now") as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
   expect(screen.queryByText("Reconnect in browser")).toBeNull();
 });
 it("validates iCloud identity and service choices before transport, retaining the entered secure draft", async () => {
@@ -863,21 +925,26 @@ it("creates first-time global policy from defaults and propagates accepted globa
     h.resources.policy = { ...policy(), preferences: [result] };
     return result;
   });
-  show(<NotificationsSettingsScreen />);
-  await screen.findByText("Save global text policy");
-  expect(screen.getByText(/unavailable: producer not registered/)).toBeTruthy();
+  const view = show(<GlobalNotificationPolicyScreen />);
+  await screen.findByText("Save policy");
+  expect(screen.getByText("producer not registered")).toBeTruthy();
   fireEvent.click(screen.getAllByLabelText("Repeat reminders")[0]);
   fireEvent.click(screen.getAllByLabelText("Repeat reminders")[0]);
   fireEvent.change(screen.getAllByLabelText("Repeat after days")[0], { target: { value: "12" } });
-  fireEvent.click(screen.getByText("Save global text policy"));
+  fireEvent.click(screen.getByText("Save policy"));
   await waitFor(() =>
     expect(h.api.saveNotificationPreferences).toHaveBeenCalledWith("global", {
       expectedRevision: null,
       preferences: { ...preferences, reminderDays: 12 },
     }),
   );
+  view.rerender(
+    <MobileDataProvider>
+      <FinanceNotificationPolicyScreen />
+    </MobileDataProvider>,
+  );
   await waitFor(() =>
-    expect((screen.getAllByLabelText("Repeat after days")[1] as HTMLInputElement).value).toBe("12"),
+    expect((screen.getAllByLabelText("Repeat after days")[0] as HTMLInputElement).value).toBe("12"),
   );
   expect(h.api.saveNotificationPreferences).toHaveBeenCalledOnce();
 });
@@ -896,16 +963,18 @@ it("keeps a denied conflict reload blocked, then separately saves a reviewed dra
         quietStartMinute: 1300,
       },
     });
-  show(<NotificationsSettingsScreen />);
-  await screen.findByText("Save finances text policy");
-  fireEvent.change(screen.getAllByLabelText("Quiet hours start")[1], { target: { value: "1300" } });
-  fireEvent.click(screen.getByText("Save finances text policy"));
+  show(<FinanceNotificationPolicyScreen />);
+  await screen.findByText("Save policy");
+  fireEvent.change(screen.getAllByLabelText("Quiet hours start")[0], { target: { value: "1300" } });
+  fireEvent.click(screen.getByText("Save policy"));
   await screen.findByText("Load latest finances policy for review");
   h.api.getNotificationStatus.mockRejectedValueOnce(new Error("Read denied"));
   fireEvent.click(screen.getByText("Load latest finances policy for review"));
   await waitFor(() => expect(h.error).toHaveBeenCalled());
-  expect((screen.getByText("Save finances text policy") as HTMLButtonElement).disabled).toBe(true);
-  expect((screen.getAllByLabelText("Quiet hours start")[1] as HTMLInputElement).value).toBe("1300");
+  expect((screen.getByText("Save policy").closest("button") as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  expect((screen.getAllByLabelText("Quiet hours start")[0] as HTMLInputElement).value).toBe("1300");
   h.api.getNotificationStatus.mockResolvedValueOnce({
     ...policy(),
     preferences: [
@@ -931,8 +1000,10 @@ it("keeps a denied conflict reload blocked, then separately saves a reviewed dra
   );
   expect(h.api.saveNotificationPreferences).toHaveBeenCalledOnce();
   await confirm();
-  expect((screen.getByText("Save finances text policy") as HTMLButtonElement).disabled).toBe(false);
-  fireEvent.click(screen.getByText("Save finances text policy"));
+  expect((screen.getByText("Save policy").closest("button") as HTMLButtonElement).disabled).toBe(
+    false,
+  );
+  fireEvent.click(screen.getByText("Save policy"));
   await waitFor(() =>
     expect(h.api.saveNotificationPreferences).toHaveBeenLastCalledWith("finances", {
       expectedRevision: null,
@@ -950,8 +1021,11 @@ it("keeps a denied conflict reload blocked, then separately saves a reviewed dra
 it("uses actual selected Google services and does not attempt connection when no services are selected", async () => {
   show(<ConnectionsSettingsScreen />);
   await screen.findByText("No connected accounts.");
+  expect(screen.queryByLabelText("Mail")).toBeNull();
+  fireEvent.click(screen.getByText("Connect Google"));
   fireEvent.click(screen.getByLabelText("Mail"));
-  fireEvent.click(screen.getByText("Connect Google in browser"));
+  expect(h.api.getGoogleAuthorizationUrl).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("Continue in browser"));
   await confirm();
   await waitFor(() =>
     expect(h.api.getGoogleAuthorizationUrl).toHaveBeenCalledWith({
@@ -960,6 +1034,6 @@ it("uses actual selected Google services and does not attempt connection when no
     }),
   );
   fireEvent.click(screen.getByLabelText("Calendar"));
-  expect((screen.getByText("Connect Google in browser") as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole("button", { name: "Continue in browser" })).toBeDisabled();
   expect(h.api.getGoogleAuthorizationUrl).toHaveBeenCalledOnce();
 });

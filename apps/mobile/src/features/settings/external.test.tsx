@@ -7,13 +7,14 @@ import {
   ConnectionsSettingsScreen,
   openAuthorization,
 } from "./connections";
-import { NotificationsSettingsScreen } from "./notifications";
+import { GlobalNotificationPolicyScreen, NotificationsSettingsScreen } from "./notifications";
 import { TextingSettingsScreen } from "./texting";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/package.json`)("react");
 });
+vi.hoisted(() => vi.stubGlobal("require", (path: string) => path));
 const h = vi.hoisted(() => ({
   resources: {} as Record<string, unknown>,
   pending: false,
@@ -69,18 +70,38 @@ vi.mock("./data", () => ({
     },
   }),
 }));
+vi.mock("../../components/forms/form-save", () => ({
+  FormSave: ({
+    label,
+    disabled,
+    onPress,
+  }: {
+    label: string;
+    disabled: boolean;
+    onPress: () => void;
+  }) => (
+    <button type="button" disabled={disabled} onClick={onPress}>
+      {label}
+    </button>
+  ),
+}));
 vi.mock("../../components/icons", () => ({ Icon: () => <span /> }));
 vi.mock("react-native", () => ({
+  Image: ({ accessibilityLabel }: { accessibilityLabel?: string }) => (
+    <span role="img" aria-label={accessibilityLabel} />
+  ),
   Pressable: ({
     children,
     onPress,
     accessibilityLabel,
+    disabled,
   }: {
     children: React.ReactNode;
     onPress: () => void;
     accessibilityLabel: string;
+    disabled?: boolean;
   }) => (
-    <button type="button" aria-label={accessibilityLabel} onClick={onPress}>
+    <button type="button" aria-label={accessibilityLabel} disabled={disabled} onClick={onPress}>
       {children}
     </button>
   ),
@@ -111,7 +132,26 @@ vi.mock("react-native", () => ({
 vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../components/screen", () => ({
+  Screen: ({ children, onRefresh }: PropsWithChildren<{ onRefresh: () => Promise<unknown> }>) => (
+    <div>
+      <button type="button" onClick={() => void onRefresh()}>
+        Pull to refresh connections
+      </button>
+      {children}
+    </div>
+  ),
+}));
+vi.mock("../../theme", () => ({
+  useTheme: () => ({
+    ink: "#202024",
+    secondary: "#626268",
+    destructive: "#ba2944",
+    warning: "#89501b",
+  }),
+  workspaceColor: () => "#202024",
+  spacing: { lg: 16, md: 12, xs: 4 },
+}));
 vi.mock("../../components/sheet-header", () => ({
   SheetHeader: ({ title, onClose }: { title: string; onClose: () => void }) => (
     <div>
@@ -124,19 +164,13 @@ vi.mock("../../components/sheet-header", () => ({
 }));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
 vi.mock("expo-router", () => ({
+  usePreventRemove: () => vi.fn(),
   router: { push: h.navigate, back: vi.fn() },
   useLocalSearchParams: () => ({ id: "account" }),
   Stack: { Screen: () => null },
 }));
 vi.mock("../notifications/provider", () => ({
   NotificationSettings: () => <div>Native notification controls</div>,
-}));
-vi.mock("./settings-row", () => ({
-  SettingsRow: ({ label, onPress }: { label: string; onPress: () => void }) => (
-    <button type="button" onClick={onPress}>
-      {label}
-    </button>
-  ),
 }));
 vi.mock("sonner-native", () => ({ toast: { error: h.error, success: h.success } }));
 vi.mock("./profile-time", () => ({
@@ -304,7 +338,9 @@ it("hands Google authorization to the browser only after explicit confirmation a
   h.api.getGoogleAuthorizationUrl.mockResolvedValue("https://accounts.google.com/oauth");
   render(<ConnectionsSettingsScreen />);
   expect(h.api.getGoogleAuthorizationUrl).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByText("Connect Google in browser"));
+  fireEvent.click(screen.getByText("Connect Google"));
+  expect(h.api.getGoogleAuthorizationUrl).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("Continue in browser"));
   expect(h.api.getGoogleAuthorizationUrl).not.toHaveBeenCalled();
   await act(async () => h.confirmation?.());
   expect(h.api.getGoogleAuthorizationUrl).toHaveBeenCalledWith({
@@ -375,7 +411,9 @@ it("requires explicit current consent before requesting an SMS code and retains 
   h.api.checkTextingVerification.mockRejectedValue(new Error("Incorrect code"));
   render(<TextingSettingsScreen />);
   fireEvent.change(screen.getByLabelText("Mobile number"), { target: { value: "5555550123" } });
-  expect((screen.getByText("Send verification code") as HTMLButtonElement).disabled).toBe(true);
+  expect(
+    (screen.getByText("Send verification code").closest("button") as HTMLButtonElement).disabled,
+  ).toBe(true);
   expect(h.api.startTextingVerification).not.toHaveBeenCalled();
   fireEvent.click(screen.getByLabelText("Allow agent text messages"));
   fireEvent.click(screen.getByText("Send verification code"));
@@ -394,14 +432,15 @@ it("requires explicit current consent before requesting an SMS code and retains 
 });
 it("saves notification policy with the observed revision and rejects invalid quiet hours through Sonner", async () => {
   h.api.saveNotificationPreferences.mockRejectedValue(new Error("Changed elsewhere"));
-  render(<NotificationsSettingsScreen />);
+  const view = render(<NotificationsSettingsScreen />);
   expect(screen.getByText("Native notification controls")).toBeTruthy();
+  view.rerender(<GlobalNotificationPolicyScreen />);
   fireEvent.change(screen.getAllByLabelText("Quiet hours start")[0], { target: { value: "480" } });
-  fireEvent.click(screen.getByText("Save global text policy"));
+  fireEvent.click(screen.getByText("Save policy"));
   expect(h.error).toHaveBeenCalledWith("Quiet hours must have distinct start and end times.");
   expect(h.api.saveNotificationPreferences).not.toHaveBeenCalled();
   fireEvent.change(screen.getAllByLabelText("Quiet hours start")[0], { target: { value: "1300" } });
-  fireEvent.click(screen.getByText("Save global text policy"));
+  fireEvent.click(screen.getByText("Save policy"));
   await waitFor(() =>
     expect(h.api.saveNotificationPreferences).toHaveBeenCalledWith("global", {
       expectedRevision: 4,
@@ -446,13 +485,15 @@ it("reloads and reviews a conflicted text policy without losing edits or silentl
       { scope: "global", revision: 7, preferences: { ...preferences, enabled: false } },
     ],
   });
-  render(<NotificationsSettingsScreen />);
+  render(<GlobalNotificationPolicyScreen />);
   fireEvent.change(screen.getAllByLabelText("Quiet hours start")[0], { target: { value: "1300" } });
-  fireEvent.click(screen.getByText("Save global text policy"));
+  fireEvent.click(screen.getByText("Save policy"));
   await waitFor(() =>
     expect(screen.getByText("Load latest global policy for review")).toBeTruthy(),
   );
-  expect((screen.getByText("Save global text policy") as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByText("Save policy").closest("button") as HTMLButtonElement).disabled).toBe(
+    true,
+  );
   fireEvent.click(screen.getByText("Load latest global policy for review"));
   await waitFor(() =>
     expect(h.confirm).toHaveBeenCalledWith(
@@ -463,7 +504,7 @@ it("reloads and reviews a conflicted text policy without losing edits or silentl
   expect(h.api.saveNotificationPreferences).toHaveBeenCalledTimes(1);
   act(() => h.confirmation?.());
   expect((screen.getAllByLabelText("Quiet hours start")[0] as HTMLInputElement).value).toBe("1300");
-  fireEvent.click(screen.getByText("Save global text policy"));
+  fireEvent.click(screen.getByText("Save policy"));
   await waitFor(() =>
     expect(h.api.saveNotificationPreferences).toHaveBeenLastCalledWith("global", {
       expectedRevision: 7,
@@ -478,16 +519,18 @@ it("reconciles an uncertain policy response already committed without duplicatin
       { scope: "global", revision: 5, preferences: { ...preferences, quietStartMinute: 1300 } },
     ],
   });
-  render(<NotificationsSettingsScreen />);
+  render(<GlobalNotificationPolicyScreen />);
   fireEvent.change(screen.getAllByLabelText("Quiet hours start")[0], { target: { value: "1300" } });
-  fireEvent.click(screen.getByText("Save global text policy"));
+  fireEvent.click(screen.getByText("Save policy"));
   await waitFor(() =>
     expect(screen.getByText("Load latest global policy for review")).toBeTruthy(),
   );
   fireEvent.click(screen.getByText("Load latest global policy for review"));
   await waitFor(() => expect(h.confirmation).toBeTruthy());
   act(() => h.confirmation?.());
-  expect((screen.getByText("Save global text policy") as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByText("Save policy").closest("button") as HTMLButtonElement).disabled).toBe(
+    true,
+  );
   expect(h.api.saveNotificationPreferences).toHaveBeenCalledTimes(1);
 });
 
@@ -519,6 +562,6 @@ it("opens a dedicated account page without expanding the row or performing a pro
   render(<ConnectionAccountScreen />);
   expect(screen.getByText("Sync now")).toBeVisible();
   expect(screen.getByText("Disconnect account")).toBeVisible();
-  expect(screen.queryByText("Connect Google in browser")).toBeNull();
+  expect(screen.queryByText("Connect Google")).toBeNull();
   expect(h.api.syncConnector).not.toHaveBeenCalled();
 });

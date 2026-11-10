@@ -11,7 +11,7 @@
     },
     "ios": {
       "bundleIdentifier": "app.personal-os.mobile",
-      "buildNumber": "8",
+      "buildNumber": "9",
       "appleTeamId": "7J7HDVDCKQ",
       "supportsTablet": false,
       "infoPlist": {
@@ -23,7 +23,10 @@
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
     },
-    "platforms": ["ios", "web"],
+    "platforms": [
+      "ios",
+      "web"
+    ],
     "plugins": [
       "expo-router",
       "expo-image",

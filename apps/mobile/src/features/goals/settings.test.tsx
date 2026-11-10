@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { GoalEditorScreen } from "./settings";
+import { GoalEditorScreen, GoalsSettingsScreen } from "./settings";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -12,6 +12,10 @@ const h = vi.hoisted(() => ({
   create: vi.fn(),
   remove: vi.fn(),
   back: vi.fn(),
+  push: vi.fn(),
+  refetch: vi.fn(),
+  readState: "success",
+  motives: [] as unknown[],
   error: vi.fn(),
   success: vi.fn(),
   invalidate: vi.fn(),
@@ -41,16 +45,24 @@ vi.mock("../auth/context", () => ({
         createGoal: h.create,
         deleteGoal: h.remove,
         updateMotive: h.update,
+        createMotive: h.create,
+        deleteMotive: h.remove,
       }),
     },
   }),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: h.records }),
+  useQuery: ({ queryKey }: { queryKey: string[] }) => ({
+    data: queryKey.includes("motives") && h.params.kind !== "motive" ? h.motives : h.records,
+    isPending: h.readState === "pending",
+    isError: h.readState === "error",
+    isSuccess: h.readState === "success",
+    refetch: h.refetch,
+  }),
   useQueryClient: () => ({ invalidateQueries: h.invalidate }),
 }));
 vi.mock("expo-router", () => ({
-  router: { back: h.back, push: vi.fn() },
+  router: { back: h.back, push: h.push },
   Stack: { Screen: () => null },
   useLocalSearchParams: () => h.params,
   usePreventRemove: (prevent: boolean, callback: typeof h.blocked) => {
@@ -94,7 +106,13 @@ vi.mock("../../components/screen", () => ({
 }));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
 vi.mock("../../components/icons", () => ({ Icon: () => null }));
-vi.mock("../../components/record-row", () => ({ RecordRow: () => null }));
+vi.mock("../../components/record-row", () => ({
+  RecordRow: ({ title, value, onPress }: { title: string; value: string; onPress: () => void }) => (
+    <button type="button" onClick={onPress}>
+      {title} {value}
+    </button>
+  ),
+}));
 vi.mock("../../components/forms/form-save", () => ({
   FormSave: ({ disabled, onPress }: { disabled: boolean; onPress: () => void }) => (
     <button type="button" disabled={disabled} onClick={onPress}>
@@ -102,11 +120,30 @@ vi.mock("../../components/forms/form-save", () => ({
     </button>
   ),
 }));
-vi.mock("../../components/forms/inline-options", () => ({ InlineOptions: () => null }));
+vi.mock("../../components/forms/inline-options", () => ({
+  InlineOptions: ({
+    options,
+    onChange,
+  }: {
+    options: { label: string; value: string }[];
+    onChange: (value: string) => void;
+  }) => (
+    <div>
+      {options.map((option) => (
+        <button type="button" key={option.value} onClick={() => onChange(option.value)}>
+          {option.label}
+        </button>
+      ))}
+    </div>
+  ),
+}));
 beforeEach(() => {
   vi.clearAllMocks();
   h.buttons = [];
   h.records = [goal];
+  h.motives = [];
+  h.readState = "success";
+  h.create.mockResolvedValue(goal);
   h.params = { kind: "goal", id: "goal" };
   h.update.mockResolvedValue(goal);
 });
@@ -202,3 +239,120 @@ for (const kind of ["goal", "motive"]) {
     expect(h.back).toHaveBeenCalledOnce();
   });
 }
+
+for (const kind of ["goal", "motive"]) {
+  it(`${kind}: creates only after explicit Save and preserves nullable fields`, async () => {
+    h.params = { kind, id: "" };
+    h.records = [];
+    render(<GoalEditorScreen />);
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "New personal record" } });
+    expect(h.create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(h.back).toHaveBeenCalled());
+    expect(h.create).toHaveBeenCalledWith(
+      kind === "goal"
+        ? { title: "New personal record", description: null, targetDate: null, progress: 0 }
+        : { title: "New personal record", detail: null },
+    );
+  });
+  it(`${kind}: rejected creation retains draft and permits corrected retry`, async () => {
+    h.params = { kind, id: "" };
+    h.records = [];
+    h.create.mockRejectedValueOnce(new Error("Create unavailable"));
+    render(<GoalEditorScreen />);
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Retain me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(h.error).toHaveBeenCalledWith("Create unavailable", { id: "toast" }),
+    );
+    expect(h.back).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Title")).toHaveValue("Retain me");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(h.back).toHaveBeenCalled());
+  });
+}
+it("motive deletion failure retains editor for retry and confirms only server success", async () => {
+  h.params = { kind: "motive", id: "motive" };
+  h.records = [{ id: "motive", title: "Family", detail: null, isActive: true }];
+  h.remove.mockRejectedValueOnce(new Error("Delete unavailable"));
+  render(<GoalEditorScreen />);
+  fireEvent.click(screen.getByText("Delete motive"));
+  await act(async () => h.buttons.find((b) => b.text === "Delete")?.onPress?.());
+  await waitFor(() => expect(h.error).toHaveBeenCalledWith("Delete unavailable", { id: "toast" }));
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.back).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("Delete motive"));
+  await act(async () => h.buttons.find((b) => b.text === "Delete")?.onPress?.());
+  await waitFor(() => expect(h.success).toHaveBeenCalledWith("Record deleted", { id: "toast" }));
+  expect(h.remove).toHaveBeenLastCalledWith("motive");
+});
+it("keeps paused goals distinct from completed outcomes and routes selected personal records", () => {
+  h.records = [
+    goal,
+    { ...goal, id: "paused", title: "Paused goal", status: "paused" },
+    { ...goal, id: "done", title: "Finished goal", progress: 100, status: "completed" },
+  ];
+  h.motives = [{ id: "motive", title: "Family", detail: "Why", isActive: false }];
+  render(<GoalsSettingsScreen />);
+  expect(screen.queryByText(/Finished goal/)).toBeNull();
+  fireEvent.click(screen.getByText(/Paused goal/));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/settings/goals/edit",
+    params: { kind: "goal", id: "paused" },
+  });
+  fireEvent.click(screen.getByText("Completed outcomes"));
+  expect(screen.getByText(/Finished goal/)).toBeVisible();
+  expect(screen.queryByText(/Paused goal/)).toBeNull();
+  fireEvent.click(screen.getByText("Motives"));
+  fireEvent.click(screen.getByText(/Family Paused/));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/settings/goals/edit",
+    params: { kind: "motive", id: "motive" },
+  });
+  fireEvent.click(screen.getByText("Add motive"));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/settings/goals/edit",
+    params: { kind: "motive" },
+  });
+});
+it("distinguishes read failures from empty lists and offers retry", () => {
+  h.records = [];
+  h.readState = "error";
+  const view = render(<GoalsSettingsScreen />);
+  expect(screen.queryByText("No goals yet.")).toBeNull();
+  fireEvent.click(screen.getByText("Unable to load. Retry"));
+  expect(h.refetch).toHaveBeenCalledOnce();
+  h.readState = "success";
+  view.rerender(<GoalsSettingsScreen />);
+  expect(screen.getByText("No goals yet.")).toBeVisible();
+  fireEvent.click(screen.getByText("Completed outcomes"));
+  expect(screen.getByText("No completed outcomes yet.")).toBeVisible();
+});
+
+it("saves edited goal planning fields and pause together as one minimal patch", async () => {
+  render(<GoalEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Description"), {
+    target: { value: "Pool twice weekly" },
+  });
+  fireEvent.change(screen.getByLabelText("Target date"), { target: { value: "2026-12-31" } });
+  fireEvent.change(screen.getByLabelText("Progress (%)"), { target: { value: "40" } });
+  fireEvent.click(screen.getByLabelText("Active"));
+  expect(h.update).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  expect(h.update).toHaveBeenCalledWith("goal", {
+    description: "Pool twice weekly",
+    targetDate: "2026-12-31",
+    progress: 40,
+    status: "paused",
+  });
+});
+it("saves a changed motive explanation without rewriting its title", async () => {
+  h.params = { kind: "motive", id: "motive" };
+  h.records = [{ id: "motive", title: "Family", detail: null, isActive: true }];
+  render(<GoalEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Detail"), { target: { value: "Time together" } });
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  expect(h.update).toHaveBeenCalledWith("motive", { detail: "Time together" });
+});

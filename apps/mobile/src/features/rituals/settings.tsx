@@ -237,6 +237,20 @@ function RitualEditor({
       ...draft,
       steps: draft.steps.map((s, i) => (i === index ? { ...s, ...patch } : s)),
     });
+  const moveStep = (stepId: string, offset: -1 | 1) => {
+    if (lock.current) return;
+    setDraft((current) => {
+      const index = current.steps.findIndex((step) => step.id === stepId);
+      const target = index + offset;
+      const step = current.steps[index],
+        neighbor = current.steps[target];
+      if (!step || !neighbor) return current;
+      const steps = [...current.steps];
+      steps[index] = neighbor;
+      steps[target] = step;
+      return { ...current, steps };
+    });
+  };
   const save = async () => {
     if (lock.current) return;
     lock.current = true;
@@ -362,6 +376,17 @@ function RitualEditor({
                 onChange={(value) => stepChange(index, { options: value.split("\n") })}
               />
             )}
+            <View style={{ flexDirection: "row", gap: 16 }}>
+              <Action disabled={pending || index === 0} onPress={() => moveStep(step.id, -1)}>
+                Move step {index + 1} up
+              </Action>
+              <Action
+                disabled={pending || index === draft.steps.length - 1}
+                onPress={() => moveStep(step.id, 1)}
+              >
+                Move step {index + 1} down
+              </Action>
+            </View>
             <Action
               onPress={() =>
                 setDraft({ ...draft, steps: draft.steps.filter((_, i) => i !== index) })

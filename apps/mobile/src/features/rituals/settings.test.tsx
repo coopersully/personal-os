@@ -27,7 +27,18 @@ const definition = {
   timeZone: "UTC",
   revision: 2,
   enabledAt: "2026-11-10T00:00:00Z",
-  steps: [{ id: "step", label: "Reflect", kind: "checkbox" }],
+  steps: [
+    { id: "step", label: "Reflect", kind: "checkbox" },
+    {
+      id: "choice",
+      label: "Energy",
+      kind: "multiple_choice",
+      options: ["Low", "High"],
+      optional: true,
+      days: [1, 3, 5],
+    },
+    { id: "note", label: "Tomorrow", kind: "short_text" },
+  ],
 };
 vi.mock("../auth/context", () => ({
   useOptionalAuth: () => null,
@@ -95,7 +106,23 @@ vi.mock("../../components/forms/form-save", () => ({
     </button>
   ),
 }));
-vi.mock("../../components/forms/inline-options", () => ({ InlineOptions: () => null }));
+vi.mock("../../components/forms/inline-options", () => ({
+  InlineOptions: ({
+    options,
+    onChange,
+  }: {
+    options: { label: string; value: string }[];
+    onChange: (value: string) => void;
+  }) => (
+    <div>
+      {options.map((option) => (
+        <button type="button" key={option.value} onClick={() => onChange(option.value)}>
+          {option.label}
+        </button>
+      ))}
+    </div>
+  ),
+}));
 beforeEach(() => {
   vi.clearAllMocks();
   h.save.mockResolvedValue(definition);
@@ -136,5 +163,86 @@ it("keeps draft after conflict and requires latest revision then explicit retry"
   await waitFor(() => expect(h.save).toHaveBeenCalledTimes(2));
   expect(h.save).toHaveBeenLastCalledWith(
     expect.objectContaining({ title: "My evening", expectedRevision: 3 }),
+  );
+});
+
+it("reorders steps in the draft and saves stable identities with their configuration", async () => {
+  render(<RitualEditorScreen />);
+  expect(screen.getByRole("button", { name: "Move step 1 up" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Move step 3 down" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Move step 1 down" }));
+  expect(screen.getByLabelText("Step 1")).toHaveValue("Energy");
+  expect(screen.getByLabelText("Step 2")).toHaveValue("Reflect");
+  expect(h.save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Move step 3 up" }));
+  expect(screen.getByLabelText("Step 2")).toHaveValue("Tomorrow");
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  expect(h.save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      expectedRevision: 2,
+      steps: [definition.steps[1], definition.steps[2], definition.steps[0]],
+    }),
+  );
+});
+it("retains reordered draft on uncertain failure and reuses the unchanged mutation on retry", async () => {
+  h.save.mockRejectedValueOnce(new Error("Network interrupted"));
+  render(<RitualEditorScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Move step 2 up" }));
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(screen.getByLabelText("Step 1")).toHaveValue("Energy");
+  expect(h.back).not.toHaveBeenCalled();
+  const attempted = h.save.mock.calls[0]?.[0];
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  expect(h.save.mock.calls[1]?.[0]).toBe(attempted);
+});
+it("does not submit invalid step choices and retains the invalid draft for correction", async () => {
+  render(<RitualEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Step 2 options (one per line)"), {
+    target: { value: "Only one choice" },
+  });
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(h.save).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Step 2 options (one per line)")).toHaveValue("Only one choice");
+  expect(h.back).not.toHaveBeenCalled();
+});
+
+it("saves schedule and step configuration edits together without issuing premature writes", async () => {
+  render(<RitualEditorScreen />);
+  fireEvent.click(screen.getByLabelText("Enabled"));
+  fireEvent.change(screen.getByLabelText("Time"), { target: { value: "21:00" } });
+  fireEvent.change(screen.getByLabelText("Reminder time (optional)"), {
+    target: { value: "21:30" },
+  });
+  fireEvent.change(screen.getByLabelText("Step 1"), { target: { value: "Energy level" } });
+  fireEvent.click(screen.getAllByText("number")[0]);
+  fireEvent.click(screen.getByLabelText("Step 1 optional"));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Step 1 days, Sunday" }));
+  fireEvent.click(screen.getAllByText("Remove step")[2]);
+  fireEvent.click(screen.getByText("Add step"));
+  fireEvent.change(screen.getByLabelText("Step 3"), { target: { value: "Next action" } });
+  expect(h.save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText("Save changes"));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  expect(h.save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      enabled: false,
+      time: "21:00",
+      reminderTime: "21:30",
+      steps: [
+        {
+          id: "step",
+          label: "Energy level",
+          kind: "number",
+          optional: true,
+          days: [1, 2, 3, 4, 5, 6],
+        },
+        definition.steps[1],
+        { id: "11111111-1111-4111-8111-111111111111", label: "Next action", kind: "checkbox" },
+      ],
+    }),
   );
 });

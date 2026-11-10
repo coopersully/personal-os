@@ -198,6 +198,9 @@ writes shared by sibling editors; a rejection or uncertain result blocks further
 explicit reload/review. Keep the attempted value visible. Do not adopt a remote revision and replay
 an unreviewed draft. Dependent Profile, guidance, personal-record, ritual and financial-profile
 forms use explicit Save. Preserve their immutable editing baseline and untouched server fields.
+The existing Tasks preferences editor also retains one reviewed draft and explicit Save for its
+capture, sorting, grouping, row-detail and search controls. This native editor choice does not change
+the independent autosave contract of the other workspace preference rows.
 Close becomes Cancel after edits; confirm discard and block dismissal during pending writes.
 All dismissal paths, including system modal dismissal, use the same guard. Confirmation and a
 separate Save reconcile text-policy conflicts; an already-committed result must not produce a

@@ -5,7 +5,7 @@ export type WorkspacePageDefinition = { name: string; label: string; icon: IconN
 export const workspacePages = {
   tasks: [
     { name: "index", label: "to-do", icon: "calendar" },
-    { name: "projects", label: "projects", icon: "target" },
+    { name: "projects", label: "projects", icon: "project" },
     { name: "lists", label: "lists", icon: "views" },
     { name: "views", label: "browse", icon: "grid" },
   ],

@@ -1,7 +1,6 @@
 import {
   calendarAutomaticEvidenceKindSchema,
   calendarProfilePreferencesSchema,
-  createLocalCalendarInputSchema,
   type DomainProfile,
   mailProfilePreferencesSchema,
   type UpsertDomainProfileInput,
@@ -16,7 +15,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { Text, View } from "react-native";
 import { editorDismissOptions } from "../../components/editor-header";
-import { FormSave } from "../../components/forms/form-save";
+import { FloatingAdd, FormSave } from "../../components/forms/form-save";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import type { IconName } from "../../components/icons";
 import { useTheme } from "../../theme";
@@ -540,42 +539,47 @@ function WorkspaceSettingsScreen({ workspace }: { workspace: Exclude<Workspace, 
     api.getDomainProfile(workspace),
   );
   return (
-    <FormBody>
-      {settings.data ? (
-        <WorkspacePreferencesEditor key={workspace} initial={settings.data} />
-      ) : (
-        <State
-          loading={settings.isPending}
-          retry={settings.isError ? () => void settings.refetch() : undefined}
-        />
-      )}
-      {workspace === "finances" && <FinanceConfigurationSettings />}
-      {workspace === "mail" && <MailRules />}
-      {workspace === "calendar" && <CalendarSources />}
-      {guidance.data ? (
-        <Action
-          label="Workspace guidance"
-          onPress={() =>
-            router.push({ pathname: "/settings/guidance", params: { domain: workspace } })
-          }
-        />
-      ) : (
-        <State
-          loading={guidance.isPending}
-          retry={guidance.isError ? () => void guidance.refetch() : undefined}
-          empty="No agent guidance has been configured for this workspace."
-        />
-      )}
-      {!guidance.isPending && !guidance.isError && !guidance.data && (
-        <Action label="Open agent setup" onPress={() => router.push("/settings/agents")} />
-      )}
-      <Section title="Related settings">
-        <Action label="Notifications" onPress={() => router.push("/settings/notifications")} />
-        {workspace !== "finances" && (
-          <Action label="Connections" onPress={() => router.push("/settings/connections")} />
+    <View style={{ flex: 1 }}>
+      <FormBody>
+        {settings.data ? (
+          <WorkspacePreferencesEditor key={workspace} initial={settings.data} />
+        ) : (
+          <State
+            loading={settings.isPending}
+            retry={settings.isError ? () => void settings.refetch() : undefined}
+          />
         )}
-      </Section>
-    </FormBody>
+        {workspace === "finances" && <FinanceConfigurationSettings />}
+        {workspace === "mail" && <MailRules />}
+        {workspace === "calendar" && <CalendarSources />}
+        {guidance.data ? (
+          <Action
+            label="Workspace guidance"
+            onPress={() =>
+              router.push({ pathname: "/settings/guidance", params: { domain: workspace } })
+            }
+          />
+        ) : (
+          <State
+            loading={guidance.isPending}
+            retry={guidance.isError ? () => void guidance.refetch() : undefined}
+            empty="No agent guidance has been configured for this workspace."
+          />
+        )}
+        {!guidance.isPending && !guidance.isError && !guidance.data && (
+          <Action label="Open agent setup" onPress={() => router.push("/settings/agents")} />
+        )}
+        <Section title="Related settings">
+          <Action label="Notifications" onPress={() => router.push("/settings/notifications")} />
+          {workspace !== "finances" && (
+            <Action label="Connections" onPress={() => router.push("/settings/connections")} />
+          )}
+        </Section>
+      </FormBody>
+      {workspace === "calendar" && (
+        <FloatingAdd label="Add calendar" onPress={() => router.push("/settings/calendar/new")} />
+      )}
+    </View>
   );
 }
 export function MailSettingsScreen() {
@@ -651,102 +655,61 @@ function MailRules() {
   );
 }
 function CalendarSources() {
-  const { state } = useAuth();
   const t = useTheme();
   const calendars = useSettingsResource("calendar-sources", (api) => api.listCalendars());
   const action = useSettingsAction();
   const cache = useQueryClient();
-  const [name, setName] = useState("");
-  const [color, setColor] = useState("");
-  useDirtyDismiss(!!name.trim() || !!color.trim(), action.pending);
   const refresh = async () => {
     await calendars.refetch();
     await cache.invalidateQueries({ queryKey: ["calendar"] });
   };
   return (
-    <>
-      <Section title="Calendar sources">
-        {calendars.data?.map((calendar) => (
-          <Section key={calendar.id} title={calendar.name}>
-            <ToggleRow
-              label={`Show ${calendar.name}${calendar.source ? ` · ${calendar.source.accountLabel}` : ""}`}
-              value={calendar.isSelected}
+    <Section title="Calendar sources">
+      {calendars.data?.map((calendar) => (
+        <Section key={calendar.id} title={calendar.name}>
+          <ToggleRow
+            label={`Show ${calendar.name}${calendar.source ? ` · ${calendar.source.accountLabel}` : ""}`}
+            value={calendar.isSelected}
+            disabled={action.pending}
+            onChange={(selected) =>
+              void action.run(async (api) => {
+                await api.setCalendarSelected(calendar.id, selected);
+                await refresh();
+              })
+            }
+          />
+          <Text style={{ color: t.secondary, padding: 16 }}>
+            {calendar.isWritable ? "Writable" : "Read only"} · {calendar.provider}
+          </Text>
+          {calendar.provider === "local" && (
+            <Action
+              label={`Delete ${calendar.name}`}
               disabled={action.pending}
-              onChange={(selected) =>
-                void action.run(async (api) => {
-                  await api.setCalendarSelected(calendar.id, selected);
-                  await refresh();
-                })
+              destructive
+              onPress={() =>
+                confirm(
+                  `Delete ${calendar.name}?`,
+                  "This permanently deletes this local calendar and its events. Any guidance using this source will need to be reviewed.",
+                  () =>
+                    void action.run(async (api) => {
+                      await api.deleteCalendar(calendar.id);
+                      await refresh();
+                    }, "Calendar deleted"),
+                  true,
+                )
               }
             />
-            <Text style={{ color: t.secondary, padding: 16 }}>
-              {calendar.isWritable ? "Writable" : "Read only"} · {calendar.provider}
-            </Text>
-            {calendar.provider === "local" && (
-              <Action
-                label={`Delete ${calendar.name}`}
-                disabled={action.pending}
-                destructive
-                onPress={() =>
-                  confirm(
-                    `Delete ${calendar.name}?`,
-                    "This permanently deletes this local calendar and its events. Any guidance using this source will need to be reviewed.",
-                    () =>
-                      void action.run(async (api) => {
-                        await api.deleteCalendar(calendar.id);
-                        await refresh();
-                      }, "Calendar deleted"),
-                    true,
-                  )
-                }
-              />
-            )}
-          </Section>
-        ))}
-        {!calendars.data && (
-          <State
-            loading={calendars.isPending}
-            retry={calendars.isError ? () => void calendars.refetch() : undefined}
-          />
-        )}{" "}
-        {calendars.data?.length === 0 && <State empty="No calendars connected." />}
-      </Section>
-      <Section title="New local calendar">
-        <Field
-          label="Calendar name"
-          value={name}
-          onChangeText={setName}
-          maxLength={120}
-          editable={!action.pending}
-          placeholder="Personal projects"
+          )}
+        </Section>
+      ))}
+      {!calendars.data && (
+        <State
+          loading={calendars.isPending}
+          retry={calendars.isError ? () => void calendars.refetch() : undefined}
         />
-        <Field
-          label="Color (optional)"
-          value={color}
-          onChangeText={setColor}
-          editable={!action.pending}
-          placeholder="#7928ff"
-        />
-        <Action
-          label="Create calendar"
-          disabled={action.pending || !name.trim() || !state.user?.planningTimezone}
-          onPress={() =>
-            void action.run(async (api) => {
-              await api.createCalendar(
-                createLocalCalendarInputSchema.parse({
-                  name,
-                  color: color.trim() || null,
-                  timezone: state.user?.planningTimezone,
-                }),
-              );
-              setName("");
-              setColor("");
-              await refresh();
-            }, "Calendar created")
-          }
-        />
-      </Section>
-    </>
+      )}
+      {calendars.data?.length === 0 && <State empty="No calendars connected." />}
+    </Section>
   );
 }
 

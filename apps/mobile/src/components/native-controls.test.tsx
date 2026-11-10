@@ -49,6 +49,7 @@ vi.mock("react-native", async () => ({
   ),
 }));
 vi.mock("../features/auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({ state: { user: { planningTimezone: h.timezone } } }),
 }));
 vi.mock("expo-router", () => ({ usePathname: () => h.path, router: { push: h.push } }));

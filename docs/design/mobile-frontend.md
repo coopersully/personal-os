@@ -358,3 +358,5 @@ The migration includes Goals, Motives, Rituals and their history alongside accou
 connection, agent and app configuration. Desktop-only controls stay platform-specific. This is
 the approved target; implementation and release evidence are tracked separately under
 COO-211 — Mobile Settings and the mobile Settings implementation plan.
+
+Settings object-list pages use the shared floating plus at the bottom right for primary creation. Form submission and contextual additions within an editor retain their appropriate form controls. Settings version/build metadata appears in the root footer, not a separate About destination. Task Projects use the box identity; personal goals retain the target identity.

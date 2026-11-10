@@ -95,6 +95,11 @@ vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => (
 vi.mock("../../components/icons", () => ({ Icon: () => null }));
 vi.mock("../../components/record-row", () => ({ RecordRow: () => null }));
 vi.mock("../../components/forms/form-save", () => ({
+  FloatingAdd: ({ label, onPress }: { label: string; onPress: () => void }) => (
+    <button type="button" onClick={onPress}>
+      {label}
+    </button>
+  ),
   FormSave: ({ disabled, onPress }: { disabled: boolean; onPress: () => void }) => (
     <button type="button" disabled={disabled} onClick={onPress}>
       Save changes

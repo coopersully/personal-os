@@ -101,13 +101,6 @@ export const settingsDestinations = [
     icon: "inbox",
     keywords: "sms phone consent verification",
   },
-  {
-    id: "about",
-    label: "About",
-    group: "App",
-    icon: "info",
-    keywords: "version build support nohmi",
-  },
 ] as const satisfies readonly {
   id: string;
   label: string;

@@ -11,7 +11,7 @@ import {
 describe("native Settings navigation", () => {
   const available = settingsDestinations.map((destination) => destination.id);
   it("resolves every planned destination to a stable detail route", () => {
-    expect(new Set(available).size).toBe(15);
+    expect(new Set(available).size).toBe(14);
     for (const destination of settingsDestinations) {
       expect(findSettingsDestination(destination.id)).toBe(destination);
       expect(settingsPath(destination.id)).toBe(`/settings/${destination.id}`);

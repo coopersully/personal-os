@@ -9,13 +9,17 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme, workspaceColor } from "../../theme";
 import { GlassSurface } from "../glass-surface";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 export function FormSave({
   disabled,
   onPress,
   workspace = "tasks",
   keyboardOffset,
+  label = "Save changes",
+  icon = "save",
 }: {
+  label?: string;
+  icon?: IconName;
   disabled: boolean;
   onPress: () => void;
   workspace?: string;
@@ -40,7 +44,7 @@ export function FormSave({
       >
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Save changes"
+          accessibilityLabel={label}
           accessibilityState={{ disabled }}
           disabled={disabled}
           onPress={onPress}
@@ -51,7 +55,7 @@ export function FormSave({
             opacity: disabled ? 0.7 : 1,
           }}
         >
-          <Icon name="save" size={27} color={disabled ? t.ink : workspaceColor(t, workspace)} />
+          <Icon name={icon} size={27} color={disabled ? t.ink : workspaceColor(t, workspace)} />
         </Pressable>
       </GlassSurface>
     </KeyboardAvoidingView>
@@ -73,4 +77,16 @@ export function useFormKeyboardOffset() {
     };
   }, [height]);
   return offset;
+}
+
+export function FloatingAdd({
+  label,
+  onPress,
+  disabled = false,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  return <FormSave label={label} icon="add" disabled={disabled} onPress={onPress} />;
 }

@@ -32,7 +32,8 @@ import type { Principal } from "./types.js";
 describe.sequential("private native Finance delivery", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
-  let clock = new Date("2026-11-10T14:00:00Z");
+  const baseline = new Date(new Date().setUTCHours(14, 0, 0, 0));
+  let clock = baseline;
   const config = {
     enabled: true,
     teamId: "TESTTEAM00",
@@ -69,7 +70,7 @@ describe.sequential("private native Finance delivery", () => {
     await database.db.delete(users);
     transport.mockClear();
     providerResult = "accepted";
-    clock = new Date("2026-11-10T14:00:00Z");
+    clock = baseline;
   });
   async function owner() {
     const id = randomUUID(),
@@ -85,7 +86,7 @@ describe.sequential("private native Finance delivery", () => {
       id: sessionId,
       userId: id,
       tokenHash: randomUUID(),
-      expiresAt: new Date("2027-01-01"),
+      expiresAt: new Date(baseline.getTime() + 7 * 86_400_000),
     });
     const principal: Principal = {
       userId: id,
@@ -235,7 +236,7 @@ describe.sequential("private native Finance delivery", () => {
     clock = new Date(clock.getTime() + 86_400_001);
     await service().dispatch();
     expect(transport).not.toHaveBeenCalled();
-    clock = new Date("2026-11-10T14:00:00Z");
+    clock = baseline;
     await database.db.delete(nativePushEvents);
     await database.db.delete(workspaceMaintenanceRuns);
     await event(principal);
@@ -456,6 +457,41 @@ describe.sequential("private native Finance delivery", () => {
     expect(await service().resolve(principal, completion.id, input.installationId)).toMatchObject({
       destination: "finance_activity",
     });
+  });
+
+  it("discovers fresh work without filling the batch with expired post-enrollment work", async () => {
+    const principal = await owner();
+    const currentTime = new Date();
+    const expiredTime = new Date(currentTime.getTime() - 25 * 60 * 60 * 1000);
+    clock = new Date(currentTime.getTime() - 26 * 60 * 60 * 1000);
+    await service().register(principal, deviceInput());
+    clock = baseline;
+
+    const ids = Array.from({ length: 26 }, () => randomUUID()).sort();
+    const freshId = ids.at(-1);
+    await database.db.insert(workspaceMaintenanceRuns).values(
+      ids.map((id) => ({
+        id,
+        userId: principal.userId,
+        domain: "finances" as const,
+        status: "completed" as const,
+        scope: { type: "all_outstanding" as const },
+        rulebookVersion: "1",
+        createdAt: id === freshId ? baseline : expiredTime,
+        updatedAt: id === freshId ? baseline : expiredTime,
+      })),
+    );
+    const runtime = createNativePushRuntime({
+      db: database.db,
+      enabled: () => true,
+      dispatch: service().dispatch,
+    });
+
+    await runtime.run();
+
+    const events = await database.db.select().from(nativePushEvents);
+    expect(events.map((event) => event.sourceId)).toEqual([freshId]);
+    expect(transport).toHaveBeenCalledTimes(1);
   });
 
   it("routes a committed agent reply to chat and denies a principal without a session", async () => {

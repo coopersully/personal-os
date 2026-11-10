@@ -28,7 +28,9 @@ export function createNativePushRuntime(options: {
         UNION ALL SELECT user_id,id,'maintenance_run',CASE WHEN status IN ('completed','completed_with_questions') THEN 'activity' ELSE 'attention' END,status,updated_at FROM workspace_maintenance_runs WHERE domain='finances' AND status IN ('awaiting_approval','blocked','failed_recoverable','failed_terminal','completed','completed_with_questions')
       ), eligible AS (
         SELECT s.*,s.user_id::text||':'||s.source_id::text||':'||s.source_type||':'||s.kind AS key FROM sources s
-        WHERE s.revision IS NOT NULL AND EXISTS(SELECT 1 FROM native_push_devices d JOIN sessions se ON se.id=d.session_id WHERE d.user_id=s.user_id AND d.finance_enabled AND se.expires_at>now() AND d.enrolled_at<=s.changed_at)
+        WHERE s.revision IS NOT NULL
+          AND s.changed_at >= now() - interval '24 hours'
+          AND EXISTS(SELECT 1 FROM native_push_devices d JOIN sessions se ON se.id=d.session_id WHERE d.user_id=s.user_id AND d.finance_enabled AND se.expires_at>now() AND d.enrolled_at<=s.changed_at)
       ) SELECT user_id::text AS "userId",source_id::text AS "sourceId",source_type AS "sourceType",kind,revision AS "sourceRevision",changed_at AS "createdAt",key FROM eligible
       WHERE ${cursor ? sql`key>${cursor}` : sql`true`} ORDER BY key LIMIT 25
     `);

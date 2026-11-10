@@ -6,8 +6,10 @@ import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   CalendarSettingsScreen,
+  CalendarSourceSettingsScreen,
   FinanceSettingsScreen,
   GuidanceSettingsScreen,
+  MailRuleSettingsScreen,
   MailSettingsScreen,
   TaskSettingsScreen,
 } from "./workspaces";
@@ -26,6 +28,8 @@ const h = vi.hoisted(() => ({
   guidance: null as unknown,
   blocked: false,
   domain: "mail",
+  recordId: undefined as string | undefined,
+  publish: vi.fn(),
   resources: {} as Record<string, unknown>,
   errors: new Set<string>(),
   pending: new Set<string>(),
@@ -45,7 +49,7 @@ vi.mock("react-native", () => ({
 vi.mock("expo-router", () => ({
   router: { push: h.push, back: h.back },
   Stack: { Screen: () => null },
-  useLocalSearchParams: () => ({ domain: h.domain }),
+  useLocalSearchParams: () => ({ domain: h.domain, id: h.recordId }),
 }));
 vi.mock("../../components/editor-header", () => ({
   editorDismissOptions: ({ onPress }: { onPress: () => void }) => {
@@ -76,11 +80,49 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
     cancelQueries: vi.fn(async () => {}),
-    setQueryData: vi.fn(),
+    setQueryData: h.publish,
   }),
 }));
 vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
 vi.mock("./finance-settings", () => ({ FinanceConfigurationSettings: () => null }));
+vi.mock("../tasks/preferences", () => ({
+  TaskPreferencesScreen: ({ relatedSettings }: { relatedSettings?: import("react").ReactNode }) => (
+    <section aria-label="Task preferences editor">{relatedSettings}</section>
+  ),
+}));
+vi.mock("./settings-row", () => ({
+  SettingsRow: ({
+    label,
+    value,
+    onPress,
+  }: {
+    label: string;
+    value?: string;
+    onPress: () => void;
+  }) => (
+    <button type="button" aria-label={value ? `${label}, ${value}` : label} onClick={onPress}>
+      {label}
+    </button>
+  ),
+  SettingsActionRow: ({
+    label,
+    onPress,
+    disabled,
+  }: {
+    label: string;
+    onPress: () => void;
+    disabled?: boolean;
+  }) => (
+    <button type="button" disabled={disabled} onClick={onPress}>
+      {label}
+    </button>
+  ),
+  SettingsDetailRow: ({ label, value }: { label: string; value: string }) => (
+    <span>
+      {label}: {value}
+    </span>
+  ),
+}));
 vi.mock("./preferences-hook", () => ({
   useWorkspacePreferenceQueue: (initial: { preferences: object }) => ({
     blocked: h.blocked,
@@ -228,6 +270,7 @@ beforeEach(() => {
   h.guidance = null;
   h.blocked = false;
   h.domain = "mail";
+  h.recordId = undefined;
   h.errors.clear();
   h.pending.clear();
   h.dismiss = undefined;
@@ -253,6 +296,31 @@ beforeEach(() => {
   h.write.mockReset().mockResolvedValue({ revision: 2 });
   h.refetch.mockReset().mockImplementation(async (key) => ({ data: h.resources[key] }));
   h.api = { getWorkspaceSettings: h.reload, upsertDomainProfile: h.saveGuidance };
+  h.publish.mockImplementation((key: string[], update: (records: unknown[]) => unknown[]) => {
+    const name = String(key.at(-1));
+    const records = h.resources[name];
+    if (!Array.isArray(records)) return undefined;
+    h.resources[name] = update(records);
+    return h.resources[name];
+  });
+});
+it("groups shared presentation choices and disables snap sensitivity when following snap is off", async () => {
+  const { rerender } = render(<MailSettingsScreen />);
+  const search = within(screen.getByRole("region", { name: "Search" }));
+  const layout = within(screen.getByRole("region", { name: "Mail layout on other devices" }));
+  expect(search.getByLabelText("Include archived in search")).toBeVisible();
+  expect(search.queryByLabelText("List density")).not.toBeInTheDocument();
+  expect(layout.getByLabelText("List density")).toBeVisible();
+  expect(layout.getByText(/iPhone keeps its native Mail layout/)).toBeVisible();
+  h.domain = "calendar";
+  rerender(<CalendarSettingsScreen />);
+  const following = within(
+    screen.getByRole("region", { name: "Following today on other devices" }),
+  );
+  expect(following.getByLabelText("Snap sensitivity")).toBeEnabled();
+  await act(async () => fireEvent.click(following.getByLabelText("Snap to today")));
+  expect(following.getByLabelText("Snap sensitivity")).toBeDisabled();
+  expect(h.write).toHaveBeenLastCalledWith({ snapToFollow: false });
 });
 it("resets rejected numeric text only after reviewed reload and does not replay it on blur", async () => {
   h.reload.mockResolvedValue({
@@ -539,15 +607,30 @@ it("configures Calendar visibility and local deletion, opening creation without 
     .mockRejectedValueOnce(new Error("Rejected"))
     .mockResolvedValueOnce({ id: identifier(5) });
   const remove = vi.fn().mockResolvedValue(undefined);
-  const select = vi.fn().mockResolvedValue({});
+  const select = vi.fn().mockResolvedValue({
+    id: identifier(2),
+    name: "Work",
+    isWritable: true,
+    isSelected: false,
+    provider: "local",
+  });
   h.api = { createCalendar: create, deleteCalendar: remove, setCalendarSelected: select };
-  render(<CalendarSettingsScreen />);
+  const { rerender } = render(<CalendarSettingsScreen />);
   expect(screen.queryByRole("button", { name: "Delete Subscribed" })).not.toBeInTheDocument();
-  await act(async () => fireEvent.click(screen.getByLabelText("Show Work")));
-  expect(select).toHaveBeenCalledWith(identifier(2), false);
   fireEvent.click(screen.getByRole("button", { name: "Add calendar" }));
   expect(h.push).toHaveBeenLastCalledWith("/settings/calendar/new");
   expect(create).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: /^Work,/ }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/settings/calendar/source",
+    params: { id: identifier(2) },
+  });
+  h.recordId = identifier(2);
+  rerender(<CalendarSourceSettingsScreen />);
+  await act(async () => fireEvent.click(screen.getByLabelText("Show Work")));
+  expect(select).toHaveBeenCalledWith(identifier(2), false);
+  rerender(<CalendarSourceSettingsScreen />);
+  expect(screen.getByLabelText("Show Work")).not.toBeChecked();
   fireEvent.click(screen.getByRole("button", { name: "Delete Work" }));
   expect(remove).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenLastCalledWith(
@@ -558,16 +641,23 @@ it("configures Calendar visibility and local deletion, opening creation without 
   );
   await approve();
   expect(remove).toHaveBeenCalledWith(identifier(2));
-  expect(h.refetch).toHaveBeenCalledWith("calendar-sources");
+  expect(h.resources["calendar-sources"]).toHaveLength(1);
+  expect(h.back).toHaveBeenCalledOnce();
 });
 it("opens actual related native settings and disables a named Mail rule only after confirmation", async () => {
   h.guidance = mailGuidance();
   h.resources["mail-rules"] = [
     { id: identifier(6), name: "Old rule", version: 8, enabled: true, policy: "approved_rule" },
   ];
-  const disable = vi.fn().mockResolvedValue({});
+  const disable = vi.fn().mockResolvedValue({
+    id: identifier(6),
+    name: "Old rule",
+    version: 9,
+    enabled: false,
+    policy: "approved_rule",
+  });
   h.api = { updateMailRule: disable };
-  render(<MailSettingsScreen />);
+  const { rerender } = render(<MailSettingsScreen />);
   fireEvent.click(screen.getByRole("button", { name: "Workspace guidance" }));
   expect(h.push).toHaveBeenCalledWith({
     pathname: "/settings/guidance",
@@ -577,11 +667,20 @@ it("opens actual related native settings and disables a named Mail rule only aft
   expect(h.push).toHaveBeenCalledWith("/settings/notifications");
   fireEvent.click(screen.getByRole("button", { name: "Connections" }));
   expect(h.push).toHaveBeenCalledWith("/settings/connections");
+  fireEvent.click(screen.getByRole("button", { name: /^Old rule,/ }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/settings/mail/rule",
+    params: { id: identifier(6) },
+  });
+  h.recordId = identifier(6);
+  rerender(<MailRuleSettingsScreen />);
   fireEvent.click(screen.getByRole("button", { name: "Disable Old rule" }));
   expect(disable).not.toHaveBeenCalled();
   await approve();
   expect(disable).toHaveBeenCalledWith(identifier(6), { enabled: false, expectedVersion: 8 });
-  expect(h.refetch).toHaveBeenCalledWith("mail-rules");
+  rerender(<MailRuleSettingsScreen />);
+  expect(screen.queryByRole("button", { name: "Disable Old rule" })).not.toBeInTheDocument();
+  expect(screen.getByText("Status: Disabled")).toBeVisible();
 });
 it("preserves honest unavailable reads and exposes retry/setup paths across workspace entry points", () => {
   h.resources["workspace-mail"] = undefined;
@@ -594,8 +693,8 @@ it("preserves honest unavailable reads and exposes retry/setup paths across work
   h.domain = "tasks";
   h.guidance = mailGuidance();
   rerender(<TaskSettingsScreen />);
-  fireEvent.click(screen.getByRole("button", { name: "Task preferences" }));
-  expect(h.push).toHaveBeenCalledWith("/task-preferences");
+  expect(screen.getByRole("region", { name: "Task preferences editor" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Task preferences" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Workspace guidance" }));
   expect(h.push).toHaveBeenCalledWith({
     pathname: "/settings/guidance",

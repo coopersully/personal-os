@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { usePageRefresh } from "../../components/page-refresh";
 import { MobileDataProvider } from "../tasks/data";
 import { ConnectionAccountScreen, ConnectionsSettingsScreen } from "./connections";
 import {
@@ -140,14 +141,17 @@ vi.mock("../../components/forms/form-save", () => ({
 }));
 vi.mock("../../components/icons", () => ({ Icon: () => null }));
 vi.mock("../../components/screen", () => ({
-  Screen: ({ children, onRefresh }: PropsWithChildren<{ onRefresh: () => Promise<unknown> }>) => (
-    <div>
-      <button type="button" onClick={() => void onRefresh()}>
-        Pull to refresh connections
-      </button>
-      {children}
-    </div>
-  ),
+  Screen: ({ children, onRefresh }: PropsWithChildren<{ onRefresh: () => Promise<unknown> }>) => {
+    const native = usePageRefresh([], onRefresh);
+    return (
+      <div>
+        <button type="button" aria-busy={native.refreshing} onClick={() => void native.refresh()}>
+          Pull to refresh connections
+        </button>
+        {children}
+      </div>
+    );
+  },
 }));
 vi.mock("../../theme", () => ({
   useTheme: () => ({
@@ -178,7 +182,9 @@ vi.mock("../../components/editor-header", () => ({
 vi.mock("expo-router", () => ({
   usePreventRemove: (enabled: boolean, callback: (event: { repeat: () => void }) => void) => {
     h.prevent = enabled ? callback : undefined;
-    return vi.fn();
+    return () => {
+      h.prevent = undefined;
+    };
   },
   router: { push: h.push, back: () => (h.prevent ? h.prevent({ repeat: h.back }) : h.back()) },
   useLocalSearchParams: () => h.params,
@@ -501,6 +507,11 @@ it("refreshes Google/X status on foreground and returns failed explicit reads th
   await waitFor(() => expect(h.error).toHaveBeenCalled());
   expect(screen.getByText("Sample Google")).toBeTruthy();
   expect(h.error).toHaveBeenCalledTimes(1);
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.error).toHaveBeenCalledWith(
+    "Couldn’t confirm the result. Check your connection and refresh before retrying.",
+    { id: undefined },
+  );
   expect(screen.queryByText("Unavailable")).toBeNull();
 });
 it("supports X folder recovery, sync and explicit browser reconnect/disconnect using existing server identity", async () => {
@@ -1036,4 +1047,46 @@ it("uses actual selected Google services and does not attempt connection when no
   fireEvent.click(screen.getByLabelText("Calendar"));
   expect(screen.getByRole("button", { name: "Continue in browser" })).toBeDisabled();
   expect(h.api.getGoogleAuthorizationUrl).toHaveBeenCalledOnce();
+});
+
+it.each([
+  false,
+  true,
+])("waits for every explicit Connections refresh read before one outcome (failure=%s)", async (failure) => {
+  h.resources.connectors = [account()];
+  show(<ConnectionsSettingsScreen />);
+  await screen.findByRole("button", { name: /Account Sample Google/ });
+  await waitFor(() => expect(h.api.getXBookmarkAccount).toHaveBeenCalledOnce());
+  let finish!: (value: unknown) => void;
+  h.api.getXBookmarkAccount.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  if (failure) h.api.listConnectors.mockRejectedValueOnce(new Error("Refresh denied"));
+  fireEvent.click(screen.getByText("Pull to refresh connections"));
+  await waitFor(() => expect(h.api.getXBookmarkAccount).toHaveBeenCalledTimes(2));
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
+  expect(screen.getByText("Pull to refresh connections")).toHaveAttribute("aria-busy", "true");
+  await act(async () => finish(null));
+  await waitFor(() =>
+    expect(screen.getByText("Pull to refresh connections")).toHaveAttribute("aria-busy", "false"),
+  );
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+  if (failure)
+    expect(h.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t confirm the result. Check your connection and refresh before retrying.",
+      { id: undefined },
+    );
+  else expect(h.error).not.toHaveBeenCalled();
+  expect(
+    screen.queryByText(
+      "Couldn’t confirm the result. Check your connection and refresh before retrying.",
+    ),
+  ).toBeNull();
+  expect(screen.queryByText(failure ? "Refresh denied" : "Connections refreshed")).toBeNull();
 });

@@ -133,9 +133,9 @@ it("uses the native spinner, locks overlapping refreshes and retains cached data
   await waitFor(() => expect(refresh).toHaveAttribute("aria-busy", "false"));
   expect(h.error).toHaveBeenCalledExactlyOnceWith(
     "Couldn’t confirm the result. Check your connection and refresh before retrying.",
-    { id: "activity-refresh" },
+    { id: undefined },
   );
-  expect(h.loading).toHaveBeenCalledExactlyOnceWith("Refreshing…");
+  expect(h.loading).not.toHaveBeenCalled();
   expect(screen.getByText("Task updated")).toBeVisible();
   expect(screen.queryByText("Offline refresh")).toBeNull();
   expect(
@@ -145,7 +145,7 @@ it("uses the native spinner, locks overlapping refreshes and retains cached data
   ).toBeNull();
   expect(h.success).not.toHaveBeenCalled();
 });
-it("refreshes confirmed data with one toast lifecycle while retaining search and actor choices", async () => {
+it("refreshes confirmed data with the native spinner and silent success while retaining search and actor choices", async () => {
   render(wrap());
   await screen.findByText("Calendar event created");
   fireEvent.click(screen.getByRole("button", { name: "Agents" }));
@@ -157,10 +157,8 @@ it("refreshes confirmed data with one toast lifecycle while retaining search and
   await screen.findByText("Calendar event updated");
   expect(screen.getByLabelText("Search activity")).toHaveValue("calendar event");
   expect(screen.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-pressed", "true");
-  expect(h.loading).toHaveBeenCalledExactlyOnceWith("Refreshing…");
-  expect(h.success).toHaveBeenCalledExactlyOnceWith("Activity refreshed", {
-    id: "activity-refresh",
-  });
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
   expect(screen.queryByText("Activity refreshed")).toBeNull();
   expect(h.error).not.toHaveBeenCalled();
 });

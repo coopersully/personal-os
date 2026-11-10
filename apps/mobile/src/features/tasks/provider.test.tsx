@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { ApiClientError } from "@personal-os/api-client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -99,4 +100,67 @@ it.each([
   rerender({ visible: true });
   await waitFor(() => expect(result.current.record.data).toEqual({ id: "one", revision: 3 }));
   expect(record).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  401, 403,
+])("removes only the exact denied query's cached records on authoritative %s without resetting or retrying", async (status) => {
+  h.listTaskProjects.mockResolvedValueOnce({
+    items: [{ id: "private-project" }],
+    nextCursor: null,
+  });
+  h.listTaskLists.mockResolvedValueOnce({ items: [{ id: "unrelated-list" }], nextCursor: null });
+  const { result } = renderHook(
+    () => ({ resources: useTaskResources(), client: useQueryClient() }),
+    { wrapper: MobileDataProvider },
+  );
+  await waitFor(() =>
+    expect(result.current.resources.projects.data).toEqual([{ id: "private-project" }]),
+  );
+  await waitFor(() =>
+    expect(result.current.resources.lists.data).toEqual([{ id: "unrelated-list" }]),
+  );
+  const query = result.current.client
+    .getQueryCache()
+    .find({ queryKey: ["tasks", "projects"], exact: true });
+  if (!query) throw new Error("Missing project query");
+  const denial = new ApiClientError({ status, code: "forbidden", message: "Access denied" });
+  h.listTaskProjects.mockRejectedValueOnce(denial);
+  await act(async () => {
+    await result.current.resources.projects.refetch();
+  });
+  await waitFor(() => expect(result.current.resources.projects.data).toBeUndefined());
+  expect(query.state.data).toBeUndefined();
+  expect(query.state.error).toBe(denial);
+  expect(query.state.status).toBe("error");
+  expect(query.state.fetchStatus).toBe("idle");
+  expect(
+    result.current.client.getQueryCache().find({ queryKey: ["tasks", "projects"], exact: true }),
+  ).toBe(query);
+  expect(result.current.resources.lists.data).toEqual([{ id: "unrelated-list" }]);
+  expect(h.listTaskProjects).toHaveBeenCalledTimes(2);
+  expect(h.listTaskLists).toHaveBeenCalledOnce();
+  expect(h.error).toHaveBeenCalledOnce();
+});
+it.each([
+  new ApiClientError({ status: 500, code: "internal_error", message: "Server error" }),
+  new Error("403 text in a network failure is not authority"),
+])("retains cached private data for transient failures without inferring denial from message text", async (error) => {
+  h.listTaskProjects.mockResolvedValueOnce({ items: [{ id: "cached-project" }], nextCursor: null });
+  const { result } = renderHook(
+    () => {
+      const resources = useTaskResources();
+      return { projects: resources.projects, error: resources.projects.error };
+    },
+    { wrapper: MobileDataProvider },
+  );
+  await waitFor(() => expect(result.current.projects.data).toEqual([{ id: "cached-project" }]));
+  h.listTaskProjects.mockRejectedValueOnce(error);
+  await act(async () => {
+    await result.current.projects.refetch();
+  });
+  expect(result.current.projects.data).toEqual([{ id: "cached-project" }]);
+  await waitFor(() => expect(result.current.error).toBe(error));
+  expect(h.listTaskProjects).toHaveBeenCalledTimes(2);
+  expect(h.error).toHaveBeenCalledOnce();
 });

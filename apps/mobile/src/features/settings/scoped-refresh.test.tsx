@@ -49,11 +49,13 @@ function useReads() {
       () => sessions.refetch({ throwOnError: true, cancelRefetch: false }),
     ],
     "Settings refreshed",
+    "action",
   );
   const single = useSettingsRefresh(
     [key("activity")],
     [() => activity.refetch({ throwOnError: true, cancelRefetch: false })],
     "Activity refreshed",
+    "action",
   );
   return { activity, sessions, other, group, single, client: useQueryClient() };
 }
@@ -232,6 +234,7 @@ it("treats a settled refetch error result as failure rather than confirming an e
           [key("activity")],
           [() => resource.refetch()],
           "Activity refreshed",
+          "action",
         ),
       };
     },
@@ -245,4 +248,111 @@ it("treats a settled refetch error result as failure rather than confirming an e
   expect(h.error).toHaveBeenCalledExactlyOnceWith("Read rejected", { id: "refresh-toast" });
   expect(h.success).not.toHaveBeenCalled();
   expect(result.current.resource.data).toEqual([]);
+});
+
+it("defaults to spinner-only refresh with silent success and one scoped error without a loading ID", async () => {
+  const { result } = renderHook(
+    () => {
+      const resource = useSettingsResource("activity", (api) => api.listActivity(100));
+      return {
+        resource,
+        refresh: useSettingsRefresh(
+          [key("activity")],
+          [() => resource.refetch({ throwOnError: true })],
+          "Activity refreshed",
+        ),
+      };
+    },
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.resource.isSuccess).toBe(true));
+  await act(async () => {
+    await result.current.refresh.refresh();
+  });
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+  h.api.listActivity.mockRejectedValueOnce(denied("Spinner read failed"));
+  await act(async () => {
+    await result.current.refresh.refresh();
+  });
+  expect(h.error).toHaveBeenCalledExactlyOnceWith("Spinner read failed", { id: undefined });
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+});
+it("keeps spinner mode locked and drops owner-stale failure without toast or leaked scopes", async () => {
+  const { result, rerender } = renderHook(
+    () => {
+      const resource = useSettingsResource("activity", (api) => api.listActivity(100));
+      return {
+        resource,
+        client: useQueryClient(),
+        refresh: useSettingsRefresh(
+          [key("activity")],
+          [() => resource.refetch({ throwOnError: true })],
+          "Activity refreshed",
+        ),
+      };
+    },
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.resource.isSuccess).toBe(true));
+  const read = deferred<[]>();
+  h.api.listActivity.mockImplementationOnce(() => read.promise);
+  let operation: ReturnType<typeof result.current.refresh.refresh>;
+  act(() => {
+    operation = result.current.refresh.refresh();
+  });
+  await waitFor(() => expect(result.current.refresh.pending).toBe(true));
+  await act(async () => {
+    await result.current.refresh.refresh();
+  });
+  expect(h.api.listActivity).toHaveBeenCalledTimes(2);
+  h.owner = "new-owner";
+  h.epoch = 2;
+  rerender();
+  await act(async () => {
+    read.reject(denied("Old read failed"));
+    await operation;
+  });
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
+  for (const query of result.current.client.getQueryCache().getAll())
+    expect(isReadFeedbackHeld(query)).toBe(false);
+});
+
+it("clears a scoped403's cached private records before reporting one owned spinner error, leaving unrelated reads intact", async () => {
+  h.api.listActivity.mockResolvedValueOnce([{ id: "private-event" }]);
+  h.api.listSessions.mockResolvedValueOnce([{ id: "other-read" }]);
+  const { result } = renderHook(
+    () => {
+      const resource = useSettingsResource("activity", (api) => api.listActivity(100));
+      const other = useSettingsResource("sessions", (api) => api.listSessions());
+      return {
+        resource,
+        other,
+        refresh: useSettingsRefresh(
+          [key("activity")],
+          [() => resource.refetch({ throwOnError: true })],
+          "Activity refreshed",
+        ),
+      };
+    },
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.resource.data).toEqual([{ id: "private-event" }]));
+  await waitFor(() => expect(result.current.other.data).toEqual([{ id: "other-read" }]));
+  h.api.listActivity.mockRejectedValueOnce(
+    new ApiClientError({ status: 403, code: "forbidden", message: "Access revoked" }),
+  );
+  await act(async () => {
+    await result.current.refresh.refresh();
+  });
+  expect(result.current.resource.data).toBeUndefined();
+  expect(result.current.other.data).toEqual([{ id: "other-read" }]);
+  expect(h.error).toHaveBeenCalledExactlyOnceWith("Access revoked", { id: undefined });
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.api.listActivity).toHaveBeenCalledTimes(2);
+  expect(h.api.listSessions).toHaveBeenCalledOnce();
 });

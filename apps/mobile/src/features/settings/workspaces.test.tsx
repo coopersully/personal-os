@@ -2,8 +2,15 @@ import type { DomainProfile } from "@personal-os/domain";
 import { expect, it, vi } from "vitest";
 import { guidanceConfirmation, guidanceInput, validateGuidancePreferences } from "./workspaces";
 
+vi.mock("sonner-native", () => ({ toast: { error: vi.fn() } }));
 vi.mock("./preferences-hook", () => ({ useWorkspacePreferenceQueue: vi.fn() }));
 vi.mock("./finance-settings", () => ({ FinanceConfigurationSettings: () => null }));
+vi.mock("../tasks/preferences", () => ({ TaskPreferencesScreen: () => null }));
+vi.mock("./settings-row", () => ({
+  SettingsRow: () => null,
+  SettingsActionRow: () => null,
+  SettingsDetailRow: () => null,
+}));
 vi.mock("react-native", () => ({ Text: () => null, View: () => null }));
 vi.mock("expo-router", () => ({ router: {}, Stack: {} }));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: vi.fn() }));

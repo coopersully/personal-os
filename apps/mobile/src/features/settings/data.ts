@@ -72,11 +72,12 @@ export function useSettingsAction() {
   };
   return { pending, run };
 }
-/** Own only the selected mounted queries until every refresh read has settled. */
+/** Own exact mounted reads through settlement. Native pull refresh uses spinner/errors only. */
 export function useSettingsRefresh(
   queryKeys: readonly QueryKey[],
   refetches: readonly (() => Promise<unknown>)[],
   confirmedMessage: string,
+  mode: "spinner" | "action" = "spinner",
 ) {
   const client = useQueryClient();
   const action = useSettingsAction();
@@ -105,7 +106,7 @@ export function useSettingsRefresh(
           release();
         }
       },
-      confirmedMessage,
+      mode === "action" ? confirmedMessage : undefined,
       "Refreshing…",
     );
   return { refresh, pending: action.pending };

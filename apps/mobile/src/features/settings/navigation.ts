@@ -77,7 +77,7 @@ export const settingsDestinations = [
     id: "agents",
     label: "Agents",
     group: "Intelligence",
-    icon: "star",
+    icon: "agent",
     keywords: "connections policy guidance execution",
   },
   {
@@ -91,7 +91,7 @@ export const settingsDestinations = [
     id: "notifications",
     label: "Notifications",
     group: "App",
-    icon: "attention",
+    icon: "notification",
     keywords: "permission alerts reminders",
   },
   {

@@ -13,7 +13,7 @@ import { useAuth } from "../auth/context";
 import { SearchableChoice } from "../tasks/searchable-choice";
 import { Action, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
 import { AccountAvatar } from "./account-avatar";
-import { useSettingsAction, useSettingsResource } from "./data";
+import { useSettingsAction, useSettingsRefresh, useSettingsResource } from "./data";
 import { ProviderMark } from "./provider-mark";
 import { SettingsActionRow, SettingsDetailRow, SettingsIdentity } from "./settings-row";
 export async function openAuthorization(url: string) {
@@ -36,6 +36,8 @@ export function ConnectionAccountScreen() {
 function Connections({ detailId }: { detailId?: string } = {}) {
   const t = useTheme();
   const action = useSettingsAction();
+  const { state, session } = useAuth();
+  const ownerKey = ["settings", state.user?.id, session.epoch()];
   const accounts = useSettingsResource("connectors", (api) => api.listConnectors());
   const x = useSettingsResource("x-account", (api) => api.getXBookmarkAccount());
   const folders = useSettingsResource("x-folders", (api) => api.listXBookmarkFolders(), !!x.data);
@@ -74,10 +76,15 @@ function Connections({ detailId }: { detailId?: string } = {}) {
           await openAuthorization(url);
         }, "Browser opened. Finish authorization, then return to nohmi."),
     );
-  // TanStack QueryCache owns read-error announcements; pull refresh never replays writes.
-  const refresh = async () => {
-    await Promise.all([accounts.refetch(), x.refetch(), ...(x.data ? [folders.refetch()] : [])]);
-  };
+  const { refresh } = useSettingsRefresh(
+    [
+      [...ownerKey, "connectors"],
+      [...ownerKey, "x-account"],
+      ...(x.data ? [[...ownerKey, "x-folders"]] : []),
+    ],
+    [accounts.refetch, x.refetch, ...(x.data ? [folders.refetch] : [])],
+    "Connections refreshed",
+  );
   return (
     <Screen onRefresh={refresh}>
       {detailId && (

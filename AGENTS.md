@@ -130,6 +130,9 @@ This includes repository mirror checks, lint, type checking, coverage enforcemen
   success, or failure message. `role="status"` and asynchronous native completion do not exempt it.
 - For an asynchronous action, update one Sonner toast from loading to the confirmed outcome.
   OS acceptance is not proof that a notification banner appeared; say exactly what is confirmed.
+- Cooper's explicit native pull-to-refresh exception: use the standard refreshing spinner and
+  one Sonner error on failure, with no loading or success toast. Keep explicit refresh commands
+  and other discrete actions on the normal Sonner lifecycle.
 - Successful background autosaves stay silent. Actual permission/configuration state and field
   correction/retry controls may remain beside settings; they do not replace Sonner error feedback.
 - Regression tests must assert Sonner delivery AND the absence of inline action-result copy.

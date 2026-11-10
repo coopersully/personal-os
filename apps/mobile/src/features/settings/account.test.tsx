@@ -42,13 +42,21 @@ vi.mock("../auth/context", () => ({
 vi.mock("./data", () => ({
   useUserSettings: () => ({ user: h.user, save: h.save, pending: false }),
   useSettingsAction: () => ({ pending: false, run: h.run }),
-  useSettingsRefresh: (_keys: unknown, reads: (() => Promise<unknown>)[], message: string) => ({
+  useSettingsRefresh: (
+    _keys: unknown,
+    reads: (() => Promise<unknown>)[],
+    message: string,
+    mode = "spinner",
+  ) => ({
     pending: false,
     refresh: () =>
-      h.run(async () => {
-        const results = await Promise.allSettled(reads.map((read) => read()));
-        for (const result of results) if (result.status === "rejected") throw result.reason;
-      }, message),
+      h.run(
+        async () => {
+          const results = await Promise.allSettled(reads.map((read) => read()));
+          for (const result of results) if (result.status === "rejected") throw result.reason;
+        },
+        mode === "action" ? message : undefined,
+      ),
   }),
   useSettingsResource: (key: string, _load: unknown, enabled = true) => {
     h.resource(key, enabled);
@@ -290,7 +298,7 @@ it("refreshes cached Activity with confirmed feedback and retains cached events 
       "false",
     ),
   );
-  expect(h.success).toHaveBeenCalledWith("Activity refreshed");
+  expect(h.success).not.toHaveBeenCalled();
   h.refetch.mockRejectedValueOnce(new Error("Refresh denied"));
   fireEvent.click(screen.getByRole("button", { name: "Pull to refresh activity" }));
   await waitFor(() => expect(h.error).toHaveBeenCalledExactlyOnceWith("Refresh denied"));

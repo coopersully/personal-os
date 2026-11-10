@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { usePageRefresh } from "../../components/page-refresh";
 import { MobileDataProvider } from "../tasks/data";
 import { RitualEditorScreen, RitualHistoryScreen, RitualsSettingsScreen } from "./settings";
 
@@ -27,6 +28,7 @@ const h = vi.hoisted(() => ({
   write: vi.fn(),
   deleteFile: vi.fn(),
   success: vi.fn(),
+  loading: vi.fn(() => "ritual-refresh"),
   error: vi.fn(),
   buttons: [] as { text: string; onPress?: () => void }[],
 }));
@@ -35,6 +37,7 @@ vi.mock("../auth/context", () => ({
   useAuth: () => ({
     state: { user: { id: h.owner, planningTimezone: "UTC" } },
     session: {
+      epoch: () => 1,
       api: () => ({
         listRitualHistory: h.history,
         listRituals: h.definitions,
@@ -72,7 +75,7 @@ vi.mock("react-native", async () => ({
 }));
 vi.mock("sonner-native", () => ({
   toast: Object.assign(vi.fn(), {
-    loading: () => "toast",
+    loading: h.loading,
     success: h.success,
     error: h.error,
     dismiss: vi.fn(),
@@ -89,16 +92,23 @@ vi.mock("../../components/screen", () => ({
   }: {
     children: React.ReactNode;
     onRefresh?: () => Promise<unknown>;
-  }) => (
-    <div>
-      {children}
-      {onRefresh && (
-        <button type="button" onClick={() => void onRefresh()}>
-          Refresh records
-        </button>
-      )}
-    </div>
-  ),
+  }) => {
+    const refresh = usePageRefresh([], onRefresh);
+    return (
+      <div>
+        {children}
+        {onRefresh && (
+          <button
+            type="button"
+            aria-busy={refresh.refreshing}
+            onClick={() => void refresh.refresh()}
+          >
+            Refresh records
+          </button>
+        )}
+      </div>
+    );
+  },
 }));
 vi.mock("../../components/editor-header", () => ({
   editorDismissOptions: ({ onPress }: { onPress: () => void }) => {
@@ -186,6 +196,14 @@ it("refreshes definitions from the authority and allows cancelling named deletio
   await screen.findByRole("button", { name: "Morning" });
   fireEvent.click(screen.getByText("Refresh records"));
   await waitFor(() => expect(h.definitions).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Refresh records" })).toHaveAttribute(
+      "aria-busy",
+      "false",
+    ),
+  );
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.loading).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Delete Evening data"));
   fireEvent.change(screen.getByLabelText("Ritual name"), { target: { value: "Evening" } });
   fireEvent.click(screen.getByText("Cancel deletion"));
@@ -216,6 +234,43 @@ it("history retries failed reads and preserves server filtering and refresh sema
   const count = h.history.mock.calls.length;
   fireEvent.click(screen.getByText("Refresh records"));
   await waitFor(() => expect(h.history).toHaveBeenCalledTimes(count + 1));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Refresh records" })).toHaveAttribute(
+      "aria-busy",
+      "false",
+    ),
+  );
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.loading).not.toHaveBeenCalled();
   act(() => h.close?.());
   expect(h.back).toHaveBeenCalledOnce();
+});
+
+it("announces one failed ritual-history refresh without dropping cached history or replaying writes", async () => {
+  h.history.mockResolvedValue({
+    items: [
+      {
+        id: "history",
+        definition: { title: "Evening record" },
+        scheduledLocalDate: "2026-11-10",
+        status: "completed",
+      },
+    ],
+    nextCursor: null,
+  });
+  render(wrap(<RitualHistoryScreen />));
+  await screen.findByText(/Evening record/);
+  h.history.mockRejectedValueOnce(new Error("History offline"));
+  fireEvent.click(screen.getByText("Refresh records"));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t confirm the result. Check your connection and refresh before retrying.",
+      { id: undefined },
+    ),
+  );
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+  expect(screen.getByText(/Evening record/)).toBeVisible();
+  expect(screen.queryByText("History offline")).toBeNull();
+  expect(h.remove).not.toHaveBeenCalled();
 });

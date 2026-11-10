@@ -1,7 +1,9 @@
 import {
+  type Calendar,
   calendarAutomaticEvidenceKindSchema,
   calendarProfilePreferencesSchema,
   type DomainProfile,
+  type MailRule,
   mailProfilePreferencesSchema,
   type UpsertDomainProfileInput,
   upsertDomainProfileInputSchema,
@@ -21,10 +23,12 @@ import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import type { IconName } from "../../components/icons";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
+import { TaskPreferencesScreen } from "../tasks/preferences";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
 import { useSettingsAction, useSettingsResource } from "./data";
 import { FinanceConfigurationSettings } from "./finance-settings";
 import { useWorkspacePreferenceQueue } from "./preferences-hook";
+import { SettingsActionRow, SettingsDetailRow, SettingsRow } from "./settings-row";
 
 /** Preserve hidden policy fields and the version the human actually reviewed. */
 export function guidanceInput(
@@ -112,6 +116,44 @@ const human = (value: string) => {
   const words = value.replaceAll("_", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
+const preferenceGroups = [
+  { title: "Search", keys: ["includeArchivedInSearch"] },
+  {
+    title: "Mail layout on other devices",
+    keys: ["mailConversationLayout", "mailListDensity", "mailListWidth"],
+    help: "These layout choices apply on web and desktop. The iPhone keeps its native Mail layout.",
+  },
+  {
+    title: "Calendar layout on other devices",
+    keys: ["calendarView", "showWeekends", "weekStartsOn"],
+    help: "These choices apply to the web and desktop calendar, not the iPhone agenda.",
+  },
+  {
+    title: "Following today on other devices",
+    keys: ["autoFollowToday", "snapToFollow", "followSnapSensitivity"],
+    help: "Following keeps today in view. Snapping returns the web timeline to following when you scroll close to today.",
+  },
+  { title: "Event defaults on other devices", keys: ["defaultEventDurationMinutes"] },
+  {
+    title: "Spending defaults on other devices",
+    keys: [
+      "financeSpendingBasis",
+      "financeSpendingPeriod",
+      "financeSpendingIncludePending",
+      "financeSpendingIncludeUncategorized",
+      "financeSpendingSubtractRefunds",
+    ],
+  },
+  {
+    title: "Transaction defaults on other devices",
+    keys: ["financeManualVisibility", "financeTransactionGroup"],
+  },
+  {
+    title: "Finance layout on other devices",
+    keys: ["financeSpendingView", "financeSpendingGrouping", "financeTransactionView"],
+    help: "These shared web and desktop layout choices do not change the iPhone Finance views.",
+  },
+];
 function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings }) {
   const t = useTheme();
   const action = useSettingsAction();
@@ -193,68 +235,76 @@ function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings })
           setRecovery((current) => current + 1);
         }),
     );
-  return (
-    <Section title="Shared workspace preferences">
-      <Text style={{ color: t.secondary, padding: 16 }}>
-        These preferences are shared with your other devices. Desktop layout choices do not change
-        the iPhone layout.
-      </Text>
-      {Object.entries(labels)
-        .filter(([key]) => key in draft)
-        .map(([key, label]) => {
-          const value = draft[key];
-          if (typeof value === "boolean")
-            return (
-              <ToggleRow
-                key={key}
-                icon={preferenceIcons[key]}
-                label={label}
-                value={value}
-                disabled={action.pending || queue.pending || failed || queue.blocked}
-                onChange={(next) => save(key, next)}
-              />
-            );
-          if (choices[key])
-            return (
-              <Choice
-                key={key}
-                icon={preferenceIcons[key]}
-                label={label}
-                value={String(value)}
-                disabled={action.pending || queue.pending || failed || queue.blocked}
-                options={choices[key].map((value) => ({
-                  value,
-                  label:
-                    key === "mailConversationLayout"
-                      ? value === "split"
-                        ? "Split view"
-                        : "Single column"
-                      : human(value),
-                }))}
-                onChange={(next) => save(key, next)}
-              />
-            );
-          return (
-            <NumberPreference
-              key={`${key}-${recovery}`}
-              icon={preferenceIcons[key]}
-              label={label}
-              value={Number(value)}
-              disabled={action.pending || queue.pending || failed || queue.blocked}
-              onSave={(next) => save(key, next)}
-            />
-          );
-        })}
-      {(failed || queue.blocked) && (
-        <Action
-          label="Reload and review preferences"
-          onPress={reload}
-          disabled={action.pending || queue.pending}
+  const control = (key: string) => {
+    const label = labels[key] ?? key;
+    const value = draft[key];
+    const disabled = action.pending || queue.pending || failed || queue.blocked;
+    if (typeof value === "boolean")
+      return (
+        <ToggleRow
+          key={key}
+          icon={preferenceIcons[key]}
+          label={label}
+          value={value}
+          disabled={disabled}
+          onChange={(next) => save(key, next)}
         />
+      );
+    if (choices[key])
+      return (
+        <Choice
+          key={key}
+          icon={preferenceIcons[key]}
+          label={label}
+          value={String(value)}
+          disabled={disabled || (key === "followSnapSensitivity" && !draft.snapToFollow)}
+          options={choices[key].map((value) => ({
+            value,
+            label:
+              key === "mailConversationLayout"
+                ? value === "split"
+                  ? "Split view"
+                  : "Single column"
+                : human(value),
+          }))}
+          onChange={(next) => save(key, next)}
+        />
+      );
+    return (
+      <NumberPreference
+        key={`${key}-${recovery}`}
+        icon={preferenceIcons[key]}
+        label={label}
+        value={Number(value)}
+        disabled={disabled}
+        onSave={(next) => save(key, next)}
+      />
+    );
+  };
+  return (
+    <>
+      {preferenceGroups.map((group) => {
+        const keys = group.keys.filter((key) => key in draft);
+        return keys.length > 0 ? (
+          <Section key={group.title} title={group.title}>
+            {group.help && <Text style={{ color: t.secondary, padding: 16 }}>{group.help}</Text>}
+            {keys.map(control)}
+          </Section>
+        ) : null;
+      })}
+      {(failed || queue.blocked) && (
+        <Section>
+          <Action
+            label="Reload and review preferences"
+            onPress={reload}
+            disabled={action.pending || queue.pending}
+          />
+        </Section>
       )}
-    </Section>
+    </>
   );
 }
+
 function NumberPreference({
   label,
   icon,
@@ -653,38 +703,40 @@ export function validateGuidancePreferences(
     ).parse(preferences);
   return preferences;
 }
+/** Publish an accepted record without letting an older in-flight read replace it. */
+function useSettingsListPublisher<T>(name: string) {
+  const { state, session } = useAuth();
+  const cache = useQueryClient();
+  const owner = state.user?.id;
+  const epoch = session.epoch();
+  const live = useRef({ owner, epoch });
+  live.current = { owner, epoch };
+  return async (update: (records: T[]) => T[]) => {
+    const current = () =>
+      !!owner &&
+      live.current.owner === owner &&
+      live.current.epoch === epoch &&
+      session.epoch() === epoch;
+    if (!current()) return false;
+    const queryKey = ["settings", owner, epoch, name];
+    await cache.cancelQueries({ queryKey, exact: true });
+    if (!current()) return false;
+    cache.setQueryData<T[]>(queryKey, (records) => update(records ?? []));
+    return true;
+  };
+}
 function MailRules() {
-  const t = useTheme();
   const rules = useSettingsResource("mail-rules", (api) => api.listMailRules());
-  const action = useSettingsAction();
   return (
     <Section title="Mail rules">
       {rules.data?.map((rule) => (
-        <Section key={rule.id} title={rule.name}>
-          <Text style={{ color: t.secondary, padding: 16 }}>
-            {rule.enabled ? "Enabled" : "Disabled"} · {rule.policy.replaceAll("_", " ")}
-          </Text>
-          {rule.enabled && (
-            <Action
-              label={`Disable ${rule.name}`}
-              disabled={action.pending}
-              onPress={() =>
-                confirm(
-                  "Disable Mail rule?",
-                  `${rule.name} will stop applying to new mail.`,
-                  () =>
-                    void action.run(async (api) => {
-                      await api.updateMailRule(rule.id, {
-                        enabled: false,
-                        expectedVersion: rule.version,
-                      });
-                      await rules.refetch();
-                    }, "Mail rule disabled"),
-                )
-              }
-            />
-          )}
-        </Section>
+        <SettingsRow
+          key={rule.id}
+          icon="mail"
+          label={rule.name}
+          value={`${rule.enabled ? "On" : "Off"} · ${human(rule.policy)}`}
+          onPress={() => router.push({ pathname: "/settings/mail/rule", params: { id: rule.id } })}
+        />
       ))}
       {!rules.data && (
         <State
@@ -696,53 +748,86 @@ function MailRules() {
     </Section>
   );
 }
-function CalendarSources() {
-  const t = useTheme();
-  const calendars = useSettingsResource("calendar-sources", (api) => api.listCalendars());
+export function MailRuleSettingsScreen() {
+  const { state, session } = useAuth();
+  const { id } = useLocalSearchParams<{ id?: string | string[] }>();
+  return (
+    <MailRuleDetails
+      key={`${state.user?.id}:${session.epoch()}:${String(id)}`}
+      id={typeof id === "string" ? id : undefined}
+    />
+  );
+}
+function MailRuleDetails({ id }: { id: string | undefined }) {
+  const rules = useSettingsResource("mail-rules", (api) => api.listMailRules());
   const action = useSettingsAction();
-  const cache = useQueryClient();
-  const refresh = async () => {
-    await calendars.refetch();
-    await cache.invalidateQueries({ queryKey: ["calendar"] });
-  };
+  const publish = useSettingsListPublisher<MailRule>("mail-rules");
+  useDirtyDismiss(false, action.pending);
+  const rule = id ? rules.data?.find((candidate) => candidate.id === id) : undefined;
+  return (
+    <FormBody>
+      <Stack.Screen options={{ title: rule?.name ?? "Mail rule" }} />
+      {rule ? (
+        <>
+          <Section title="Rule">
+            <SettingsDetailRow label="Name" value={rule.name} icon="mail" />
+            <SettingsDetailRow label="Status" value={rule.enabled ? "Enabled" : "Disabled"} />
+            <SettingsDetailRow label="Policy" value={human(rule.policy)} />
+          </Section>
+          {rule.enabled && (
+            <Section>
+              <SettingsActionRow
+                icon="cancel"
+                label={`Disable ${rule.name}`}
+                disabled={action.pending}
+                onPress={() =>
+                  confirm(
+                    "Disable Mail rule?",
+                    `${rule.name} will stop applying to new mail.`,
+                    () =>
+                      void action.run(async (api) => {
+                        const accepted = await api.updateMailRule(rule.id, {
+                          enabled: false,
+                          expectedVersion: rule.version,
+                        });
+                        await publish((records) =>
+                          records.map((current) =>
+                            current.id === rule.id && current.version <= accepted.version
+                              ? accepted
+                              : current,
+                          ),
+                        );
+                      }, "Mail rule disabled"),
+                  )
+                }
+              />
+            </Section>
+          )}
+        </>
+      ) : (
+        <State
+          loading={rules.isPending}
+          retry={rules.isError ? () => void rules.refetch() : undefined}
+          empty="This Mail rule is no longer available."
+        />
+      )}
+    </FormBody>
+  );
+}
+function CalendarSources() {
+  const calendars = useSettingsResource("calendar-sources", (api) => api.listCalendars());
   return (
     <Section title="Calendar sources">
       {calendars.data?.map((calendar) => (
-        <Section key={calendar.id} title={calendar.name}>
-          <ToggleRow
-            label={`Show ${calendar.name}${calendar.source ? ` · ${calendar.source.accountLabel}` : ""}`}
-            value={calendar.isSelected}
-            disabled={action.pending}
-            onChange={(selected) =>
-              void action.run(async (api) => {
-                await api.setCalendarSelected(calendar.id, selected);
-                await refresh();
-              })
-            }
-          />
-          <Text style={{ color: t.secondary, padding: 16 }}>
-            {calendar.isWritable ? "Writable" : "Read only"} · {calendar.provider}
-          </Text>
-          {calendar.provider === "local" && (
-            <Action
-              label={`Delete ${calendar.name}`}
-              disabled={action.pending}
-              destructive
-              onPress={() =>
-                confirm(
-                  `Delete ${calendar.name}?`,
-                  "This permanently deletes this local calendar and its events. Any guidance using this source will need to be reviewed.",
-                  () =>
-                    void action.run(async (api) => {
-                      await api.deleteCalendar(calendar.id);
-                      await refresh();
-                    }, "Calendar deleted"),
-                  true,
-                )
-              }
-            />
-          )}
-        </Section>
+        <SettingsRow
+          key={calendar.id}
+          icon="calendar"
+          label={calendar.name}
+          value={`${calendar.isSelected ? "Shown" : "Hidden"} · ${calendar.source?.accountLabel ?? human(calendar.provider)}`}
+          onPress={() =>
+            router.push({ pathname: "/settings/calendar/source", params: { id: calendar.id } })
+          }
+        />
       ))}
       {!calendars.data && (
         <State
@@ -754,6 +839,95 @@ function CalendarSources() {
     </Section>
   );
 }
+export function CalendarSourceSettingsScreen() {
+  const { state, session } = useAuth();
+  const { id } = useLocalSearchParams<{ id?: string | string[] }>();
+  return (
+    <CalendarSourceDetails
+      key={`${state.user?.id}:${session.epoch()}:${String(id)}`}
+      id={typeof id === "string" ? id : undefined}
+    />
+  );
+}
+function CalendarSourceDetails({ id }: { id: string | undefined }) {
+  const calendars = useSettingsResource("calendar-sources", (api) => api.listCalendars());
+  const action = useSettingsAction();
+  const publish = useSettingsListPublisher<Calendar>("calendar-sources");
+  const cache = useQueryClient();
+  useDirtyDismiss(false, action.pending);
+  const calendar = id ? calendars.data?.find((candidate) => candidate.id === id) : undefined;
+  return (
+    <FormBody>
+      <Stack.Screen options={{ title: calendar?.name ?? "Calendar source" }} />
+      {calendar ? (
+        <>
+          <Section title="Calendar">
+            <SettingsDetailRow label="Name" value={calendar.name} icon="calendar" />
+            <SettingsDetailRow
+              label="Source"
+              value={calendar.source?.accountLabel ?? human(calendar.provider)}
+            />
+            <SettingsDetailRow
+              label="Access"
+              value={calendar.isWritable ? "Writable" : "Read only"}
+            />
+            <ToggleRow
+              label={`Show ${calendar.name}`}
+              value={calendar.isSelected}
+              disabled={action.pending}
+              onChange={(selected) =>
+                void action.run(async (api) => {
+                  const accepted = await api.setCalendarSelected(calendar.id, selected);
+                  if (
+                    await publish((records) =>
+                      records.map((current) => (current.id === calendar.id ? accepted : current)),
+                    )
+                  )
+                    await cache.invalidateQueries({ queryKey: ["calendar"] });
+                })
+              }
+            />
+          </Section>
+          {calendar.provider === "local" && (
+            <Section>
+              <SettingsActionRow
+                icon="trash"
+                label={`Delete ${calendar.name}`}
+                destructive
+                disabled={action.pending}
+                onPress={() =>
+                  confirm(
+                    `Delete ${calendar.name}?`,
+                    "This permanently deletes this local calendar and its events. Any guidance using this source will need to be reviewed.",
+                    () =>
+                      void action.run(async (api) => {
+                        await api.deleteCalendar(calendar.id);
+                        if (
+                          await publish((records) =>
+                            records.filter((current) => current.id !== calendar.id),
+                          )
+                        ) {
+                          await cache.invalidateQueries({ queryKey: ["calendar"] });
+                          router.back();
+                        }
+                      }, "Calendar deleted"),
+                    true,
+                  )
+                }
+              />
+            </Section>
+          )}
+        </>
+      ) : (
+        <State
+          loading={calendars.isPending}
+          retry={calendars.isError ? () => void calendars.refetch() : undefined}
+          empty="This calendar is no longer available."
+        />
+      )}
+    </FormBody>
+  );
+}
 
 export function TaskSettingsScreen() {
   const { state, session } = useAuth();
@@ -762,25 +936,32 @@ export function TaskSettingsScreen() {
 function TaskSettings() {
   const guidance = useSettingsResource("guidance-tasks", (api) => api.getDomainProfile("tasks"));
   return (
-    <FormBody>
-      <Section title="Tasks">
-        <Action label="Task preferences" onPress={() => router.push("/task-preferences")} />
-      </Section>
-      {guidance.data ? (
-        <Action
-          label="Workspace guidance"
-          onPress={() =>
-            router.push({ pathname: "/settings/guidance", params: { domain: "tasks" } })
-          }
-        />
-      ) : (
-        <State
-          loading={guidance.isPending}
-          retry={guidance.isError ? () => void guidance.refetch() : undefined}
-          empty="No agent guidance has been configured for Tasks."
-        />
-      )}
-    </FormBody>
+    <TaskPreferencesScreen
+      relatedSettings={
+        <Section title="Workspace guidance">
+          {guidance.data ? (
+            <SettingsRow
+              icon="agent"
+              label="Workspace guidance"
+              onPress={() =>
+                router.push({ pathname: "/settings/guidance", params: { domain: "tasks" } })
+              }
+            />
+          ) : guidance.isError || guidance.isPending ? (
+            <State
+              loading={guidance.isPending}
+              retry={guidance.isError ? () => void guidance.refetch() : undefined}
+            />
+          ) : (
+            <SettingsRow
+              icon="agent"
+              label="Set up workspace guidance"
+              onPress={() => router.push("/settings/agents")}
+            />
+          )}
+        </Section>
+      }
+    />
   );
 }
 

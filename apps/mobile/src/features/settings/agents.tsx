@@ -21,7 +21,12 @@ import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { errorMessage } from "../tasks/data";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
-import { type SettingsApi, useSettingsAction, useSettingsResource } from "./data";
+import {
+  type SettingsApi,
+  useSettingsAction,
+  useSettingsRefresh,
+  useSettingsResource,
+} from "./data";
 import { SettingsRow } from "./settings-row";
 
 export const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
@@ -246,6 +251,13 @@ function Authority({
     page === "policy",
     true,
   );
+  const { state, session } = useAuth();
+  const policyRefresh = useSettingsRefresh(
+    [["settings", state.user?.id, session.epoch(), "agent-execution-policy"]],
+    [policy.refetch],
+    "Execution policy refreshed",
+    "action",
+  );
   const initialPolicyFeedback = useRef(true);
   useEffect(() => {
     if (page !== "policy" || !initialPolicyFeedback.current) return;
@@ -257,12 +269,7 @@ function Authority({
   }, [page, policy.data, policy.error]);
   const refreshPolicy = () => {
     initialPolicyFeedback.current = false;
-    void action.run(async () => {
-      const result = await policy.refetch();
-      if (result.error) throw result.error;
-      if (!result.data) throw new Error("Execution policy is unavailable.");
-      return result.data;
-    }, "Execution policy refreshed");
+    void policyRefresh.refresh();
   };
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<AccessScope[]>([]);
@@ -330,7 +337,7 @@ function Authority({
           )}
           <Action
             label="Refresh execution policy"
-            disabled={action.pending}
+            disabled={action.pending || policyRefresh.pending}
             onPress={refreshPolicy}
           />
         </Section>

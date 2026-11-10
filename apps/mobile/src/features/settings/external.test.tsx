@@ -53,6 +53,10 @@ vi.mock("./data", () => ({
     isFetching: false,
     refetch: h.refetch,
   }),
+  useSettingsRefresh: (_keys: unknown, refetches: (() => Promise<unknown>)[]) => ({
+    pending: false,
+    refresh: () => Promise.all(refetches.map((refetch) => refetch())),
+  }),
   useSettingsAction: () => ({
     pending: h.pending,
     run: async (

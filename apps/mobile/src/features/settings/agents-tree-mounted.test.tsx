@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   push: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
+  loading: vi.fn(() => "toast"),
   api: {
     listAgentAccounts: vi.fn(),
     getAgentConnectionGuide: vi.fn(),
@@ -66,7 +67,7 @@ vi.mock("./settings-row", () => ({
   ),
 }));
 vi.mock("sonner-native", () => ({
-  toast: { error: h.error, success: h.success, loading: () => "toast", dismiss: vi.fn() },
+  toast: { error: h.error, success: h.success, loading: h.loading, dismiss: vi.fn() },
 }));
 vi.mock("../tasks/ui", () => ({
   FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,
@@ -272,4 +273,33 @@ it("suppresses prior-owner directory results after a native child survives sessi
   });
   await waitFor(() => expect(h.api.listAgentAccounts).toHaveBeenCalledTimes(2));
   expect(screen.queryByText(/Private prior-owner agent/)).toBeNull();
+});
+
+it("announces explicit cached policy refresh once and preserves policy on denied reads", async () => {
+  show(<AgentPolicyScreen />);
+  await screen.findByLabelText("Allow eligible actions without review");
+  fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" }));
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Execution policy refreshed", { id: "toast" }),
+  );
+  expect(h.loading).toHaveBeenCalledWith("Refreshing…");
+  expect(h.success).toHaveBeenCalledOnce();
+  h.api.getExecutionPolicySettings.mockRejectedValueOnce(new Error("Cached refresh denied"));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" }));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Couldn’t confirm the result. Check your connection and refresh before retrying.",
+      { id: "toast" },
+    ),
+  );
+  expect(h.error).toHaveBeenCalledOnce();
+  expect(h.loading).toHaveBeenCalledTimes(2);
+  expect(h.success).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText("Allow eligible actions without review")).not.toBeChecked();
+  expect(
+    screen.queryByText(
+      "Couldn’t confirm the result. Check your connection and refresh before retrying.",
+    ),
+  ).toBeNull();
+  expect(screen.queryByText("Cached refresh denied")).toBeNull();
 });

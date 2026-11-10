@@ -228,8 +228,10 @@ Provider setup is an explicit browser handoff when no registered native return e
 launch is not provider authorization; refresh authoritative connection state on return. Activity
 states its latest-100 contract and filters only that loaded history; detail omits private before/after
 payloads. iPhone due-alert permission/scheduling and server text-message policy are distinct
-capabilities. Sonner owns every discrete action and error, including explicit refresh; successful
-background autosaves stay silent. Configuration state and correction controls are allowed inline,
+capabilities. Sonner owns every discrete action and error, including explicit refresh commands.
+Routine native pull-to-refresh uses the native spinner, silent success and one Sonner error;
+it shows no loading or success toast. Successful background autosaves stay silent.
+Configuration state and correction controls are allowed inline,
 not action-result messages. Device acceptance never proves a visible banner, provider grant,
 SMS delivery or background execution.
 
@@ -250,3 +252,38 @@ services and actual status, then discloses sync details and consequential accoun
 Connected-account rows use provider-supplied profile photos with initials when missing or failed.
 Account details open a native child page; they never expand inside the account list. Every Mail
 or Calendar service label in connection permissions and status includes its workspace icon.
+
+
+### Focused Settings detail pages
+
+Use the shared action, read-only detail and identity rows for Settings content. A discrete action's
+icon and label share one touch target; destructive actions are red, named and separated from
+ordinary settings. Provider connection rows render canonical brand artwork, retaining Google's
+required colors, rather than approximating logos. Provider photos use a safe initials fallback.
+Choose a provider before selecting that connection's Mail/Calendar permissions; choosing services
+never grants access before the existing authorization flow completes.
+
+Security lists readable device summaries and opens technical metadata/revocation on a native
+child page. Mark a session current only when the authenticated server response says `isCurrent`
+is true; user-agent, IP and missing metadata cannot establish identity. Invitations have separate
+list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Execution
+policy pages; setup material, token scopes and one-time secrets do not become a root-page wall.
+All existing human authority, role checks, scope confirmations and secret-clearing guards remain.
+
+Notifications leads with device controls and links to separate Global and Finances text-policy
+editors. Each dependent editor has a floating Save outside its scroll body and retains explicit
+revision review/recovery. Deployment-unavailable Texting hides futile setup inputs but keeps actual
+masked connection/consent state, legal material, refresh and named disconnect available. A code
+already requested can still arrive; cancelling local setup never claims to recall it.
+
+Workspace preferences group search, behavior and shared web/desktop presentation. Name choices
+that affect other devices rather than suggesting that they change the iPhone layout. Tasks opens
+its reviewed preferences editor directly, keeping guidance and device-notification links reachable.
+Mail rules and Calendar sources use compact record rows and native child detail pages. Accepted
+writes update the correct owner's cache; older reads cannot silently replace accepted state.
+
+Personal editors use the shared fields, switches, action rows and native date/time controls.
+Day multiselect opens a bounded native sheet with Done, not inline expanding settings rows.
+API date/time/day values retain their existing formats. While Save is pending, disable every draft
+input and reject queued native callbacks using the same synchronous save lock. Failed saves retain
+the submitted draft; later input must not disappear when an earlier request closes the editor.

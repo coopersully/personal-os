@@ -237,3 +237,12 @@ acceptance receipt. Focused tests, native simulator evidence, the frozen-candida
 protected delivery and an installable TestFlight build are separate gates. Settings source uses
 partial/revisioned saves, retained-draft recovery and Sonner feedback as specified by
 `docs/design/mobile-forms.md` and `docs/design/feedback.md`.
+
+
+The approved Settings refinement source adds canonical native provider artwork and provider-first
+connection setup; focused Security/Agents/policy detail trees; shared personal editors with bounded
+day sheets; grouped workspace preferences and accepted-write cache publication. Human session
+listing adds server-derived `isCurrent`; an older API omitting it remains compatible and receives no
+inferred current-device badge. Native-stack status-bar ownership requires the generated iOS
+controller-based flag. Routine pull refresh uses a spinner and Sonner errors without success toasts.
+These are source contracts; installable build and production acceptance require separate receipts.

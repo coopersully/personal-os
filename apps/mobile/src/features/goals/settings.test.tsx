@@ -40,6 +40,7 @@ vi.mock("../auth/context", () => ({
   useAuth: () => ({
     state: { user: { id: "owner" } },
     session: {
+      epoch: () => 1,
       api: () => ({
         updateGoal: h.update,
         createGoal: h.create,

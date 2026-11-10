@@ -58,6 +58,12 @@ vi.mock("../../components/forms/form-save", () => ({
   FloatingAdd: () => null,
 }));
 vi.mock("./finance-settings", () => ({ FinanceConfigurationSettings: () => null }));
+vi.mock("../tasks/preferences", () => ({ TaskPreferencesScreen: () => null }));
+vi.mock("./settings-row", () => ({
+  SettingsRow: () => null,
+  SettingsActionRow: () => null,
+  SettingsDetailRow: () => null,
+}));
 vi.mock("../tasks/ui", () => ({
   Section: ({ children }: PropsWithChildren) => <section>{children}</section>,
   FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,

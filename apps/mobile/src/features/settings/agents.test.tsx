@@ -81,6 +81,20 @@ vi.mock("./data", async () => {
         },
       };
     },
+    useSettingsRefresh: (
+      _keys: unknown,
+      refetches: (() => Promise<{ error?: unknown }>)[],
+      message: string,
+    ) => ({
+      pending: false,
+      refresh: () =>
+        h.run(async () => {
+          for (const refetch of refetches) {
+            const result = await refetch();
+            if (result.error) throw result.error;
+          }
+        }, message),
+    }),
     useSettingsAction: () => {
       const [pending, setPending] = useState(false);
       return {

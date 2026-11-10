@@ -1,17 +1,16 @@
 import type { TasksWorkspacePreferences, WorkspaceSettings } from "@personal-os/domain";
 import { router, Stack } from "expo-router";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Text, View } from "react-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
-import { NotificationSettings } from "../notifications/provider";
 import { useTaskAction, useTaskApi, useTaskResources } from "./data";
 import { listOption } from "./list-presentation";
 import { SearchableChoice } from "./searchable-choice";
-import { Action, Choice, confirm, FormBody, Section, State, ToggleRow } from "./ui";
-export function TaskPreferencesScreen() {
+import { Action, Choice, confirm, FormBody, NavigationRow, Section, State, ToggleRow } from "./ui";
+export function TaskPreferencesScreen({ relatedSettings }: { relatedSettings?: ReactNode } = {}) {
   const { state, session } = useAuth();
   const resources = useTaskResources();
   if (!resources.settings.data)
@@ -24,6 +23,7 @@ export function TaskPreferencesScreen() {
   return (
     <Preferences
       key={`${state.user?.id}:${session.epoch()}`}
+      relatedSettings={relatedSettings}
       initial={resources.settings.data}
       lists={(resources.lists.data ?? [])
         .filter((row) => row.availability === "active")
@@ -34,8 +34,10 @@ export function TaskPreferencesScreen() {
 function Preferences({
   initial: opened,
   lists,
+  relatedSettings,
 }: {
   initial: WorkspaceSettings<"tasks">;
+  relatedSettings?: ReactNode;
   lists: { value: string; label: string }[];
 }) {
   const t = useTheme();
@@ -57,7 +59,7 @@ function Preferences({
     <View style={{ flex: 1 }}>
       <Stack.Screen
         options={{
-          title: "task preferences",
+          title: "Task preferences",
           gestureEnabled: false,
           ...editorDismissOptions({
             label: edited ? "Cancel" : "Close",
@@ -73,8 +75,7 @@ function Preferences({
         }}
       />
       <FormBody>
-        <NotificationSettings />
-        <Section title="capture">
+        <Section title="Capture">
           <SearchableChoice
             entity="list"
             disabled={action.pending}
@@ -84,7 +85,7 @@ function Preferences({
             onChange={(value) => update("defaultCaptureListId", value || null)}
           />
         </Section>
-        <Section title="presentation">
+        <Section title="Presentation">
           <Choice
             label="Sort"
             disabled={action.pending}
@@ -205,6 +206,14 @@ function Preferences({
             onChange={(value) => update("includeArchivedInSearch", value)}
           />
         </Section>
+        <Section title="Related settings">
+          <NavigationRow
+            label="iPhone notifications"
+            icon="notification"
+            onPress={() => router.push("/settings/notifications")}
+          />
+        </Section>
+        {relatedSettings}
         {needsReview && (
           <Action
             label="Load latest preferences"

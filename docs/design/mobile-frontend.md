@@ -313,3 +313,11 @@ the approved target; implementation and release evidence are tracked separately 
 COO-211 — Mobile Settings and the mobile Settings implementation plan.
 
 Settings object-list pages use the shared floating plus at the bottom right for primary creation. Form submission and contextual additions within an editor retain their appropriate form controls. Settings version/build metadata appears in the root footer, not a separate About destination. Task Projects use the box identity; personal goals retain the target identity.
+
+
+Native Settings uses focused children for connected accounts, device sessions, invitations, agent
+setup/reviews/access/policy, Mail rules, Calendar sources and text-message policies. General rows
+stay neutral and workspace subtrees retain their own accent. Routine pull refresh uses the native
+spinner, silent success and one Sonner error, following Cooper's explicit preference. Native-stack
+controllers own status-bar contrast, including Today sky overrides; generated iOS configuration
+must enable controller-based status-bar appearance rather than suppress framework warnings.

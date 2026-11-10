@@ -45,7 +45,7 @@ vi.mock("../auth/context", () => ({
   useOptionalAuth: () => null,
   useAuth: () => ({
     state: { user: { id: "owner", planningTimezone: "America/New_York" } },
-    session: { api: () => ({ saveRitual: h.save, listRituals: h.list }) },
+    session: { epoch: () => 1, api: () => ({ saveRitual: h.save, listRituals: h.list }) },
   }),
 }));
 vi.mock("@tanstack/react-query", () => ({

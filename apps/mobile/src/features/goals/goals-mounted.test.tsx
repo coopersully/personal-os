@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { usePageRefresh } from "../../components/page-refresh";
 import { MobileDataProvider } from "../tasks/data";
 import { GoalEditorScreen, GoalsSettingsScreen } from "./settings";
 
@@ -22,6 +23,8 @@ const h = vi.hoisted(() => ({
   motives: [] as unknown[],
   error: vi.fn(),
   success: vi.fn(),
+  loading: vi.fn(() => "goals-refresh"),
+  dismiss: vi.fn(),
   invalidate: vi.fn(),
   params: { kind: "goal", id: "goal" },
   records: [] as unknown[],
@@ -44,6 +47,7 @@ vi.mock("../auth/context", () => ({
   useAuth: () => ({
     state: { user: { id: h.owner } },
     session: {
+      epoch: () => 1,
       api: () => ({
         listGoals: h.goals,
         listMotives: h.motivesRead,
@@ -96,7 +100,7 @@ vi.mock("react-native", async () => ({
   },
 }));
 vi.mock("sonner-native", () => ({
-  toast: { loading: () => "toast", success: h.success, error: h.error },
+  toast: { loading: h.loading, success: h.success, error: h.error, dismiss: h.dismiss },
 }));
 vi.mock("../../theme", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../theme")>()),
@@ -109,16 +113,23 @@ vi.mock("../../components/screen", () => ({
   }: {
     children: React.ReactNode;
     onRefresh?: () => Promise<unknown>;
-  }) => (
-    <div>
-      {children}
-      {onRefresh && (
-        <button type="button" onClick={() => void onRefresh()}>
-          Refresh personal records
-        </button>
-      )}
-    </div>
-  ),
+  }) => {
+    const refresh = usePageRefresh([], onRefresh);
+    return (
+      <div>
+        {children}
+        {onRefresh && (
+          <button
+            type="button"
+            aria-busy={refresh.refreshing}
+            onClick={() => void refresh.refresh()}
+          >
+            Refresh personal records
+          </button>
+        )}
+      </div>
+    );
+  },
 }));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
 vi.mock("../../components/icons", () => ({ Icon: () => null }));
@@ -181,6 +192,15 @@ it("loads authoritative goals and motives, then refreshes cached records without
   expect(screen.queryByText(/Swim/)).toBeNull();
   expect(h.goals).toHaveBeenCalledTimes(2);
   expect(h.motivesRead).toHaveBeenCalledTimes(2);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Refresh personal records" })).toHaveAttribute(
+      "aria-busy",
+      "false",
+    ),
+  );
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
 });
 it("exposes a failed authoritative read and retries without interpreting failure as empty", async () => {
   h.goals.mockRejectedValueOnce(new Error("Offline"));
@@ -221,4 +241,42 @@ it("clears the mounted owner's read state when the authenticated account changes
   await screen.findByText("No goals yet.");
   expect(screen.queryByText(/Swim/)).toBeNull();
   expect(h.goals).toHaveBeenCalledTimes(2);
+});
+
+it("waits for both personal reads before giving one refresh error and retains both cached lists", async () => {
+  render(wrap(<GoalsSettingsScreen />));
+  await screen.findByText(/Swim/);
+  let failGoals: (reason: Error) => void = () => {},
+    failMotives: (reason: Error) => void = () => {};
+  h.goals.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        failGoals = reject;
+      }),
+  );
+  h.motivesRead.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        failMotives = reject;
+      }),
+  );
+  fireEvent.click(screen.getByText("Refresh personal records"));
+  await waitFor(() => expect(h.motivesRead).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("button", { name: "Refresh personal records" })).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+  await act(async () => failGoals(new Error("Goals offline")));
+  expect(h.error).not.toHaveBeenCalled();
+  await act(async () => failMotives(new Error("Motives offline")));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t confirm the result. Check your connection and refresh before retrying.",
+      { id: undefined },
+    ),
+  );
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+  expect(screen.getByText(/Swim/)).toBeVisible();
+  expect(screen.queryByText("Goals offline")).toBeNull();
 });

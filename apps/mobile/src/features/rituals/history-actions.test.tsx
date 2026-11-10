@@ -30,6 +30,7 @@ vi.mock("../auth/context", () => ({
   useAuth: () => ({
     state: { user: { id: h.owner, planningTimezone: "UTC" } },
     session: {
+      epoch: () => 1,
       api: () => ({
         listRitualHistory: h.history,
         listRituals: h.definitions,

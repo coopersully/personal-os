@@ -25,6 +25,7 @@ import { Screen } from "../../components/screen";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { Action, Field, ReadState, Section, ToggleRow } from "../goals/controls";
+import { useSettingsRefresh } from "../settings/data";
 import { DaySelection } from "./day-selection";
 
 let devicePromise: Promise<string> | undefined;
@@ -69,6 +70,11 @@ function RitualHome() {
     queryFn: () => api.listRituals(),
     enabled: !!state.user,
   });
+  const { refresh: refreshDefinitions } = useSettingsRefresh(
+    [[...key, "definitions"]],
+    [() => definitions.refetch({ throwOnError: true })],
+    "Rituals refreshed",
+  );
   const [pending, setPending] = useState(false);
   const [confirmKind, setConfirmKind] = useState<"morning" | "night" | null>(null);
   const [confirmation, setConfirmation] = useState("");
@@ -108,7 +114,7 @@ function RitualHome() {
     }
   };
   return (
-    <Screen onRefresh={() => definitions.refetch({ throwOnError: true })}>
+    <Screen onRefresh={refreshDefinitions}>
       <Stack.Screen options={{ title: "Rituals" }} />
       <ReadState
         pending={definitions.isPending}
@@ -472,9 +478,14 @@ function RitualHistory({ close }: { close: () => void }) {
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     enabled: !!state.user,
   });
+  const { refresh: refreshHistory } = useSettingsRefresh(
+    [["personal-rituals", state.user?.id, "history", filters]],
+    [() => history.refetch({ throwOnError: true })],
+    "Ritual history refreshed",
+  );
   const t = useTheme();
   return (
-    <Screen onRefresh={() => history.refetch({ throwOnError: true })}>
+    <Screen onRefresh={refreshHistory}>
       <Stack.Screen
         options={{
           title: detail ? "Ritual history details" : "Ritual history",

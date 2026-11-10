@@ -20,6 +20,7 @@ import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
+import { useSettingsRefresh } from "../settings/data";
 import { SettingsViewSwitcher } from "../settings/view-switcher";
 import { Action, confirmDelete, Field, ReadState, Section, ToggleRow } from "./controls";
 import { goalChanges, motiveChanges, personalDraft } from "./logic";
@@ -42,17 +43,18 @@ function GoalsHome() {
     queryFn: () => api.listMotives(),
     enabled: !!state.user,
   });
+  const { refresh } = useSettingsRefresh(
+    [
+      [...key, "goals"],
+      [...key, "motives"],
+    ],
+    [() => goals.refetch({ throwOnError: true }), () => motives.refetch({ throwOnError: true })],
+    "Goals and motives refreshed",
+  );
   const [tab, setTab] = useState("goals");
   return (
     <View style={{ flex: 1 }}>
-      <Screen
-        onRefresh={async () => {
-          await Promise.all([
-            goals.refetch({ throwOnError: true }),
-            motives.refetch({ throwOnError: true }),
-          ]);
-        }}
-      >
+      <Screen onRefresh={refresh}>
         <Stack.Screen options={{ title: "Goals & Motives" }} />
         <SettingsViewSwitcher
           value={tab}

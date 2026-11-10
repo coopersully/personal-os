@@ -115,7 +115,9 @@ export function BudgetOverview() {
   const ringColor =
     percent !== null && percent > 100 ? t.destructive : workspaceColor(t, "finances");
   const budgetMonth = budget
-    ? new Date(`${budget.effectiveFrom.slice(0, 7)}-01T12:00:00Z`).toLocaleDateString("en-US", {
+    ? new Date(
+        `${totals && baseline?.state === "qualified" ? baseline.month : budget.effectiveFrom.slice(0, 7)}-01T12:00:00Z`,
+      ).toLocaleDateString("en-US", {
         month: "long",
         timeZone: "UTC",
       })

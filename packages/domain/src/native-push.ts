@@ -16,7 +16,15 @@ export type NativePushDeviceRegistration = {
   status: "registered" | "disabled";
   audience: string;
 };
+export type NativePushEventDetail = {
+  title: string;
+  summary: string;
+  status: string;
+  webPath: string;
+  webUrl: string;
+};
 export type NativePushEventDestination = {
   destination: "finance_chat" | "finance_attention" | "finance_activity";
+  detail?: NativePushEventDetail;
   audience: string;
 };

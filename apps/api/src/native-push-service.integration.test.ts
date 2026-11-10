@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
+  financeAgentActionReviews,
   migrateDatabase,
   nativePushDeliveries,
   nativePushDevices,
@@ -40,6 +41,7 @@ describe.sequential("private native Finance delivery", () => {
   );
   const service = () =>
     createNativePushService({
+      appBaseUrl: "https://app.example.com",
       db: database.db,
       encryptionKey,
       config,
@@ -137,7 +139,7 @@ describe.sequential("private native Finance delivery", () => {
     await service().dispatch();
     expect(transport).toHaveBeenCalledTimes(1);
     expect(transport.mock.calls[0]).toBeDefined();
-    expect(await service().resolve(principal, source.id, input.installationId)).toEqual({
+    expect(await service().resolve(principal, source.id, input.installationId)).toMatchObject({
       audience: first.audience,
       destination: "finance_attention",
     });
@@ -288,6 +290,7 @@ describe.sequential("private native Finance delivery", () => {
     const principal = await owner(),
       input = deviceInput();
     const disabled = createNativePushService({
+      appBaseUrl: "https://app.example.com",
       db: database.db,
       encryptionKey,
       config: { ...config, enabled: false },
@@ -323,6 +326,7 @@ describe.sequential("private native Finance delivery", () => {
       release = resolve;
     });
     const active = createNativePushService({
+      appBaseUrl: "https://app.example.com",
       db: database.db,
       encryptionKey,
       config,
@@ -355,5 +359,57 @@ describe.sequential("private native Finance delivery", () => {
     await dispatch;
     await database.db.delete(sessions).where(eq(sessions.id, String(principal.sessionId)));
     await expect(active.register(principal, input)).rejects.toMatchObject({ code: "unauthorized" });
+  });
+  it("resolves a pending agent approval to its current actionable source without exposing private payloads", async () => {
+    const principal = await owner(),
+      input = deviceInput(),
+      sourceId = randomUUID();
+    await service().register(principal, input);
+    await database.db.insert(financeAgentActionReviews).values({
+      id: sourceId,
+      userId: principal.userId,
+      requestingAgentId: randomUUID(),
+      actionKind: "categorize_transaction",
+      privatePayload: { secret: "must-not-leak" },
+      fingerprint: randomUUID(),
+      createdAt: clock,
+      updatedAt: clock,
+    });
+    await database.db.transaction((tx) =>
+      enqueueNativePushEvent(tx, {
+        userId: principal.userId,
+        sourceId,
+        sourceType: "action_review",
+        kind: "attention",
+        sourceRevision: String(clock.getTime()),
+        createdAt: clock,
+      }),
+    );
+    const [push] = await database.db.select().from(nativePushEvents);
+    if (!push) throw new Error("missing event");
+    await service().dispatch();
+    const resolved = await service().resolve(principal, push.id, input.installationId);
+    expect(resolved).toMatchObject({
+      destination: "finance_attention",
+      detail: {
+        title: "An agent action needs your approval",
+        status: "pending",
+        webPath: `/finances/review?approval=${sourceId}`,
+        webUrl: `https://app.example.com/finances/review?approval=${sourceId}`,
+      },
+    });
+    expect(resolved.detail?.summary).toContain("categorize transaction");
+    expect(JSON.stringify(resolved)).not.toContain("must-not-leak");
+    const other = await owner();
+    await expect(service().resolve(other, push.id, input.installationId)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await database.db
+      .update(financeAgentActionReviews)
+      .set({ status: "dismissed" })
+      .where(eq(financeAgentActionReviews.id, sourceId));
+    await expect(service().resolve(principal, push.id, input.installationId)).rejects.toMatchObject(
+      { code: "not_found" },
+    );
   });
 });

@@ -820,6 +820,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     environment: "production" as const,
   };
   const nativePush = createNativePushService({
+    appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
     encryptionKey: dependencies.config.encryptionKey,
     config: pushConfig,

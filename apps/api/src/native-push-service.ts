@@ -1,19 +1,24 @@
 import { randomUUID } from "node:crypto";
 import {
   type Database,
+  financeAgentActionReviews,
+  financeContextualQuestions,
   financeConversationMessages,
+  financeReviewCases,
   nativePushDeliveries,
   nativePushDevices,
   nativePushEvents,
   notificationPreferences,
   sessions,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import {
   defaultNotificationPreferences,
   type NativePushDeviceInput,
   type NativePushDeviceRegistration,
   type NativePushEventDestination,
+  type NativePushEventDetail,
   nativePushDeviceInputSchema,
 } from "@personal-os/domain";
 import { and, asc, eq, gt, inArray, lte, sql } from "drizzle-orm";
@@ -83,6 +88,7 @@ function humanSession(principal: Principal): string {
 }
 
 export function createNativePushService(options: {
+  appBaseUrl: string;
   db: Database;
   encryptionKey: string;
   config: ApnsConfig;
@@ -127,6 +133,101 @@ export function createNativePushService(options: {
       UNION ALL SELECT 1 FROM finance_review_cases WHERE ${event.sourceType}='review_case' AND id=${event.sourceId}::uuid AND user_id=${event.userId}::uuid AND status='open' AND human_action->>'state'='open' AND human_action->'request'->'work'->>'actionRevision'=${event.sourceRevision}
     ) AS current`);
     return result.rows[0]?.current === true;
+  }
+  async function attentionDetail(
+    tx: Store,
+    event: typeof nativePushEvents.$inferSelect,
+  ): Promise<NativePushEventDetail> {
+    const words = (value: string) => value.replaceAll("_", " ");
+    let title: string, summary: string, status: string, webPath: string;
+    if (event.sourceType === "contextual_question") {
+      const [question] = await tx
+        .select({
+          prompt: financeContextualQuestions.prompt,
+          state: financeContextualQuestions.state,
+        })
+        .from(financeContextualQuestions)
+        .where(
+          and(
+            eq(financeContextualQuestions.id, event.sourceId),
+            eq(financeContextualQuestions.userId, event.userId),
+            eq(financeContextualQuestions.state, "open"),
+            sql`${financeContextualQuestions.actionRevision}::text = ${event.sourceRevision}`,
+          ),
+        );
+      if (!question) throw new AppError("not_found", "This notification is no longer available.");
+      title = "A Finance question needs your answer";
+      summary = question.prompt.slice(0, 1000);
+      status = question.state;
+      webPath = `/finances/review?contextualQuestion=${event.sourceId}`;
+    } else if (event.sourceType === "review_case") {
+      const [review] = await tx
+        .select({
+          rationale: financeReviewCases.rationale,
+          reason: financeReviewCases.reason,
+          status: financeReviewCases.status,
+        })
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.id, event.sourceId),
+            eq(financeReviewCases.userId, event.userId),
+            eq(financeReviewCases.status, "open"),
+            sql`${financeReviewCases.humanAction}->>'state' = 'open' AND ${financeReviewCases.humanAction}->'request'->'work'->>'actionRevision' = ${event.sourceRevision}`,
+          ),
+        );
+      if (!review) throw new AppError("not_found", "This notification is no longer available.");
+      title = "A Finance decision needs your review";
+      summary = (review.rationale || `Review this transaction: ${words(review.reason)}.`).slice(
+        0,
+        1000,
+      );
+      status = review.status;
+      webPath = `/finances/review?case=${event.sourceId}`;
+    } else if (event.sourceType === "action_review") {
+      const [review] = await tx
+        .select({
+          kind: financeAgentActionReviews.actionKind,
+          status: financeAgentActionReviews.status,
+        })
+        .from(financeAgentActionReviews)
+        .where(
+          and(
+            eq(financeAgentActionReviews.id, event.sourceId),
+            eq(financeAgentActionReviews.userId, event.userId),
+            eq(financeAgentActionReviews.status, "pending"),
+            sql`floor(extract(epoch FROM ${financeAgentActionReviews.updatedAt})*1000)::bigint::text = ${event.sourceRevision}`,
+          ),
+        );
+      if (!review) throw new AppError("not_found", "This notification is no longer available.");
+      title = "An agent action needs your approval";
+      summary = `Review the proposed ${words(review.kind).slice(0, 100)} action before deciding whether to approve it.`;
+      status = review.status;
+      webPath = `/finances/review?approval=${event.sourceId}`;
+    } else if (event.sourceType === "maintenance_run") {
+      const [run] = await tx
+        .select({ status: workspaceMaintenanceRuns.status })
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.id, event.sourceId),
+            eq(workspaceMaintenanceRuns.userId, event.userId),
+            eq(workspaceMaintenanceRuns.domain, "finances"),
+            sql`${workspaceMaintenanceRuns.status} = ${event.sourceRevision}`,
+          ),
+        );
+      if (!run) throw new AppError("not_found", "This notification is no longer available.");
+      title = "Finance bookkeeping needs attention";
+      summary =
+        run.status === "blocked"
+          ? "Bookkeeping is blocked. Open Finance activity for context, or continue in chat to ask what needs attention."
+          : run.status === "awaiting_approval"
+            ? "Bookkeeping is waiting for approval. Open Finance review to inspect pending decisions."
+            : "Bookkeeping encountered a problem. Open Finance activity for context, or continue in chat to discuss recovery.";
+      status = run.status;
+      webPath = run.status === "awaiting_approval" ? "/finances/review" : "/finances/activity";
+    } else throw new AppError("not_found", "This notification is no longer available.");
+    return { title, summary, status, webPath, webUrl: new URL(webPath, options.appBaseUrl).href };
   }
   return {
     async register(
@@ -248,6 +349,9 @@ export function createNativePushService(options: {
           throw new AppError("not_found", "This notification is no longer available.");
         return {
           audience: row.device.audience,
+          ...(row.event.kind === "attention"
+            ? { detail: await attentionDetail(tx, row.event) }
+            : {}),
           destination:
             row.event.kind === "reply"
               ? "finance_chat"

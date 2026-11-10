@@ -465,7 +465,12 @@ export function createFinanceConversationService({
         return messageValue(row);
       });
     },
-    async history(userId: string, after = "0", limit = 50, backward?: { before?: string | undefined }) {
+    async history(
+      userId: string,
+      after = "0",
+      limit = 50,
+      backward?: { before?: string | undefined },
+    ) {
       const sequence = BigInt(financeConversationSequenceSchema.parse(after));
       const before =
         backward?.before === undefined

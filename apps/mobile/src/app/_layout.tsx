@@ -1,5 +1,4 @@
 import { Stack } from "expo-router";
-import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { toast } from "sonner-native";
@@ -58,10 +57,10 @@ function AuthenticatedLayout() {
   return (
     <MobileDataProvider key={state.user?.id ?? "signed-out"}>
       <PreviewProvider>
-        <StatusBar style={t.dark ? "light" : "dark"} />
         <Stack
           screenOptions={{
             headerTintColor: t.ink,
+            statusBarStyle: t.dark ? "light" : "dark",
             headerUserInterfaceStyle: t.dark ? "dark" : "light",
             headerStyle: { backgroundColor: t.canvas },
             contentStyle: { backgroundColor: t.canvas },

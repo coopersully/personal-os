@@ -73,7 +73,8 @@ vi.mock("sonner-native", () => ({
     dismiss: vi.fn(),
   }),
 }));
-vi.mock("../../theme", () => ({
+vi.mock("../../theme", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../theme")>()),
   useTheme: () => ({ ink: "black", secondary: "gray", information: "blue", surface: "white" }),
 }));
 vi.mock("../../components/screen", () => ({

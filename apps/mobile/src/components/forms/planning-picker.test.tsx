@@ -31,7 +31,8 @@ it("uses the account calendar day rather than UTC and clears optional date", () 
       onChange={change}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Target date, 2026-11-09" }));
+  expect(screen.queryByText("2026-11-09")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Target date, .*2026/ }));
   fireEvent.click(screen.getByText("Pick date"));
   expect(change).toHaveBeenCalledWith("2026-11-09");
   fireEvent.click(screen.getByText("Clear target date"));
@@ -48,7 +49,7 @@ it("stores native time selection as wall time in profile timezone", () => {
       onChange={change}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Time, 20:00" }));
+  fireEvent.click(screen.getByRole("button", { name: /Time, .*8:00/ }));
   fireEvent.click(screen.getByText("Pick date"));
   expect(change).toHaveBeenCalledWith("20:30");
 });

@@ -1,4 +1,8 @@
-import { Pressable, Text, View } from "react-native";
+import { useState } from "react";
+import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Icon } from "../../components/icons";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
+import { SheetHeader } from "../../components/sheet-header";
 import { useTheme } from "../../theme";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -12,33 +16,68 @@ export function DaySelection({
   onChange: (value: number[] | undefined) => void;
 }) {
   const t = useTheme();
+  const [expanded, setExpanded] = useState(false);
   const selected = value ?? [0, 1, 2, 3, 4, 5, 6];
   return (
     <View>
-      <Text style={{ color: t.secondary }}>{label}</Text>
-      {days.map((day, index) => (
-        <Pressable
-          key={day}
-          accessibilityRole="checkbox"
-          accessibilityLabel={`${label}, ${day}`}
-          accessibilityState={{ checked: selected.includes(index) }}
-          onPress={() => {
-            const next = selected.includes(index)
-              ? selected.filter((v) => v !== index)
-              : [...selected, index].sort();
-            onChange(next.length === 7 ? undefined : next);
-          }}
-          style={{
-            minHeight: 44,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <Text style={{ color: t.ink }}>{day}</Text>
-          <Text style={{ color: t.information }}>{selected.includes(index) ? "✓" : ""}</Text>
-        </Pressable>
-      ))}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${label}, ${selected.length === 7 ? "Every day" : selected.length === 0 ? "Choose days" : selected.map((day) => days[day]?.slice(0, 3)).join(", ")}`}
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded(!expanded)}
+        style={{ minHeight: 56, padding: 16, flexDirection: "row", alignItems: "center", gap: 12 }}
+      >
+        <SettingLabel>{label}</SettingLabel>
+        <SettingValue>
+          {selected.length === 7
+            ? "Every day"
+            : selected.length === 0
+              ? "Choose days"
+              : selected.map((day) => days[day]?.slice(0, 3)).join(", ")}
+        </SettingValue>
+        <Icon name="chevron" color={t.secondary} size={16} />
+      </Pressable>
+      <Modal
+        visible={expanded}
+        presentationStyle="formSheet"
+        animationType="slide"
+        onRequestClose={() => setExpanded(false)}
+      >
+        <View accessibilityViewIsModal style={{ flex: 1, backgroundColor: t.canvas, padding: 20 }}>
+          <SheetHeader
+            title={label}
+            label="Done"
+            onClose={() => setExpanded(false)}
+            inset={false}
+          />
+          <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 20 }}>
+            {days.map((day, index) => (
+              <Pressable
+                key={day}
+                accessibilityRole="checkbox"
+                accessibilityLabel={`${label}, ${day}`}
+                accessibilityState={{ checked: selected.includes(index) }}
+                onPress={() => {
+                  const next = selected.includes(index)
+                    ? selected.filter((v) => v !== index)
+                    : [...selected, index].sort();
+                  onChange(next.length === 7 ? undefined : next);
+                }}
+                style={{
+                  minHeight: 44,
+                  paddingHorizontal: 16,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <Text style={{ color: t.ink }}>{day}</Text>
+                <Text style={{ color: t.ink }}>{selected.includes(index) ? "✓" : ""}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 }

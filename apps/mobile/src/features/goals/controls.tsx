@@ -1,22 +1,24 @@
-import type { PropsWithChildren } from "react";
-import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
-import { useTheme } from "../../theme";
+import { Children, type PropsWithChildren } from "react";
+import { ActivityIndicator, Alert } from "react-native";
+import { SettingsActionRow } from "../settings/settings-row";
+import { Field as SharedField } from "../tasks/ui";
+
+export { Section, ToggleRow } from "../tasks/ui";
 export function Action({
   children,
   onPress,
   disabled = false,
-}: PropsWithChildren<{ onPress: () => void; disabled?: boolean }>) {
-  const t = useTheme();
+  destructive = false,
+}: PropsWithChildren<{ onPress: () => void; disabled?: boolean; destructive?: boolean }>) {
+  const label = Children.toArray(children).join("");
   return (
-    <Pressable
-      accessibilityRole="button"
-      disabled={disabled}
-      accessibilityState={{ disabled }}
+    <SettingsActionRow
+      label={label}
+      icon={destructive ? "trash" : undefined}
       onPress={onPress}
-      style={{ minHeight: 44, justifyContent: "center", opacity: disabled ? 0.5 : 1 }}
-    >
-      <Text style={{ color: t.information }}>{children}</Text>
-    </Pressable>
+      disabled={disabled}
+      destructive={destructive}
+    />
   );
 }
 export function Field({
@@ -32,26 +34,15 @@ export function Field({
   placeholder?: string;
   multiline?: boolean;
 }) {
-  const t = useTheme();
   return (
-    <View style={{ gap: 8, marginVertical: 8 }}>
-      <Text style={{ color: t.secondary }}>{label}</Text>
-      <TextInput
-        accessibilityLabel={label}
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={t.secondary}
-        multiline={multiline}
-        style={{
-          color: t.ink,
-          backgroundColor: t.surface,
-          borderRadius: 12,
-          padding: 12,
-          minHeight: 48,
-        }}
-      />
-    </View>
+    <SharedField
+      label={label}
+      value={value}
+      onChangeText={onChange}
+      placeholder={placeholder}
+      multiline={multiline}
+      compact={!multiline}
+    />
   );
 }
 export function ReadState({

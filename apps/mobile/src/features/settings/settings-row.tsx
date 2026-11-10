@@ -1,8 +1,9 @@
-import { Pressable, View } from "react-native";
+import type { ReactNode } from "react";
+import { Pressable, Text, View } from "react-native";
 import { Icon, type IconName } from "../../components/icons";
-import type { SettingsWorkspace } from "../../components/settings-accent";
+import { type SettingsWorkspace, useSettingsAccent } from "../../components/settings-accent";
 import { SettingLabel, SettingValue } from "../../components/settings-row-content";
-import { useTheme, workspaceColor } from "../../theme";
+import { spacing, useTheme, workspaceColor } from "../../theme";
 export function SettingsRow({
   label,
   value,
@@ -58,3 +59,90 @@ export function SettingsRow({
     </Pressable>
   );
 }
+
+/** A discrete action uses the same row geometry as Settings navigation, without a chevron. */
+export function SettingsActionRow({
+  label,
+  icon,
+  leading,
+  onPress,
+  disabled = false,
+  destructive = false,
+}: {
+  label: string;
+  icon?: IconName;
+  leading?: ReactNode;
+  onPress: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+}) {
+  const t = useTheme();
+  const accent = useSettingsAccent();
+  const color = destructive ? t.destructive : accent;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({ ...rowStyle, opacity: disabled ? 0.4 : pressed ? 0.6 : 1 })}
+    >
+      {leading ?? (icon ? <Icon name={icon} color={color} size={22} /> : null)}
+      <SettingLabel style={{ color }}>{label}</SettingLabel>
+    </Pressable>
+  );
+}
+/** Configuration metadata is readable content, never a disabled button. */
+export function SettingsDetailRow({
+  label,
+  value,
+  icon,
+  attention = false,
+}: {
+  label: string;
+  value: string;
+  icon?: IconName;
+  attention?: boolean;
+}) {
+  const t = useTheme();
+  return (
+    <View accessibilityLabel={`${label}, ${value}`} style={rowStyle}>
+      {icon && <Icon name={icon} size={22} color={t.secondary} />}
+      <SettingLabel>{label}</SettingLabel>
+      <SettingValue style={attention ? { color: t.warning } : undefined}>{value}</SettingValue>
+    </View>
+  );
+}
+export function SettingsIdentity({
+  name,
+  detail,
+  leading,
+}: {
+  name: string;
+  detail?: string | null;
+  leading: ReactNode;
+}) {
+  const t = useTheme();
+  return (
+    <View style={{ ...rowStyle, gap: spacing.lg }}>
+      {leading}
+      <View style={{ flex: 1, minWidth: 0, gap: spacing.xs }}>
+        <Text style={{ color: t.ink, fontSize: 20, fontWeight: "600" }}>{name}</Text>
+        {detail && (
+          <Text selectable style={{ color: t.secondary, fontSize: 15 }}>
+            {detail}
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+}
+const rowStyle = {
+  minHeight: 56,
+  paddingHorizontal: spacing.lg,
+  paddingVertical: spacing.md,
+  flexDirection: "row" as const,
+  alignItems: "center" as const,
+  gap: spacing.md,
+};

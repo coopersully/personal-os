@@ -90,7 +90,8 @@ vi.mock("sonner-native", () => ({
     dismiss: vi.fn(),
   }),
 }));
-vi.mock("../../theme", () => ({
+vi.mock("../../theme", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../theme")>()),
   useTheme: () => ({ ink: "black", secondary: "gray", information: "blue", surface: "white" }),
 }));
 vi.mock("../../components/screen", () => ({
@@ -218,9 +219,11 @@ it("saves schedule and step configuration edits together without issuing prematu
     target: { value: "21:30" },
   });
   fireEvent.change(screen.getByLabelText("Step 1"), { target: { value: "Energy level" } });
-  fireEvent.click(screen.getAllByText("number")[0]);
+  fireEvent.click(screen.getAllByText("Number")[0]);
   fireEvent.click(screen.getByLabelText("Step 1 optional"));
+  fireEvent.click(screen.getByRole("button", { name: "Step 1 days, Every day" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Step 1 days, Sunday" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   fireEvent.click(screen.getAllByText("Remove step")[2]);
   fireEvent.click(screen.getByText("Add step"));
   fireEvent.change(screen.getByLabelText("Step 3"), { target: { value: "Next action" } });

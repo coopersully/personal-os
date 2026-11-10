@@ -98,7 +98,8 @@ vi.mock("react-native", async () => ({
 vi.mock("sonner-native", () => ({
   toast: { loading: () => "toast", success: h.success, error: h.error },
 }));
-vi.mock("../../theme", () => ({
+vi.mock("../../theme", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../theme")>()),
   useTheme: () => ({ ink: "black", secondary: "gray", information: "blue", surface: "white" }),
 }));
 vi.mock("../../components/screen", () => ({

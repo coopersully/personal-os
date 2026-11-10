@@ -9,7 +9,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
-import { Switch, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FloatingAdd, FormSave } from "../../components/forms/form-save";
@@ -21,7 +21,7 @@ import { Screen } from "../../components/screen";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { SettingsViewSwitcher } from "../settings/view-switcher";
-import { Action, confirmDelete, Field, ReadState } from "./controls";
+import { Action, confirmDelete, Field, ReadState, Section, ToggleRow } from "./controls";
 import { goalChanges, motiveChanges, personalDraft } from "./logic";
 export function GoalsSettingsScreen() {
   const { state } = useAuth();
@@ -179,7 +179,6 @@ function PersonalEditor({
   close: () => void;
   refresh: () => Promise<void>;
 }) {
-  const t = useTheme();
   const { session, state } = useAuth();
   // Keep the reviewed snapshot aligned with this draft for the whole editing session.
   // Query refreshes must never turn untouched fields into outgoing patches.
@@ -230,7 +229,9 @@ function PersonalEditor({
     <View style={{ flex: 1 }}>
       <Stack.Screen
         options={{
-          title: record ? `Edit ${kind}` : `New ${kind}`,
+          title: record
+            ? `Edit ${kind === "goal" ? "Goal" : "Motive"}`
+            : `New ${kind === "goal" ? "Goal" : "Motive"}`,
           gestureEnabled: !dirty,
           ...editorDismissOptions({
             label: dirty ? "Cancel" : "Close",
@@ -240,20 +241,22 @@ function PersonalEditor({
         }}
       />
       <Screen>
-        <Field
-          label="Title"
-          value={draft.title}
-          onChange={(title) => change({ title })}
-          placeholder={kind === "goal" ? "Learn to swim" : "Make time for family"}
-        />
-        <Field
-          label={kind === "goal" ? "Description" : "Detail"}
-          value={draft.detail}
-          onChange={(detail) => change({ detail })}
-          multiline
-        />
+        <Section title="Identity">
+          <Field
+            label="Title"
+            value={draft.title}
+            onChange={(title) => change({ title })}
+            placeholder={kind === "goal" ? "Learn to swim" : "Make time for family"}
+          />
+          <Field
+            label={kind === "goal" ? "Description" : "Detail"}
+            value={draft.detail}
+            onChange={(detail) => change({ detail })}
+            multiline
+          />
+        </Section>
         {kind === "goal" && (
-          <>
+          <Section title="Planning">
             <PlanningPicker
               mode="date"
               optional
@@ -269,25 +272,28 @@ function PersonalEditor({
                 onChange={(progress) => change({ progress })}
               />
             )}
-          </>
+          </Section>
         )}
         {record && (
-          <>
-            <Text style={{ color: t.ink }}>Active</Text>
-            <Switch
-              accessibilityLabel="Active"
+          <Section title="State">
+            <ToggleRow
+              label="Active"
               value={draft.active}
-              onValueChange={(active) => change({ active })}
+              onChange={(active) => change({ active })}
+              disabled={pending}
             />
-          </>
+          </Section>
         )}
         {record && (
-          <Action
-            disabled={pending}
-            onPress={() => confirmDelete(record.title, () => void run(true))}
-          >
-            Delete {kind}
-          </Action>
+          <Section>
+            <Action
+              destructive
+              disabled={pending}
+              onPress={() => confirmDelete(record.title, () => void run(true))}
+            >
+              Delete {kind}
+            </Action>
+          </Section>
         )}
       </Screen>
       <FormSave disabled={!dirty || pending} onPress={() => void run()} />

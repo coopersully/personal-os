@@ -29,16 +29,24 @@ export function PlanningPicker({
   const minutes =
     mode === "time" && value ? Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5)) : 720;
   const date = localDateTimeToUtc(day, minutes, timeZone);
+  const displayValue = value
+    ? new Intl.DateTimeFormat(
+        undefined,
+        mode === "date"
+          ? { timeZone, month: "short", day: "numeric", year: "numeric" }
+          : { timeZone, hour: "numeric", minute: "2-digit" },
+      ).format(date)
+    : "Not set";
   return (
     <View style={{ paddingVertical: 8 }}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${label}, ${value || "Not set"}`}
+        accessibilityLabel={`${label}, ${displayValue}`}
         onPress={() => setEditing(!editing)}
         style={{ minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12 }}
       >
         <SettingLabel>{label}</SettingLabel>
-        <SettingValue>{value || "Not set"}</SettingValue>
+        <SettingValue>{displayValue}</SettingValue>
       </Pressable>
       {editing && (
         <>

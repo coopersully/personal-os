@@ -12,7 +12,7 @@ import { File, Paths } from "expo-file-system";
 import { router, Stack, useLocalSearchParams, usePreventRemove } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useRef, useState } from "react";
-import { Alert, Share, Switch, Text, View } from "react-native";
+import { Alert, Share, Text, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { EnumChoice } from "../../components/forms/enum-choice";
@@ -24,7 +24,7 @@ import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
-import { Action, Field, ReadState } from "../goals/controls";
+import { Action, Field, ReadState, Section, ToggleRow } from "../goals/controls";
 import { DaySelection } from "./day-selection";
 
 let devicePromise: Promise<string> | undefined;
@@ -124,7 +124,7 @@ function RitualHome() {
             title={kind === "morning" ? "Morning" : "Evening"}
             value={
               definition
-                ? `${definition.time} · ${definition.enabled ? "Enabled" : "Disabled"}`
+                ? `${new Intl.DateTimeFormat(undefined, { timeZone: "UTC", hour: "numeric", minute: "2-digit" }).format(new Date(`2000-01-01T${definition.time}:00Z`))} · ${definition.enabled ? "Enabled" : "Disabled"}`
                 : "Not configured"
             }
             onPress={() => router.push({ pathname: "/settings/rituals/edit", params: { kind } })}
@@ -135,18 +135,21 @@ function RitualHome() {
       <Action disabled={pending} onPress={() => void action()}>
         Export ritual data
       </Action>
-      {(["morning", "night"] as const).map((kind) => (
-        <Action
-          key={kind}
-          disabled={pending}
-          onPress={() => {
-            setConfirmation("");
-            setConfirmKind(kind);
-          }}
-        >
-          Delete {kind === "morning" ? "Morning" : "Evening"} data
-        </Action>
-      ))}
+      <Section title="Delete data">
+        {(["morning", "night"] as const).map((kind) => (
+          <Action
+            key={kind}
+            destructive
+            disabled={pending}
+            onPress={() => {
+              setConfirmation("");
+              setConfirmKind(kind);
+            }}
+          >
+            Delete {kind === "morning" ? "Morning" : "Evening"} data
+          </Action>
+        ))}
+      </Section>
       {confirmKind && (
         <>
           <Text>
@@ -155,6 +158,7 @@ function RitualHome() {
           </Text>
           <Field label="Ritual name" value={confirmation} onChange={setConfirmation} />
           <Action
+            destructive
             disabled={
               pending || confirmation !== (confirmKind === "morning" ? "Morning" : "Evening")
             }
@@ -311,40 +315,44 @@ function RitualEditor({
         }}
       />
       <Screen>
-        <Field
-          label="Title"
-          value={draft.title}
-          onChange={(title) => setDraft({ ...draft, title })}
-        />
-        <Text style={{ color: t.ink }}>Enabled</Text>
-        <Switch
-          accessibilityLabel="Enabled"
-          value={draft.enabled}
-          onValueChange={(enabled) => setDraft({ ...draft, enabled })}
-        />
-        <PlanningPicker
-          mode="time"
-          timeZone={state.user?.planningTimezone ?? "UTC"}
-          label="Time"
-          value={draft.time}
-          onChange={(time) => setDraft({ ...draft, time })}
-        />
-        <PlanningPicker
-          mode="time"
-          optional
-          timeZone={state.user?.planningTimezone ?? "UTC"}
-          label="Reminder time (optional)"
-          value={draft.reminderTime}
-          onChange={(reminderTime) => setDraft({ ...draft, reminderTime })}
-        />
-        <Text style={{ color: t.secondary }}>
-          Uses your Profile timezone: {state.user?.planningTimezone ?? "Set a timezone in Profile"}
-        </Text>
+        <Section title="Identity">
+          <Field
+            label="Title"
+            value={draft.title}
+            onChange={(title) => setDraft({ ...draft, title })}
+          />
+        </Section>
+        <Section title="State">
+          <ToggleRow
+            label="Enabled"
+            value={draft.enabled}
+            onChange={(enabled) => setDraft({ ...draft, enabled })}
+            disabled={pending}
+          />
+        </Section>
+        <Section title="Planning">
+          <PlanningPicker
+            mode="time"
+            timeZone={state.user?.planningTimezone ?? "UTC"}
+            label="Time"
+            value={draft.time}
+            onChange={(time) => setDraft({ ...draft, time })}
+          />
+          <PlanningPicker
+            mode="time"
+            optional
+            timeZone={state.user?.planningTimezone ?? "UTC"}
+            label="Reminder time (optional)"
+            value={draft.reminderTime}
+            onChange={(reminderTime) => setDraft({ ...draft, reminderTime })}
+          />
+          <Text style={{ color: t.secondary }}>
+            Uses your Profile timezone:{" "}
+            {state.user?.planningTimezone ?? "Set a timezone in Profile"}
+          </Text>
+        </Section>
         {draft.steps.map((step, index) => (
-          <View
-            key={step.id}
-            style={{ borderBottomColor: t.line, borderBottomWidth: 1, paddingVertical: 12 }}
-          >
+          <Section key={step.id} title={`Step ${index + 1}`}>
             <Field
               label={`Step ${index + 1}`}
               value={step.label}
@@ -354,15 +362,21 @@ function RitualEditor({
               label="Step type"
               value={step.kind}
               options={["checkbox", "short_text", "time", "date", "number", "multiple_choice"].map(
-                (value) => ({ label: value.replaceAll("_", " "), value }),
+                (value) => ({
+                  label: value
+                    .split("_")
+                    .map((word) => word[0]?.toUpperCase() + word.slice(1))
+                    .join(" "),
+                  value,
+                }),
               )}
               onChange={(value) => stepChange(index, { kind: value as RitualStep["kind"] })}
             />
-            <Text style={{ color: t.ink }}>Optional</Text>
-            <Switch
-              accessibilityLabel={`Step ${index + 1} optional`}
+            <ToggleRow
+              label={`Step ${index + 1} optional`}
               value={step.optional ?? false}
-              onValueChange={(optional) => stepChange(index, { optional })}
+              onChange={(optional) => stepChange(index, { optional })}
+              disabled={pending}
             />
             <DaySelection
               label={`Step ${index + 1} days`}
@@ -395,7 +409,7 @@ function RitualEditor({
             >
               Remove step
             </Action>
-          </View>
+          </Section>
         ))}
         <Action
           disabled={draft.steps.length >= 20}
@@ -502,7 +516,7 @@ function RitualHistory({ close }: { close: () => void }) {
             label="Ritual"
             value={kind}
             options={[
-              { label: "All rituals", value: "all" },
+              { label: "All Rituals", value: "all" },
               { label: "Morning", value: "morning" },
               { label: "Evening", value: "night" },
             ]}
@@ -518,7 +532,13 @@ function RitualHistory({ close }: { close: () => void }) {
               "skipped",
               "missed",
               "cancelled_configuration",
-            ].map((value) => ({ value, label: value.replaceAll("_", " ") }))}
+            ].map((value) => ({
+              value,
+              label: value
+                .split("_")
+                .map((word) => word[0]?.toUpperCase() + word.slice(1))
+                .join(" "),
+            }))}
             onChange={setStatus}
           />
           <Field label="Search history" value={search} onChange={setSearch} />
@@ -530,13 +550,20 @@ function RitualHistory({ close }: { close: () => void }) {
             value={dateFrom}
             onChange={setDateFrom}
           />
-          <Field label="To date" placeholder="YYYY-MM-DD" value={dateTo} onChange={setDateTo} />
+          <PlanningPicker
+            label="To date"
+            mode="date"
+            optional
+            timeZone={state.user?.planningTimezone ?? "UTC"}
+            value={dateTo}
+            onChange={setDateTo}
+          />
           <EnumChoice
             label="Order"
             value={sort}
             options={[
-              { label: "Newest first", value: "newest" },
-              { label: "Oldest first", value: "oldest" },
+              { label: "Newest First", value: "newest" },
+              { label: "Oldest First", value: "oldest" },
             ]}
             onChange={(value) => setSort(value as "newest" | "oldest")}
           />

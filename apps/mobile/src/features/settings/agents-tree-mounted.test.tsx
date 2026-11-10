@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
+import { useQueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -244,6 +245,7 @@ it("retries the policy API through its single action feedback owner", async () =
 });
 it("loads review work only on Reviews", async () => {
   show(<AgentReviewsScreen />);
+  await screen.findByText("No agent work is waiting.");
   await waitFor(() => expect(h.api.listAgentAccessWorkItems).toHaveBeenCalledWith({ limit: 10 }));
   expect(h.api.getPersonalOsContext).toHaveBeenCalledOnce();
   expect(h.api.getAgentConnectionGuide).not.toHaveBeenCalled();
@@ -354,7 +356,8 @@ it.each([
   );
   if (status === 500) expect(screen.getByText("Private first summary")).toBeTruthy();
   else {
-    await screen.findByText("No agent work is waiting.");
+    await screen.findByText("No agent work on this page.");
+    expect(screen.queryByText("No agent work is waiting.")).toBeNull();
     expect(screen.queryByText("Private first summary")).toBeNull();
   }
   expect(h.api.listAgentAccessWorkItems).toHaveBeenCalledTimes(3);
@@ -412,7 +415,8 @@ it("fences queued page, review and confirmation callbacks through denial, pendin
   expect(screen.queryByText("Private queued summary")).toBeNull();
   expect(h.open).not.toHaveBeenCalled();
   await act(async () => finish({ items: [], unavailableDomains: [], nextCursor: null }));
-  await screen.findByText("No agent work is waiting.");
+  await screen.findByText("No agent work on this page.");
+  expect(screen.queryByText("No agent work is waiting.")).toBeNull();
   await act(async () => {
     oldLoad();
     oldReview();
@@ -429,4 +433,77 @@ it("fences queued page, review and confirmation callbacks through denial, pendin
     oldConfirm();
   });
   expect(h.open).not.toHaveBeenCalled();
+});
+
+it("recovers denied review context explicitly while successful pages stay private and old callbacks remain fenced", async () => {
+  const item = {
+    id: "context-item",
+    domain: "tasks",
+    priority: "high",
+    kind: "review",
+    title: "Context review",
+    summary: "Context private summary",
+    action: { label: "Review", to: "/tasks/review?id=context" },
+  };
+  h.api.listAgentAccessWorkItems.mockResolvedValue({
+    items: [item],
+    unavailableDomains: [],
+    nextCursor: "next",
+  });
+  let refetchContext: (() => Promise<unknown>) | undefined;
+  function ReviewContextFixture() {
+    const client = useQueryClient();
+    refetchContext = () =>
+      client.refetchQueries({
+        queryKey: ["settings", h.owner, h.epoch, "agent-context"],
+        exact: true,
+      });
+    return <AgentReviewsScreen />;
+  }
+  show(<ReviewContextFixture />);
+  await screen.findByRole("button", { name: "Review on the web" });
+  const oldReview = h.callbacks.get("Review on the web");
+  const oldLoad = h.callbacks.get("Load more agent work");
+  if (!oldReview || !oldLoad || !refetchContext) throw new Error("Expected live context fixture");
+  act(() => oldReview());
+  const oldConfirm = h.confirm.mock.calls.at(-1)?.[2] as () => void;
+  h.api.getPersonalOsContext.mockRejectedValueOnce(
+    new ApiClientError({ code: "FORBIDDEN", status: 403, message: "Context denied" }),
+  );
+  await act(async () => refetchContext?.());
+  await screen.findByRole("button", { name: "Retry web review links" });
+  expect(h.error).toHaveBeenCalledOnce();
+  expect(screen.queryByText("Context private summary")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry loading agent work" })).toBeNull();
+  let finish!: (value: unknown) => void;
+  h.api.getPersonalOsContext.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Retry web review links" }));
+  await waitFor(() => expect(h.api.getPersonalOsContext).toHaveBeenCalledTimes(3));
+  expect(screen.queryByRole("button", { name: "Review on the web" })).toBeNull();
+  await act(async () => {
+    oldLoad();
+    oldReview();
+    oldConfirm();
+  });
+  expect(screen.queryByText("Context private summary")).toBeNull();
+  expect(h.open).not.toHaveBeenCalled();
+  await act(async () => finish({ links: { agentAccess: "https://authorized-new.test/settings" } }));
+  await screen.findByRole("button", { name: "Review on the web" });
+  expect(screen.queryByRole("button", { name: "Retry web review links" })).toBeNull();
+  await act(async () => {
+    oldLoad();
+    oldReview();
+    oldConfirm();
+  });
+  expect(h.open).not.toHaveBeenCalled();
+  expect(h.api.listAgentAccessWorkItems).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Review on the web" }));
+  await act(async () => h.confirm.mock.calls.at(-1)?.[2]());
+  expect(h.open).toHaveBeenCalledWith("https://authorized-new.test/tasks/review?id=context");
+  expect(h.api.getPersonalOsContext).toHaveBeenCalledTimes(3);
 });

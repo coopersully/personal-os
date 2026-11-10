@@ -837,7 +837,9 @@ function AgentWorkItems() {
       {page.isError && (
         <Action label="Retry loading agent work" onPress={() => void page.refetch()} />
       )}
-      {!denied && page.data && items.length === 0 && <State empty="No agent work is waiting." />}
+      {!denied && page.data && items.length === 0 && (
+        <State empty={cursor ? "No agent work on this page." : "No agent work is waiting."} />
+      )}
       {!denied && page.data?.nextCursor && (
         <Action
           label="Load more agent work"

@@ -2,7 +2,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ConnectionsSettingsScreen, openAuthorization } from "./connections";
+import {
+  ConnectionAccountScreen,
+  ConnectionsSettingsScreen,
+  openAuthorization,
+} from "./connections";
 import { NotificationsSettingsScreen } from "./notifications";
 import { TextingSettingsScreen } from "./texting";
 
@@ -13,6 +17,7 @@ vi.mock("react", async () => {
 const h = vi.hoisted(() => ({
   resources: {} as Record<string, unknown>,
   pending: false,
+  navigate: vi.fn(),
   modalDismiss: undefined as (() => void) | undefined,
   allowSwipeDismissal: undefined as boolean | undefined,
   refetch: vi.fn(async () => ({})),
@@ -119,7 +124,8 @@ vi.mock("../../components/sheet-header", () => ({
 }));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
 vi.mock("expo-router", () => ({
-  router: { push: vi.fn(), back: vi.fn() },
+  router: { push: h.navigate, back: vi.fn() },
+  useLocalSearchParams: () => ({ id: "account" }),
   Stack: { Screen: () => null },
 }));
 vi.mock("../notifications/provider", () => ({
@@ -485,7 +491,7 @@ it("reconciles an uncertain policy response already committed without duplicatin
   expect(h.api.saveNotificationPreferences).toHaveBeenCalledTimes(1);
 });
 
-it("discloses connection details on demand without performing a provider action", () => {
+it("opens a dedicated account page without expanding the row or performing a provider action", () => {
   h.resources.connectors = [
     {
       id: "account",
@@ -500,13 +506,19 @@ it("discloses connection details on demand without performing a provider action"
       syncStatus: "idle",
     },
   ];
-  render(<ConnectionsSettingsScreen />);
+  const list = render(<ConnectionsSettingsScreen />);
   expect(screen.getByText("Connected")).toBeVisible();
   expect(screen.queryByText("Sync now")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Account Work Google, alex@example.com" }));
+  expect(h.navigate).toHaveBeenCalledWith({
+    pathname: "/settings/connections/account",
+    params: { id: "account" },
+  });
+  expect(screen.queryByText("Sync now")).toBeNull();
+  list.unmount();
+  render(<ConnectionAccountScreen />);
   expect(screen.getByText("Sync now")).toBeVisible();
   expect(screen.getByText("Disconnect account")).toBeVisible();
+  expect(screen.queryByText("Connect Google in browser")).toBeNull();
   expect(h.api.syncConnector).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Account Work Google, alex@example.com" }));
-  expect(screen.queryByText("Sync now")).toBeNull();
 });

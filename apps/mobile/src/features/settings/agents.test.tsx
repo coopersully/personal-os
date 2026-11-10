@@ -17,9 +17,13 @@ const h = vi.hoisted(() => ({
   createToken: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
+  api: {} as Record<string, unknown>,
+  openURL: vi.fn(),
+  errors: new Set<string>(),
   dismiss: undefined as undefined | (() => void),
 }));
 vi.mock("react-native", () => ({
+  Linking: { openURL: h.openURL },
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   View: ({ children, style }: PropsWithChildren<{ style?: object }>) => (
     <div style={style}>{children}</div>
@@ -43,12 +47,20 @@ vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
 vi.mock("./data", async () => {
   const { useState } = await import("react");
   return {
-    useSettingsResource: (key: string) => ({
-      data: h.resources[key],
-      isPending: false,
-      isError: false,
-      refetch: h.refresh,
-    }),
+    useSettingsResource: (key: string) => {
+      const [, refresh] = useState(0);
+      return {
+        data: h.resources[key],
+        isPending: false,
+        isError: h.errors.has(key),
+        isFetching: false,
+        refetch: async () => {
+          const result = await h.refresh(key);
+          refresh((value) => value + 1);
+          return result;
+        },
+      };
+    },
     useSettingsAction: () => {
       const [pending, setPending] = useState(false);
       return {
@@ -66,9 +78,20 @@ vi.mock("./data", async () => {
   };
 });
 vi.mock("../tasks/ui", () => ({
-  Section: ({ children }: PropsWithChildren) => <div>{children}</div>,
+  Section: ({ children, title }: PropsWithChildren<{ title?: string }>) => (
+    <section aria-label={title}>{children}</section>
+  ),
   FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,
-  State: () => null,
+  State: ({ loading, retry, empty }: { loading?: boolean; retry?: () => void; empty?: string }) =>
+    loading ? (
+      <span role="progressbar" />
+    ) : retry ? (
+      <button type="button" onClick={retry}>
+        Retry loading
+      </button>
+    ) : (
+      <span>{empty}</span>
+    ),
   Field: ({
     label,
     value,
@@ -87,7 +110,32 @@ vi.mock("../tasks/ui", () => ({
       onChange={(event) => onChangeText(event.target.value)}
     />
   ),
-  Choice: () => null,
+  Choice: ({
+    label,
+    value,
+    options,
+    onChange,
+    disabled,
+  }: {
+    label: string;
+    value: string;
+    options: { label: string; value: string }[];
+    onChange: (value: string) => void;
+    disabled?: boolean;
+  }) => (
+    <select
+      aria-label={label}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  ),
   confirm: h.confirm,
   Action: ({
     label,
@@ -118,18 +166,19 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   h.dismiss = undefined;
+  h.errors.clear();
+  h.createToken.mockReset();
+  h.refresh.mockReset().mockImplementation(async (key) => ({ data: h.resources[key] }));
   h.resources = {
     "agent-directory": { accounts: [], connections: [] },
     "agent-tokens": [],
     "agent-oauth-clients": [],
     "agent-execution-policy": { version: 9, reviewBypassEnabled: false },
   };
+  h.api = { updateExecutionPolicySettings: h.updatePolicy, createAccessToken: h.createToken };
   h.run.mockImplementation(async (action, success) => {
     try {
-      const value = await action({
-        updateExecutionPolicySettings: h.updatePolicy,
-        createAccessToken: h.createToken,
-      });
+      const value = await action(h.api);
       if (success) h.success(success);
       return { ok: true, value };
     } catch (error) {
@@ -287,3 +336,262 @@ it("routes refresh success and cached refresh failure through shared Sonner acti
 
 vi.mock("sonner-native", () => ({ toast: { error: h.error } }));
 vi.mock("../tasks/data", () => ({ errorMessage: (error: Error) => error.message }));
+
+const approve = async () => {
+  await act(async () => h.confirm.mock.calls.at(-1)?.[2]());
+};
+it("edits an agent identity explicitly and refreshes authoritative directory state without granting scopes", async () => {
+  h.resources["agent-directory"] = { accounts: [account], connections: [] };
+  const update = vi.fn().mockResolvedValue({});
+  h.api = { ...h.api, updateAgentAccount: update };
+  render(<AgentsSettingsScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Updated helper" } });
+  fireEvent.change(screen.getByLabelText("Account label"), { target: { value: "Work account" } });
+  fireEvent.change(screen.getByLabelText("Platform"), { target: { value: "claude" } });
+  expect(update).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(update).toHaveBeenCalledWith("agent", {
+      displayName: "Updated helper",
+      accountLabel: "Work account",
+      platform: "claude",
+    }),
+  );
+  await waitFor(() => expect(screen.queryByLabelText("Name")).not.toBeInTheDocument());
+  expect(h.refresh).toHaveBeenCalledWith("agent-directory");
+  expect(h.success).toHaveBeenCalledWith("Agent identity saved");
+});
+it("retains rejected identity edits and confirms local cancellation before returning", async () => {
+  h.resources["agent-directory"] = { accounts: [account], connections: [] };
+  const update = vi.fn().mockRejectedValue(new Error("Denied"));
+  h.api = { ...h.api, updateAgentAccount: update };
+  render(<AgentsSettingsScreen />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
+  fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft helper" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(expect.objectContaining({ message: "Denied" })),
+  );
+  expect(screen.getByLabelText("Name")).toHaveValue("Draft helper");
+  act(() => h.dismiss?.());
+  expect(screen.getByLabelText("Name")).toBeVisible();
+  expect(h.confirm).toHaveBeenLastCalledWith(
+    "Discard identity changes?",
+    expect.any(String),
+    expect.any(Function),
+    true,
+  );
+  await approve();
+  expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+});
+it("requires confirmation to link or unlink existing connections while displaying their actual authority", async () => {
+  h.resources["agent-directory"] = {
+    accounts: [account],
+    connections: [
+      {
+        id: "connection",
+        label: "My client",
+        agentAccountId: null,
+        scopes: ["tasks:read"],
+        active: true,
+        lastUsedAt: "2026-11-10T00:00:00.000Z",
+      },
+    ],
+  };
+  const link = vi.fn().mockResolvedValue({});
+  h.api = { ...h.api, linkAgentAccountConnection: link };
+  const { rerender } = render(<AgentsSettingsScreen />);
+  expect(screen.getByText("Granted scopes: tasks:read")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Agent identity"), { target: { value: "agent" } });
+  expect(link).not.toHaveBeenCalled();
+  expect(h.confirm).toHaveBeenLastCalledWith(
+    "Change connection identity?",
+    expect.stringContaining("does not add scopes"),
+    expect.any(Function),
+  );
+  await approve();
+  expect(link).toHaveBeenCalledWith("connection", { agentAccountId: "agent" });
+  h.resources["agent-directory"] = {
+    accounts: [account],
+    connections: [
+      {
+        id: "connection",
+        label: "My client",
+        agentAccountId: "agent",
+        scopes: [],
+        active: false,
+        lastUsedAt: null,
+      },
+    ],
+  };
+  rerender(<AgentsSettingsScreen />);
+  fireEvent.change(screen.getByLabelText("Agent identity"), { target: { value: "none" } });
+  await approve();
+  expect(link).toHaveBeenLastCalledWith("connection", { agentAccountId: null });
+  expect(screen.getByText("Granted scopes: none")).toBeVisible();
+});
+it("retains a rejected scope grant draft and validates dependent scopes before transport", async () => {
+  h.createToken.mockRejectedValue(new Error("Grant rejected"));
+  tokenDraft();
+  fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+  await approve();
+  expect(screen.getByLabelText("Token name")).toHaveValue("Limited helper");
+  expect(screen.getByLabelText("tasks:read")).toBeChecked();
+  expect(h.error).toHaveBeenCalledWith(expect.objectContaining({ message: "Grant rejected" }));
+  expect(screen.queryByText("New access token")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("tasks:read"));
+  fireEvent.click(screen.getByLabelText("texting:write"));
+  fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+  await approve();
+  expect(h.createToken).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText("texting:write")).toBeChecked();
+});
+it("revokes named token and OAuth grants through confirmed endpoints without exposing a stored secret", async () => {
+  h.resources["agent-tokens"] = [
+    {
+      id: "live-token",
+      name: "Live client",
+      scopes: ["tasks:read"],
+      revokedAt: null,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    },
+    {
+      id: "old-token",
+      name: "Old client",
+      scopes: [],
+      revokedAt: "2026-11-10T00:00:00.000Z",
+      expiresAt: null,
+    },
+  ];
+  h.resources["agent-oauth-clients"] = [
+    { id: "oauth", name: "OAuth client", scopes: ["mail:read"] },
+  ];
+  const revokeToken = vi.fn().mockResolvedValue(undefined),
+    revokeOAuth = vi.fn().mockResolvedValue(undefined);
+  h.api = { ...h.api, deleteAccessToken: revokeToken, revokeOAuthClient: revokeOAuth };
+  render(<AgentsSettingsScreen />);
+  expect(screen.queryByRole("button", { name: "Revoke Old client" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Revoke Live client" }));
+  expect(revokeToken).not.toHaveBeenCalled();
+  await approve();
+  expect(revokeToken).toHaveBeenCalledWith("live-token");
+  expect(h.refresh).toHaveBeenCalledWith("agent-tokens");
+  fireEvent.click(screen.getByRole("button", { name: "Revoke OAuth client" }));
+  await approve();
+  expect(revokeOAuth).toHaveBeenCalledWith("oauth");
+  expect(h.refresh).toHaveBeenCalledWith("agent-oauth-clients");
+  expect(screen.queryByLabelText("New access token")).not.toBeInTheDocument();
+});
+it("shows actual setup readiness and changes workspace instructions without changing permissions", async () => {
+  h.resources["agent-setup-status"] = {
+    domains: [
+      {
+        domain: "tasks",
+        canRead: true,
+        canWrite: false,
+        approvedProfileVersion: 3,
+        pendingDraftVersion: 4,
+      },
+      {
+        domain: "mail",
+        canRead: false,
+        canWrite: true,
+        approvedProfileVersion: null,
+        pendingDraftVersion: null,
+      },
+    ],
+  };
+  const setup = (status: string) => ({
+    status,
+    progress: { completed: 1, total: 3 },
+    nextAction: "Review setup",
+    steps: [
+      {
+        id: "review",
+        title: "Review guidance",
+        state: "current",
+        owner: "person",
+        description: "Check the instructions",
+        instructions: ["Inspect current scopes"],
+        userAction: "Approve only intended access",
+      },
+    ],
+  });
+  h.resources["agent-setup-tasks"] = setup("in_progress");
+  h.resources["agent-setup-mail"] = setup("blocked");
+  render(<AgentsSettingsScreen />);
+  expect(screen.getByText(/Approved guidance version 3/)).toBeVisible();
+  expect(screen.getByText("Inspect current scopes")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "mail" } });
+  expect(screen.getByText(/Agent access: no read.*write/)).toBeVisible();
+  expect(screen.getByText(/blocked.*1 of 3/)).toBeVisible();
+  expect(h.updatePolicy).not.toHaveBeenCalled();
+});
+it("retains earlier work pages across a later read failure and only hands confirmed reviews to the authoritative web origin", async () => {
+  const first = {
+    id: "first",
+    domain: "tasks",
+    priority: "high",
+    kind: "review",
+    title: "Review first item",
+    summary: "First summary",
+    preview: [{ label: "Workspace", value: "Tasks" }],
+    action: { label: "Review", to: "/tasks/review?id=first" },
+  };
+  h.resources["agent-context"] = { links: { agentAccess: "https://app.example.com/settings" } };
+  h.resources["agent-work-items-root"] = {
+    items: [first],
+    nextCursor: "second",
+    unavailableDomains: ["mail"],
+  };
+  h.errors.add("agent-work-items-second");
+  h.refresh.mockImplementation(async (key) => {
+    if (key === "agent-work-items-second") {
+      h.errors.delete(key);
+      h.resources[key] = {
+        items: [
+          first,
+          {
+            ...first,
+            id: "next",
+            title: "Review next item",
+            summary: "Next summary",
+            action: null,
+          },
+        ],
+        nextCursor: null,
+        unavailableDomains: [],
+      };
+    }
+    return { data: h.resources[key] };
+  });
+  h.openURL.mockResolvedValue(undefined);
+  render(<AgentsSettingsScreen />);
+  expect(screen.getByText(/Could not load: mail/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Load more agent work" }));
+  expect(screen.getByText("First summary")).toBeVisible();
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading agent work" })),
+  );
+  expect(screen.getByText("Next summary")).toBeVisible();
+  expect(screen.getAllByText("First summary")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Review on the web" }));
+  expect(h.openURL).not.toHaveBeenCalled();
+  await approve();
+  expect(h.openURL).toHaveBeenCalledWith("https://app.example.com/tasks/review?id=first");
+  expect(h.success).toHaveBeenCalledWith("Requested opening the web flow");
+});
+it.each([
+  "agent-directory",
+  "agent-guide",
+  "agent-tokens",
+  "agent-oauth-clients",
+  "agent-setup-tasks",
+])("retries the failed %s read without fabricating an empty successful result", async (key) => {
+  h.resources[key] = undefined;
+  h.errors.add(key);
+  render(<AgentsSettingsScreen />);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retry loading" })));
+  expect(h.refresh).toHaveBeenCalledWith(key);
+});

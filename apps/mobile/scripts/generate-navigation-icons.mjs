@@ -9,6 +9,7 @@ import * as registry from "../../web/src/components/icons";
 const names = [
   "Search",
   "MapPin",
+  "Reply",
   "CircleArrowUp",
   "Tags",
   "Layers",

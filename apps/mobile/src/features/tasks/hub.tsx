@@ -2,6 +2,8 @@ import type { TaskList, TaskProject } from "@personal-os/domain";
 import { router } from "expo-router";
 import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { Icon, type IconName } from "../../components/icons";
+import { PageRefreshControl } from "../../components/page-refresh";
+import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { radius, spacing, useTheme, workspaceColor } from "../../theme";
 import { ListRow, PinnedContainers, ProjectRow } from "./container-rows";
 import { useTaskAction, useTaskApi, useTaskResources, useTaskSearch } from "./data";
@@ -10,6 +12,7 @@ import { TaskListScreen } from "./task-list";
 import { Group, Heading, NavigationRow, SearchField, State } from "./ui";
 export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "archive" }) {
   const t = useTheme();
+  const headerInset = useWorkspaceHeaderInset();
   const api = useTaskApi();
   const resources = useTaskResources();
   const action = useTaskAction();
@@ -125,10 +128,17 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
   return (
     <View style={{ flex: 1, backgroundColor: t.canvas }}>
       <FlatList
-        contentInsetAdjustmentBehavior="automatic"
+        alwaysBounceVertical
+        refreshControl={<PageRefreshControl scope={["tasks"]} offset={headerInset} />}
+        contentInsetAdjustmentBehavior={headerInset ? "never" : "automatic"}
+        scrollIndicatorInsets={{ top: headerInset }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentContainerStyle={{ padding: spacing.page, paddingBottom: 100 }}
+        contentContainerStyle={{
+          padding: spacing.page,
+          paddingTop: headerInset + spacing.page,
+          paddingBottom: 100,
+        }}
         data={directoryRows}
         keyExtractor={(item) => `${item.kind}:${item.record.id}`}
         ListHeaderComponent={

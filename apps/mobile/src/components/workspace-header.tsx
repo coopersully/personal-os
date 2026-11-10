@@ -1,5 +1,5 @@
 import * as Haptics from "expo-haptics";
-import { router, usePathname } from "expo-router";
+import { router, useLocalSearchParams, usePathname } from "expo-router";
 import { type ComponentRef, useEffect, useRef, useState } from "react";
 import {
   Animated,
@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner-native";
 import { useAuth } from "../features/auth/context";
 import { sampleItems } from "../features/briefing/sample";
+import { workspaceSettingsPath } from "../features/settings/navigation";
 import { useTaskSearch } from "../features/tasks/data";
 import { useStablePan } from "../navigation/use-stable-pan";
 import { regionMotion, useWorkspaceMotion, workspaceOrder } from "../navigation/workspace-motion";
@@ -27,8 +28,10 @@ const menuWorkspaces = workspaceOrder.flatMap((id) =>
 );
 type Workspace = (typeof workspaces)[number];
 
-/** Shared workspace chrome. Search is intentionally restricted to the preview fixtures. */
-export function WorkspaceHeader() {
+/** Shared workspace chrome. Tasks, Mail and Accounts search their live lists; other destinations use preview fixtures. */
+export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
+  const chromeInk = chromeDark === undefined ? undefined : chromeDark ? "#f8f8fc" : "#202024";
+  const chromeSecondary = chromeDark === undefined ? undefined : chromeDark ? "#d0d6e8" : "#4f5360";
   const t = useTheme();
   const { state: auth, session } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
@@ -47,9 +50,17 @@ export function WorkspaceHeader() {
   };
   const motion = useWorkspaceMotion();
   const path = usePathname();
+  const isFinanceAccounts = path === "/finances/accounts";
+  const { accountSearch = "", mailSearch = "" } = useLocalSearchParams<{
+    accountSearch?: string;
+    mailSearch?: string;
+  }>();
   const current =
     workspaces.find(
-      (workspace) => path === `/${workspace.id}` || path.startsWith(`/${workspace.id}/`),
+      (workspace) =>
+        path === `/${workspace.id}` ||
+        path.startsWith(`/${workspace.id}/`) ||
+        (workspace.id === "finances" && path.startsWith("/finance-")),
     ) ?? workspaces[0];
   const isSettings = path === "/settings" || path.startsWith("/settings/");
   const [open, setOpen] = useState(false);
@@ -192,7 +203,7 @@ export function WorkspaceHeader() {
       )}
       <View style={styles.bar}>
         {/* Keep glass outside the menu ancestry so iOS cannot lift the whole search bar. */}
-        <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
+        <GlassSurface pointerEvents="none" colorScheme="auto" style={StyleSheet.absoluteFill} />
         <Animated.View
           style={[styles.barContents, motion && regionMotion(motion.workspaceProgress, 10)]}
         >
@@ -217,25 +228,39 @@ export function WorkspaceHeader() {
                 name={isSettings ? "settings" : current.icon}
                 size={23}
                 filled
-                color={isSettings ? t.secondary : color(current)}
+                color={chromeInk ?? (isSettings ? t.secondary : color(current))}
               />
             </Pressable>
           </View>
           <TextInput
-            value={current.id === "tasks" ? taskSearch.search : query}
+            value={
+              isFinanceAccounts
+                ? accountSearch
+                : current.id === "mail"
+                  ? mailSearch
+                  : current.id === "tasks"
+                    ? taskSearch.search
+                    : query
+            }
             onChangeText={(value) => {
               close();
-              if (current.id === "tasks") taskSearch.setSearch(value);
+              if (isFinanceAccounts) router.setParams({ accountSearch: value });
+              else if (current.id === "mail") router.setParams({ mailSearch: value });
+              else if (current.id === "tasks") taskSearch.setSearch(value);
               else setQuery(value);
             }}
             onFocus={() => close()}
-            accessibilityLabel={`Search ${isSettings ? "settings" : current.label}${current.id === "tasks" ? "" : " sample data"}`}
-            placeholder={`Search ${isSettings ? "settings" : current.label}`}
-            placeholderTextColor={t.secondary}
+            accessibilityLabel={
+              isFinanceAccounts
+                ? "Search accounts"
+                : `Search ${isSettings ? "settings" : current.label}${current.id === "tasks" || current.id === "mail" ? "" : " sample data"}`
+            }
+            placeholder={`Search ${isFinanceAccounts ? "accounts" : isSettings ? "settings" : current.label}`}
+            placeholderTextColor={chromeSecondary ?? t.secondary}
             returnKeyType="search"
             autoCorrect={false}
             clearButtonMode="while-editing"
-            style={[styles.input, { color: t.ink }]}
+            style={[styles.input, { color: chromeInk ?? t.ink }]}
           />
           <Pressable
             accessibilityRole="button"
@@ -355,7 +380,11 @@ export function WorkspaceHeader() {
             {(
               [
                 { label: "settings", icon: "settings", path: "/settings" },
-                { label: "workspace settings", icon: "grid", path: "/settings/workspaces" },
+                {
+                  label: "workspace settings",
+                  icon: "grid",
+                  path: workspaceSettingsPath(current.id),
+                },
                 { label: "agent settings", icon: "target", path: "/settings/agents" },
               ] as const
             ).map((item) => (
@@ -395,7 +424,7 @@ export function WorkspaceHeader() {
           </GlassSurface>
         </View>
       )}
-      {current.id !== "tasks" && !!query.trim() && (
+      {!isFinanceAccounts && current.id !== "tasks" && current.id !== "mail" && !!query.trim() && (
         <View style={[styles.results, { backgroundColor: t.canvas, borderColor: t.line }]}>
           <Text style={[styles.caption, { color: t.secondary }]}>
             sample results · {isSettings ? "settings" : current.label}

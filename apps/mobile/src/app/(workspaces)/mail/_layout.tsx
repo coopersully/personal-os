@@ -1,4 +1,9 @@
 import { WorkspaceTabs } from "../../../components/workspace-tabs";
+import { MailScopeProvider } from "../../../features/mail/scope";
 export default function Layout() {
-  return <WorkspaceTabs workspace="mail" />;
+  return (
+    <MailScopeProvider>
+      <WorkspaceTabs workspace="mail" />
+    </MailScopeProvider>
+  );
 }

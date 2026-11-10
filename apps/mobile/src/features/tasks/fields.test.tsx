@@ -11,6 +11,9 @@ vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/package.json`)("react");
 });
+vi.mock("sonner-native", () => ({
+  toast: { loading: vi.fn(), info: vi.fn(), error: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
+}));
 vi.mock("react-native", async () => import("../../../test/native"));
 vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,

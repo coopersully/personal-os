@@ -28,3 +28,23 @@ it("passes attachment cancellation through to fetch without requiring a signal f
   await rejected;
   expect(fetch.mock.calls[1]?.[1]?.signal).toBe(controller.signal);
 });
+
+it("requests body-free summaries with stable pagination and inbox search", async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValue(new Response(JSON.stringify({ threads: [{ id: "summary" }] })));
+  const client = createApiClient({ baseUrl: "https://example.test", fetch });
+  await expect(
+    client.listMailThreadSummaries({
+      mailboxRole: "inbox",
+      query: "board packet",
+      limit: 50,
+      beforeId: "last",
+      beforeReceivedAt: "2026-11-09T12:00:00.000Z",
+    }),
+  ).resolves.toEqual([{ id: "summary" }]);
+  const url = new URL(String(fetch.mock.calls[0]?.[0]));
+  expect(url.pathname).toBe("/v1/mail/thread-summaries");
+  expect(url.searchParams.get("query")).toBe("board packet");
+  expect(url.searchParams.get("beforeId")).toBe("last");
+});

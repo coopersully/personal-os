@@ -28,6 +28,7 @@ import type {
   MailRule,
   MailRulePreview,
   MailSetupContext,
+  MailSummaryQuery,
   MailThread,
   PreviewMailRuleInput,
   SendMailDraftInput,
@@ -54,6 +55,7 @@ import {
 import { connectionHealthForAccount } from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { resolveDraftAttachments } from "./mail/draft-attachments.js";
 import { enqueueDurableMailRuleWork } from "./mail-rule-work.js";
 import {
   auditAttentionItemMetadata,
@@ -84,6 +86,58 @@ export function createMailService({
   now: () => Date;
   reviewSigningKey: string;
 }) {
+  async function downloadAttachment(
+    userId: string,
+    messageId: string,
+    attachmentId: string,
+    signal?: AbortSignal,
+  ) {
+    signal?.throwIfAborted();
+    const [record] = await db
+      .select({ message: mailMessages, accountId: mailThreads.accountId })
+      .from(mailMessages)
+      .innerJoin(mailThreads, eq(mailMessages.threadId, mailThreads.id))
+      .where(
+        and(
+          eq(mailMessages.id, messageId),
+          eq(mailThreads.userId, userId),
+          isNull(mailThreads.deletedAt),
+        ),
+      )
+      .limit(1);
+    const attachment = record?.message.attachments.find((file) => file.id === attachmentId);
+    if (!record || !attachment) throw new AppError("not_found", "The attachment was not found.");
+    if (attachment.projectionIssue || (attachment.size ?? 0) > 10 * 1024 * 1024)
+      throw new AppError(
+        "invalid_request",
+        "This attachment is too large to download here. Open it in your mail provider.",
+      );
+    if (!gateway.downloadAttachment)
+      throw new AppError(
+        "service_unavailable",
+        "Attachment downloads are unavailable for this connection.",
+      );
+    signal?.throwIfAborted();
+    const bytes = await gateway.downloadAttachment(
+      userId,
+      record.accountId,
+      record.message.remoteMessageId,
+      attachment,
+      signal,
+    );
+    if (bytes.length > 10 * 1024 * 1024)
+      throw new AppError("invalid_request", "This attachment exceeds the 10 MB download limit.");
+    return {
+      filename: (attachment.filename || "attachment")
+        .replace(/[/\\\p{Cc}]/gu, "_")
+        .slice(0, 255)
+        .replace(/^\.+$/, "attachment"),
+      contentType: attachment.contentType,
+      data: Buffer.from(bytes).toString("base64"),
+      size: bytes.length,
+    };
+  }
+
   function previewFingerprint(
     preview: Omit<MailRulePreview, "fingerprint">,
     reviewedAt = preview.previewedAt,
@@ -476,7 +530,28 @@ export function createMailService({
         sql`${mailThreads.remoteMailboxIds} @> ${JSON.stringify([mailbox.remoteMailboxId])}::jsonb`,
       );
     }
-    if (query.mailboxRole) {
+    if (query.mailboxRole === "archive") {
+      // Gmail has no Archive label: it is mail outside Inbox, Trash, Spam and Drafts.
+      // IMAP accounts retain their provider's explicit Archive folder semantics.
+      conditions.push(sql`exists (
+        select 1 from ${calendarAccounts}
+        where ${calendarAccounts.id} = ${mailThreads.accountId}
+          and ${calendarAccounts.userId} = ${userId}
+          and ${calendarAccounts.mailEnabled} = true
+          and (
+            (${calendarAccounts.provider} = 'google'
+              and not (${mailThreads.remoteMailboxIds} ?| array['INBOX', 'TRASH', 'SPAM', 'DRAFT']))
+            or (${calendarAccounts.provider} = 'icloud' and exists (
+              select 1 from ${mailboxes}
+              where ${mailboxes.accountId} = ${mailThreads.accountId}
+                and ${mailboxes.userId} = ${userId}
+                and ${mailboxes.role} = 'archive'
+                and ${mailboxes.deletedAt} is null
+                and ${mailThreads.remoteMailboxIds} @> jsonb_build_array(${mailboxes.remoteMailboxId})
+            ))
+          )
+      )`);
+    } else if (query.mailboxRole) {
       conditions.push(sql`exists (
           select 1 from ${mailboxes}
           inner join ${calendarAccounts}
@@ -546,7 +621,18 @@ export function createMailService({
       await validateMailSourceIds(userId, sourceIds, transaction, true);
     },
 
-    async createDraft(userId: string, input: CreateMailDraftInput): Promise<MailDraft> {
+    async createDraft(
+      userId: string,
+      input: CreateMailDraftInput,
+      signal?: AbortSignal,
+    ): Promise<MailDraft> {
+      const attachments = await resolveDraftAttachments(
+        input.attachments,
+        [],
+        (messageId, attachmentId, deadline) =>
+          downloadAttachment(userId, messageId, attachmentId, deadline),
+        signal,
+      );
       const created = await db.transaction(async (transaction) => {
         const [account] = await transaction
           .select({ id: calendarAccounts.id })
@@ -586,7 +672,7 @@ export function createMailService({
           (
             await transaction
               .insert(mailDrafts)
-              .values({ ...input, threadId: input.threadId ?? null, userId })
+              .values({ ...input, attachments, threadId: input.threadId ?? null, userId })
               .returning()
           )[0],
           "The Mail draft could not be created.",
@@ -595,7 +681,12 @@ export function createMailService({
       return serializeMailDraft(created, now());
     },
 
-    async updateDraft(userId: string, id: string, input: UpdateMailDraftInput): Promise<MailDraft> {
+    async updateDraft(
+      userId: string,
+      id: string,
+      input: UpdateMailDraftInput,
+      signal?: AbortSignal,
+    ): Promise<MailDraft> {
       const [before] = await db
         .select()
         .from(mailDrafts)
@@ -645,10 +736,18 @@ export function createMailService({
           );
         }
       }
+      const attachments = await resolveDraftAttachments(
+        input.attachments,
+        before.attachments,
+        (messageId, attachmentId, deadline) =>
+          downloadAttachment(userId, messageId, attachmentId, deadline),
+        signal,
+      );
       const updatedAt = new Date(Math.max(now().getTime(), before.updatedAt.getTime() + 1));
       const [updated] = await db
         .update(mailDrafts)
         .set({
+          attachments,
           accountId: input.accountId,
           body: input.body,
           cc: input.cc,
@@ -676,6 +775,16 @@ export function createMailService({
       return serializeMailDraft(updated, now());
     },
 
+    async downloadDraftAttachment(userId: string, draftId: string, attachmentId: string) {
+      const [draft] = await db
+        .select({ attachments: mailDrafts.attachments })
+        .from(mailDrafts)
+        .where(and(eq(mailDrafts.id, draftId), eq(mailDrafts.userId, userId)))
+        .limit(1);
+      const attachment = draft?.attachments.find((file) => file.id === attachmentId);
+      if (!attachment) throw new AppError("not_found", "The attachment was not found.");
+      return attachment;
+    },
     async listDrafts(userId: string): Promise<MailDraft[]> {
       const listedAt = now();
       const drafts = await db
@@ -807,6 +916,7 @@ export function createMailService({
       });
       try {
         await gateway.send(userId, draft.accountId, {
+          ...(draft.attachments.length ? { attachments: draft.attachments } : {}),
           body: draft.body,
           cc: draft.cc,
           subject: draft.subject,
@@ -1819,54 +1929,7 @@ export function createMailService({
       return serializeMailThread(record, await mailboxMap(userId));
     },
 
-    async downloadAttachment(
-      userId: string,
-      messageId: string,
-      attachmentId: string,
-      signal?: AbortSignal,
-    ) {
-      signal?.throwIfAborted();
-      const [record] = await db
-        .select({ message: mailMessages, accountId: mailThreads.accountId })
-        .from(mailMessages)
-        .innerJoin(mailThreads, eq(mailMessages.threadId, mailThreads.id))
-        .where(
-          and(
-            eq(mailMessages.id, messageId),
-            eq(mailThreads.userId, userId),
-            isNull(mailThreads.deletedAt),
-          ),
-        )
-        .limit(1);
-      const attachment = record?.message.attachments.find((file) => file.id === attachmentId);
-      if (!record || !attachment) throw new AppError("not_found", "The attachment was not found.");
-      if (attachment.projectionIssue || (attachment.size ?? 0) > 10 * 1024 * 1024)
-        throw new AppError(
-          "invalid_request",
-          "This attachment is too large to download here. Open it in your mail provider.",
-        );
-      if (!gateway.downloadAttachment)
-        throw new AppError(
-          "service_unavailable",
-          "Attachment downloads are unavailable for this connection.",
-        );
-      signal?.throwIfAborted();
-      const bytes = await gateway.downloadAttachment(
-        userId,
-        record.accountId,
-        record.message.remoteMessageId,
-        attachment,
-        signal,
-      );
-      if (bytes.length > 10 * 1024 * 1024)
-        throw new AppError("invalid_request", "This attachment exceeds the 10 MB download limit.");
-      return {
-        filename: (attachment.filename || "attachment").replace(/[/\\\p{Cc}]/gu, "_"),
-        contentType: attachment.contentType,
-        data: Buffer.from(bytes).toString("base64"),
-        size: bytes.length,
-      };
-    },
+    downloadAttachment,
     async listMessages(userId: string, threadId: string): Promise<MailMessage[]> {
       const records = await db
         .select({ message: mailMessages })
@@ -1948,8 +2011,17 @@ export function createMailService({
       } as import("@personal-os/domain").MailNavigationCounts;
     },
 
-    async listThreads(userId: string, query: MailListQuery): Promise<MailThread[]> {
+    async listThreads(
+      userId: string,
+      query: MailListQuery,
+      cursor?: Pick<MailSummaryQuery, "beforeReceivedAt" | "beforeId">,
+    ): Promise<MailThread[]> {
       const conditions = await threadConditions(userId, query);
+      if (cursor?.beforeReceivedAt && cursor.beforeId) {
+        conditions.push(
+          sql`(${mailThreads.receivedAt}, ${mailThreads.id}) < (${new Date(cursor.beforeReceivedAt)}, ${cursor.beforeId})`,
+        );
+      }
       const records = await db
         .select()
         .from(mailThreads)
@@ -2188,6 +2260,7 @@ function serializeMailDraft(row: typeof mailDrafts.$inferSelect, listedAt: Date)
     row.sendClaimedAt.getTime() <= listedAt.getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS;
   return {
     accountId: row.accountId,
+    attachments: row.attachments.map(({ data: _data, ...metadata }) => metadata),
     body: row.body,
     cc: row.cc,
     createdAt: row.createdAt.toISOString(),

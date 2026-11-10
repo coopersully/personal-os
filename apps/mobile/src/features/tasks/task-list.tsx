@@ -2,9 +2,12 @@ import type { TaskWorkspaceItem, TaskWorkspaceQuery } from "@personal-os/domain"
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { FlatList, Modal, RefreshControl, Text, View } from "react-native";
+import { FlatList, Modal, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { FloatingAdd } from "../../components/floating-add";
+import { PageRefreshControl } from "../../components/page-refresh";
+import { SheetHeader } from "../../components/sheet-header";
+import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { entityDictionary } from "../../product/entities";
 import { spacing, useTheme } from "../../theme";
 import { ActiveFilters } from "./active-filters";
@@ -20,6 +23,7 @@ import {
   useTaskSearch,
 } from "./data";
 import { DateField } from "./date-field";
+import { listIcons, listTint } from "./list-presentation";
 import { OptionsMenu } from "./options-menu";
 import { TaskRow } from "./task-row";
 import {
@@ -48,8 +52,10 @@ export function TaskListScreen({
   initialFilters?: Partial<TaskWorkspaceQuery>;
 }) {
   const t = useTheme();
+  const headerInset = useWorkspaceHeaderInset();
   const api = useTaskApi();
   const resources = useTaskResources();
+  const selectedList = resources.lists.data?.find((row) => row.id === scope.listId);
   const { search, setSearch } = useTaskSearch();
   const [debounced, setDebounced] = useState(search);
   useEffect(() => {
@@ -156,19 +162,15 @@ export function TaskListScreen({
         keyExtractor={itemKey}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        contentInsetAdjustmentBehavior="automatic"
+        contentInsetAdjustmentBehavior={headerInset ? "never" : "automatic"}
+        scrollIndicatorInsets={{ top: headerInset }}
         contentContainerStyle={{
           paddingHorizontal: spacing.page,
-          paddingTop: spacing.page,
+          paddingTop: headerInset + spacing.page,
           paddingBottom: 100,
         }}
-        refreshControl={
-          <RefreshControl
-            refreshing={page.isRefetching}
-            onRefresh={() => void page.refetch()}
-            tintColor={t.ink}
-          />
-        }
+        alwaysBounceVertical
+        refreshControl={<PageRefreshControl scope={["tasks"]} offset={headerInset} />}
         ListHeaderComponent={
           <View>
             <View
@@ -182,11 +184,12 @@ export function TaskListScreen({
               <View style={{ flex: 1 }}>
                 <Heading
                   compact
+                  iconColor={selectedList ? listTint(selectedList.color, t.dark, t.ink) : undefined}
                   icon={
                     scope.projectId
                       ? entityDictionary.project.icon
                       : scope.listId
-                        ? entityDictionary.list.icon
+                        ? listIcons[selectedList?.icon ?? "list"]
                         : undefined
                   }
                 >
@@ -233,7 +236,9 @@ export function TaskListScreen({
             )}
             <View style={[styles.toolbar, { marginBottom: spacing.md }]}>
               <Text style={{ color: t.secondary, marginRight: "auto" }}>
-                {page.data ? `${page.data.pages[0].total} items` : ""}
+                {page.data
+                  ? `${page.data.pages[0].total} ${page.data.pages[0].total === 1 ? "item" : "items"}`
+                  : ""}
                 {` · ${menuChoices.find((choice) => choice.key === "sort")?.options.find((option) => option.value === query.sort)?.label ?? "Recommended"}`}
                 {query.group && query.group !== "none" ? ` · Grouped by ${query.group}` : ""}
               </Text>
@@ -358,15 +363,7 @@ export function TaskListScreen({
         onRequestClose={() => setShowFilters(false)}
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
-          <View style={[styles.settingRow, { justifyContent: "space-between" }]}>
-            <Text
-              accessibilityRole="header"
-              style={{ color: t.ink, fontSize: 22, fontWeight: "600" }}
-            >
-              Filters
-            </Text>
-            <Action label="Done" onPress={() => setShowFilters(false)} />
-          </View>
+          <SheetHeader title="Filters" label="Done" onClose={() => setShowFilters(false)} />
           <FormBody>
             <Section title="Match items">
               {menuChoices

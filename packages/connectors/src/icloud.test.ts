@@ -97,6 +97,7 @@ describe("iCloud connector", () => {
     await expect(
       value.sendMail(credentials, {
         body: "Prepared response",
+        attachments: [{ filename: "notes.txt", contentType: "text/plain", data: "dGVzdA==" }],
         cc: [{ address: "copy@example.com", name: null }],
         from: credentials.email,
         inReplyTo: "<prior@example.com>",
@@ -107,6 +108,9 @@ describe("iCloud connector", () => {
     ).resolves.toBeUndefined();
 
     expect(sendMail).toHaveBeenCalledWith({
+      attachments: [
+        { filename: "notes.txt", contentType: "text/plain", content: Buffer.from("test") },
+      ],
       cc: [{ address: "copy@example.com" }],
       from: credentials.email,
       inReplyTo: "<prior@example.com>",

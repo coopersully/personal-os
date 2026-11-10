@@ -3,11 +3,13 @@ import { workspacePages } from "../../navigation/workspace-pages";
 import { currencyForTotals, formatMoney, periodScope } from "./presentation";
 
 describe("mobile Finance presentation", () => {
-  it("never presents an unknown balance or currency as dollars or zero", () => {
+  it("keeps missing balances unavailable and defaults legacy currency to USD", () => {
     expect(formatMoney(null, "USD")).toBe("Unavailable");
-    expect(formatMoney(100, null)).toBe("Currency unknown");
+    expect(formatMoney(100, null)).toBe("$100.00");
     expect(formatMoney(100, "EUR")).toContain("100.00");
-    expect(formatMoney(0, "USD")).toContain("0.00");
+    expect(formatMoney(0, "USD")).toBe("$0.00");
+    expect(formatMoney(1234.56, "USD")).toBe("$1,234.56");
+    expect(formatMoney(-42, "USD")).toBe("-$42.00");
   });
   it("does not combine mixed or unknown currencies", () => {
     expect(currencyForTotals([])).toBeNull();
@@ -54,14 +56,14 @@ it("distinguishes expected money in and out without assuming unknown amounts", a
       remainingExpectedCents: 5000,
       currencyCode: "USD",
     }),
-  ).toMatch(/\+USD\s50\.00/);
+  ).toMatch(/\+\$50\.00/);
   expect(
     expectedAmount({
       source: { kind: "obligation" },
       remainingExpectedCents: 5000,
       currencyCode: "USD",
     }),
-  ).toMatch(/−USD\s50\.00/);
+  ).toMatch(/−\$50\.00/);
   expect(
     expectedAmount({
       source: { kind: "obligation" },
@@ -71,9 +73,9 @@ it("distinguishes expected money in and out without assuming unknown amounts", a
   ).toBe("Unavailable");
 });
 
-it("retains native record amounts without inventing a currency", async () => {
+it("formats legacy record amounts as USD and preserves explicit currency", async () => {
   const { recordAmount, formatLocalDate } = await import("./presentation");
-  expect(recordAmount(124, null)).toBe("124.00");
+  expect(recordAmount(124, null)).toBe("$124.00");
   expect(recordAmount(null, "USD")).toBe("Unavailable");
   expect(recordAmount(124, "EUR")).toMatch(/EUR\s124\.00/);
   expect(formatLocalDate("2026-01-01")).toBe("Jan 1");

@@ -13,7 +13,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { AppToaster } from "../../components/app-toaster";
-import { EditorClose } from "../../components/editor-close";
+import { editorDismissOptions } from "../../components/editor-header";
 import { Icon } from "../../components/icons";
 import { RowActions } from "../../components/row-actions";
 import { useTheme } from "../../theme";
@@ -22,6 +22,7 @@ import { actWithUndo, type ItemAction, useTaskAction, useTaskApi, useTaskResourc
 import { DateField } from "./date-field";
 import { FormSave } from "./form-save";
 import { useDraftField } from "./form-state";
+import { listOption } from "./list-presentation";
 import { loadTrashedRecord } from "./logic";
 import { RecordIdentity } from "./record-identity";
 import { SearchableChoice } from "./searchable-choice";
@@ -67,7 +68,7 @@ function TaskEditorRecord({ params }: { params: TaskEditorParams }) {
           options={{
             title: `${kind} details`,
             headerRight: () => null,
-            headerLeft: () => <EditorClose label="Close" onPress={() => router.back()} />,
+            ...editorDismissOptions({ label: "Close", onPress: () => router.back() }),
           }}
         />
         <State
@@ -309,75 +310,73 @@ function TaskEditor({
         options={{
           title: persisted ? `${kind} details` : `new ${kind}`,
           gestureEnabled: false,
-          headerLeft: () => (
-            <EditorClose
-              label={edited ? "Cancel" : "Close"}
-              disabled={action.pending}
-              onPress={() =>
-                edited
-                  ? confirm("Discard changes?", "Unsaved edits will be lost.", finish)
-                  : finish()
-              }
-            />
-          ),
-          headerRight: () => (
-            <View style={styles.toolbar}>
-              {persisted && (
-                <RowActions
-                  label="Record actions"
-                  placement="header"
-                  actions={
-                    deleted
-                      ? [
-                          {
-                            id: "restore",
-                            label: "Restore",
-                            icon: "history",
-                            disabled: action.pending || readOnly || conflict,
-                            onPress: () => transition("restore"),
-                          },
-                        ]
-                      : [
-                          {
-                            id: "complete",
-                            label: (task ? task.lifecycle !== "open" : !!persisted.completedAt)
-                              ? "Reopen"
-                              : "Complete",
-                            icon: "check",
-                            disabled: action.pending || readOnly || conflict,
-                            onPress: () =>
-                              transition(
-                                (task ? task.lifecycle !== "open" : !!persisted.completedAt)
-                                  ? "reopen"
-                                  : "complete",
-                              ),
-                          },
-                          ...(task?.lifecycle === "open"
-                            ? [
-                                {
-                                  id: "cancel",
-                                  destructive: true,
-                                  label: "Cancel task",
-                                  icon: "cancel" as const,
-                                  disabled: action.pending || readOnly || conflict,
-                                  onPress: () => transition("cancel"),
-                                },
-                              ]
-                            : []),
-                          {
-                            id: "trash",
-                            label: "Move to Trash",
-                            icon: "trash",
-                            destructive: true,
-                            disabled: action.pending || readOnly || conflict,
-                            onPress: () => transition("trash"),
-                          },
-                        ]
-                  }
-                />
-              )}
-            </View>
-          ),
+          ...editorDismissOptions({
+            label: edited ? "Cancel" : "Close",
+            disabled: action.pending,
+            onPress: () =>
+              edited
+                ? confirm("Discard changes?", "Unsaved edits will be lost.", finish)
+                : finish(),
+          }),
+          headerRight: () =>
+            persisted ? (
+              <View style={styles.toolbar}>
+                {persisted && (
+                  <RowActions
+                    label="Record actions"
+                    placement="header"
+                    actions={
+                      deleted
+                        ? [
+                            {
+                              id: "restore",
+                              label: "Restore",
+                              icon: "history",
+                              disabled: action.pending || readOnly || conflict,
+                              onPress: () => transition("restore"),
+                            },
+                          ]
+                        : [
+                            {
+                              id: "complete",
+                              label: (task ? task.lifecycle !== "open" : !!persisted.completedAt)
+                                ? "Reopen"
+                                : "Complete",
+                              icon: "check",
+                              disabled: action.pending || readOnly || conflict,
+                              onPress: () =>
+                                transition(
+                                  (task ? task.lifecycle !== "open" : !!persisted.completedAt)
+                                    ? "reopen"
+                                    : "complete",
+                                ),
+                            },
+                            ...(task?.lifecycle === "open"
+                              ? [
+                                  {
+                                    id: "cancel",
+                                    destructive: true,
+                                    label: "Cancel task",
+                                    icon: "cancel" as const,
+                                    disabled: action.pending || readOnly || conflict,
+                                    onPress: () => transition("cancel"),
+                                  },
+                                ]
+                              : []),
+                            {
+                              id: "trash",
+                              label: "Move to Trash",
+                              icon: "trash",
+                              destructive: true,
+                              disabled: action.pending || readOnly || conflict,
+                              onPress: () => transition("trash"),
+                            },
+                          ]
+                    }
+                  />
+                )}
+              </View>
+            ) : null,
         }}
       />
       <FormBody>
@@ -393,7 +392,7 @@ function TaskEditor({
         )}
         <View pointerEvents={writable && !action.pending && !uncertain ? "auto" : "none"}>
           <RecordIdentity
-            icon={<Icon name={kind === "task" ? "check" : "clock"} color={t.ink} size={28} />}
+            icon={<Icon name={kind === "task" ? "tasks" : "clock"} color={t.ink} size={28} />}
             title={title}
             onTitleChange={setTitle}
             description={notes}
@@ -438,7 +437,7 @@ function TaskEditor({
                 value={listId}
                 options={(resources.lists.data ?? [])
                   .filter((row) => !row.deletedAt && row.availability === "active")
-                  .map((row) => ({ value: row.id, label: row.name }))}
+                  .map(listOption)}
                 onChange={(value) => {
                   setListId(value);
                   setProjectId("");
@@ -485,9 +484,11 @@ function TaskEditor({
                 ]}
                 disabled={action.pending || uncertain}
                 onChange={(value) =>
-                  confirm("Change item type?", "The current draft will be discarded.", () =>
-                    router.replace({ pathname: "/task-editor", params: { kind: value } }),
-                  )
+                  edited
+                    ? confirm("Change item type?", "The current draft will be discarded.", () =>
+                        router.replace({ pathname: "/task-editor", params: { kind: value } }),
+                      )
+                    : router.replace({ pathname: "/task-editor", params: { kind: value } })
                 }
               />
             </Section>

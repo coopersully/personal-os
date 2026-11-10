@@ -10,15 +10,22 @@ export function AppToaster({ editor = false }: { editor?: boolean }) {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const inEditor =
+    pathname === "/mail-compose" ||
     pathname === "/task-editor" ||
     pathname === "/task-container" ||
-    pathname === "/finance-transaction-edit";
+    pathname === "/finance-transaction-edit" ||
+    pathname === "/finance-budget-edit";
   if (editor !== inEditor) return null;
   const background = t.dark ? "#fafafa" : "#202024";
   const foreground = t.dark ? "#202024" : "#fafafa";
   return (
     <Toaster
-      fullWindowOverlay={!editor || pathname === "/finance-transaction-edit"}
+      fullWindowOverlay={
+        !editor ||
+        pathname === "/mail-compose" ||
+        pathname === "/finance-transaction-edit" ||
+        pathname === "/finance-budget-edit"
+      }
       theme={t.dark ? "light" : "dark"}
       position="top-center"
       offset={insets.top + spacing.md}
@@ -30,7 +37,7 @@ export function AppToaster({ editor = false }: { editor?: boolean }) {
       autoWiggleOnUpdate="never"
       icons={{
         success: <Icon name="save" size={22} color={foreground} />,
-        error: <Icon name="cancel" size={22} color={t.dark ? "#ba2944" : "#ff8190"} />,
+        error: <Icon name="attention" size={22} color={t.dark ? "#ba2944" : "#ff8190"} />,
         warning: <Icon name="attention" size={22} color={foreground} />,
         info: <Icon name="attention" size={22} color={foreground} />,
       }}
@@ -50,11 +57,20 @@ export function AppToaster({ editor = false }: { editor?: boolean }) {
         descriptionStyle: { color: foreground, fontSize: 14 },
         actionButtonStyle: {
           minHeight: 44,
+          minWidth: 64,
+          alignItems: "center",
+          justifyContent: "center",
+          borderWidth: 0,
           paddingHorizontal: spacing.md,
           backgroundColor: foreground,
           borderRadius: radius.control,
         },
-        actionButtonTextStyle: { color: background, fontWeight: "600" },
+        actionButtonTextStyle: {
+          color: background,
+          fontWeight: "600",
+          alignSelf: "center",
+          textAlign: "center",
+        },
       }}
     />
   );

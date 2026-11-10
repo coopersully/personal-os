@@ -2,14 +2,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import BriefingHome from "../../app/(workspaces)/index";
 import Detail from "../../app/detail/[id]";
 import Monitoring from "../../app/monitoring";
 import Profile from "../../app/profile";
 import { WorkspacePage } from "../../components/workspace-page";
 import { PreviewProvider } from "./context";
+import BriefingHome from "./home";
 import { WorkspacePreview } from "./workspace";
 
+vi.mock("sonner-native", () => ({
+  toast: { info: vi.fn(), loading: vi.fn(), success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
+}));
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/package.json`)("react");
@@ -90,23 +93,9 @@ it("shows sample workspace items and leaves unimplemented financial data clearly
 
 const pages: Record<string, () => Promise<{ default: React.ComponentType }>> = {
   calendar: () => import("../../app/(workspaces)/calendar"),
-  "mail/index": () => import("../../app/(workspaces)/mail/index"),
-  "mail/mailboxes": () => import("../../app/(workspaces)/mail/mailboxes"),
-  "settings/agents": () => import("../../app/(workspaces)/settings/agents"),
-  "settings/(pages)/index": () => import("../../app/(workspaces)/settings/(pages)/index"),
-  "settings/(pages)/app": () => import("../../app/(workspaces)/settings/(pages)/app"),
-  "settings/(pages)/personal": () => import("../../app/(workspaces)/settings/(pages)/personal"),
-  "settings/(pages)/workspaces": () => import("../../app/(workspaces)/settings/(pages)/workspaces"),
 };
 it.each([
   ["calendar", "calendar"],
-  ["mail/index", "inbox"],
-  ["mail/mailboxes", "mailboxes"],
-  ["settings/agents", "agent settings"],
-  ["settings/(pages)/index", "account"],
-  ["settings/(pages)/app", "app"],
-  ["settings/(pages)/personal", "personal"],
-  ["settings/(pages)/workspaces", "workspaces"],
 ])("keeps the %s destination identified while domain content is deferred", async (path, title) => {
   const { default: Page } = await pages[path]();
   render(<Page />);

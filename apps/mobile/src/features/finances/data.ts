@@ -20,6 +20,7 @@ export function useFinanceRead<T>(
     queryKey,
     meta: { scopedReadFeedback: true },
     queryFn: () => read(api),
+    staleTime: 30_000,
     enabled: Boolean(owner) && enabled,
   });
   return { ...query, feedbackKey: JSON.stringify(queryKey) };
@@ -35,13 +36,13 @@ export function useSpending(period: "week" | "month") {
     },
     !!scope,
   );
-  return { ...query, scope };
+  return { ...query, scope, configurationMissing: !timezone };
 }
 
 export function useUpcoming() {
   const { timezone } = useFinance();
   const scope = timezone ? upcomingScope(timezone) : null;
-  return useFinanceRead(
+  const query = useFinanceRead(
     ["upcoming", scope],
     (api) => {
       if (!scope) throw new Error("Your account timezone is unavailable.");
@@ -49,21 +50,29 @@ export function useUpcoming() {
     },
     !!scope,
   );
+  return { ...query, configurationMissing: !timezone };
 }
 
 /** Native tabs remain mounted; revalidate their owner-scoped records on return. */
-export function useFinanceRefresh() {
+export function useFinanceRefresh(keys: readonly string[]) {
   const { owner } = useFinance();
   const client = useQueryClient();
   useFocusEffect(
     useCallback(() => {
       if (!owner) return;
-      const refresh = () => void client.invalidateQueries({ queryKey: ["finances", owner] });
+      const refresh = () => {
+        for (const key of keys)
+          void client.refetchQueries({
+            queryKey: ["finances", owner, key],
+            type: "active",
+            stale: true,
+          });
+      };
       refresh();
       const listener = AppState.addEventListener("change", (state) => {
         if (state === "active") refresh();
       });
       return () => listener.remove();
-    }, [client, owner]),
+    }, [client, owner, keys]),
   );
 }

@@ -15,6 +15,12 @@ import { WorkspaceAddButton } from "./workspace-add-button";
 import { WorkspaceDock } from "./workspace-dock";
 import { WorkspaceHeader } from "./workspace-header";
 
+vi.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+vi.mock("../features/briefing/sky-context", () => ({
+  TodaySkyProvider: ({ children }: PropsWithChildren) => <>{children}</>,
+  useTodaySky: () => ({ sky: { topColor: "#141f41", chromeDark: true } }),
+}));
+
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/package.json`)("react");
@@ -28,6 +34,7 @@ const h = vi.hoisted(() => ({
   platform: { OS: "web" },
   reduced: false,
   navigate: vi.fn(),
+  setParams: vi.fn(),
   push: vi.fn(),
   selection: vi.fn(),
   logout: vi.fn(),
@@ -41,8 +48,10 @@ const h = vi.hoisted(() => ({
   changeReduced: undefined as undefined | ((value: boolean) => void),
 }));
 vi.mock("expo-router", () => ({
-  router: { navigate: h.navigate, push: h.push },
+  router: { navigate: h.navigate, push: h.push, setParams: h.setParams },
   usePathname: () => h.path,
+  useLocalSearchParams: () => ({}),
+  useGlobalSearchParams: () => ({}),
   Stack: () => <div data-testid="page-stack" />,
 }));
 vi.mock("react-native-safe-area-context", () => ({
@@ -195,7 +204,7 @@ it("keeps search mounted while selecting a workspace and shows account/settings 
   expect(screen.queryByRole("button", { name: "Open mail" })).not.toBeInTheDocument();
   for (const [label, path] of [
     ["settings", "/settings"],
-    ["workspace settings", "/settings/workspaces"],
+    ["workspace settings", "/settings"],
     ["agent settings", "/settings/agents"],
   ]) {
     fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
@@ -204,17 +213,14 @@ it("keeps search mounted while selecting a workspace and shows account/settings 
     expect(h.navigate).toHaveBeenLastCalledWith(path);
   }
 });
-it("limits sample search by workspace and opens the matching detail", async () => {
+it("routes Mail search to live folder params and keeps sample search out of live workspaces", async () => {
   h.path = "/mail";
   const { rerender } = render(<Shell />);
   await act(async () => {});
-  fireEvent.change(screen.getByLabelText("Search mail sample data"), { target: { value: "Maya" } });
-  fireEvent.click(screen.getByRole("button", { name: "Maya needs a reply" }));
-  expect(h.push).toHaveBeenCalledWith("/detail/reply");
-  fireEvent.change(screen.getByLabelText("Search mail sample data"), {
-    target: { value: "dentist" },
-  });
-  expect(screen.getByText("No sample matches. Try another search.")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Search mail"), { target: { value: "Maya" } });
+  expect(h.setParams).toHaveBeenCalledWith({ mailSearch: "Maya" });
+  expect(screen.queryByRole("button", { name: "Maya needs a reply" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/sample results/)).not.toBeInTheDocument();
   h.path = "/tasks";
   rerender(<Shell />);
   fireEvent.change(screen.getByLabelText("Search tasks"), { target: { value: "groceries" } });
@@ -350,7 +356,9 @@ it("offers workspace-specific tabs and contextual capture while leaving previews
   expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
   h.path = "/mail";
   rerender(<Shell />);
-  expect(screen.getByRole("button", { name: "Compose mail" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Compose mail" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Compose mail" }));
+  expect(h.push).toHaveBeenLastCalledWith("/mail-compose");
   h.path = "/calendar";
   rerender(<Shell />);
   expect(screen.getByRole("button", { name: "Add event" })).toBeDisabled();
@@ -391,4 +399,16 @@ it("keeps shared search chrome around the page stack and uses the dock only on w
   );
   expect(screen.getByTestId("page-stack")).toBeVisible();
   expect(screen.queryByRole("tab", { name: "projects" })).not.toBeInTheDocument();
+});
+
+it("routes Finance account search to the real account list without sample results", () => {
+  h.path = "/finances/accounts";
+  render(
+    <WorkspaceMotion>
+      <WorkspaceHeader />
+    </WorkspaceMotion>,
+  );
+  fireEvent.change(screen.getByLabelText("Search accounts"), { target: { value: "Checking" } });
+  expect(h.setParams).toHaveBeenCalledWith({ accountSearch: "Checking" });
+  expect(screen.queryByText(/sample results/)).toBeNull();
 });

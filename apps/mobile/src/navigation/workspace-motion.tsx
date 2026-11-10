@@ -12,7 +12,8 @@ import { AccessibilityInfo, Animated, Easing, Platform } from "react-native";
 import { workspacePages } from "./workspace-pages";
 
 export const workspaceOrder = ["index", "tasks", "mail", "finances", "calendar"] as const;
-const ownerOf = (path: string) => path.split("/")[1] || "index";
+const ownerOf = (path: string) =>
+  path.startsWith("/finance-") ? "finances" : path.split("/")[1] || "index";
 const pageIndex = (path: string) =>
   workspacePages[ownerOf(path) as keyof typeof workspacePages]?.findIndex(
     (page) => page.name === (path.split("/")[2] || "index"),

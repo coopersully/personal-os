@@ -10,7 +10,7 @@ export type RowAction = {
   destructive?: boolean;
 };
 export type RowActionsProps = {
-  placement?: "card" | "header";
+  placement?: "card" | "header" | "toolbar";
   label: string;
   actions: readonly RowAction[];
 };
@@ -19,7 +19,7 @@ export function RowActionButton({
   placement,
 }: {
   action: RowAction;
-  placement?: "card" | "header";
+  placement?: "card" | "header" | "toolbar";
 }) {
   const t = useTheme();
   return (
@@ -33,24 +33,12 @@ export function RowActionButton({
         width: touchTarget,
         minHeight: touchTarget,
         alignSelf: "flex-start",
-        alignItems: placement === "header" ? "center" : "flex-end",
-        justifyContent: placement === "header" ? "center" : "flex-start",
+        alignItems: placement !== "card" && placement !== undefined ? "center" : "flex-end",
+        justifyContent: placement !== "card" && placement !== undefined ? "center" : "flex-start",
         opacity: action.disabled ? 0.4 : pressed ? 0.6 : 1,
       })}
     >
-      <Icon
-        name={action.icon}
-        size={20}
-        color={
-          action.destructive
-            ? placement === "header"
-              ? "#ba2944"
-              : t.destructive
-            : placement === "header"
-              ? "#202024"
-              : t.ink
-        }
-      />
+      <Icon name={action.icon} size={20} color={action.destructive ? t.destructive : t.ink} />
     </Pressable>
   );
 }

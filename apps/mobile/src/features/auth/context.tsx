@@ -43,3 +43,8 @@ export function useAuth() {
   if (!value) throw new Error("AuthProvider is missing.");
   return value;
 }
+
+/** Theme can render before authentication without creating a provider dependency. */
+export function useOptionalAuth() {
+  return useContext(Context);
+}

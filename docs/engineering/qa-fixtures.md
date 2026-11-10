@@ -234,3 +234,29 @@ The polished demo includes an evening reading/planning block, starting no earlie
 than 9 p.m. or 15 minutes after the fixture run, plus workshop, running and money
 check-in events in the coming week. These remain fictional local records with stable
 IDs and regenerate on reload; late-night runs may put the next block tomorrow.
+
+### Finance institution artwork
+
+Populated personas use fictional balances and transactions at named real institutions: Chase
+checking, Discover savings, Wells Fargo brokerage and an American Express credit card. Their
+masked numbers are fictional. Existing stable record IDs, account kinds and recovery states remain
+unchanged. These are offline provider-shaped projections with unusable credential placeholders and no
+scheduled sync; they never connect to the named institutions.
+
+Each account carries an offline PNG in `institutionBranding.logo`, the same response field used
+for provider-supplied institution artwork. This exercises API serialization and native/web image
+loading without relying on remote logo hosts. Full-color artwork is sourced from institution websites, with source URLs recorded in
+`apps/api/src/fixtures/institution-artwork/sources.json`. Native logos use a 44-point frame with
+aspect-ratio preservation and no tint. Regenerate it with:
+
+```bash
+node scripts/generate-fixture-institution-logos.mjs
+```
+
+### Finance conversation preview
+
+The full demo and loaded QA persona include six chronological user/assistant messages about the
+$78.25 uncategorized popup purchase. The conversation uses the normal Finance history endpoint
+and references the existing fixture transaction. It illustrates categorization and notes without
+claiming an applied edit, creating a merchant rule, or dispatching agent work. Empty and recovery
+personas retain their own states. Reload fixtures to restore this conversation and review item.

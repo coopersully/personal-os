@@ -212,6 +212,7 @@ export type UpdateRemoteMailThreadInput = {
 };
 
 export type SendRemoteMailInput = {
+  attachments?: { filename: string; contentType: string; data: string }[];
   body: string;
   cc: MailAddress[];
   from: string;

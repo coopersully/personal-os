@@ -105,7 +105,7 @@ export function TaskRow({
           {item.record.title}
         </Text>
         {metadata.length > 0 && (
-          <Text numberOfLines={1} style={{ color: t.secondary, fontSize: 12 }}>
+          <Text style={{ color: t.secondary, fontSize: 13, lineHeight: 19 }}>
             {metadata.map((part, index) => (
               <Text
                 key={part}

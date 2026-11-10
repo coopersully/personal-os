@@ -1,5 +1,18 @@
 # nohmi — Implementation Log
 
+## 2026-11-09 — Native Today briefing (local implementation)
+
+- Today now reads authenticated Tasks and Finance APIs instead of the sample briefing. It shows
+  up to three attention items, chronologically ordered upcoming work/payments, and confirmed applied
+  Finance agent actions. Task Auto ranking, owner-scoped queries, user-local dates, bounded previews,
+  refresh feedback, partial coverage and canonical detail links are preserved.
+- Shared record rows place descriptions below the entire heading/value line; Finance Activity,
+  What changed and other Finance rows reuse that structure. Task container descriptions likewise
+  use the width below their trailing actions. Settings rows retain centered label/value alignment.
+- Focused tests and mobile types passed; the iPhone simulator verified live local demo reads,
+  reminder and transaction navigation, refresh feedback, and Finance description wrapping. This
+  does not establish production/TestFlight acceptance or live Mail/Calendar/monitoring coverage.
+
 ## 2026-11-06 — Native Tasks source acceptance
 
 - [Native Tasks iPhone workflows](https://github.com/coopersully/personal-os/pull/367) merged with
@@ -1266,3 +1279,13 @@ Account/manual transaction/goal creation, budget proposal/approval interactions,
 conversation sending, automation/profile setup editing, imports and correction
 workflows, alternate spending visualizations, and preference parity remain tracked
 under the same issue. No live financial records were modified for acceptance.
+
+## 2026-11-09 — Native Today atmospheric sky candidate
+
+COO-32 — Deliver the native Today workspace and connection health now includes the selected
+Atmospheric wash hero. Desktop and mobile share solar/weather interpretation; mobile uses smooth
+pastel gradients and haze above the opaque rounded briefing drawer. Foreground location is opt-in,
+coarsened for weather requests, and never tracked in the background. Saved-location weather and an
+honest time-only sky cover denied permissions, unavailable fixes, stale observations and outages.
+See `docs/engineering/mobile-today-sky.md` for lifecycle, privacy and verification boundaries.
+This is a local candidate, not a production or TestFlight release.

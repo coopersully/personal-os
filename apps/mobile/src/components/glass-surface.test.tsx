@@ -5,6 +5,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { confirm } from "../features/tasks/ui";
 import { GlassSurface } from "./glass-surface";
 
+vi.mock("sonner-native", () => ({
+  toast: { info: vi.fn(), loading: vi.fn(), success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
+}));
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/package.json`)("react");

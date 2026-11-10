@@ -33,7 +33,7 @@ export function buildViewOptions(
       ? [
           {
             key: "view" as const,
-            label: "When",
+            label: "Date scope",
             value: query.view ?? "all",
             section: "filter" as const,
             options: [
@@ -78,7 +78,7 @@ export function buildViewOptions(
     },
     {
       key: "due",
-      label: "Due",
+      label: "Due date",
       value: query.due ?? "any",
       section: "filter",
       options: options(["any", "today", "overdue", "dated", "none"]),

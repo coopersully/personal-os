@@ -68,6 +68,8 @@ describe.sequential("mail service", () => {
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine")
+      // This suite needs an isolated database, not durable Docker-volume storage.
+      .withTmpFs({ "/var/lib/postgresql/data": "rw" })
       .withDatabase("personal_os")
       .withUsername("personal_os")
       .withPassword("personal_os")
@@ -538,6 +540,121 @@ describe.sequential("mail service", () => {
     });
   });
 
+  it("persists draft files privately, preserves omitted files, and sends confirmed bytes", async () => {
+    const attachment = {
+      id: "file-1",
+      filename: "notes.txt",
+      contentType: "text/plain",
+      size: 4,
+      data: "dGVzdA==",
+    };
+    const fields = {
+      accountId: enabledAccountId,
+      body: "File attached",
+      cc: [],
+      subject: "Attachment",
+      to: [{ address: "person@example.com", name: null }],
+    };
+    const created = await service.createDraft(userId, { ...fields, attachments: [attachment] });
+    expect(created.attachments).toEqual([
+      { id: "file-1", filename: "notes.txt", contentType: "text/plain", size: 4 },
+    ]);
+    expect(JSON.stringify(await service.listDrafts(userId))).not.toContain("dGVzdA==");
+    expect(await service.downloadDraftAttachment(userId, created.id, "file-1")).toMatchObject(
+      attachment,
+    );
+    await expect(
+      service.downloadDraftAttachment(disabledAccountId, created.id, "file-1"),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const updated = await service.updateDraft(userId, created.id, {
+      ...fields,
+      expectedUpdatedAt: created.updatedAt,
+    });
+    expect(updated.attachments).toEqual(created.attachments);
+    await expect(
+      service.sendDraft(
+        userId,
+        { draftId: created.id, confirmedUpdatedAt: created.updatedAt },
+        mutationContext("stale-files"),
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await service.sendDraft(
+      userId,
+      { draftId: updated.id, confirmedUpdatedAt: updated.updatedAt },
+      mutationContext("send-files"),
+    );
+    expect(gateway.send).toHaveBeenLastCalledWith(
+      userId,
+      enabledAccountId,
+      expect.objectContaining({ attachments: [attachment] }),
+    );
+  });
+
+  it("retains every forwarded file after the original message disappears and sends all bytes", async () => {
+    const originals = ["one", "two", "three"].map((value, index) => ({
+      id: `provider-file:${index}`,
+      filename: index < 2 ? "notes.txt" : "summary.csv",
+      contentType: index < 2 ? "text/plain" : "text/csv",
+      size: Buffer.byteLength(value),
+      data: Buffer.from(value).toString("base64"),
+    }));
+    const [message] = await database.db
+      .insert(mailMessages)
+      .values({
+        threadId,
+        remoteMessageId: "forward-all-files",
+        receivedAt: new Date(),
+        from: { address: "sender@example.com", name: null },
+        to: [],
+        cc: [],
+        bodyText: "Three files",
+        attachments: originals.map(({ data: _data, ...metadata }) => metadata),
+      })
+      .returning();
+    if (!message) throw new Error("Missing source message");
+    const fields = {
+      accountId: enabledAccountId,
+      body: "Forwarded message",
+      cc: [],
+      subject: "Fwd: Three files",
+      to: [{ address: "person@example.com", name: null }],
+      attachments: originals.map(({ data: _data, ...metadata }) => ({
+        ...metadata,
+        source: { messageId: message.id, attachmentId: metadata.id },
+      })),
+    };
+    gateway.downloadAttachment.mockImplementation(async (_user, _account, _message, attachment) => {
+      const file = originals.find((file) => file.id === attachment.id);
+      if (!file) throw new Error("Missing source file");
+      return Buffer.from(file.data, "base64");
+    });
+    try {
+      const draft = await service.createDraft(userId, fields);
+      expect(draft.attachments).toHaveLength(3);
+      expect(draft.threadId).toBeNull();
+      await database.db.delete(mailMessages).where(eq(mailMessages.id, message.id));
+      for (const file of originals)
+        expect(await service.downloadDraftAttachment(userId, draft.id, file.id)).toMatchObject(
+          file,
+        );
+      const reopened = (await service.listDrafts(userId)).find((item) => item.id === draft.id);
+      expect(reopened?.attachments).toEqual(draft.attachments);
+      await service.sendDraft(
+        userId,
+        { draftId: draft.id, confirmedUpdatedAt: draft.updatedAt },
+        mutationContext("forward-all-files"),
+      );
+      expect(gateway.send).toHaveBeenLastCalledWith(
+        userId,
+        enabledAccountId,
+        expect.objectContaining({ attachments: originals }),
+      );
+    } finally {
+      gateway.downloadAttachment.mockImplementation(async () => Buffer.from("test"));
+      await database.db.delete(mailMessages).where(eq(mailMessages.id, message.id));
+    }
+  });
+
   it("sends one exact saved draft revision and rejects stale or duplicate confirmation", async () => {
     gateway.send.mockClear();
     const created = await service.createDraft(userId, {
@@ -849,6 +966,70 @@ describe.sequential("mail service", () => {
 
     await database.db.delete(mailDrafts).where(eq(mailDrafts.id, rejected.id));
     await database.db.delete(mailDrafts).where(eq(mailDrafts.id, uncertain.id));
+  });
+
+  it("paginates Mail summaries without skipping equal timestamps or crossing owners", async () => {
+    const original = await service.getThread(userId, secondThreadId);
+    const firstDate = (await service.getThread(userId, threadId)).receivedAt;
+    await database.db
+      .update(mailThreads)
+      .set({ receivedAt: new Date(firstDate) })
+      .where(eq(mailThreads.id, secondThreadId));
+    try {
+      const all = await service.listThreads(userId, { limit: 50 });
+      const first = await service.listThreads(userId, { limit: 1 });
+      const anchor = first[0];
+      if (!anchor) throw new Error("Missing first page");
+      const page = await service.listThreads(
+        userId,
+        { limit: 1 },
+        { beforeReceivedAt: anchor.receivedAt, beforeId: anchor.id },
+      );
+      expect([...first, ...page].map((item) => item.id)).toEqual(all.map((item) => item.id));
+      expect(page).toHaveLength(1);
+      expect(
+        await service.listThreads("00000000-0000-4000-8000-000000000000", { limit: 50 }),
+      ).toEqual([]);
+    } finally {
+      await database.db
+        .update(mailThreads)
+        .set({ receivedAt: new Date(original.receivedAt) })
+        .where(eq(mailThreads.id, secondThreadId));
+    }
+  });
+
+  it("finds Gmail archived mail without an Archive label and excludes Trash, Spam and Drafts", async () => {
+    const [before] = await database.db
+      .select()
+      .from(mailThreads)
+      .where(eq(mailThreads.id, threadId));
+    if (!before) throw new Error("Missing Mail fixture");
+    try {
+      for (const [labels, visible] of [
+        [["INBOX"], false],
+        [["CUSTOM_LABEL"], true],
+        [["SENT"], true],
+        [["TRASH"], false],
+        [["SPAM"], false],
+        [["DRAFT"], false],
+      ] as const) {
+        await database.db
+          .update(mailThreads)
+          .set({ remoteMailboxIds: [...labels] })
+          .where(eq(mailThreads.id, threadId));
+        const result = await service.listThreads(userId, {
+          mailboxRole: "archive",
+          accountIds: [enabledAccountId],
+          limit: 100,
+        });
+        expect(result.some((thread) => thread.id === threadId)).toBe(visible);
+      }
+    } finally {
+      await database.db
+        .update(mailThreads)
+        .set({ remoteMailboxIds: before.remoteMailboxIds })
+        .where(eq(mailThreads.id, threadId));
+    }
   });
 
   it("filters conversations by account, unread state, mailbox, and search fields", async () => {

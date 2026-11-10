@@ -1302,6 +1302,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         delete: { security, responses: { 204: { description: "Editable Mail draft deleted" } } },
         patch: { security, responses: { 200: { description: "Mail draft updated" } } },
       },
+      "/v1/mail/drafts/{id}/attachments/{attachmentId}": {
+        get: {
+          security,
+          responses: { 200: { description: "Owned draft attachment content; never cached" } },
+        },
+      },
       "/v1/mail/drafts/{id}/reconcile": {
         post: {
           security,
@@ -1312,6 +1318,19 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: {
           security,
           responses: { 204: { description: "Exact confirmed draft submitted once" } },
+        },
+      },
+      "/v1/mail/thread-summaries": {
+        get: {
+          security,
+          description:
+            "Body-free inbox summaries. Uses Mail list filters with optional paired beforeReceivedAt and beforeId cursor fields; ordered by receivedAt and id descending. Requires mail:read. Responses are not cached.",
+          responses: {
+            200: {
+              description:
+                "Mail summaries without message bodies, recipient lists or remote provider identifiers",
+            },
+          },
         },
       },
       "/v1/mail/threads": {

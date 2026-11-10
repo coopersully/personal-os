@@ -1,4 +1,5 @@
 import { ApiClientError } from "@personal-os/api-client";
+import { RefreshClient } from "../../components/refresh-context";
 import { refreshDueAlerts } from "../notifications/events";
 import { allPages } from "./logic";
 
@@ -50,7 +51,9 @@ export function MobileDataProvider({ children }: PropsWithChildren) {
   useEffect(() => () => client.clear(), [client]);
   return (
     <QueryClientProvider client={client}>
-      <Search.Provider value={{ search, setSearch }}>{children}</Search.Provider>
+      <RefreshClient.Provider value={client}>
+        <Search.Provider value={{ search, setSearch }}>{children}</Search.Provider>
+      </RefreshClient.Provider>
     </QueryClientProvider>
   );
 }

@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { Icon, type IconName } from "../../components/icons";
+import { PageRefreshControl } from "../../components/page-refresh";
 import { radius, spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
 
 export function Action({
@@ -59,7 +60,8 @@ export function Heading({
   children,
   icon,
   compact = false,
-}: PropsWithChildren<{ icon?: IconName; compact?: boolean }>) {
+  iconColor,
+}: PropsWithChildren<{ icon?: IconName; compact?: boolean; iconColor?: string }>) {
   const t = useTheme();
   return (
     <View
@@ -72,7 +74,7 @@ export function Heading({
     >
       {icon && (
         <View style={{ paddingTop: 3 }}>
-          <Icon name={icon} size={28} color={t.ink} />
+          <Icon name={icon} size={28} color={iconColor ?? t.ink} />
         </View>
       )}
       <Text
@@ -169,6 +171,12 @@ export function SearchField(props: TextInputProps & { accessibilityLabel: string
       returnKeyType="search"
       autoCorrect={false}
       {...props}
+      placeholder={
+        props.placeholder
+          ? `${props.accessibilityLabel} · ${props.placeholder}`
+          : props.accessibilityLabel
+      }
+      clearButtonMode="while-editing"
       style={[
         {
           color: t.ink,
@@ -324,7 +332,7 @@ export function Field({
     </View>
   );
 }
-export type Option = { value: string; label: string };
+export type Option = { value: string; label: string; icon?: IconName; color?: string };
 export function Choice({
   label,
   value,
@@ -423,6 +431,8 @@ export function FormBody({ children }: PropsWithChildren) {
   const t = useTheme();
   return (
     <ScrollView
+      alwaysBounceVertical
+      refreshControl={<PageRefreshControl scope={["tasks"]} />}
       automaticallyAdjustKeyboardInsets
       keyboardDismissMode="interactive"
       keyboardShouldPersistTaps="handled"

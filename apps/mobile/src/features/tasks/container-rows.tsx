@@ -4,6 +4,7 @@ import { Icon, type IconName } from "../../components/icons";
 import { RowActions } from "../../components/row-actions";
 import { entityDictionary } from "../../product/entities";
 import { radius, spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
+import { listIcons, listTint } from "./list-presentation";
 import { Action, groupEdges, styles } from "./ui";
 
 type ContainerRowActions = {
@@ -19,6 +20,7 @@ function ContainerRow({
   name,
   subtitle,
   icon,
+  color,
   editable = true,
   permanent = false,
   ...actions
@@ -26,6 +28,7 @@ function ContainerRow({
   name: string;
   subtitle?: string;
   icon: IconName;
+  color?: string | null;
   editable?: boolean;
   permanent?: boolean;
 }) {
@@ -50,14 +53,15 @@ function ContainerRow({
           alignItems: "flex-start",
         }}
       >
-        <Icon name={icon} size={24} color={t.secondary} />
+        <Icon name={icon} size={24} color={listTint(color, t.dark, t.secondary)} />
         <View style={{ flex: 1, gap: spacing.xs }}>
           <View
             style={{
               flexDirection: "row",
               flexWrap: "wrap",
-              alignItems: "center",
+              alignItems: "flex-start",
               gap: spacing.sm,
+              paddingRight: touchTarget + spacing.sm,
             }}
           >
             <Text style={{ color: t.ink, fontSize: 17 }}>{name}</Text>
@@ -70,38 +74,42 @@ function ContainerRow({
           )}
         </View>
       </Pressable>
-      <RowActions
-        label={`Actions for ${name}`}
-        actions={[
-          {
-            id: "pin",
-            label: `${actions.pinned ? "Unpin" : "Pin"} ${name}`,
-            icon: "pin",
-            onPress: actions.onPin,
-            disabled: actions.disabled,
-          },
-          ...(editable
-            ? [
-                {
-                  id: "edit",
-                  label: `Edit ${name}`,
-                  icon: "settings" as const,
-                  onPress: actions.onEdit,
-                },
-              ]
-            : []),
-        ]}
-      />
+      <View style={{ position: "absolute", top: spacing.md, right: spacing.lg }}>
+        <RowActions
+          label={`Actions for ${name}`}
+          actions={[
+            {
+              id: "pin",
+              label: `${actions.pinned ? "Unpin" : "Pin"} ${name}`,
+              icon: "pin",
+              onPress: actions.onPin,
+              disabled: actions.disabled,
+            },
+            ...(editable
+              ? [
+                  {
+                    id: "edit",
+                    label: `Edit ${name}`,
+                    icon: "settings" as const,
+                    onPress: actions.onEdit,
+                  },
+                ]
+              : []),
+          ]}
+        />
+      </View>
     </View>
   );
 }
+
 export function ListRow({ record, ...actions }: ContainerRowActions & { record: TaskList }) {
   return (
     <ContainerRow
       {...actions}
       name={record.name}
       subtitle={record.description ?? undefined}
-      icon={entityDictionary.list.icon}
+      icon={listIcons[record.icon ?? "list"]}
+      color={record.color}
       editable={record.kind !== "inbox"}
       permanent={record.kind === "inbox"}
     />
@@ -116,7 +124,12 @@ export function ProjectRow({
     <ContainerRow
       {...actions}
       name={record.name}
-      subtitle={[listName, record.targetDate ? `Target ${record.targetDate}` : null]
+      subtitle={[
+        listName,
+        record.targetDate
+          ? `Target ${new Date(`${record.targetDate}T12:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" })}`
+          : null,
+      ]
         .filter(Boolean)
         .join(" · ")}
       icon={entityDictionary.project.icon}
@@ -179,8 +192,14 @@ export function PinnedContainers({
                 }}
               >
                 <Icon
-                  name={entityDictionary[kind].icon}
-                  color={workspaceColor(t, "tasks")}
+                  name={
+                    "icon" in item ? listIcons[item.icon ?? "list"] : entityDictionary[kind].icon
+                  }
+                  color={listTint(
+                    "color" in item ? item.color : null,
+                    t.dark,
+                    workspaceColor(t, "tasks"),
+                  )}
                   size={22}
                 />
                 <RowActions

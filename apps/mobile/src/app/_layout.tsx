@@ -62,6 +62,7 @@ function AuthenticatedLayout() {
         <Stack
           screenOptions={{
             headerTintColor: t.ink,
+            headerUserInterfaceStyle: t.dark ? "dark" : "light",
             headerStyle: { backgroundColor: t.canvas },
             contentStyle: { backgroundColor: t.canvas },
             headerShadowVisible: false,
@@ -73,6 +74,16 @@ function AuthenticatedLayout() {
           </Stack.Protected>
           <Stack.Protected guard={state.status === "signedIn"}>
             <Stack.Screen name="(workspaces)" options={{ headerShown: false, title: "today" }} />
+            <Stack.Screen name="settings" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="mail-compose"
+              options={{ title: "New message", presentation: "modal", gestureEnabled: false }}
+            />
+            <Stack.Screen name="finance-budget-category" options={{ title: "category budget" }} />
+            <Stack.Screen
+              name="finance-budget-edit"
+              options={{ title: "edit budget", presentation: "modal" }}
+            />
             <Stack.Screen name="finance-account" options={{ title: "account" }} />
             <Stack.Screen
               name="finance-transaction-edit"

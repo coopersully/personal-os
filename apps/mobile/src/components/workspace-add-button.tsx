@@ -1,5 +1,7 @@
 import { router, usePathname } from "expo-router";
 import { Platform, Pressable, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { supportsProminentCompose } from "../navigation/native-compose";
 import { useTheme, workspaceColor } from "../theme";
 import { GlassSurface } from "./glass-surface";
 import { Icon } from "./icons";
@@ -14,11 +16,19 @@ export function WorkspaceAddButton() {
         : "project"
       : null;
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  if (owner === "mail" && supportsProminentCompose(Platform.OS, Platform.Version)) return null;
   if (owner === "tasks" && page === "views") return null;
   if (owner !== "tasks" && owner !== "mail" && owner !== "calendar") return null;
   return (
     <GlassSurface
-      style={[styles.floating, Platform.OS === "ios" && owner !== "calendar" && { bottom: 96 }]}
+      style={[
+        styles.floating,
+        Platform.OS === "ios" &&
+          owner !== "calendar" && {
+            bottom: owner === "mail" ? Math.max(16, insets.bottom - 8) : 96,
+          },
+      ]}
     >
       <Pressable
         accessibilityRole="button"
@@ -36,15 +46,19 @@ export function WorkspaceAddButton() {
             ? `Create a ${container}`
             : owner === "tasks"
               ? "Create a task or reminder"
-              : "Layout preview; not available yet"
+              : owner === "mail"
+                ? "Write a message"
+                : "Layout preview; not available yet"
         }
-        accessibilityState={{ disabled: owner !== "tasks" }}
-        disabled={owner !== "tasks"}
+        accessibilityState={{ disabled: owner === "calendar" }}
+        disabled={owner === "calendar"}
         onPress={() =>
           router.push(
-            container
-              ? { pathname: "/task-container", params: { kind: container } }
-              : { pathname: "/task-editor", params: { kind: "task" } },
+            owner === "mail"
+              ? "/mail-compose"
+              : container
+                ? { pathname: "/task-container", params: { kind: container } }
+                : { pathname: "/task-editor", params: { kind: "task" } },
           )
         }
         style={styles.button}

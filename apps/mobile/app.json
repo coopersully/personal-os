@@ -29,7 +29,17 @@
       "expo-font",
       "expo-secure-store",
       "expo-asset",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow nohmi to use your location for local weather and the Today sky.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "locationFullAccuracyPermission": false,
+          "isIosBackgroundLocationEnabled": false
+        }
+      ]
     ],
     "scheme": "personal-os"
   }

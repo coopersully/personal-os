@@ -654,6 +654,11 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
           from: credentials.email,
           ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
           ...(input.references?.length ? { references: input.references } : {}),
+          attachments: input.attachments?.map((file) => ({
+            filename: file.filename,
+            contentType: file.contentType,
+            content: Buffer.from(file.data, "base64"),
+          })),
           subject: input.subject,
           text: input.body,
           to: input.to.map((address) => ({

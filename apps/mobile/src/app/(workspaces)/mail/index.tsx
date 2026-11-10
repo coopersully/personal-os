@@ -1,4 +1,2 @@
-import { WorkspacePage } from "../../../components/workspace-page";
-export default function Page() {
-  return <WorkspacePage title="inbox" />;
-}
+import { MailInbox } from "../../../features/mail/inbox";
+export default MailInbox;

@@ -10,6 +10,10 @@ import {
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { connectedAccountHealthSchema, connectorSyncStatusSchema } from "./connection.js";
 import type { AgentMutationPolicy } from "./feature-contracts.js";
+import {
+  mailDraftAttachmentSchema,
+  mailDraftAttachmentsInputSchema,
+} from "./mail-draft-attachments.js";
 
 export const MAIL_RULE_EXECUTION_LIMIT_PER_RUN = 6;
 
@@ -134,6 +138,14 @@ export const mailThreadSchema = z.object({
 });
 export type MailThread = z.infer<typeof mailThreadSchema>;
 
+/** Inbox reads never transport full bodies, recipients, or provider identifiers. */
+export const mailThreadSummarySchema = mailThreadSchema.omit({
+  bodyText: true,
+  to: true,
+  remoteThreadId: true,
+});
+export type MailThreadSummary = z.infer<typeof mailThreadSummarySchema>;
+
 export const mailAttachmentSchema = z.object({
   contentType: z.string(),
   filename: z.string(),
@@ -235,6 +247,15 @@ export const mailListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(100),
 });
 export type MailListQuery = z.infer<typeof mailListQuerySchema>;
+export const mailSummaryQuerySchema = mailListQuerySchema
+  .extend({
+    beforeReceivedAt: isoDateTimeSchema.optional(),
+    beforeId: idSchema.optional(),
+  })
+  .refine((value) => Boolean(value.beforeReceivedAt) === Boolean(value.beforeId), {
+    message: "Both cursor fields are required.",
+  });
+export type MailSummaryQuery = z.infer<typeof mailSummaryQuerySchema>;
 
 /** A provider-backed change to a conversation. Fields are intentionally optional
  * so a single keyboard/bulk action can update one or more attributes. */
@@ -297,6 +318,7 @@ export const bulkUpdateMailResultSchema = z.object({
 export type BulkUpdateMailResult = z.infer<typeof bulkUpdateMailResultSchema>;
 
 const mailDraftFields = {
+  attachments: mailDraftAttachmentsInputSchema.optional(),
   accountId: idSchema,
   body: z.string().max(100_000),
   cc: z.array(mailRecipientInputSchema).max(100).default([]),
@@ -325,6 +347,7 @@ export const reconcileMailDraftInputSchema = z.object({
 export type ReconcileMailDraftInput = z.infer<typeof reconcileMailDraftInputSchema>;
 
 export const mailDraftSchema = z.object(mailDraftFields).extend({
+  attachments: z.array(mailDraftAttachmentSchema).optional(),
   createdAt: isoDateTimeSchema,
   id: idSchema,
   reconciliationState: z.enum(["in_progress", "none", "sent_mail_review_required"]),

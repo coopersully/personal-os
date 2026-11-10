@@ -104,10 +104,13 @@ export function DateField({
         alignItems: "stretch",
       }}
     >
-      <Text style={{ color: overdue ? t.destructive : t.ink, fontSize: 17, flexGrow: 1 }}>
-        {label}
-        {overdue ? " · Overdue" : ""}
-      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <Text style={{ color: overdue ? t.destructive : t.ink, fontSize: 17, flex: 1 }}>
+          {label}
+          {overdue ? " · Overdue" : ""}
+        </Text>
+        <Action label="Done" onPress={() => setEditing(false)} />
+      </View>
       {due && (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs }}>
           {(
@@ -146,7 +149,7 @@ export function DateField({
                 : new Date(value)
           }
           timeZoneName={timezone}
-          accentColor={overdue ? t.destructive : workspaceColor(t, "tasks")}
+          accentColor={workspaceColor(t, "tasks")}
           mode="date"
           display="inline"
           onChange={(_event, date) => {
@@ -157,7 +160,7 @@ export function DateField({
           <DateTimePicker
             value={new Date(value ?? now)}
             timeZoneName={timezone}
-            accentColor={overdue ? t.destructive : workspaceColor(t, "tasks")}
+            accentColor={workspaceColor(t, "tasks")}
             mode="time"
             display="spinner"
             onChange={(_event, date) => {
@@ -172,7 +175,6 @@ export function DateField({
             setEditing(false);
           }}
         />
-        <Action label="Done" onPress={() => setEditing(false)} />
       </View>
     </View>
   );

@@ -61,6 +61,7 @@ import type {
   MaterialSourceReference,
   NotificationDeliveryState,
   NotificationPreferences,
+  StoredMailDraftAttachment,
   TaskContainerAvailability,
   TaskLifecycle,
   TaskListIcon,
@@ -1282,6 +1283,7 @@ export const mailDrafts = pgTable(
       .notNull()
       .references(() => calendarAccounts.id, { onDelete: "cascade" }),
     threadId: uuid("thread_id").references(() => mailThreads.id, { onDelete: "set null" }),
+    attachments: jsonb("attachments").$type<StoredMailDraftAttachment[]>().notNull().default([]),
     subject: text("subject").notNull().default(""),
     body: text("body").notNull().default(""),
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),

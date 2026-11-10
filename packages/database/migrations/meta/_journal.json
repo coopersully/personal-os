@@ -1002,6 +1002,13 @@
       "when": 1793907300000,
       "tag": "0135_texting_input_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1794278000000,
+      "tag": "0136_mail_draft_attachments",
+      "breakpoints": true
     }
   ]
 }

@@ -2,12 +2,12 @@ import type { TaskWorkspaceItem, TaskWorkspaceQuery } from "@personal-os/domain"
 /** Keep the scan line about urgency. Full notes, tags and estimates stay in details. */
 export function taskMetadata(item: TaskWorkspaceItem, timezone = "UTC") {
   return [
-    item.readOnly ? "Read-only" : null,
-    item.kind === "reminder" ? "Reminder" : null,
-    item.record.priority === "high" ? "High priority" : null,
     item.record.dueAt
       ? `Due ${new Date(item.record.dueAt).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: timezone })}`
       : null,
+    item.record.priority === "high" ? "High priority" : null,
+    item.kind === "reminder" ? "Reminder" : null,
+    item.readOnly ? "Read-only" : null,
   ].filter((value): value is string => !!value);
 }
 export function activeFilters(filters: Partial<TaskWorkspaceQuery>) {

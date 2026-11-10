@@ -15,7 +15,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { AppToaster } from "../../components/app-toaster";
-import { EditorClose } from "../../components/editor-close";
+import { editorDismissOptions } from "../../components/editor-header";
 import { Icon } from "../../components/icons";
 import { RowActions } from "../../components/row-actions";
 import { useTheme } from "../../theme";
@@ -24,6 +24,7 @@ import { DateField } from "./date-field";
 import { FormSave } from "./form-save";
 import { useDraftField } from "./form-state";
 import { ListAppearance } from "./list-appearance";
+import { listOption } from "./list-presentation";
 import { RecordIdentity } from "./record-identity";
 import { SearchableChoice } from "./searchable-choice";
 import { Action, confirm, Field, FormBody, Section, State, styles } from "./ui";
@@ -56,7 +57,7 @@ function ContainerEditorRecord({ params }: { params: { id?: string; kind?: strin
           options={{
             title: `${kind} details`,
             headerRight: () => null,
-            headerLeft: () => <EditorClose label="Close" onPress={() => router.back()} />,
+            ...editorDismissOptions({ label: "Close", onPress: () => router.back() }),
           }}
         />
         <State
@@ -205,77 +206,75 @@ function ContainerForm({
         options={{
           title: `${initial ? "edit" : "new"} ${kind}`,
           gestureEnabled: false,
-          headerLeft: () => (
-            <EditorClose
-              label={edited ? "Cancel" : "Close"}
-              disabled={action.pending}
-              onPress={() =>
-                edited
-                  ? confirm(
-                      "Discard draft?",
-                      "Unsaved changes will be lost.",
-                      () => router.back(),
-                      true,
-                    )
-                  : router.back()
-              }
-            />
-          ),
-          headerRight: () => (
-            <View style={styles.toolbar}>
-              {initial && available && (
-                <RowActions
-                  label="Record actions"
-                  placement="header"
-                  actions={[
-                    ...(project
-                      ? [
-                          {
-                            id: "complete",
-                            label: "Complete project",
-                            icon: "check" as const,
-                            disabled: action.pending || stale,
-                            onPress: () => lifecycle("complete"),
-                          },
-                          {
-                            id: "cancel",
-                            label: "Cancel project",
-                            icon: "cancel" as const,
-                            destructive: true,
-                            disabled: action.pending || stale,
-                            onPress: () =>
-                              confirm(
-                                "Cancel project?",
-                                "This changes the project lifecycle. The server will check its contents.",
-                                () => lifecycle("cancel"),
-                                true,
-                              ),
-                          },
-                        ]
-                      : []),
-                    ...(list?.kind !== "inbox"
-                      ? [
-                          {
-                            id: "archive",
-                            label: "Archive",
-                            icon: "archive" as const,
-                            destructive: true,
-                            disabled: action.pending || stale,
-                            onPress: () =>
-                              confirm(
-                                "Archive this container?",
-                                "Its contents may become read-only. You’ll choose how to handle active contents next.",
-                                () => lifecycle("archive"),
-                                true,
-                              ),
-                          },
-                        ]
-                      : []),
-                  ]}
-                />
-              )}
-            </View>
-          ),
+          ...editorDismissOptions({
+            label: edited ? "Cancel" : "Close",
+            disabled: action.pending,
+            onPress: () =>
+              edited
+                ? confirm(
+                    "Discard draft?",
+                    "Unsaved changes will be lost.",
+                    () => router.back(),
+                    true,
+                  )
+                : router.back(),
+          }),
+          headerRight: () =>
+            initial && available ? (
+              <View style={styles.toolbar}>
+                {initial && available && (
+                  <RowActions
+                    label="Record actions"
+                    placement="header"
+                    actions={[
+                      ...(project
+                        ? [
+                            {
+                              id: "complete",
+                              label: "Complete project",
+                              icon: "check" as const,
+                              disabled: action.pending || stale,
+                              onPress: () => lifecycle("complete"),
+                            },
+                            {
+                              id: "cancel",
+                              label: "Cancel project",
+                              icon: "cancel" as const,
+                              destructive: true,
+                              disabled: action.pending || stale,
+                              onPress: () =>
+                                confirm(
+                                  "Cancel project?",
+                                  "This changes the project lifecycle. The server will check its contents.",
+                                  () => lifecycle("cancel"),
+                                  true,
+                                ),
+                            },
+                          ]
+                        : []),
+                      ...(list?.kind !== "inbox"
+                        ? [
+                            {
+                              id: "archive",
+                              label: "Archive",
+                              icon: "archive" as const,
+                              destructive: true,
+                              disabled: action.pending || stale,
+                              onPress: () =>
+                                confirm(
+                                  "Archive this container?",
+                                  "Its contents may become read-only. You’ll choose how to handle active contents next.",
+                                  () => lifecycle("archive"),
+                                  true,
+                                ),
+                            },
+                          ]
+                        : []),
+                    ]}
+                  />
+                )}
+              </View>
+            ) : null,
         }}
       />
       <FormBody>
@@ -313,7 +312,7 @@ function ContainerForm({
                   entity="list"
                   label="List"
                   value={listId}
-                  options={active.map((row) => ({ value: row.id, label: row.name }))}
+                  options={active.map(listOption)}
                   onChange={setListId}
                 />
               )}
@@ -342,9 +341,7 @@ function ContainerForm({
                   entity="list"
                   label="Move to list"
                   value={destination}
-                  options={active
-                    .filter((row) => row.id !== project.listId)
-                    .map((row) => ({ value: row.id, label: row.name }))}
+                  options={active.filter((row) => row.id !== project.listId).map(listOption)}
                   onChange={setDestination}
                 />
                 <Action
@@ -403,9 +400,7 @@ function ContainerForm({
               entity="list"
               label="Destination list"
               value={destination}
-              options={active
-                .filter((row) => row.id !== initial?.id)
-                .map((row) => ({ value: row.id, label: row.name }))}
+              options={active.filter((row) => row.id !== initial?.id).map(listOption)}
               onChange={(value) => {
                 setDestination(value);
                 setDestinationProject("");

@@ -9,6 +9,9 @@ import Reminders from "../app/reminders";
 import TaskBrowser from "../app/task-browser";
 import TaskContainers from "../app/task-containers";
 
+vi.mock("sonner-native", () => ({
+  toast: { info: vi.fn(), loading: vi.fn(), success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
+}));
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
   return createRequire(`${process.cwd()}/package.json`)("react");

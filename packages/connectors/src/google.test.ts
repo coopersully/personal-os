@@ -328,6 +328,7 @@ describe("Google Calendar connector", () => {
         },
         {
           body: "Prepared response",
+          attachments: [{ filename: "notes.txt", contentType: "text/plain", data: "dGVzdA==" }],
           cc: [{ address: "copy@example.com", name: null }],
           from: "sender@example.com",
           inReplyTo: "<prior@example.com>",
@@ -349,6 +350,8 @@ describe("Google Calendar connector", () => {
     expect(body.threadId).toBe("thread-1");
     const raw = Buffer.from(body.raw, "base64url").toString();
     expect(raw).toContain("person@example.com");
+    expect(raw).toContain("filename=notes.txt");
+    expect(raw).toContain("dGVzdA==");
     expect(raw).toContain("In-Reply-To: <prior@example.com>");
     expect(raw).toContain("References: <root@example.com> <prior@example.com>");
   });

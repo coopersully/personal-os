@@ -6,6 +6,8 @@ import {
   createMailRuleInputSchema,
   mailListQuerySchema,
   mailSnoozeInputSchema,
+  mailSummaryQuerySchema,
+  mailThreadSummarySchema,
   previewMailRuleInputSchema,
   reconcileMailDraftInputSchema,
   sendMailDraftInputSchema,
@@ -15,8 +17,11 @@ import {
   upsertMailAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
+import type { z } from "zod";
+import { AppError } from "../errors.js";
 import type { createMailService } from "../mail-service.js";
 import { attachmentReadBudget } from "../read-budget.js";
+import { readBoundedRequestBody } from "../request-body.js";
 import type { AppEnv, Principal } from "../types.js";
 import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
 import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
@@ -49,6 +54,22 @@ export function registerMailRoutes({ app, db, mail, mutationContext }: MailRoute
   app.get("/v1/mail/setup-context", async (context) =>
     context.json({ setup: await mail.listSetupContext(context.get("principal").userId) }),
   );
+  app.get(
+    "/v1/mail/drafts/:id/attachments/:attachmentId",
+    requireScope("mail:read"),
+    async (context) => {
+      context.header("Cache-Control", "no-store");
+      return attachmentReadBudget(context.get("principal").userId, async () =>
+        context.json({
+          attachment: await mail.downloadDraftAttachment(
+            context.get("principal").userId,
+            context.req.param("id"),
+            context.req.param("attachmentId"),
+          ),
+        }),
+      );
+    },
+  );
   app.get("/v1/mail/drafts", async (context) =>
     context.json({ drafts: await mail.listDrafts(context.get("principal").userId) }),
   );
@@ -57,7 +78,8 @@ export function registerMailRoutes({ app, db, mail, mutationContext }: MailRoute
       {
         draft: await mail.createDraft(
           context.get("principal").userId,
-          await parseBody(context, createMailDraftInputSchema),
+          await parseDraftBody(context, createMailDraftInputSchema),
+          context.req.raw.signal,
         ),
       },
       201,
@@ -68,7 +90,8 @@ export function registerMailRoutes({ app, db, mail, mutationContext }: MailRoute
       draft: await mail.updateDraft(
         context.get("principal").userId,
         context.req.param("id"),
-        await parseBody(context, updateMailDraftInputSchema),
+        await parseDraftBody(context, updateMailDraftInputSchema),
+        context.req.raw.signal,
       ),
     }),
   );
@@ -158,6 +181,14 @@ export function registerMailRoutes({ app, db, mail, mutationContext }: MailRoute
       ),
     }),
   );
+  app.get("/v1/mail/thread-summaries", requireScope("mail:read"), async (context) => {
+    context.header("Cache-Control", "no-store");
+    const query = mailSummaryQuerySchema.parse(context.req.query());
+    const threads = await mail.listThreads(context.get("principal").userId, query, query);
+    return context.json({
+      threads: threads.map((thread) => mailThreadSummarySchema.parse(thread)),
+    });
+  });
   app.get("/v1/mail/threads", async (context) =>
     context.json({
       threads: await mail.listThreads(
@@ -222,4 +253,17 @@ export function registerMailRoutes({ app, db, mail, mutationContext }: MailRoute
       ),
     }),
   );
+}
+
+async function parseDraftBody<T>(context: Context, schema: z.ZodType<T>): Promise<T> {
+  const raw = await readBoundedRequestBody(context.req.raw, 15 * 1024 * 1024);
+  if (raw === null)
+    throw new AppError("invalid_request", "The draft exceeds the 15 MB request limit.");
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new AppError("invalid_request", "The request body must be valid JSON.");
+  }
+  return schema.parse(value);
 }

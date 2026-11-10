@@ -185,3 +185,71 @@ guidance favors contextual, predictably ordered selection and provides inline da
 styles. [Undo and redo](https://developer.apple.com/design/human-interface-guidelines/undo-and-redo)
 asks for predictable reversal and visible results. Our inline short-choice rows and Sonner actions
 are nohmi's application of those principles, not claims of native UIKit menu or undo-manager behavior.
+
+## Mail compose
+
+Mail uses a focused modal with compact From, To and Cc settings rows, followed by the visible
+subject/message content block. Account choices expand inline with a leading account icon and a
+trailing selection check. Use connected accounts for saving drafts even if sending needs reconnection;
+show that account value in yellow and disable Send until the API reports capability available.
+Keep example recipients reserved (sam@example.com), never personal defaults.
+
+Autosave valid draft edits quietly after a short pause and flush when backgrounding or explicitly
+saving/closing. Save uses the shared bottom-right checkmark; Send is the single top-right action
+and requires confirmation of From, To, Cc and subject against the saved revision. Close dismisses
+an untouched or fully autosaved form; unsaved changes show Cancel and a save-before-close prompt.
+This compose-specific autosave behavior is an exception to explicit-save record editor semantics.
+An incomplete/invalid recipient remains in the editor and blocks save/close until corrected.
+Failed saves retain text and report through Sonner; never claim offline durability. Drafts persist
+in the authenticated API, not unencrypted device storage or mail-body caches.
+
+Serialize saves and use returned revisions. Never automatically repeat a create or send after an
+uncertain response; preserve the local copy and direct the user to review Drafts/Sent. Only an
+explicitly retry-safe send failure plus recovered current draft authority permits another send.
+Attachments use compact filename/size rows with native preview and Save or share. Add files through the system picker; saved drafts retain their bytes, with a 10-file and 10 MB total limit. Rich text and Bcc remain separate capabilities.
+
+Reader messages expose Reply, Reply all and Forward in the top-right native actions menu. Route only
+source IDs and the action to the composer; refetch authenticated source material rather than placing
+message bodies or recipients in navigation URLs. Replies honor Reply-To, deduplicate addresses
+case-insensitively, exclude the sending account, preserve To/Cc roles for reply-all, and retain the
+original account and thread ID through every draft save. Lock the From row for threaded drafts.
+Forward keeps the original account selected, clears recipients, starts a new thread and quotes only
+the selected message and retain its attachments in the saved draft. Files can be removed before sending; failed copies must never silently omit files. The API owns provider thread IDs
+and reply/reference headers; the native client never fabricates those identifiers.
+
+### Compact form and reader presentation
+
+New-record headers must return no trailing view when there are no actions; an empty wrapper
+can render an unexplained native glass circle. Preferences use the same Close/Cancel and
+bottom-right Save contract as record forms. Put an expanded date editor's Done control beside
+its heading so it remains reachable without scrolling past both date and time pickers.
+
+Scoped search placeholders identify their operation before an example (for example,
+“Search transactions · coffee”). Searchable entity choices retain the entity's chosen icon;
+list color is an identity cue, adapted for readable foreground contrast without changing stored data.
+Keep primary text and metadata close together; preserve the 44-point target on the enclosing
+row rather than forcing an extra 44-point title line inside it. Allow meaningful due dates to wrap.
+
+Mail readers expose a visible Reply action in addition to the full reply/forward menu. In compose,
+keep original quoted mail collapsed and separate from the editable response, while retaining its
+exact text in the saved and sent body. Reserve a keyboard-safe action lane so the floating Save
+button cannot cover editable text. Empty mailbox drafts use a compact message below local drafts.
+
+### Native glass modal actions
+
+Use `editorDismissOptions` for stack-based form headers. On iOS it creates a native UIKit bar
+button: the system owns label width, horizontal padding, Dynamic Type, disabled appearance and
+Liquid Glass. Never fix Close/Cancel to a shared numeric width or force light colors in a dark
+header. Use `editorActionOptions` for a single trailing action such as Send; retain its accessible
+name, permission gate and existing confirmation. Do not wrap native bar items in another glass layer.
+
+Standalone sheets use `SheetHeader` and the intrinsic-size SwiftUI `EditorClose` glass button,
+with a 60-point minimum header row, 8-point vertical spacing and the page's 20-point side inset.
+Keep dismissal leading and record actions trailing. A text capsule fits its label; an icon-only
+control uses a 44-point target. Native glass controls fall back to ordinary system controls where
+Liquid Glass is unavailable. Use the current appearance rather than fixed black text.
+
+Glass belongs to navigation and floating controls. Message bodies, text inputs and grouped form
+rows remain readable content surfaces. Mail's composer uses a normal-size subject and an open
+writing area rather than a large task-style title card; draft safety and quoted-message retention
+remain unchanged. Native tab bars remain system-owned.

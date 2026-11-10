@@ -3,17 +3,19 @@ import type { FinanceTransaction } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, Text, TextInput, View } from "react-native";
+import { Alert, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { AppToaster } from "../../components/app-toaster";
+import { editorDismissOptions } from "../../components/editor-header";
 import { EntityPicker } from "../../components/forms/entity-picker";
 import { FormSave, useFormKeyboardOffset } from "../../components/forms/form-save";
 import { useTheme } from "../../theme";
+import { categoryIcon } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
 import { appliedTransaction } from "./mutations";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
 
-function TransactionForm({ record }: { record: FinanceTransaction }) {
+function TransactionForm({ record, field }: { record: FinanceTransaction; field?: string }) {
   const { api, owner } = useFinance();
   const client = useQueryClient();
   const t = useTheme();
@@ -23,7 +25,7 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
   const [notes, setNotes] = useState(record.notes ?? "");
   const [category, setCategory] = useState(record.category);
   const [edited, setEdited] = useState(false);
-  const [choosing, setChoosing] = useState(false);
+  const [choosing, setChoosing] = useState(field === "category");
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const lock = useRef(false);
@@ -107,18 +109,11 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
         options={{
           title: "edit transaction",
           gestureEnabled: false,
-          headerLeft: () => (
-            <Pressable
-              accessibilityRole="button"
-              disabled={pending}
-              onPress={close}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: t.ink, fontSize: 16 }}>
-                {edited && !submitted ? "Cancel" : "Close"}
-              </Text>
-            </Pressable>
-          ),
+          ...editorDismissOptions({
+            label: edited && !submitted ? "Cancel" : "Close",
+            disabled: pending,
+            onPress: close,
+          }),
         }}
       />
       <FinanceScreen title={record.merchant}>
@@ -126,8 +121,10 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
           <FinanceRow
             centered
             title="Category"
-            icon="grid"
+            icon={categoryIcon(category ?? "Uncategorized")}
             value={category ?? "Uncategorized"}
+            valueTone={!category ? "attention" : undefined}
+            accessibilityHint={!category ? "Needs your input. Choose a category." : undefined}
             onPress={pending || submitted ? undefined : () => setChoosing(!choosing)}
           />
           {choosing && (
@@ -137,9 +134,10 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
                 icon="grid"
                 value={category}
                 options={[
-                  { label: "Uncategorized", value: null },
+                  { label: "Uncategorized", value: null, icon: categoryIcon("Uncategorized") },
                   ...(categories.data ?? []).map((item) => ({
                     label: item.name,
+                    icon: categoryIcon(item.name),
                     value: item.name,
                   })),
                 ]}
@@ -157,6 +155,7 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
           <Card>
             <TextInput
               accessibilityLabel="Notes"
+              autoFocus={field === "notes"}
               editable={!pending && !submitted}
               multiline
               maxLength={4000}
@@ -187,12 +186,14 @@ function TransactionForm({ record }: { record: FinanceTransaction }) {
   );
 }
 export function FinanceTransactionEditor() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, field } = useLocalSearchParams<{ id: string; field?: string }>();
   const query = useFinanceRead(["transaction", id], (api) => api.getFinanceTransaction(id), !!id);
   return (
     <View style={{ flex: 1 }}>
       <ReadState query={query}>
-        {query.data?.data ? <TransactionForm key={id} record={query.data.data} /> : null}
+        {query.data?.data ? (
+          <TransactionForm key={id} record={query.data.data} field={field} />
+        ) : null}
       </ReadState>
       <AppToaster editor />
     </View>

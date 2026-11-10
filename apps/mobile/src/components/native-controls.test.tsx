@@ -14,6 +14,7 @@ import { buildViewOptions } from "../features/tasks/view-options";
 import { workspaces } from "../theme";
 import { AppToaster } from "./app-toaster";
 import { EditorClose } from "./editor-close.ios";
+import { editorActionOptions, editorDismissOptions } from "./editor-header";
 import { Icon } from "./icons";
 import { RowActions } from "./row-actions.ios";
 import { WorkspacePicker } from "./workspace-picker.ios";
@@ -36,11 +37,12 @@ const h = vi.hoisted(() => {
     toaster: {} as Record<string, unknown>,
     tabs: {} as Record<string, unknown>,
     change: vi.fn(),
+    push: vi.fn(),
   };
 });
 vi.mock("react-native", async () => ({
   ...(await import("../../test/native")),
-  Platform: { OS: "ios" },
+  Platform: { OS: "ios", Version: 27 },
   useColorScheme: () => (h.dark ? "dark" : "light"),
   Image: ({ source, style }: { source: string; style: { tintColor: string } }) => (
     <img alt="App icon" src={source} data-tint={style.tintColor} />
@@ -49,7 +51,7 @@ vi.mock("react-native", async () => ({
 vi.mock("../features/auth/context", () => ({
   useAuth: () => ({ state: { user: { planningTimezone: h.timezone } } }),
 }));
-vi.mock("expo-router", () => ({ usePathname: () => h.path }));
+vi.mock("expo-router", () => ({ usePathname: () => h.path, router: { push: h.push } }));
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 40, bottom: 20 }),
 }));
@@ -106,7 +108,7 @@ vi.mock("@expo/ui/swift-ui/modifiers", () => {
     (kind: string) =>
     (value?: unknown, ...rest: unknown[]) => ({ kind, value, rest });
   return Object.fromEntries([
-    ..."accessibilityLabel disabled font foregroundStyle frame pickerStyle tag accessibilityHidden animation glassEffect offset padding resizable"
+    ..."buttonStyle buttonBorderShape accessibilityLabel disabled font foregroundStyle frame pickerStyle tag accessibilityHidden animation glassEffect offset padding resizable"
       .split(" ")
       .map((name) => [name, modifier(name)]),
     ["Animation", { snappy: modifier("snappy") }],
@@ -194,8 +196,29 @@ vi.mock("expo-router/native-tabs", () => {
     <span data-testid="native-tab-icon" data-default={src.default} data-selected={src.selected} />
   );
   const Trigger = Object.assign(
-    ({ children, accessibilityLabel }: PropsWithChildren<{ accessibilityLabel: string }>) => (
-      <div role="tab" tabIndex={0} aria-label={accessibilityLabel}>
+    ({
+      children,
+      accessibilityLabel,
+      prominent,
+      disabled,
+      listeners,
+    }: PropsWithChildren<{
+      accessibilityLabel: string;
+      prominent?: boolean;
+      disabled?: boolean;
+      listeners?: { tabPress: () => void };
+    }>) => (
+      <div
+        role="tab"
+        tabIndex={0}
+        aria-label={accessibilityLabel}
+        aria-disabled={disabled}
+        data-prominent={prominent}
+        onClick={() => listeners?.tabPress()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") listeners?.tabPress();
+        }}
+      >
         {children}
       </div>
     ),
@@ -477,4 +500,45 @@ it("hosts stacked high-contrast feedback only on the active screen layer", () =>
   h.path = "/tasks";
   rerender(<AppToaster editor />);
   expect(screen.queryByTestId("toaster")).not.toBeInTheDocument();
+});
+
+it("keeps Compose on the real prominent native action surface", () => {
+  render(<WorkspaceTabs workspace="mail" />);
+  const compose = screen.getByRole("tab", { name: "Compose mail" });
+  expect(compose).toHaveAttribute("data-prominent", "true");
+  expect(compose).toHaveAttribute("aria-disabled", "true");
+  fireEvent.click(compose);
+  expect(h.push).toHaveBeenCalledWith({ pathname: "/mail-compose", params: { accountId: "" } });
+});
+
+it("delegates changing form labels and disabled behavior to intrinsic native bar items", () => {
+  const onPress = vi.fn();
+  for (const label of ["Close", "Cancel", "Close preview"]) {
+    const item = editorDismissOptions({
+      label,
+      onPress,
+      disabled: true,
+    }).unstable_headerLeftItems?.()[0];
+    expect(item).toMatchObject({ type: "button", label, disabled: true, onPress });
+    expect(item).not.toHaveProperty("width");
+    expect(item).not.toHaveProperty("tintColor");
+  }
+});
+it("keeps Send a native icon action with its authority gate and accessible name", () => {
+  const onPress = vi.fn();
+  const item = editorActionOptions({
+    id: "send",
+    label: "Review and send",
+    icon: "send",
+    disabled: true,
+    onPress,
+  }).unstable_headerRightItems?.()[0];
+  expect(item).toMatchObject({
+    type: "button",
+    accessibilityLabel: "Review and send",
+    disabled: true,
+    icon: { type: "image" },
+  });
+  item?.onPress();
+  expect(onPress).toHaveBeenCalledOnce();
 });

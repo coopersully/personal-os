@@ -5,11 +5,11 @@ export function formatMoney(
   currency: string | null | undefined,
 ): string {
   if (value == null || !Number.isFinite(value)) return "Unavailable";
-  if (!currency) return "Currency unknown";
-  return new Intl.NumberFormat(undefined, {
+  currency ||= "USD";
+  return new Intl.NumberFormat(currency === "USD" ? "en-US" : undefined, {
     style: "currency",
     currency,
-    currencyDisplay: "code",
+    currencyDisplay: currency === "USD" ? "symbol" : "code",
   }).format(value);
 }
 /** A legacy aggregate is displayable only when its source currencies agree. */
@@ -103,16 +103,36 @@ export function formatLocalDate(date: string) {
   });
 }
 
-/** Preserve a source amount even when its currency is missing; callers label that qualification. */
+/** Legacy records use the product's USD default; explicit source currencies remain authoritative. */
 export function recordAmount(
   value: number | null | undefined,
   currency: string | null | undefined,
 ) {
-  if (value == null || !Number.isFinite(value)) return "Unavailable";
-  return currency
-    ? formatMoney(value, currency)
-    : new Intl.NumberFormat(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value);
+  return formatMoney(value, currency);
+}
+
+/** Human-readable fallback for server enum vocabulary; preserve ordinary descriptions. */
+export function financeLabel(value: string) {
+  const labels: Record<string, string> = {
+    registration_missing: "Set up a Finance assistant to send messages.",
+    registration_paused: "Your Finance assistant is paused.",
+    connection_disconnected: "Reconnect your Finance assistant to send messages.",
+    needs_reauth: "Reconnect needed",
+    pending_review: "Awaiting review",
+    needs_input: "Needs your input",
+    current: "Up to date",
+    stale: "Update needed",
+    retrying: "Updating",
+    blocked: "Needs attention",
+    applied: "Completed",
+    failed: "Not completed",
+    manual: "Manual",
+    plaid: "Connected bank",
+    partially_matched: "Partially paid",
+    matched: "Paid",
+    expected: "Expected",
+  };
+  return (
+    labels[value] ?? value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase())
+  );
 }

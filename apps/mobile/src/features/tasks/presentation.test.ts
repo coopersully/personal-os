@@ -23,7 +23,7 @@ describe("task presentation", () => {
         readOnly: true,
         record: { ...item.record, priority: "high" },
       } as TaskWorkspaceItem),
-    ).toEqual(["Read-only", "High priority"]);
+    ).toEqual(["High priority", "Read-only"]);
   });
   it("does not hide reminder identity", () => {
     expect(

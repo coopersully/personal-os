@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-nativ
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { radius, spacing, useTheme } from "../../theme";
 import { Icon, type IconName } from "../icons";
+import { SheetHeader } from "../sheet-header";
 
 /** Large entity choices use a searchable sheet with leading identities and trailing selection. */
 export function EntityPicker({
@@ -16,7 +17,7 @@ export function EntityPicker({
   title: string;
   icon: IconName;
   value: string | null;
-  options: { label: string; value: string | null }[];
+  options: { label: string; value: string | null; icon?: IconName }[];
   onChange: (value: string | null) => void;
   onClose: () => void;
 }) {
@@ -37,22 +38,7 @@ export function EntityPicker({
           paddingBottom: Math.max(insets.bottom, 20),
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Text
-            accessibilityRole="header"
-            style={{ flex: 1, color: t.ink, fontSize: 24, fontWeight: "600" }}
-          >
-            {title}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close picker"
-            onPress={onClose}
-            style={{ minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" }}
-          >
-            <Icon name="cancel" color={t.ink} />
-          </Pressable>
-        </View>
+        <SheetHeader title={title} onClose={onClose} inset={false} />
         <TextInput
           accessibilityLabel={`Search ${title.toLowerCase()}`}
           value={search}
@@ -92,7 +78,7 @@ export function EntityPicker({
                 paddingVertical: 12,
               }}
             >
-              <Icon name={icon} color={t.secondary} />
+              <Icon name={option.icon ?? icon} color={t.secondary} />
               <Text style={{ flex: 1, color: t.ink, fontSize: 17 }}>{option.label}</Text>
               {value === option.value && <Icon name="save" color={t.ink} />}
             </Pressable>

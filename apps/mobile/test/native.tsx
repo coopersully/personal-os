@@ -14,7 +14,8 @@ export const StyleSheet = {
   absoluteFillObject: {},
 };
 export const useColorScheme = () => "light";
-export const useWindowDimensions = () => ({ width: 390, height: 844 });
+export const useWindowDimensions = () => ({ width: 390, height: 844, fontScale: 1, scale: 3 });
+export const Keyboard = { addListener: () => ({ remove: () => {} }) };
 export const View = ({ children, testID }: Props) => <div data-testid={testID}>{children}</div>;
 export const Text = ({ children, accessibilityRole }: Props) =>
   accessibilityRole === "header" ? <h2>{children}</h2> : <span>{children}</span>;

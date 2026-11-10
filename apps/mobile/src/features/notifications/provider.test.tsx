@@ -46,6 +46,7 @@ vi.mock("react-native", async () => ({
 }));
 vi.mock("../../components/icons", () => ({ Icon: () => null }));
 vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({ state: h.state, session: { api: () => ({ listTaskWorkspace: h.list }) } }),
 }));
 vi.mock("expo-router", () => ({ router: { push: h.push } }));

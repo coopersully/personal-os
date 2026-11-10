@@ -14,7 +14,9 @@ import {
   View,
 } from "react-native";
 import { Icon, type IconName } from "../../components/icons";
-import { radius, spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
+import { useSettingsAccent, useSettingsAccentColor } from "../../components/settings-accent";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
+import { radius, spacing, touchTarget, useTheme } from "../../theme";
 
 export function Action({
   label,
@@ -28,6 +30,7 @@ export function Action({
   destructive?: boolean;
 }) {
   const t = useTheme();
+  const accent = useSettingsAccent();
   return (
     <Pressable
       accessibilityRole="button"
@@ -47,7 +50,7 @@ export function Action({
         style={{
           fontSize: 16,
           fontWeight: "600",
-          color: destructive ? t.destructive : workspaceColor(t, "tasks"),
+          color: destructive ? t.destructive : accent,
         }}
       >
         {label}
@@ -156,7 +159,7 @@ export function NavigationRow({
       style={({ pressed }) => [styles.row, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}
     >
       <Icon name={icon} color={t.secondary} size={22} />
-      <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
+      <SettingLabel>{label}</SettingLabel>
       <Icon name="chevron" color={t.secondary} size={16} />
     </Pressable>
   );
@@ -187,25 +190,30 @@ export function SearchField(props: TextInputProps & { accessibilityLabel: string
 }
 export function ToggleRow({
   label,
+  icon,
   value,
   onChange,
   disabled,
 }: {
   label: string;
+  icon?: IconName;
   value: boolean;
   onChange: (value: boolean) => void;
   disabled?: boolean;
 }) {
   const t = useTheme();
+  const fallbackAccent = useSettingsAccent();
+  const accent = useSettingsAccentColor(fallbackAccent, t.secondary);
   return (
     <View style={styles.settingRow}>
-      <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
+      {icon && <Icon name={icon} size={22} color={t.secondary} />}
+      <SettingLabel>{label}</SettingLabel>
       <Switch
         accessibilityLabel={label}
         value={value}
         onValueChange={onChange}
         disabled={disabled}
-        trackColor={{ true: workspaceColor(t, "tasks") }}
+        trackColor={{ true: accent }}
       />
     </View>
   );
@@ -249,19 +257,36 @@ export function TitleField({ label, ...props }: TextInputProps & { label: string
 }
 export function Field({
   label,
+  icon,
   compact = true,
   ...props
-}: TextInputProps & { label: string; compact?: boolean }) {
+}: TextInputProps & { label: string; compact?: boolean; icon?: IconName }) {
   const [editing, setEditing] = useState(false);
+  const [inlineEditing, setInlineEditing] = useState(false);
   const t = useTheme();
-  if (compact && !props.multiline)
+  const expandedValue =
+    !props.secureTextEntry &&
+    (!!props.multiline ||
+      props.keyboardType === "email-address" ||
+      props.autoComplete === "email" ||
+      (props.value?.length ?? 0) > 24);
+  if (compact && !editing && (!expandedValue || inlineEditing))
     return (
       <View style={styles.settingRow}>
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
+        {icon && <Icon name={icon} size={22} color={t.secondary} />}
+        <SettingLabel>{label}</SettingLabel>
         <TextInput
           {...props}
           accessibilityLabel={label}
           placeholderTextColor={t.secondary}
+          onFocus={(event) => {
+            setInlineEditing(true);
+            props.onFocus?.(event);
+          }}
+          onBlur={(event) => {
+            setInlineEditing(false);
+            props.onBlur?.(event);
+          }}
           style={{
             color: t.ink,
             fontSize: 17,
@@ -281,26 +306,25 @@ export function Field({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${label}, ${props.value || "Not set"}`}
+        disabled={props.editable === false}
+        accessibilityState={{ disabled: props.editable === false }}
         onPress={() => setEditing(true)}
         style={styles.settingRow}
       >
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-        <Text
-          numberOfLines={1}
-          style={{
-            color: props.value ? t.ink : t.secondary,
-            fontSize: 17,
-            maxWidth: "55%",
-            textAlign: "right",
-          }}
-        >
+        {icon && <Icon name={icon} size={22} color={t.secondary} />}
+        <SettingLabel>{label}</SettingLabel>
+        <SettingValue style={{ color: props.value ? t.ink : t.secondary }}>
           {props.value || props.placeholder || "Not set"}
-        </Text>
+        </SettingValue>
       </Pressable>
     );
   return (
     <View style={{ padding: spacing.lg, gap: spacing.sm }}>
-      <Text style={{ fontSize: 13, color: t.secondary }}>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+        {icon && <Icon name={icon} size={22} color={t.secondary} />}
+        <SettingLabel>{label}</SettingLabel>
+        {compact && <Action label="Done" onPress={() => setEditing(false)} />}
+      </View>
       <TextInput
         accessibilityLabel={label}
         placeholderTextColor={t.secondary}
@@ -324,77 +348,8 @@ export function Field({
     </View>
   );
 }
-export type Option = { value: string; label: string };
-export function Choice({
-  label,
-  value,
-  options,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  options: readonly Option[];
-  onChange: (value: string) => void;
-  disabled?: boolean;
-}) {
-  const t = useTheme();
-  const [expanded, setExpanded] = useState(false);
-  const choose = () => setExpanded(!expanded);
-  return (
-    <View>
-      <Pressable
-        disabled={disabled}
-        accessibilityRole="button"
-        accessibilityState={{
-          disabled: !!disabled,
-          expanded,
-        }}
-        accessibilityLabel={`${label}, ${options.find((option) => option.value === value)?.label ?? "None"}`}
-        onPress={choose}
-        style={{
-          minHeight: 56,
-          alignItems: "center",
-          opacity: disabled ? 0.4 : 1,
-          padding: spacing.lg,
-          flexDirection: "row",
-          justifyContent: "space-between",
-          gap: spacing.md,
-        }}
-      >
-        <Text style={{ color: t.ink, fontSize: 17, flexShrink: 1 }}>{label}</Text>
-        <Text
-          numberOfLines={1}
-          style={{
-            color: workspaceColor(t, "tasks"),
-            fontSize: 17,
-            flexShrink: 1,
-            textAlign: "right",
-            maxWidth: "55%",
-          }}
-        >
-          {options.find((option) => option.value === value)?.label ?? "None"}
-        </Text>
-      </Pressable>
-      {expanded &&
-        options.map((option) => (
-          <Pressable
-            key={option.value}
-            accessibilityRole="radio"
-            accessibilityState={{ checked: option.value === value }}
-            onPress={() => {
-              onChange(option.value);
-              setExpanded(false);
-            }}
-            style={styles.settingRow}
-          >
-            <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{option.label}</Text>
-            {option.value === value && <Icon name="save" color={workspaceColor(t, "tasks")} />}
-          </Pressable>
-        ))}
-    </View>
-  );
-}
+export type Option = { value: string; label: string; icon?: IconName; color?: string };
+export { EnumChoice as Choice } from "../../components/forms/enum-choice";
 export function State({
   loading,
   retry,

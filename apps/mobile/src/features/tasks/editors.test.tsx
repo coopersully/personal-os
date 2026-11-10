@@ -61,6 +61,8 @@ const h = vi.hoisted(() => ({
 vi.mock("react-native", () => {
   const Box = ({ children }: PropsWithChildren) => <div>{children}</div>;
   return {
+    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1, scale: 3 }),
+    Keyboard: { addListener: () => ({ remove: () => {} }) },
     View: Box,
     Text: Box,
     ScrollView: Box,
@@ -181,6 +183,7 @@ vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-icon={name} />,
 }));
 vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({ state: { user: { planningTimezone: h.timezone } } }),
 }));
 vi.mock("sonner-native", () => ({
@@ -1036,6 +1039,32 @@ it.each([
   await waitFor(() =>
     expect(screen.getByLabelText("Title")).toHaveValue(
       kind === "task" ? "Updated task" : "Updated list",
+    ),
+  );
+});
+
+it("closes an unavailable existing container without inventing an editable record", () => {
+  h.params = { kind: "list", id: garden.id };
+  h.isError = true;
+  render(<ContainerEditorScreen />);
+  expect(screen.queryByLabelText("Title")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(h.back).toHaveBeenCalledOnce();
+  expect(h.api.updateTaskList).not.toHaveBeenCalled();
+});
+it("retains a reviewed list appearance in the draft and submits its identity only on Save", async () => {
+  h.params = { kind: "list" };
+  render(<ContainerEditorScreen />);
+  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Home improvements" } });
+  fireEvent.click(screen.getByRole("button", { name: "Edit list icon and color" }));
+  fireEvent.click(screen.getByRole("button", { name: "home icon" }));
+  fireEvent.click(screen.getByRole("button", { name: "#22c55e" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(h.api.createTaskList).not.toHaveBeenCalled();
+  fireEvent.click(save());
+  await waitFor(() =>
+    expect(h.api.createTaskList).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Home improvements", icon: "home", color: "#22c55e" }),
     ),
   );
 });

@@ -9,16 +9,21 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Icon } from "../../components/icons";
+import { Icon, type IconName } from "../../components/icons";
+import { useSettingsAccent } from "../../components/settings-accent";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
+import { SheetHeader } from "../../components/sheet-header";
 import { type EntityKind, entityDictionary } from "../../product/entities";
-import { spacing, useTheme, workspaceColor } from "../../theme";
+import { spacing, useTheme } from "../../theme";
+import { listTint } from "./list-presentation";
 import { matchingOptions } from "./presentation";
-import { Action, type Option, SearchField, State, styles } from "./ui";
+import { type Option, SearchField, State, styles } from "./ui";
 
 /** Shared searchable container selection. Cancel preserves the current value. */
 export function SearchableChoice({
   label,
   entity,
+  icon,
   value,
   options,
   onChange,
@@ -26,12 +31,15 @@ export function SearchableChoice({
 }: {
   label: string;
   entity?: EntityKind;
+  icon?: IconName;
   value: string;
   options: readonly Option[];
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
   const t = useTheme();
+  const accent = useSettingsAccent();
+  const leadingIcon = entity ? entityDictionary[entity].icon : icon;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const close = () => {
@@ -51,14 +59,11 @@ export function SearchableChoice({
           { alignItems: "center", opacity: disabled ? 0.4 : pressed ? 0.6 : 1 },
         ]}
       >
-        {entity && <Icon name={entityDictionary[entity].icon} size={22} color={t.secondary} />}
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-        <Text
-          numberOfLines={1}
-          style={{ color: workspaceColor(t, "tasks"), fontSize: 17, maxWidth: "55%" }}
-        >
+        {leadingIcon && <Icon name={leadingIcon} size={22} color={t.secondary} />}
+        <SettingLabel>{label}</SettingLabel>
+        <SettingValue style={{ color: accent }}>
           {options.find((option) => option.value === value)?.label ?? "None"}
-        </Text>
+        </SettingValue>
         <Icon name="chevron" size={16} color={t.secondary} />
       </Pressable>
       <Modal
@@ -72,15 +77,7 @@ export function SearchableChoice({
             style={{ flex: 1 }}
             behavior={Platform.OS === "ios" ? "padding" : undefined}
           >
-            <View style={[styles.settingRow, { justifyContent: "space-between" }]}>
-              <Text
-                accessibilityRole="header"
-                style={{ color: t.ink, fontSize: 20, fontWeight: "600", flex: 1 }}
-              >
-                {label}
-              </Text>
-              <Action label="Cancel" onPress={close} />
-            </View>
+            <SheetHeader title={label} label="Cancel" onClose={close} />
             <View style={{ paddingHorizontal: spacing.page }}>
               <SearchField
                 accessibilityLabel={`Search ${label.toLowerCase()}`}
@@ -107,12 +104,14 @@ export function SearchableChoice({
                   style={({ pressed }) => [styles.settingRow, { opacity: pressed ? 0.6 : 1 }]}
                 >
                   {entity && item.label !== "None" && (
-                    <Icon name={entityDictionary[entity].icon} color={t.secondary} size={22} />
+                    <Icon
+                      name={item.icon ?? entityDictionary[entity].icon}
+                      color={listTint(item.color, t.dark, t.secondary)}
+                      size={22}
+                    />
                   )}
                   <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{item.label}</Text>
-                  {item.value === value && (
-                    <Icon name="save" size={22} color={workspaceColor(t, "tasks")} />
-                  )}
+                  {item.value === value && <Icon name="save" size={22} color={accent} />}
                 </Pressable>
               )}
             />

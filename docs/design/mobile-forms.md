@@ -11,7 +11,9 @@ API contracts and existing ownership/revision rules continue to determine mutati
 A settings row reads as **entity icon (when meaningful) → label → current value → accessory**.
 Center all four vertically within the row. Give the label and value bounded, flexible width;
 long values truncate in the trigger and remain available in the picker. Labels may wrap without
-clipping, and larger accessibility type must grow the row. Use explicit accessible names containing
+clipping, and larger accessibility type must grow the row. At larger text sizes, shared navigation
+and read-only detail rows stack the label above the full-width value so neither becomes a narrow
+word column; retain the semantic icon, accessory and complete accessible name. Use explicit accessible names containing
 both the label and current value. Preserve disabled and selected states.
 
 Content cards are a different pattern: their identity icons, task checkboxes and trailing record
@@ -23,7 +25,7 @@ therefore be top-aligned on a project card and vertically centered in a Project 
 - `TitleField` owns the prominent, growing record name/title input.
 - `Field` owns a persistent label and its text input. Stacked labels and multiline notes are one
   field block, not a key/value row; multiline text starts at the top of its input.
-- `Choice` owns short finite choices. `SearchableChoice` owns entity association selection with
+- `Choice` owns finite single-selection choices using native popup menus on iOS. `SearchableChoice` owns entity association selection with
   the canonical entity icon, search, selection, cancellation, and a no-results state.
 - `ToggleRow` owns label/switch presentation. `DateField` owns the native date/time control.
 - `Section`/`Group` own rounded surfaces and inset seams. `FormBody` owns scroll and keyboard insets.
@@ -151,14 +153,23 @@ Reset view returns to the destination's scope and saved defaults. Saving sort/gr
 a distinct explicit action with Sonner feedback and existing revision safeguards.
 
 
-## Inline selection and dates
+## Selection menus and dates
 
-Short finite choices such as Priority expand below the setting row, with labels start-aligned
-and one plain selected check at the trailing edge. Selection collapses the options. Keep selected
-state accessible; do not prefix labels with check characters or center the options. Native
-sort/group menus remain appropriate for toolbar configuration. Searchable entity sheets remain
-appropriate for long collections: use the dictionary icon in the trigger and before each entity
-option, with selection at the trailing edge. An explicit None option is not an entity.
+Finite single-selection settings such as Priority, Mail conversation layout and list density use
+one compact label/value row that opens Apple's native popup menu on iOS. Compose the shared
+`EnumChoice` (also exported as `Choice`); SwiftUI Menu and Picker own Liquid Glass, placement,
+dismissal and adaptive selection marks. Do not expand enum options below the row or recreate the
+system popup with a custom glass sheet. Selection updates the visible value through the existing
+draft/autosave callback; do not change a screen's persistence or confirmation semantics.
+
+Vertically center the semantic field icon, leading label, trailing current value and accessory.
+Use neutral value foreground across workspaces and explicit field metadata for semantic icons;
+entity identities still come from the dictionary. Option labels start-align. Native iOS menus use
+the platform’s leading selection mark; non-iOS selection dialogs keep checks trailing. Preserve
+disabled states and accessible label/current-value names. Non-iOS uses an accessible bounded
+selection dialog. Page/view navigation retains its navigation controls;
+multiselect, date/time and long searchable entity associations retain their appropriate editors.
+This popup contract supersedes the earlier inline-enum expansion guidance.
 
 Use the shared DateField for due dates, reserved time, project targets and date filters. On iPhone,
 expand an Apple native inline calendar and, for timestamps, a native time wheel below the row;
@@ -183,5 +194,98 @@ not an exception to the goal of reversible actions.
 References: Apple's [Pickers](https://developer.apple.com/design/human-interface-guidelines/pickers)
 guidance favors contextual, predictably ordered selection and provides inline date and time
 styles. [Undo and redo](https://developer.apple.com/design/human-interface-guidelines/undo-and-redo)
-asks for predictable reversal and visible results. Our inline short-choice rows and Sonner actions
+asks for predictable reversal and visible results. Our native popup choices and Sonner actions
 are nohmi's application of those principles, not claims of native UIKit menu or undo-manager behavior.
+
+## Native Settings contracts
+
+Settings uses the account utility navigation tree in [mobile frontend standards](mobile-frontend.md#settings-navigation-target).
+Keep root search non-mutating: matching a preference opens its existing destination; it never saves,
+creates or grants access. Profile, Security & Access, Connections, Activity Log, Goals & Motives,
+Rituals, workspace configuration, Agents and app settings remain separate native-stack children.
+
+Independent preference writes use partial updates and the revision the person reviewed. Serialize
+writes shared by sibling editors; a rejection or uncertain result blocks further writes until an
+explicit reload/review. Keep the attempted value visible. Do not adopt a remote revision and replay
+an unreviewed draft. Dependent Profile, guidance, personal-record, ritual and financial-profile
+forms use explicit Save. Preserve their immutable editing baseline and untouched server fields.
+The existing Tasks preferences editor also retains one reviewed draft and explicit Save for its
+capture, sorting, grouping, row-detail and search controls. This native editor choice does not change
+the independent autosave contract of the other workspace preference rows.
+Close becomes Cancel after edits; confirm discard and block dismissal during pending writes.
+All dismissal paths, including system modal dismissal, use the same guard. Confirmation and a
+separate Save reconcile text-policy conflicts; an already-committed result must not produce a
+duplicate write. Current implementation gaps belong in the parity matrix rather than being
+reclassified as platform exceptions.
+
+Use searchable native sheets for timezone/place choices, the complete bundled timezone catalog
+filtered through available DateTimeFormat support, and native time/date controls. Keep the one
+account planning timezone; record editors do not create their own. A selected home place retains
+its coordinates and adopts its returned timezone. Credentials use secure inputs and remain only
+in their pending form; never persist an app-specific password, phone verification code or one-time
+agent token in a receipt. Failed writes retain safe drafts; accepted or discarded credential forms
+clear their secrets.
+
+Provider setup is an explicit browser handoff when no registered native return exists. Browser
+launch is not provider authorization; refresh authoritative connection state on return. Activity
+states its latest-100 contract and filters only that loaded history; detail omits private before/after
+payloads. iPhone due-alert permission/scheduling and server text-message policy are distinct
+capabilities. Sonner owns every discrete action and error, including explicit refresh commands.
+Routine native pull-to-refresh uses the native spinner, silent success and one Sonner error;
+it shows no loading or success toast. Successful background autosaves stay silent.
+Configuration state and correction controls are allowed inline,
+not action-result messages. Device acceptance never proves a visible banner, provider grant,
+SMS delivery or background execution.
+
+### Settings hierarchy and color ownership
+
+General Settings uses a neutral ink accent. A workspace's Settings subtree uses that workspace's
+accent, including child editors and guidance; Tasks color must not leak through reused controls.
+Root workspace destinations have framed identity icons tinted with their own workspace color.
+Labels stay leading and values trailing in compact centered rows. Long email addresses, timezone
+names and identifiers must remain inspectable through wrapping or the focused editor; missing
+artwork reserves its normal icon slot with a semantic fallback, never replacing the label.
+
+Peer views such as Goals, Completed and Motives use a compact horizontal view switcher rather
+than a vertical list of form choices. Activity separates compact filters from readable event rows;
+metadata and identifiers are disclosed on demand. Connections leads with account identity,
+services and actual status, then discloses sync details and consequential account actions.
+
+Connected-account rows use provider-supplied profile photos with initials when missing or failed.
+Account details open a native child page; they never expand inside the account list. Every Mail
+or Calendar service label in connection permissions and status includes its workspace icon.
+
+
+### Focused Settings detail pages
+
+Use the shared action, read-only detail and identity rows for Settings content. A discrete action's
+icon and label share one touch target; destructive actions are red, named and separated from
+ordinary settings. Provider connection rows render canonical brand artwork, retaining Google's
+required colors, rather than approximating logos. Provider photos use a safe initials fallback.
+Choose a provider before selecting that connection's Mail/Calendar permissions; choosing services
+never grants access before the existing authorization flow completes.
+
+Security lists readable device summaries and opens technical metadata/revocation on a native
+child page. Mark a session current only when the authenticated server response says `isCurrent`
+is true; user-agent, IP and missing metadata cannot establish identity. Invitations have separate
+list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Execution
+policy pages; setup material, token scopes and one-time secrets do not become a root-page wall.
+All existing human authority, role checks, scope confirmations and secret-clearing guards remain.
+
+Notifications leads with device controls and links to separate Global and Finances text-policy
+editors. Each dependent editor has a floating Save outside its scroll body and retains explicit
+revision review/recovery. Deployment-unavailable Texting hides futile setup inputs but keeps actual
+masked connection/consent state, legal material, refresh and named disconnect available. A code
+already requested can still arrive; cancelling local setup never claims to recall it.
+
+Workspace preferences group search, behavior and shared web/desktop presentation. Name choices
+that affect other devices rather than suggesting that they change the iPhone layout. Tasks opens
+its reviewed preferences editor directly, keeping guidance and device-notification links reachable.
+Mail rules and Calendar sources use compact record rows and native child detail pages. Accepted
+writes update the correct owner's cache; older reads cannot silently replace accepted state.
+
+Personal editors use the shared fields, switches, action rows and native date/time controls.
+Day multiselect opens a bounded native sheet with Done, not inline expanding settings rows.
+API date/time/day values retain their existing formats. While Save is pending, disable every draft
+input and reject queued native callbacks using the same synchronous save lock. Failed saves retain
+the submitted draft; later input must not disappear when an earlier request closes the editor.

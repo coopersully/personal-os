@@ -172,6 +172,7 @@ export type Session = {
   createdAt: string;
   expiresAt: string;
   id: string;
+  isCurrent?: boolean;
   ipAddress: string | null;
   lastSeenAt: string;
   userAgent: string | null;

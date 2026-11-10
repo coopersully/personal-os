@@ -16,7 +16,7 @@ export function WorkspaceDock() {
   const owner = path.split("/")[1] as keyof typeof workspacePages;
   const pages = workspacePages[owner];
   const page = path.split("/")[2] || "index";
-  const selected = owner === "settings" && page === "agents" ? "app" : page;
+  const selected = page;
   const motion = useWorkspaceMotion();
   const row = useRef<ComponentRef<typeof View>>(null);
   const bounds = useRef({ x: 0, y: 0, width: 0, height: 0 });

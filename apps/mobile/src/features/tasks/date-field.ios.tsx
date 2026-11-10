@@ -2,7 +2,8 @@ import DateTimePicker from "@expo/ui/community/datetime-picker";
 import { localDateAt, localDateTimeToUtc } from "@personal-os/domain";
 import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
+import { useSettingsAccent } from "../../components/settings-accent";
+import { spacing, touchTarget, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import type { DateFieldProps } from "./date-field";
 import { isPastDue, relativeDueDate } from "./due-date";
@@ -15,6 +16,7 @@ export function DateField({
   due = false,
 }: DateFieldProps) {
   const t = useTheme();
+  const accent = useSettingsAccent();
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
@@ -93,7 +95,7 @@ export function DateField({
         })}
       >
         <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-        <Text style={{ color: workspaceColor(t, "tasks"), fontSize: 17 }}>Not set</Text>
+        <Text style={{ color: accent, fontSize: 17 }}>Not set</Text>
       </Pressable>
     );
   return (
@@ -146,7 +148,7 @@ export function DateField({
                 : new Date(value)
           }
           timeZoneName={timezone}
-          accentColor={overdue ? t.destructive : workspaceColor(t, "tasks")}
+          accentColor={overdue ? t.destructive : accent}
           mode="date"
           display="inline"
           onChange={(_event, date) => {
@@ -157,7 +159,7 @@ export function DateField({
           <DateTimePicker
             value={new Date(value ?? now)}
             timeZoneName={timezone}
-            accentColor={overdue ? t.destructive : workspaceColor(t, "tasks")}
+            accentColor={overdue ? t.destructive : accent}
             mode="time"
             display="spinner"
             onChange={(_event, date) => {

@@ -11,11 +11,12 @@
     },
     "ios": {
       "bundleIdentifier": "app.personal-os.mobile",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "appleTeamId": "7J7HDVDCKQ",
       "supportsTablet": false,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIViewControllerBasedStatusBarAppearance": true
       }
     },
     "web": {

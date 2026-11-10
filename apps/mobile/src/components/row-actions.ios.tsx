@@ -43,7 +43,7 @@ export function RowActions({ label, actions, placement }: RowActionsProps) {
           <Text
             modifiers={[
               font({ size: 26, weight: "semibold" }),
-              foregroundStyle(placement === "header" ? "#202024" : t.ink),
+              foregroundStyle(t.ink),
               frame({
                 width: touchTarget,
                 height: touchTarget,

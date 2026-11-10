@@ -43,7 +43,7 @@ import type { EmailMessage } from "./email-delivery.js";
 import { GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
 import { createRuntimeLifecycle, type RuntimeLifecycle } from "./runtime-lifecycle.js";
-import { encryptJson, verifyPassword } from "./security.js";
+import { encryptJson, hashToken, verifyPassword } from "./security.js";
 
 const invalidLowercasePassword = ["alllowercase", "123", "!"].join("");
 
@@ -6509,6 +6509,71 @@ describe.sequential("ilo API", () => {
     ).toBe("updated@example.com");
     const sessions = (await payload(await request("/v1/sessions"))).sessions;
     expect(sessions).toHaveLength(2);
+    const currentSession = sessions.find((session: { isCurrent: boolean }) => session.isCurrent);
+    expect(currentSession).toMatchObject({ isCurrent: true, userAgent: "Integration Browser" });
+    expect(sessions.filter((session: { isCurrent: boolean }) => !session.isCurrent)).toHaveLength(
+      1,
+    );
+    const originalSession = sessions.find((session: { isCurrent: boolean }) => !session.isCurrent);
+    const cookieSessions = (
+      await payload(
+        await request("/v1/sessions", {
+          auth: "none",
+          headers: { cookie: String(sessionCookie) },
+        }),
+      )
+    ).sessions;
+    expect(cookieSessions.filter((session: { isCurrent: boolean }) => session.isCurrent)).toEqual([
+      currentSession,
+    ]);
+    const originalCookie = `${appConfig.sessionCookieName}=${registrationBody.sessionToken}`;
+    const originalCookieSessions = (
+      await payload(
+        await request("/v1/sessions", {
+          auth: "none",
+          headers: { cookie: originalCookie },
+        }),
+      )
+    ).sessions;
+    expect(
+      originalCookieSessions.find((session: { id: string }) => session.id === originalSession.id),
+    ).toMatchObject({ isCurrent: true });
+    expect(
+      originalCookieSessions.find((session: { id: string }) => session.id === currentSession.id),
+    ).toMatchObject({ isCurrent: false });
+    const headerWithOtherCookie = (
+      await payload(
+        await request("/v1/sessions", {
+          headers: { cookie: originalCookie },
+        }),
+      )
+    ).sessions;
+    expect(
+      headerWithOtherCookie.find((session: { id: string }) => session.id === currentSession.id),
+    ).toMatchObject({ isCurrent: true });
+    for (const listed of [
+      sessions,
+      cookieSessions,
+      originalCookieSessions,
+      headerWithOtherCookie,
+    ]) {
+      for (const summary of listed)
+        expect(Object.keys(summary).sort()).toEqual([
+          "createdAt",
+          "expiresAt",
+          "id",
+          "ipAddress",
+          "isCurrent",
+          "lastSeenAt",
+          "userAgent",
+        ]);
+      const serialized = JSON.stringify(listed);
+      for (const token of [sessionToken, registrationBody.sessionToken]) {
+        expect(serialized).not.toContain(token);
+        expect(serialized).not.toContain(hashToken(token));
+      }
+    }
+    expect((await request("/v1/sessions", { auth: "none" })).status).toBe(401);
     expect(
       sessions.some(
         (session: { ipAddress: string | null }) => session.ipAddress === "203.0.113.10",
@@ -6546,6 +6611,7 @@ describe.sequential("ilo API", () => {
     );
     agentToken = createdToken.token.token;
     expect(agentToken).toMatch(/^pos_/);
+    expect((await request("/v1/sessions", { auth: "agent" })).status).toBe(403);
     expect(
       (
         await request(`/v1/finances/accounts/${paypalAccount.id}/disconnect`, {

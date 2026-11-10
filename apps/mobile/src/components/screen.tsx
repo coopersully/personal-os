@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { regionMotion, useWorkspaceMotion } from "../navigation/workspace-motion";
 import { useTheme } from "../theme";
+import { PageRefreshControl } from "./page-refresh";
 import { useWorkspaceHeaderInset } from "./workspace-header-inset";
 
 export function Screen({
@@ -20,6 +21,7 @@ export function Screen({
   backgroundColor,
   bounces = true,
   onScroll,
+  onRefresh,
 }: PropsWithChildren<{
   chrome?: boolean;
   scroll?: boolean;
@@ -27,6 +29,7 @@ export function Screen({
   backgroundColor?: string;
   bounces?: boolean;
   onScroll?: ScrollViewProps["onScroll"];
+  onRefresh?: () => Promise<unknown>;
 }>) {
   const theme = useTheme();
   const motion = useWorkspaceMotion();
@@ -56,6 +59,11 @@ export function Screen({
             {scroll ? (
               <ScrollView
                 bounces={bounces}
+                refreshControl={
+                  onRefresh ? (
+                    <PageRefreshControl onRefresh={onRefresh} offset={headerInset} />
+                  ) : undefined
+                }
                 onScroll={onScroll}
                 scrollEventThrottle={16}
                 scrollIndicatorInsets={{ top: headerInset }}

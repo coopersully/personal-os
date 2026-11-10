@@ -92,23 +92,17 @@ const pages: Record<string, () => Promise<{ default: React.ComponentType }>> = {
   calendar: () => import("../../app/(workspaces)/calendar"),
   "mail/index": () => import("../../app/(workspaces)/mail/index"),
   "mail/mailboxes": () => import("../../app/(workspaces)/mail/mailboxes"),
-  "settings/agents": () => import("../../app/(workspaces)/settings/agents"),
-  "settings/(pages)/index": () => import("../../app/(workspaces)/settings/(pages)/index"),
-  "settings/(pages)/app": () => import("../../app/(workspaces)/settings/(pages)/app"),
-  "settings/(pages)/personal": () => import("../../app/(workspaces)/settings/(pages)/personal"),
-  "settings/(pages)/workspaces": () => import("../../app/(workspaces)/settings/(pages)/workspaces"),
 };
 it.each([
   ["calendar", "calendar"],
   ["mail/index", "inbox"],
   ["mail/mailboxes", "mailboxes"],
-  ["settings/agents", "agent settings"],
-  ["settings/(pages)/index", "account"],
-  ["settings/(pages)/app", "app"],
-  ["settings/(pages)/personal", "personal"],
-  ["settings/(pages)/workspaces", "workspaces"],
 ])("keeps the %s destination identified while domain content is deferred", async (path, title) => {
   const { default: Page } = await pages[path]();
   render(<Page />);
   expect(screen.getByRole("heading", { name: title })).toBeVisible();
 });
+
+vi.mock("../auth/context", () => ({ useOptionalAuth: () => null }));
+
+vi.mock("sonner-native", () => ({ toast: { error: vi.fn() } }));

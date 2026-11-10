@@ -82,3 +82,5 @@ it.each([
   buttons[1].onPress();
   expect(accept).toHaveBeenCalledOnce();
 });
+
+vi.mock("../features/auth/context", () => ({ useOptionalAuth: () => null }));

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type { TaskWorkspaceItem } from "@personal-os/domain";
+import { useQueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -26,6 +27,7 @@ vi.mock("expo-glass-effect", () => ({
   GlassView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
 const h = vi.hoisted(() => ({
+  epoch: 1,
   items: [] as TaskWorkspaceItem[],
   lists: [] as object[],
   projects: [] as object[],
@@ -36,6 +38,8 @@ const h = vi.hoisted(() => ({
     taskGroup: "none",
     showCompletedTasks: false,
     taskContainerSort: "name",
+    taskRowDetails: ["estimate"],
+    includeArchivedInSearch: true,
   },
   listTaskWorkspace: vi.fn(),
   listTaskLists: vi.fn(),
@@ -51,18 +55,30 @@ const h = vi.hoisted(() => ({
   trashReminder: vi.fn(),
   restoreReminder: vi.fn(),
   push: vi.fn(),
+  back: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
   loading: vi.fn(() => "task-toast"),
 }));
 vi.mock("../auth/context", () => ({
-  useAuth: () => ({ state: { user: { planningTimezone: "UTC" } }, session: { api: () => h } }),
+  useOptionalAuth: () => null,
+  useAuth: () => ({
+    state: { user: { id: "fixture", planningTimezone: "UTC" } },
+    session: { api: () => h, epoch: () => h.epoch },
+  }),
 }));
 vi.mock("expo-router", () => ({
-  router: { push: h.push },
+  router: { push: h.push, back: h.back },
   Stack: {
-    Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => (
-      <div>{options.headerRight?.()}</div>
+    Screen: ({
+      options,
+    }: {
+      options: { headerRight?: () => ReactNode; headerLeft?: () => ReactNode };
+    }) => (
+      <div>
+        {options.headerLeft?.()}
+        {options.headerRight?.()}
+      </div>
     ),
   },
 }));
@@ -131,6 +147,7 @@ const project = (id: string, name: string, overrides: object = {}) => ({
 });
 beforeEach(() => {
   vi.clearAllMocks();
+  h.epoch = 1;
   h.items = [task("one")];
   h.lists = [list("inbox", "Inbox", { kind: "inbox" })];
   h.projects = [];
@@ -141,6 +158,8 @@ beforeEach(() => {
     taskGroup: "none",
     showCompletedTasks: false,
     taskContainerSort: "name",
+    taskRowDetails: ["estimate"],
+    includeArchivedInSearch: true,
   };
   h.listTaskWorkspace
     .mockReset()
@@ -485,15 +504,18 @@ it("saves task preferences with a searchable default list and the loaded revisio
   fireEvent.change(screen.getByLabelText("Search default list"), { target: { value: "garden" } });
   fireEvent.click(screen.getByRole("button", { name: "Garden" }));
   for (const [label, value] of [
-    ["Sort, default", "priority"],
-    ["Group, none", "list"],
-    ["Container sort, name", "target"],
+    ["Sort, Recommended", "Priority"],
+    ["Group, None", "List"],
+    ["Container sort, Name (A–Z)", "Target date"],
   ] as const) {
     fireEvent.click(screen.getByRole("button", { name: label }));
     fireEvent.click(screen.getByRole("radio", { name: value }));
   }
   fireEvent.click(screen.getByRole("switch", { name: "Show completed tasks" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Show tags" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Include archived in search" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() =>
     expect(h.updateWorkspaceSettings).toHaveBeenCalledWith("tasks", {
       expectedRevision: 3,
@@ -503,6 +525,8 @@ it("saves task preferences with a searchable default list and the loaded revisio
         taskGroup: "list",
         taskContainerSort: "target",
         showCompletedTasks: true,
+        taskRowDetails: ["estimate", "tags", "notes"],
+        includeArchivedInSearch: false,
       }),
     }),
   );
@@ -519,10 +543,12 @@ it("retries preferences loading and reports a save failure through Sonner", asyn
   await screen.findByRole("button", { name: "Default list, Inbox" });
   h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("offline"));
   h.error.mockClear();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Show completed tasks" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
   expect(screen.queryByText("offline")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Load latest preferences" })).toBeEnabled();
 });
 it("applies date boundaries and clears filters without losing sort or grouping", async () => {
   show();
@@ -736,7 +762,7 @@ it("clears a custom capture list back to the default Inbox", async () => {
   );
   fireEvent.click(await screen.findByRole("button", { name: "Default list, Garden" }));
   fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() =>
     expect(h.updateWorkspaceSettings).toHaveBeenCalledWith(
       "tasks",
@@ -745,4 +771,200 @@ it("clears a custom capture list back to the default Inbox", async () => {
       }),
     ),
   );
+});
+
+function RefreshPreferencesFixture() {
+  const query = useQueryClient();
+  return (
+    <button
+      type="button"
+      onClick={() => void query.refetchQueries({ queryKey: ["tasks", "settings"] })}
+    >
+      Background preferences refresh
+    </button>
+  );
+}
+it("retains the opened draft and reviewed revision when background preferences change", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+      <RefreshPreferencesFixture />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  h.getWorkspaceSettings.mockResolvedValueOnce({
+    revision: 19,
+    preferences: { ...h.preferences, taskRowDetails: ["tags"] },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Background preferences refresh" }));
+  await waitFor(() => expect(h.getWorkspaceSettings).toHaveBeenCalledTimes(2));
+  await act(async () => {});
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  expect(screen.getByRole("switch", { name: "Show tags" })).not.toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(h.updateWorkspaceSettings).toHaveBeenCalledWith(
+      "tasks",
+      expect.objectContaining({
+        expectedRevision: 3,
+        preferences: expect.objectContaining({ taskRowDetails: ["estimate", "notes"] }),
+      }),
+    ),
+  );
+});
+
+it("blocks stale retries until latest preferences are explicitly reviewed, preserving the local draft and unrelated remote fields", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("Conflict"));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  const reload = await screen.findByRole("button", { name: "Load latest preferences" });
+  await waitFor(() => expect(reload).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  h.getWorkspaceSettings.mockRejectedValueOnce(new Error("Read offline"));
+  fireEvent.click(reload);
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  h.getWorkspaceSettings.mockResolvedValue({
+    revision: 19,
+    preferences: { ...h.preferences, taskGroup: "list", taskRowDetails: ["tags"] },
+  });
+  vi.mocked(globalThis.confirm).mockReturnValueOnce(false);
+  fireEvent.click(reload);
+  await waitFor(() =>
+    expect(globalThis.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("Review latest preferences"),
+    ),
+  );
+  await waitFor(() => expect(reload).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  fireEvent.click(reload);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Group, List" })).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  expect(globalThis.confirm).toHaveBeenLastCalledWith(
+    expect.stringContaining("saved tags; your draft estimate, notes"),
+  );
+  expect(h.updateWorkspaceSettings).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(h.updateWorkspaceSettings).toHaveBeenLastCalledWith("tasks", {
+      expectedRevision: 19,
+      preferences: expect.objectContaining({
+        taskGroup: "list",
+        taskRowDetails: ["estimate", "notes"],
+      }),
+    }),
+  );
+});
+it("recognizes an uncertain already-committed preference draft without sending it again", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("Response interrupted"));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  const reload = await screen.findByRole("button", { name: "Load latest preferences" });
+  await waitFor(() => expect(reload).toBeEnabled());
+  h.getWorkspaceSettings.mockResolvedValue({
+    revision: 4,
+    preferences: { ...h.preferences, taskRowDetails: ["estimate", "notes"] },
+  });
+  fireEvent.click(reload);
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Load latest preferences" })).toBeNull(),
+  );
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  expect(h.updateWorkspaceSettings).toHaveBeenCalledOnce();
+});
+
+it("closes untouched Task preferences, confirms dirty cancellation, and links notification controls without saving", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(h.back).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "iPhone notifications" }));
+  expect(h.push).toHaveBeenCalledWith("/settings/notifications");
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  vi.mocked(globalThis.confirm).mockReturnValueOnce(false);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.back).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(h.back).toHaveBeenCalledTimes(2);
+  expect(h.updateWorkspaceSettings).not.toHaveBeenCalled();
+});
+
+it("rejects an older authoritative preference reload and keeps the reviewed local draft locked", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Default list, Inbox" });
+  fireEvent.click(screen.getByRole("switch", { name: "Show notes" }));
+  h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("Conflict"));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  const reload = await screen.findByRole("button", { name: "Load latest preferences" });
+  await waitFor(() => expect(reload).toBeEnabled());
+  h.getWorkspaceSettings.mockResolvedValueOnce({
+    revision: 2,
+    preferences: { ...h.preferences, taskRowDetails: [] },
+  });
+  fireEvent.click(reload);
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
+  expect(screen.getByRole("switch", { name: "Show notes" })).toBeChecked();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  expect(h.updateWorkspaceSettings).toHaveBeenCalledOnce();
+});
+it("reviews an unavailable saved capture list and explicitly empty row details without losing local choices", async () => {
+  h.lists = [list("garden", "Garden")];
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Default list, Inbox" }));
+  fireEvent.click(screen.getByRole("button", { name: "Garden" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Show estimate" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Include archived in search" }));
+  h.updateWorkspaceSettings.mockRejectedValueOnce(new Error("Conflict"));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  const reload = await screen.findByRole("button", { name: "Load latest preferences" });
+  await waitFor(() => expect(reload).toBeEnabled());
+  h.getWorkspaceSettings.mockResolvedValueOnce({
+    revision: 4,
+    preferences: {
+      ...h.preferences,
+      defaultCaptureListId: "missing",
+      taskRowDetails: ["notes"],
+      includeArchivedInSearch: true,
+    },
+  });
+  fireEvent.click(reload);
+  await waitFor(() =>
+    expect(globalThis.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("saved Unavailable list; your draft Garden"),
+    ),
+  );
+  expect(globalThis.confirm).toHaveBeenCalledWith(expect.stringContaining("your draft None"));
+  expect(globalThis.confirm).toHaveBeenCalledWith(
+    expect.stringContaining("saved On; your draft Off"),
+  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
 });

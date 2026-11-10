@@ -5,7 +5,7 @@ export type WorkspacePageDefinition = { name: string; label: string; icon: IconN
 export const workspacePages = {
   tasks: [
     { name: "index", label: "to-do", icon: "calendar" },
-    { name: "projects", label: "projects", icon: "target" },
+    { name: "projects", label: "projects", icon: "project" },
     { name: "lists", label: "lists", icon: "views" },
     { name: "views", label: "browse", icon: "grid" },
   ],
@@ -19,12 +19,6 @@ export const workspacePages = {
     { name: "plan", label: "plan", icon: "wallet" },
     { name: "accounts", label: "accounts", icon: "finances" },
     { name: "assistant", label: "assistant", icon: "star" },
-  ],
-  settings: [
-    { name: "index", label: "account", icon: "profile" },
-    { name: "personal", label: "personal", icon: "target" },
-    { name: "workspaces", label: "workspaces", icon: "grid" },
-    { name: "app", label: "app", icon: "settings" },
   ],
 } as const satisfies Record<string, readonly WorkspacePageDefinition[]>;
 export type WorkspaceWithPages = keyof typeof workspacePages;

@@ -389,3 +389,5 @@ it("opens one review directly and links confirmed transaction activity to the sa
     params: { id: "tx" },
   });
 });
+
+vi.mock("../auth/context", () => ({ useOptionalAuth: () => null }));

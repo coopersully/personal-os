@@ -1343,9 +1343,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ),
   );
 
-  app.get("/v1/sessions", async (context) =>
-    context.json({ sessions: await auth.listSessions(context.get("principal").userId) }),
-  );
+  app.get("/v1/sessions", async (context) => {
+    const authorization = context.req.header("authorization");
+    const token = authorization?.startsWith("Session ")
+      ? authorization.slice(8)
+      : getCookie(context, dependencies.config.sessionCookieName);
+    return context.json({
+      sessions: await auth.listSessions(context.get("principal").userId, token),
+    });
+  });
   app.delete("/v1/sessions/:id", async (context) => {
     await auth.revokeSession(context.get("principal").userId, context.req.param("id"));
     return context.body(null, 204);

@@ -31,6 +31,7 @@ vi.mock("react-native", () => ({
   },
 }));
 vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({
     state: { user: { id: h.owner } },
     session: { api: () => ({ getWeather: h.weather }) },

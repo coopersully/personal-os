@@ -38,19 +38,7 @@ export function RowActionButton({
         opacity: action.disabled ? 0.4 : pressed ? 0.6 : 1,
       })}
     >
-      <Icon
-        name={action.icon}
-        size={20}
-        color={
-          action.destructive
-            ? placement === "header"
-              ? "#ba2944"
-              : t.destructive
-            : placement === "header"
-              ? "#202024"
-              : t.ink
-        }
-      />
+      <Icon name={action.icon} size={20} color={action.destructive ? t.destructive : t.ink} />
     </Pressable>
   );
 }

@@ -1,6 +1,15 @@
-import { Image, type ImageSourcePropType } from "react-native";
+import type { ImageSourcePropType } from "react-native";
+
+import { IconImage } from "./icon-image";
 
 export const icons = {
+  agent: require("../../assets/navigation/Agent.png"),
+  notification: require("../../assets/navigation/Notification.png"),
+  refresh: require("../../assets/navigation/Refresh.png"),
+  reply: require("../../assets/navigation/Reply.png"),
+  project: require("../../assets/navigation/Project.png"),
+  search: require("../../assets/navigation/Search.png"),
+  location: require("../../assets/navigation/MapPin.png"),
   send: require("../../assets/navigation/CircleArrowUp.png"),
   categoryTags: require("../../assets/navigation/Tags.png"),
   categoryLayers: require("../../assets/navigation/Layers.png"),
@@ -52,6 +61,9 @@ export const icons = {
 
 export type IconName = keyof typeof icons;
 export const selectedIcons = {
+  agent: require("../../assets/navigation/AgentFilled.png"),
+  notification: require("../../assets/navigation/NotificationFilled.png"),
+  project: require("../../assets/navigation/ProjectFilled.png"),
   send: require("../../assets/navigation/CircleArrowUpFilled.png"),
   receipt: require("../../assets/navigation/ReceiptFilled.png"),
   star: require("../../assets/navigation/StarFilled.png"),
@@ -83,14 +95,15 @@ export function Icon({
   filled?: boolean;
 }) {
   return (
-    <Image
-      accessible={false}
+    <IconImage
+      name={name}
+      color={color}
+      size={size}
       source={
         filled && name in selectedIcons
           ? selectedIcons[name as keyof typeof selectedIcons]
           : icons[name]
       }
-      style={{ width: size, height: size, tintColor: color }}
     />
   );
 }

@@ -52,6 +52,12 @@ not proof of visible delivery or audible sound. Keep diagnostic next steps in th
 Errors reach Sonner, including validation, local load, autosave, and native failures; deduplicate
 unchanged polling failures. Background autosave success stays silent.
 
+Routine native pull-to-refresh is Cooper's explicit exception: retain the native refreshing
+spinner, stay silent on success, and announce a failure once through Sonner. Do not add a loading
+or success toast for that gesture. When several reads belong to one refresh, keep error feedback
+owned until all those reads settle so they produce one result; unrelated read errors remain
+visible. Explicit refresh commands and other discrete actions retain their normal toast lifecycle.
+
 Field correction/retry controls and actual configuration/permission state may remain inline.
 They supplement Sonner announcements, not replace them. Initial dataset failures use a bounded,
 neutral availability/retry region inside the owning content area. Cached refresh failures preserve

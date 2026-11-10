@@ -1,4 +1,5 @@
 import { ApiClientError } from "@personal-os/api-client";
+import { isReadFeedbackHeld } from "../../components/read-feedback-scope";
 import { refreshDueAlerts } from "../notifications/events";
 import { allPages } from "./logic";
 
@@ -38,7 +39,13 @@ export function MobileDataProvider({ children }: PropsWithChildren) {
       new QueryClient({
         queryCache: new QueryCache({
           onError: (error, query) => {
-            if (!query.meta?.scopedReadFeedback) toast.error(errorMessage(error));
+            // Authoritative denial invalidates this query's private data, even when a refresh owns its toast.
+            // setState preserves the error without reset/refetch or clearing unrelated reads.
+            if (error instanceof ApiClientError && (error.status === 401 || error.status === 403)) {
+              query.setState({ data: undefined });
+            }
+            if (!query.meta?.scopedReadFeedback && !isReadFeedbackHeld(query))
+              toast.error(errorMessage(error));
           },
         }),
         defaultOptions: {

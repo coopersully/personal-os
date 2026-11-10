@@ -19,7 +19,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("sonner-native", () => ({ toast: mocks }));
 vi.mock("../notifications/events", () => ({ refreshDueAlerts: mocks.refresh }));
-vi.mock("../auth/context", () => ({ useAuth: vi.fn() }));
+vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
+  useAuth: vi.fn(),
+}));
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     invalidateQueries: mocks.invalidateQueries,

@@ -250,3 +250,27 @@ it("uses the platform fetch transport when no test transport is supplied", async
     vi.unstubAllGlobals();
   }
 });
+
+it("applies authoritative settings only in their original session and prevents stale refresh replacement", async () => {
+  const t = setup("sess-existing");
+  t.fetch.mockResolvedValueOnce(ok({ user }));
+  await t.session.restore();
+  const epoch = t.session.epoch();
+  let finish!: (response: Response) => void;
+  t.fetch.mockReturnValueOnce(
+    new Promise<Response>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const refresh = t.session.revalidate();
+  const updated = { ...user, theme: "dark" as const };
+  expect(t.session.acceptUserUpdate(updated, epoch)).toBe(true);
+  finish(ok({ user }));
+  await refresh;
+  expect(t.states.at(-1)).toEqual({ status: "signedIn", user: updated });
+  t.fetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
+  await t.session.logout();
+  expect(t.session.epoch()).toBeGreaterThan(epoch);
+  expect(t.session.acceptUserUpdate(updated, epoch)).toBe(false);
+  expect(t.states.at(-1)?.status).toBe("signedOut");
+});

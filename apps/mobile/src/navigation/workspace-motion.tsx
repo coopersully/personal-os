@@ -76,9 +76,19 @@ export function WorkspaceMotion({ children }: PropsWithChildren) {
     if (target) router.navigate(target === "index" ? "/" : `/${target}`);
   }, [reduceMotion, workspaceProgress, pageProgress]);
   useLayoutEffect(() => {
-    if (![...workspaceOrder, "settings"].some((owner) => owner === ownerOf(path))) return;
     const from = previous.current;
     previous.current = path;
+    const isWorkspace = (candidate: string) =>
+      (workspaceOrder as readonly string[]).includes(ownerOf(candidate));
+    // Native stack screens own their transitions. Do not animate detached workspace regions.
+    if (!isWorkspace(path) || !isWorkspace(from)) {
+      workspaceProgress.stopAnimation();
+      pageProgress.stopAnimation();
+      workspaceProgress.setValue(0);
+      pageProgress.setValue(0);
+      pending.current = null;
+      return;
+    }
     if (from === path || reduceMotion) return;
     if (ownerOf(from) !== ownerOf(path)) {
       pageProgress.stopAnimation();

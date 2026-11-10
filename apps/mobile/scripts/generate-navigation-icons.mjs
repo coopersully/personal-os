@@ -7,6 +7,13 @@ import * as registry from "../../web/src/components/icons";
 
 // The web registry remains the only module importing reicon. Native uses generated template images.
 const names = [
+  "Agent",
+  "Notification",
+  "Refresh",
+  "Project",
+  "Search",
+  "MapPin",
+  "Reply",
   "CircleArrowUp",
   "Tags",
   "Layers",
@@ -81,7 +88,17 @@ try {
         );
       }
     }
-    for (const name of ["Trash", "Archive", "X", "Pin", "Settings", "CircleCheck", "History"]) {
+    for (const name of [
+      "Trash",
+      "Archive",
+      "X",
+      "Pin",
+      "Settings",
+      "CircleCheck",
+      "History",
+    ].filter(
+      (name) => !process.env.ICON_NAMES || process.env.ICON_NAMES.split(",").includes(name),
+    )) {
       // Native menu images preserve original pixels, so ship explicit semantic color variants.
       for (const [tone, color] of Object.entries({
         Light: "#202024",

@@ -61,6 +61,7 @@ vi.mock("react-native-safe-area-context", () => ({
 vi.mock("expo-haptics", () => ({ selectionAsync: h.selection }));
 vi.mock("sonner-native", () => ({ toast: h }));
 vi.mock("../features/auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({
     state: { user: { id: "owner", displayName: "Test Person", email: "person@example.test" } },
     session: { logout: h.logout },
@@ -207,7 +208,7 @@ it("keeps search mounted while selecting a workspace and shows account/settings 
   expect(screen.queryByRole("button", { name: "Open mail" })).not.toBeInTheDocument();
   for (const [label, path] of [
     ["settings", "/settings"],
-    ["workspace settings", "/settings/workspaces"],
+    ["workspace settings", "/settings"],
     ["agent settings", "/settings/agents"],
   ]) {
     fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
@@ -467,4 +468,41 @@ it("does not select a workspace in Settings until a gesture resolves to a concre
   fireEvent.click(screen.getByRole("button", { name: "Switch workspace, settings" }));
   await act(async () => menu.onPanResponderRelease?.(event(20, 144), gesture(0, 0)));
   expect(h.navigate).toHaveBeenLastCalledWith("/tasks");
+});
+
+it("leaves Settings transitions to the native stack and resets workspace motion on return", async () => {
+  h.path = "/tasks";
+  const { rerender } = render(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  await act(async () => {});
+  const count = h.animations.length;
+  h.path = "/settings";
+  rerender(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  h.path = "/settings/calendar/new";
+  rerender(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  h.path = "/tasks";
+  rerender(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  expect(h.animations).toHaveLength(count);
+  h.path = "/tasks/projects";
+  rerender(
+    <WorkspaceMotion>
+      <div>Workspace</div>
+    </WorkspaceMotion>,
+  );
+  expect(h.animations).toHaveLength(count + 1);
 });

@@ -5,8 +5,8 @@ shell uses authenticated API sessions, workspace-specific native tabs and Apple'
 on supported iOS versions. Tasks includes tasks, reminders, lists, projects, filters, history,
 archive and trash. Finance includes Overview, Spending, Plan, Accounts and Assistant read workflows,
 plus category/notes editing, category budget limits and conversation sending. Today combines live
-Tasks and Finance reads with a time/weather hero and optional foreground location. Other workspaces
-remain previews. Full Finance web parity (creation, approvals, imports and automation configuration)
+Tasks and Finance reads with a time/weather hero and optional foreground location. Other workspace experiences
+retain their existing preview boundaries. Full Finance web parity (creation, approvals, imports and automation configuration)
 remains in progress.
 The existing web and Tauri desktop UI remain separate consumers of shared domain/API contracts.
 
@@ -44,7 +44,7 @@ pnpm --filter @personal-os/mobile archive
 ```
 
 The Release simulator build needs no signing identity. Archive uses Xcode automatic signing
-for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `7`.
+for John Cooper (`7J7HDVDCKQ`), bundle ID `app.personal-os.mobile`, version `0.1.0`, build `8`.
 Archive builds explicitly bind to `https://nohmi-api.coopersully.me`, reject development API
 overrides and disable dotenv loading. Verify the signed archive against the committed source.
 Increment `ios.buildNumber` before every new App Store Connect upload and regenerate native files.
@@ -147,7 +147,8 @@ workspace. `src/navigation/workspace-pages.ts` mirrors the web's
 - Tasks: today, views, pinned, history.
 - Mail: inbox, mailboxes.
 - Finances: overview, money, planning, manage.
-- Settings: account, personal, workspaces, app (opened by the account icon).
+- Settings is an account utility entered through the account menu, with a searchable grouped root
+  and native-stack detail pages. It has no bottom app bar or Settings tabs.
 - Today and Calendar: no bottom bar, matching the web contract.
 
 These destinations are route shells with titles only. They do not implement the sidebar groups'
@@ -211,3 +212,37 @@ control rendered with SwiftUI glassEffect and a moving glass selection capsule.
 The app owns drag routing and haptics; Apple supplies actual material and animation.
 It opens below the search field, keeps icons aligned, and supports direct dragging
 from the closed trigger as well as tap-open/tap-select. Bottom tabs remain NativeTabs.
+
+## Native Settings candidate scope
+
+The source includes account Profile (identity, planning timezone/hours, home place and workspace
+setup choices), Security & Access (sessions, password reset, owner-gated invitations), Connections,
+Activity Log, persisted shared appearance and installed version/build. Personal Goals & Motives
+and morning/evening Ritual configuration/history are domain-owned children. Workspace and Agent
+settings reuse authenticated typed APIs and existing permissions, revisions and Finance outcomes.
+Field/action classification, including current gaps and shared preferences consumed by other
+devices, is tracked in the COO-211 — Mobile Settings delivery record.
+
+Google/X setup uses an explicitly confirmed browser handoff and authoritative status refresh;
+iCloud uses a secure app-specific-password form. Texting enrollment requires current consent and
+explicit verification; an interrupted pending challenge survives background/foreground within the
+mounted form. No provider callback, push/background engine or raw phone/code persistence is added.
+Notifications reuse existing on-device task/reminder scheduling separately from global/Finance
+server text-message policy. Desktop widgets, wallpaper, pets, login lifecycle and desktop alert
+preferences stay desktop-specific. Activity loads at most the latest 100 events and never invents
+cursor pagination or exposes private audit payloads.
+
+This section describes current source scope, not a shipped/TestFlight or production-provider
+acceptance receipt. Focused tests, native simulator evidence, the frozen-candidate verifier,
+protected delivery and an installable TestFlight build are separate gates. Settings source uses
+partial/revisioned saves, retained-draft recovery and Sonner feedback as specified by
+`docs/design/mobile-forms.md` and `docs/design/feedback.md`.
+
+
+The approved Settings refinement source adds canonical native provider artwork and provider-first
+connection setup; focused Security/Agents/policy detail trees; shared personal editors with bounded
+day sheets; grouped workspace preferences and accepted-write cache publication. Human session
+listing adds server-derived `isCurrent`; an older API omitting it remains compatible and receives no
+inferred current-device badge. Native-stack status-bar ownership requires the generated iOS
+controller-based flag. Routine pull refresh uses a spinner and Sonner errors without success toasts.
+These are source contracts; installable build and production acceptance require separate receipts.

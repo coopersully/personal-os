@@ -76,6 +76,7 @@ export type SessionSummary = {
   createdAt: string;
   expiresAt: string;
   id: string;
+  isCurrent: boolean;
   ipAddress: string | null;
   lastSeenAt: string;
   userAgent: string | null;
@@ -482,7 +483,8 @@ export function createAuthService(options: AuthServiceOptions) {
       return records.map(serializeAccessToken);
     },
 
-    async listSessions(userId: string): Promise<SessionSummary[]> {
+    async listSessions(userId: string, currentSessionToken?: string): Promise<SessionSummary[]> {
+      const currentTokenHash = currentSessionToken ? hashToken(currentSessionToken) : undefined;
       const records = await db
         .select()
         .from(sessions)
@@ -492,6 +494,7 @@ export function createAuthService(options: AuthServiceOptions) {
         createdAt: record.createdAt.toISOString(),
         expiresAt: record.expiresAt.toISOString(),
         id: record.id,
+        isCurrent: currentTokenHash !== undefined && record.tokenHash === currentTokenHash,
         ipAddress: record.ipAddress,
         lastSeenAt: record.lastSeenAt.toISOString(),
         userAgent: record.userAgent,

@@ -17,7 +17,9 @@ it("exposes domain input fields instead of silently narrowing workspace mutation
     prepare_finance_budget_baseline_qualification:
       domain.prepareFinanceBudgetBaselineQualificationInputSchema,
     acknowledge_finance_conversation_batch: domain.financeConversationAcknowledgmentInputSchema,
+    acknowledge_finance_conversation_turn: domain.financeConversationAcknowledgmentInputSchema,
     reply_to_finance_conversation_batch: domain.financeConversationReplyInputSchema,
+    reply_to_finance_conversation_turn: domain.financeConversationReplyInputSchema,
     list_events: domain.eventListQuerySchema,
     get_finance_host_prompt_history: domain.automationHostPromptPageInputSchema,
     issue_finance_host_prompt: domain.automationHostPromptIssueInputSchema,

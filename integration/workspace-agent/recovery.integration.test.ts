@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import {
   auditEvents,
   automationHostPromptIssues,
   financeAnswerContinuations,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
+import type { FinanceHostInstructionDelivery } from "@personal-os/domain";
 import { eq, sql } from "drizzle-orm";
 import { FINANCE_AUTOMATION_PROMPT_VERSION as currentPromptVersion } from "../../apps/api/src/finance/automation-prompts.js";
 import { createMcpWorkspaceFixture, type WorkspaceFixture } from "./fixture.js";
@@ -49,9 +51,32 @@ describe("connection-bound host controls", () => {
       expectedVersion: 1,
     });
     expect(bound.schedule.nextExpectedAt).not.toBeNull();
-    expect(bound.prompt?.latestIssued?.text).toContain(
-      "No API trigger or trigger bearer is required",
-    );
+    expect(bound.prompt?.latestIssued?.text).toContain("load_finance_host_instructions");
+    const loaded = await a.client.callTool({
+      name: "load_finance_host_instructions",
+      arguments: { scheduleId: result.schedule.id, operationId: randomUUID() },
+    });
+    expect(loaded.isError, JSON.stringify(loaded)).not.toBe(true);
+    const instructions = (loaded.structuredContent as { result: FinanceHostInstructionDelivery })
+      .result;
+    expect(instructions.scheduleId).toBe(result.schedule.id);
+    expect(instructions.scheduleVersion).toBe(bound.schedule.version);
+    expect(instructions.acknowledgedAt).toBeNull();
+    expect(instructions.text).toContain("No API trigger or trigger bearer is required");
+    expect(instructions.text).toContain("begin_finance_conversation_turn");
+    const adopted = await a.client.callTool({
+      name: "acknowledge_finance_host_instructions",
+      arguments: {
+        scheduleId: result.schedule.id,
+        receiptId: instructions.receiptId,
+        instructionVersion: instructions.instructionVersion,
+      },
+    });
+    expect(adopted.isError, JSON.stringify(adopted)).not.toBe(true);
+    expect(adopted.structuredContent).toMatchObject({
+      result: { receiptId: instructions.receiptId, acknowledgedAt: expect.any(String) },
+    });
+
     const observation = await a.client.callTool({
       name: "observe_finance_host_schedule",
       arguments: {

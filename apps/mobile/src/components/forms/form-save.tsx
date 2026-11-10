@@ -7,9 +7,10 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useTheme, workspaceColor } from "../../theme";
+import { useTheme } from "../../theme";
 import { GlassSurface } from "../glass-surface";
 import { Icon, type IconName } from "../icons";
+import { useSettingsAccent } from "../settings-accent";
 export function FormSave({
   disabled,
   onPress,
@@ -26,6 +27,7 @@ export function FormSave({
   keyboardOffset?: number;
 }) {
   const t = useTheme();
+  const accent = useSettingsAccent(workspace);
   const insets = useSafeAreaInsets();
   return (
     <KeyboardAvoidingView
@@ -55,7 +57,7 @@ export function FormSave({
             opacity: disabled ? 0.7 : 1,
           }}
         >
-          <Icon name={icon} size={27} color={disabled ? t.ink : workspaceColor(t, workspace)} />
+          <Icon name={icon} size={27} color={disabled ? t.ink : accent} />
         </Pressable>
       </GlassSurface>
     </KeyboardAvoidingView>

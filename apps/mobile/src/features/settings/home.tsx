@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import { router } from "expo-router";
 import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
+import type { SettingsWorkspace } from "../../components/settings-accent";
 import { useTheme } from "../../theme";
 import {
   type SettingsDestinationId,
@@ -46,6 +47,11 @@ export function SettingsHome() {
                   <SettingsRow
                     label={destination.label}
                     icon={destination.icon}
+                    workspace={
+                      destination.group === "Workspaces"
+                        ? (destination.id as SettingsWorkspace)
+                        : undefined
+                    }
                     onPress={() => router.push(settingsPath(destination.id))}
                   />
                 </View>

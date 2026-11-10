@@ -1,9 +1,10 @@
 import type { CalendarAccount } from "@personal-os/api-client";
 import { connectICloudInputSchema } from "@personal-os/domain";
 import { useEffect, useState } from "react";
-import { AppState, Linking, Modal, Text, View } from "react-native";
+import { AppState, Linking, Modal, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
+import { Icon } from "../../components/icons";
 import { SheetHeader } from "../../components/sheet-header";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
@@ -26,6 +27,7 @@ function Connections() {
   const accounts = useSettingsResource("connectors", (api) => api.listConnectors());
   const x = useSettingsResource("x-account", (api) => api.getXBookmarkAccount());
   const folders = useSettingsResource("x-folders", (api) => api.listXBookmarkFolders(), !!x.data);
+  const [expandedAccount, setExpandedAccount] = useState<string | null>(null);
   const [icloud, setIcloud] = useState(false);
   const [reconnectIcloud, setReconnectIcloud] = useState<CalendarAccount | null>(null);
   const [mail, setMail] = useState(true);
@@ -69,80 +71,131 @@ function Connections() {
         {accounts.data?.length === 0 && <State empty="No connected accounts." />}
         {accounts.data?.map((account) => (
           <View key={account.id} style={{ padding: 16, gap: 8 }}>
-            <Text style={{ color: t.ink, fontSize: 17, fontWeight: "600" }}>{account.label}</Text>
-            <Text style={{ color: t.secondary }}>{account.email ?? account.provider}</Text>
-            <Text style={{ color: account.health.state === "ready" ? t.secondary : t.warning }}>
-              {account.health.state.replaceAll("_", " ")}
-              {account.health.message ? ` · ${account.health.message}` : ""}
-            </Text>
-            <Text style={{ color: t.secondary }}>
-              {[account.mailEnabled ? "Mail" : null, account.calendarEnabled ? "Calendar" : null]
-                .filter(Boolean)
-                .join(" · ") || "No enabled services"}
-            </Text>
-            <Text style={{ color: t.secondary }}>
-              Last synced{" "}
-              {account.lastSyncedAt ? new Date(account.lastSyncedAt).toLocaleString() : "Never"}
-            </Text>
-            {Object.entries(account.capabilities ?? {}).map(([service, capability]) => (
-              <Text
-                key={service}
-                style={{ color: capability.health.state === "ready" ? t.secondary : t.warning }}
-              >
-                {service}: {capability.health.state.replaceAll("_", " ")}
-              </Text>
-            ))}
-            <Action
-              label="Sync now"
-              disabled={action.pending || account.syncStatus === "syncing"}
-              onPress={() =>
-                void action.run(
-                  async (api) => {
-                    const result = await api.syncConnector(account.id);
-                    await accounts.refetch();
-                    return result;
-                  },
-                  (result) =>
-                    result.pending
-                      ? "Sync requested. Check account status for completion."
-                      : `Sync confirmed: ${result.changed} changes.`,
-                )
-              }
-            />
-            {account.provider === "google" && (
-              <Action
-                label="Reconnect in browser"
-                disabled={action.pending}
-                onPress={() => google(account)}
-              />
-            )}
-            {account.provider === "icloud" && (
-              <Action
-                label="Update iCloud credentials"
-                disabled={action.pending}
-                onPress={() => {
-                  setReconnectIcloud(account);
-                  setIcloud(true);
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Account ${account.label}, ${account.email ?? account.provider}`}
+              accessibilityState={{ expanded: expandedAccount === account.id }}
+              onPress={() => setExpandedAccount(expandedAccount === account.id ? null : account.id)}
+              style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52 }}
+            >
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  backgroundColor: t.canvas,
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
-              />
+              >
+                <Icon
+                  name={account.provider === "google" ? "mail" : "disconnected"}
+                  color={t.ink}
+                  size={22}
+                />
+              </View>
+              <View style={{ flex: 1, gap: 4 }}>
+                <Text style={{ color: t.ink, fontSize: 17, fontWeight: "600" }}>
+                  {account.label || (account.provider === "google" ? "Google" : "iCloud")}
+                </Text>
+                <Text style={{ color: t.secondary, fontSize: 14 }}>
+                  {account.email ?? account.provider}
+                </Text>
+                <Text style={{ color: t.secondary, fontSize: 13 }}>
+                  {[
+                    account.mailEnabled ? "Mail" : null,
+                    account.calendarEnabled ? "Calendar" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "No services enabled"}
+                </Text>
+              </View>
+              <Text
+                style={{
+                  color: account.health.state === "ready" ? t.secondary : t.warning,
+                  fontSize: 13,
+                  maxWidth: "30%",
+                  textAlign: "right",
+                }}
+              >
+                {account.health.state === "ready" ? "Connected" : "Needs attention"}
+              </Text>
+              <Icon name="chevron" color={t.secondary} size={16} />
+            </Pressable>
+            {expandedAccount === account.id && (
+              <View style={{ gap: 8, paddingTop: 12 }}>
+                {account.health.message && (
+                  <Text
+                    style={{ color: account.health.state === "ready" ? t.secondary : t.warning }}
+                  >
+                    {account.health.message}
+                  </Text>
+                )}
+                <Text style={{ color: t.secondary }}>
+                  Last synced{" "}
+                  {account.lastSyncedAt ? new Date(account.lastSyncedAt).toLocaleString() : "Never"}
+                </Text>
+                {Object.entries(account.capabilities ?? {}).map(([service, capability]) => (
+                  <Text
+                    key={service}
+                    style={{ color: capability.health.state === "ready" ? t.secondary : t.warning }}
+                  >
+                    {service.replaceAll("_", " ")}: {capability.health.state.replaceAll("_", " ")}
+                  </Text>
+                ))}
+                <Action
+                  label="Sync now"
+                  disabled={action.pending || account.syncStatus === "syncing"}
+                  onPress={() =>
+                    void action.run(
+                      async (api) => {
+                        const result = await api.syncConnector(account.id);
+                        await accounts.refetch();
+                        return result;
+                      },
+                      (result) =>
+                        result.pending
+                          ? "Sync requested. Check account status for completion."
+                          : `Sync confirmed: ${result.changed} changes.`,
+                    )
+                  }
+                />
+                {account.provider === "google" && (
+                  <Action
+                    label="Reconnect in browser"
+                    disabled={action.pending}
+                    onPress={() => google(account)}
+                  />
+                )}
+                {account.provider === "icloud" && (
+                  <Action
+                    label="Update iCloud credentials"
+                    disabled={action.pending}
+                    onPress={() => {
+                      setReconnectIcloud(account);
+                      setIcloud(true);
+                    }}
+                  />
+                )}
+                <Action
+                  label="Disconnect account"
+                  destructive
+                  disabled={action.pending}
+                  onPress={() =>
+                    confirm(
+                      `Disconnect ${account.label}?`,
+                      "This removes the account connection. Its mail and calendar will stop syncing.",
+                      () =>
+                        void action.run(async (api) => {
+                          await api.deleteConnector(account.id);
+                          await accounts.refetch();
+                        }, "Account disconnected"),
+                      true,
+                    )
+                  }
+                />
+              </View>
             )}
-            <Action
-              label="Disconnect account"
-              destructive
-              disabled={action.pending}
-              onPress={() =>
-                confirm(
-                  `Disconnect ${account.label}?`,
-                  "This removes the account connection. Its mail and calendar will stop syncing.",
-                  () =>
-                    void action.run(async (api) => {
-                      await api.deleteConnector(account.id);
-                      await accounts.refetch();
-                    }, "Account disconnected"),
-                  true,
-                )
-              }
-            />
           </View>
         ))}
         <Action

@@ -1,6 +1,7 @@
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { spacing, useTheme } from "../../theme";
 import { Icon, type IconName } from "../icons";
+import { SettingLabel, SettingValue } from "../settings-row-content";
 
 export interface EnumChoiceProps {
   label: string;
@@ -67,19 +68,10 @@ export function EnumChoiceLabel({
       }}
     >
       {glyph && <Icon name={glyph} color={t.secondary} size={22} />}
-      <Text style={{ flex: 1, color: t.ink, fontSize: 17 }}>{label}</Text>
-      <Text
-        numberOfLines={1}
-        style={{
-          maxWidth: "55%",
-          flexShrink: 1,
-          textAlign: "right",
-          color: valueColor ?? t.secondary,
-          fontSize: 17,
-        }}
-      >
+      <SettingLabel>{label}</SettingLabel>
+      <SettingValue style={{ color: valueColor ?? t.secondary }}>
         {valueLabel ?? options.find((option) => option.value === value)?.label ?? "None"}
-      </Text>
+      </SettingValue>
       <Icon name="chevron" color={t.secondary} size={16} />
     </View>
   );

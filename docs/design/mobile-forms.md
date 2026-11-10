@@ -232,3 +232,17 @@ capabilities. Sonner owns every discrete action and error, including explicit re
 background autosaves stay silent. Configuration state and correction controls are allowed inline,
 not action-result messages. Device acceptance never proves a visible banner, provider grant,
 SMS delivery or background execution.
+
+### Settings hierarchy and color ownership
+
+General Settings uses a neutral ink accent. A workspace's Settings subtree uses that workspace's
+accent, including child editors and guidance; Tasks color must not leak through reused controls.
+Root workspace destinations have framed identity icons tinted with their own workspace color.
+Labels stay leading and values trailing in compact centered rows. Long email addresses, timezone
+names and identifiers must remain inspectable through wrapping or the focused editor; missing
+artwork reserves its normal icon slot with a semantic fallback, never replacing the label.
+
+Peer views such as Goals, Completed and Motives use a compact horizontal view switcher rather
+than a vertical list of form choices. Activity separates compact filters from readable event rows;
+metadata and identifiers are disclosed on demand. Connections leads with account identity,
+services and actual status, then discloses sync details and consequential account actions.

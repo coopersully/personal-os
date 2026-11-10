@@ -7,6 +7,7 @@ import { Icon } from "./icons";
 export function RecordRow({
   title,
   subtitle,
+  subtitleLines,
   value,
   leading,
   centered = false,
@@ -16,6 +17,7 @@ export function RecordRow({
 }: {
   title: string;
   subtitle?: string;
+  subtitleLines?: number;
   value?: string;
   leading: ReactNode;
   centered?: boolean;
@@ -62,7 +64,12 @@ export function RecordRow({
           {!!onPress && <Icon name="chevron" size={16} color={t.secondary} />}
         </View>
         {!!subtitle && (
-          <Text style={{ color: t.secondary, fontSize: 15, lineHeight: 21 }}>{subtitle}</Text>
+          <Text
+            numberOfLines={subtitleLines}
+            style={{ color: t.secondary, fontSize: 15, lineHeight: 21 }}
+          >
+            {subtitle}
+          </Text>
         )}
       </View>
     </View>

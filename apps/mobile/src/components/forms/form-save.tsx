@@ -1,11 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  useWindowDimensions,
-} from "react-native";
+import { Keyboard, Pressable, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "../../theme";
 import { GlassSurface } from "../glass-surface";
@@ -29,11 +23,11 @@ export function FormSave({
   const t = useTheme();
   const accent = useSettingsAccent(workspace);
   const insets = useSafeAreaInsets();
+  const defaultKeyboardOffset = useFormKeyboardOffset(keyboardOffset === undefined);
   return (
-    <KeyboardAvoidingView
+    <View
       pointerEvents="box-none"
-      behavior={keyboardOffset === undefined && Platform.OS === "ios" ? "padding" : undefined}
-      style={{ position: "absolute", bottom: keyboardOffset ?? 0, right: 20 }}
+      style={{ position: "absolute", bottom: keyboardOffset ?? defaultKeyboardOffset, right: 20 }}
     >
       <GlassSurface
         style={{
@@ -60,15 +54,16 @@ export function FormSave({
           <Icon name={icon} size={27} color={disabled ? t.ink : accent} />
         </Pressable>
       </GlassSurface>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
-/** Use screen-space keyboard geometry for native modal forms with a floating action. */
-export function useFormKeyboardOffset() {
+/** Use screen-space keyboard geometry for forms with a floating action. */
+export function useFormKeyboardOffset(enabled = true) {
   const { height } = useWindowDimensions();
   const [offset, setOffset] = useState(0);
   useEffect(() => {
+    if (!enabled) return;
     const change = Keyboard.addListener("keyboardWillChangeFrame", (event) => {
       setOffset(Math.max(0, height - event.endCoordinates.screenY));
     });
@@ -77,7 +72,7 @@ export function useFormKeyboardOffset() {
       change.remove();
       hide.remove();
     };
-  }, [height]);
+  }, [enabled, height]);
   return offset;
 }
 

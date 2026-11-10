@@ -10,7 +10,7 @@ import {
   createAccessTokenInputSchema,
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Linking, Text, View } from "react-native";
 import { toast } from "sonner-native";
@@ -22,6 +22,7 @@ import { useAuth } from "../auth/context";
 import { errorMessage } from "../tasks/data";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
 import { type SettingsApi, useSettingsAction, useSettingsResource } from "./data";
+import { SettingsRow } from "./settings-row";
 
 export const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
@@ -220,26 +221,40 @@ function Connection({
     </Section>
   );
 }
-function Authority({ onPendingChange }: { onPendingChange: (pending: boolean) => void }) {
+function Authority({
+  onPendingChange,
+  page,
+}: {
+  onPendingChange: (pending: boolean) => void;
+  page: "access" | "policy";
+}) {
   const t = useTheme();
   const action = useSettingsAction();
-  const tokens = useSettingsResource("agent-tokens", (api) => api.listAccessTokens());
-  const clients = useSettingsResource("agent-oauth-clients", (api) => api.listOAuthClients());
+  const tokens = useSettingsResource(
+    "agent-tokens",
+    (api) => api.listAccessTokens(),
+    page === "access",
+  );
+  const clients = useSettingsResource(
+    "agent-oauth-clients",
+    (api) => api.listOAuthClients(),
+    page === "access",
+  );
   const policy = useSettingsResource(
     "agent-execution-policy",
     (api) => api.getExecutionPolicySettings(),
-    true,
+    page === "policy",
     true,
   );
   const initialPolicyFeedback = useRef(true);
   useEffect(() => {
-    if (!initialPolicyFeedback.current) return;
+    if (page !== "policy" || !initialPolicyFeedback.current) return;
     if (policy.data) initialPolicyFeedback.current = false;
     else if (policy.error) {
       initialPolicyFeedback.current = false;
       toast.error(errorMessage(policy.error));
     }
-  }, [policy.data, policy.error]);
+  }, [page, policy.data, policy.error]);
   const refreshPolicy = () => {
     initialPolicyFeedback.current = false;
     void action.run(async () => {
@@ -279,192 +294,259 @@ function Authority({ onPendingChange }: { onPendingChange: (pending: boolean) =>
     );
   return (
     <>
-      <Section title="Execution policy">
-        <Text style={{ color: t.secondary, padding: 16 }}>
-          Review bypass applies only to registered reversible operations. Required scopes, explicit
-          approvals and unavailable capabilities still apply.
-        </Text>
-        {policy.data ? (
-          <ToggleRow
-            label="Allow eligible actions without review"
-            icon="check"
-            value={policy.data.reviewBypassEnabled}
+      {page === "policy" && (
+        <Section title="Execution policy">
+          <Text style={{ color: t.secondary, padding: 16 }}>
+            Review bypass applies only to registered reversible operations. Required scopes,
+            explicit approvals and unavailable capabilities still apply.
+          </Text>
+          {policy.data ? (
+            <ToggleRow
+              label="Allow eligible actions without review"
+              icon="check"
+              value={policy.data.reviewBypassEnabled}
+              disabled={action.pending}
+              onChange={(reviewBypassEnabled) => {
+                const current = policy.data;
+                if (!current) return;
+                confirm(
+                  reviewBypassEnabled ? "Enable review bypass?" : "Require review?",
+                  reviewBypassEnabled
+                    ? "Eligible registered reversible Finance actions may execute without the review queue. This does not grant scopes or bypass explicit approval requirements."
+                    : "Eligible actions will return to the review queue.",
+                  () =>
+                    void action.run(async (api) => {
+                      await api.updateExecutionPolicySettings({
+                        expectedVersion: current.version,
+                        reviewBypassEnabled,
+                      });
+                      await policy.refetch();
+                    }, "Execution policy saved"),
+                );
+              }}
+            />
+          ) : (
+            <State loading={policy.isPending} retry={policy.isError ? refreshPolicy : undefined} />
+          )}
+          <Action
+            label="Refresh execution policy"
             disabled={action.pending}
-            onChange={(reviewBypassEnabled) => {
-              const current = policy.data;
-              if (!current) return;
-              confirm(
-                reviewBypassEnabled ? "Enable review bypass?" : "Require review?",
-                reviewBypassEnabled
-                  ? "Eligible registered reversible Finance actions may execute without the review queue. This does not grant scopes or bypass explicit approval requirements."
-                  : "Eligible actions will return to the review queue.",
-                () =>
-                  void action.run(async (api) => {
-                    await api.updateExecutionPolicySettings({
-                      expectedVersion: current.version,
-                      reviewBypassEnabled,
-                    });
-                    await policy.refetch();
-                  }, "Execution policy saved"),
-              );
-            }}
+            onPress={refreshPolicy}
           />
-        ) : (
-          <State loading={policy.isPending} retry={policy.isError ? refreshPolicy : undefined} />
-        )}
-        <Action
-          label="Refresh execution policy"
-          disabled={action.pending}
-          onPress={refreshPolicy}
-        />
-      </Section>
-      <Section title="Access tokens">
-        {tokens.data?.map((token) => (
-          <Section key={token.id} title={token.name}>
-            <Text selectable style={{ color: t.ink, padding: 16 }}>
-              {token.scopes.join(", ")}
-            </Text>
-            <Text style={{ color: t.secondary, paddingHorizontal: 16 }}>
-              {token.revokedAt
-                ? "Revoked"
-                : token.expiresAt
-                  ? `Expires ${new Date(token.expiresAt).toLocaleString()}`
-                  : "No expiry"}
-            </Text>
-            {!token.revokedAt && (
-              <Action
-                label={`Revoke ${token.name}`}
-                disabled={action.pending}
-                destructive
-                onPress={() =>
-                  revoke(token.name, (api) => api.deleteAccessToken(token.id), tokens.refetch)
-                }
+        </Section>
+      )}
+      {page === "access" && (
+        <>
+          <Section title="Access tokens">
+            {tokens.data?.map((token) => (
+              <Section key={token.id} title={token.name}>
+                <Text selectable style={{ color: t.ink, padding: 16 }}>
+                  {token.scopes.join(", ")}
+                </Text>
+                <Text style={{ color: t.secondary, paddingHorizontal: 16 }}>
+                  {token.revokedAt
+                    ? "Revoked"
+                    : token.expiresAt
+                      ? `Expires ${new Date(token.expiresAt).toLocaleString()}`
+                      : "No expiry"}
+                </Text>
+                {!token.revokedAt && (
+                  <Action
+                    label={`Revoke ${token.name}`}
+                    disabled={action.pending}
+                    destructive
+                    onPress={() =>
+                      revoke(token.name, (api) => api.deleteAccessToken(token.id), tokens.refetch)
+                    }
+                  />
+                )}
+              </Section>
+            ))}
+            {!tokens.data && (
+              <State
+                loading={tokens.isPending}
+                retry={tokens.isError ? () => void tokens.refetch() : undefined}
               />
             )}
+            {tokens.data?.length === 0 && <State empty="No access tokens." />}
           </Section>
-        ))}
-        {!tokens.data && (
-          <State
-            loading={tokens.isPending}
-            retry={tokens.isError ? () => void tokens.refetch() : undefined}
-          />
-        )}
-        {tokens.data?.length === 0 && <State empty="No access tokens." />}
-      </Section>
-      <Section title="Create access token">
-        <Text style={{ color: t.secondary, padding: 16 }}>
-          Select only the scopes this connection needs. Read scopes can expose private records;
-          write, execute and maintain scopes can change them. The token will appear once.
-        </Text>
-        <Field
-          label="Token name"
-          icon="disconnected"
-          value={name}
-          onChangeText={setName}
-          editable={!action.pending && !secret}
-          maxLength={80}
-          placeholder="My agent connection"
-        />
-        <Choice
-          label="Permission preset"
-          value={selectedPreset}
-          disabled={action.pending || !!secret}
-          options={[
-            { value: "custom", label: "Custom permissions" },
-            ...tokenPresets.map((preset) => ({ value: preset.name, label: preset.name })),
-          ]}
-          onChange={(name) => {
-            const preset = tokenPresets.find((preset) => preset.name === name);
-            if (preset) setScopes([...preset.scopes]);
-          }}
-        />
-        {accessScopeSchema.options
-          .filter((scope) => scope !== "automations:write" && scope !== "tracking:write")
-          .map((scope) => (
-            <ToggleRow
-              key={scope}
-              label={scope}
-              value={scopes.includes(scope)}
+          <Section title="Create access token">
+            <Text style={{ color: t.secondary, padding: 16 }}>
+              Select only the scopes this connection needs. Read scopes can expose private records;
+              write, execute and maintain scopes can change them. The token will appear once.
+            </Text>
+            <Field
+              label="Token name"
+              icon="disconnected"
+              value={name}
+              onChangeText={setName}
+              editable={!action.pending && !secret}
+              maxLength={80}
+              placeholder="My agent connection"
+            />
+            <Choice
+              label="Permission preset"
+              value={selectedPreset}
               disabled={action.pending || !!secret}
-              onChange={(selected) =>
-                setScopes((current) =>
-                  selected ? [...current, scope] : current.filter((value) => value !== scope),
+              options={[
+                { value: "custom", label: "Custom permissions" },
+                ...tokenPresets.map((preset) => ({ value: preset.name, label: preset.name })),
+              ]}
+              onChange={(name) => {
+                const preset = tokenPresets.find((preset) => preset.name === name);
+                if (preset) setScopes([...preset.scopes]);
+              }}
+            />
+            {accessScopeSchema.options
+              .filter((scope) => scope !== "automations:write" && scope !== "tracking:write")
+              .map((scope) => (
+                <ToggleRow
+                  key={scope}
+                  label={scope}
+                  value={scopes.includes(scope)}
+                  disabled={action.pending || !!secret}
+                  onChange={(selected) =>
+                    setScopes((current) =>
+                      selected ? [...current, scope] : current.filter((value) => value !== scope),
+                    )
+                  }
+                />
+              ))}
+            <Action
+              label="Create token"
+              disabled={action.pending || !name.trim() || !scopes.length || !!secret}
+              onPress={() =>
+                confirm(
+                  "Grant agent access?",
+                  `${name.trim()} will receive these scopes: ${scopes.join(", ")}. Keep its token private.`,
+                  () =>
+                    void action.run(async (api) => {
+                      const created = await api.createAccessToken(tokenInput(name, scopes));
+                      setSecret(created.token);
+                      setName("");
+                      setScopes([]);
+                      await tokens.refetch();
+                    }, "Access token created"),
                 )
               }
             />
-          ))}
-        <Action
-          label="Create token"
-          disabled={action.pending || !name.trim() || !scopes.length || !!secret}
-          onPress={() =>
-            confirm(
-              "Grant agent access?",
-              `${name.trim()} will receive these scopes: ${scopes.join(", ")}. Keep its token private.`,
-              () =>
-                void action.run(async (api) => {
-                  const created = await api.createAccessToken(tokenInput(name, scopes));
-                  setSecret(created.token);
-                  setName("");
-                  setScopes([]);
-                  await tokens.refetch();
-                }, "Access token created"),
-            )
-          }
-        />
-        {secret && (
-          <>
-            <Text style={{ color: t.warning, padding: 16 }}>
-              Save this token somewhere private. It cannot be retrieved again after you dismiss it.
-            </Text>
-            <Text
-              selectable
-              accessibilityLabel="New access token"
-              style={{ color: t.ink, padding: 16 }}
-            >
-              {secret}
-            </Text>
-            <Action label="I saved the token" onPress={() => setSecret(null)} />
-          </>
-        )}
-      </Section>
-      <Section title="Authorized applications">
-        {clients.data?.map((client) => (
-          <Section key={client.id} title={client.name}>
-            <Text selectable style={{ color: t.ink, padding: 16 }}>
-              {client.scopes.join(", ") || "No scopes"}
-            </Text>
-            <Action
-              label={`Revoke ${client.name}`}
-              disabled={action.pending}
-              destructive
-              onPress={() =>
-                revoke(client.name, (api) => api.revokeOAuthClient(client.id), clients.refetch)
-              }
-            />
+            {secret && (
+              <>
+                <Text style={{ color: t.warning, padding: 16 }}>
+                  Save this token somewhere private. It cannot be retrieved again after you dismiss
+                  it.
+                </Text>
+                <Text
+                  selectable
+                  accessibilityLabel="New access token"
+                  style={{ color: t.ink, padding: 16 }}
+                >
+                  {secret}
+                </Text>
+                <Action label="I saved the token" onPress={() => setSecret(null)} />
+              </>
+            )}
           </Section>
-        ))}
-        {!clients.data && (
-          <State
-            loading={clients.isPending}
-            retry={clients.isError ? () => void clients.refetch() : undefined}
-          />
-        )}
-        {clients.data?.length === 0 && <State empty="No authorized applications." />}
-      </Section>
+          <Section title="Authorized applications">
+            {clients.data?.map((client) => (
+              <Section key={client.id} title={client.name}>
+                <Text selectable style={{ color: t.ink, padding: 16 }}>
+                  {client.scopes.join(", ") || "No scopes"}
+                </Text>
+                <Action
+                  label={`Revoke ${client.name}`}
+                  disabled={action.pending}
+                  destructive
+                  onPress={() =>
+                    revoke(client.name, (api) => api.revokeOAuthClient(client.id), clients.refetch)
+                  }
+                />
+              </Section>
+            ))}
+            {!clients.data && (
+              <State
+                loading={clients.isPending}
+                retry={clients.isError ? () => void clients.refetch() : undefined}
+              />
+            )}
+            {clients.data?.length === 0 && <State empty="No authorized applications." />}
+          </Section>
+        </>
+      )}
     </>
   );
 }
+type AgentPage = "connected" | "setup" | "reviews" | "access" | "policy";
 export function AgentsSettingsScreen() {
-  const { state, session } = useAuth();
-  return <AgentSettings key={`${state.user?.id}-${session.epoch()}`} />;
+  return (
+    <FormBody>
+      <Section>
+        <SettingsRow
+          label="Connected agents"
+          icon="people"
+          onPress={() => router.push("/settings/agents/connected")}
+        />
+        <SettingsRow
+          label="Setup"
+          icon="settings"
+          onPress={() => router.push("/settings/agents/setup")}
+        />
+        <SettingsRow
+          label="Reviews"
+          icon="check"
+          onPress={() => router.push("/settings/agents/reviews")}
+        />
+        <SettingsRow
+          label="Access"
+          icon="profile"
+          onPress={() => router.push("/settings/agents/access")}
+        />
+        <SettingsRow
+          label="Execution policy"
+          icon="settings"
+          onPress={() => router.push("/settings/agents/policy")}
+        />
+      </Section>
+    </FormBody>
+  );
 }
-function AgentSettings() {
+function AgentPageScreen({ page }: { page: AgentPage }) {
+  const { state, session } = useAuth();
+  return state.user ? (
+    <AgentSettings key={`${state.user.id}-${session.epoch()}-${page}`} page={page} />
+  ) : null;
+}
+export function ConnectedAgentsScreen() {
+  return <AgentPageScreen page="connected" />;
+}
+export function AgentSetupScreen() {
+  return <AgentPageScreen page="setup" />;
+}
+export function AgentReviewsScreen() {
+  return <AgentPageScreen page="reviews" />;
+}
+export function AgentAccessScreen() {
+  return <AgentPageScreen page="access" />;
+}
+export function AgentPolicyScreen() {
+  return <AgentPageScreen page="policy" />;
+}
+
+function AgentSettings({ page }: { page: AgentPage }) {
   const t = useTheme();
   const cache = useQueryClient();
   const [editing, setEditing] = useState<AgentAccount | null>(null);
   const [authorityPending, setAuthorityPending] = useState(false);
-  const directory = useSettingsResource("agent-directory", (api) => api.listAgentAccounts());
-  const guide = useSettingsResource("agent-guide", (api) => api.getAgentConnectionGuide());
+  const directory = useSettingsResource(
+    "agent-directory",
+    (api) => api.listAgentAccounts(),
+    page === "connected",
+  );
+  const guide = useSettingsResource(
+    "agent-guide",
+    (api) => api.getAgentConnectionGuide(),
+    page === "setup",
+  );
   const refresh = async () => {
     await directory.refetch();
     await cache.invalidateQueries({ queryKey: ["settings"] });
@@ -476,66 +558,81 @@ function AgentSettings() {
         <FormBody>
           {!editing && (
             <Stack.Screen
-              options={{ title: "Agents", headerLeft: undefined, gestureEnabled: true }}
+              options={{
+                title: {
+                  connected: "Connected agents",
+                  setup: "Agent setup",
+                  reviews: "Reviews",
+                  access: "Access",
+                  policy: "Execution policy",
+                }[page],
+                headerLeft: undefined,
+                gestureEnabled: true,
+              }}
             />
           )}
-          <Section title="Connect an agent">
-            {guide.data ? (
-              <>
-                <Text selectable style={{ color: t.ink, padding: 16 }}>
-                  MCP endpoint: {guide.data.mcpUrl}
-                </Text>
-                <Text selectable style={{ color: t.ink, padding: 16 }}>
-                  {guide.data.skill.installPrompt}
-                </Text>
-                <Text selectable style={{ color: t.secondary, padding: 16 }}>
-                  {guide.data.skill.setupPrompt}
-                </Text>
-                {guide.data.domains.map((domain) => (
-                  <Text key={domain.domain} style={{ color: t.secondary, padding: 16 }}>
-                    {domain.domain}: {domain.support.replaceAll("_", " ")} · {domain.readScope} ·{" "}
-                    {domain.writeScope}
+          {page === "setup" && (
+            <Section title="Connect an agent">
+              {guide.data ? (
+                <>
+                  <Text selectable style={{ color: t.ink, padding: 16 }}>
+                    MCP endpoint: {guide.data.mcpUrl}
                   </Text>
+                  <Text selectable style={{ color: t.ink, padding: 16 }}>
+                    {guide.data.skill.installPrompt}
+                  </Text>
+                  <Text selectable style={{ color: t.secondary, padding: 16 }}>
+                    {guide.data.skill.setupPrompt}
+                  </Text>
+                  {guide.data.domains.map((domain) => (
+                    <Text key={domain.domain} style={{ color: t.secondary, padding: 16 }}>
+                      {domain.domain}: {domain.support.replaceAll("_", " ")} · {domain.readScope} ·{" "}
+                      {domain.writeScope}
+                    </Text>
+                  ))}
+                </>
+              ) : (
+                <State
+                  loading={guide.isPending}
+                  retry={guide.isError ? () => void guide.refetch() : undefined}
+                />
+              )}
+            </Section>
+          )}
+          {page === "connected" &&
+            (directory.data ? (
+              <>
+                {directory.data.accounts.map((account) => (
+                  <Action
+                    key={account.id}
+                    label={`Edit ${account.displayName}`}
+                    disabled={authorityPending}
+                    onPress={() => setEditing(account)}
+                  />
+                ))}
+                {directory.data.accounts.length === 0 && (
+                  <State empty="No agents have connected yet." />
+                )}
+                {directory.data.connections.map((connection) => (
+                  <Connection
+                    key={connection.id}
+                    connection={connection}
+                    directory={directory.data}
+                    refresh={refresh}
+                  />
                 ))}
               </>
             ) : (
               <State
-                loading={guide.isPending}
-                retry={guide.isError ? () => void guide.refetch() : undefined}
+                loading={directory.isPending}
+                retry={directory.isError ? () => void directory.refetch() : undefined}
               />
-            )}
-          </Section>
-          {directory.data ? (
-            <>
-              {directory.data.accounts.map((account) => (
-                <Action
-                  key={account.id}
-                  label={`Edit ${account.displayName}`}
-                  disabled={authorityPending}
-                  onPress={() => setEditing(account)}
-                />
-              ))}
-              {directory.data.accounts.length === 0 && (
-                <State empty="No agents have connected yet." />
-              )}
-              {directory.data.connections.map((connection) => (
-                <Connection
-                  key={connection.id}
-                  connection={connection}
-                  directory={directory.data}
-                  refresh={refresh}
-                />
-              ))}
-            </>
-          ) : (
-            <State
-              loading={directory.isPending}
-              retry={directory.isError ? () => void directory.refetch() : undefined}
-            />
+            ))}
+          {page === "setup" && <AgentSetup />}
+          {page === "reviews" && <AgentWorkItems />}
+          {(page === "access" || page === "policy") && (
+            <Authority page={page} onPendingChange={setAuthorityPending} />
           )}
-          <AgentSetup />
-          <AgentWorkItems />
-          <Authority onPendingChange={setAuthorityPending} />
         </FormBody>
       </View>
     </View>

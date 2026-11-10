@@ -3,7 +3,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MobileDataProvider } from "../tasks/data";
-import { SecuritySettingsScreen } from "./security";
+import {
+  SecurityDeviceScreen,
+  SecurityInvitationCreateScreen,
+  SecurityInvitationsScreen,
+  SecuritySettingsScreen,
+} from "./security";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -14,6 +19,8 @@ vi.mock("@tanstack/react-query", async () => {
   return createRequire(`${process.cwd()}/apps/web/package.json`)("@tanstack/react-query");
 });
 const h = vi.hoisted(() => ({
+  params: { id: "fixture-session" },
+  push: vi.fn(),
   owner: true,
   epoch: 1,
   api: {} as Record<string, unknown>,
@@ -42,6 +49,36 @@ vi.mock("sonner-native", () => ({
   toast: { error: h.error, loading: h.loading, success: h.success, dismiss: h.dismiss },
 }));
 vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../components/forms/use-dirty-dismiss", () => ({ useDirtyDismiss: () => {} }));
+vi.mock("expo-router", () => ({
+  router: { push: h.push },
+  useLocalSearchParams: () => h.params,
+  Stack: { Screen: () => null },
+}));
+vi.mock("../../components/icons", () => ({ Icon: () => null }));
+vi.mock("./settings-row", () => ({
+  SettingsRow: ({
+    label,
+    value,
+    onPress,
+  }: {
+    label: string;
+    value?: string;
+    onPress: () => void;
+  }) => (
+    <button type="button" onClick={onPress}>
+      {label}
+      {value}
+    </button>
+  ),
+  SettingsIdentity: ({ name }: { name: string }) => <div>{name}</div>,
+  SettingsDetailRow: ({ label, value }: { label: string; value: string }) => (
+    <div>
+      {label}
+      {value}
+    </div>
+  ),
+}));
 vi.mock("react-native", () => ({
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
@@ -113,12 +150,8 @@ beforeEach(() => {
   };
 });
 afterEach(cleanup);
-const show = () =>
-  render(
-    <MobileDataProvider>
-      <SecuritySettingsScreen />
-    </MobileDataProvider>,
-  );
+const show = (children: React.ReactNode = <SecuritySettingsScreen />) =>
+  render(<MobileDataProvider>{children}</MobileDataProvider>);
 const confirmLast = async () => {
   const callback = h.confirm.mock.calls.at(-1)?.[2] as () => void;
   await act(async () => callback());
@@ -157,9 +190,9 @@ it("revokes only the confirmed synthetic session and revalidates identity before
       expiresAt: "2026-12-01T12:00:00Z",
     },
   ]);
-  show();
-  await screen.findByText("Unknown device");
-  expect(screen.getByText("IP address unavailable")).toBeTruthy();
+  show(<SecurityDeviceScreen />);
+  await screen.findAllByText("Unknown device");
+  expect(screen.getByText(/IP address unavailable/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Revoke session" }));
   expect(h.revoke).not.toHaveBeenCalled();
   expect(h.confirm.mock.calls.at(-1)?.[1]).toContain("This may be your current session");
@@ -171,8 +204,8 @@ it("revokes only the confirmed synthetic session and revalidates identity before
 });
 
 it("retains invitation corrections on validation and denied creation, then displays only the returned code", async () => {
-  show();
-  await screen.findByText("No invitations yet.");
+  show(<SecurityInvitationCreateScreen />);
+  await screen.findByLabelText("Recipient");
   const email = screen.getByLabelText("Recipient");
   const expiry = screen.getByLabelText("Expires after days");
   fireEvent.change(email, { target: { value: "recipient@nohmi.test" } });
@@ -198,8 +231,8 @@ it("retains invitation corrections on validation and denied creation, then displ
 });
 
 it("omits invitation reads and controls without owner authority, and clears returned codes on a new auth epoch", async () => {
-  const mounted = show();
-  await screen.findByText("No invitations yet.");
+  const mounted = show(<SecurityInvitationCreateScreen />);
+  await screen.findByLabelText("Recipient");
   fireEvent.click(screen.getByRole("button", { name: "Create invitation" }));
   await screen.findByText("synthetic-invite");
   expect(h.create).toHaveBeenCalledWith({ expiresInDays: 14 });
@@ -227,4 +260,83 @@ it("distinguishes read failure from an empty device list and retries through the
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   await screen.findByText("No active sessions returned.");
   expect(h.invitations).not.toHaveBeenCalled();
+});
+
+it("navigates owner invitation list and create child without creating any record", async () => {
+  const view = show();
+  await screen.findByText("No active sessions returned.");
+  fireEvent.click(screen.getByRole("button", { name: "Invitations" }));
+  expect(h.push).toHaveBeenCalledWith("/settings/security/invitations");
+  expect(h.invitations).not.toHaveBeenCalled();
+  view.rerender(
+    <MobileDataProvider>
+      <SecurityInvitationsScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByText("No invitations yet.");
+  fireEvent.click(screen.getByRole("button", { name: "Create invitation" }));
+  expect(h.push).toHaveBeenCalledWith("/settings/security/create-invitation");
+  expect(h.create).not.toHaveBeenCalled();
+});
+it("keeps technical session metadata in its native child and retries a denied device read", async () => {
+  h.sessions.mockRejectedValueOnce(new Error("Device read denied")).mockResolvedValue([
+    {
+      id: "fixture-session",
+      userAgent: "Mozilla/5.0 (iPhone) Safari/604.1",
+      ipAddress: "192.0.2.5",
+      createdAt: "2026-11-01",
+      lastSeenAt: "2026-11-10",
+      expiresAt: "2026-12-01",
+    },
+  ]);
+  const view = show();
+  await screen.findByRole("button", { name: "Retry" });
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await screen.findByRole("button", { name: /Safari on iPhone/ });
+  expect(screen.queryByText(/192.0.2.5/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Safari on iPhone/ }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/settings/security/device",
+    params: { id: "fixture-session" },
+  });
+  view.rerender(
+    <MobileDataProvider>
+      <SecurityDeviceScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByText(/192.0.2.5/);
+  expect(h.revoke).not.toHaveBeenCalled();
+});
+
+it.each([
+  true,
+  false,
+  undefined,
+])("badges current device only with authoritative isCurrent=%s", async (isCurrent) => {
+  h.sessions.mockResolvedValue([
+    {
+      id: "fixture-session",
+      userAgent: "Mozilla/5.0 (iPhone) Safari/604.1",
+      ipAddress: "192.0.2.5",
+      createdAt: "2026-11-01",
+      lastSeenAt: "2026-11-10",
+      expiresAt: "2026-12-01",
+      ...(isCurrent === undefined ? {} : { isCurrent }),
+    },
+  ]);
+  const view = show();
+  await screen.findByRole("button", { name: /Safari on iPhone/ });
+  expect(screen.queryByText(/Current device/) !== null).toBe(isCurrent === true);
+  view.rerender(
+    <MobileDataProvider>
+      <SecurityDeviceScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Revoke session" });
+  expect(screen.queryByText(/Current device/) !== null).toBe(isCurrent === true);
+  fireEvent.click(screen.getByRole("button", { name: "Revoke session" }));
+  expect(h.confirm.mock.calls.at(-1)?.[1]).toContain(
+    isCurrent === true ? "This is your current session" : "This may be your current session",
+  );
+  expect(h.revoke).not.toHaveBeenCalled();
 });

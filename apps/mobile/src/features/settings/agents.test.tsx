@@ -3,9 +3,13 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
-  AgentsSettingsScreen,
+  AgentAccessScreen,
+  AgentPolicyScreen,
+  AgentReviewsScreen,
+  AgentSetupScreen,
   agentIdentityInput,
   agentWorkItemUrl,
+  ConnectedAgentsScreen,
   tokenInput,
   tokenPresets,
 } from "./agents";
@@ -26,6 +30,7 @@ const h = vi.hoisted(() => ({
   api: {} as Record<string, unknown>,
   openURL: vi.fn(),
   errors: new Set<string>(),
+  dirtyGuard: vi.fn(),
   dismiss: undefined as undefined | (() => void),
 }));
 vi.mock("react-native", () => ({
@@ -35,19 +40,28 @@ vi.mock("react-native", () => ({
     <div style={style}>{children}</div>
   ),
 }));
-vi.mock("expo-router", () => ({ Stack: { Screen: () => null } }));
+vi.mock("expo-router", () => ({ router: { push: vi.fn() }, Stack: { Screen: () => null } }));
 vi.mock("../../components/editor-header", () => ({
   editorDismissOptions: ({ onPress }: { onPress: () => void }) => {
     h.dismiss = onPress;
     return {};
   },
 }));
-vi.mock("../../components/forms/use-dirty-dismiss", () => ({ useDirtyDismiss: () => {} }));
+vi.mock("../../components/forms/use-dirty-dismiss", () => ({
+  useDirtyDismiss: (dirty: boolean, pending: boolean) => h.dirtyGuard(dirty, pending),
+}));
 vi.mock("../auth/context", () => ({
   useAuth: () => ({ state: { user: { id: "fixture" } }, session: { epoch: () => 1 } }),
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+}));
+vi.mock("./settings-row", () => ({
+  SettingsRow: ({ label, onPress }: { label: string; onPress: () => void }) => (
+    <button type="button" onClick={onPress}>
+      {label}
+    </button>
+  ),
 }));
 vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
 vi.mock("./data", async () => {
@@ -194,7 +208,7 @@ beforeEach(() => {
   });
 });
 it("requires confirmation before policy broadening and sends the reviewed version", async () => {
-  render(<AgentsSettingsScreen />);
+  render(<AgentPolicyScreen />);
   fireEvent.click(screen.getByLabelText("Allow eligible actions without review"));
   expect(h.updatePolicy).not.toHaveBeenCalled();
   expect(h.run).not.toHaveBeenCalled();
@@ -218,7 +232,7 @@ it("requires a named confirmation before revoking an existing token", () => {
       expiresAt: null,
     },
   ];
-  render(<AgentsSettingsScreen />);
+  render(<AgentAccessScreen />);
   fireEvent.click(screen.getByRole("button", { name: "Revoke Fixture agent" }));
   expect(h.run).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenCalledWith(
@@ -276,34 +290,27 @@ const account = {
 };
 function tokenDraft() {
   h.resources["agent-directory"] = { accounts: [account], connections: [] };
-  render(<AgentsSettingsScreen />);
+  render(<AgentAccessScreen />);
   fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "Limited helper" } });
   fireEvent.click(screen.getByLabelText("tasks:read"));
 }
-it("keeps token drafts mounted when opening and returning from identity editing", () => {
+it("retains token draft across access rerenders and guards native dismissal", () => {
   tokenDraft();
-  fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
-  expect(screen.getByLabelText("Name")).toHaveValue("Helper");
-  expect(screen.getByLabelText("Token name")).not.toBeVisible();
-  act(() => h.dismiss?.());
-  expect(screen.getByLabelText("Token name")).toBeVisible();
+  expect(h.dirtyGuard).toHaveBeenLastCalledWith(true, false);
   expect(screen.getByLabelText("Token name")).toHaveValue("Limited helper");
   expect(screen.getByLabelText("tasks:read")).toBeChecked();
 });
-it("retains the one-time secret across identity editing until explicit acknowledgement", async () => {
+it("retains the one-time secret until explicit acknowledgement and guards native dismissal", async () => {
   h.createToken.mockResolvedValue({ token: "synthetic-token" });
   tokenDraft();
   fireEvent.click(screen.getByRole("button", { name: "Create token" }));
   await act(async () => h.confirm.mock.calls.at(-1)?.[2]());
   await waitFor(() => expect(screen.getByText("synthetic-token")).toBeVisible());
-  fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
-  expect(screen.getByText("synthetic-token")).not.toBeVisible();
-  act(() => h.dismiss?.());
-  expect(screen.getByText("synthetic-token")).toBeVisible();
+  expect(h.dirtyGuard).toHaveBeenLastCalledWith(true, false);
   fireEvent.click(screen.getByRole("button", { name: "I saved the token" }));
   expect(screen.queryByText("synthetic-token")).not.toBeInTheDocument();
 });
-it("blocks identity transitions while a token creation is pending", async () => {
+it("guards native dismissal while token creation is pending", async () => {
   let finish!: (value: { token: string }) => void;
   h.createToken.mockReturnValue(
     new Promise((resolve) => {
@@ -313,9 +320,8 @@ it("blocks identity transitions while a token creation is pending", async () => 
   tokenDraft();
   fireEvent.click(screen.getByRole("button", { name: "Create token" }));
   act(() => h.confirm.mock.calls.at(-1)?.[2]());
-  await waitFor(() => expect(screen.getByRole("button", { name: "Edit Helper" })).toBeDisabled());
-  fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
-  expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+  await waitFor(() => expect(h.dirtyGuard).toHaveBeenLastCalledWith(true, true));
+  expect(screen.getByRole("button", { name: "Create token" })).toBeDisabled();
   await act(async () => finish({ token: "synthetic-token" }));
 });
 it("routes refresh success and cached refresh failure through shared Sonner action feedback", async () => {
@@ -323,7 +329,7 @@ it("routes refresh success and cached refresh failure through shared Sonner acti
     data: { version: 9, reviewBypassEnabled: false },
     error: null,
   });
-  render(<AgentsSettingsScreen />);
+  render(<AgentPolicyScreen />);
   await act(async () =>
     fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" })),
   );
@@ -350,7 +356,7 @@ it("edits an agent identity explicitly and refreshes authoritative directory sta
   h.resources["agent-directory"] = { accounts: [account], connections: [] };
   const update = vi.fn().mockResolvedValue({});
   h.api = { ...h.api, updateAgentAccount: update };
-  render(<AgentsSettingsScreen />);
+  render(<ConnectedAgentsScreen />);
   fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Updated helper" } });
   fireEvent.change(screen.getByLabelText("Account label"), { target: { value: "Work account" } });
@@ -372,7 +378,7 @@ it("retains rejected identity edits and confirms local cancellation before retur
   h.resources["agent-directory"] = { accounts: [account], connections: [] };
   const update = vi.fn().mockRejectedValue(new Error("Denied"));
   h.api = { ...h.api, updateAgentAccount: update };
-  render(<AgentsSettingsScreen />);
+  render(<ConnectedAgentsScreen />);
   fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft helper" } });
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -407,7 +413,7 @@ it("requires confirmation to link or unlink existing connections while displayin
   };
   const link = vi.fn().mockResolvedValue({});
   h.api = { ...h.api, linkAgentAccountConnection: link };
-  const { rerender } = render(<AgentsSettingsScreen />);
+  const { rerender } = render(<ConnectedAgentsScreen />);
   expect(screen.getByText("Granted scopes: tasks:read")).toBeVisible();
   fireEvent.change(screen.getByLabelText("Agent identity"), { target: { value: "agent" } });
   expect(link).not.toHaveBeenCalled();
@@ -431,7 +437,7 @@ it("requires confirmation to link or unlink existing connections while displayin
       },
     ],
   };
-  rerender(<AgentsSettingsScreen />);
+  rerender(<ConnectedAgentsScreen />);
   fireEvent.change(screen.getByLabelText("Agent identity"), { target: { value: "none" } });
   await approve();
   expect(link).toHaveBeenLastCalledWith("connection", { agentAccountId: null });
@@ -476,7 +482,7 @@ it("revokes named token and OAuth grants through confirmed endpoints without exp
   const revokeToken = vi.fn().mockResolvedValue(undefined),
     revokeOAuth = vi.fn().mockResolvedValue(undefined);
   h.api = { ...h.api, deleteAccessToken: revokeToken, revokeOAuthClient: revokeOAuth };
-  render(<AgentsSettingsScreen />);
+  render(<AgentAccessScreen />);
   expect(screen.queryByRole("button", { name: "Revoke Old client" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Revoke Live client" }));
   expect(revokeToken).not.toHaveBeenCalled();
@@ -526,7 +532,7 @@ it("shows actual setup readiness and changes workspace instructions without chan
   });
   h.resources["agent-setup-tasks"] = setup("in_progress");
   h.resources["agent-setup-mail"] = setup("blocked");
-  render(<AgentsSettingsScreen />);
+  render(<AgentSetupScreen />);
   expect(screen.getByText(/Approved guidance version 3/)).toBeVisible();
   expect(screen.getByText("Inspect current scopes")).toBeVisible();
   fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "mail" } });
@@ -573,7 +579,7 @@ it("retains earlier work pages across a later read failure and only hands confir
     return { data: h.resources[key] };
   });
   h.openURL.mockResolvedValue(undefined);
-  render(<AgentsSettingsScreen />);
+  render(<AgentReviewsScreen />);
   expect(screen.getByText(/Could not load: mail/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Load more agent work" }));
   expect(screen.getByText("First summary")).toBeVisible();
@@ -597,14 +603,20 @@ it.each([
 ])("retries the failed %s read without fabricating an empty successful result", async (key) => {
   h.resources[key] = undefined;
   h.errors.add(key);
-  render(<AgentsSettingsScreen />);
+  const Page =
+    key === "agent-directory"
+      ? ConnectedAgentsScreen
+      : key === "agent-guide" || key === "agent-setup-tasks"
+        ? AgentSetupScreen
+        : AgentAccessScreen;
+  render(<Page />);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retry loading" })));
   expect(h.refresh).toHaveBeenCalledWith(key);
 });
 
 it("matches web permission presets, changes only draft scopes, and keeps custom toggles behind explicit grant confirmation", async () => {
   h.createToken.mockResolvedValue({ token: "preset-secret" });
-  render(<AgentsSettingsScreen />);
+  render(<AgentAccessScreen />);
   expect(tokenPresets.map((preset) => preset.name)).toEqual([
     "Mail setup",
     "Calendar & planning",
@@ -643,9 +655,10 @@ it("matches web permission presets, changes only draft scopes, and keeps custom 
 it("retries failed workspace setup status and authoritative web review links without granting scopes", async () => {
   h.errors.add("agent-setup-status");
   h.errors.add("agent-context");
-  render(<AgentsSettingsScreen />);
+  const view = render(<AgentSetupScreen />);
   fireEvent.click(screen.getByText("Retry setup status"));
   await waitFor(() => expect(h.refresh).toHaveBeenCalledWith("agent-setup-status"));
+  view.rerender(<AgentReviewsScreen />);
   fireEvent.click(screen.getByText("Retry web review links"));
   await waitFor(() => expect(h.refresh).toHaveBeenCalledWith("agent-context"));
   expect(h.createToken).not.toHaveBeenCalled();

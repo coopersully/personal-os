@@ -1,4 +1,5 @@
 import { ApiClientError } from "@personal-os/api-client";
+import { isReadFeedbackHeld } from "../../components/read-feedback-scope";
 import { refreshDueAlerts } from "../notifications/events";
 import { allPages } from "./logic";
 
@@ -38,7 +39,8 @@ export function MobileDataProvider({ children }: PropsWithChildren) {
       new QueryClient({
         queryCache: new QueryCache({
           onError: (error, query) => {
-            if (!query.meta?.scopedReadFeedback) toast.error(errorMessage(error));
+            if (!query.meta?.scopedReadFeedback && !isReadFeedbackHeld(query))
+              toast.error(errorMessage(error));
           },
         }),
         defaultOptions: {

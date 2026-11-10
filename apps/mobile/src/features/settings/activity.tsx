@@ -1,50 +1,115 @@
 import type { AuditEvent } from "@personal-os/api-client";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { toast } from "sonner-native";
 import { Icon } from "../../components/icons";
+import { Screen } from "../../components/screen";
 import { useTheme } from "../../theme";
-import { errorMessage } from "../tasks/data";
-import { Action, FormBody, SearchField, Section, State } from "../tasks/ui";
-import { useSettingsAction, useSettingsResource } from "./data";
+import { useAuth } from "../auth/context";
+import { SearchField, Section, State } from "../tasks/ui";
+import { useSettingsRefresh, useSettingsResource } from "./data";
 import { SettingsViewSwitcher } from "./view-switcher";
+
 /** Deliberately omit before/after payloads: they may contain mail, credentials or private record content. */
+const resourceLabels: Record<string, string> = {
+  task: "Task",
+  task_list: "List",
+  task_project: "Project",
+  reminder: "Reminder",
+  calendar_event: "Calendar event",
+  mail_thread: "Email",
+  finance_transaction: "Transaction",
+  user: "Profile",
+  access_token: "Agent token",
+  session: "Device session",
+  connector: "Connection",
+  goal: "Goal",
+  motive: "Motive",
+  ritual_definition: "Ritual",
+  notification_preferences: "Notification policy",
+};
+function resourceLabel(entityType: string) {
+  const words = entityType.replaceAll("_", " ").replaceAll(".", " ");
+  return resourceLabels[entityType] ?? words.charAt(0).toUpperCase() + words.slice(1);
+}
+function actorLabel(actorType: string) {
+  return ["human", "user"].includes(actorType)
+    ? "You"
+    : actorType === "agent"
+      ? "Agent"
+      : actorType.charAt(0).toUpperCase() + actorType.slice(1);
+}
+export function activityTitle(action: string, entityType?: string) {
+  const verbs: Record<string, string> = {
+    create: "created",
+    created: "created",
+    update: "updated",
+    updated: "updated",
+    delete: "deleted",
+    deleted: "deleted",
+    complete: "completed",
+    completed: "completed",
+    restore: "restored",
+    restored: "restored",
+    archive: "archived",
+    archived: "archived",
+    connect: "connected",
+    connected: "connected",
+    disconnect: "disconnected",
+    disconnected: "disconnected",
+    revoke: "revoked",
+    revoked: "revoked",
+    save: "saved",
+    saved: "saved",
+    pause: "paused",
+    paused: "paused",
+  };
+  const parts = action.split(/[._]/);
+  const verb = verbs[parts.at(-1) ?? ""] ?? verbs[parts[0] ?? ""];
+  if (entityType) return `${resourceLabel(entityType)} ${verb ?? "activity"}`;
+  const words = parts.join(" ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 export function activityMatches(event: AuditEvent, search: string, actor: string) {
   return (
     (actor === "all" || event.actorType === actor) &&
-    `${event.action} ${event.entityType} ${event.actorType}`
+    `${event.action} ${event.entityType} ${event.actorType} ${activityTitle(event.action, event.entityType)} ${actorLabel(event.actorType)}`
       .toLowerCase()
       .includes(search.trim().toLowerCase())
   );
 }
-export function activityTitle(action: string) {
-  const words = (action.split(".").at(-1) ?? action).replaceAll("_", " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
 export function ActivitySettingsScreen() {
+  const { state, session } = useAuth();
+  return state.user ? <Activity key={`${state.user.id}:${session.epoch()}`} /> : null;
+}
+function Activity() {
   const t = useTheme();
-  const action = useSettingsAction();
-  const refreshing = useRef(false);
-  const events = useSettingsResource("activity", (api) => api.listActivity(100), true, true);
-  useEffect(() => {
-    if (events.error && !events.data && !refreshing.current)
-      toast.error(errorMessage(events.error));
-  }, [events.error, events.data]);
+  const { state, session } = useAuth();
+  const events = useSettingsResource("activity", (api) => api.listActivity(100));
+  const { refresh } = useSettingsRefresh(
+    [["settings", state.user?.id, session.epoch(), "activity"]],
+    [() => events.refetch({ throwOnError: true })],
+    "Activity refreshed",
+  );
   const [search, setSearch] = useState("");
   const [actor, setActor] = useState("all");
   const [selected, setSelected] = useState<string | null>(null);
   const actors = [...new Set(events.data?.map((event) => event.actorType) ?? [])];
   return (
-    <FormBody>
+    <Screen onRefresh={refresh}>
       <Text style={{ color: t.secondary, marginBottom: 16 }}>
         Recent changes to your account · Latest 100 events
       </Text>
-      <SearchField
-        accessibilityLabel="Search activity"
-        placeholder="task"
-        value={search}
-        onChangeText={setSearch}
-      />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Icon name="search" color={t.secondary} />
+        <View style={{ flex: 1 }}>
+          <SearchField
+            accessibilityLabel="Search activity"
+            placeholder="task"
+            value={search}
+            onChangeText={setSearch}
+          />
+        </View>
+      </View>
       <Section>
         <SettingsViewSwitcher
           value={actor}
@@ -60,21 +125,6 @@ export function ActivitySettingsScreen() {
             })),
           ]}
           onChange={setActor}
-        />
-        <Action
-          label="Refresh activity"
-          disabled={action.pending}
-          onPress={() => {
-            refreshing.current = true;
-            void action
-              .run(async () => {
-                const result = await events.refetch();
-                if (result.error) throw result.error;
-              }, "Activity refreshed")
-              .finally(() => {
-                refreshing.current = false;
-              });
-          }}
         />
       </Section>
       {!events.data && <State loading={events.isPending} retry={() => void events.refetch()} />}
@@ -117,14 +167,11 @@ export function ActivitySettingsScreen() {
                   />
                 </View>
                 <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={{ color: t.ink, fontSize: 16 }}>{activityTitle(event.action)}</Text>
+                  <Text style={{ color: t.ink, fontSize: 16 }}>
+                    {activityTitle(event.action, event.entityType)}
+                  </Text>
                   <Text style={{ color: t.secondary, fontSize: 13 }}>
-                    {["human", "user"].includes(event.actorType)
-                      ? "You"
-                      : event.actorType === "agent"
-                        ? "Agent"
-                        : event.actorType}{" "}
-                    · {event.entityType.replaceAll("_", " ")}
+                    {actorLabel(event.actorType)} · {resourceLabel(event.entityType)}
                   </Text>
                 </View>
                 <Text
@@ -141,6 +188,8 @@ export function ActivitySettingsScreen() {
               {selected === event.id && (
                 <View style={{ padding: 16, gap: 8 }}>
                   {[
+                    ["Action", event.action],
+                    ["Resource type", event.entityType],
                     ["Actor", event.actorType],
                     ["Entity", event.entityId],
                     ["Request", event.requestId],
@@ -163,6 +212,6 @@ export function ActivitySettingsScreen() {
             </View>
           ))}
       </Section>
-    </FormBody>
+    </Screen>
   );
 }

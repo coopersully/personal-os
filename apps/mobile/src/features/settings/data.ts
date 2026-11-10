@@ -1,8 +1,9 @@
 import type { createApiClient } from "@personal-os/api-client";
 import type { UpdateUserInput } from "@personal-os/domain";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryKey, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { toast } from "sonner-native";
+import { holdReadFeedback } from "../../components/read-feedback-scope";
 import { useAuth } from "../auth/context";
 import { errorMessage } from "../tasks/data";
 export type SettingsApi = ReturnType<typeof createApiClient>;
@@ -38,6 +39,7 @@ export function useSettingsAction() {
   const run = async <T>(
     action: (api: SettingsApi) => Promise<T>,
     success?: string | ((value: T) => string),
+    loadingLabel = "Working…",
   ): Promise<{ ok: true; value: T } | { ok: false }> => {
     if (
       busy.current ||
@@ -49,7 +51,7 @@ export function useSettingsAction() {
     busy.current = true;
     setPending(true);
     const captured = scope;
-    const id = success ? toast.loading("Working…") : undefined;
+    const id = success ? toast.loading(loadingLabel) : undefined;
     try {
       const result = await action(session.api());
       if (captured.owner !== current.current.owner || captured.epoch !== session.epoch()) {
@@ -69,6 +71,44 @@ export function useSettingsAction() {
     }
   };
   return { pending, run };
+}
+/** Own only the selected mounted queries until every refresh read has settled. */
+export function useSettingsRefresh(
+  queryKeys: readonly QueryKey[],
+  refetches: readonly (() => Promise<unknown>)[],
+  confirmedMessage: string,
+) {
+  const client = useQueryClient();
+  const action = useSettingsAction();
+  const refresh = () =>
+    action.run(
+      async () => {
+        const queries = queryKeys.flatMap((queryKey) =>
+          client.getQueryCache().findAll({ queryKey, exact: true }),
+        );
+        const release = holdReadFeedback(queries);
+        try {
+          const results = await Promise.allSettled(
+            refetches.map((refetch) => Promise.resolve().then(refetch)),
+          );
+          for (const result of results) {
+            if (result.status === "rejected") throw result.reason;
+            if (
+              result.value &&
+              typeof result.value === "object" &&
+              "error" in result.value &&
+              result.value.error
+            )
+              throw result.value.error;
+          }
+        } finally {
+          release();
+        }
+      },
+      confirmedMessage,
+      "Refreshing…",
+    );
+  return { refresh, pending: action.pending };
 }
 const userQueues = new WeakMap<object, Promise<unknown>>();
 export function useUserSettings() {

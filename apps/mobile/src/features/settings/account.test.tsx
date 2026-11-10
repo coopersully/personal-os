@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { usePageRefresh } from "../../components/page-refresh";
 import { AboutSettingsScreen } from "./about";
 import { ActivitySettingsScreen } from "./activity";
 import { AppearanceSettingsScreen } from "./appearance";
@@ -41,12 +42,39 @@ vi.mock("../auth/context", () => ({
 vi.mock("./data", () => ({
   useUserSettings: () => ({ user: h.user, save: h.save, pending: false }),
   useSettingsAction: () => ({ pending: false, run: h.run }),
+  useSettingsRefresh: (_keys: unknown, reads: (() => Promise<unknown>)[], message: string) => ({
+    pending: false,
+    refresh: () =>
+      h.run(async () => {
+        const results = await Promise.allSettled(reads.map((read) => read()));
+        for (const result of results) if (result.status === "rejected") throw result.reason;
+      }, message),
+  }),
   useSettingsResource: (key: string, _load: unknown, enabled = true) => {
     h.resource(key, enabled);
     return { data: key === "activity" ? h.data : [], isPending: false, refetch: h.refetch };
   },
 }));
 vi.mock("../../components/icons", () => ({ Icon: () => <span /> }));
+vi.mock("../../components/screen", () => ({
+  Screen: ({ children, onRefresh }: PropsWithChildren<{ onRefresh: () => Promise<unknown> }>) => {
+    const refresh = usePageRefresh([], onRefresh);
+    return (
+      <div>
+        <button
+          type="button"
+          aria-label="Pull to refresh activity"
+          aria-busy={refresh.refreshing}
+          onClick={() => void refresh.refresh()}
+        >
+          Native refresh gesture
+        </button>
+        {children}
+      </div>
+    );
+  },
+}));
+
 vi.mock("react-native", () => ({
   AppState: { addEventListener: () => ({ remove: vi.fn() }) },
   Linking: { openURL: vi.fn() },
@@ -59,7 +87,11 @@ vi.mock("react-native", () => ({
     </button>
   ),
 }));
-vi.mock("expo-router", () => ({ router: { back: vi.fn() }, Stack: { Screen: () => null } }));
+vi.mock("expo-router", () => ({
+  usePreventRemove: () => vi.fn(),
+  router: { back: vi.fn() },
+  Stack: { Screen: () => null },
+}));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
 vi.mock("../../components/forms/form-save", () => ({
   FormSave: ({ onPress, disabled }: { onPress: () => void; disabled: boolean }) => (
@@ -208,12 +240,12 @@ it("shows an honest bounded audit history without exposing before/after content"
   ];
   render(<ActivitySettingsScreen />);
   expect(screen.getByText(/Latest 100 events/)).toBeTruthy();
-  fireEvent.click(screen.getByText("Update task"));
+  fireEvent.click(screen.getByText("Task updated"));
   expect(screen.getByText("Request")).toBeTruthy();
   expect(screen.getByText("request")).toBeTruthy();
   expect(screen.queryByText(/private|password|secret/)).toBeNull();
   fireEvent.change(screen.getByLabelText("Search activity"), { target: { value: "calendar" } });
-  expect(screen.queryByText("Update task")).toBeNull();
+  expect(screen.queryByText("Task updated")).toBeNull();
 });
 it("omits owner invitation controls for other users", () => {
   render(<SecuritySettingsScreen />);
@@ -237,7 +269,7 @@ it("renders Profile on Hermes without Intl.supportedValuesOf", () => {
   }
 });
 
-it("refreshes cached Activity with explicit success/error feedback and retains cached events on failure", async () => {
+it("refreshes cached Activity with confirmed feedback and retains cached events with one error on failed pull refresh", async () => {
   h.data = [
     {
       id: "event",
@@ -250,11 +282,18 @@ it("refreshes cached Activity with explicit success/error feedback and retains c
     },
   ];
   render(<ActivitySettingsScreen />);
-  fireEvent.click(screen.getByText("Refresh activity"));
-  await waitFor(() => expect(h.success).toHaveBeenCalledWith("Activity refreshed"));
-  h.refetch.mockResolvedValueOnce({ error: new Error("Refresh denied") });
-  fireEvent.click(screen.getByText("Refresh activity"));
-  await waitFor(() => expect(h.error).toHaveBeenCalledWith("Refresh denied"));
-  expect(screen.getByText("Update task")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Pull to refresh activity" }));
+  await waitFor(() => expect(h.refetch).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Pull to refresh activity" })).toHaveAttribute(
+      "aria-busy",
+      "false",
+    ),
+  );
+  expect(h.success).toHaveBeenCalledWith("Activity refreshed");
+  h.refetch.mockRejectedValueOnce(new Error("Refresh denied"));
+  fireEvent.click(screen.getByRole("button", { name: "Pull to refresh activity" }));
+  await waitFor(() => expect(h.error).toHaveBeenCalledExactlyOnceWith("Refresh denied"));
+  expect(screen.getByText("Task updated")).toBeTruthy();
   expect(screen.queryByText("Refresh denied")).toBeNull();
 });

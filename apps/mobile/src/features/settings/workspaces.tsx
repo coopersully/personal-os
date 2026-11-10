@@ -12,7 +12,7 @@ import {
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FloatingAdd, FormSave } from "../../components/forms/form-save";
@@ -115,11 +115,21 @@ function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings })
   const t = useTheme();
   const action = useSettingsAction();
   const cache = useQueryClient();
+  const { state, session } = useAuth();
+  const owner = state.user?.id;
+  const epoch = session.epoch();
+  const scope = useRef({ owner, epoch });
+  scope.current = { owner, epoch };
+  const edits = useRef<Record<string, number>>({});
   const [draft, setDraft] = useState<Record<string, unknown>>({ ...initial.preferences });
   const queue = useWorkspacePreferenceQueue(initial);
   const [failed, setFailed] = useState(queue.blocked);
   const [recovery, setRecovery] = useState(0);
   const save = (key: string, value: unknown) => {
+    edits.current[key] = (edits.current[key] ?? 0) + 1;
+    const submittedEdits = { ...edits.current };
+    const isCurrentScope = () =>
+      scope.current.owner === owner && scope.current.epoch === epoch && session.epoch() === epoch;
     setDraft((current) => ({ ...current, [key]: value }));
     void action.run(async () => {
       try {
@@ -130,6 +140,25 @@ function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings })
         const next = await queue.save({
           [key]: candidate[key as keyof typeof candidate],
         } as Partial<WorkspacePreferences>);
+        if (!isCurrentScope()) return next;
+        const queryKey = ["settings", owner, epoch, `workspace-${initial.workspace}`];
+        // A pre-write read must not overwrite the accepted server response later.
+        await cache.cancelQueries({ queryKey, exact: true });
+        if (!isCurrentScope()) return next;
+        const accepted = cache.setQueryData<WorkspaceSettings>(queryKey, (current) =>
+          current && current.revision > next.revision ? current : next,
+        );
+        if (accepted) {
+          setDraft((current) => {
+            const reconciled: Record<string, unknown> = { ...accepted.preferences };
+            for (const field of Object.keys(current)) {
+              if ((edits.current[field] ?? 0) > (submittedEdits[field] ?? 0)) {
+                reconciled[field] = current[field];
+              }
+            }
+            return reconciled;
+          });
+        }
         await cache.invalidateQueries({ queryKey: [initial.workspace] });
         return next;
       } catch (error) {

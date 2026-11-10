@@ -72,7 +72,11 @@ vi.mock("../../components/forms/form-save", () => ({
   ),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({
+    invalidateQueries: vi.fn(),
+    cancelQueries: vi.fn(async () => {}),
+    setQueryData: vi.fn(),
+  }),
 }));
 vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
 vi.mock("./finance-settings", () => ({ FinanceConfigurationSettings: () => null }));

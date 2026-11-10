@@ -1002,6 +1002,27 @@
       "when": 1793907300000,
       "tag": "0135_texting_input_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "7",
+      "when": 1794348000000,
+      "tag": "0136_finance_conversation_turns",
+      "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1794348000001,
+      "tag": "0137_native_push",
+      "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1794348000002,
+      "tag": "0138_finance_host_instruction_receipts",
+      "breakpoints": true
     }
   ]
 }

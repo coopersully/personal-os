@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   request: vi.fn(),
   dismiss: vi.fn(),
   clearLast: vi.fn(),
+  lastResponse: vi.fn(async (): Promise<unknown> => null),
   push: vi.fn(),
   loading: vi.fn(() => "finance-toast"),
   success: vi.fn(),
@@ -88,7 +89,7 @@ vi.mock("expo-notifications", () => ({
   ],
   dismissNotificationAsync: h.dismiss,
   clearLastNotificationResponseAsync: h.clearLast,
-  getLastNotificationResponseAsync: async () => null,
+  getLastNotificationResponseAsync: h.lastResponse,
   addNotificationResponseReceivedListener: (listener: (value: unknown) => void) => {
     h.response = listener;
     const remove = vi.fn();
@@ -115,6 +116,8 @@ beforeEach(() => {
   h.epoch = 1;
   h.enabled = false;
   h.removes = [];
+  h.lastResponse.mockResolvedValue(null);
+  h.register.mockResolvedValue({ audience: "audience" });
   h.permission.mockResolvedValue({ granted: true, canAskAgain: true });
 });
 afterEach(cleanup);
@@ -193,4 +196,30 @@ it("routes cold notification responses only after authenticated lookup", async (
     }),
   );
   expect(h.target).toHaveBeenCalledWith("event", "installation");
+});
+
+it("replays a cold tap after offline registration recovers", async () => {
+  h.enabled = true;
+  const response = {
+    notification: {
+      request: {
+        content: {
+          data: { version: 1, kind: "finance", eventId: "event", audience: "audience" },
+        },
+      },
+    },
+  };
+  h.lastResponse.mockResolvedValue(response);
+  h.register.mockRejectedValueOnce(new Error("offline"));
+  render(<Settings />);
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  await act(async () => h.response?.(response));
+  expect(h.clearLast).not.toHaveBeenCalled();
+  expect(h.push).not.toHaveBeenCalled();
+  await act(async () => h.app?.("active"));
+  await waitFor(() => expect(h.push).toHaveBeenCalledTimes(1));
+  expect(h.clearLast).toHaveBeenCalledTimes(1);
+  await act(async () => h.app?.("active"));
+  await waitFor(() => expect(h.register).toHaveBeenCalledTimes(3));
+  expect(h.push).toHaveBeenCalledTimes(1);
 });

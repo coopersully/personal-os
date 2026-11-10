@@ -180,3 +180,15 @@ it("still unregisters when persisting opt-out fails", async () => {
   expect(ports.api.disableNativePushDevice).toHaveBeenCalledWith("installation");
   expect(ports.update).toHaveBeenLastCalledWith(false);
 });
+
+it("clears presented Finance notifications even when remote opt-out fails offline", async () => {
+  const { ports, push } = setup();
+  await push.change(true);
+  vi.mocked(ports.api.disableNativePushDevice).mockRejectedValue(new Error("offline"));
+  await expect(push.change(false)).rejects.toThrow("offline");
+  expect(ports.saveEnabled).toHaveBeenLastCalledWith(false);
+  expect(ports.update).toHaveBeenLastCalledWith(false);
+  expect(ports.clearPresented).toHaveBeenCalledTimes(1);
+  await push.tap(payload);
+  expect(ports.open).not.toHaveBeenCalled();
+});

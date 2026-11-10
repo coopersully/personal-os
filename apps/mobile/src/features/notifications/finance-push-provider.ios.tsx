@@ -145,6 +145,7 @@ export function FinancePushProvider({ children }: PropsWithChildren) {
         .refresh()
         .then(() => {
           reportedSyncFailure = false;
+          return replayResponse();
         })
         .catch(reportSyncFailure);
     };
@@ -152,21 +153,20 @@ export function FinancePushProvider({ children }: PropsWithChildren) {
       if (!financePushPayload(value.notification.request.content.data)) return;
       void next
         .tap(value.notification.request.content.data)
-        .then(() => {
-          if (current()) void Notifications.clearLastNotificationResponseAsync().catch(() => {});
+        .then((consumed) => {
+          if (consumed && current())
+            void Notifications.clearLastNotificationResponseAsync().catch(() => {});
         })
         .catch(() => {
           if (current()) toast.error("Couldn’t open Finance. Open nohmi to review it.");
         });
     };
-    void next
-      .restore()
-      .then(async () => {
-        if (!current()) return;
-        const last = await Notifications.getLastNotificationResponseAsync();
-        if (last && current()) response(last);
-      })
-      .catch(reportSyncFailure);
+    const replayResponse = async () => {
+      if (!current()) return;
+      const last = await Notifications.getLastNotificationResponseAsync();
+      if (last && current()) response(last);
+    };
+    void next.restore().then(replayResponse).catch(reportSyncFailure);
     const app = AppState.addEventListener("change", (value) => {
       if (value === "active") refresh();
     });
@@ -177,6 +177,7 @@ export function FinancePushProvider({ children }: PropsWithChildren) {
           .refresh(token.data)
           .then(() => {
             reportedSyncFailure = false;
+            return replayResponse();
           })
           .catch(reportSyncFailure);
     });

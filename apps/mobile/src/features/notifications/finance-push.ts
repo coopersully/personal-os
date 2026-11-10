@@ -59,9 +59,8 @@ export function createFinancePush(ports: FinancePushPorts) {
     audience = null;
     const installationId = await ports.installationId();
     check();
-    await ports.api.disableNativePushDevice(installationId);
-    check();
-    await ports.clearPresented();
+    // Local cleanup must not wait for, or depend on, a reachable API.
+    await Promise.all([ports.clearPresented(), ports.api.disableNativePushDevice(installationId)]);
     check();
   }
   async function sync(request = false, rotatedToken?: string) {
@@ -137,22 +136,19 @@ export function createFinancePush(ports: FinancePushPorts) {
     tap: (data: unknown) =>
       serial(async () => {
         const payload = financePushPayload(data);
-        if (
-          !current() ||
-          !enabled ||
-          !audience ||
-          !payload ||
-          payload.audience !== audience ||
-          handled.has(payload.eventId)
-        )
-          return;
+        if (!current()) return false;
+        // Keep launch responses available while registration is waiting for connectivity.
+        if (enabled && !audience) return false;
+        if (!enabled || !payload || payload.audience !== audience || handled.has(payload.eventId))
+          return true;
         const installationId = await ports.installationId();
         check();
         const target = await ports.api.getNativePushEvent(payload.eventId, installationId);
         check();
-        if (!enabled || target.audience !== audience || payload.audience !== audience) return;
+        if (!enabled || target.audience !== audience || payload.audience !== audience) return true;
         handled.add(payload.eventId);
         ports.open(target.destination);
+        return true;
       }),
     dispose: () => {
       active = false;

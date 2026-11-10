@@ -94,7 +94,7 @@ vi.mock("../../components/forms/form-save", () => ({
     </button>
   ),
 }));
-vi.mock("../../components/forms/inline-options", () => ({ InlineOptions: () => null }));
+vi.mock("../../components/forms/enum-choice", () => ({ EnumChoice: () => null }));
 beforeEach(() => {
   vi.clearAllMocks();
   h.save.mockResolvedValue(definition);

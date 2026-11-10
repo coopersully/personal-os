@@ -338,76 +338,7 @@ export function Field({
   );
 }
 export type Option = { value: string; label: string; icon?: IconName; color?: string };
-export function Choice({
-  label,
-  value,
-  options,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  options: readonly Option[];
-  onChange: (value: string) => void;
-  disabled?: boolean;
-}) {
-  const t = useTheme();
-  const [expanded, setExpanded] = useState(false);
-  const choose = () => setExpanded(!expanded);
-  return (
-    <View>
-      <Pressable
-        disabled={disabled}
-        accessibilityRole="button"
-        accessibilityState={{
-          disabled: !!disabled,
-          expanded,
-        }}
-        accessibilityLabel={`${label}, ${options.find((option) => option.value === value)?.label ?? "None"}`}
-        onPress={choose}
-        style={{
-          minHeight: 56,
-          alignItems: "center",
-          opacity: disabled ? 0.4 : 1,
-          padding: spacing.lg,
-          flexDirection: "row",
-          justifyContent: "space-between",
-          gap: spacing.md,
-        }}
-      >
-        <Text style={{ color: t.ink, fontSize: 17, flexShrink: 1 }}>{label}</Text>
-        <Text
-          numberOfLines={1}
-          style={{
-            color: workspaceColor(t, "tasks"),
-            fontSize: 17,
-            flexShrink: 1,
-            textAlign: "right",
-            maxWidth: "55%",
-          }}
-        >
-          {options.find((option) => option.value === value)?.label ?? "None"}
-        </Text>
-      </Pressable>
-      {expanded &&
-        options.map((option) => (
-          <Pressable
-            key={option.value}
-            accessibilityRole="radio"
-            accessibilityState={{ checked: option.value === value }}
-            onPress={() => {
-              onChange(option.value);
-              setExpanded(false);
-            }}
-            style={styles.settingRow}
-          >
-            <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{option.label}</Text>
-            {option.value === value && <Icon name="save" color={workspaceColor(t, "tasks")} />}
-          </Pressable>
-        ))}
-    </View>
-  );
-}
+export { EnumChoice as Choice } from "../../components/forms/enum-choice";
 export function State({
   loading,
   retry,

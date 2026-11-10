@@ -87,6 +87,7 @@ function Identity({
           />
           <Field
             label="Account label"
+            icon="profile"
             value={label}
             onChangeText={setLabel}
             maxLength={80}
@@ -95,11 +96,12 @@ function Identity({
           />
           <Choice
             label="Platform"
+            icon="disconnected"
             value={platform}
             disabled={action.pending}
             options={["claude", "codex", "other", "unknown"].map((value) => ({
               value,
-              label: value,
+              label: value.charAt(0).toUpperCase() + value.slice(1),
             }))}
             onChange={(next) => setPlatform(next as AgentAccount["platform"])}
           />
@@ -140,6 +142,7 @@ function Connection({
       </Text>
       <Choice
         label="Agent identity"
+        icon="profile"
         value={connection.agentAccountId ?? "none"}
         disabled={action.pending}
         options={[
@@ -227,6 +230,7 @@ function Authority({ onPendingChange }: { onPendingChange: (pending: boolean) =>
         {policy.data ? (
           <ToggleRow
             label="Allow eligible actions without review"
+            icon="check"
             value={policy.data.reviewBypassEnabled}
             disabled={action.pending}
             onChange={(reviewBypassEnabled) => {
@@ -297,6 +301,7 @@ function Authority({ onPendingChange }: { onPendingChange: (pending: boolean) =>
         </Text>
         <Field
           label="Token name"
+          icon="disconnected"
           value={name}
           onChangeText={setName}
           editable={!action.pending && !secret}
@@ -478,10 +483,12 @@ function AgentSetup() {
     <Section title="Workspace setup">
       <Choice
         label="Workspace"
+        icon="grid"
         value={domain}
         options={["tasks", "mail", "calendar", "finances"].map((value) => ({
           value,
-          label: value,
+          label: value.charAt(0).toUpperCase() + value.slice(1),
+          icon: value as "tasks" | "mail" | "calendar" | "finances",
         }))}
         onChange={(value) => setDomain(value as AssistantDomain)}
       />

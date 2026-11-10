@@ -52,7 +52,7 @@
     "icon": "node scripts/generate-icon.mjs",
     "native:generate": "expo prebuild --platform ios",
     "upload": "node scripts/ios-build.mjs upload",
-    "icons": "tsx scripts/generate-navigation-icons.mjs"
+    "icons": "tsx scripts/generate-navigation-icons.mjs && tsx scripts/generate-enum-menu-icons.mjs"
   },
   "private": true
 }

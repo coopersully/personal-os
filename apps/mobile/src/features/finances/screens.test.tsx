@@ -219,6 +219,7 @@ vi.mock("../../components/glass-surface", () => ({
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
   useAuth: () => ({
     state: { user: { id: h.owner, planningTimezone: h.timezone } },
     session: { api: () => h.api },

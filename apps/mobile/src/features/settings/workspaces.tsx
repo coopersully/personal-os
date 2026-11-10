@@ -18,6 +18,7 @@ import { Text, View } from "react-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
+import type { IconName } from "../../components/icons";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
@@ -70,6 +71,29 @@ const labels: Record<string, string> = {
   financeSpendingPeriod: "Spending period",
   financeTransactionGroup: "Transaction grouping",
 };
+const preferenceIcons: Record<string, IconName> = {
+  includeArchivedInSearch: "archive",
+  mailConversationLayout: "categoryLayers",
+  mailListDensity: "views",
+  mailListWidth: "mail",
+  calendarView: "calendar",
+  showWeekends: "calendar",
+  autoFollowToday: "today",
+  snapToFollow: "today",
+  followSnapSensitivity: "target",
+  weekStartsOn: "calendar",
+  defaultEventDurationMinutes: "clock",
+  financeTransactionView: "receipt",
+  financeManualVisibility: "edit",
+  financeSpendingView: "wallet",
+  financeSpendingGrouping: "categoryLayers",
+  financeSpendingIncludePending: "clock",
+  financeSpendingIncludeUncategorized: "categoryTags",
+  financeSpendingBasis: "wallet",
+  financeSpendingSubtractRefunds: "reply",
+  financeSpendingPeriod: "calendar",
+  financeTransactionGroup: "categoryLayers",
+};
 const choices: Record<string, readonly string[]> = {
   mailConversationLayout: ["split", "single"],
   mailListDensity: ["compact", "comfortable", "expanded"],
@@ -84,7 +108,10 @@ const choices: Record<string, readonly string[]> = {
   financeSpendingPeriod: ["today", "week", "month", "custom"],
   financeTransactionGroup: ["none", "date", "category", "merchant", "direction", "posting"],
 };
-const human = (value: string) => value.replaceAll("_", " ");
+const human = (value: string) => {
+  const words = value.replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
 function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings }) {
   const t = useTheme();
   const action = useSettingsAction();
@@ -139,6 +166,7 @@ function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings })
             return (
               <ToggleRow
                 key={key}
+                icon={preferenceIcons[key]}
                 label={label}
                 value={value}
                 disabled={action.pending || queue.pending || failed || queue.blocked}
@@ -149,16 +177,26 @@ function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings })
             return (
               <Choice
                 key={key}
+                icon={preferenceIcons[key]}
                 label={label}
                 value={String(value)}
                 disabled={action.pending || queue.pending || failed || queue.blocked}
-                options={choices[key].map((value) => ({ value, label: human(value) }))}
+                options={choices[key].map((value) => ({
+                  value,
+                  label:
+                    key === "mailConversationLayout"
+                      ? value === "split"
+                        ? "Split view"
+                        : "Single column"
+                      : human(value),
+                }))}
                 onChange={(next) => save(key, next)}
               />
             );
           return (
             <NumberPreference
               key={`${key}-${recovery}`}
+              icon={preferenceIcons[key]}
               label={label}
               value={Number(value)}
               disabled={action.pending || queue.pending || failed || queue.blocked}
@@ -178,6 +216,7 @@ function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings })
 }
 function NumberPreference({
   label,
+  icon,
   value,
   disabled,
   onSave,
@@ -186,11 +225,13 @@ function NumberPreference({
   value: number;
   disabled: boolean;
   onSave: (value: number) => void;
+  icon?: IconName;
 }) {
   const [text, setText] = useState(String(value));
   return (
     <Field
       label={label}
+      icon={icon}
       value={text}
       editable={!disabled}
       keyboardType="number-pad"
@@ -303,6 +344,7 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
             <>
               <Choice
                 label="Inbox style"
+                icon="inbox"
                 value={String(preferences.inboxStyle ?? "conservative")}
                 options={["signal_only", "balanced", "conservative", "custom"].map((value) => ({
                   value,
@@ -313,6 +355,7 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
               />
               <Choice
                 label="Important email"
+                icon="mail"
                 value={String(preferences.importantEmailHandling ?? "inbox_and_attention")}
                 options={["inbox_only", "inbox_and_attention"].map((value) => ({
                   value,
@@ -325,6 +368,7 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
               />
               <Choice
                 label="Noise handling"
+                icon="mail"
                 value={String(preferences.noiseDisposition ?? "review_only")}
                 options={["review_only", "archive_after_days", "trash_after_days"].map((value) => ({
                   value,
@@ -345,6 +389,7 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
               {preferences.noiseDisposition !== "review_only" && (
                 <Field
                   label="Noise retention (days)"
+                  icon="clock"
                   value={String(preferences.noiseRetentionDays ?? 30)}
                   keyboardType="number-pad"
                   editable={!action.pending}
@@ -360,6 +405,7 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
               {calendarSources.data ? (
                 <Choice
                   label="Default calendar"
+                  icon="calendar"
                   value={String(preferences.defaultCalendarId ?? "")}
                   disabled={action.pending}
                   options={[
@@ -399,6 +445,7 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
               )}
               <ToggleRow
                 label="Create events automatically"
+                icon="calendar"
                 value={preferences.automaticEventCreation === true}
                 disabled={action.pending}
                 onChange={(automaticEventCreation) =>
@@ -430,6 +477,7 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
 
               <Field
                 label="Before-event buffer (minutes)"
+                icon="clock"
                 value={String(preferences.beforeBufferMinutes ?? 0)}
                 keyboardType="number-pad"
                 editable={!action.pending}
@@ -439,6 +487,7 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
               />
               <Field
                 label="After-event buffer (minutes)"
+                icon="clock"
                 value={String(preferences.afterBufferMinutes ?? 0)}
                 keyboardType="number-pad"
                 editable={!action.pending}
@@ -448,6 +497,7 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
               />
               <Choice
                 label="Busy-block privacy"
+                icon="calendar"
                 value={String(preferences.busyBlockPrivacy ?? "busy")}
                 options={["busy", "details"].map((value) => ({ value, label: human(value) }))}
                 onChange={(busyBlockPrivacy) =>
@@ -595,7 +645,7 @@ function MailRules() {
           loading={rules.isPending}
           retry={rules.isError ? () => void rules.refetch() : undefined}
         />
-      )}{" "}
+      )}
       {rules.data?.length === 0 && <State empty="No Mail rules." />}
     </Section>
   );

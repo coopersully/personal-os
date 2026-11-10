@@ -23,7 +23,7 @@ therefore be top-aligned on a project card and vertically centered in a Project 
 - `TitleField` owns the prominent, growing record name/title input.
 - `Field` owns a persistent label and its text input. Stacked labels and multiline notes are one
   field block, not a key/value row; multiline text starts at the top of its input.
-- `Choice` owns short finite choices. `SearchableChoice` owns entity association selection with
+- `Choice` owns finite single-selection choices using native popup menus on iOS. `SearchableChoice` owns entity association selection with
   the canonical entity icon, search, selection, cancellation, and a no-results state.
 - `ToggleRow` owns label/switch presentation. `DateField` owns the native date/time control.
 - `Section`/`Group` own rounded surfaces and inset seams. `FormBody` owns scroll and keyboard insets.
@@ -151,14 +151,23 @@ Reset view returns to the destination's scope and saved defaults. Saving sort/gr
 a distinct explicit action with Sonner feedback and existing revision safeguards.
 
 
-## Inline selection and dates
+## Selection menus and dates
 
-Short finite choices such as Priority expand below the setting row, with labels start-aligned
-and one plain selected check at the trailing edge. Selection collapses the options. Keep selected
-state accessible; do not prefix labels with check characters or center the options. Native
-sort/group menus remain appropriate for toolbar configuration. Searchable entity sheets remain
-appropriate for long collections: use the dictionary icon in the trigger and before each entity
-option, with selection at the trailing edge. An explicit None option is not an entity.
+Finite single-selection settings such as Priority, Mail conversation layout and list density use
+one compact label/value row that opens Apple's native popup menu on iOS. Compose the shared
+`EnumChoice` (also exported as `Choice`); SwiftUI Menu and Picker own Liquid Glass, placement,
+dismissal and adaptive selection marks. Do not expand enum options below the row or recreate the
+system popup with a custom glass sheet. Selection updates the visible value through the existing
+draft/autosave callback; do not change a screen's persistence or confirmation semantics.
+
+Vertically center the semantic field icon, leading label, trailing current value and accessory.
+Use neutral value foreground across workspaces and explicit field metadata for semantic icons;
+entity identities still come from the dictionary. Option labels start-align. Native iOS menus use
+the platform’s leading selection mark; non-iOS selection dialogs keep checks trailing. Preserve
+disabled states and accessible label/current-value names. Non-iOS uses an accessible bounded
+selection dialog. Page/view navigation retains its navigation controls;
+multiselect, date/time and long searchable entity associations retain their appropriate editors.
+This popup contract supersedes the earlier inline-enum expansion guidance.
 
 Use the shared DateField for due dates, reserved time, project targets and date filters. On iPhone,
 expand an Apple native inline calendar and, for timestamps, a native time wheel below the row;
@@ -183,7 +192,7 @@ not an exception to the goal of reversible actions.
 References: Apple's [Pickers](https://developer.apple.com/design/human-interface-guidelines/pickers)
 guidance favors contextual, predictably ordered selection and provides inline date and time
 styles. [Undo and redo](https://developer.apple.com/design/human-interface-guidelines/undo-and-redo)
-asks for predictable reversal and visible results. Our inline short-choice rows and Sonner actions
+asks for predictable reversal and visible results. Our native popup choices and Sonner actions
 are nohmi's application of those principles, not claims of native UIKit menu or undo-manager behavior.
 
 ## Mail compose

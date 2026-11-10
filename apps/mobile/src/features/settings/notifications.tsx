@@ -132,6 +132,7 @@ function NotificationPolicy({
       />
       <Choice
         label="Quiet hours"
+        icon="clock"
         value={draft.quietMode}
         disabled={action.pending}
         options={[
@@ -158,6 +159,7 @@ function NotificationPolicy({
       )}
       <ToggleRow
         label="Repeat reminders"
+        icon="history"
         value={draft.reminderDays !== null}
         disabled={action.pending}
         onChange={(value) => {
@@ -168,6 +170,7 @@ function NotificationPolicy({
       {draft.reminderDays !== null && (
         <Field
           label="Repeat after days"
+          icon="calendar"
           value={reminder}
           placeholder="7"
           keyboardType="number-pad"
@@ -180,6 +183,7 @@ function NotificationPolicy({
       )}
       <Choice
         label="Message detail"
+        icon="mail"
         value={draft.detail}
         disabled={action.pending}
         options={[

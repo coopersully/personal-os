@@ -2420,6 +2420,112 @@ describe.sequential("finance action service", () => {
     }
   });
 
+  it.each([
+    { actorType: "user", bypass: false, suppliedRevision: true },
+    { actorType: "agent", bypass: false, suppliedRevision: true },
+    { actorType: "agent", bypass: true, suppliedRevision: true },
+    { actorType: "user", bypass: false, suppliedRevision: false },
+    { actorType: "agent", bypass: false, suppliedRevision: false },
+    { actorType: "agent", bypass: true, suppliedRevision: false },
+  ] as const)("conflicts on a budget changed during direct revalidation ($actorType, bypass=$bypass, revision=$suppliedRevision)", async ({
+    actorType,
+    bypass,
+    suppliedRevision,
+  }) => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        email: `budget-race-${crypto.randomUUID()}@example.com`,
+        displayName: "Budget race",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Owner fixture missing.");
+    await database.db.insert(executionPolicySettings).values({
+      userId: owner.id,
+      reviewBypassEnabled: bypass,
+    });
+    const [budget] = await database.db
+      .insert(financeBudgets)
+      .values({
+        userId: owner.id,
+        category: "Groceries",
+        month: "2026-08",
+        limit: 100,
+        updatedAt: now,
+      })
+      .returning();
+    if (!budget) throw new Error("Budget fixture missing.");
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const blocker = await database.pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `finance-budget-plan:${owner.id}:${budget.month}`,
+      ]);
+      const outcome = actions
+        .performDirect(
+          "budget_plan",
+          {
+            category: budget.category,
+            month: budget.month,
+            limit: 125,
+            ...(suppliedRevision
+              ? {
+                  budgetId: budget.id,
+                  expectedBudgetUpdatedAt: budget.updatedAt.toISOString(),
+                }
+              : {}),
+          },
+          {
+            principal: actorType === "user" ? user(owner.id) : agent(owner.id),
+            requestId: `budget-race-${crypto.randomUUID()}`,
+          },
+        )
+        .then(
+          (value) => ({ status: "resolved" as const, value }),
+          (error: unknown) => ({ status: "rejected" as const, error }),
+        );
+      // Initial preparation is complete; revalidation is blocked on the month lock.
+      await waitForLockWaiter(database.pool, "pg_advisory_xact_lock");
+      await database.db
+        .update(financeBudgets)
+        .set({
+          limit: 150,
+          updatedAt: new Date(now.getTime() + 1000),
+        })
+        .where(eq(financeBudgets.id, budget.id));
+      await blocker.query("COMMIT");
+      await expect(outcome).resolves.toMatchObject({
+        status: "rejected",
+        error: { code: "conflict" },
+      });
+      await expect(
+        database.db
+          .select({ limit: financeBudgets.limit })
+          .from(financeBudgets)
+          .where(eq(financeBudgets.id, budget.id)),
+      ).resolves.toEqual([{ limit: 150 }]);
+      await expect(
+        database.db
+          .select({ id: financeAgentActionReviews.id })
+          .from(financeAgentActionReviews)
+          .where(eq(financeAgentActionReviews.userId, owner.id)),
+      ).resolves.toEqual([]);
+      await expect(
+        database.db
+          .select({ id: financeMutationRecords.id })
+          .from(financeMutationRecords)
+          .where(eq(financeMutationRecords.userId, owner.id)),
+      ).resolves.toEqual([]);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      blocker.release();
+    }
+  });
+
   it("supersedes a stale category-budget review while direct stale edits still conflict", async () => {
     const [owner] = await database.db
       .insert(users)

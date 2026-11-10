@@ -62,6 +62,28 @@ vi.mock("../auth/context", () => {
   };
 });
 vi.mock("react-native", () => ({
+  Pressable: ({
+    children,
+    onPress,
+    disabled,
+    accessibilityLabel,
+    accessibilityState,
+  }: PropsWithChildren<{
+    onPress: () => void;
+    disabled?: boolean;
+    accessibilityLabel?: string;
+    accessibilityState?: { expanded?: boolean };
+  }>) => (
+    <button
+      type="button"
+      aria-label={accessibilityLabel}
+      aria-expanded={accessibilityState?.expanded}
+      disabled={disabled}
+      onClick={onPress}
+    >
+      {children}
+    </button>
+  ),
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
   Modal: ({
@@ -89,6 +111,7 @@ vi.mock("react-native", () => ({
 vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
+vi.mock("../../components/icons", () => ({ Icon: () => null }));
 vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
 vi.mock("../../components/sheet-header", () => ({
   SheetHeader: ({ title, onClose }: { title: string; onClose: () => void }) => (
@@ -357,6 +380,11 @@ it("reconnects only the current Google services after confirmation and reports b
   h.open.mockRejectedValueOnce(new Error("No browser"));
   show(<ConnectionsSettingsScreen />);
   await screen.findByText("Sample Google");
+  const accountRow = screen.getByRole("button", {
+    name: "Account Sample Google, fixture@nohmi.test",
+  });
+  expect(accountRow).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(accountRow);
   fireEvent.click(screen.getByText("Reconnect in browser"));
   expect(h.api.getGoogleAuthorizationUrl).not.toHaveBeenCalled();
   await confirm();
@@ -378,6 +406,11 @@ it("confirms pending/settled sync outcomes and named disconnect without treating
     .mockResolvedValueOnce({ pending: false, changed: 3 });
   show(<ConnectionsSettingsScreen />);
   await screen.findByText("Sample Google");
+  const accountRow = screen.getByRole("button", {
+    name: "Account Sample Google, fixture@nohmi.test",
+  });
+  expect(accountRow).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(accountRow);
   fireEvent.click(screen.getByText("Sync now"));
   await waitFor(() =>
     expect(h.success).toHaveBeenCalledWith("Sync requested. Check account status for completion.", {
@@ -399,6 +432,11 @@ it("refreshes Google/X status on foreground and returns failed explicit reads th
   h.resources.connectors = [account()];
   show(<ConnectionsSettingsScreen />);
   await screen.findByText("Sample Google");
+  const accountRow = screen.getByRole("button", {
+    name: "Account Sample Google, fixture@nohmi.test",
+  });
+  expect(accountRow).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(accountRow);
   const before = h.api.listConnectors.mock.calls.length;
   act(() => {
     for (const listener of h.listeners) listener("active");
@@ -692,6 +730,12 @@ it("prefills iCloud reconnect identity/services and submits only its chosen capa
   ];
   h.api.connectICloud.mockResolvedValue({ accountId: "icloud", email: "alex@icloud.com" });
   show(<ConnectionsSettingsScreen />);
+  await screen.findByText("Sample Google");
+  const reconnectRow = screen.getByRole("button", {
+    name: "Account Sample Google, alex@icloud.com",
+  });
+  expect(screen.queryByText("Update iCloud credentials")).toBeNull();
+  fireEvent.click(reconnectRow);
   await screen.findByText("Update iCloud credentials");
   fireEvent.click(screen.getByText("Update iCloud credentials"));
   expect((screen.getByLabelText("Apple Account") as HTMLInputElement).value).toBe(
@@ -772,9 +816,11 @@ it("does not expose protected account data after sign-out and tolerates unknown 
   ];
   show(<ConnectionsSettingsScreen />);
   await screen.findByText("Other provider");
+  fireEvent.click(screen.getByRole("button", { name: "Account Other provider, future" }));
   expect(screen.getByText("future")).toBeTruthy();
-  expect(screen.getByText("No enabled services")).toBeTruthy();
-  expect(screen.getByText("reconnect · Reconnect required")).toBeTruthy();
+  expect(screen.getByText("No services enabled")).toBeTruthy();
+  expect(screen.getByText("Needs attention")).toBeTruthy();
+  expect(screen.getByText("Reconnect required")).toBeTruthy();
   expect((screen.getByText("Sync now") as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByText("Reconnect in browser")).toBeNull();
 });

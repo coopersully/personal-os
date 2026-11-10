@@ -34,7 +34,12 @@ vi.mock("expo-router", () => {
     ),
     { Screen: () => null },
   );
-  return { Stack, router: navigation };
+  return {
+    Stack,
+    router: navigation,
+    usePathname: () => "/settings",
+    useGlobalSearchParams: () => ({}),
+  };
 });
 afterEach(cleanup);
 it.each([

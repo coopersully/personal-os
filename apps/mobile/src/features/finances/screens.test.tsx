@@ -2904,6 +2904,8 @@ it.each([
   mount(<FinanceAccountScreen />);
   fireEvent.click(await screen.findByRole("button", { name: /Ownership.*Joint/ }));
   fireEvent.click(screen.getByRole("button", { name: "Joint" }));
+  expect(screen.queryByLabelText("Ownership percentage")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Edit ownership share" }));
   expect(screen.getByLabelText("Ownership percentage")).toHaveProperty("value", expected);
   expect(h.api.updateFinanceAccount).not.toHaveBeenCalled();
 });

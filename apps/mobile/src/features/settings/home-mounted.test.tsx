@@ -21,7 +21,10 @@ vi.mock("expo-router", () => ({
 vi.mock("expo-constants", () => ({
   default: { nativeAppVersion: "2.4.1", nativeBuildVersion: "81" },
 }));
-vi.mock("../../theme", () => ({ useTheme: () => ({ ink: "black", secondary: "gray" }) }));
+vi.mock("../../theme", () => ({
+  useTheme: () => ({ ink: "black", secondary: "gray" }),
+  workspaceColor: () => "#123456",
+}));
 vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-testid={`icon-${name}`} />,
 }));

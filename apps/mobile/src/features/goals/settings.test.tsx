@@ -305,7 +305,7 @@ it("keeps paused goals distinct from completed outcomes and routes selected pers
     pathname: "/settings/goals/edit",
     params: { kind: "goal", id: "paused" },
   });
-  fireEvent.click(screen.getByText("Completed outcomes"));
+  fireEvent.click(screen.getByRole("button", { name: "Completed" }));
   expect(screen.getByText(/Finished goal/)).toBeVisible();
   expect(screen.queryByText(/Paused goal/)).toBeNull();
   fireEvent.click(screen.getByText("Motives"));
@@ -330,7 +330,7 @@ it("distinguishes read failures from empty lists and offers retry", () => {
   h.readState = "success";
   view.rerender(<GoalsSettingsScreen />);
   expect(screen.getByText("No goals yet.")).toBeVisible();
-  fireEvent.click(screen.getByText("Completed outcomes"));
+  fireEvent.click(screen.getByRole("button", { name: "Completed" }));
   expect(screen.getByText("No completed outcomes yet.")).toBeVisible();
 });
 

@@ -6,6 +6,7 @@ import { Pressable, Text, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { EnumChoice } from "../../components/forms/enum-choice";
 import { Icon } from "../../components/icons";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { useTheme, workspaceColor } from "../../theme";
 import { useFinance } from "./data";
 import { financeLabel } from "./presentation";
@@ -95,6 +96,34 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
           }
         }}
       />
+      {!joint && account.ownershipType === "joint" && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Edit ownership share"
+          disabled={pending}
+          onPress={() => {
+            setShare(String(Number(((account.ownershipShare ?? 0) * 100).toFixed(2))));
+            setJoint(true);
+          }}
+          style={{
+            minHeight: 56,
+            padding: 16,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <Icon name="people" color={t.secondary} size={22} />
+          <SettingLabel>Your share</SettingLabel>
+          <SettingValue>
+            {((account.ownershipShare ?? 0) * 100).toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+            })}
+            %
+          </SettingValue>
+          <Icon name="chevron" color={t.secondary} size={16} />
+        </Pressable>
+      )}
       {joint && (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <Text style={{ flex: 1, color: t.ink }}>Your share</Text>

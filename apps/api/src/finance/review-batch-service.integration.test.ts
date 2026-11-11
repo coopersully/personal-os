@@ -28,6 +28,7 @@ import { eq, sql } from "drizzle-orm";
 import type { PoolClient } from "pg";
 import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
+import { validateFinanceCompletionBatch } from "./completion-service.js";
 import { createFinanceReviewBatchService } from "./review-batch-service.js";
 
 const stamp = new Date("2026-10-24T12:00:00.000Z");
@@ -468,6 +469,34 @@ describe.sequential("durable Finance review batches", () => {
       },
     ]);
     if (scenario === "revision") {
+      const stored = required(
+        await database.db.query.financeReviewBatchRuns.findFirst({
+          where: eq(financeReviewBatchRuns.id, run.id),
+        }),
+      );
+      expect(validateFinanceCompletionBatch(f.userId, stored, run.fingerprint).manifest).toEqual(
+        run.decisions,
+      );
+      const { index, transactionId } = required(run.transferCounterparts[0]);
+      const alteredManifest = stored.manifest.map((entry, position) =>
+        position === index
+          ? {
+              decision: required(run.decisions[index]),
+              transferCounterpart: {
+                transactionId,
+                revision: (f.counterpart.contextualRevision + 1n).toString(),
+              },
+            }
+          : entry,
+      );
+      expect(() =>
+        validateFinanceCompletionBatch(
+          f.userId,
+          { ...stored, manifest: alteredManifest },
+          run.fingerprint,
+        ),
+      ).toThrow("The saved Finance batch source is inconsistent.");
+
       await database.db
         .update(financeTransactions)
         .set({ merchant: "Updated source merchant" })

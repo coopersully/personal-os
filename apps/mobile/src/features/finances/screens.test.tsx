@@ -790,6 +790,33 @@ it("reads user and agent messages from the same ongoing conversation", async () 
   await screen.findByText("Here are the recorded changes");
   expect(h.api.getFinanceConversationHistory).toHaveBeenLastCalledWith({ before: "12", limit: 50 });
 });
+it("keeps the latest reply visible while older messages are loading", async () => {
+  h.params = { view: "Conversation" };
+  const message = {
+    id: "new",
+    authorKind: "agent",
+    text: "Latest reply",
+    createdAt: "2026-11-07T12:00:00Z",
+  };
+  const older = Promise.withResolvers<{ messages: (typeof message)[]; nextCursor: null }>();
+  h.api.getFinanceConversationHistory
+    .mockResolvedValueOnce({ messages: [message], nextCursor: "earlier" })
+    .mockReturnValueOnce(older.promise);
+  mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: "Load older messages" }));
+  expect(screen.getByText("Latest reply")).toBeInTheDocument();
+  expect(await screen.findByText("Loading…")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Load older messages" })).toBeNull();
+  await act(async () =>
+    older.resolve({
+      messages: [{ ...message, id: "old", text: "Earlier reply" }],
+      nextCursor: null,
+    }),
+  );
+  expect(await screen.findByText("Earlier reply")).toBeInTheDocument();
+  expect(screen.getByText("Latest reply")).toBeInTheDocument();
+});
+
 it("formats agent reply headings and bullets while preserving literal user text", async () => {
   h.params = { view: "Conversation" };
   h.api.getFinanceConversationHistory.mockResolvedValue({
@@ -1662,6 +1689,215 @@ it("shows the review action before its evidence and links the saved counterpart"
   });
 });
 
+it("distinguishes two named account links and opens the attached transaction", async () => {
+  h.params = { view: "Conversation" };
+  h.api.getFinanceConversationHistory.mockResolvedValue({
+    messages: [
+      {
+        id: "discover-reply",
+        authorKind: "agent",
+        text: "Check whether either Discover account has unique history.",
+        createdAt: "2026-11-09T12:00:00Z",
+        recordRefs: [
+          { kind: "account", id: "discover-1", displayLabel: "Discover · ••1234" },
+          { kind: "account", id: "discover-2", displayLabel: "Discover · ••5678" },
+          { kind: "transaction", id: transaction.id },
+        ],
+      },
+    ],
+    nextCursor: null,
+  });
+  mount(<FinanceAssistantScreen />);
+  for (const [mask, id] of [
+    ["1234", "discover-1"],
+    ["5678", "discover-2"],
+  ]) {
+    fireEvent.click(await screen.findByRole("button", { name: `Discover · ••${mask}` }));
+    expect(h.push).toHaveBeenLastCalledWith({ pathname: "/finance-account", params: { id } });
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Attached transaction" }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-transaction",
+    params: { id: transaction.id },
+  });
+});
+
+const pendingReviewBatch = {
+  id: "batch-1",
+  fingerprint: "saved-manifest",
+  pendingCount: 1,
+  decisions: [
+    {
+      kind: "categorization",
+      transactionId: "transaction-1",
+      rationale: "Categorize the posted purchase.",
+      evidence: "The receipt identifies the merchant.",
+    },
+  ],
+  transferCounterparts: [],
+  outcomes: [],
+};
+
+it.each([
+  "applied",
+  "review_required",
+] as const)("reports the saved %s outcome after applying a reviewed batch", async (status) => {
+  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
+  const saved = {
+    ...pendingReviewBatch,
+    pendingCount: 0,
+    outcomes: [
+      {
+        index: 0,
+        status,
+        error: status === "review_required" ? { message: "The record changed." } : null,
+      },
+    ],
+  };
+  h.api.getFinanceReviewBatch.mockResolvedValue(saved).mockResolvedValueOnce(pendingReviewBatch);
+  h.api.executeFinanceReviewBatch.mockResolvedValue(saved);
+  mount(<FinanceConversationReference />);
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
+  expect(h.api.executeFinanceReviewBatch).toHaveBeenCalledWith(
+    pendingReviewBatch.id,
+    { fingerprint: pendingReviewBatch.fingerprint, limit: 10 },
+    expect.any(AbortSignal),
+  );
+  if (status === "applied") {
+    await waitFor(() =>
+      expect(h.success).toHaveBeenCalledWith("Reviewed batch applied", { id: "save" }),
+    );
+    expect(screen.getByRole("button", { name: /^Categorization Completed/ })).toBeInTheDocument();
+  } else {
+    await waitFor(() =>
+      expect(h.info).toHaveBeenCalledWith("Some decisions need review. Check the saved outcomes.", {
+        id: "save",
+      }),
+    );
+    expect(await screen.findByText(/The record changed/)).toBeInTheDocument();
+    expect(h.success).not.toHaveBeenCalled();
+  }
+  expect(screen.queryByText("Reviewed batch applied")).toBeNull();
+  expect(screen.queryByText("Some decisions need review. Check the saved outcomes.")).toBeNull();
+  expect(screen.queryByRole("button", { name: /Apply reviewed batch/ })).toBeNull();
+});
+
+it("stops an in-flight batch without claiming that its pending decisions applied", async () => {
+  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
+  h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
+  const execution = Promise.withResolvers<void>();
+  h.api.executeFinanceReviewBatch.mockReturnValueOnce(execution.promise);
+  mount(<FinanceConversationReference />);
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Stop applying" }));
+  expect(h.api.executeFinanceReviewBatch.mock.calls[0]?.[2].aborted).toBe(true);
+  await act(async () => execution.resolve());
+  expect(
+    await screen.findByRole("button", { name: "Apply reviewed batch (1)" }),
+  ).toBeInTheDocument();
+  expect(h.dismiss).toHaveBeenCalledWith("save");
+  expect(h.success).not.toHaveBeenCalled();
+});
+
+it("aborts the reviewed batch when leaving its screen and suppresses a late failure", async () => {
+  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
+  h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
+  const execution = Promise.withResolvers<void>();
+  h.api.executeFinanceReviewBatch.mockReturnValueOnce(execution.promise);
+  const view = mount(<FinanceConversationReference />);
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
+  view.unmount();
+  expect(h.api.executeFinanceReviewBatch.mock.calls[0]?.[2].aborted).toBe(true);
+  await act(async () => execution.reject(new Error("Cancelled")));
+  expect(h.dismiss).toHaveBeenCalledWith("save");
+  expect(h.error).not.toHaveBeenCalled();
+  expect(h.api.getFinanceReviewBatch).toHaveBeenCalledTimes(1);
+});
+
+it("keeps an unconfirmed batch resumable and refreshes the saved progress", async () => {
+  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
+  h.api.getFinanceReviewBatch.mockResolvedValue(pendingReviewBatch);
+  h.api.executeFinanceReviewBatch.mockRejectedValueOnce(new Error("Connection lost"));
+  mount(<FinanceConversationReference />);
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Could not confirm progress. Review the saved batch before retrying.",
+      { id: "save" },
+    ),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Apply reviewed batch (1)" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText("Could not confirm progress. Review the saved batch before retrying."),
+  ).toBeNull();
+  expect(h.api.getFinanceReviewBatch).toHaveBeenCalledTimes(2);
+  expect(h.success).not.toHaveBeenCalled();
+});
+
+it("withholds application when a saved transfer lacks its counterpart", async () => {
+  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
+  h.api.getFinanceReviewBatch.mockResolvedValue({
+    ...pendingReviewBatch,
+    decisions: [{ ...pendingReviewBatch.decisions[0], kind: "review", action: "confirm_transfer" }],
+  });
+  mount(<FinanceConversationReference />);
+  await screen.findByText("Ask for a fresh batch with both transfer records attached.");
+  expect(screen.queryByRole("button", { name: /Apply reviewed batch/ })).toBeNull();
+  expect(h.api.executeFinanceReviewBatch).not.toHaveBeenCalled();
+});
+
+it.each([
+  { kind: "review_case", matching: true },
+  { kind: "review_case", matching: false },
+  { kind: "contextual_question", matching: true },
+  { kind: "contextual_question", matching: false },
+] as const)("checks the exact $kind reference (matching: $matching)", async ({
+  kind,
+  matching,
+}) => {
+  h.params = { kind, id: "reference-1" };
+  h.api.getFinanceReviewQueue.mockResolvedValue([
+    { id: matching ? "reference-1" : "other-review", reason: "uncategorized", transaction },
+  ]);
+  h.api.getFinanceContextualQuestion.mockResolvedValue(
+    matching
+      ? {
+          state: "available",
+          question: { prompt: "Was this purchase reimbursed?", transactionId: null },
+        }
+      : { state: "unavailable" },
+  );
+  mount(<FinanceConversationReference />);
+  if (!matching) {
+    await screen.findByText("Reference unavailable.");
+    expect(screen.queryByRole("button", { name: "View transaction" })).toBeNull();
+  } else if (kind === "review_case") {
+    fireEvent.click(await screen.findByRole("button", { name: "View transaction" }));
+    expect(h.push).toHaveBeenCalledWith({
+      pathname: "/finance-transaction",
+      params: { id: transaction.id },
+    });
+  } else {
+    await screen.findByText("Was this purchase reimbursed?");
+    expect(screen.queryByRole("button", { name: "View transaction" })).toBeNull();
+  }
+  if (kind === "review_case")
+    expect(h.api.getFinanceReviewQueue).toHaveBeenCalledWith(1, "reference-1");
+  else expect(h.api.getFinanceContextualQuestion).toHaveBeenCalledWith("reference-1");
+});
+
+it.each([
+  { kind: "budget_plan" },
+  { kind: "budget_plan", id: "plan-1" },
+])("leaves an incomplete budget link unavailable without reading a different proposal", async (params) => {
+  h.params = params.id ? { kind: params.kind, id: params.id } : { kind: params.kind };
+  mount(<FinanceConversationReference />);
+  await screen.findByText("Reference unavailable.");
+  expect(h.api.getFinanceBudget).not.toHaveBeenCalled();
+});
+
 const proposal = {
   id: "version-8",
   planId: "plan-1",
@@ -1725,6 +1961,57 @@ it("holds a stale proposal and shows the canonical approval blocker when the ver
   await screen.findByText("Refresh your financial profile before approving.");
   expect(h.api.approveFinanceBudget).not.toHaveBeenCalled();
 });
+it("keeps goal and reserve amounts readable in a proposal and leaves Chat changes available", async () => {
+  h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
+  h.api.getFinanceBudget.mockResolvedValue({
+    data: {
+      ...proposal,
+      assumptions: [],
+      resources: [{ key: "salary", kind: "income", description: "Monthly salary", amount: 500 }],
+      allocations: [
+        { key: "food-groceries", kind: "spending", legacyCategory: "Groceries", amount: 300 },
+        { key: "emergency-fund", kind: "goal", amount: 100 },
+        { key: "cash-buffer", kind: "reserve", description: "Keep a cash buffer", amount: 100 },
+      ],
+    },
+    approvalReadiness: { ready: true },
+  });
+  mount(<FinanceConversationReference />);
+  await screen.findByText("Groceries");
+  expect(screen.getByText("Monthly salary")).toBeInTheDocument();
+  expect(screen.getByText(/emergency fund/i)).toBeInTheDocument();
+  expect(screen.getByText("Keep a cash buffer")).toBeInTheDocument();
+  expect(screen.getAllByText("$100.00")).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: "Review assumptions" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Ask for changes in Chat" }));
+  expect(h.back).toHaveBeenCalled();
+  expect(h.api.approveFinanceBudget).not.toHaveBeenCalled();
+});
+
+it.each([
+  { id: "other-version", version: 8 },
+  { id: "version-8", version: 9 },
+])("does not announce success for a mismatched approval receipt ($id v$version)", async (receipt) => {
+  h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
+  h.api.getFinanceBudget.mockResolvedValue({ data: proposal, approvalReadiness: { ready: true } });
+  h.api.approveFinanceBudget.mockResolvedValue({
+    data: { ...proposal, ...receipt, status: "active" },
+  });
+  mount(<FinanceConversationReference />);
+  fireEvent.click(await screen.findByRole("button", { name: approveLabel }));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Could not confirm approval. Review the current proposal before retrying.",
+      { id: "save" },
+    ),
+  );
+  expect(h.success).not.toHaveBeenCalled();
+  expect(
+    screen.queryByText("Could not confirm approval. Review the current proposal before retrying."),
+  ).toBeNull();
+  expect(await screen.findByText("November 2026 · v8 · Proposed")).toBeInTheDocument();
+});
+
 it("discards a previous owner's in-flight budget approval feedback", async () => {
   h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
   h.api.getFinanceBudget.mockResolvedValue({ data: proposal, approvalReadiness: { ready: true } });
@@ -1748,6 +2035,27 @@ it("discards a previous owner's in-flight budget approval feedback", async () =>
   await act(async () => finish({ data: { ...proposal, status: "active" } }));
   expect(h.success).not.toHaveBeenCalled();
   expect(h.dismiss).toHaveBeenCalledWith("save");
+});
+
+it("sends a null legacy profile revision and dismisses approval failure after closing the proposal", async () => {
+  h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
+  h.api.getFinanceBudget.mockResolvedValue({
+    data: { ...proposal, profileVersionId: undefined },
+    approvalReadiness: { ready: true },
+  });
+  const result = Promise.withResolvers<unknown>();
+  h.api.approveFinanceBudget.mockReturnValueOnce(result.promise);
+  const view = mount(<FinanceConversationReference />);
+  const approve = await screen.findByRole("button", { name: approveLabel });
+  fireEvent.click(approve);
+  expect(h.api.approveFinanceBudget).toHaveBeenCalledWith(
+    expect.objectContaining({ budgetVersionId: "version-8", expectedProfileVersionId: null }),
+  );
+  view.unmount();
+  await act(async () => result.reject(new Error("Connection lost")));
+  expect(h.dismiss).toHaveBeenCalledWith("save");
+  expect(h.error).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
 });
 
 it("shrinks the chat region above the keyboard and restores it on dismissal", async () => {
@@ -1798,6 +2106,78 @@ it("opens the exact duplicate account comparison on the signed-in web origin", a
       `https://nohmi.example/finances/accounts?accountId=${encodeURIComponent(account.id)}`,
     ),
   );
+});
+
+it.each([
+  "group changed",
+  "connection lost",
+] as const)("withholds the browser handoff when account comparison refresh finds %s", async (reason) => {
+  const { FinanceAccountScreen } = await import("./details");
+  h.params = { id: account.id };
+  const existing = await h.api.listFinanceAccounts();
+  h.api.listFinanceAccounts
+    .mockResolvedValue({
+      ...existing,
+      accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
+    })
+    .mockResolvedValueOnce({
+      ...existing,
+      accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
+    });
+  mount(<FinanceAccountScreen />);
+  const compare = await screen.findByRole("button", { name: /Compare duplicates in browser/ });
+  if (reason === "group changed")
+    h.api.listFinanceAccounts.mockResolvedValue({ ...existing, accountSemantics: undefined });
+  else h.api.listFinanceAccounts.mockRejectedValueOnce(new Error(reason));
+  fireEvent.click(compare);
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith("Could not open this account comparison.", { id: "save" }),
+  );
+  expect(h.openURL).not.toHaveBeenCalled();
+  expect(screen.queryByText("Could not open this account comparison.")).toBeNull();
+});
+
+it("does not open a comparison after its owner leaves the screen", async () => {
+  const { FinanceAccountScreen } = await import("./details");
+  h.params = { id: account.id };
+  const existing = await h.api.listFinanceAccounts();
+  const comparison = {
+    ...existing,
+    accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
+  };
+  h.api.listFinanceAccounts.mockResolvedValue(comparison);
+  const view = mount(<FinanceAccountScreen />);
+  const compare = await screen.findByRole("button", { name: /Compare duplicates in browser/ });
+  const fresh = Promise.withResolvers<typeof comparison>();
+  h.api.listFinanceAccounts.mockReturnValueOnce(fresh.promise);
+  const priorReads = h.api.listFinanceAccounts.mock.calls.length;
+  fireEvent.click(compare);
+  fireEvent.click(compare);
+  expect(h.api.listFinanceAccounts).toHaveBeenCalledTimes(priorReads + 1);
+  view.unmount();
+  await act(async () => fresh.resolve(comparison));
+  await waitFor(() => expect(h.dismiss).toHaveBeenCalledWith("save"));
+  expect(h.openURL).not.toHaveBeenCalled();
+  expect(h.success).not.toHaveBeenCalled();
+});
+
+it("suppresses account comparison success when the browser opens after the screen closes", async () => {
+  const { FinanceAccountScreen } = await import("./details");
+  h.params = { id: account.id };
+  const existing = await h.api.listFinanceAccounts();
+  h.api.listFinanceAccounts.mockResolvedValue({
+    ...existing,
+    accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
+  });
+  const browser = Promise.withResolvers<void>();
+  h.openURL.mockReturnValueOnce(browser.promise);
+  const view = mount(<FinanceAccountScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Compare duplicates in browser/ }));
+  await waitFor(() => expect(h.openURL).toHaveBeenCalledOnce());
+  view.unmount();
+  await act(async () => browser.resolve());
+  expect(h.dismiss).toHaveBeenCalledWith("save");
+  expect(h.success).not.toHaveBeenCalled();
 });
 
 it("opens chat from a transaction with its record attached", async () => {

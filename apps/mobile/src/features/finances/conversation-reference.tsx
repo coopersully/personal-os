@@ -251,15 +251,17 @@ function BatchReference({ id }: { id: string }) {
                 return (
                   <Fragment key={decision.transactionId}>
                     <FinanceRow
-                      title={decision.rationale}
-                      subtitle={`${decision.evidence}${outcome?.error ? `\n${outcome.error.message}` : ""}`}
-                      value={
-                        outcome
-                          ? financeLabel(outcome.status)
-                          : financeLabel(
-                              decision.kind === "review" ? decision.action : decision.kind,
-                            )
-                      }
+                      title={financeLabel(
+                        decision.kind === "review" ? decision.action : decision.kind,
+                      )}
+                      subtitle={[
+                        ...new Set(
+                          [decision.rationale, decision.evidence, outcome?.error?.message]
+                            .map((text) => text?.trim())
+                            .filter(Boolean),
+                        ),
+                      ].join("\n")}
+                      value={outcome ? financeLabel(outcome.status) : undefined}
                       onPress={() =>
                         router.push({
                           pathname: "/finance-transaction",

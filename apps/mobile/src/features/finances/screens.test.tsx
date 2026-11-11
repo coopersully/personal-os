@@ -1600,6 +1600,39 @@ it("opens structured Finance chat references in native details", async () => {
   });
 });
 
+it("shows the review action before its evidence and links the saved counterpart", async () => {
+  const evidence = "Two posted entries show equal and opposite movement between owned accounts.";
+  h.params = { kind: "review_batch", id: "batch-1" };
+  h.api.getFinanceReviewBatch.mockResolvedValue({
+    pendingCount: 0,
+    decisions: [
+      {
+        kind: "review",
+        action: "confirm_transfer",
+        transactionId: "transaction-1",
+        rationale: evidence,
+        evidence,
+      },
+    ],
+    transferCounterparts: [{ index: 0, transactionId: "transaction-2", revision: "1" }],
+    outcomes: [{ index: 0, status: "applied" }],
+  });
+  mount(<FinanceConversationReference />);
+  const action = await screen.findByRole("button", { name: /^Confirm transfer Completed/ });
+  expect(action).toHaveTextContent(evidence);
+  expect(screen.getAllByText(evidence)).toHaveLength(1);
+  fireEvent.click(action);
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-transaction",
+    params: { id: "transaction-1" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "View other transfer leg" }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-transaction",
+    params: { id: "transaction-2" },
+  });
+});
+
 const proposal = {
   id: "version-8",
   planId: "plan-1",

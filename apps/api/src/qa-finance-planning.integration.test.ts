@@ -62,7 +62,7 @@ it("reloads canonical planning fixtures without completing empty, recovery or on
           expect(parsed.resources[0]?.amount).toBe(8250);
           expect(parsed.allocations).toHaveLength(10);
           expect(parsed.balanceDelta).toBe(account.key === "demo-full" ? 0 : 500);
-          expect(parsed.status).toBe(account.key === "demo-full" ? "active" : "incomplete");
+          expect(parsed.status).toBe(account.key === "demo-full" ? "proposed" : "incomplete");
           expect(setup?.completedAt).toEqual(now);
           expect(setup?.automationChoice).toBe("later");
           const bases = await database.db.query.financeCashBalanceBases.findMany({

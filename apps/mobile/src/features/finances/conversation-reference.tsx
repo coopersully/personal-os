@@ -48,6 +48,22 @@ function useMountedReference() {
   return active;
 }
 
+async function refreshReferenceData(
+  active: { current: boolean },
+  reads: Array<() => Promise<{ isError: boolean }>>,
+) {
+  const feedback = toast.loading("Refreshing Finance details…");
+  try {
+    const results = await Promise.all(reads.map((read) => read()));
+    if (results.some((result) => result.isError)) throw new Error("Refresh failed");
+    if (active.current) toast.success("Finance details refreshed", { id: feedback });
+    else toast.dismiss(feedback);
+  } catch {
+    if (active.current) toast.error("Could not refresh Finance details.", { id: feedback });
+    else toast.dismiss(feedback);
+  }
+}
+
 function BudgetReference({ id, versionId }: { id: string; versionId: string }) {
   const { api } = useFinance();
   const query = useFinanceRead(["chat-budget-plan", id], (api) => api.getFinanceBudget(id));
@@ -66,13 +82,32 @@ function BudgetReference({ id, versionId }: { id: string; versionId: string }) {
     (api) => api.getFinanceCategories(),
     !!plan?.allocations.some((item) => item.kind === "spending" && !!item.categoryId),
   );
+  const needsAccounts = !!plan?.allocations.some((item) => item.kind === "debt");
+  const needsGoals = !!plan?.allocations.some((item) => "goalId" in item && !!item.goalId);
+  const accounts = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts(), needsAccounts);
+  const goals = useFinanceRead(["goals"], (api) => api.listFinanceGoals(), needsGoals);
+  const identitiesReady = plan?.allocations.every((item) => {
+    if (item.kind === "debt")
+      return (
+        !accounts.isError &&
+        !accounts.isFetching &&
+        accounts.data?.accounts.some((account) => account.id === item.accountId)
+      );
+    if ("goalId" in item && item.goalId)
+      return (
+        !goals.isError &&
+        !goals.isFetching &&
+        goals.data?.data.some((goal) => goal.id === item.goalId)
+      );
+    return true;
+  });
   const [showAssumptions, setShowAssumptions] = useState(false);
   const active = useMountedReference();
   const approval = useRef<{ version: string; key: string } | null>(null);
   const busy = useRef(false);
   const [pending, setPending] = useState(false);
   async function approve() {
-    if (!plan || busy.current || query.isError || !readiness?.ready) return;
+    if (!plan || busy.current || query.isError || !readiness?.ready || !identitiesReady) return;
     if (approval.current?.version !== plan.id)
       approval.current = { version: plan.id, key: randomUUID() };
     busy.current = true;
@@ -128,27 +163,63 @@ function BudgetReference({ id, versionId }: { id: string; versionId: string }) {
             </Section>
             <Section title="Allocations">
               <Card rows>
-                {plan.allocations.map((allocation) => (
-                  <FinanceRow
-                    key={allocation.key}
-                    title={
-                      allocation.description ??
-                      (allocation.kind === "spending"
-                        ? (categories.data?.find((item) => item.id === allocation.categoryId)
-                            ?.name ?? allocation.legacyCategory)
-                        : undefined) ??
-                      financeLabel(allocation.key.replaceAll("-", " "))
-                    }
-                    icon={
-                      allocation.kind === "spending"
-                        ? categoryIcon(allocation.legacyCategory ?? allocation.key)
-                        : allocation.kind === "goal"
-                          ? "target"
-                          : "wallet"
-                    }
-                    value={formatMoney(allocation.amount, null)}
-                  />
-                ))}
+                {plan.allocations.map((allocation) => {
+                  const account =
+                    allocation.kind === "debt"
+                      ? accounts.data?.accounts.find((item) => item.id === allocation.accountId)
+                      : undefined;
+                  const goal =
+                    "goalId" in allocation && allocation.goalId
+                      ? goals.data?.data.find((item) => item.id === allocation.goalId)
+                      : undefined;
+                  return (
+                    <FinanceRow
+                      key={allocation.key}
+                      onPress={
+                        account
+                          ? () =>
+                              router.push({
+                                pathname: "/finance-account",
+                                params: { id: account.id },
+                              })
+                          : undefined
+                      }
+                      subtitle={
+                        account
+                          ? [
+                              account.institution,
+                              account.accountMask ? `••${account.accountMask}` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                          : goal && Number.isFinite(goal.targetAmount)
+                            ? `Goal target: ${formatMoney(goal.targetAmount, null)}`
+                            : undefined
+                      }
+                      title={
+                        (allocation.kind === "debt"
+                          ? (account?.name ?? "Debt account unavailable")
+                          : "goalId" in allocation && allocation.goalId
+                            ? (goal?.name ?? "Goal unavailable")
+                            : undefined) ??
+                        allocation.description ??
+                        (allocation.kind === "spending"
+                          ? (categories.data?.find((item) => item.id === allocation.categoryId)
+                              ?.name ?? allocation.legacyCategory)
+                          : undefined) ??
+                        financeLabel(allocation.key.replaceAll("-", " "))
+                      }
+                      icon={
+                        allocation.kind === "spending"
+                          ? categoryIcon(allocation.legacyCategory ?? allocation.key)
+                          : allocation.kind === "goal"
+                            ? "target"
+                            : "wallet"
+                      }
+                      value={formatMoney(allocation.amount, null)}
+                    />
+                  );
+                })}
               </Card>
             </Section>
             {plan.assumptions.length ? (
@@ -166,7 +237,27 @@ function BudgetReference({ id, versionId }: { id: string; versionId: string }) {
                   : null}
               </Card>
             ) : null}
-            {readiness?.ready && !query.isError && !query.isFetching && !pending ? (
+            {plan.status === "proposed" && !identitiesReady ? (
+              <FinanceRow
+                title="Refresh linked accounts and goals"
+                subtitle="Confirm the allocation recipients before approving."
+                onPress={
+                  accounts.isFetching || goals.isFetching
+                    ? undefined
+                    : () => {
+                        void refreshReferenceData(active, [
+                          ...(needsAccounts ? [accounts.refetch] : []),
+                          ...(needsGoals ? [goals.refetch] : []),
+                        ]);
+                      }
+                }
+              />
+            ) : null}
+            {readiness?.ready &&
+            identitiesReady &&
+            !query.isError &&
+            !query.isFetching &&
+            !pending ? (
               <Button onPress={() => void approve()}>
                 Approve {month} v{plan.version} · {formatMoney(plan.allocatedTotal, null)}
               </Button>
@@ -192,7 +283,28 @@ function BudgetReference({ id, versionId }: { id: string; versionId: string }) {
 function BatchReference({ id }: { id: string }) {
   const { api } = useFinance();
   const query = useFinanceRead(["chat-review-batch", id], (api) => api.getFinanceReviewBatch(id));
-  const batch = query.data;
+  const [confirmed, setConfirmed] = useState<typeof query.data>();
+  const batch =
+    confirmed && (!query.data || confirmed.pendingCount < query.data.pendingCount)
+      ? confirmed
+      : query.data;
+  const needsCategories = !!batch?.decisions.some(
+    (item) => item.kind === "categorization" || item.action === "recategorize",
+  );
+  const categories = useFinanceRead(
+    ["categories"],
+    (api) => api.getFinanceCategories(),
+    needsCategories,
+  );
+  const categoryBlocker =
+    needsCategories &&
+    (categories.isFetching ||
+      categories.isError ||
+      batch?.decisions.some(
+        (item) =>
+          (item.kind === "categorization" || item.action === "recategorize") &&
+          !categories.data?.some((category) => category.id === item.categoryId),
+      ));
   const active = useMountedReference();
   const blocker = batch ? financeReviewBatchApprovalBlocker(batch) : null;
   const cancellation = useRef<AbortController | null>(null);
@@ -200,7 +312,8 @@ function BatchReference({ id }: { id: string }) {
   const [pending, setPending] = useState(false);
   useEffect(() => () => cancellation.current?.abort(), []);
   async function apply() {
-    if (!batch || busy.current || query.isError || blocker || !active.current) return;
+    if (!batch || busy.current || query.isError || blocker || categoryBlocker || !active.current)
+      return;
     const controller = new AbortController();
     cancellation.current = controller;
     busy.current = true;
@@ -212,6 +325,9 @@ function BatchReference({ id }: { id: string }) {
         batch,
         controller.signal,
         () => active.current,
+        (receipt) => {
+          if (active.current) setConfirmed(receipt);
+        },
       );
       if (!active.current || result.state === "cancelled") toast.dismiss(feedback);
       else if (result.state === "completed")
@@ -222,7 +338,7 @@ function BatchReference({ id }: { id: string }) {
         toast.info("Batch paused. Review the saved outcomes before continuing.", { id: feedback });
     } catch {
       if (active.current && !controller.signal.aborted)
-        toast.error("Could not confirm progress. Review the saved batch before retrying.", {
+        toast.error("Could not finish checking the batch. Review saved progress before retrying.", {
           id: feedback,
         });
       else toast.dismiss(feedback);
@@ -235,7 +351,7 @@ function BatchReference({ id }: { id: string }) {
   }
   return (
     <FinanceScreen title="Grouped reviews">
-      <ReadState query={query}>
+      <ReadState query={confirmed ? { ...query, data: batch } : query}>
         {batch ? (
           <>
             <Copy>
@@ -244,6 +360,10 @@ function BatchReference({ id }: { id: string }) {
             </Copy>
             <Card rows>
               {batch.decisions.map((decision, index) => {
+                const target =
+                  decision.kind === "categorization" || decision.action === "recategorize"
+                    ? categories.data?.find((category) => category.id === decision.categoryId)
+                    : undefined;
                 const outcome = batch.outcomes.find((item) => item.index === index);
                 const counterpart = batch.transferCounterparts?.find(
                   (item) => item.index === index,
@@ -254,9 +374,15 @@ function BatchReference({ id }: { id: string }) {
                       title={financeLabel(
                         decision.kind === "review" ? decision.action : decision.kind,
                       )}
+                      icon={target ? categoryIcon(target.name) : "receipt"}
                       subtitle={[
                         ...new Set(
-                          [decision.rationale, decision.evidence, outcome?.error?.message]
+                          [
+                            target ? `Category: ${target.name}` : undefined,
+                            decision.rationale,
+                            decision.evidence,
+                            outcome?.error?.message,
+                          ]
                             .map((text) => text?.trim())
                             .filter(Boolean),
                         ),
@@ -285,8 +411,20 @@ function BatchReference({ id }: { id: string }) {
               })}
             </Card>
             {blocker ? <Copy>{blocker}</Copy> : null}
+            {categoryBlocker ? (
+              <FinanceRow
+                title="Refresh target categories"
+                subtitle="Confirm each target category before applying."
+                onPress={
+                  categories.isFetching
+                    ? undefined
+                    : () => void refreshReferenceData(active, [categories.refetch])
+                }
+              />
+            ) : null}
             {batch.pendingCount > 0 &&
             !blocker &&
+            !categoryBlocker &&
             !query.isFetching &&
             !query.isError &&
             !pending ? (

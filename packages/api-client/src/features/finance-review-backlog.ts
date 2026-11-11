@@ -84,26 +84,38 @@ export async function applyReviewedFinanceBatch(
   initial: FinanceReviewBatchRun,
   signal: AbortSignal,
   isCurrent: () => boolean,
+  onConfirmed?: (batch: FinanceReviewBatchRun) => void,
 ) {
   let batch = initial;
   for (let chunk = 0; chunk < 10 && batch.pendingCount > 0; chunk++) {
     if (signal.aborted || !isCurrent()) return { state: "cancelled" as const, batch };
     if (financeReviewBatchApprovalBlocker(batch)) return { state: "needs_review" as const, batch };
-    await api.executeFinanceReviewBatch(
+    const receipt = await api.executeFinanceReviewBatch(
       initial.id,
       { fingerprint: initial.fingerprint, limit: 10 },
       signal,
     );
-    if (signal.aborted || !isCurrent()) return { state: "cancelled" as const, batch };
+    if (!isCurrent()) return { state: "cancelled" as const, batch };
+    const receiptConfirmed =
+      receipt?.id === initial.id &&
+      receipt.fingerprint === initial.fingerprint &&
+      receipt.pendingCount < batch.pendingCount;
+    if (receiptConfirmed) onConfirmed?.(receipt);
+    if (signal.aborted)
+      return { state: "cancelled" as const, batch: receiptConfirmed ? receipt : batch };
     const next = await api.getFinanceReviewBatch(initial.id, signal);
+    if (signal.aborted || !isCurrent())
+      return { state: "cancelled" as const, batch: receiptConfirmed ? receipt : batch };
     if (
       next.id !== initial.id ||
       next.fingerprint !== initial.fingerprint ||
-      next.pendingCount >= batch.pendingCount
+      next.pendingCount >= batch.pendingCount ||
+      (receiptConfirmed && next.pendingCount > receipt.pendingCount)
     )
       throw new Error("Batch progress could not be confirmed.");
     const finished = new Set(batch.outcomes.map((item) => item.index));
     batch = next;
+    onConfirmed?.(batch);
     if (next.outcomes.some((item) => !finished.has(item.index) && item.status !== "applied"))
       return { state: "needs_review" as const, batch };
   }

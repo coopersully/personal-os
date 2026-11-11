@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceReviewBatchRun } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -8,6 +9,7 @@ import { FinanceConversationReviewBatch } from "./conversation-review-batch";
 
 const api = vi.hoisted(() => ({
   getFinanceReviewBatch: vi.fn(),
+  getFinanceCategories: vi.fn(),
   executeFinanceReviewBatch: vi.fn(),
 }));
 const toast = vi.hoisted(() => ({
@@ -55,7 +57,10 @@ function mount() {
     </QueryClientProvider>,
   );
 }
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  api.getFinanceCategories.mockResolvedValue([{ id: "category", name: "Groceries" }]);
+});
 it("executes the reviewed manifest in bounded chunks and reads each committed result", async () => {
   const original = preview();
   let saved = original;
@@ -202,4 +207,71 @@ it("retains an earlier exception when the remaining reviewed decisions apply", a
     "Some decisions need review. Check the saved outcomes.",
     expect.anything(),
   );
+});
+
+it("requires the exact category before allowing approval", async () => {
+  api.getFinanceReviewBatch.mockResolvedValue(preview());
+  api.getFinanceCategories
+    .mockResolvedValueOnce([{ id: "other", name: "Groceries" }])
+    .mockRejectedValueOnce(new Error("Offline"));
+  mount();
+  const refresh = await screen.findByRole("button", {
+    name: "Refresh target categories before applying",
+  });
+  await waitFor(() => expect(refresh).toBeEnabled());
+  expect(screen.queryByRole("button", { name: /Apply reviewed batch/ })).toBeNull();
+  fireEvent.click(refresh);
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Could not refresh target categories.", {
+      id: "toast",
+    }),
+  );
+  expect(screen.queryByText("Could not refresh target categories.")).toBeNull();
+  expect(screen.queryByRole("button", { name: /Apply reviewed batch/ })).toBeNull();
+  fireEvent.click(refresh);
+  expect(await screen.findAllByText("Category: Groceries")).toHaveLength(11);
+  expect(screen.getByRole("button", { name: "Apply reviewed batch (11)" })).toBeEnabled();
+  expect(api.executeFinanceReviewBatch).not.toHaveBeenCalled();
+});
+
+it("keeps the confirmed execute receipt when the following and final reads fail", async () => {
+  const original = preview();
+  const saved = {
+    ...original,
+    pendingCount: 10,
+    outcomes: [{ index: 0, status: "applied" }],
+  };
+  api.getFinanceReviewBatch.mockResolvedValueOnce(original).mockRejectedValue(new Error("Offline"));
+  api.executeFinanceReviewBatch.mockResolvedValue(saved);
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (11)" }));
+  expect(await screen.findByText("10 pending · 1 applied")).toBeVisible();
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Could not finish checking the batch. Refresh saved progress before retrying.",
+      { id: "toast" },
+    ),
+  );
+  expect(
+    screen.queryByText(
+      "Could not finish checking the batch. Refresh saved progress before retrying.",
+    ),
+  ).toBeNull();
+  expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+  expect(api.executeFinanceReviewBatch).toHaveBeenCalledOnce();
+});
+
+it("withholds cached outcomes if the current batch is no longer accessible", async () => {
+  const original = preview();
+  const receipt = { ...original, pendingCount: 10, outcomes: [{ index: 0, status: "applied" }] };
+  api.getFinanceReviewBatch
+    .mockResolvedValueOnce(original)
+    .mockRejectedValue(new ApiClientError({ code: "forbidden", status: 403, message: "Denied" }));
+  api.executeFinanceReviewBatch.mockResolvedValue(receipt);
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (11)" }));
+  await screen.findByText("Could not load this review batch.");
+  expect(screen.queryByText(/pending ·/)).toBeNull();
+  expect(screen.queryByText("Category: Groceries")).toBeNull();
+  expect(screen.queryByRole("button", { name: /Apply reviewed batch/ })).toBeNull();
 });

@@ -7,7 +7,7 @@ import { ApiClientError } from "@personal-os/api-client";
 import { resolveWorkspaceSettings } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { type Action, toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FinanceAccountsPage } from "./accounts-page.js";
@@ -1288,6 +1288,56 @@ it("reloads the latest account after a conflict before another edit", async () =
   });
   fireEvent.click(screen.getByRole("button", { name: /Reload/ }));
   await waitFor(() => expect(screen.getByLabelText("Account name")).toHaveValue("New server name"));
+});
+
+it("keeps a deep-linked account draft through the automatic conflict refresh", async () => {
+  const original = await api.listFinanceAccounts();
+  api.updateFinanceAccount.mockImplementationOnce(async () => {
+    api.listFinanceAccounts.mockResolvedValue({
+      ...original,
+      accounts: [{ ...account, name: "Latest server name", updatedAt: "2026-10-06T12:00:00Z" }],
+    });
+    throw new ApiClientError({ code: "conflict", message: "Changed", status: 409 });
+  });
+  mount(<FinanceAccountsPage />, `/finances/accounts?accountId=${encodeURIComponent(account.id)}`);
+  const name = await screen.findByLabelText("Account name");
+  fireEvent.change(name, { target: { value: "My linked draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save account" }));
+  await screen.findByText(/This item changed or is no longer available/);
+  await screen.findByRole("button", { name: "Edit Latest server name", hidden: true });
+  expect(screen.getByLabelText("Account name")).toHaveValue("My linked draft");
+  fireEvent.click(screen.getByRole("button", { name: /Reload/ }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Account name")).toHaveValue("Latest server name"),
+  );
+});
+
+it("opens the new account when a different Chat link replaces an open editor", async () => {
+  function SecondLink() {
+    const navigate = useNavigate();
+    return (
+      <button type="button" onClick={() => navigate("/finances/accounts?accountId=next-account")}>
+        Open second account link
+      </button>
+    );
+  }
+  const original = await api.listFinanceAccounts();
+  api.listFinanceAccounts.mockResolvedValue({
+    ...original,
+    accounts: [account, { ...account, id: "next-account", name: "Second account" }],
+  });
+  mount(
+    <>
+      <SecondLink />
+      <FinanceAccountsPage />
+    </>,
+    `/finances/accounts?accountId=${encodeURIComponent(account.id)}`,
+  );
+  const name = await screen.findByLabelText("Account name");
+  fireEvent.change(name, { target: { value: "First account draft" } });
+  fireEvent.click(screen.getByText("Open second account link"));
+  await waitFor(() => expect(screen.getByLabelText("Account name")).toHaveValue("Second account"));
+  expect(api.updateFinanceAccount).not.toHaveBeenCalled();
 });
 
 // Canonical entry remains reachable regardless of financial snapshot readiness.

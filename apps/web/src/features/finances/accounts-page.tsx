@@ -5,7 +5,7 @@ import type {
   UpdateFinanceAccountInput,
 } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
@@ -79,6 +79,8 @@ export function FinanceAccountsPage() {
     queryFn: () => api.listFinanceAccounts(),
   });
   const [editingAccount, setEditing] = useState<FinanceAccount | null>(null);
+  const [linkedSnapshot, setLinkedSnapshot] = useState<FinanceAccount | null>(null);
+  const reloadGeneration = useRef(0);
   const [comparingAccount, setComparing] = useState<FinanceAccount | null>(null);
   const requestedAccount = !accounts.isError
     ? accounts.data?.accounts.find((account) => account.id === requestedAccountId)
@@ -88,8 +90,19 @@ export function FinanceAccountsPage() {
     accounts.data?.accountSemantics.possibleDuplicateGroups.some((group) =>
       group.accountIds.includes(requestedAccount.id),
     );
-  const comparing = comparingAccount ?? (requestedDuplicates ? requestedAccount : null);
-  const editing = editingAccount ?? (requestedDuplicates ? null : requestedAccount);
+  const linkedEditor = linkedSnapshot?.id === requestedAccountId ? linkedSnapshot : null;
+  const comparing =
+    comparingAccount ?? (!linkedEditor && requestedDuplicates ? requestedAccount : null);
+  const editing = editingAccount ?? linkedEditor ?? (requestedDuplicates ? null : requestedAccount);
+  const editorScope = useRef({ editing, requestedAccountId });
+  editorScope.current = { editing, requestedAccountId };
+  useEffect(() => {
+    if (!requestedAccountId) setLinkedSnapshot(null);
+    else if (requestedAccount && !requestedDuplicates)
+      setLinkedSnapshot((snapshot) =>
+        snapshot?.id === requestedAccountId ? snapshot : requestedAccount,
+      );
+  }, [requestedAccount, requestedAccountId, requestedDuplicates]);
   function clearRequestedAccount() {
     if (!requestedAccountId) return;
     const next = new URLSearchParams(params);
@@ -193,13 +206,25 @@ export function FinanceAccountsPage() {
           account={editing}
           key={`${editing.id}:${editing.updatedAt}`}
           onClose={() => {
+            reloadGeneration.current += 1;
             setEditing(null);
+            setLinkedSnapshot(null);
             clearRequestedAccount();
           }}
           onReload={async () => {
+            const generation = ++reloadGeneration.current;
             const result = await accounts.refetch();
+            if (
+              reloadGeneration.current !== generation ||
+              editorScope.current.editing !== editing ||
+              editorScope.current.requestedAccountId !== requestedAccountId
+            )
+              return;
             const latest = result.data?.accounts.find((item) => item.id === editing.id);
-            if (latest) setEditing(latest);
+            if (!result.isError && latest) {
+              if (editingAccount) setEditing(latest);
+              else setLinkedSnapshot(latest);
+            }
           }}
         />
       ) : null}

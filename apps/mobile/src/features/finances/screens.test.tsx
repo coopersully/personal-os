@@ -1729,6 +1729,7 @@ const pendingReviewBatch = {
   decisions: [
     {
       kind: "categorization",
+      categoryId: "category",
       transactionId: "transaction-1",
       rationale: "Categorize the posted purchase.",
       evidence: "The receipt identifies the merchant.",
@@ -1822,7 +1823,7 @@ it("keeps an unconfirmed batch resumable and refreshes the saved progress", asyn
   fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
   await waitFor(() =>
     expect(h.error).toHaveBeenCalledWith(
-      "Could not confirm progress. Review the saved batch before retrying.",
+      "Could not finish checking the batch. Review saved progress before retrying.",
       { id: "save" },
     ),
   );
@@ -1830,10 +1831,49 @@ it("keeps an unconfirmed batch resumable and refreshes the saved progress", asyn
     await screen.findByRole("button", { name: "Apply reviewed batch (1)" }),
   ).toBeInTheDocument();
   expect(
-    screen.queryByText("Could not confirm progress. Review the saved batch before retrying."),
+    screen.queryByText(
+      "Could not finish checking the batch. Review saved progress before retrying.",
+    ),
   ).toBeNull();
   expect(h.api.getFinanceReviewBatch).toHaveBeenCalledTimes(2);
   expect(h.success).not.toHaveBeenCalled();
+});
+
+it("shows the owned target category and preserves a committed receipt after read failure", async () => {
+  h.params = { kind: "review_batch", id: pendingReviewBatch.id };
+  h.api.getFinanceCategories.mockResolvedValue([]);
+  const saved = {
+    ...pendingReviewBatch,
+    pendingCount: 0,
+    outcomes: [{ index: 0, status: "applied" }],
+  };
+  h.api.getFinanceReviewBatch
+    .mockResolvedValueOnce(pendingReviewBatch)
+    .mockRejectedValue(new Error("Offline"));
+  h.api.executeFinanceReviewBatch.mockResolvedValue(saved);
+  mount(<FinanceConversationReference />);
+  const refresh = await screen.findByRole("button", { name: /Refresh target categories/ });
+  expect(screen.queryByRole("button", { name: /Apply reviewed batch/ })).toBeNull();
+  h.api.getFinanceCategories.mockResolvedValue([{ id: "category", name: "Groceries" }]);
+  fireEvent.click(refresh);
+  expect(await screen.findByText(/Category: Groceries/)).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "Apply reviewed batch (1)" }));
+  expect(
+    await screen.findByRole("button", { name: /^Categorization Completed/ }),
+  ).toBeInTheDocument();
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Could not finish checking the batch. Review saved progress before retrying.",
+      { id: "save" },
+    ),
+  );
+  expect(
+    screen.queryByText(
+      "Could not finish checking the batch. Review saved progress before retrying.",
+    ),
+  ).toBeNull();
+  expect(h.api.executeFinanceReviewBatch).toHaveBeenCalledOnce();
+  expect(h.success).not.toHaveBeenCalledWith("Reviewed batch applied", expect.anything());
 });
 
 it("withholds application when a saved transfer lacks its counterpart", async () => {
@@ -1962,6 +2002,7 @@ it("holds a stale proposal and shows the canonical approval blocker when the ver
   expect(h.api.approveFinanceBudget).not.toHaveBeenCalled();
 });
 it("keeps goal and reserve amounts readable in a proposal and leaves Chat changes available", async () => {
+  h.api.listFinanceGoals.mockResolvedValue({ data: [{ id: "goal", name: "Emergency fund" }] });
   h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
   h.api.getFinanceBudget.mockResolvedValue({
     data: {
@@ -1970,7 +2011,13 @@ it("keeps goal and reserve amounts readable in a proposal and leaves Chat change
       resources: [{ key: "salary", kind: "income", description: "Monthly salary", amount: 500 }],
       allocations: [
         { key: "food-groceries", kind: "spending", legacyCategory: "Groceries", amount: 300 },
-        { key: "emergency-fund", kind: "goal", amount: 100 },
+        {
+          key: "emergency-fund",
+          kind: "goal",
+          goalId: "goal",
+          description: "A generic goal",
+          amount: 100,
+        },
         { key: "cash-buffer", kind: "reserve", description: "Keep a cash buffer", amount: 100 },
       ],
     },
@@ -1979,7 +2026,7 @@ it("keeps goal and reserve amounts readable in a proposal and leaves Chat change
   mount(<FinanceConversationReference />);
   await screen.findByText("Groceries");
   expect(screen.getByText("Monthly salary")).toBeInTheDocument();
-  expect(screen.getByText(/emergency fund/i)).toBeInTheDocument();
+  expect(await screen.findByText(/emergency fund/i)).toBeInTheDocument();
   expect(screen.getByText("Keep a cash buffer")).toBeInTheDocument();
   expect(screen.getAllByText("$100.00")).toHaveLength(2);
   expect(screen.queryByRole("button", { name: "Review assumptions" })).toBeNull();
@@ -2010,6 +2057,54 @@ it.each([
     screen.queryByText("Could not confirm approval. Review the current proposal before retrying."),
   ).toBeNull();
   expect(await screen.findByText("November 2026 · v8 · Proposed")).toBeInTheDocument();
+});
+
+it("requires exact account and goal identities before allowing approval", async () => {
+  h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
+  h.api.getFinanceBudget.mockResolvedValue({
+    data: {
+      ...proposal,
+      allocations: [
+        {
+          key: "debt",
+          kind: "debt",
+          accountId: account.id,
+          amount: 300,
+          description: "Generic debt",
+        },
+        {
+          key: "goal",
+          kind: "goal",
+          goalId: "goal-1",
+          amount: 200,
+          description: "Generic savings",
+        },
+      ],
+    },
+    approvalReadiness: { ready: true },
+  });
+  h.api.listFinanceGoals.mockResolvedValue({ data: [] });
+  mount(<FinanceConversationReference />);
+  const refresh = await screen.findByRole("button", { name: /Refresh linked accounts and goals/ });
+  expect(screen.queryByRole("button", { name: approveLabel })).toBeNull();
+  expect(screen.queryByText("Generic debt")).toBeNull();
+  h.api.listFinanceGoals.mockRejectedValueOnce(new Error("Offline"));
+  fireEvent.click(refresh);
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith("Could not refresh Finance details.", { id: "save" }),
+  );
+  expect(screen.queryByText("Could not refresh Finance details.")).toBeNull();
+  expect(screen.queryByRole("button", { name: approveLabel })).toBeNull();
+  h.api.listFinanceGoals.mockResolvedValue({
+    data: [{ id: "goal-1", name: "Family reserve", targetAmount: 1000 }],
+  });
+  fireEvent.click(await screen.findByRole("button", { name: /Refresh linked accounts and goals/ }));
+  expect(await screen.findByText("Family reserve")).toBeInTheDocument();
+  expect(screen.getByText("Goal target: $1,000.00")).toBeInTheDocument();
+  const debt = await screen.findByRole("button", { name: new RegExp(account.name) });
+  fireEvent.click(debt);
+  expect(h.push).toHaveBeenCalledWith({ pathname: "/finance-account", params: { id: account.id } });
+  expect(await screen.findByRole("button", { name: approveLabel })).toBeEnabled();
 });
 
 it("discards a previous owner's in-flight budget approval feedback", async () => {

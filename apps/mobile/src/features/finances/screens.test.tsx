@@ -790,6 +790,35 @@ it("reads user and agent messages from the same ongoing conversation", async () 
   await screen.findByText("Here are the recorded changes");
   expect(h.api.getFinanceConversationHistory).toHaveBeenLastCalledWith({ before: "12", limit: 50 });
 });
+it("formats agent reply headings and bullets while preserving literal user text", async () => {
+  h.params = { view: "Conversation" };
+  h.api.getFinanceConversationHistory.mockResolvedValue({
+    messages: [
+      {
+        id: "agent",
+        authorKind: "agent",
+        text: "**Budget proposal:** November\n\n- Check the total\n* Review the evidence",
+        createdAt: "2026-11-07T12:00:00Z",
+        recordRefs: [],
+      },
+      {
+        id: "user",
+        authorKind: "user",
+        text: "**Keep this literal**",
+        createdAt: "2026-11-07T12:01:00Z",
+        recordRefs: [],
+      },
+    ],
+    nextCursor: null,
+  });
+  mount(<FinanceAssistantScreen />);
+  const heading = await screen.findByText("Budget proposal:");
+  expect(heading.parentElement?.textContent).toBe(
+    "Budget proposal: November\n\n• Check the total\n• Review the evidence",
+  );
+  expect(screen.getByText("**Keep this literal**")).toBeInTheDocument();
+});
+
 it("keeps a draft on stale-revision conflicts and reports recovery through Sonner", async () => {
   const { ApiClientError } = await import("@personal-os/api-client");
   h.api.updateFinanceTransaction.mockRejectedValue(

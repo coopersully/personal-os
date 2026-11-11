@@ -16,6 +16,25 @@ const referenceLabels = {
   contextual_question: "View question",
 } as const;
 
+/** Render the agent's supported formatting as native text. Record references own navigation. */
+function agentMessageText(text: string) {
+  const content = text.replace(/^([ \t]*)[-*][ \t]+(?=\S)/gm, "$1• ");
+  const spans = [];
+  let cursor = 0;
+  for (const match of content.matchAll(/\*\*([^*\r\n]+)\*\*/g)) {
+    const start = match.index;
+    spans.push(content.slice(cursor, start));
+    spans.push(
+      <Text key={start} style={{ fontWeight: "700" }}>
+        {match[1]}
+      </Text>,
+    );
+    cursor = start + match[0].length;
+  }
+  spans.push(content.slice(cursor));
+  return spans;
+}
+
 /** The transcript scrolls independently; composer and page controls never join its content. */
 export function Conversation() {
   const { api, owner } = useFinance();
@@ -150,7 +169,7 @@ export function Conversation() {
                       }}
                     >
                       <Text selectable style={{ color: t.ink, fontSize: 16, lineHeight: 23 }}>
-                        {message.text}
+                        {mine ? message.text : agentMessageText(message.text)}
                       </Text>
                       {message.recordRefs?.map((ref) => (
                         <FinanceRow

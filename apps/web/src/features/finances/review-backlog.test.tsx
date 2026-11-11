@@ -113,6 +113,7 @@ function batch(): FinanceReviewBatchRun {
     createdAt: now,
     updatedAt: now,
     outcomes: [],
+    transferCounterparts: [],
     decisions: [
       {
         kind: "categorization",

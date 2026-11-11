@@ -3389,7 +3389,8 @@ export function createFinanceService({
           action: options.auditAction ?? "finance.transaction_categorized",
           after: {
             ...transactionAuditSnapshot(after),
-            ...(exactTransferReviewExecution && batchScope?.transferCounterpart
+            ...(options.auditAction === "finance.transfer_confirmed" &&
+            batchScope?.transferCounterpart
               ? {
                   confirmedTransferPair: {
                     transactionRevision: updated.contextualRevision.toString(),

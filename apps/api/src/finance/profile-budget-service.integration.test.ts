@@ -54,7 +54,7 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await container.stop();
   });
 
-  it("inspects a synthetic v7 savings/buffer proposal without writes, then recovers a changed profile and approves", async () => {
+  it("revises an approved October v7 into an idempotent November proposal and requires exact approval", async () => {
     const [owner] = await database.db
       .insert(users)
       .values({
@@ -138,12 +138,34 @@ describe.sequential("Finance profile and budget lifecycle", () => {
       profileVersionId: profile.data.id,
     });
     expect(await service.approveFinanceBudget(decision, context)).toEqual(v7Active);
-    proposal = (
-      await service.reviseFinanceBudget(
-        { ...input, planId: proposal.planId, expectedVersion: 7, idempotencyKey: "readiness-v8" },
+    const novemberInput = {
+      ...input,
+      planId: proposal.planId,
+      effectiveFrom: "2026-11",
+      expectedVersion: 7,
+      assumptions: ["November savings target was confirmed at 2,300."],
+      allocations: [
+        { key: "Savings", kind: "savings" as const, amount: 2300 },
+        { key: "Buffer", kind: "buffer" as const, amount: 700 },
+      ],
+      idempotencyKey: "readiness-v8",
+    };
+    await expect(
+      service.reviseFinanceBudget(
+        { ...novemberInput, expectedVersion: 6, idempotencyKey: "readiness-stale-revision" },
         context,
-      )
-    ).data;
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const novemberDraft = await service.reviseFinanceBudget(novemberInput, context);
+    expect(await service.reviseFinanceBudget(novemberInput, context)).toEqual(novemberDraft);
+    proposal = novemberDraft.data;
+    expect(proposal).toMatchObject({
+      effectiveFrom: "2026-11",
+      version: 8,
+      status: "proposed",
+      assumptions: novemberInput.assumptions,
+      allocations: novemberInput.allocations.map((item) => expect.objectContaining(item)),
+    });
     const staleDecision = {
       ...decision,
       budgetVersionId: proposal.id,
@@ -167,7 +189,7 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     });
     const revised = (
       await service.reviseFinanceBudget(
-        { ...input, planId: proposal.planId, expectedVersion: 8, idempotencyKey: "readiness-v9" },
+        { ...novemberInput, expectedVersion: 8, idempotencyKey: "readiness-v9" },
         context,
       )
     ).data;
@@ -180,7 +202,12 @@ describe.sequential("Finance profile and budget lifecycle", () => {
       idempotencyKey: "readiness-current",
     };
     const active = await service.approveFinanceBudget(approval, context);
-    expect(active.data.status).toBe("active");
+    expect(active.data).toMatchObject({ effectiveFrom: "2026-11", status: "active" });
+    expect(
+      await database.db.query.financeBudgetVersions.findFirst({
+        where: eq(financeBudgetVersions.id, v7Active.data.id),
+      }),
+    ).toMatchObject({ effectiveFrom: "2026-10", status: "active" });
     expect(await service.approveFinanceBudget(approval, context)).toEqual(active);
     expect(
       (await service.getFinanceBudget(owner.id, proposal.planId)).approvalReadiness,

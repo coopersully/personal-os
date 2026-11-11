@@ -19,6 +19,7 @@ import {
   type FinanceReviewBatchOutcome,
   type FinanceReviewBatchRun,
   financeMaintenanceQualificationSchema,
+  financeReviewBatchCounterpartSchema,
   financeReviewBatchDecisionSchema,
   financeReviewBatchOutcomeSchema,
   idSchema,
@@ -29,6 +30,7 @@ import {
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool, PoolClient, QueryConfig, QueryResultRow } from "pg";
+import { z } from "zod";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { type createFinanceService, isProviderTransfer } from "../finance-service.js";
@@ -49,14 +51,23 @@ type Finance = Pick<
   "resolveReview" | "applyCategorizations"
 >;
 
+const manifestItemSchema = z.strictObject({
+  decision: financeReviewBatchDecisionSchema,
+  transferCounterpart: financeReviewBatchCounterpartSchema.optional(),
+});
 function manifest(row: Row) {
-  return row.manifest.map((item) => financeReviewBatchDecisionSchema.parse(item));
+  return row.manifest.map((item) =>
+    typeof item === "object" && item !== null && "decision" in item
+      ? manifestItemSchema.parse(item)
+      : { decision: financeReviewBatchDecisionSchema.parse(item), transferCounterpart: undefined },
+  );
 }
 function outcomes(row: Row) {
   return row.outcomes.map((item) => financeReviewBatchOutcomeSchema.parse(item));
 }
 function present(row: Row): FinanceReviewBatchRun {
-  const decisions = manifest(row);
+  const items = manifest(row);
+  const decisions = items.map(({ decision }) => decision);
   const receipts = outcomes(row);
   const pendingCount = decisions.length - receipts.length;
   return {
@@ -64,6 +75,9 @@ function present(row: Row): FinanceReviewBatchRun {
     fingerprint: row.fingerprint,
     idempotencyKey: row.idempotencyKey,
     decisions,
+    transferCounterparts: items.flatMap(({ transferCounterpart }, index) =>
+      transferCounterpart ? [{ index, ...transferCounterpart }] : [],
+    ),
     outcomes: receipts,
     pendingCount,
     status:
@@ -572,7 +586,6 @@ export function createFinanceReviewBatchService({
     },
     async preview(raw: unknown, context: Context): Promise<FinanceReviewBatchRun> {
       const input = previewFinanceReviewBatchInputSchema.parse(raw);
-      const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify(input.decisions)).digest("hex")}`;
       return db.transaction(async (tx) => {
         await authorize(tx, context, "write");
         const [existing] = await tx
@@ -587,21 +600,28 @@ export function createFinanceReviewBatchService({
           .limit(1);
         if (existing) {
           const row = await find(tx, existing.id, context);
-          if (row.fingerprint !== fingerprint)
+          if (
+            JSON.stringify(manifest(row).map(({ decision }) => decision)) !==
+            JSON.stringify(input.decisions)
+          )
             throw new AppError(
               "conflict",
               "That idempotency key already identifies a different manifest.",
             );
           return present(row);
         }
-        for (const decision of input.decisions)
-          await validate(
+        const items: z.infer<typeof manifestItemSchema>[] = [];
+        for (const decision of input.decisions) {
+          const checked = await validate(
             tx,
             decision,
             context.principal.userId,
             false,
             context.principal.actorType === "agent",
           );
+          items.push({ decision, transferCounterpart: checked?.transferCounterpart });
+        }
+        const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify(items)).digest("hex")}`;
         const [row] = await tx
           .insert(financeReviewBatchRuns)
           .values({
@@ -611,7 +631,7 @@ export function createFinanceReviewBatchService({
             authorizationConnectionId: context.principal.authorizationConnectionId ?? null,
             idempotencyKey: input.idempotencyKey,
             fingerprint,
-            manifest: input.decisions,
+            manifest: items,
             createdAt: now(),
             updatedAt: now(),
           })
@@ -818,12 +838,13 @@ export function createFinanceReviewBatchService({
                 "conflict",
                 "Execution must accept the exact preview fingerprint.",
               );
-            const decisions = manifest(row);
+            const items = manifest(row);
             const receipts = outcomes(row);
             const completed = new Set(receipts.map((item) => item.index));
-            const index = decisions.findIndex((_, index) => !completed.has(index));
-            const decision = decisions[index];
-            if (!decision) return { row, progressed: false };
+            const index = items.findIndex((_, index) => !completed.has(index));
+            const item = items[index];
+            if (!item) return { row, progressed: false };
+            const { decision, transferCounterpart } = item;
             check();
             let outcome: FinanceReviewBatchOutcome;
             try {
@@ -835,8 +856,41 @@ export function createFinanceReviewBatchService({
                     decision,
                     context.principal.userId,
                     true,
-                    context.principal.actorType === "agent",
+                    row.actorType === "agent",
                   );
+                  const currentCounterpart = transferReview?.transferCounterpart;
+                  if (currentCounterpart || transferCounterpart) {
+                    const matchingId =
+                      currentCounterpart &&
+                      transferCounterpart &&
+                      currentCounterpart.transactionId === transferCounterpart.transactionId;
+                    // The only allowed advance is the first leg of this exact reciprocal pair
+                    // committed by this same run. validate() also checked the writer's pair audit.
+                    const advancedByThisRun =
+                      matchingId &&
+                      receipts.some((receipt) => {
+                        const prior = items[receipt.index];
+                        return (
+                          receipt.status === "applied" &&
+                          receipt.appliedTransferRevision === currentCounterpart.revision &&
+                          receipt.transactionId === transferCounterpart.transactionId &&
+                          prior?.decision.expectedTransactionRevision ===
+                            transferCounterpart.revision &&
+                          prior.transferCounterpart?.transactionId === decision.transactionId &&
+                          prior.transferCounterpart.revision ===
+                            decision.expectedTransactionRevision
+                        );
+                      });
+                    if (
+                      !matchingId ||
+                      (currentCounterpart.revision !== transferCounterpart.revision &&
+                        !advancedByThisRun)
+                    )
+                      throw new AppError(
+                        "conflict",
+                        "The transfer counterpart changed or was not bound; prepare a new preview.",
+                      );
+                  }
                   check();
                   // Deliberately reconstruct context: internal prepared-action/maintenance capabilities
                   // must never be inherited from a batch caller or persisted preview.
@@ -846,9 +900,7 @@ export function createFinanceReviewBatchService({
                     financeReviewBatchScope: {
                       transactionId: decision.transactionId,
                       transferReview: transferReview?.transferReview === true,
-                      ...(transferReview?.transferCounterpart
-                        ? { transferCounterpart: transferReview.transferCounterpart }
-                        : {}),
+                      ...(currentCounterpart ? { transferCounterpart: currentCounterpart } : {}),
                       reviewId: decision.kind === "review" ? decision.reviewId : null,
                     },
                   };
@@ -879,9 +931,29 @@ export function createFinanceReviewBatchService({
                       );
                     status = result.applied ? "applied" : "review_required";
                   }
+                  let appliedTransferRevision: string | undefined;
+                  if (status === "applied" && currentCounterpart) {
+                    const [updated] = await itemTx
+                      .select({ revision: financeTransactions.contextualRevision })
+                      .from(financeTransactions)
+                      .where(
+                        and(
+                          eq(financeTransactions.id, decision.transactionId),
+                          eq(financeTransactions.userId, context.principal.userId),
+                        ),
+                      )
+                      .limit(1);
+                    if (!updated)
+                      throw new AppError(
+                        "internal_error",
+                        "The applied transfer revision is missing.",
+                      );
+                    appliedTransferRevision = updated.revision.toString();
+                  }
                   check();
                   return {
                     index,
+                    ...(appliedTransferRevision ? { appliedTransferRevision } : {}),
                     transactionId: decision.transactionId,
                     status,
                     error: null,

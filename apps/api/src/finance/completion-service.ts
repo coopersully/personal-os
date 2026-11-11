@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   answerFinanceReviewInputSchema,
   financeMonthSchema,
+  financeReviewBatchCounterpartSchema,
   financeReviewBatchDecisionSchema,
   financeReviewBatchOutcomeSchema,
   financeReviewResolutionSchema,
@@ -178,6 +179,10 @@ export function validateFinanceCompletionBudget(input: {
   } as const;
 }
 
+const wrappedDecisionSchema = z.strictObject({
+  decision: financeReviewBatchDecisionSchema,
+  transferCounterpart: financeReviewBatchCounterpartSchema.optional(),
+});
 const batchSchema = z.object({
   id,
   userId: id,
@@ -185,7 +190,10 @@ const batchSchema = z.object({
   actorId: id,
   authorizationConnectionId: id.nullable(),
   fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-  manifest: z.array(financeReviewBatchDecisionSchema).min(1).max(100),
+  manifest: z.union([
+    z.array(financeReviewBatchDecisionSchema).min(1).max(100),
+    z.array(wrappedDecisionSchema).min(1).max(100),
+  ]),
   outcomes: z.array(financeReviewBatchOutcomeSchema).max(100),
 });
 /** Do not trust the batch's aggregate completed label or an outcome detached from its manifest. */
@@ -194,6 +202,7 @@ export function validateFinanceCompletionBatch(
   raw: unknown,
   expectedFingerprint: string,
 ) {
+  // Parsing restores the writer’s property order after JSONB reorders the manifest.
   const row = batchSchema.parse(raw);
   if (
     row.userId !== id.parse(ownerId) ||
@@ -203,9 +212,10 @@ export function validateFinanceCompletionBatch(
     (row.actorType === "user" && row.actorId !== row.userId)
   )
     throw new AppError("conflict", "The saved Finance batch source is inconsistent.");
+  const decisions = row.manifest.map((item) => ("decision" in item ? item.decision : item));
   const seen = new Set<number>();
   for (const outcome of row.outcomes) {
-    const decision = row.manifest[outcome.index];
+    const decision = decisions[outcome.index];
     if (
       seen.has(outcome.index) ||
       !decision ||
@@ -215,7 +225,7 @@ export function validateFinanceCompletionBatch(
       throw new AppError("conflict", "The saved Finance batch outcome is inconsistent.");
     seen.add(outcome.index);
   }
-  return row;
+  return { ...row, manifest: decisions };
 }
 
 /** Recover real historical revisions from saved manifests, not from today's row or prose.

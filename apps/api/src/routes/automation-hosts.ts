@@ -13,8 +13,10 @@ export function registerAutomationHostRoutes({
   hosts: ReturnType<typeof createAutomationHostService>;
 }) {
   app.use("/v1/automation-hosts/*", async (c, next) => {
+    if (c.req.path.includes("/instructions")) c.header("cache-control", "no-store");
     if (
       (/\/prompts(?:\/[^/]+)?$/.test(c.req.path) && c.get("principal").actorType === "agent") ||
+      c.req.path.includes("/instructions") ||
       c.req.path.endsWith("/observe") ||
       c.req.path.endsWith("/continuations")
     )
@@ -24,6 +26,35 @@ export function registerAutomationHostRoutes({
   app.use("/v1/automation-hosts", requireFeatureAccess("finances"));
   const id = (value: string) => idSchema.parse(value);
   const version = (value: string) => z.coerce.number().int().positive().parse(value);
+  app.post("/v1/automation-hosts/:id/instructions", requireScope("finances:maintain"), async (c) =>
+    c.json(
+      await hosts.loadInstructions(
+        c.get("principal"),
+        id(c.req.param("id")),
+        await parseBody(c, z.unknown()),
+      ),
+    ),
+  );
+  app.post(
+    "/v1/automation-hosts/:id/instructions/acknowledgments",
+    requireScope("finances:maintain"),
+    async (c) =>
+      c.json(
+        await hosts.acknowledgeInstructions(
+          c.get("principal"),
+          id(c.req.param("id")),
+          await parseBody(c, z.unknown()),
+        ),
+      ),
+  );
+  app.get(
+    "/v1/automation-hosts/:id/instructions/history",
+    requireScope("finances:maintain"),
+    async (c) =>
+      c.json(
+        await hosts.instructionHistory(c.get("principal"), id(c.req.param("id")), c.req.query()),
+      ),
+  );
   app.get("/v1/automation-hosts/:id/prompts", async (c) =>
     c.json(await hosts.promptHistory(c.get("principal"), id(c.req.param("id")), c.req.query())),
   );

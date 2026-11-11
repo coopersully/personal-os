@@ -14,6 +14,7 @@ import {
   financeConversationMessages,
   financeConversationReadCursors,
   financeConversations,
+  financeConversationTurns,
   financeTransactions,
   migrateDatabase,
   oauthClients,
@@ -24,6 +25,7 @@ import {
 import { automationHostScheduleSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq } from "drizzle-orm";
+import { createAutomationHostService } from "../automation-host-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import { createOAuthService } from "../oauth-service.js";
@@ -35,6 +37,10 @@ import {
   captureFinanceConversationBatch,
   postgresConversationBatchStore,
 } from "./conversation-service.js";
+import {
+  createFinanceHostInstructionService,
+  readFinanceHostInstructionSummary,
+} from "./host-instructions-service.js";
 import { createFinanceMaintenanceIntentService } from "./maintenance-intent-service.js";
 
 /** Authored for the exclusive PostgreSQL verification slot; never run as a unit substitute. */
@@ -227,6 +233,318 @@ describe.sequential("durable Finance conversation intake", () => {
     if (verifyImmediately) await verify();
     return { ...f, conversation, agent, scheduleId, connectionId, token, verify };
   }
+
+  it("host status uses canonical readiness and loses readiness on replacement proof", async () => {
+    const f = await hostFixture();
+    const hosts = createAutomationHostService({
+      db: database.db,
+      now: () => new Date(),
+      encryptionKey: Buffer.alloc(32, 7).toString("base64"),
+    });
+    const status = (await hosts.list(f.principal)).find(
+      (item) => item.schedule.id === f.scheduleId,
+    );
+    expect(status?.chatCapability).toEqual({ state: "verified", reason: "ready", canSend: true });
+    await f.conversation.issueChallenge(f.principal, f.scheduleId);
+    const replaced = (await hosts.list(f.principal)).find(
+      (item) => item.schedule.id === f.scheduleId,
+    );
+    expect(replaced?.chatCapability).toEqual({
+      state: "unverified",
+      reason: "challenge_required",
+      canSend: false,
+    });
+  });
+
+  it("processes fresh chat beside an old blocked unbound run and recovers partial replies without changing financial evidence", async () => {
+    const f = await hostFixture();
+    const old = await canonicalRun(f.userId);
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "blocked" })
+      .where(eq(workspaceMaintenanceRuns.id, old.id));
+    expect(await f.conversation.beginTurn(f.agent, f.scheduleId)).toEqual({
+      turn: null,
+      messages: [],
+    });
+    const first = await f.conversation.send(f.principal, {
+      text: "Hello",
+      idempotencyKey: randomUUID(),
+      caseId: null,
+      recordRefs: [],
+    });
+    const second = await f.conversation.send(f.principal, {
+      text: "Any update?",
+      idempotencyKey: randomUUID(),
+      caseId: null,
+      recordRefs: [],
+    });
+    const [a, b] = await Promise.all([
+      f.conversation.beginTurn(f.agent, f.scheduleId),
+      f.conversation.beginTurn(f.agent, f.scheduleId),
+    ]);
+    expect(a).toEqual(b);
+    if (!a.turn) throw new Error("turn");
+    expect(a.messages.map((m) => m.id)).toEqual([first.id, second.id]);
+    await f.conversation.acknowledgeTurn(f.agent, a.turn.id, [first.id, second.id]);
+    expect((await f.conversation.beginTurn(f.agent, f.scheduleId)).messages).toHaveLength(2);
+    const reply = {
+      text: "Hello! Bookkeeping is still blocked.",
+      idempotencyKey: randomUUID(),
+      sourceMessageIds: [first.id],
+    };
+    const committed = await f.conversation.replyToTurn(f.agent, a.turn.id, reply);
+    expect(await f.conversation.replyToTurn(f.agent, a.turn.id, reply)).toEqual(committed);
+    await expect(
+      f.conversation.replyToTurn(f.agent, a.turn.id, { ...reply, text: "Changed" }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const later = await f.conversation.send(f.principal, {
+      text: "New question",
+      idempotencyKey: randomUUID(),
+      caseId: null,
+      recordRefs: [],
+    });
+    const resumed = await f.conversation.beginTurn(f.agent, f.scheduleId);
+    expect(resumed.turn).toEqual(a.turn);
+    expect(resumed.messages.map((m) => m.id)).toEqual([second.id]);
+    await expect(
+      f.conversation.replyToTurn(f.agent, a.turn.id, {
+        ...reply,
+        idempotencyKey: randomUUID(),
+        sourceMessageIds: [later.id],
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await f.conversation.replyToTurn(f.agent, a.turn.id, {
+      ...reply,
+      idempotencyKey: randomUUID(),
+      sourceMessageIds: [second.id],
+    });
+    const next = await f.conversation.beginTurn(f.agent, f.scheduleId);
+    expect(next.turn?.id).not.toBe(a.turn.id);
+    expect(next.messages.map((m) => m.id)).toEqual([later.id]);
+    const [saved] = await database.db
+      .select()
+      .from(workspaceMaintenanceRuns)
+      .where(eq(workspaceMaintenanceRuns.id, old.id));
+    expect(saved).toMatchObject({
+      status: "blocked",
+      automationScheduleId: null,
+      authorizationConnectionId: null,
+    });
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationBatches)
+        .where(eq(financeConversationBatches.userId, f.userId)),
+    ).toEqual([]);
+  });
+  it("fences turns by owner, original live connection and replacement proof", async () => {
+    const f = await hostFixture(),
+      other = await hostFixture();
+    const message = await f.conversation.send(f.principal, {
+      text: "Hello",
+      idempotencyKey: randomUUID(),
+      caseId: null,
+      recordRefs: [],
+    });
+    const opened = await f.conversation.beginTurn(f.agent, f.scheduleId);
+    if (!opened.turn) throw new Error("turn");
+    await expect(other.conversation.beginTurn(other.agent, f.scheduleId)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      other.conversation.replyToTurn(other.agent, opened.turn.id, {
+        text: "No",
+        idempotencyKey: randomUUID(),
+        sourceMessageIds: [message.id],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      f.conversation.beginTurn(
+        { ...f.agent, authorizationConnectionId: randomUUID() },
+        f.scheduleId,
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await f.conversation.issueChallenge(f.principal, f.scheduleId);
+    await expect(f.conversation.beginTurn(f.agent, f.scheduleId)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await f.verify();
+    await database.db
+      .update(accessTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(accessTokens.id, f.token.id));
+    await expect(
+      f.conversation.replyToTurn(f.agent, opened.turn.id, {
+        text: "No",
+        idempotencyKey: randomUUID(),
+        sourceMessageIds: [message.id],
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationTurns)
+        .where(eq(financeConversationTurns.userId, f.userId)),
+    ).toHaveLength(1);
+  });
+
+  it("bounds turns at 100 and preserves decimal sequences above the JavaScript integer limit", async () => {
+    const f = await hostFixture();
+    const base = 9007199254740993n;
+    await database.db
+      .insert(financeConversations)
+      .values({ userId: f.userId, nextSequence: base + 101n });
+    await database.db.insert(financeConversationMessages).values(
+      Array.from({ length: 101 }, (_, index) => ({
+        userId: f.userId,
+        authorKind: "user" as const,
+        text: `Question ${index}`,
+        sequence: base + BigInt(index + 1),
+        idempotencyKey: randomUUID(),
+        createdAt: new Date(),
+      })),
+    );
+    const first = await f.conversation.beginTurn(f.agent, f.scheduleId);
+    if (!first.turn) throw new Error("turn");
+    expect(first.messages).toHaveLength(100);
+    expect(first.turn.cutoffSequence).toBe((base + 100n).toString());
+    await f.conversation.replyToTurn(f.agent, first.turn.id, {
+      text: "Received all questions",
+      idempotencyKey: randomUUID(),
+      sourceMessageIds: first.messages.map((message) => message.id),
+    });
+    const next = await f.conversation.beginTurn(f.agent, f.scheduleId);
+    expect(next.messages).toHaveLength(1);
+    expect(next.turn?.cutoffSequence).toBe((base + 101n).toString());
+  });
+
+  it("serves current instructions without Chat proof, deduplicates delivery and records separate explicit adoption", async () => {
+    const f = await hostFixture(false);
+    const instructions = createFinanceHostInstructionService({
+      db: database.db,
+      now: () => new Date(),
+    });
+    const operationId = randomUUID();
+    const [a, b] = await Promise.all([
+      instructions.loadInstructions(f.agent, f.scheduleId, { operationId }),
+      instructions.loadInstructions(f.agent, f.scheduleId, { operationId }),
+    ]);
+    expect(a).toEqual(b);
+    expect(a).toMatchObject({
+      actorId: f.agent.actorId,
+      authorizationConnectionId: f.connectionId,
+      instructionVersion: 1,
+      scheduleVersion: 1,
+      acknowledgedAt: null,
+    });
+    expect(a.text).toContain("begin_finance_conversation_turn");
+    expect(
+      await readFinanceHostInstructionSummary(database.db, f.userId, f.scheduleId),
+    ).toMatchObject({ latestServed: { receiptId: a.receiptId }, latestAcknowledged: null });
+    await expect(
+      instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
+        receiptId: a.receiptId,
+        instructionVersion: 2,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const acknowledged = await instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
+      receiptId: a.receiptId,
+      instructionVersion: 1,
+    });
+    expect(acknowledged.acknowledgedAt).toBeTruthy();
+    expect(
+      await instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
+        receiptId: a.receiptId,
+        instructionVersion: 1,
+      }),
+    ).toEqual(acknowledged);
+    const next = await instructions.loadInstructions(f.agent, f.scheduleId, {
+      operationId: randomUUID(),
+    });
+    const history = await instructions.instructionHistory(f.agent, f.scheduleId, { limit: 1 });
+    expect(history.receipts.map((r) => r.receiptId)).toEqual([next.receiptId]);
+    expect(
+      (
+        await instructions.instructionHistory(f.agent, f.scheduleId, {
+          limit: 1,
+          before: history.nextCursor,
+        })
+      ).receipts.map((r) => r.receiptId),
+    ).toEqual([a.receiptId]);
+    const summary = await readFinanceHostInstructionSummary(database.db, f.userId, f.scheduleId);
+    expect(summary).toMatchObject({
+      latestServed: { receiptId: next.receiptId, acknowledgedAt: null },
+      latestAcknowledged: { receiptId: a.receiptId },
+      acknowledgementMeaning: "host_reported_adoption_not_proof_of_obedience",
+    });
+    const [host] = await database.db
+      .select()
+      .from(automationHostSchedules)
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    if (!host) throw new Error("host");
+    await database.db
+      .update(automationHostSchedules)
+      .set({ schedule: { ...host.schedule, version: 2 } })
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    await expect(
+      instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
+        receiptId: next.receiptId,
+        instructionVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await database.db
+      .update(accessTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(accessTokens.id, f.token.id));
+    await expect(
+      instructions.loadInstructions(f.agent, f.scheduleId, { operationId: randomUUID() }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
+        receiptId: a.receiptId,
+        instructionVersion: 1,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+
+  it("observes a revocation committed while a turn is waiting for its original credential", async () => {
+    const f = await hostFixture();
+    await f.conversation.send(f.principal, {
+      text: "Please reply",
+      idempotencyKey: randomUUID(),
+      caseId: null,
+      recordRefs: [],
+    });
+    let release: () => void = () => {};
+    let changed: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      changed = resolve;
+    });
+    const revoke = database.db.transaction(async (tx) => {
+      await tx
+        .update(accessTokens)
+        .set({ revokedAt: new Date() })
+        .where(eq(accessTokens.id, f.token.id));
+      changed();
+      await held;
+    });
+    await ready;
+    const pending = f.conversation.beginTurn(f.agent, f.scheduleId);
+    const denied = expect(pending).rejects.toMatchObject({ code: "forbidden" });
+    release();
+    await revoke;
+    await denied;
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationTurns)
+        .where(eq(financeConversationTurns.userId, f.userId)),
+    ).toEqual([]);
+  });
 
   async function refreshableHost() {
     const f = await hostFixture();

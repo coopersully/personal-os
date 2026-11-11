@@ -15,6 +15,7 @@ import { spacing, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { Action, Section, ToggleRow } from "../tasks/ui";
 import { onDueAlertsRefresh } from "./events";
+import { FinancePushProvider, FinancePushSettings } from "./finance-push-provider";
 import { loadAlertItems } from "./load-items";
 import { alertTarget, notificationChanges, notificationPrefix, planAlerts } from "./plan";
 
@@ -272,7 +273,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
         },
       }}
     >
-      {children}
+      <FinancePushProvider>{children}</FinancePushProvider>
     </Context.Provider>
   );
 }
@@ -281,29 +282,36 @@ export function NotificationSettings() {
   const t = useTheme();
   if (!state) return null;
   return (
-    <Section title="Notifications on this iPhone">
-      <ToggleRow
-        label="Task & reminder due alerts"
-        value={state.enabled}
-        disabled={state.pending}
-        onChange={state.setEnabled}
-      />
-      <Text style={{ color: t.secondary, padding: spacing.lg, fontSize: 14 }}>
-        {state.status}. Schedules the next 50 due alerts. Changes made elsewhere update when you
-        reopen nohmi. Focus and Scheduled Summary may delay delivery.
-      </Text>
-      {state.enabled && (
-        <Action label="Send test notification" disabled={state.pending} onPress={state.test} />
-      )}
-      {state.enabled && (
-        <Action label="Refresh device schedule" disabled={state.pending} onPress={state.refresh} />
-      )}
-      <Action
-        label="Open iOS notification settings"
-        onPress={() => {
-          void Linking.openSettings().catch(() => toast.error("Couldn’t open iOS Settings."));
-        }}
-      />
-    </Section>
+    <>
+      <FinancePushSettings />
+      <Section title="Notifications on this iPhone">
+        <ToggleRow
+          label="Task & reminder due alerts"
+          value={state.enabled}
+          disabled={state.pending}
+          onChange={state.setEnabled}
+        />
+        <Text style={{ color: t.secondary, padding: spacing.lg, fontSize: 14 }}>
+          {state.status}. Schedules the next 50 due alerts. Changes made elsewhere update when you
+          reopen nohmi. Focus and Scheduled Summary may delay delivery.
+        </Text>
+        {state.enabled && (
+          <Action label="Send test notification" disabled={state.pending} onPress={state.test} />
+        )}
+        {state.enabled && (
+          <Action
+            label="Refresh device schedule"
+            disabled={state.pending}
+            onPress={state.refresh}
+          />
+        )}
+        <Action
+          label="Open iOS notification settings"
+          onPress={() => {
+            void Linking.openSettings().catch(() => toast.error("Couldn’t open iOS Settings."));
+          }}
+        />
+      </Section>
+    </>
   );
 }

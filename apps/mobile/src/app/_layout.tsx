@@ -79,6 +79,7 @@ function AuthenticatedLayout() {
               name="finance-budget-edit"
               options={{ title: "edit budget", presentation: "modal" }}
             />
+            <Stack.Screen name="finance-notification" options={{ title: "Finance update" }} />
             <Stack.Screen name="finance-account" options={{ title: "account" }} />
             <Stack.Screen
               name="finance-transaction-edit"

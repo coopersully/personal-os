@@ -14,6 +14,7 @@ import {
   financeConversations,
   financeReviewCases,
   financeTransactions,
+  nativePushEvents,
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
@@ -168,6 +169,7 @@ function fixture(active = false) {
         inserted.set(table, [...(inserted.get(table) ?? []), value]);
         const chain = {
           onConflictDoUpdate: () => chain,
+          onConflictDoNothing: () => chain,
           returning: async () =>
             omitInsert.has(table) ? [] : [{ id: randomUUID(), nextSequence: 6n, ...value }],
         };
@@ -489,12 +491,23 @@ describe("Finance conversation persisted boundaries", () => {
     await expect(f.service.reply(agent, { ...reply, caseId: randomUUID() })).rejects.toMatchObject({
       code: "conflict",
     });
-    expect(await f.service.reply(agent, reply)).toMatchObject({
+    const persisted = await f.service.reply(agent, reply);
+    expect(persisted).toMatchObject({
       authorKind: "agent",
       sourceMessageIds: [source.id],
       caseId,
       recordRefs: [{ kind: "review_case", id: caseId }],
     });
+    expect(f.inserted.get(nativePushEvents)).toEqual([
+      {
+        userId: owner,
+        sourceId: persisted.id,
+        kind: "reply",
+        sourceType: "conversation_message",
+        sourceRevision: "1",
+        createdAt: now,
+      },
+    ]);
     f.omitInsert.add(financeConversationMessages);
     await expect(f.service.reply(agent, { ...reply, caseId: null })).rejects.toMatchObject({
       code: "internal_error",

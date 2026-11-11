@@ -39,10 +39,15 @@ import {
   renderFinanceAutomationPrompt,
 } from "./finance/automation-prompts.js";
 import { reconcileFinanceContinuations } from "./finance/continuation-reconciliation.js";
+import { createFinanceConversationService } from "./finance/conversation-persistence.js";
 import {
   financeExecutionTokenSnapshot,
   guardFinanceExecutionTransaction,
 } from "./finance/execution-owner-guard.js";
+import {
+  createFinanceHostInstructionService,
+  readFinanceHostInstructionSummary,
+} from "./finance/host-instructions-service.js";
 import { encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
@@ -140,6 +145,11 @@ export function createAutomationHostService(options: {
               .orderBy(desc(automationHostPromptIssues.templateVersion))
               .limit(1)
           )[0];
+    const readiness = await createFinanceConversationService({ db, now }).getHostReadiness(
+      userId,
+      schedule.id,
+      tx === db ? undefined : (tx as Tx),
+    );
     return {
       schedule,
       agentAccount: await findAgentAccount(tx, userId, schedule.tenantAuthorizationConnectionId),
@@ -150,9 +160,11 @@ export function createAutomationHostService(options: {
         currentTemplateVersion: FINANCE_AUTOMATION_PROMPT_VERSION,
         upgradeAvailable: !latest || latest.templateVersion < FINANCE_AUTOMATION_PROMPT_VERSION,
       },
+      instructions: await readFinanceHostInstructionSummary(tx, userId, schedule.id),
       chatCapability: {
-        state: "unverified" as const,
-        reason: "message_protocol_unavailable" as const,
+        state: readiness.messageCapability,
+        reason: readiness.reason,
+        canSend: readiness.canSend,
       },
     };
   }
@@ -251,6 +263,7 @@ export function createAutomationHostService(options: {
     });
   }
   return {
+    ...createFinanceHostInstructionService({ db, now }),
     async promptHistory(principal: Principal, id: string, raw: unknown) {
       await authorizeHost(principal);
       const input = automationHostPromptPageInputSchema.parse(raw);

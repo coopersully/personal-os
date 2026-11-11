@@ -42,6 +42,85 @@ Acknowledge only the exact delivered message IDs from this existing Finance run'
 }
 ```
 
+## acknowledge_finance_conversation_turn
+
+Acknowledge exact delivered conversation-turn source IDs. Does not mark human history read, settle sources, or approve financial effects.
+
+- Domain: finances; stage: verify; policy: approved_rule.
+- Grants (all): finances:maintain, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `acknowledgeFinanceConversationTurn`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "turnId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "messageIds": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+      }
+    }
+  },
+  "required": [
+    "turnId",
+    "messageIds"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## acknowledge_finance_host_instructions
+
+Explicitly report adoption of an exact served instruction receipt/version through its original live credential. Schedule, authority or current instruction changes require a fresh load. This records the host's report; it is not proof of obedience.
+
+- Domain: finances; stage: verify; policy: approved_rule.
+- Grants (all): finances:maintain, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `acknowledgeFinanceHostInstructions`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scheduleId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "receiptId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "instructionVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "scheduleId",
+    "receiptId",
+    "instructionVersion"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## activate_mail_rule
 
 Activate the exact saved rule version and current bounded preview. Preserve the returned sample fingerprint and preview timestamp; stale evidence is rejected. Requires mail:write. Agents also require mail:execute and enabled review bypass.
@@ -919,6 +998,34 @@ Archive one loaded Project. Archive is destructive visibility and organization l
   "required": [
     "expectedRevision",
     "id"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## begin_finance_conversation_turn
+
+Capture or resume one bounded immutable conversation turn under the original verified host. Returns only unanswered delivered sources, or null when none remain. Independent of blocked financial maintenance; creates no financial run or execution authority. ACK is delivery evidence; only committed causal replies settle sources.
+
+- Domain: finances; stage: inspect; policy: approved_rule.
+- Grants (all): finances:maintain, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `beginFinanceConversationTurn`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scheduleId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    }
+  },
+  "required": [
+    "scheduleId"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false
@@ -6357,6 +6464,45 @@ Start Finance setup here. Read active guidance with its recorded user_instructio
 }
 ```
 
+## get_finance_host_instruction_history
+
+Read a bounded page of immutable served Finance instructions and separate explicit host acknowledgements, under the original live connection. Follow nextCursor as before; never infer obedience from a receipt.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:maintain, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `getFinanceHostInstructionHistory`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scheduleId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "before": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  },
+  "required": [
+    "scheduleId"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## get_finance_host_prompt
 
 Read exact stored instructions for one schedule/template version using the original authorized connection. This never regenerates instructions or changes the external job. A schedule ID is not a credential.
@@ -9177,6 +9323,41 @@ List synchronized posts from the user's selected X bookmark folder. Use each pos
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## load_finance_host_instructions
+
+Load current code-controlled Finance host instructions every invocation and persist an immutable served receipt under the original live credential. Retry one operationId only for the same invocation. Loading does not prove adoption, Chat capability or financial completion. Fail closed if unavailable.
+
+- Domain: finances; stage: inspect; policy: approved_rule.
+- Grants (all): finances:maintain, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `loadFinanceHostInstructions`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scheduleId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "operationId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    }
+  },
+  "required": [
+    "scheduleId",
+    "operationId"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 
@@ -13114,6 +13295,70 @@ Persist a contextual reply to exact source messages delivered within this existi
   },
   "required": [
     "runId",
+    "text",
+    "idempotencyKey",
+    "sourceMessageIds"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## reply_to_finance_conversation_turn
+
+Commit one reply to exact delivered sources of a fixed conversation turn. Retry the same idempotency key only with identical text and sources. A committed reply settles only its sources; it never authorizes or proves a financial effect.
+
+- Domain: finances; stage: commit; policy: approved_rule.
+- Grants (all): finances:maintain, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `replyToFinanceConversationTurn`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "turnId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "caseId": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sourceMessageIds": {
+      "minItems": 1,
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+      }
+    }
+  },
+  "required": [
+    "turnId",
     "text",
     "idempotencyKey",
     "sourceMessageIds"

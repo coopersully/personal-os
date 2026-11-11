@@ -33,6 +33,46 @@ export function registerFinanceConversationRoutes({
     context.header("cache-control", "no-store");
     await next();
   });
+  app.post(
+    `${root}/hosts/:scheduleId/turns`,
+    requireScope("finances:maintain"),
+    async (context) => {
+      await parseBody(context, z.object({}).strict());
+      return context.json(
+        await conversation.beginTurn(
+          context.get("principal"),
+          idSchema.parse(context.req.param("scheduleId")),
+        ),
+      );
+    },
+  );
+  app.post(
+    `${root}/turns/:turnId/acknowledgments`,
+    requireScope("finances:maintain"),
+    async (context) => {
+      const input = await parseBody(context, financeConversationAcknowledgmentInputSchema);
+      return context.json(
+        await conversation.acknowledgeTurn(
+          context.get("principal"),
+          idSchema.parse(context.req.param("turnId")),
+          input.messageIds,
+        ),
+      );
+    },
+  );
+  app.post(`${root}/turns/:turnId/replies`, requireScope("finances:maintain"), async (context) => {
+    const input = await parseBody(context, financeConversationReplyInputSchema);
+    return context.json(
+      {
+        message: await conversation.replyToTurn(
+          context.get("principal"),
+          idSchema.parse(context.req.param("turnId")),
+          input,
+        ),
+      },
+      201,
+    );
+  });
   app.get(`${root}/readiness`, requireScope("finances:read"), requireHuman, async (context) =>
     context.json({ readiness: await conversation.getReadiness(context.get("principal").userId) }),
   );

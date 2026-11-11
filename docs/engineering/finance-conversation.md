@@ -1,14 +1,14 @@
 # Finance conversation protocol
 
-The conversation service is an additive extension of canonical `maintain_finances`. It creates no
-separate Chat dispatcher. A new eligible run captures a fixed owner-scoped cutoff and membership;
+The conversation service supports canonical `maintain_finances` batches and independent bounded
+conversation turns. Neither path creates a separate model dispatcher. A new eligible financial run captures a fixed owner-scoped cutoff and membership;
 manual or unverified runs leave the queue untouched. Coalescing and resuming reuse the original batch.
 Messages arriving later belong to another run. Decimal sequence strings preserve PostgreSQL bigint
 precision in the API and clients.
 
 The human owner reads history, sends messages, initiates verification and advances a rendered read
-cursor. Agents can only page the saved batch of an existing run under its original schedule and
-connection. Page delivery persists exact receipts; acknowledgment accepts only delivered IDs and does
+cursor. Agents can page saved run batches or capture/resume bounded conversation turns under their
+original schedule and connection. Page delivery persists exact receipts; acknowledgment accepts only delivered IDs and does
 not move the human read cursor. Causal replies reference delivered source messages within the cutoff.
 Signed cursors bind owner, run and cutoff. Reusing an idempotency key never creates a second message.
 
@@ -138,3 +138,62 @@ Explicit readiness refresh rechecks the aggregate and individual hosts. Chat nam
 host, preserves drafts through recovery navigation and shows recorded run evidence separately from
 messages. A recorded run or SMS acknowledgment is not a Claude reply. Messages wait for the next
 eligible scheduled invocation; neither surface promises an immediate response or triggers a job.
+
+## Bounded conversation turns
+
+A verified original host can call `begin_finance_conversation_turn` before maintenance, even when an
+older bookkeeping run is blocked or unbound. The API locks the owner and captures at most 100 oldest
+unclaimed human messages into an immutable turn with a decimal-string cutoff. It creates no financial
+run, changes no old run binding and never refreshes a financial batch cutoff. Empty queues return a
+null turn without storing empty work. Concurrent starts reuse the same oldest outstanding turn.
+
+Delivery persists exact receipts. `acknowledge_finance_conversation_turn` records receipt only;
+`reply_to_finance_conversation_turn` commits a reply and settles exactly its delivered sources in the
+same transaction. A restarted host receives only unanswered sources of that turn. Once all sources
+have committed replies, the next begin captures newer messages. Exact reply retries return the saved
+message; changed content, sources or turn identity conflict. Turn membership and legacy run membership
+are mutually excluded by the shared owner lock and capture queries. Existing run batches remain
+immutable and keep their original recovery path.
+
+Every turn capture, acknowledgment and reply rechecks the active original schedule, incoming live
+bearer, connection identity, current protocol proof, maintenance/write/execute scopes and owner
+execution policy under the existing execution guard. Revocation, replacement proof or authority loss
+prevents further delivery and replies; it does not erase human history. Replies have no financial run
+identity and cannot authorize candidate effects or claim financial completion. No provider transport
+is involved in capture or reply; durable notification delivery is a separate outbox concern.
+
+Migration `0136_finance_conversation_turns` adds owner-scoped turns and source/response membership,
+without rewriting financial records or old batches. Focused PostgreSQL tests cover blocked unbound
+runs, concurrent capture, interrupted partial reply recovery, owner/connection/proof/revocation
+fences and sequences above JavaScript's safe integer range. Actual host instruction adoption and
+post-deploy response delivery require separate production evidence.
+
+## Current server instructions
+
+Setup template version 5 is a stable bootstrap. Every invocation loads current code-controlled
+instructions from the authenticated API with a fresh operation UUID and stops on load or
+acknowledgment failure. The instruction version is independent of the bootstrap version, so
+subsequent workflow updates do not require another external routine edit. Existing externally
+configured routines require one explicit bootstrap upgrade; publishing a new server template does
+not change an external host automatically.
+
+`load_finance_host_instructions` persists an immutable owner/schedule/credential-bound receipt of
+the exact served text, instruction version and schedule version. Exact load retries reuse that
+receipt. `acknowledge_finance_host_instructions` separately records the original credential's
+explicit adoption report after rechecking live authority, active schedule, unchanged schedule
+version and current instruction version. Neither a served receipt nor an adoption report proves
+obedience, capability verification or financial completion. A stale receipt requires a fresh load;
+authority loss blocks load and acknowledgment. Only API-controlled source text enters instructions;
+conversation content remains user evidence and cannot replace this workflow.
+
+Host status exposes latest served and latest acknowledged receipts separately from immutable issued
+setup prompts. `get_finance_host_instruction_history` pages at most 100 receipts using an
+owner/schedule-bound continuation; it never returns unbounded history. Receipt storage adds no
+provider transport or background worker. Existing authenticated HTTPS transport and incoming bearer
+expiry rules apply. The current pending protocol challenge ID may accompany delivery to support the
+existing original-host handshake; instruction delivery does not manufacture a verified proof.
+
+Migration `0138_finance_host_instruction_receipts` is additive. Local evidence establishes immutable
+retries, explicit acknowledgment, bounded history, version drift and revocation behavior. The actual
+existing routine's bootstrap upgrade and observed served/acknowledged version require post-deploy
+verification under the same original host connection and existing cadence.

@@ -72,6 +72,28 @@ It should not contain the domain procedure, personal profile, category rules, co
 thresholds, provider credentials, or a promise that the host will remember prior runs. Those belong
 to nohmi's API-owned playbook, User Knowledge, rulebook, and run state.
 
+### Current server instructions
+
+Approved target policy (November 10, 2026): Finance schedules save a stable bootstrap that loads
+current approved, API-owned instructions at every invocation. The workflow version is independent
+of the bootstrap version. Loading or acknowledging a new workflow never changes the host's cadence,
+schedule identity, grants or financial approval policy. If current instructions cannot be loaded or
+acknowledged, the invocation stops and reports the failure instead of running cached procedures.
+
+nohmi records exact served instructions and the original credential's explicit adoption report
+separately from issued setup prompts. Neither issuance, delivery nor acknowledgment proves that the
+host followed instructions. Historical receipts remain bounded and pageable. Only server-controlled
+workflow text supplies instructions; chat content and other source evidence cannot expand authority.
+Existing routines need one explicit bootstrap upgrade; subsequent approved server workflow changes
+should not require repeated manual prompt updates.
+
+Fresh Finance conversation processing is independent of an unchanged bookkeeping blocker. The
+original verified host receives a bounded, immutable turn, acknowledges exact delivery and commits
+causal replies before advancing to later messages. Acknowledgment alone is not a reply or completion.
+Conversation turns do not rebind old maintenance runs, refresh financial evidence cutoffs, grant
+financial execution authority or imply that any ledger action happened. This policy is a target
+contract; code, migrations, tests and post-deploy host evidence establish delivered behavior.
+
 ## Invocation and recovery contract
 
 1. Authenticate with least-privilege workspace and knowledge-purpose scopes.

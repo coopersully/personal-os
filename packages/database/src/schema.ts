@@ -6576,3 +6576,203 @@ export const textingAgentWork = pgTable(
     }).onDelete("cascade"),
   ],
 );
+
+/** Chat turns are independent of bookkeeping runs and cannot authorize financial effects. */
+export const financeConversationTurns = pgTable(
+  "finance_conversation_turns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    automationScheduleId: uuid("automation_schedule_id").notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    cutoffSequence: bigint("cutoff_sequence", { mode: "bigint" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_conversation_turns_owner_id_idx").on(table.userId, table.id),
+    foreignKey({
+      name: "finance_conversation_turns_schedule_fk",
+      columns: [table.userId, table.automationScheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }),
+    check("finance_conversation_turns_cutoff_check", sql`${table.cutoffSequence} > 0`),
+  ],
+);
+export const financeConversationTurnMessages = pgTable(
+  "finance_conversation_turn_messages",
+  {
+    userId: uuid("user_id").notNull(),
+    turnId: uuid("turn_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    replyMessageId: uuid("reply_message_id"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.turnId, table.messageId] }),
+    uniqueIndex("finance_conversation_turn_messages_once_idx").on(table.userId, table.messageId),
+    foreignKey({
+      name: "finance_conversation_turn_messages_turn_fk",
+      columns: [table.userId, table.turnId],
+      foreignColumns: [financeConversationTurns.userId, financeConversationTurns.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_conversation_turn_messages_source_fk",
+      columns: [table.userId, table.messageId],
+      foreignColumns: [financeConversationMessages.userId, financeConversationMessages.id],
+    }),
+    foreignKey({
+      name: "finance_conversation_turn_messages_reply_fk",
+      columns: [table.userId, table.replyMessageId],
+      foreignColumns: [financeConversationMessages.userId, financeConversationMessages.id],
+    }),
+    check(
+      "finance_conversation_turn_messages_ack_check",
+      sql`${table.acknowledgedAt} IS NULL OR ${table.deliveredAt} IS NOT NULL`,
+    ),
+    check(
+      "finance_conversation_turn_messages_reply_check",
+      sql`${table.replyMessageId} IS NULL OR ${table.deliveredAt} IS NOT NULL`,
+    ),
+  ],
+);
+
+/** Tokens belong to a live human session; deleting that session removes delivery authority. */
+export const nativePushDevices = pgTable(
+  "native_push_devices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    installationId: uuid("installation_id").notNull().unique(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    encryptedToken: jsonb("encrypted_token").$type<EncryptedCredentials>().notNull(),
+    tokenFingerprint: text("token_fingerprint").notNull().unique(),
+    environment: text("environment").$type<"sandbox" | "production">().notNull(),
+    financeEnabled: boolean("finance_enabled").notNull(),
+    revision: integer("revision").notNull().default(1),
+    audience: uuid("audience").notNull().defaultRandom(),
+    enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
+    ...timestamps,
+  },
+  (table) => [
+    index("native_push_devices_owner_idx").on(table.userId),
+    check(
+      "native_push_devices_environment_check",
+      sql`${table.environment} IN ('sandbox','production')`,
+    ),
+    check("native_push_devices_revision_check", sql`${table.revision} > 0`),
+  ],
+);
+
+export const nativePushEvents = pgTable(
+  "native_push_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sourceId: uuid("source_id").notNull(),
+    sourceType: text("source_type")
+      .$type<
+        | "conversation_message"
+        | "maintenance_run"
+        | "contextual_question"
+        | "review_case"
+        | "action_review"
+      >()
+      .notNull()
+      .default("conversation_message"),
+    kind: text("kind").$type<"reply" | "attention" | "activity">().notNull(),
+    sourceRevision: text("source_revision").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("native_push_events_source_idx").on(
+      table.userId,
+      table.sourceType,
+      table.sourceId,
+      table.kind,
+      table.sourceRevision,
+    ),
+    check("native_push_events_kind_check", sql`${table.kind} IN ('reply','attention','activity')`),
+  ],
+);
+
+export const nativePushDeliveries = pgTable(
+  "native_push_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => nativePushEvents.id, { onDelete: "cascade" }),
+    deviceId: uuid("device_id")
+      .notNull()
+      .references(() => nativePushDevices.id, { onDelete: "cascade" }),
+    audience: uuid("audience").notNull(),
+    deviceRevision: integer("device_revision").notNull(),
+    state: text("state")
+      .$type<"pending" | "submitting" | "accepted" | "uncertain" | "failed" | "suppressed">()
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    outcomeCode: text("outcome_code"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("native_push_deliveries_event_device_idx").on(table.eventId, table.deviceId),
+    index("native_push_deliveries_due_idx").on(table.state, table.nextAttemptAt),
+    check(
+      "native_push_deliveries_state_check",
+      sql`${table.state} IN ('pending','submitting','accepted','uncertain','failed','suppressed')`,
+    ),
+    check("native_push_deliveries_attempts_check", sql`${table.attempts} BETWEEN 0 AND 3`),
+  ],
+);
+
+/** Immutable code-controlled instruction delivery with separately reported host acknowledgement. */
+export const financeHostInstructionReceipts = pgTable(
+  "finance_host_instruction_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scheduleId: uuid("schedule_id").notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    actorId: uuid("actor_id").notNull(),
+    operationId: uuid("operation_id").notNull(),
+    scheduleVersion: integer("schedule_version").notNull(),
+    instructionVersion: integer("instruction_version").notNull(),
+    text: text("text").notNull(),
+    servedAt: timestamp("served_at", { withTimezone: true }).notNull(),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("finance_host_instruction_receipts_operation_idx").on(
+      table.userId,
+      table.scheduleId,
+      table.operationId,
+    ),
+    foreignKey({
+      name: "finance_host_instruction_receipts_schedule_fk",
+      columns: [table.userId, table.scheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }).onDelete("cascade"),
+    check(
+      "finance_host_instruction_receipts_versions_check",
+      sql`${table.scheduleVersion} > 0 AND ${table.instructionVersion} > 0`,
+    ),
+    check(
+      "finance_host_instruction_receipts_text_check",
+      sql`length(${table.text}) BETWEEN 1 AND 20000`,
+    ),
+  ],
+);

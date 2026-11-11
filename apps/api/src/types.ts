@@ -22,6 +22,7 @@ import type { EmailDelivery } from "./email-delivery.js";
 import type { RuntimeLifecycle } from "./runtime-lifecycle.js";
 
 export type Principal = {
+  sessionId?: string;
   authorizationConnectionId?: string;
   actorId: string;
   actorType: Extract<ActorType, "agent" | "user">;

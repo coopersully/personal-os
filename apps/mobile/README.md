@@ -226,7 +226,7 @@ devices, is tracked in the COO-211 — Mobile Settings delivery record.
 Google/X setup uses an explicitly confirmed browser handoff and authoritative status refresh;
 iCloud uses a secure app-specific-password form. Texting enrollment requires current consent and
 explicit verification; an interrupted pending challenge survives background/foreground within the
-mounted form. No provider callback, push/background engine or raw phone/code persistence is added.
+mounted form. No provider callback or raw phone/code persistence is added.
 Notifications reuse existing on-device task/reminder scheduling separately from global/Finance
 server text-message policy. Desktop widgets, wallpaper, pets, login lifecycle and desktop alert
 preferences stay desktop-specific. Activity loads at most the latest 100 events and never invents
@@ -246,3 +246,41 @@ listing adds server-derived `isCurrent`; an older API omitting it remains compat
 inferred current-device badge. Native-stack status-bar ownership requires the generated iOS
 controller-based flag. Routine pull refresh uses a spinner and Sonner errors without success toasts.
 These are source contracts; installable build and production acceptance require separate receipts.
+
+## Native Finance push candidate
+
+Finance notifications have a separate, explicit per-account opt-in in Settings → Notifications.
+iOS permission alone does not opt in. The native adapter uses Apple's APNs device token from
+`getDevicePushTokenAsync`, never an Expo push token or Expo delivery service. It re-registers on
+foreground and token rotation, unregisters when permissions are revoked or consent is disabled,
+and fences asynchronous results by the human-session epoch. Successful background synchronization stays silent; failures use a deduplicated Sonner error.
+Explicit changes update one Sonner toast. Existing local Task due scheduling
+and server text-message preferences retain their separate controls and lifecycles.
+
+`PERSONAL_OS_APNS_ENVIRONMENT=sandbox|production` is trusted native build configuration;
+`app.config.ts` embeds it in Expo extra and the APNs entitlement. A missing value disables the
+Finance toggle. The archive environment explicitly sets `production`, independently of `__DEV__`.
+After changing this value, regenerate/rebuild native code; changing JS alone cannot change the
+signed entitlement or provisioning profile. The APNs key, Apple App ID capability, signing profile,
+and backend environment/topic must agree. Device tokens remain private authenticated API inputs.
+
+Payload data is limited to `{version: 1, kind: "finance", eventId, audience}`. Taps require a
+matching current registration audience and an authenticated event lookup bound to this installation
+before opening Conversation or Activity in the existing Finance assistant. Attention updates open
+an authenticated native detail that rereads the current source summary/status and offers its
+server-generated existing web review destination plus Finance chat. It does not introduce native
+approval controls. Resolved or replaced notifications explain that the update is unavailable.
+Web handoff revalidates the source and only permits the configured `EXPO_PUBLIC_APP_URL` origin
+and supported Finance paths. Archive builds bind that origin to production; synthetic QA must set
+it to the synthetic API's configured app origin. Payloads never carry money, transcript text, an
+owner ID or a raw account/session token. Logout/account replacement removes response and token
+listeners, invalidates outstanding callbacks and clears presented Finance notifications; the server
+revokes session-bound registrations on logout. Previously delivered OS banners may already have
+been visible; the app cannot retract information the OS already presented.
+
+Provider acceptance, APNs delivery and physical-device presentation remain separate evidence.
+Unit and mounted tests establish callback isolation, opt-in, routing and toast delivery. Simulated
+notification injection establishes routing only. A signed production build on a physical device
+is required to establish the actual production APNs registration/delivery path. Native permission
+requests can await human action; device token acquisition has a 15-second deadline; network and native token failures keep opt-in unsuccessful and
+are retried by explicit action or subsequent foreground synchronization for saved consent.

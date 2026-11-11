@@ -78,6 +78,48 @@ export const financeCapabilityManifest = [
   },
 
   {
+    apiOperation: "beginFinanceConversationTurn",
+    capability: "workflow.conversation_turn_delivery",
+    mcpTool: "begin_finance_conversation_turn",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "acknowledgeFinanceConversationTurn",
+    capability: "workflow.conversation_turn_acknowledgment",
+    mcpTool: "acknowledge_finance_conversation_turn",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "replyToFinanceConversationTurn",
+    capability: "workflow.conversation_turn_reply",
+    mcpTool: "reply_to_finance_conversation_turn",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "loadFinanceHostInstructions",
+    capability: "workflow.host_instructions_delivery",
+    mcpTool: "load_finance_host_instructions",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "acknowledgeFinanceHostInstructions",
+    capability: "workflow.host_instructions_acknowledgment",
+    mcpTool: "acknowledge_finance_host_instructions",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "getFinanceHostInstructionHistory",
+    capability: "workflow.host_instructions_history",
+    mcpTool: "get_finance_host_instruction_history",
+    mode: "read",
+    requiredScope: "finances:execute",
+  },
+  {
     apiOperation: "getFinanceConversationBatch",
     capability: "workflow.conversation_batch_delivery",
     mcpTool: "get_finance_conversation_batch",

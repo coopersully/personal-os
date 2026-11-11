@@ -19,6 +19,7 @@ const template = vi.hoisted(() => ({ version: 1 }));
 vi.mock("./automation-prompts.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("./automation-prompts.js")>();
   return {
+    ...original,
     get FINANCE_AUTOMATION_PROMPT_VERSION() {
       return template.version;
     },
@@ -120,7 +121,8 @@ describe.sequential("immutable Finance host prompt issuance", () => {
     expect(first.prompt.externalAdoption).toBe("unknown");
     expect(first.chatCapability).toEqual({
       state: "unverified",
-      reason: "message_protocol_unavailable",
+      reason: "registration_missing",
+      canSend: false,
     });
     const edited = await f.service.update(f.human, first.schedule.id, {
       expectedVersion: 1,

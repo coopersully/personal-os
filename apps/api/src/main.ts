@@ -50,6 +50,9 @@ const app = createApp({
   runtimeLifecycle,
 });
 const server = serve({ fetch: app.fetch, port: config.port });
+runtimeLifecycle.startBackgroundTask("startup-native-push", async () => {
+  await app.dispatchNativePush();
+});
 const scheduler = setInterval(() => {
   runtimeLifecycle.startBackgroundTask("local-demo-fixtures", refreshLocalDemo);
   runtimeLifecycle.startBackgroundTask("scheduled-connector-sync", async () => {
@@ -74,6 +77,9 @@ const scheduler = setInterval(() => {
   );
 }, 60_000);
 const textingScheduler = setInterval(() => {
+  runtimeLifecycle.startBackgroundTask("scheduled-native-push", async () => {
+    await app.dispatchNativePush();
+  });
   runtimeLifecycle.startBackgroundTask("scheduled-texting-recovery", dispatchTextingRecovery);
   runtimeLifecycle.startBackgroundTask(
     "scheduled-finance-notifications",

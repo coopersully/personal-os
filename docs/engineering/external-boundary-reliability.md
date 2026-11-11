@@ -290,3 +290,65 @@ before pagination and does not produce a full-context send receipt. Loopback-onl
 previews contain fictional records, make no provider call and cannot update verification state.
 PostgreSQL tests establish concurrency, cooldown, isolation and proof transitions; local browser
 checks establish layout and gating only. Real routine and carrier acceptance remain rollout evidence.
+
+## iOS Finance push delivery
+
+The API owns direct APNs notification delivery; the native app opts in explicitly and obtains an
+APNs device token with Expo's `getDevicePushTokenAsync`. This path uses neither Expo's relay nor
+SMS consent. `NATIVE_PUSH_ENABLED` defaults off. Deployment supplies `APNS_TEAM_ID`, `APNS_KEY_ID`,
+`APNS_PRIVATE_KEY_BASE64` (an encoded P-256 PEM), `APNS_TOPIC` and `APNS_ENVIRONMENT`; production
+allows only production APNs and the `app.personal-os.mobile` topic. The Mac Mini Compose allowlist
+forwards these values. The deployment owner provisions secrets separately; never commit them.
+
+HTTP/2 over TLS/443 to `api.push.apple.com` (or explicitly selected development sandbox) is bounded
+to ten seconds, one request at a time and 25 delivery claims per pass. ES256 provider JWTs are cached
+for 30 minutes. Notification payloads contain only generic text and opaque event/audience IDs, never
+financial records, transcripts, tokens or provider error bodies. APNs may retain a generic alert for up to one hour for an offline phone; expiry prevents
+indefinite delayed presentation. A delivered alert remains generic and its tap must pass current authorization. APNs acceptance proves provider acceptance, not phone presentation.
+
+The reply transaction commits a deduplicated native event and device-specific delivery outbox.
+Bounded rotating canonical discovery repairs actionable-work publication without holding financial
+execution. Enrollment never backfills historical events. Stable source revisions prevent repeated
+unchanged blockers. Events expire for delivery after 24 hours; current source state, owner, actual
+unexpired session, installation audience/revision, token environment, opt-in, preferences and quiet
+hours are checked before submission. Session/device locks serialize submission with logout and token
+rebinding. Notification taps resolve through the authenticated API using the installation ID; stale
+or switched audiences cannot reveal a destination.
+
+A committed `submitting` delivery precedes transport. A timeout, process loss, malformed/oversized
+response or network error leaves `uncertain`, with no automatic replay. Explicit APNs 429/500/503
+rejections allow at most three total attempts; invalid device responses disable the registration.
+Quiet hours defer without consuming provider attempts. Lease recovery converts interrupted submits
+to uncertain. Redacted outcome codes and persisted state support operator inspection. Revoking a
+session cascades its device registrations and pending deliveries. Disabling the feature stops
+provider submission while preserving event evidence.
+
+Official contracts: [Expo direct APNs delivery](https://docs.expo.dev/push-notifications/sending-notifications-custom/),
+[Apple request protocol](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns),
+and [Apple response handling](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns).
+Behavior tests prove application and persistence semantics only. The deployment owner must separately
+verify APNs key authority, host HTTP/2 reachability, signed entitlement/environment, and a TestFlight
+phone's token registration and visible notification. Missing permission, Focus, device offline state,
+revoked credentials or wrong entitlements can still prevent presentation despite green tests.
+
+## Finance host instruction delivery
+
+The API owns current Finance workflow instructions; external hosts retain their existing cadence and
+connection grants. A stable setup bootstrap loads instructions through authenticated HTTPS each
+invocation and stops on load or acknowledgment failure. There is no outbound provider request, new
+port or background execution in this path. Ordinary API ingress bounds apply; receipt text is capped
+at 20,000 characters and history pages at 100 rows.
+
+The commit point is an immutable served receipt containing exact code-controlled text, independent
+instruction version, schedule version, original connection and credential. Owner execution guards
+serialize delivery and acknowledgment with authority changes. Load operation UUIDs make exact
+retries return the original receipt. Explicit host acknowledgment is separate, and requires the
+same credential, current instruction version, unchanged schedule version and live authority. It is
+a report of adoption, not evidence that the host followed instructions. Revocation that commits
+first prevents delivery or acknowledgment; a changed schedule/version requires a fresh load.
+
+Latest served and acknowledged receipts are distinct from issued bootstrap prompts and Chat
+verification. The owner can inspect current delivery summaries, and the original host can page exact
+receipt history. Actual unattended permission, external bootstrap adoption, next scheduled
+invocation and successful causal Chat reply remain post-deploy evidence requirements. API tests and
+an issued prompt alone cannot establish them.

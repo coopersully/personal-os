@@ -5,8 +5,11 @@ import { toast } from "sonner-native";
 import { createSession, resolveApiOrigin, type SessionState } from "./session";
 import { sessionStorage } from "./storage";
 
-const origin = resolveApiOrigin(
+export const mobileApiOrigin = resolveApiOrigin(
   process.env.EXPO_PUBLIC_API_URL ?? "https://nohmi-api.coopersully.me",
+);
+export const mobileAppOrigin = resolveApiOrigin(
+  process.env.EXPO_PUBLIC_APP_URL ?? "https://nohmi.coopersully.me",
 );
 const Context = createContext<{
   state: SessionState;
@@ -16,8 +19,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [state, setState] = useState<SessionState>({ status: "checking", user: null });
   const [session] = useState(() =>
     createSession({
-      origin,
-      storage: sessionStorage(origin),
+      origin: mobileApiOrigin,
+      storage: sessionStorage(mobileApiOrigin),
       fetch: expoFetch,
       onChange: setState,
     }),

@@ -9,6 +9,9 @@ function fixture(scopes: Principal["scopes"]) {
   const app = new Hono<AppEnv>();
   const methods = [
     "list",
+    "loadInstructions",
+    "acknowledgeInstructions",
+    "instructionHistory",
     "connections",
     "pendingAnswers",
     "bindAnswer",
@@ -163,4 +166,40 @@ it("allows maintenance agents at the host prompt adapter and rejects missing sco
       })
     ).status,
   ).toBe(403);
+});
+
+it("keeps current instruction delivery on the maintenance boundary and disables caching", async () => {
+  const { app, hosts } = fixture(new Set(["finances:maintain"]));
+  const input = { operationId: id };
+  const response = await app.request(`/v1/automation-hosts/${id}/instructions`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(hosts.loadInstructions).toHaveBeenCalledWith(
+    expect.objectContaining({ actorType: "agent" }),
+    id,
+    input,
+  );
+  await app.request(`/v1/automation-hosts/${id}/instructions/acknowledgments`, {
+    method: "POST",
+    body: JSON.stringify({ receiptId: id, instructionVersion: 1 }),
+  });
+  expect(hosts.acknowledgeInstructions).toHaveBeenCalledWith(expect.anything(), id, {
+    receiptId: id,
+    instructionVersion: 1,
+  });
+  await app.request(`/v1/automation-hosts/${id}/instructions/history?limit=1`);
+  expect(hosts.instructionHistory).toHaveBeenCalledWith(expect.anything(), id, { limit: "1" });
+  const denied = fixture(new Set(["finances:read"]));
+  expect(
+    (
+      await denied.app.request(`/v1/automation-hosts/${id}/instructions`, {
+        method: "POST",
+        body: "{}",
+      })
+    ).status,
+  ).toBe(403);
+  expect(denied.hosts.loadInstructions).not.toHaveBeenCalled();
 });

@@ -1,3 +1,4 @@
+import { createPrivateKey } from "node:crypto";
 import { personalOsSetupRelease, semanticVersionSchema } from "@personal-os/domain";
 import { z } from "zod";
 
@@ -59,6 +60,12 @@ const configSchema = z
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
     MCP_RESOURCE_URL: z.url().optional(),
     MCP_INTERNAL_SECRET: z.string().min(32).optional(),
+    NATIVE_PUSH_ENABLED: z.enum(["true", "false"]).default("false"),
+    APNS_TEAM_ID: z.string().default(""),
+    APNS_KEY_ID: z.string().default(""),
+    APNS_PRIVATE_KEY_BASE64: z.string().default(""),
+    APNS_TOPIC: z.string().default("app.personal-os.mobile"),
+    APNS_ENVIRONMENT: z.enum(["sandbox", "production"]).default("production"),
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     OWNER_EMAILS: z.string().default(""),
     PORT: z.coerce.number().int().min(1).max(65_535).default(8788),
@@ -227,6 +234,7 @@ function sourceIdentifiesRevision(sourceUrl: string, revision: string): boolean 
 }
 
 export type AppConfig = {
+  nativePush?: import("./native-push-transport.js").ApnsConfig;
   agentSkillRevision?: string;
   agentSkillSourceUrl?: string;
   agentSkillVersion?: string;
@@ -281,6 +289,25 @@ export type AppConfig = {
 
 export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
   const value = configSchema.parse(migrateLegacyOfficialAgentSkill(environment));
+  if (value.NATIVE_PUSH_ENABLED === "true") {
+    if (
+      !/^[A-Z0-9]{10}$/.test(value.APNS_TEAM_ID) ||
+      !/^[A-Z0-9]{10}$/.test(value.APNS_KEY_ID) ||
+      value.APNS_TOPIC !== "app.personal-os.mobile" ||
+      (value.NODE_ENV === "production" && value.APNS_ENVIRONMENT !== "production")
+    )
+      throw new Error("Native push configuration is invalid.");
+    try {
+      const encoded = value.APNS_PRIVATE_KEY_BASE64;
+      if (!encoded || Buffer.from(encoded, "base64").toString("base64") !== encoded)
+        throw new Error();
+      const key = createPrivateKey(Buffer.from(encoded, "base64").toString("utf8"));
+      if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1")
+        throw new Error();
+    } catch {
+      throw new Error("Native push requires a valid base64-encoded APNs P-256 private key.");
+    }
+  }
   return {
     agentSkillRevision: value.AGENT_SKILL_REVISION,
     agentSkillSourceUrl:
@@ -295,6 +322,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
           ]),
         ]
       : [value.APP_BASE_URL],
+    nativePush: {
+      enabled: value.NATIVE_PUSH_ENABLED === "true",
+      teamId: value.APNS_TEAM_ID,
+      keyId: value.APNS_KEY_ID,
+      privateKey: Buffer.from(value.APNS_PRIVATE_KEY_BASE64, "base64").toString("utf8"),
+      topic: value.APNS_TOPIC,
+      environment: value.APNS_ENVIRONMENT,
+    },
     authRateLimitMaxRequests: value.AUTH_RATE_LIMIT_MAX_REQUESTS,
     authRateLimitWindowSeconds: value.AUTH_RATE_LIMIT_WINDOW_SECONDS,
     apiBaseUrl: value.API_BASE_URL,

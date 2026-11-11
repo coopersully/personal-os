@@ -83,3 +83,28 @@ it("fetches exact human message context using the shared transport and encoded m
   await api.getFinanceConversationMessageContext("message/id");
   expect(request).toHaveBeenCalledWith("/v1/finances/conversation/messages/message%2Fid/context");
 });
+
+it("uses the independent turn transport without coercing fixed decimal cutoffs", async () => {
+  const request = vi.fn(async (path: string) =>
+    path.endsWith("/replies")
+      ? { message: { id: "reply" } }
+      : { turn: { cutoffSequence: "9007199254740993" }, messages: [] },
+  );
+  const api = createFinanceConversationApi(request as unknown as FinanceRequest);
+  expect(await api.beginFinanceConversationTurn("schedule/id")).toMatchObject({
+    turn: { cutoffSequence: "9007199254740993" },
+  });
+  await api.acknowledgeFinanceConversationTurn("turn/id", { messageIds: ["source"] });
+  const input = {
+    text: "reply",
+    idempotencyKey: "retry",
+    sourceMessageIds: ["source"],
+    caseId: null,
+  };
+  expect(await api.replyToFinanceConversationTurn("turn/id", input)).toEqual({ id: "reply" });
+  expect(request.mock.calls.map((call) => call[0])).toEqual([
+    "/v1/finances/conversation/hosts/schedule%2Fid/turns",
+    "/v1/finances/conversation/turns/turn%2Fid/acknowledgments",
+    "/v1/finances/conversation/turns/turn%2Fid/replies",
+  ]);
+});

@@ -52,6 +52,7 @@ import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
 import { createMailApiClient } from "./features/mail.js";
 import { createMailStewardshipApiClient } from "./features/mail-stewardship.js";
+import { createNativePushApi } from "./features/native-push.js";
 import { createReminderApiClient } from "./features/reminders.js";
 import { createRitualsApiClient } from "./features/rituals.js";
 import { createTaskWorkspaceApiClient } from "./features/task-workspace.js";
@@ -222,6 +223,7 @@ export function createApiClient(options: ClientOptions) {
     ...createFinanceReviewBacklogApi(request),
     ...createFinanceConversationApi(request),
     ...createFinanceConversationUnreadApi(request),
+    ...createNativePushApi(request),
     ...createFinanceMaintenanceExecutionApi(request),
     ...createFinanceConversationEvidenceApi(request),
     ...createFinanceActivityApi(request),

@@ -266,6 +266,58 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   );
 
   server.registerTool(
+    "begin_finance_conversation_turn",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Capture or resume one bounded immutable conversation turn under the original verified host. Returns only unanswered delivered sources, or null when none remain. Independent of blocked financial maintenance; creates no financial run or execution authority. ACK is delivery evidence; only committed causal replies settle sources.",
+      inputSchema: z.object({ scheduleId: id }).strict(),
+      title: "Begin Finance conversation turn",
+    },
+    async ({ scheduleId }) => apiResult(() => api.beginFinanceConversationTurn(scheduleId)),
+  );
+  server.registerTool(
+    "acknowledge_finance_conversation_turn",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Acknowledge exact delivered conversation-turn source IDs. Does not mark human history read, settle sources, or approve financial effects.",
+      inputSchema: z
+        .object({ turnId: id, ...financeConversationAcknowledgmentInputSchema.shape })
+        .strict(),
+      title: "Acknowledge Finance conversation turn",
+    },
+    async ({ turnId, ...input }) =>
+      apiResult(() => api.acknowledgeFinanceConversationTurn(turnId, input)),
+  );
+  server.registerTool(
+    "reply_to_finance_conversation_turn",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Commit one reply to exact delivered sources of a fixed conversation turn. Retry the same idempotency key only with identical text and sources. A committed reply settles only its sources; it never authorizes or proves a financial effect.",
+      inputSchema: z.object({ turnId: id, ...financeConversationReplyInputSchema.shape }).strict(),
+      title: "Reply to Finance conversation turn",
+    },
+    async ({ turnId, ...input }) =>
+      apiResult(() => api.replyToFinanceConversationTurn(turnId, input)),
+  );
+  server.registerTool(
     "get_finance_conversation_batch",
     {
       annotations: {
@@ -444,6 +496,70 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Read Finance continuations",
     },
     async (input) => apiResult(() => api.getFinanceContinuations(input.scheduleId, input.cursor)),
+  );
+  server.registerTool(
+    "load_finance_host_instructions",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Load current code-controlled Finance host instructions every invocation and persist an immutable served receipt under the original live credential. Retry one operationId only for the same invocation. Loading does not prove adoption, Chat capability or financial completion. Fail closed if unavailable.",
+      inputSchema: z.object({ scheduleId: id, operationId: id }).strict(),
+      title: "Load current Finance host instructions",
+    },
+    async ({ scheduleId, operationId }) =>
+      apiResult(() => api.loadFinanceHostInstructions(scheduleId, { operationId })),
+  );
+  server.registerTool(
+    "acknowledge_finance_host_instructions",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Explicitly report adoption of an exact served instruction receipt/version through its original live credential. Schedule, authority or current instruction changes require a fresh load. This records the host's report; it is not proof of obedience.",
+      inputSchema: z
+        .object({ scheduleId: id, receiptId: id, instructionVersion: z.int().positive() })
+        .strict(),
+      title: "Acknowledge current Finance host instructions",
+    },
+    async ({ scheduleId, ...input }) =>
+      apiResult(() => api.acknowledgeFinanceHostInstructions(scheduleId, input)),
+  );
+  server.registerTool(
+    "get_finance_host_instruction_history",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: true,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Read a bounded page of immutable served Finance instructions and separate explicit host acknowledgements, under the original live connection. Follow nextCursor as before; never infer obedience from a receipt.",
+      inputSchema: z
+        .object({
+          scheduleId: id,
+          before: id.optional(),
+          limit: z.int().min(1).max(100).optional(),
+        })
+        .strict(),
+      title: "Read Finance instruction delivery history",
+    },
+    async ({ scheduleId, ...input }) =>
+      apiResult(() =>
+        api.getFinanceHostInstructionHistory(scheduleId, {
+          ...(input.before === undefined ? {} : { before: input.before }),
+          ...(input.limit === undefined ? {} : { limit: input.limit }),
+        }),
+      ),
   );
   server.registerTool(
     "get_finance_host_prompt_history",

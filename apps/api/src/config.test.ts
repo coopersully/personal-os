@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { loadConfig, officialAgentSkill } from "./config.js";
 
 const required = {
@@ -64,6 +65,14 @@ describe("API configuration", () => {
       icloudMailIdleConcurrency: 5,
       icloudMailIdleEnabled: false,
       logLevel: "info",
+      nativePush: {
+        enabled: false,
+        teamId: "",
+        keyId: "",
+        privateKey: "",
+        topic: "app.personal-os.mobile",
+        environment: "production",
+      },
       mcpResourceUrl: "https://api.example.com/mcp",
       port: 8788,
       plaidClientId: "",
@@ -376,5 +385,34 @@ describe("API configuration", () => {
     expect(() => loadConfig({ ...production, GOOGLE_CLIENT_SECRET: "" })).toThrow(
       "GOOGLE_CLIENT_SECRET",
     );
+  });
+});
+
+describe("APNs configuration", () => {
+  const pem = generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+    .privateKey.export({ type: "pkcs8", format: "pem" })
+    .toString();
+  const valid = {
+    ...required,
+    NATIVE_PUSH_ENABLED: "true",
+    APNS_TEAM_ID: "TESTTEAM00",
+    APNS_KEY_ID: "TESTKEY000",
+    APNS_PRIVATE_KEY_BASE64: Buffer.from(pem).toString("base64"),
+  };
+  it("accepts encoded P-256 PEM and keeps the flag fail-closed", () => {
+    expect(loadConfig(valid).nativePush).toMatchObject({
+      enabled: true,
+      privateKey: pem,
+      environment: "production",
+    });
+    expect(() => loadConfig({ ...valid, NATIVE_PUSH_ENABLED: "yes" })).toThrow();
+  });
+  it.each([
+    { APNS_PRIVATE_KEY_BASE64: "bad" },
+    { APNS_TOPIC: "wrong.topic" },
+    { APNS_TEAM_ID: "bad" },
+    { NODE_ENV: "production", APNS_ENVIRONMENT: "sandbox" },
+  ])("rejects unsafe configuration %o", (change) => {
+    expect(() => loadConfig({ ...valid, ...change })).toThrow();
   });
 });

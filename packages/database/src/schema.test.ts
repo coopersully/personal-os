@@ -529,6 +529,9 @@ describe("database schema contracts", () => {
       "0133_texting_workspace_messages",
       "0134_texting_host_binding",
       "0135_texting_input_snapshot",
+      "0136_finance_conversation_turns",
+      "0137_native_push",
+      "0138_finance_host_instruction_receipts",
     ]);
   });
 

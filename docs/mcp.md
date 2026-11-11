@@ -746,3 +746,20 @@ The owner can inspect and explicitly apply prepared batches in Finance review. A
 resume its own originating authorization and needs current read/write/execute grants and the
 owner's execution policy. Revocation and current evidence are checked during execution. Saved
 answers remain available for agent follow-through; ask only for missing facts, not repeated answers.
+
+### Finance conversation turns and current host instructions
+
+`begin_finance_conversation_turn`, `acknowledge_finance_conversation_turn` and
+`reply_to_finance_conversation_turn` adapt the API's bounded, immutable conversation-turn protocol.
+They require current maintenance, write and execution grants under the verified original host.
+A turn is independent of financial maintenance run state; neither delivery ACK nor a chat reply
+provides financial approval or effect evidence. Existing fixed financial run batches remain valid.
+
+`load_finance_host_instructions` loads the current API-owned workflow with an operation UUID and
+records an immutable served receipt. `acknowledge_finance_host_instructions` records the original
+credential's explicit adoption report for that exact version/receipt. The separate
+`get_finance_host_instruction_history` read pages bounded delivery evidence. These tools require
+maintenance, write and execution grants; loading does not require Chat proof because instructions
+also guide the existing handshake. Failed delivery/acknowledgment stops a bootstrap invocation.
+The stable bootstrap and dynamic instruction version are independent. Host scheduling and actual
+obedience remain external evidence, never inferred from issuance or acknowledgment.

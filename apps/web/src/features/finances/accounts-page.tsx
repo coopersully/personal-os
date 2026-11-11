@@ -78,10 +78,12 @@ export function FinanceAccountsPage() {
     queryKey: ["finance-accounts"],
     queryFn: () => api.listFinanceAccounts(),
   });
-  const [editingAccount, setEditing] = useState<FinanceAccount | null>(null);
+  const [manualDialog, setManualDialog] = useState<{
+    kind: "edit" | "compare";
+    account: FinanceAccount;
+  } | null>(null);
   const [linkedSnapshot, setLinkedSnapshot] = useState<FinanceAccount | null>(null);
   const reloadGeneration = useRef(0);
-  const [comparingAccount, setComparing] = useState<FinanceAccount | null>(null);
   const requestedAccount = !accounts.isError
     ? accounts.data?.accounts.find((account) => account.id === requestedAccountId)
     : undefined;
@@ -91,23 +93,37 @@ export function FinanceAccountsPage() {
       group.accountIds.includes(requestedAccount.id),
     );
   const linkedEditor = linkedSnapshot?.id === requestedAccountId ? linkedSnapshot : null;
+  const manual = requestedAccountId === null ? manualDialog : null;
   const comparing =
-    comparingAccount ?? (!linkedEditor && requestedDuplicates ? requestedAccount : null);
-  const editing = editingAccount ?? linkedEditor ?? (requestedDuplicates ? null : requestedAccount);
-  const editorScope = useRef({ editing, requestedAccountId });
-  editorScope.current = { editing, requestedAccountId };
+    manual?.kind === "compare"
+      ? manual.account
+      : !linkedEditor && requestedDuplicates
+        ? requestedAccount
+        : null;
+  const editing =
+    manual?.kind === "edit"
+      ? manual.account
+      : (linkedEditor ?? (requestedDuplicates ? null : requestedAccount));
+  const dialogScope = useRef({ editing, comparing, requestedAccountId });
+  dialogScope.current = { editing, comparing, requestedAccountId };
   useEffect(() => {
-    if (!requestedAccountId) setLinkedSnapshot(null);
-    else if (requestedAccount && !requestedDuplicates)
-      setLinkedSnapshot((snapshot) =>
-        snapshot?.id === requestedAccountId ? snapshot : requestedAccount,
-      );
+    if (requestedAccountId !== null) setManualDialog(null);
+  }, [requestedAccountId]);
+  useEffect(() => {
+    setLinkedSnapshot((snapshot) => {
+      if (snapshot?.id === requestedAccountId) return snapshot;
+      return requestedAccount && !requestedDuplicates ? requestedAccount : null;
+    });
   }, [requestedAccount, requestedAccountId, requestedDuplicates]);
   function clearRequestedAccount() {
-    if (!requestedAccountId) return;
+    if (requestedAccountId === null) return;
     const next = new URLSearchParams(params);
     next.delete("accountId");
     setParams(next, { replace: true });
+  }
+  function openManual(kind: "edit" | "compare", account: FinanceAccount) {
+    clearRequestedAccount();
+    setManualDialog({ kind, account });
   }
   return (
     <div className="flex flex-col gap-5">
@@ -142,8 +158,8 @@ export function FinanceAccountsPage() {
                   accounts={accounts.data.accounts}
                   {...(me.data?.id ? { ownerId: me.data.id } : {})}
                   duplicateGroups={accounts.data.accountSemantics.possibleDuplicateGroups}
-                  onEdit={setEditing}
-                  onCompareDuplicates={setComparing}
+                  onEdit={(account) => openManual("edit", account)}
+                  onCompareDuplicates={(account) => openManual("compare", account)}
                   attentionAction={(account, iconOnly = false) =>
                     financeAccountNeedsConnectionAttention(account) ? (
                       account.status === "needs_reauth" ? (
@@ -189,6 +205,7 @@ export function FinanceAccountsPage() {
       {comparing && accounts.data ? (
         <AccountDuplicateDialog
           account={comparing}
+          key={comparing.id}
           candidates={accounts.data.accounts.filter((candidate) =>
             accounts.data.accountSemantics.possibleDuplicateGroups.some(
               (group) =>
@@ -196,7 +213,12 @@ export function FinanceAccountsPage() {
             ),
           )}
           onClose={() => {
-            setComparing(null);
+            if (
+              dialogScope.current.comparing?.id !== comparing.id ||
+              dialogScope.current.requestedAccountId !== requestedAccountId
+            )
+              return;
+            setManualDialog(null);
             clearRequestedAccount();
           }}
         />
@@ -206,8 +228,13 @@ export function FinanceAccountsPage() {
           account={editing}
           key={`${editing.id}:${editing.updatedAt}`}
           onClose={() => {
+            if (
+              dialogScope.current.editing !== editing ||
+              dialogScope.current.requestedAccountId !== requestedAccountId
+            )
+              return;
             reloadGeneration.current += 1;
-            setEditing(null);
+            setManualDialog(null);
             setLinkedSnapshot(null);
             clearRequestedAccount();
           }}
@@ -216,13 +243,13 @@ export function FinanceAccountsPage() {
             const result = await accounts.refetch();
             if (
               reloadGeneration.current !== generation ||
-              editorScope.current.editing !== editing ||
-              editorScope.current.requestedAccountId !== requestedAccountId
+              dialogScope.current.editing !== editing ||
+              dialogScope.current.requestedAccountId !== requestedAccountId
             )
               return;
             const latest = result.data?.accounts.find((item) => item.id === editing.id);
             if (!result.isError && latest) {
-              if (editingAccount) setEditing(latest);
+              if (manual?.kind === "edit") setManualDialog({ kind: "edit", account: latest });
               else setLinkedSnapshot(latest);
             }
           }}

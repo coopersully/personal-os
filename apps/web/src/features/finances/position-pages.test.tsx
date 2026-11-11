@@ -1340,6 +1340,80 @@ it("opens the new account when a different Chat link replaces an open editor", a
   expect(api.updateFinanceAccount).not.toHaveBeenCalled();
 });
 
+it.each([
+  "edit",
+  "compare",
+] as const)("replaces a manual %s dialog with the single linked account dialog", async (manual) => {
+  const linkedId = "next-account";
+  function OpenChatLink() {
+    const navigate = useNavigate();
+    return (
+      <button type="button" onClick={() => navigate(`/finances/accounts?accountId=${linkedId}`)}>
+        Follow Chat link
+      </button>
+    );
+  }
+  const original = await api.listFinanceAccounts();
+  const duplicate = { ...account, id: "duplicate", name: "Duplicate checking" };
+  const linked = { ...account, id: linkedId, name: "Linked checking" };
+  api.listFinanceAccounts.mockResolvedValue({
+    ...original,
+    accounts: [account, duplicate, linked],
+    accountSemantics: {
+      ...original.accountSemantics,
+      possibleDuplicateGroups: [
+        { accountIds: [manual === "edit" ? linkedId : account.id, duplicate.id] },
+      ],
+    },
+  });
+  mount(
+    <>
+      <OpenChatLink />
+      <FinanceAccountsPage />
+    </>,
+    "/finances/accounts",
+  );
+  const lateSave = Promise.withResolvers<ReturnType<typeof envelope>>();
+  if (manual === "edit") api.updateFinanceAccount.mockReturnValueOnce(lateSave.promise);
+  const manualAction =
+    manual === "edit" ? "Edit Shared checking" : "Compare duplicates for Shared checking";
+  fireEvent.click(await screen.findByRole("button", { name: manualAction }));
+  await screen.findByRole("dialog");
+  if (manual === "edit") {
+    fireEvent.change(screen.getByLabelText("Account name"), {
+      target: { value: "Edited checking" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save account" }));
+    await waitFor(() => expect(api.updateFinanceAccount).toHaveBeenCalledOnce());
+  }
+  fireEvent.click(screen.getByText("Follow Chat link"));
+  if (manual === "edit") {
+    const dialog = await screen.findByRole("dialog", { name: /Compare duplicates/ });
+    expect(within(dialog).getByRole("option", { name: /Duplicate checking/ })).toBeVisible();
+    expect(screen.queryByLabelText("Account name")).toBeNull();
+    await act(async () => lateSave.resolve(envelope({ ...account, name: "Edited checking" })));
+    expect(screen.getByRole("dialog", { name: /Compare duplicates/ })).toBeVisible();
+  } else {
+    await waitFor(() =>
+      expect(screen.getByLabelText("Account name")).toHaveValue("Linked checking"),
+    );
+    expect(screen.queryByRole("button", { name: "Preview comparison" })).toBeNull();
+  }
+  expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { hidden: true })).toBeNull());
+});
+
+it.each([
+  "missing-account",
+  "",
+])("lets a manual row action replace an unavailable Chat account link (%s)", async (id) => {
+  mount(<FinanceAccountsPage />, `/finances/accounts?accountId=${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+  expect(await screen.findByLabelText("Account name")).toHaveValue("Shared checking");
+  expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+});
+
 // Canonical entry remains reachable regardless of financial snapshot readiness.
 it.each([
   "partial",

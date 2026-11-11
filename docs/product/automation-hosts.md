@@ -94,6 +94,12 @@ Conversation turns do not rebind old maintenance runs, refresh financial evidenc
 financial execution authority or imply that any ledger action happened. This policy is a target
 contract; code, migrations, tests and post-deploy host evidence establish delivered behavior.
 
+Finance Chat replies lead with a short result or one concrete question. Structured references open
+owned records, the exact saved budget proposal, or the exact grouped review in the app. The person
+reviews both transfer legs before applying a group and approves a budget by its displayed version.
+A draft can be revised before approval. Inbox cleanup counts only resolved work. Exceptions remain
+visible and retain their source evidence for a later decision.
+
 ## Invocation and recovery contract
 
 1. Authenticate with least-privilege workspace and knowledge-purpose scopes.

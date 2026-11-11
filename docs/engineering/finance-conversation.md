@@ -197,3 +197,23 @@ Migration `0138_finance_host_instruction_receipts` is additive. Local evidence e
 retries, explicit acknowledgment, bounded history, version drift and revocation behavior. The actual
 existing routine's bootstrap upgrade and observed served/acknowledged version require post-deploy
 verification under the same original host connection and existing cadence.
+
+### References and reviewed decisions
+
+Chat replies can attach up to twelve records. The API validates every reference against the owner
+and binds a budget link to its plan and exact saved version. The reply receipt preserves those
+identities on retry. History projects account names and masked suffixes from current owned account
+records. The app opens transaction and account details directly, shows the exact budget proposal,
+and displays grouped review decisions with both transfer legs before offering execution. An earlier
+budget link cannot approve a newer version.
+
+A person can approve the displayed proposal through the canonical budget approval operation, or
+apply the reviewed batch through its saved fingerprint. The batch client submits at most ten items
+per request and reads saved progress before continuing. Cancellation, a changed session, or an
+exception stops further requests. Previously applied decisions remain recorded, and an unresolved
+exception stays visible even after all remaining decisions apply. Old transfer previews without the
+saved counterpart and batches containing deferrals require a fresh preview.
+
+Current host instructions ask for a short result or one concrete question and structured references.
+A chat reply establishes communication. The host summary shows its timestamp separately from the
+latest bookkeeping run, and the ledger and review counts establish the effects of financial work.

@@ -17,6 +17,7 @@ import TodayHome from "../briefing/today";
 import { FinanceAccountsScreen } from "./accounts";
 import { FinanceAssistantScreen } from "./assistant";
 import { FinanceBudgetCategoryScreen, FinanceBudgetEditor } from "./budget-category";
+import { FinanceConversationReference } from "./conversation-reference";
 import { FinanceTransactionScreen } from "./details";
 import { InstitutionLogo } from "./institution-logo";
 import { FinanceOverviewScreen } from "./overview";
@@ -64,6 +65,7 @@ const h = vi.hoisted(() => ({
   timezone: "America/New_York" as string | undefined,
   params: { id: "transaction-1" } as Record<string, string>,
   push: vi.fn(),
+  openURL: vi.fn().mockResolvedValue(undefined),
   navigate: vi.fn(),
   setParams: vi.fn(),
   back: vi.fn(),
@@ -82,6 +84,10 @@ const h = vi.hoisted(() => ({
     listFinanceSpendingTransactions: vi.fn(),
     getFinanceBudget: vi.fn(),
     createFinanceBudget: vi.fn(),
+    approveFinanceBudget: vi.fn(),
+    getFinanceReviewBatch: vi.fn(),
+    executeFinanceReviewBatch: vi.fn(),
+    getFinanceContextualQuestion: vi.fn(),
     getFinanceBudgetStatus: vi.fn().mockResolvedValue([]),
     getFinanceConversationReadiness: vi.fn().mockResolvedValue({ canSend: true }),
     sendFinanceConversationMessage: vi.fn().mockResolvedValue({ id: "sent" }),
@@ -120,7 +126,11 @@ vi.mock("react-native", () => {
     );
   };
   return {
-    StyleSheet: { absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 } },
+    Linking: { openURL: h.openURL },
+    StyleSheet: {
+      create: (value: unknown) => value,
+      absoluteFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+    },
     AppState: {
       currentState: "active",
       addEventListener: (_event: string, callback: (state: string) => void) => {
@@ -235,10 +245,11 @@ vi.mock("../../components/glass-surface", () => ({
 }));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock("../auth/context", () => ({
+  mobileAppOrigin: "https://nohmi.example",
   useOptionalAuth: () => null,
   useAuth: () => ({
     state: { user: { id: h.owner, planningTimezone: h.timezone } },
-    session: { api: () => h.api },
+    session: { api: () => h.api, epoch: () => h.owner },
   }),
 }));
 vi.mock("sonner-native", () => ({ toast: h }));
@@ -1553,6 +1564,130 @@ it("keeps the composer outside the transcript and avoids pulling readers to the 
   expect(h.scrollToEnd).toHaveBeenCalled();
 });
 
+it("opens structured Finance chat references in native details", async () => {
+  h.params = { view: "Conversation" };
+  h.api.getFinanceConversationHistory.mockResolvedValue({
+    messages: [
+      {
+        id: "reply",
+        authorKind: "agent",
+        text: "November is ready to review.",
+        createdAt: "2026-11-09T12:00:00Z",
+        recordRefs: [
+          { kind: "account", id: "account-1" },
+          { kind: "budget_plan", id: "plan-1", budgetVersionId: "version-8" },
+          { kind: "review_batch", id: "batch-1" },
+        ],
+      },
+    ],
+    nextCursor: null,
+  });
+  mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: "View account" }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-account",
+    params: { id: "account-1" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "View budget proposal" }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-chat-reference",
+    params: { kind: "budget_plan", id: "plan-1", versionId: "version-8" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Review grouped decisions" }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-chat-reference",
+    params: { kind: "review_batch", id: "batch-1" },
+  });
+});
+
+const proposal = {
+  id: "version-8",
+  planId: "plan-1",
+  version: 8,
+  effectiveFrom: "2026-11",
+  status: "proposed",
+  profileVersionId: "profile",
+  rationale: "Updated November commitments",
+  allocatedTotal: 500,
+  resources: [{ key: "salary", kind: "income", amount: 500 }],
+  allocations: [{ key: "food-groceries", kind: "spending", categoryId: "category", amount: 500 }],
+  assumptions: ["Confirm recurring income"],
+};
+const approveLabel = /Approve November 2026 v8.*500/;
+it("approves the exact linked budget and keeps its retry identity after an uncertain response", async () => {
+  h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
+  h.api.getFinanceBudget.mockResolvedValue({ data: proposal, approvalReadiness: { ready: true } });
+  h.api.approveFinanceBudget
+    .mockRejectedValueOnce(new Error("connection lost"))
+    .mockImplementationOnce(async () => {
+      const active = { ...proposal, status: "active" };
+      h.api.getFinanceBudget.mockResolvedValue({
+        data: active,
+        approvalReadiness: { ready: false },
+      });
+      return { data: active };
+    });
+  mount(<FinanceConversationReference />);
+  await screen.findByText("Groceries");
+  fireEvent.click(screen.getByRole("button", { name: "Review assumptions" }));
+  expect(screen.getByText("Confirm recurring income")).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: approveLabel }));
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  fireEvent.click(await screen.findByRole("button", { name: approveLabel }));
+  await screen.findByText("November 2026 · v8 · Active");
+  expect(h.api.approveFinanceBudget.mock.calls[0]?.[0]).toMatchObject({
+    budgetVersionId: "version-8",
+    expectedVersion: 8,
+    expectedProfileVersionId: "profile",
+    approvalSource: "user_instruction",
+  });
+  expect(h.api.approveFinanceBudget.mock.calls[1]).toEqual(
+    h.api.approveFinanceBudget.mock.calls[0],
+  );
+});
+it("holds a stale proposal and shows the canonical approval blocker when the version is current", async () => {
+  h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-7" };
+  h.api.getFinanceBudget.mockResolvedValue({
+    data: proposal,
+    approvalReadiness: {
+      ready: false,
+      message: "Refresh your financial profile before approving.",
+    },
+  });
+  const view = mount(<FinanceConversationReference />);
+  await screen.findByText(/earlier budget version/);
+  expect(screen.queryByRole("button", { name: approveLabel })).toBeNull();
+  view.unmount();
+  h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
+  mount(<FinanceConversationReference />);
+  await screen.findByText("Refresh your financial profile before approving.");
+  expect(h.api.approveFinanceBudget).not.toHaveBeenCalled();
+});
+it("discards a previous owner's in-flight budget approval feedback", async () => {
+  h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
+  h.api.getFinanceBudget.mockResolvedValue({ data: proposal, approvalReadiness: { ready: true } });
+  let finish: (value: unknown) => void = () => {};
+  h.api.approveFinanceBudget.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const view = mount(<FinanceConversationReference />);
+  fireEvent.click(await screen.findByRole("button", { name: approveLabel }));
+  h.owner = "owner-b";
+  h.api.getFinanceBudget.mockResolvedValue({ data: null });
+  view.rerender(
+    <QueryClientProvider client={view.client}>
+      <FinanceConversationReference />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Proposal unavailable.");
+  await act(async () => finish({ data: { ...proposal, status: "active" } }));
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.dismiss).toHaveBeenCalledWith("save");
+});
+
 it("shrinks the chat region above the keyboard and restores it on dismissal", async () => {
   h.params = { view: "Conversation" };
   const view = mount(<FinanceAssistantScreen />);
@@ -1581,6 +1716,26 @@ it("keeps the accessible circular Send action inside the message field", async (
   expect(send).toBeDisabled();
   fireEvent.change(input, { target: { value: "Review my budget" } });
   expect(send).toBeEnabled();
+});
+
+it("opens the exact duplicate account comparison on the signed-in web origin", async () => {
+  const { FinanceAccountScreen } = await import("./details");
+  h.params = { id: account.id };
+  const existing = await h.api.listFinanceAccounts();
+  h.api.listFinanceAccounts.mockResolvedValue({
+    ...existing,
+    accountSemantics: {
+      ...existing.accountSemantics,
+      possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }],
+    },
+  });
+  mount(<FinanceAccountScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /Compare duplicates in browser/ }));
+  await waitFor(() =>
+    expect(h.openURL).toHaveBeenCalledWith(
+      `https://nohmi.example/finances/accounts?accountId=${encodeURIComponent(account.id)}`,
+    ),
+  );
 });
 
 it("opens chat from a transaction with its record attached", async () => {

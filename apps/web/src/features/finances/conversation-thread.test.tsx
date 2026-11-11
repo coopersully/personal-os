@@ -30,6 +30,8 @@ it("renders both authors and navigates every supported record kind", () => {
               { kind: "account", id: "a &1" },
               { kind: "contextual_question", id: "q &1" },
               { kind: "review_case", id: "r &1" },
+              { kind: "budget_plan", id: "p &1", budgetVersionId: "v &1" },
+              { kind: "review_batch", id: "b &1" },
             ],
           },
           {
@@ -51,8 +53,13 @@ it("renders both authors and navigates every supported record kind", () => {
     ["account", "/finances/accounts?accountId=a%20%261"],
     ["contextual question", "/finances/chat?question=q%20%261"],
     ["review case", "/finances/review/legacy?item=r%20%261"],
+    ["budget proposal", "/finances/plan?planId=p%20%261&versionId=v%20%261"],
   ])
     expect(screen.getByRole("link", { name: `View ${name}` })).toHaveAttribute("href", href);
+  expect(screen.getByRole("link", { name: "Review grouped decisions" })).toHaveAttribute(
+    "href",
+    "/finances/chat?batch=b%20%261",
+  );
 });
 it("waits for a target, focuses it once, and allows refocusing after the target clears", () => {
   vi.stubGlobal("IntersectionObserver", undefined);

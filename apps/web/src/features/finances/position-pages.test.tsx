@@ -123,14 +123,14 @@ const goal = {
   createdAt: account.createdAt,
   updatedAt: account.updatedAt,
 };
-function mount(page: React.ReactNode) {
+function mount(page: React.ReactNode, location = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <MemoryRouter>{page}</MemoryRouter>
+        <MemoryRouter initialEntries={[location]}>{page}</MemoryRouter>
       </TooltipProvider>
     </QueryClientProvider>,
   );
@@ -1630,6 +1630,23 @@ it("opens comparison from a duplicate account row and restricts keep choices to 
   expect(within(dialog).getByRole("button", { name: "Preview comparison" })).toBeDisabled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+it("opens the owner account comparison directly from an exact Chat link", async () => {
+  const response = await api.listFinanceAccounts();
+  api.listFinanceAccounts.mockResolvedValue({
+    ...response,
+    accounts: [account, { ...account, id: "account-2", name: "Replacement checking" }],
+    accountSemantics: {
+      ...response.accountSemantics,
+      possibleDuplicateGroups: [{ accountIds: [account.id, "account-2"] }],
+    },
+  });
+  mount(<FinanceAccountsPage />, `/finances/accounts?accountId=${encodeURIComponent(account.id)}`);
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByRole("option", { name: /Replacement checking/ })).toBeVisible();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
 it.each([

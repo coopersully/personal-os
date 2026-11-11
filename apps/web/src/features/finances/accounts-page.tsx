@@ -6,7 +6,7 @@ import type {
 } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
 import { FloatingActionRegion, FloatingActions } from "@/components/floating-actions";
@@ -60,7 +60,9 @@ export function FinanceAccountsPage() {
   const client = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
   const workspace = useFinanceWorkspaceReadiness();
-  const task = new URLSearchParams(useLocation().search).get("financeTask");
+  const [params, setParams] = useSearchParams();
+  const task = params.get("financeTask");
+  const requestedAccountId = params.get("accountId");
   const canImport =
     workspace.manualCreationVisible === true &&
     !workspace.isError &&
@@ -76,8 +78,24 @@ export function FinanceAccountsPage() {
     queryKey: ["finance-accounts"],
     queryFn: () => api.listFinanceAccounts(),
   });
-  const [editing, setEditing] = useState<FinanceAccount | null>(null);
-  const [comparing, setComparing] = useState<FinanceAccount | null>(null);
+  const [editingAccount, setEditing] = useState<FinanceAccount | null>(null);
+  const [comparingAccount, setComparing] = useState<FinanceAccount | null>(null);
+  const requestedAccount = !accounts.isError
+    ? accounts.data?.accounts.find((account) => account.id === requestedAccountId)
+    : undefined;
+  const requestedDuplicates =
+    requestedAccount &&
+    accounts.data?.accountSemantics.possibleDuplicateGroups.some((group) =>
+      group.accountIds.includes(requestedAccount.id),
+    );
+  const comparing = comparingAccount ?? (requestedDuplicates ? requestedAccount : null);
+  const editing = editingAccount ?? (requestedDuplicates ? null : requestedAccount);
+  function clearRequestedAccount() {
+    if (!requestedAccountId) return;
+    const next = new URLSearchParams(params);
+    next.delete("accountId");
+    setParams(next, { replace: true });
+  }
   return (
     <div className="flex flex-col gap-5">
       <FloatingActionRegion align="end">
@@ -164,14 +182,20 @@ export function FinanceAccountsPage() {
                 group.accountIds.includes(comparing.id) && group.accountIds.includes(candidate.id),
             ),
           )}
-          onClose={() => setComparing(null)}
+          onClose={() => {
+            setComparing(null);
+            clearRequestedAccount();
+          }}
         />
       ) : null}
       {editing ? (
         <AccountEditor
           account={editing}
           key={`${editing.id}:${editing.updatedAt}`}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            clearRequestedAccount();
+          }}
           onReload={async () => {
             const result = await accounts.refetch();
             const latest = result.data?.accounts.find((item) => item.id === editing.id);

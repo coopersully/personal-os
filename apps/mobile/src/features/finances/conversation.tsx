@@ -7,6 +7,15 @@ import { ConversationComposer } from "./conversation-composer";
 import { useFinance } from "./data";
 import { Copy, FinanceRow, ReadState } from "./ui";
 
+const referenceLabels = {
+  transaction: "Attached transaction",
+  account: "View account",
+  budget_plan: "View budget proposal",
+  review_batch: "Review grouped decisions",
+  review_case: "View review case",
+  contextual_question: "View question",
+} as const;
+
 /** The transcript scrolls independently; composer and page controls never join its content. */
 export function Conversation() {
   const { api, owner } = useFinance();
@@ -140,24 +149,41 @@ export function Conversation() {
                         backgroundColor: mine ? (t.dark ? "#173b2a" : "#e4f1e8") : t.surface,
                       }}
                     >
-                      {message.recordRefs
-                        ?.filter((ref) => ref.kind === "transaction")
-                        .map((ref) => (
-                          <FinanceRow
-                            key={ref.id}
-                            title="Attached transaction"
-                            icon="receipt"
-                            onPress={() =>
-                              router.push({
-                                pathname: "/finance-transaction",
-                                params: { id: ref.id },
-                              })
-                            }
-                          />
-                        ))}
                       <Text selectable style={{ color: t.ink, fontSize: 16, lineHeight: 23 }}>
                         {message.text}
                       </Text>
+                      {message.recordRefs?.map((ref) => (
+                        <FinanceRow
+                          key={`${ref.kind}:${ref.id}${ref.kind === "budget_plan" ? `:${ref.budgetVersionId}` : ""}`}
+                          title={
+                            ref.kind === "account" && ref.displayLabel
+                              ? ref.displayLabel
+                              : referenceLabels[ref.kind]
+                          }
+                          onPress={() => {
+                            if (ref.kind === "transaction" || ref.kind === "account") {
+                              router.push({
+                                pathname:
+                                  ref.kind === "transaction"
+                                    ? "/finance-transaction"
+                                    : "/finance-account",
+                                params: { id: ref.id },
+                              });
+                              return;
+                            }
+                            router.push({
+                              pathname: "/finance-chat-reference",
+                              params: {
+                                kind: ref.kind,
+                                id: ref.id,
+                                ...(ref.kind === "budget_plan"
+                                  ? { versionId: ref.budgetVersionId }
+                                  : {}),
+                              },
+                            });
+                          }}
+                        />
+                      ))}
                     </View>
                   </View>
                 );

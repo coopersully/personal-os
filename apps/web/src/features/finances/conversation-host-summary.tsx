@@ -34,6 +34,9 @@ export function FinanceConversationHostSummary({
           . Starts may be late.
         </p>
       ) : null}
+      {host.latestChatReplyAt ? (
+        <p>Latest chat reply: {new Date(host.latestChatReplyAt).toLocaleString()}.</p>
+      ) : null}
       <FinanceHostRunSummary run={host.latestRun} />
     </div>
   );
@@ -59,8 +62,8 @@ export function FinanceHostRunSummary({
     <div className="grid min-w-0 gap-1 text-sm text-muted-foreground">
       <p>
         {run
-          ? `Latest run: ${runLabels[run.status]} · ${new Date(run.updatedAt).toLocaleString()}.`
-          : "No run recorded for this host."}{" "}
+          ? `Latest bookkeeping run: ${runLabels[run.status]} · ${new Date(run.updatedAt).toLocaleString()}.`
+          : "No bookkeeping run recorded for this host."}{" "}
         <Link className="underline underline-offset-4" to="/finances/activity">
           View Activity
         </Link>

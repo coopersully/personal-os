@@ -2,6 +2,15 @@ import type { FinanceConversationMessage } from "@personal-os/domain";
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 
+const referenceRoutes = {
+  transaction: ["View transaction", "/finances/transactions?transactionId="],
+  account: ["View account", "/finances/accounts?accountId="],
+  contextual_question: ["View contextual question", "/finances/chat?question="],
+  review_case: ["View review case", "/finances/review/legacy?item="],
+  budget_plan: ["View budget proposal", "/finances/plan?planId="],
+  review_batch: ["Review grouped decisions", "/finances/chat?batch="],
+} as const;
+
 export function FinanceConversationThread({
   messages,
   onRendered,
@@ -80,18 +89,12 @@ export function FinanceConversationThread({
             {message.recordRefs.map((ref) => (
               <Link
                 className="text-sm underline underline-offset-4"
-                key={`${ref.kind}:${ref.id}`}
-                to={
-                  ref.kind === "transaction"
-                    ? `/finances/transactions?transactionId=${encodeURIComponent(ref.id)}`
-                    : ref.kind === "account"
-                      ? `/finances/accounts?accountId=${encodeURIComponent(ref.id)}`
-                      : ref.kind === "contextual_question"
-                        ? `/finances/chat?question=${encodeURIComponent(ref.id)}`
-                        : `/finances/review/legacy?item=${encodeURIComponent(ref.id)}`
-                }
+                key={`${ref.kind}:${ref.id}${ref.kind === "budget_plan" ? `:${ref.budgetVersionId}` : ""}`}
+                to={`${referenceRoutes[ref.kind][1]}${encodeURIComponent(ref.id)}${ref.kind === "budget_plan" ? `&versionId=${encodeURIComponent(ref.budgetVersionId)}` : ""}`}
               >
-                View {ref.kind.replaceAll("_", " ")}
+                {ref.kind === "account" && ref.displayLabel
+                  ? ref.displayLabel
+                  : referenceRoutes[ref.kind][0]}
               </Link>
             ))}
           </article>

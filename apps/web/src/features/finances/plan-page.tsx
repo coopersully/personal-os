@@ -240,6 +240,7 @@ function PlanDetails({ plan, relations }: { plan: FinanceBudgetVersion; relation
 export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boolean }) {
   const [params] = useSearchParams();
   const requestedPlanId = params.get("planId");
+  const referencedVersionId = params.get("versionId");
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ plan: FinanceBudgetVersion | null } | null>(null);
   const [approvalNeedsRefresh, setApprovalNeedsRefresh] = useState(false);
@@ -369,6 +370,26 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
     save.reset();
     setEditing(null);
     void refresh();
+  }
+
+  if (referencedVersionId && loaded && plan?.id !== referencedVersionId) {
+    return (
+      <section aria-label="Budget proposal" className="grid gap-2">
+        <p>This chat link points to an earlier budget version.</p>
+        {plan ? (
+          <Link
+            className="underline"
+            to={`/finances/plan?planId=${encodeURIComponent(plan.planId)}`}
+          >
+            View current budget proposal
+          </Link>
+        ) : (
+          <Link className="underline" to="/finances/chat">
+            Back to conversation
+          </Link>
+        )}
+      </section>
+    );
   }
 
   return (

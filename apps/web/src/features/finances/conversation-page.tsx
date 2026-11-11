@@ -20,6 +20,7 @@ import {
 import { financeConversationRecovery, financeRecoveryHref } from "./automation-recovery.js";
 import { FinanceConversationComposer } from "./conversation-composer.js";
 import { FinanceConversationHostSummary } from "./conversation-host-summary.js";
+import { FinanceConversationReviewBatch } from "./conversation-review-batch.js";
 import { FinanceConversationThread } from "./conversation-thread.js";
 import { useFinanceConversationReadiness } from "./use-finance-conversation-readiness.js";
 
@@ -47,6 +48,7 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
     sameSession(client, capturedSession) && capturedSession.owner === ownerId;
   const [params] = useSearchParams();
   const questionId = params.get("question");
+  const batchId = params.get("batch");
   const targetMessageId = params.get("message");
   const draftStateKey = ["finance-conversation-local-drafts", ownerId, capturedSession.epoch];
   // Memory only: recovery navigation retains drafts and exact retry commands for this owner.
@@ -446,6 +448,14 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
           Showing the source message with nearby context. Other messages may be outside the loaded
           pages.
         </p>
+      ) : null}
+      {!accessDenied && batchId ? (
+        <FinanceConversationReviewBatch
+          key={batchId}
+          id={batchId}
+          sessionKey={`${ownerId}:${capturedSession.epoch}`}
+          isCurrent={currentSession}
+        />
       ) : null}
       <FinanceConversationThread
         messages={visible}

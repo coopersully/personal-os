@@ -1685,7 +1685,7 @@ describe.sequential("durable Finance review batches", () => {
       const slow = createFinanceReviewBatchService({
         db: isolated.db,
         now,
-        transactionBudgetMs: 1_000,
+        transactionBudgetMs: 3_000,
         finance: {
           ...f.finance,
           async applyCategorizations(...args) {
@@ -1694,10 +1694,11 @@ describe.sequential("durable Finance review batches", () => {
             if (calls === 2) {
               const tx = required(args[2]);
               // Use the production pre-BEGIN session setup. Every statement stays
-              // below its 500ms statement timeout, but the sequence crosses the
-              // real 1s server transaction deadline after real writer effects.
+              // below its 1500ms statement timeout, but the sequence crosses the
+              // real 3s server transaction deadline after real writer effects.
+              // Allow normal writer/setup work room under parallel DB suites.
               try {
-                for (let step = 0; step < 30; step++) await tx.execute(sql`SELECT pg_sleep(0.1)`);
+                for (let step = 0; step < 60; step++) await tx.execute(sql`SELECT pg_sleep(0.1)`);
               } catch (error) {
                 let cause: unknown = error;
                 while (typeof cause === "object" && cause !== null) {
@@ -1721,6 +1722,7 @@ describe.sequential("durable Finance review batches", () => {
         },
       });
       const partial = await slow.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+      expect(calls, JSON.stringify(partial)).toBe(2);
       expect(observedCode).toBe("25P04");
       const recoveredSession = await isolated.pool.query(
         "SELECT pg_backend_pid() AS pid, current_setting('transaction_timeout') AS timeout",

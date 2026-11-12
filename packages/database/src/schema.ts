@@ -33,6 +33,7 @@ import type {
   ConnectorSyncStatus,
   ConnectorSyncTriggerReason,
   DomainProfile,
+  FinanceAttentionSnapshot,
   FinanceBudgetPolicyEvaluation,
   FinanceBudgetPolicyEvaluationInput,
   FinanceBudgetPolicyPlanSnapshot,
@@ -6769,6 +6770,59 @@ export const financeHostInstructionReceipts = pgTable(
     check(
       "finance_host_instruction_receipts_text_check",
       sql`length(${table.text}) BETWEEN 1 AND 20000`,
+    ),
+  ],
+);
+
+/** Append-only approved scope decisions. They never resolve or delete ledger history. */
+export const financeBudgetStartPolicies = pgTable(
+  "finance_budget_start_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    firstMonth: text("first_month"),
+    timezone: text("timezone").notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    approvedBy: text("approved_by").notNull(),
+    previewId: uuid("preview_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_budget_start_owner_revision").on(table.userId, table.revision),
+    uniqueIndex("finance_budget_start_preview").on(table.previewId),
+    check("finance_budget_start_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "finance_budget_start_month_valid",
+      sql`${table.firstMonth} IS NULL OR ${table.firstMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`,
+    ),
+  ],
+);
+export const financeBudgetStartPreviews = pgTable(
+  "finance_budget_start_previews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    actorType: text("actor_type").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    attention: jsonb("attention").$type<FinanceAttentionSnapshot>().notNull(),
+    firstMonth: text("first_month"),
+    timezone: text("timezone").notNull(),
+    expectedPolicyRevision: integer("expected_policy_revision").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_budget_start_preview_owner_key").on(table.userId, table.idempotencyKey),
+    check("finance_budget_start_preview_revision", sql`${table.expectedPolicyRevision} >= 0`),
+    check("finance_budget_start_preview_actor", sql`${table.actorType} IN ('user', 'agent')`),
+    check(
+      "finance_budget_start_preview_month",
+      sql`${table.firstMonth} IS NULL OR ${table.firstMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`,
     ),
   ],
 );

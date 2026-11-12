@@ -1,7 +1,7 @@
 # Finance inbox zero and November-first budgeting
 
 Date: 2026-11-12
-Status: Proposed detailed design; November-first direction approved by Cooper. No production changes made by this document.
+Status: Detailed design and implementation plan approved by Cooper on November 12, 2026, including verification, deployment, TestFlight and real Finance Chat acceptance. No production changes made by this document.
 Tracking: COO-153 — Reconcile Finance review backlog and recover budget approvals (Nohmi).
 
 ## Intent and approved direction
@@ -85,4 +85,4 @@ A8. Normal independent review, frozen-candidate full verification, protected mer
 
 ## Delivery boundaries
 
-This spec and its implementation plan are for review; writing them does not change production or approve financial batches. Implement in the current thread as requested, without delegating production finance operations. Detailed implementation/design approval precedes product code under the Superpowers workflow. No additional execution-method question is needed: Cooper selected this agent.
+This spec and its implementation plan are approved for implementation; approval does not approve individual financial batches. Implement in the current thread as requested, without delegating production finance operations. Detailed implementation/design approval precedes product code under the Superpowers workflow. No additional execution-method question is needed: Cooper selected this agent.

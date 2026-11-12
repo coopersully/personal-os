@@ -13,6 +13,7 @@ export * from "./execution-policy.js";
 export * from "./feature-contracts.js";
 export * from "./finance/account-balances.js";
 export * from "./finance/appearance.js";
+export * from "./finance/attention.js";
 export * from "./finance/baseline-qualification.js";
 export * from "./finance/budget-approval.js";
 export * from "./finance/cashflow-timeline.js";

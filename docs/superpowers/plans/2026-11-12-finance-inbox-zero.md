@@ -1,6 +1,6 @@
 # Finance Inbox Zero Implementation Plan
 
-> **For agentic workers:** Use superpowers:executing-plans to implement this plan task-by-task in the current thread, honoring Cooper's explicit no-delegation instruction for production Finance operations. Review this detailed plan before implementation.
+> **For agentic workers:** Use superpowers:executing-plans to implement this plan task-by-task in the current thread, honoring Cooper's explicit no-delegation instruction for production Finance operations. Cooper approved this detailed plan on November 12, 2026.
 
 **Goal:** Make November 2026 budget-ready and reach zero active human Finance decisions, then maintain that state through Finance Chat and the existing routine.
 
@@ -20,7 +20,7 @@
 - Keep approved plans, proposals, balances, income, spending and savings distinct; unknown is never zero.
 - Work tracked under COO-153 — Reconcile Finance review backlog and recover budget approvals, in unique live Nohmi project.
 - Current worktree predates shipped Finance Chat. Inspect current main and adopt existing delivered implementations before editing; do not overwrite newer services from this checkout.
-- Product code waits for detailed design/plan review. Existing agent implementation choice is preserved; no repeated method question.
+- Detailed design/plan review approved November 12, 2026. Existing inline implementation choice is preserved; no repeated method question.
 
 ## Review focus
 

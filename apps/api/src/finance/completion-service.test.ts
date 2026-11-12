@@ -455,6 +455,96 @@ describe("real saved batch evidence and known-target satisfaction", () => {
       }).state,
     ).toBe("qualified");
   });
+  it.each([
+    false,
+    true,
+  ])("derives and qualifies targets from a wrapped saved manifest (counterpart: %s)", (hasCounterpart) => {
+    const f = categorizationFixture(true);
+    const manifest = f.batchItem.batch.manifest.map((decision) => ({
+      decision,
+      transferCounterpart: hasCounterpart ? { transactionId: uuid(35), revision: "9" } : undefined,
+    }));
+    const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify(manifest)).digest("hex")}`;
+    const batch = {
+      ...f.batchItem.batch,
+      fingerprint,
+      manifest: manifest.map(({ decision, transferCounterpart }) => ({
+        ...(transferCounterpart && {
+          transferCounterpart: {
+            revision: transferCounterpart.revision,
+            transactionId: transferCounterpart.transactionId,
+          },
+        }),
+        decision: Object.fromEntries(Object.entries(decision).reverse()),
+      })),
+    };
+
+    expect(
+      deriveFinanceCompletionBatchTargets({
+        ownerId: owner,
+        batch,
+        fingerprint,
+        knownFlagIds: [f.transaction.id, uuid(35)],
+      }),
+    ).toMatchObject([
+      {
+        kind: "review_case",
+        id: f.reviewCase.id,
+        capturedRevision: "5",
+        sourceAnchors: [{ id: batch.id, index: 0, fingerprint }],
+      },
+      { kind: "transaction_flag", id: f.transaction.id, capturedRevision: "5" },
+    ]);
+    expect(
+      qualifyFinanceCompletionTarget({
+        ...f,
+        batchItem: { ...f.batchItem, batch, fingerprint },
+      }),
+    ).toMatchObject({ state: "qualified", observedRevision: "6" });
+
+    expect(
+      qualifyFinanceCompletionTarget({
+        ...f,
+        target: { ...f.target, id: uuid(36) },
+        reviewCase: { ...f.reviewCase, id: uuid(36) },
+        batchItem: { ...f.batchItem, batch, fingerprint },
+      }),
+    ).toMatchObject({ reason: "exact_case_effect_unavailable" });
+    expect(
+      qualifyFinanceCompletionTarget({
+        ...f,
+        transaction: { ...f.transaction, contextualRevision: "5" },
+        batchItem: { ...f.batchItem, batch, fingerprint },
+      }),
+    ).toMatchObject({ reason: "source_inconsistent" });
+
+    if (hasCounterpart) {
+      const changed = {
+        ...batch,
+        manifest: manifest.map((item) => ({
+          ...item,
+          transferCounterpart: { transactionId: uuid(35), revision: "10" },
+        })),
+      };
+      expect(() => validateFinanceCompletionBatch(owner, changed, fingerprint)).toThrow(
+        "The saved Finance batch source is inconsistent.",
+      );
+    }
+  });
+  it("rejects malformed wrapped entries and mixed manifest formats even with matching fingerprints", () => {
+    const { batch } = categorizationFixture(true).batchItem;
+    const [decision] = batch.manifest;
+    for (const manifest of [
+      [{ decision, transferCounterpart: { transactionId: uuid(35), revision: "0" } }],
+      [{ decision, transferCounterpart: { transactionId: "invalid", revision: "9" } }],
+      [decision, { decision }],
+    ]) {
+      const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify(manifest)).digest("hex")}`;
+      expect(() =>
+        validateFinanceCompletionBatch(owner, { ...batch, manifest, fingerprint }, fingerprint),
+      ).toThrow();
+    }
+  });
   it("retains historical target revisions from a real saved manifest, not today's revision", () => {
     const f = categorizationFixture(true);
     const targets = deriveFinanceCompletionBatchTargets({

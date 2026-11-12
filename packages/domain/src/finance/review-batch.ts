@@ -145,13 +145,22 @@ export const financeReviewBatchOutcomeSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }).nullable(),
   recovery: z.enum(["none", "new_preview"]),
   completedAt: isoDateTimeSchema,
+  appliedTransferRevision: basis.expectedTransactionRevision.optional(),
 });
 export type FinanceReviewBatchOutcome = z.infer<typeof financeReviewBatchOutcomeSchema>;
+export const financeReviewBatchCounterpartSchema = z.strictObject({
+  transactionId: idSchema,
+  revision: basis.expectedTransactionRevision,
+});
+
 export const financeReviewBatchRunSchema = z.object({
   id: idSchema,
   fingerprint: z.string(),
   idempotencyKey: z.string(),
   decisions: z.array(financeReviewBatchDecisionSchema),
+  transferCounterparts: z
+    .array(financeReviewBatchCounterpartSchema.extend({ index: z.number().int().min(0).max(99) }))
+    .default([]),
   outcomes: z.array(financeReviewBatchOutcomeSchema),
   status: z.enum(["previewed", "in_progress", "completed", "completed_with_exceptions"]),
   pendingCount: z.number().int().nonnegative(),

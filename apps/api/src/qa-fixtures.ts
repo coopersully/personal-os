@@ -35,6 +35,7 @@ import {
   financeProviderItems,
   financeRecurringObligations,
   financeRecurringScheduleVersions,
+  financeReviewBatchRuns,
   financeReviewCases,
   financeTransactionCoverage,
   financeTransactions,
@@ -62,6 +63,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
 import { fixtureFinanceConversation } from "./fixtures/finance-conversation.js";
+import { fixtureFinanceConversationPreview } from "./fixtures/finance-conversation-preview.js";
 import { fixtureInstitutionBranding } from "./fixtures/institution-branding.js";
 import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
@@ -229,6 +231,7 @@ type FixtureData = {
   financeRecurringObligations: Array<typeof financeRecurringObligations.$inferInsert>;
   financeConversations: Array<typeof financeConversations.$inferInsert>;
   financeConversationMessages: Array<typeof financeConversationMessages.$inferInsert>;
+  financeReviewBatchRuns: Array<typeof financeReviewBatchRuns.$inferInsert>;
   financeReviewCases: Array<typeof financeReviewCases.$inferInsert>;
   financeTransactionCoverage: (typeof financeTransactionCoverage.$inferInsert)[];
   financeTransactions: Array<typeof financeTransactions.$inferInsert>;
@@ -286,6 +289,7 @@ function emptyFixtureData(): FixtureData {
     financeMerchants: [],
     financeProfiles: [],
     financeRecurringObligations: [],
+    financeReviewBatchRuns: [],
     financeReviewCases: [],
     financeConversations: [],
     financeConversationMessages: [],
@@ -2103,17 +2107,36 @@ export async function loadQaFixtures(
         createdAt: now,
         updatedAt: now,
       });
+      const planning = financePlanningFixture(account.id, now, account.key === "demo-full");
+      const preview =
+        account.key === "demo-full"
+          ? fixtureFinanceConversationPreview(
+              account.id,
+              now,
+              (record) => fixtureId(account, record),
+              planning,
+            )
+          : undefined;
+      if (preview) {
+        data.financeTransactions.push(...preview.transactions);
+        data.financeReviewCases.push(...preview.reviews);
+        data.financeReviewBatchRuns.push(preview.batch);
+      }
       const conversation = fixtureFinanceConversation(account.id, now, {
         transactionId: loaded.reviewTransactionId,
         messageId: (record) => fixtureId(account, record),
+        ...(preview ? { previewRefs: preview.recordRefs } : {}),
       });
       data.financeConversations.push(conversation.conversation);
       data.financeConversationMessages.push(...conversation.messages);
-      const planning = financePlanningFixture(account.id, now, account.key === "demo-full");
       data.financeProfileVersions.push(planning.profile);
       data.financeBudgetPlans.push(planning.plan);
       data.financeBudgetVersions.push(planning.budget);
       data.financeBudgetAllocations.push(...planning.allocations);
+      if (preview) {
+        data.financeBudgetVersions.push(preview.proposal);
+        data.financeBudgetAllocations.push(...preview.proposalAllocations);
+      }
       data.financeGoals.push(...planning.goals);
       data.financeRecurringObligations.push(...planning.obligations);
       data.financeRecurringScheduleVersions.push(...planning.schedules);
@@ -2373,6 +2396,8 @@ export async function loadQaFixtures(
         .values(data.financeClassificationDecisions);
     if (data.financeReviewCases.length)
       await transaction.insert(financeReviewCases).values(data.financeReviewCases);
+    if (data.financeReviewBatchRuns.length)
+      await transaction.insert(financeReviewBatchRuns).values(data.financeReviewBatchRuns);
     if (data.financeConversations.length)
       await transaction.insert(financeConversations).values(data.financeConversations);
     if (data.financeConversationMessages.length)

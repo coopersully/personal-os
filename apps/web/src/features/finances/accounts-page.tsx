@@ -5,8 +5,8 @@ import type {
   UpdateFinanceAccountInput,
 } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
 import { FloatingActionRegion, FloatingActions } from "@/components/floating-actions";
@@ -60,7 +60,9 @@ export function FinanceAccountsPage() {
   const client = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
   const workspace = useFinanceWorkspaceReadiness();
-  const task = new URLSearchParams(useLocation().search).get("financeTask");
+  const [params, setParams] = useSearchParams();
+  const task = params.get("financeTask");
+  const requestedAccountId = params.get("accountId");
   const canImport =
     workspace.manualCreationVisible === true &&
     !workspace.isError &&
@@ -76,8 +78,53 @@ export function FinanceAccountsPage() {
     queryKey: ["finance-accounts"],
     queryFn: () => api.listFinanceAccounts(),
   });
-  const [editing, setEditing] = useState<FinanceAccount | null>(null);
-  const [comparing, setComparing] = useState<FinanceAccount | null>(null);
+  const [manualDialog, setManualDialog] = useState<{
+    kind: "edit" | "compare";
+    account: FinanceAccount;
+  } | null>(null);
+  const [linkedSnapshot, setLinkedSnapshot] = useState<FinanceAccount | null>(null);
+  const reloadGeneration = useRef(0);
+  const requestedAccount = !accounts.isError
+    ? accounts.data?.accounts.find((account) => account.id === requestedAccountId)
+    : undefined;
+  const requestedDuplicates =
+    requestedAccount &&
+    accounts.data?.accountSemantics.possibleDuplicateGroups.some((group) =>
+      group.accountIds.includes(requestedAccount.id),
+    );
+  const linkedEditor = linkedSnapshot?.id === requestedAccountId ? linkedSnapshot : null;
+  const manual = requestedAccountId === null ? manualDialog : null;
+  const comparing =
+    manual?.kind === "compare"
+      ? manual.account
+      : !linkedEditor && requestedDuplicates
+        ? requestedAccount
+        : null;
+  const editing =
+    manual?.kind === "edit"
+      ? manual.account
+      : (linkedEditor ?? (requestedDuplicates ? null : requestedAccount));
+  const dialogScope = useRef({ editing, comparing, requestedAccountId });
+  dialogScope.current = { editing, comparing, requestedAccountId };
+  useEffect(() => {
+    if (requestedAccountId !== null) setManualDialog(null);
+  }, [requestedAccountId]);
+  useEffect(() => {
+    setLinkedSnapshot((snapshot) => {
+      if (snapshot?.id === requestedAccountId) return snapshot;
+      return requestedAccount && !requestedDuplicates ? requestedAccount : null;
+    });
+  }, [requestedAccount, requestedAccountId, requestedDuplicates]);
+  function clearRequestedAccount() {
+    if (requestedAccountId === null) return;
+    const next = new URLSearchParams(params);
+    next.delete("accountId");
+    setParams(next, { replace: true });
+  }
+  function openManual(kind: "edit" | "compare", account: FinanceAccount) {
+    clearRequestedAccount();
+    setManualDialog({ kind, account });
+  }
   return (
     <div className="flex flex-col gap-5">
       <FloatingActionRegion align="end">
@@ -111,8 +158,8 @@ export function FinanceAccountsPage() {
                   accounts={accounts.data.accounts}
                   {...(me.data?.id ? { ownerId: me.data.id } : {})}
                   duplicateGroups={accounts.data.accountSemantics.possibleDuplicateGroups}
-                  onEdit={setEditing}
-                  onCompareDuplicates={setComparing}
+                  onEdit={(account) => openManual("edit", account)}
+                  onCompareDuplicates={(account) => openManual("compare", account)}
                   attentionAction={(account, iconOnly = false) =>
                     financeAccountNeedsConnectionAttention(account) ? (
                       account.status === "needs_reauth" ? (
@@ -158,24 +205,53 @@ export function FinanceAccountsPage() {
       {comparing && accounts.data ? (
         <AccountDuplicateDialog
           account={comparing}
+          key={comparing.id}
           candidates={accounts.data.accounts.filter((candidate) =>
             accounts.data.accountSemantics.possibleDuplicateGroups.some(
               (group) =>
                 group.accountIds.includes(comparing.id) && group.accountIds.includes(candidate.id),
             ),
           )}
-          onClose={() => setComparing(null)}
+          onClose={() => {
+            if (
+              dialogScope.current.comparing?.id !== comparing.id ||
+              dialogScope.current.requestedAccountId !== requestedAccountId
+            )
+              return;
+            setManualDialog(null);
+            clearRequestedAccount();
+          }}
         />
       ) : null}
       {editing ? (
         <AccountEditor
           account={editing}
           key={`${editing.id}:${editing.updatedAt}`}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            if (
+              dialogScope.current.editing !== editing ||
+              dialogScope.current.requestedAccountId !== requestedAccountId
+            )
+              return;
+            reloadGeneration.current += 1;
+            setManualDialog(null);
+            setLinkedSnapshot(null);
+            clearRequestedAccount();
+          }}
           onReload={async () => {
+            const generation = ++reloadGeneration.current;
             const result = await accounts.refetch();
+            if (
+              reloadGeneration.current !== generation ||
+              dialogScope.current.editing !== editing ||
+              dialogScope.current.requestedAccountId !== requestedAccountId
+            )
+              return;
             const latest = result.data?.accounts.find((item) => item.id === editing.id);
-            if (latest) setEditing(latest);
+            if (!result.isError && latest) {
+              if (manual?.kind === "edit") setManualDialog({ kind: "edit", account: latest });
+              else setLinkedSnapshot(latest);
+            }
           }}
         />
       ) : null}

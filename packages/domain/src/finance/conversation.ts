@@ -30,6 +30,7 @@ export const financeConversationReadinessSchema = z
         label: z.string().min(1).max(100),
         trigger: automationHostTriggerSchema,
         nextExpectedAt: isoDateTimeSchema.nullable(),
+        latestChatReplyAt: isoDateTimeSchema.optional(),
         latestRun: z
           .object({
             id: idSchema,
@@ -68,12 +69,23 @@ export const financeConversationReadinessSchema = z
   .strict();
 export type FinanceConversationReadiness = z.infer<typeof financeConversationReadinessSchema>;
 
-export const financeConversationRecordReferenceSchema = z
+const ordinaryReference = z
   .object({
-    kind: z.enum(["transaction", "account", "review_case", "contextual_question"]),
+    kind: z.enum(["transaction", "account", "review_case", "contextual_question", "review_batch"]),
     id: idSchema,
   })
   .strict();
+const budgetReference = z
+  .object({ kind: z.literal("budget_plan"), id: idSchema, budgetVersionId: idSchema })
+  .strict();
+export const financeConversationRecordReferenceSchema = z.discriminatedUnion("kind", [
+  ordinaryReference,
+  budgetReference,
+]);
+const conversationDisplayedReferenceSchema = z.discriminatedUnion("kind", [
+  ordinaryReference.extend({ displayLabel: z.string().max(240).optional() }),
+  budgetReference,
+]);
 export const financeConversationMessageSchema = z
   .object({
     id: idSchema,
@@ -81,7 +93,7 @@ export const financeConversationMessageSchema = z
     authorKind: z.enum(["user", "agent"]),
     text: z.string().trim().min(1).max(10_000),
     caseId: idSchema.nullable(),
-    recordRefs: z.array(financeConversationRecordReferenceSchema).max(100),
+    recordRefs: z.array(conversationDisplayedReferenceSchema).max(100),
     runId: idSchema.nullable(),
     sourceMessageIds: z.array(idSchema).max(100),
     smsProvenance: z
@@ -198,6 +210,7 @@ export const financeConversationReplyInputSchema = z
     idempotencyKey: z.string().trim().min(1).max(200),
     caseId: idSchema.nullable().default(null),
     sourceMessageIds: z.array(idSchema).min(1).max(100),
+    recordRefs: z.array(financeConversationRecordReferenceSchema).max(12).optional(),
   })
   .strict();
 export type FinanceConversationReplyInput = z.infer<typeof financeConversationReplyInputSchema>;

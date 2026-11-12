@@ -566,3 +566,8 @@ function toQuery(value: object): string {
 }
 
 export type PersonalOsApiClient = ReturnType<typeof createApiClient>;
+
+export {
+  applyReviewedFinanceBatch,
+  financeReviewBatchApprovalBlocker,
+} from "./features/finance-review-backlog.js";

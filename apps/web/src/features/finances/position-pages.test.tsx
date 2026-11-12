@@ -7,7 +7,7 @@ import { ApiClientError } from "@personal-os/api-client";
 import { resolveWorkspaceSettings } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { type Action, toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FinanceAccountsPage } from "./accounts-page.js";
@@ -123,14 +123,14 @@ const goal = {
   createdAt: account.createdAt,
   updatedAt: account.updatedAt,
 };
-function mount(page: React.ReactNode) {
+function mount(page: React.ReactNode, location = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
-        <MemoryRouter>{page}</MemoryRouter>
+        <MemoryRouter initialEntries={[location]}>{page}</MemoryRouter>
       </TooltipProvider>
     </QueryClientProvider>,
   );
@@ -1290,6 +1290,130 @@ it("reloads the latest account after a conflict before another edit", async () =
   await waitFor(() => expect(screen.getByLabelText("Account name")).toHaveValue("New server name"));
 });
 
+it("keeps a deep-linked account draft through the automatic conflict refresh", async () => {
+  const original = await api.listFinanceAccounts();
+  api.updateFinanceAccount.mockImplementationOnce(async () => {
+    api.listFinanceAccounts.mockResolvedValue({
+      ...original,
+      accounts: [{ ...account, name: "Latest server name", updatedAt: "2026-10-06T12:00:00Z" }],
+    });
+    throw new ApiClientError({ code: "conflict", message: "Changed", status: 409 });
+  });
+  mount(<FinanceAccountsPage />, `/finances/accounts?accountId=${encodeURIComponent(account.id)}`);
+  const name = await screen.findByLabelText("Account name");
+  fireEvent.change(name, { target: { value: "My linked draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save account" }));
+  await screen.findByText(/This item changed or is no longer available/);
+  await screen.findByRole("button", { name: "Edit Latest server name", hidden: true });
+  expect(screen.getByLabelText("Account name")).toHaveValue("My linked draft");
+  fireEvent.click(screen.getByRole("button", { name: /Reload/ }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Account name")).toHaveValue("Latest server name"),
+  );
+});
+
+it("opens the new account when a different Chat link replaces an open editor", async () => {
+  function SecondLink() {
+    const navigate = useNavigate();
+    return (
+      <button type="button" onClick={() => navigate("/finances/accounts?accountId=next-account")}>
+        Open second account link
+      </button>
+    );
+  }
+  const original = await api.listFinanceAccounts();
+  api.listFinanceAccounts.mockResolvedValue({
+    ...original,
+    accounts: [account, { ...account, id: "next-account", name: "Second account" }],
+  });
+  mount(
+    <>
+      <SecondLink />
+      <FinanceAccountsPage />
+    </>,
+    `/finances/accounts?accountId=${encodeURIComponent(account.id)}`,
+  );
+  const name = await screen.findByLabelText("Account name");
+  fireEvent.change(name, { target: { value: "First account draft" } });
+  fireEvent.click(screen.getByText("Open second account link"));
+  await waitFor(() => expect(screen.getByLabelText("Account name")).toHaveValue("Second account"));
+  expect(api.updateFinanceAccount).not.toHaveBeenCalled();
+});
+
+it.each([
+  "edit",
+  "compare",
+] as const)("replaces a manual %s dialog with the single linked account dialog", async (manual) => {
+  const linkedId = "next-account";
+  function OpenChatLink() {
+    const navigate = useNavigate();
+    return (
+      <button type="button" onClick={() => navigate(`/finances/accounts?accountId=${linkedId}`)}>
+        Follow Chat link
+      </button>
+    );
+  }
+  const original = await api.listFinanceAccounts();
+  const duplicate = { ...account, id: "duplicate", name: "Duplicate checking" };
+  const linked = { ...account, id: linkedId, name: "Linked checking" };
+  api.listFinanceAccounts.mockResolvedValue({
+    ...original,
+    accounts: [account, duplicate, linked],
+    accountSemantics: {
+      ...original.accountSemantics,
+      possibleDuplicateGroups: [
+        { accountIds: [manual === "edit" ? linkedId : account.id, duplicate.id] },
+      ],
+    },
+  });
+  mount(
+    <>
+      <OpenChatLink />
+      <FinanceAccountsPage />
+    </>,
+    "/finances/accounts",
+  );
+  const lateSave = Promise.withResolvers<ReturnType<typeof envelope>>();
+  if (manual === "edit") api.updateFinanceAccount.mockReturnValueOnce(lateSave.promise);
+  const manualAction =
+    manual === "edit" ? "Edit Shared checking" : "Compare duplicates for Shared checking";
+  fireEvent.click(await screen.findByRole("button", { name: manualAction }));
+  await screen.findByRole("dialog");
+  if (manual === "edit") {
+    fireEvent.change(screen.getByLabelText("Account name"), {
+      target: { value: "Edited checking" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save account" }));
+    await waitFor(() => expect(api.updateFinanceAccount).toHaveBeenCalledOnce());
+  }
+  fireEvent.click(screen.getByText("Follow Chat link"));
+  if (manual === "edit") {
+    const dialog = await screen.findByRole("dialog", { name: /Compare duplicates/ });
+    expect(within(dialog).getByRole("option", { name: /Duplicate checking/ })).toBeVisible();
+    expect(screen.queryByLabelText("Account name")).toBeNull();
+    await act(async () => lateSave.resolve(envelope({ ...account, name: "Edited checking" })));
+    expect(screen.getByRole("dialog", { name: /Compare duplicates/ })).toBeVisible();
+  } else {
+    await waitFor(() =>
+      expect(screen.getByLabelText("Account name")).toHaveValue("Linked checking"),
+    );
+    expect(screen.queryByRole("button", { name: "Preview comparison" })).toBeNull();
+  }
+  expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { hidden: true })).toBeNull());
+});
+
+it.each([
+  "missing-account",
+  "",
+])("lets a manual row action replace an unavailable Chat account link (%s)", async (id) => {
+  mount(<FinanceAccountsPage />, `/finances/accounts?accountId=${id}`);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+  expect(await screen.findByLabelText("Account name")).toHaveValue("Shared checking");
+  expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+});
+
 // Canonical entry remains reachable regardless of financial snapshot readiness.
 it.each([
   "partial",
@@ -1630,6 +1754,23 @@ it("opens comparison from a duplicate account row and restricts keep choices to 
   expect(within(dialog).getByRole("button", { name: "Preview comparison" })).toBeDisabled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+it("opens the owner account comparison directly from an exact Chat link", async () => {
+  const response = await api.listFinanceAccounts();
+  api.listFinanceAccounts.mockResolvedValue({
+    ...response,
+    accounts: [account, { ...account, id: "account-2", name: "Replacement checking" }],
+    accountSemantics: {
+      ...response.accountSemantics,
+      possibleDuplicateGroups: [{ accountIds: [account.id, "account-2"] }],
+    },
+  });
+  mount(<FinanceAccountsPage />, `/finances/accounts?accountId=${encodeURIComponent(account.id)}`);
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByRole("option", { name: /Replacement checking/ })).toBeVisible();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
 it.each([

@@ -11,7 +11,7 @@
     },
     "ios": {
       "bundleIdentifier": "app.personal-os.mobile",
-      "buildNumber": "9",
+      "buildNumber": "10",
       "appleTeamId": "7J7HDVDCKQ",
       "supportsTablet": false,
       "infoPlist": {

@@ -28,6 +28,7 @@ import { eq, sql } from "drizzle-orm";
 import type { PoolClient } from "pg";
 import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
+import { validateFinanceCompletionBatch } from "./completion-service.js";
 import { createFinanceReviewBatchService } from "./review-batch-service.js";
 
 const stamp = new Date("2026-10-24T12:00:00.000Z");
@@ -453,6 +454,97 @@ describe.sequential("durable Finance review batches", () => {
     ).toMatchObject({ state: "awaiting_evidence", reasons: ["counterpart_evidence_limit"] });
   });
   it.each([
+    "revision",
+    "replacement",
+    "legacy",
+  ] as const)("requires a new preview after counterpart %s without blocking independent decisions", async (scenario) => {
+    const f = await transferFixture();
+    const run = await f.service.preview(f.input, f.agentContext);
+    const before = await transaction(f.decision.transactionId);
+    expect(run.transferCounterparts).toEqual([
+      {
+        index: 0,
+        transactionId: f.counterpart.id,
+        revision: f.counterpart.contextualRevision.toString(),
+      },
+    ]);
+    if (scenario === "revision") {
+      const stored = required(
+        await database.db.query.financeReviewBatchRuns.findFirst({
+          where: eq(financeReviewBatchRuns.id, run.id),
+        }),
+      );
+      expect(validateFinanceCompletionBatch(f.userId, stored, run.fingerprint).manifest).toEqual(
+        run.decisions,
+      );
+      const { index, transactionId } = required(run.transferCounterparts[0]);
+      const alteredManifest = stored.manifest.map((entry, position) =>
+        position === index
+          ? {
+              decision: required(run.decisions[index]),
+              transferCounterpart: {
+                transactionId,
+                revision: (f.counterpart.contextualRevision + 1n).toString(),
+              },
+            }
+          : entry,
+      );
+      expect(() =>
+        validateFinanceCompletionBatch(
+          f.userId,
+          { ...stored, manifest: alteredManifest },
+          run.fingerprint,
+        ),
+      ).toThrow("The saved Finance batch source is inconsistent.");
+
+      await database.db
+        .update(financeTransactions)
+        .set({ merchant: "Updated source merchant" })
+        .where(eq(financeTransactions.id, f.counterpart.id));
+    } else if (scenario === "replacement") {
+      await database.db
+        .update(financeTransactions)
+        .set({ pending: true })
+        .where(eq(financeTransactions.id, f.counterpart.id));
+      await database.db.insert(financeTransactions).values({
+        userId: f.userId,
+        accountId: f.counterpart.accountId,
+        merchant: "Replacement source entry",
+        amount: f.counterpart.amount,
+        direction: "transfer",
+        providerDirection: "income",
+        providerCategory: "TRANSFER_IN",
+        currencyCode: "USD",
+        transactionDate: f.counterpart.transactionDate,
+      });
+    } else {
+      await database.db
+        .update(financeReviewBatchRuns)
+        .set({ manifest: run.decisions })
+        .where(eq(financeReviewBatchRuns.id, run.id));
+    }
+    const replay = await f.service.preview(f.input, f.agentContext);
+    expect(replay.fingerprint).toBe(run.fingerprint);
+    expect(replay.transferCounterparts).toEqual(
+      scenario === "legacy" ? [] : run.transferCounterparts,
+    );
+    const fresh = await f.service.preview(
+      { ...f.input, idempotencyKey: "fresh-counterpart" },
+      f.agentContext,
+    );
+    if (scenario !== "legacy") expect(fresh.fingerprint).not.toBe(run.fingerprint);
+    const result = await f.service.execute(
+      run.id,
+      { fingerprint: run.fingerprint },
+      scenario === "legacy" ? f.context : f.agentContext,
+    );
+    expect(result.outcomes).toMatchObject([
+      { status: "failed", recovery: "new_preview", error: { code: "conflict" } },
+      { status: "deferred" },
+    ]);
+    expect(await transaction(f.decision.transactionId)).toEqual(before);
+  });
+  it.each([
     "confirm_transfer",
     "recategorize",
   ] as const)("executes an exact agent %s with the real writer and continues the batch", async (action) => {
@@ -565,9 +657,36 @@ describe.sequential("durable Finance review batches", () => {
     f.decisions.splice(1, 0, second);
     return { ...f, counterpart, second, siblings };
   }
+  it("does not inherit a counterpart revision advance committed by a different batch", async () => {
+    const f = await twoLegTransferFixture();
+    const pending = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.second] },
+      f.agentContext,
+    );
+    const first = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.decision] },
+      f.agentContext,
+    );
+    expect(
+      (await f.service.execute(first.id, { fingerprint: first.fingerprint }, f.agentContext))
+        .outcomes[0]?.status,
+    ).toBe("applied");
+    const result = await f.service.execute(
+      pending.id,
+      { fingerprint: pending.fingerprint },
+      f.agentContext,
+    );
+    expect(result.outcomes[0]).toMatchObject({
+      status: "failed",
+      recovery: "new_preview",
+      error: { code: "conflict" },
+    });
+    expect(await transaction(f.second.transactionId)).toEqual(f.counterpart);
+  });
   it.each([
     "same batch",
     "resumed chunk",
+    "owner resumes agent preview",
     "fresh preview",
   ] as const)("confirms both exact transfer legs through %s without consuming unrelated cases", async (mode) => {
     const f = await twoLegTransferFixture();
@@ -604,7 +723,7 @@ describe.sequential("durable Finance review batches", () => {
     const result = await freshService.execute(
       resumedRun.id,
       { fingerprint: resumedRun.fingerprint },
-      f.agentContext,
+      mode === "owner resumes agent preview" ? f.context : f.agentContext,
     );
     expect(result.pendingCount).toBe(0);
     expect(result.outcomes.map((outcome) => outcome.status)).toEqual(

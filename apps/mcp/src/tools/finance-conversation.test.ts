@@ -78,6 +78,7 @@ it("preserves fixed-batch cursors, exact acknowledgments, causal replies and cha
         idempotencyKey: "reply",
         sourceMessageIds: [source],
         caseId: null,
+        recordRefs: [{ kind: "account", id: source }],
       },
     });
     expect(api.replyToFinanceConversationTurn).toHaveBeenCalledWith(id, {
@@ -85,6 +86,7 @@ it("preserves fixed-batch cursors, exact acknowledgments, causal replies and cha
       idempotencyKey: "reply",
       sourceMessageIds: [source],
       caseId: null,
+      recordRefs: [{ kind: "account", id: source }],
     });
     const page = await client.callTool({
       name: "get_finance_conversation_batch",

@@ -4,7 +4,11 @@ import type { financeConversationMessages } from "@personal-os/database";
 export function fixtureFinanceConversation(
   userId: string,
   now: Date,
-  references: { transactionId: string; messageId: (record: number) => string },
+  references: {
+    transactionId: string;
+    messageId: (record: number) => string;
+    previewRefs?: NonNullable<(typeof financeConversationMessages.$inferInsert)["recordRefs"]>;
+  },
 ) {
   const messages = [
     {
@@ -32,6 +36,18 @@ export function fixtureFinanceConversation(
       text: "No. Editing this transaction changes only this purchase. Other purchases keep their own categories, and no merchant rule is created.",
     },
   ] satisfies { authorKind: "user" | "agent"; text: string }[];
+  const originalCount = messages.length;
+  if (references.previewRefs)
+    messages.push(
+      {
+        authorKind: "user",
+        text: "Can you set aside another $100 this month and check the $375 savings transfer?",
+      },
+      {
+        authorKind: "agent",
+        text: "**Budget proposal:** I moved $100 from investing to the cash buffer in the draft. It’s ready for your approval.\n\n**Transfer review:** Checking shows $375 out and savings shows $375 in. I grouped both entries for review. Neither entry has changed.",
+      },
+    );
   return {
     conversation: { userId, nextSequence: BigInt(messages.length) },
     messages: messages.map((message, index) => ({
@@ -41,7 +57,12 @@ export function fixtureFinanceConversation(
       sequence: BigInt(index + 1),
       idempotencyKey: `fixture-finance-conversation-${index + 1}`,
       createdAt: new Date(now.getTime() - (messages.length - index) * 120_000),
-      recordRefs: [{ kind: "transaction" as const, id: references.transactionId }],
+      recordRefs:
+        index < originalCount
+          ? [{ kind: "transaction" as const, id: references.transactionId }]
+          : message.authorKind === "agent"
+            ? (references.previewRefs ?? [])
+            : [],
     })) satisfies (typeof financeConversationMessages.$inferInsert)[],
   };
 }

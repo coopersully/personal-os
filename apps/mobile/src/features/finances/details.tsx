@@ -1,6 +1,9 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { View } from "react-native";
+import { useEffect, useRef } from "react";
+import { Linking, View } from "react-native";
+import { toast } from "sonner-native";
 import { RowActions } from "../../components/row-actions";
+import { mobileAppOrigin, useAuth } from "../auth/context";
 import { AccountPreferences } from "./account-preferences";
 import { categoryIcon } from "./category-presentation";
 import { useFinanceRead } from "./data";
@@ -13,8 +16,52 @@ import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Section } fro
 
 export function FinanceAccountScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { session } = useAuth();
+  const comparisonActive = useRef(false);
+  const comparisonPending = useRef(false);
+  useEffect(() => {
+    comparisonActive.current = true;
+    return () => {
+      comparisonActive.current = false;
+    };
+  }, []);
   const query = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
   const account = query.data?.accounts.find((item) => item.id === id);
+  const duplicates = query.data?.accountSemantics?.possibleDuplicateGroups?.some((group) =>
+    group.accountIds.includes(id),
+  );
+  async function compareDuplicates() {
+    if (comparisonPending.current) return;
+    const epoch = session.epoch();
+    const current = () => comparisonActive.current && session.epoch() === epoch;
+    comparisonPending.current = true;
+    const feedback = toast.loading("Opening account comparison…");
+    try {
+      const fresh = await query.refetch();
+      if (!current()) {
+        toast.dismiss(feedback);
+        return;
+      }
+      if (
+        fresh.isError ||
+        !fresh.data?.accounts.some((item) => item.id === id) ||
+        !fresh.data?.accountSemantics?.possibleDuplicateGroups?.some((group) =>
+          group.accountIds.includes(id),
+        )
+      )
+        throw new Error("Account comparison unavailable");
+      const url = new URL("/finances/accounts", mobileAppOrigin);
+      url.searchParams.set("accountId", id);
+      await Linking.openURL(url.href);
+      if (current()) toast.success("Account comparison opened", { id: feedback });
+      else toast.dismiss(feedback);
+    } catch {
+      if (current()) toast.error("Could not open this account comparison.", { id: feedback });
+      else toast.dismiss(feedback);
+    } finally {
+      comparisonPending.current = false;
+    }
+  }
   return (
     <FinanceScreen title={account?.name ?? "Account"}>
       <ReadState query={query}>
@@ -63,6 +110,13 @@ export function FinanceAccountScreen() {
                 }
                 icon="clock"
               />
+              {duplicates ? (
+                <FinanceRow
+                  title="Compare duplicates in browser"
+                  subtitle="Check for unique history before excluding an account."
+                  onPress={() => void compareDuplicates()}
+                />
+              ) : null}
               <AccountPreferences key={account.id} account={account} />
             </Card>
             <Section title="Transactions">

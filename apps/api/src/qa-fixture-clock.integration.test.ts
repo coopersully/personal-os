@@ -9,6 +9,9 @@ import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { createFinanceAccountService } from "./finance/account-service.js";
 import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
+import { createProfileBudgetService } from "./finance/profile-budget-service.js";
+import { createFinanceReviewBatchService } from "./finance/review-batch-service.js";
+import { createFinanceService } from "./finance-service.js";
 import { fixtureInstitutionBranding } from "./fixtures/institution-branding.js";
 import { refreshQaFinanceFixtures } from "./qa-fixture-clock.js";
 import { loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
@@ -47,6 +50,8 @@ it("catches up through DST/month rollover without duplicates, lost edits, sessio
       "agent",
       "user",
       "agent",
+      "user",
+      "agent",
     ]);
     expect(messages[1]?.text).toContain("$78.25");
     expect(messages[3]?.text).toContain("I haven’t changed it yet");
@@ -54,11 +59,45 @@ it("catches up through DST/month rollover without duplicates, lost edits, sessio
       await database.db.query.financeConversations.findFirst({
         where: (row, { eq }) => eq(row.userId, owner),
       }),
-    ).toMatchObject({ nextSequence: 6n });
+    ).toMatchObject({ nextSequence: 8n });
     const linked = await database.db.query.financeTransactions.findFirst({
       where: (row, { eq }) => eq(row.id, messages[1]?.recordRefs[0]?.id ?? ""),
     });
     expect(linked).toMatchObject({ merchant: "SQ *UNKNOWN POPUP 8821", needsReview: true });
+    const previewRefs = messages.at(-1)?.recordRefs ?? [];
+    expect(previewRefs.map(({ kind }) => kind)).toEqual([
+      "budget_plan",
+      "review_batch",
+      "transaction",
+      "transaction",
+      "account",
+      "review_case",
+    ]);
+    const plan = previewRefs.find((ref) => ref.kind === "budget_plan");
+    const batch = previewRefs.find((ref) => ref.kind === "review_batch");
+    if (!plan || !batch) throw new Error("Missing Finance Chat demo references");
+    const db = database.db;
+    const readBudget = createProfileBudgetService({ db, now: () => seed });
+    expect(await readBudget.getFinanceBudget(owner, plan.id)).toMatchObject({
+      data: { id: plan.budgetVersionId, version: 2, status: "proposed", balanceDelta: 0 },
+      approvalReadiness: { ready: true },
+    });
+    const finance = createFinanceService({ db, now: () => seed });
+    const batches = createFinanceReviewBatchService({ db, now: () => seed, finance });
+    const run = await batches.get(batch.id, {
+      principal: {
+        userId: owner,
+        actorId: owner,
+        actorType: "user",
+        scopes: new Set(["finances:read"]),
+      },
+      requestId: "fixture-clock-batch",
+    });
+    expect(run).toMatchObject({ status: "previewed", pendingCount: 2 });
+    expect(run.transferCounterparts).toEqual([
+      { index: 0, transactionId: previewRefs[3]?.id, revision: "1" },
+      { index: 1, transactionId: previewRefs[2]?.id, revision: "1" },
+    ]);
     const original = await database.db.query.financeTransactions.findFirst({
       where: (row, { eq }) => eq(row.userId, owner),
     });

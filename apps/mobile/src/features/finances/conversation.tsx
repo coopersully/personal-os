@@ -7,6 +7,34 @@ import { ConversationComposer } from "./conversation-composer";
 import { useFinance } from "./data";
 import { Copy, FinanceRow, ReadState } from "./ui";
 
+const referenceLabels = {
+  transaction: "Attached transaction",
+  account: "View account",
+  budget_plan: "View budget proposal",
+  review_batch: "Review grouped decisions",
+  review_case: "View review case",
+  contextual_question: "View question",
+} as const;
+
+/** Render the agent's supported formatting as native text. Record references own navigation. */
+function agentMessageText(text: string) {
+  const content = text.replace(/^([ \t]*)[-*][ \t]+(?=\S)/gm, "$1• ");
+  const spans = [];
+  let cursor = 0;
+  for (const match of content.matchAll(/\*\*([^*\r\n]+)\*\*/g)) {
+    const start = match.index;
+    spans.push(content.slice(cursor, start));
+    spans.push(
+      <Text key={start} style={{ fontWeight: "700" }}>
+        {match[1]}
+      </Text>,
+    );
+    cursor = start + match[0].length;
+  }
+  spans.push(content.slice(cursor));
+  return spans;
+}
+
 /** The transcript scrolls independently; composer and page controls never join its content. */
 export function Conversation() {
   const { api, owner } = useFinance();
@@ -140,24 +168,41 @@ export function Conversation() {
                         backgroundColor: mine ? (t.dark ? "#173b2a" : "#e4f1e8") : t.surface,
                       }}
                     >
-                      {message.recordRefs
-                        ?.filter((ref) => ref.kind === "transaction")
-                        .map((ref) => (
-                          <FinanceRow
-                            key={ref.id}
-                            title="Attached transaction"
-                            icon="receipt"
-                            onPress={() =>
-                              router.push({
-                                pathname: "/finance-transaction",
-                                params: { id: ref.id },
-                              })
-                            }
-                          />
-                        ))}
                       <Text selectable style={{ color: t.ink, fontSize: 16, lineHeight: 23 }}>
-                        {message.text}
+                        {mine ? message.text : agentMessageText(message.text)}
                       </Text>
+                      {message.recordRefs?.map((ref) => (
+                        <FinanceRow
+                          key={`${ref.kind}:${ref.id}${ref.kind === "budget_plan" ? `:${ref.budgetVersionId}` : ""}`}
+                          title={
+                            ref.kind === "account" && ref.displayLabel
+                              ? ref.displayLabel
+                              : referenceLabels[ref.kind]
+                          }
+                          onPress={() => {
+                            if (ref.kind === "transaction" || ref.kind === "account") {
+                              router.push({
+                                pathname:
+                                  ref.kind === "transaction"
+                                    ? "/finance-transaction"
+                                    : "/finance-account",
+                                params: { id: ref.id },
+                              });
+                              return;
+                            }
+                            router.push({
+                              pathname: "/finance-chat-reference",
+                              params: {
+                                kind: ref.kind,
+                                id: ref.id,
+                                ...(ref.kind === "budget_plan"
+                                  ? { versionId: ref.budgetVersionId }
+                                  : {}),
+                              },
+                            });
+                          }}
+                        />
+                      ))}
                     </View>
                   </View>
                 );

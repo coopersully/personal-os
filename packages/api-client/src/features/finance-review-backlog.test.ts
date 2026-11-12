@@ -1,4 +1,5 @@
-import { createApiClient } from "../client.js";
+import type { FinanceReviewBatchRun } from "@personal-os/domain";
+import { applyReviewedFinanceBatch, createApiClient } from "../client.js";
 
 function fixture() {
   const response = { status: "in_progress", pendingCount: 2, outcomes: [] };
@@ -143,4 +144,44 @@ describe("Finance review backlog API client", () => {
       ).rejects.toMatchObject({ status, details: { recovery: "new_preview" } });
     }
   });
+});
+
+it.each([
+  "offline",
+  "stale",
+] as const)("retains a validated execution receipt when the follow-up read is %s", async (readFailure) => {
+  const before: FinanceReviewBatchRun = {
+    id: "batch",
+    fingerprint: `sha256:${"a".repeat(64)}`,
+    idempotencyKey: "review",
+    status: "previewed",
+    pendingCount: 3,
+    createdAt: "2026-11-11T00:00:00Z",
+    updatedAt: "2026-11-11T00:00:00Z",
+    decisions: [],
+    transferCounterparts: [],
+    outcomes: [],
+  };
+  const receipt: FinanceReviewBatchRun = {
+    ...before,
+    status: "in_progress",
+    pendingCount: 1,
+  };
+  const getFinanceReviewBatch = vi.fn().mockResolvedValue({ ...receipt, pendingCount: 2 });
+  if (readFailure === "offline") getFinanceReviewBatch.mockRejectedValue(new Error("Offline"));
+  const executeFinanceReviewBatch = vi.fn().mockResolvedValue(receipt);
+  const onConfirmed = vi.fn();
+  await expect(
+    applyReviewedFinanceBatch(
+      { executeFinanceReviewBatch, getFinanceReviewBatch },
+      before,
+      new AbortController().signal,
+      () => true,
+      onConfirmed,
+    ),
+  ).rejects.toThrow(
+    readFailure === "offline" ? "Offline" : "Batch progress could not be confirmed",
+  );
+  expect(executeFinanceReviewBatch).toHaveBeenCalledOnce();
+  expect(onConfirmed.mock.calls).toEqual([[receipt]]);
 });

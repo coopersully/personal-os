@@ -5,6 +5,7 @@ import {
   automationHostSchedules,
   type Database,
   financeAccounts,
+  financeBudgetVersions,
   financeContextRevisions,
   financeContextualQuestions,
   financeConversationBatches,
@@ -15,6 +16,7 @@ import {
   financeConversations,
   financeConversationTurnMessages,
   financeConversationTurns,
+  financeReviewBatchRuns,
   financeReviewCases,
   financeTransactions,
   workspaceMaintenanceRuns,
@@ -58,6 +60,30 @@ import {
 import { requireHostRunAuthority } from "./host-run-authority.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+function replyReferences(parsed: FinanceConversationSendInput) {
+  const refs = [...parsed.recordRefs];
+  if (
+    refs.length > 12 ||
+    refs.some((ref) => ref.kind === "review_case" && ref.id !== parsed.caseId)
+  )
+    throw new AppError(
+      "invalid_request",
+      "Use at most twelve references and attach a review case through its causal case ID.",
+    );
+  if (parsed.caseId && !refs.some((ref) => ref.kind === "review_case"))
+    refs.unshift({ kind: "review_case", id: parsed.caseId });
+  return [
+    ...new Map(
+      refs.map((ref) => [
+        ref.kind === "budget_plan"
+          ? `${ref.kind}:${ref.id}:${ref.budgetVersionId}`
+          : `${ref.kind}:${ref.id}`,
+        ref,
+      ]),
+    ).values(),
+  ];
+}
+
 function messageValue(
   row: typeof financeConversationMessages.$inferSelect,
 ): FinanceConversationMessage {
@@ -78,6 +104,44 @@ async function messageValues(
   db: Pick<Database, "select">,
   rows: Array<typeof financeConversationMessages.$inferSelect>,
 ): Promise<FinanceConversationMessage[]> {
+  const owner = rows[0]?.userId;
+  const accountIds = [
+    ...new Set(
+      rows.flatMap((row) =>
+        row.recordRefs.filter((ref) => ref.kind === "account").map((ref) => ref.id),
+      ),
+    ),
+  ];
+  const accounts =
+    owner && accountIds.length
+      ? await db
+          .select({
+            id: financeAccounts.id,
+            name: financeAccounts.name,
+            mask: financeAccounts.providerAccountMask,
+          })
+          .from(financeAccounts)
+          .where(and(eq(financeAccounts.userId, owner), inArray(financeAccounts.id, accountIds)))
+      : [];
+  const labels = new Map(
+    accounts.map((account) => [
+      account.id,
+      `${account.name}${account.mask ? ` · ••${account.mask}` : ""}`.slice(0, 240),
+    ]),
+  );
+  function displayed(
+    row: typeof financeConversationMessages.$inferSelect,
+  ): FinanceConversationMessage {
+    const value = messageValue(row);
+    return {
+      ...value,
+      recordRefs: value.recordRefs.map((ref) => {
+        const displayLabel =
+          ref.kind === "account" && row.userId === owner ? labels.get(ref.id) : undefined;
+        return displayLabel ? { ...ref, displayLabel } : ref;
+      }),
+    };
+  }
   const smsRows = rows.filter(
     (row) =>
       row.authorKind === "user" &&
@@ -85,7 +149,7 @@ async function messageValues(
       row.idempotencyKey === `sms-context:${row.sourceOperationId}`,
   );
   const ownerId = smsRows[0]?.userId;
-  if (!ownerId) return rows.map(messageValue);
+  if (!ownerId) return rows.map(displayed);
   const sources = await db
     .select()
     .from(financeContextRevisions)
@@ -100,7 +164,7 @@ async function messageValues(
       ),
     );
   return rows.map((row) => {
-    const value = messageValue(row);
+    const value = displayed(row);
     const source = sources.find(
       (source) =>
         source.userId === row.userId &&
@@ -216,6 +280,35 @@ export function createFinanceConversationService({
         )
         .orderBy(desc(workspaceMaintenanceRuns.createdAt), desc(workspaceMaintenanceRuns.id))
         .limit(1);
+      const [latestReply] = await tx
+        .select({ createdAt: financeConversationMessages.createdAt })
+        .from(financeConversationTurns)
+        .innerJoin(
+          financeConversationTurnMessages,
+          and(
+            eq(financeConversationTurnMessages.userId, userId),
+            eq(financeConversationTurnMessages.turnId, financeConversationTurns.id),
+          ),
+        )
+        .innerJoin(
+          financeConversationMessages,
+          and(
+            eq(financeConversationMessages.userId, userId),
+            eq(financeConversationMessages.id, financeConversationTurnMessages.replyMessageId),
+          ),
+        )
+        .where(
+          and(
+            eq(financeConversationTurns.userId, userId),
+            eq(financeConversationTurns.automationScheduleId, selected.id),
+            eq(
+              financeConversationTurns.authorizationConnectionId,
+              selected.authorizationConnectionId,
+            ),
+          ),
+        )
+        .orderBy(desc(financeConversationMessages.createdAt))
+        .limit(1);
       return {
         ...result,
         host: {
@@ -225,6 +318,7 @@ export function createFinanceConversationService({
           trigger: selected.schedule.trigger,
           nextExpectedAt: observeAutomationHostScheduleHealth(selected.schedule, now())
             .nextExpectedAt,
+          ...(latestReply ? { latestChatReplyAt: latestReply.createdAt.toISOString() } : {}),
           latestRun: latestRun
             ? {
                 id: latestRun.id,
@@ -343,6 +437,22 @@ export function createFinanceConversationService({
       if (!owned) throw new AppError("not_found", "The Finance case was not found.");
     }
     for (const ref of input.recordRefs) {
+      if (ref.kind === "budget_plan") {
+        const [version] = await tx
+          .select({ id: financeBudgetVersions.id })
+          .from(financeBudgetVersions)
+          .where(
+            and(
+              eq(financeBudgetVersions.userId, userId),
+              eq(financeBudgetVersions.planId, ref.id),
+              eq(financeBudgetVersions.id, ref.budgetVersionId),
+            ),
+          )
+          .for("share");
+        if (!version)
+          throw new AppError("not_found", "A referenced Finance budget version was not found.");
+        continue;
+      }
       const table =
         ref.kind === "transaction"
           ? financeTransactions
@@ -350,7 +460,9 @@ export function createFinanceConversationService({
             ? financeAccounts
             : ref.kind === "review_case"
               ? financeReviewCases
-              : financeContextualQuestions;
+              : ref.kind === "review_batch"
+                ? financeReviewBatchRuns
+                : financeContextualQuestions;
       const [owned] = await tx
         .select({ id: table.id })
         .from(table)
@@ -589,13 +701,16 @@ export function createFinanceConversationService({
         idempotencyKey: string;
         sourceMessageIds: string[];
         caseId?: string | null;
+        recordRefs?: FinanceConversationSendInput["recordRefs"] | undefined;
       },
     ) {
       const parsed = financeConversationSendInputSchema.parse({
         text: input.text,
         idempotencyKey: input.idempotencyKey,
         caseId: input.caseId ?? null,
+        recordRefs: input.recordRefs ?? [],
       });
+      const recordRefs = replyReferences(parsed);
       if (
         !input.sourceMessageIds.length ||
         input.sourceMessageIds.length > 100 ||
@@ -651,6 +766,7 @@ export function createFinanceConversationService({
             existing.runId ||
             existing.text !== parsed.text ||
             messageValue(existing).caseId !== parsed.caseId ||
+            !isDeepStrictEqual(existing.recordRefs, recordRefs) ||
             !isDeepStrictEqual(existing.sourceMessageIds, input.sourceMessageIds) ||
             sources.some((row) => row.member.replyMessageId !== existing.id)
           )
@@ -662,6 +778,11 @@ export function createFinanceConversationService({
         }
         if (sources.some((row) => row.member.replyMessageId))
           throw new AppError("conflict", "A source message already has a committed reply.");
+        await validateContext(tx, principal.userId, {
+          ...parsed,
+          caseId: null,
+          recordRefs: recordRefs.filter((ref) => ref.kind !== "review_case"),
+        });
         const [message] = await tx
           .insert(financeConversationMessages)
           .values({
@@ -669,7 +790,7 @@ export function createFinanceConversationService({
             userId: principal.userId,
             authorKind: "agent",
             caseOwnerId: parsed.caseId ? principal.userId : null,
-            recordRefs: parsed.caseId ? [{ kind: "review_case", id: parsed.caseId }] : [],
+            recordRefs,
             runId: null,
             sourceMessageIds: input.sourceMessageIds,
             sequence: await nextSequence(tx, principal.userId),
@@ -1028,13 +1149,16 @@ export function createFinanceConversationService({
         idempotencyKey: string;
         sourceMessageIds: string[];
         caseId?: string | null;
+        recordRefs?: FinanceConversationSendInput["recordRefs"] | undefined;
       },
     ) {
       const parsed = financeConversationSendInputSchema.parse({
         text: input.text,
         idempotencyKey: input.idempotencyKey,
         caseId: input.caseId ?? null,
+        recordRefs: input.recordRefs ?? [],
       });
+      const recordRefs = replyReferences(parsed);
       if (!input.sourceMessageIds.length || input.sourceMessageIds.length > 100)
         throw new AppError("invalid_request", "A reply requires bounded batch source messages.");
       return db.transaction(async (tx) => {
@@ -1084,11 +1208,17 @@ export function createFinanceConversationService({
             existing.runId !== input.runId ||
             existing.text !== parsed.text ||
             messageValue(existing).caseId !== parsed.caseId ||
+            !isDeepStrictEqual(existing.recordRefs, recordRefs) ||
             !isDeepStrictEqual(existing.sourceMessageIds, input.sourceMessageIds)
           )
             throw new AppError("conflict", "This reply identity already has different content.");
           return messageValue(existing);
         }
+        await validateContext(tx, principal.userId, {
+          ...parsed,
+          caseId: null,
+          recordRefs: recordRefs.filter((ref) => ref.kind !== "review_case"),
+        });
         const [row] = await tx
           .insert(financeConversationMessages)
           .values({
@@ -1096,7 +1226,7 @@ export function createFinanceConversationService({
             userId: principal.userId,
             authorKind: "agent",
             caseOwnerId: parsed.caseId ? principal.userId : null,
-            recordRefs: parsed.caseId ? [{ kind: "review_case", id: parsed.caseId }] : [],
+            recordRefs,
             runId: input.runId,
             sourceMessageIds: input.sourceMessageIds,
             sequence: await nextSequence(tx, principal.userId),

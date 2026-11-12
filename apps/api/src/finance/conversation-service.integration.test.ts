@@ -8,6 +8,8 @@ import {
   executionPolicySettings,
   financeAccounts,
   financeAnswerContinuations,
+  financeBudgetPlans,
+  financeBudgetVersions,
   financeConversationBatches,
   financeConversationBatchMessages,
   financeConversationCapabilities,
@@ -31,6 +33,7 @@ import type { FinanceStatusService } from "../finance-status-service.js";
 import { createOAuthService } from "../oauth-service.js";
 import { hashToken } from "../security.js";
 import type { Principal } from "../types.js";
+import { FINANCE_HOST_INSTRUCTION_VERSION } from "./automation-prompts.js";
 import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 import { createFinanceConversationService } from "./conversation-persistence.js";
 import {
@@ -256,6 +259,99 @@ describe.sequential("durable Finance conversation intake", () => {
     });
   });
 
+  it("attaches only owner records and preserves exact references on a lost reply retry", async () => {
+    const f = await hostFixture();
+    const other = await fixture();
+    const [plan] = await database.db
+      .insert(financeBudgetPlans)
+      .values({ userId: f.userId, name: "November" })
+      .returning();
+    if (!plan) throw new Error("plan");
+    const [version] = await database.db
+      .insert(financeBudgetVersions)
+      .values({
+        userId: f.userId,
+        planId: plan.id,
+        version: 1,
+        effectiveFrom: "2026-11",
+        expectedResources: 0,
+        allocatedTotal: 0,
+        balanceDelta: 0,
+        rationale: "Reference fixture",
+      })
+      .returning();
+    if (!version) throw new Error("version");
+    const source = await f.conversation.send(f.principal, {
+      text: "Show my plan and account",
+      idempotencyKey: randomUUID(),
+      caseId: null,
+      recordRefs: [],
+    });
+    const { turn } = await f.conversation.beginTurn(f.agent, f.scheduleId);
+    if (!turn) throw new Error("turn");
+    const reply = {
+      text: "November is ready to review.\n\n• Check the account balance first.",
+      idempotencyKey: randomUUID(),
+      sourceMessageIds: [source.id],
+    };
+    await expect(
+      f.conversation.replyToTurn(f.agent, turn.id, {
+        ...reply,
+        recordRefs: [{ kind: "account", id: other.account.id }],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const [older] = await database.db
+      .insert(financeBudgetVersions)
+      .values({
+        userId: f.userId,
+        planId: plan.id,
+        version: 2,
+        effectiveFrom: "2026-11",
+        expectedResources: 0,
+        allocatedTotal: 0,
+        balanceDelta: 0,
+        rationale: "Another saved revision",
+      })
+      .returning();
+    if (!older) throw new Error("other revision");
+    const recordRefs = [
+      { kind: "budget_plan" as const, id: plan.id, budgetVersionId: version.id },
+      { kind: "budget_plan" as const, id: plan.id, budgetVersionId: older.id },
+      { kind: "account" as const, id: f.account.id },
+      { kind: "transaction" as const, id: f.transaction.id },
+    ];
+    await expect(
+      f.conversation.replyToTurn(f.agent, turn.id, {
+        ...reply,
+        recordRefs: [{ kind: "budget_plan", id: plan.id, budgetVersionId: randomUUID() }],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const saved = await f.conversation.replyToTurn(f.agent, turn.id, { ...reply, recordRefs });
+    expect(saved.recordRefs).toEqual(recordRefs);
+    await expect(
+      f.conversation.replyToTurn(f.agent, turn.id, { ...reply, recordRefs: recordRefs.slice(1) }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect((await f.conversation.getHostReadiness(f.userId, f.scheduleId)).host).toMatchObject({
+      latestChatReplyAt: saved.createdAt,
+      latestRun: null,
+    });
+    expect(await f.conversation.replyToTurn(f.agent, turn.id, { ...reply, recordRefs })).toEqual(
+      saved,
+    );
+    await expect(
+      f.conversation.replyToTurn(f.agent, turn.id, {
+        ...reply,
+        recordRefs: recordRefs.slice(0, 1),
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect((await f.conversation.history(f.userId)).messages.at(-1)?.recordRefs).toEqual([
+      recordRefs[0],
+      recordRefs[1],
+      { ...recordRefs[2], displayLabel: "Cash" },
+      recordRefs[3],
+    ]);
+  });
+
   it("processes fresh chat beside an old blocked unbound run and recovers partial replies without changing financial evidence", async () => {
     const f = await hostFixture();
     const old = await canonicalRun(f.userId);
@@ -434,7 +530,7 @@ describe.sequential("durable Finance conversation intake", () => {
     expect(a).toMatchObject({
       actorId: f.agent.actorId,
       authorizationConnectionId: f.connectionId,
-      instructionVersion: 1,
+      instructionVersion: FINANCE_HOST_INSTRUCTION_VERSION,
       scheduleVersion: 1,
       acknowledgedAt: null,
     });
@@ -445,18 +541,18 @@ describe.sequential("durable Finance conversation intake", () => {
     await expect(
       instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
         receiptId: a.receiptId,
-        instructionVersion: 2,
+        instructionVersion: FINANCE_HOST_INSTRUCTION_VERSION + 1,
       }),
     ).rejects.toMatchObject({ code: "conflict" });
     const acknowledged = await instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
       receiptId: a.receiptId,
-      instructionVersion: 1,
+      instructionVersion: FINANCE_HOST_INSTRUCTION_VERSION,
     });
     expect(acknowledged.acknowledgedAt).toBeTruthy();
     expect(
       await instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
         receiptId: a.receiptId,
-        instructionVersion: 1,
+        instructionVersion: FINANCE_HOST_INSTRUCTION_VERSION,
       }),
     ).toEqual(acknowledged);
     const next = await instructions.loadInstructions(f.agent, f.scheduleId, {
@@ -490,7 +586,7 @@ describe.sequential("durable Finance conversation intake", () => {
     await expect(
       instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
         receiptId: next.receiptId,
-        instructionVersion: 1,
+        instructionVersion: FINANCE_HOST_INSTRUCTION_VERSION,
       }),
     ).rejects.toMatchObject({ code: "conflict" });
     await database.db
@@ -503,7 +599,7 @@ describe.sequential("durable Finance conversation intake", () => {
     await expect(
       instructions.acknowledgeInstructions(f.agent, f.scheduleId, {
         receiptId: a.receiptId,
-        instructionVersion: 1,
+        instructionVersion: FINANCE_HOST_INSTRUCTION_VERSION,
       }),
     ).rejects.toMatchObject({ code: "forbidden" });
   });

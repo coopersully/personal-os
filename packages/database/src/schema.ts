@@ -37,6 +37,7 @@ import type {
   FinanceBudgetPolicyEvaluationInput,
   FinanceBudgetPolicyPlanSnapshot,
   FinanceBudgetPolicyTerms,
+  FinanceConversationSendInput,
   FinanceHumanWorkRef,
   FinanceInstitutionBranding,
   FinanceProvider,
@@ -5927,12 +5928,7 @@ export const financeConversationMessages = pgTable(
     caseId: uuid("case_id"),
     caseOwnerId: uuid("case_owner_id"),
     recordRefs: jsonb("record_refs")
-      .$type<
-        Array<{
-          kind: "transaction" | "account" | "review_case" | "contextual_question";
-          id: string;
-        }>
-      >()
+      .$type<FinanceConversationSendInput["recordRefs"]>()
       .notNull()
       .default([]),
     sourceMessageIds: jsonb("source_message_ids").$type<string[]>().notNull().default([]),

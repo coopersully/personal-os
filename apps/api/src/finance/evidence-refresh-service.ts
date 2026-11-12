@@ -20,6 +20,7 @@ import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import { budgetPlanningDate } from "./budget-plan-projection.js";
 import type { FinanceTransaction } from "./context.js";
+import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 
 type Context = { principal: Principal; requestId: string };
 type Row = typeof financeEvidenceRefreshRequests.$inferSelect;
@@ -197,12 +198,17 @@ export function createFinanceEvidenceRefreshService({
     async prepareEvidenceRefresh(context: Context, raw: unknown) {
       const input = prepareFinanceEvidenceRefreshInputSchema.parse(raw);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+          actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+          connectionIds: context.principal.authorizationConnectionId
+            ? [context.principal.authorizationConnectionId]
+            : [],
+        });
         await authorize(tx, context, true);
         const [owner] = await tx
           .select()
           .from(users)
           .where(eq(users.id, context.principal.userId))
-          .for("update")
           .limit(1);
         if (!owner) throw new AppError("not_found", "Account not found.");
         const fingerprint = createHash("sha256")

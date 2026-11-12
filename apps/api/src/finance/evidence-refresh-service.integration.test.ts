@@ -9,7 +9,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { encryptJson } from "../security.js";
 import type { Principal } from "../types.js";
 import { createFinanceEvidenceRefreshService } from "./evidence-refresh-service.js";
@@ -202,6 +202,64 @@ describe.sequential("durable Finance evidence refresh", () => {
       status: "blocked",
       sources: [{ freshness: "blocked", reason: "source_unavailable" }],
     });
+  });
+  it("rechecks refresh authority after waiting for the owner lock", async () => {
+    const f = await connected();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.context.principal.userId,
+        name: "Synthetic refresh agent",
+        tokenHash: crypto.randomUUID(),
+        scopes: ["finances:read", "finances:write", "finances:maintain"],
+      })
+      .returning();
+    if (!token) throw new Error("Missing token");
+    const context = {
+      ...f.context,
+      principal: {
+        ...f.context.principal,
+        actorType: "agent" as const,
+        actorId: token.id,
+        authorizationConnectionId: token.authorizationConnectionId,
+      },
+    };
+    let release!: () => void;
+    let acquired!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const locked = new Promise<void>((resolve) => {
+      acquired = resolve;
+    });
+    const ownerLock = database.db.transaction(async (tx) => {
+      await tx.select().from(users).where(eq(users.id, f.context.principal.userId)).for("update");
+      acquired();
+      await held;
+    });
+    await locked;
+    const prepared = service()
+      .prepareEvidenceRefresh(context, f.input)
+      .then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+    try {
+      await vi.waitFor(async () => {
+        const waiters = await database.db.execute<{ count: string }>(
+          sql`SELECT count(*)::text AS count FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%users%'`,
+        );
+        expect(Number(waiters.rows[0]?.count)).toBeGreaterThan(0);
+      });
+      await database.db
+        .update(accessTokens)
+        .set({ revokedAt: clock })
+        .where(eq(accessTokens.id, token.id));
+    } finally {
+      release();
+      await ownerLock;
+    }
+    expect(await prepared).toMatchObject({ error: { code: "forbidden" } });
   });
   it("stops a pending request when the originating agent is revoked", async () => {
     const f = await connected();

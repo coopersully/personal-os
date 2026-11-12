@@ -84,3 +84,24 @@ Results retain every supplied item in order. Source checks use the owned transac
 The first evidence adapter qualifies exact reciprocal transfer confirmations only. Other decisions remain `awaiting_evidence` until their owning evidence adapter establishes sufficiency; caller explanations, confidence, routing groups and `current_record` do not establish it. Missing execute permission is reported as `authorization_denied`, separately from source failure. Valid permission without standing approval remains `awaiting_approval`. A human inspection request itself does not grant approval. Independent qualified items remain visible alongside all held items, so a caller can prepare a separate exact preview for justified work without creating another maintenance run.
 
 The response includes canonical source references and an observation time, plus explicit `advisoryOnly`, `previewRequired` and `executionRevalidationRequired` markers. Re-read or requalify after source changes; the strict existing preview and execution paths remain authoritative. The MCP tool `qualify_finance_maintenance_work` uses the same service and typed client with only `finances:read`, including read-only discovery; it requires no maintenance or execution scope to inspect. Its catalog entry is read-only, prepare-stage and closed-world. Natural-host consumption and useful independent progress remain outcome acceptance, not a consequence of passing source tests.
+
+## November-first budgeting and the active inbox
+
+Accepted product direction on November 12, 2026; implementation remains a target until separately
+verified. Cooper's first maintained budget month is November 2026 in the user's default timezone.
+Preserve all prior transactions, reviews and provenance. Historical work belongs in a separately
+inspectable cleanup queue unless it affects current balances, spending, obligations or allocations.
+Moving work out of the active scope never resolves it or establishes historical completeness.
+Unknown dates and uncertain dependencies require triage rather than automatic historical placement.
+
+The active inbox counts distinct human decisions, with transaction flags, review cases, processing
+work and technical blockers reported separately. Zero human decisions does not imply budget-ready:
+material evidence dependencies must be resolved and the exact current plan approved. The opening
+position requires qualified balance anchors and interval coverage; missing information is not zero.
+
+Finance Chat owns concise, linked questions and batch approvals. Answers durably resume authorized
+work and receive a verified result; they do not silently create permanent rules. Reuse the original
+routine, current-instruction bootstrap and notification controls. Each later month uses the same
+policy with a fresh proposal and explicit carryover, rather than resetting history or automatically
+approving a plan. See the [detailed design](../superpowers/specs/2026-11-12-finance-inbox-zero-design.md)
+and [implementation plan](../superpowers/plans/2026-11-12-finance-inbox-zero.md).

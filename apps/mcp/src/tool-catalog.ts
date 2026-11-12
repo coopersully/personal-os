@@ -233,6 +233,32 @@ export const personalOsToolCatalog = {
     policy: "approved_rule",
   }),
   search_finance: read("finances", ["finances:read"]),
+  get_finance_attention: read("finances", ["finances:read"]),
+  get_finance_budget_start: read("finances", ["finances:read"]),
+  get_finance_budget_start_preview: read("finances", ["finances:read"]),
+  get_finance_opening_position: read("finances", ["finances:read"]),
+  get_finance_evidence_refresh: read("finances", ["finances:read"], "verify"),
+  get_finance_review_batch_undo: read("finances", ["finances:read"], "verify"),
+  preview_finance_budget_start: write("finances", ["finances:read", "finances:write"], {
+    policy: "preview",
+    stage: "prepare",
+    idempotent: true,
+  }),
+  prepare_finance_evidence_refresh: write(
+    "finances",
+    ["finances:read", "finances:write", "finances:maintain"],
+    { policy: "preview", stage: "recover", idempotent: true },
+  ),
+  preview_finance_review_batch_undo: write("finances", ["finances:read", "finances:write"], {
+    policy: "preview",
+    stage: "prepare",
+    idempotent: true,
+  }),
+  execute_finance_review_batch_undo: write(
+    "finances",
+    ["finances:read", "finances:write", "finances:execute"],
+    { policy: "approved_rule", idempotent: false },
+  ),
   get_finance_review_backlog: read("finances", ["finances:read"]),
   list_finance_review_backlog_items: read("finances", ["finances:read"]),
   qualify_finance_maintenance_work: read("finances", ["finances:read"], "prepare", {

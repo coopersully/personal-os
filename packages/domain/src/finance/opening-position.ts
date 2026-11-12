@@ -124,3 +124,35 @@ export const confirmFinanceOpeningStatementInputSchema = z.strictObject({
   signedOpeningBalanceCents: cents.min(-10000000000).max(10000000000),
   idempotencyKey: z.string().trim().min(1).max(200),
 });
+
+export const financeOpeningStatementSchema = z.strictObject({
+  id: z.uuid(),
+  accountId: z.uuid(),
+  month: financeMonthSchema,
+  revision: z.number().int().positive(),
+  signedOpeningBalanceCents: cents,
+  currencyCode: z.literal("USD"),
+  recordedAt: z.iso.datetime(),
+  source: z.literal("user_statement"),
+});
+export const financeOpeningPositionSchema = z.strictObject({
+  month: financeMonthSchema,
+  qualified: z.boolean(),
+  reasons: z.array(z.string()),
+  accounts: z.array(
+    z.strictObject({
+      accountId: z.uuid(),
+      openingBalanceCents: cents.nullable(),
+      reasons: z.array(z.string()),
+      statementDate: z.iso.date().nullable(),
+    }),
+  ),
+  statements: z.array(financeOpeningStatementSchema),
+  asOf: z.iso.datetime(),
+  timezone: z.string(),
+});
+export type FinanceOpeningPosition = z.infer<typeof financeOpeningPositionSchema>;
+export type FinanceOpeningStatement = z.infer<typeof financeOpeningStatementSchema>;
+export type ConfirmFinanceOpeningStatementInput = z.infer<
+  typeof confirmFinanceOpeningStatementInputSchema
+>;

@@ -25,6 +25,9 @@ function setup(scopes: AccessScope[] = ["finances:read", "finances:write"]) {
     list: vi.fn(async () => ({ items: [], nextCursor: null })),
   };
   const batches = {
+    previewUndo: vi.fn(async () => ({ id })),
+    getUndo: vi.fn(async () => ({ id })),
+    executeUndo: vi.fn(async () => ({ id })),
     list: vi.fn(async () => []),
     get: vi.fn(async () => ({ id })),
     preview: vi.fn(async () => ({ id })),
@@ -35,6 +38,55 @@ function setup(scopes: AccessScope[] = ["finances:read", "finances:write"]) {
   return { app, backlog, batches, principal };
 }
 describe("Finance backlog routes", () => {
+  it("keeps corrections private and passes exact bounded acceptance to the execution owner", async () => {
+    const { app, batches, principal } = setup();
+    const preview = { batchId: id, outcomeIndexes: [0, 2], idempotencyKey: "undo" };
+    const post = (body: unknown) => ({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect((await app.request("/v1/finances/review-batch-corrections", post(preview))).status).toBe(
+      201,
+    );
+    expect(batches.previewUndo).toHaveBeenCalledWith(preview, {
+      principal,
+      requestId: "request-1",
+    });
+    const read = await app.request(`/v1/finances/review-batch-corrections/${id}`);
+    expect(read.headers.get("cache-control")).toBe("no-store");
+    const acceptance = { fingerprint: `sha256:${"a".repeat(64)}`, limit: 2 };
+    expect(
+      (await app.request(`/v1/finances/review-batch-corrections/${id}/execute`, post(acceptance)))
+        .status,
+    ).toBe(200);
+    expect(batches.executeUndo).toHaveBeenCalledWith(
+      id,
+      acceptance,
+      expect.objectContaining({ principal }),
+    );
+    expect(
+      (
+        await app.request(
+          `/v1/finances/review-batch-corrections/${id}/execute`,
+          post({ ...acceptance, limit: 11 }),
+        )
+      ).status,
+    ).toBe(400);
+    const denied = setup(["finances:read"]);
+    expect(
+      (await denied.app.request("/v1/finances/review-batch-corrections", post(preview))).status,
+    ).toBe(403);
+    expect(
+      (
+        await denied.app.request(
+          `/v1/finances/review-batch-corrections/${id}/execute`,
+          post(acceptance),
+        )
+      ).status,
+    ).toBe(403);
+    expect(denied.batches.executeUndo).not.toHaveBeenCalled();
+  });
   it("qualifies bounded work under read authority without creating a preview or executing", async () => {
     const { app, batches, principal } = setup(["finances:read"]);
     const input = {

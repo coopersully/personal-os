@@ -177,6 +177,44 @@ describe.sequential("Finance opening statements", () => {
       dependencyRefs: [`flag:${historical.id}`],
     });
   });
+  it("previews historical separation without presenting it as already applied", async () => {
+    const f = await fixture();
+    await database.db.insert(financeTransactions).values({
+      userId: f.context.principal.userId,
+      accountId: f.account.id,
+      merchant: "Old fixture",
+      amount: 1000,
+      direction: "expense",
+      transactionDate: "2026-10-20",
+      needsReview: true,
+    });
+    await service().confirmOpeningStatement(f.context, {
+      accountId: f.account.id,
+      month: "2026-11",
+      expectedAccountRevision: f.account.contextualRevision.toString(),
+      expectedStatementRevision: 0,
+      signedOpeningBalanceCents: 125000,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    const attention = createFinanceAttentionService({
+      db: database.db,
+      now: () => new Date("2026-11-12T16:00:00Z"),
+    });
+    const preview = await attention.previewBudgetStart(f.context, {
+      firstMonth: "2026-11",
+      expectedPolicyRevision: 0,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(preview.attention).toMatchObject({
+      historicalRecordCount: 0,
+      activeTransactionCount: 1,
+    });
+    expect(preview.projectedAttention).toMatchObject({
+      historicalRecordCount: 1,
+      activeTransactionCount: 0,
+    });
+    expect(await attention.getBudgetStart(f.context.principal.userId)).toBeNull();
+  });
   it("carries cash into the next month only with complete movement evidence and coverage", async () => {
     const f = await fixture();
     await service().confirmOpeningStatement(f.context, {

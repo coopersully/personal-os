@@ -101,6 +101,33 @@ describe.sequential("Finance budget starting policy", () => {
       rawCounts: { transactionFlags: 1 },
     });
   });
+  it("lets the owner inspect an agent preview without leaking it to another owner or agent", async () => {
+    const owner = await fixture();
+    const other = await fixture();
+    const agent = {
+      ...owner,
+      principal: { ...owner.principal, actorType: "agent" as const, actorId: crypto.randomUUID() },
+    };
+    const prepared = await service().previewBudgetStart(agent, input());
+    expect(await service().getBudgetStartPreview(owner, prepared.id)).toEqual(prepared);
+    expect(await service().getBudgetStartPreview(agent, prepared.id)).toEqual(prepared);
+    await expect(service().getBudgetStartPreview(other, prepared.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      service().getBudgetStartPreview(
+        { ...agent, principal: { ...agent.principal, actorId: crypto.randomUUID() } },
+        prepared.id,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service().applyBudgetStart(agent, {
+        previewId: prepared.id,
+        fingerprint: prepared.fingerprint,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(await service().getBudgetStart(owner.principal.userId)).toBeNull();
+  });
   it("requires an exact preview, records server-derived approval, and replays safely", async () => {
     const context = await fixture();
     const prepared = await service().previewBudgetStart(context, input());

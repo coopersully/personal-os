@@ -9,6 +9,8 @@ import {
 import {
   applyFinanceBudgetStartInputSchema,
   financeBudgetStartPolicySchema,
+  financeBudgetStartPreviewSchema,
+  idSchema,
   previewFinanceBudgetStartInputSchema,
 } from "@personal-os/domain";
 import { and, desc, eq } from "drizzle-orm";
@@ -29,14 +31,15 @@ function policy(row: typeof financeBudgetStartPolicies.$inferSelect) {
   });
 }
 function preview(row: typeof financeBudgetStartPreviews.$inferSelect) {
-  return {
+  return financeBudgetStartPreviewSchema.parse({
     id: row.id,
     fingerprint: row.fingerprint,
     proposedMonth: row.firstMonth,
     timezone: row.timezone,
     expectedPolicyRevision: row.expectedPolicyRevision,
     attention: row.attention,
-  };
+    projectedAttention: row.projectedAttention,
+  });
 }
 
 /** Scope policy only: approval does not qualify a balance or resolve a transaction. */
@@ -72,68 +75,96 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
       const row = await latest(db, userId);
       return row ? policy(row) : null;
     },
+    async getBudgetStartPreview(context: Context, rawId: string) {
+      if (!context.principal.scopes.has("finances:read"))
+        throw new AppError("forbidden", "Finance read access is required.");
+      const row = await db.query.financeBudgetStartPreviews.findFirst({
+        where: and(
+          eq(financeBudgetStartPreviews.id, idSchema.parse(rawId)),
+          eq(financeBudgetStartPreviews.userId, context.principal.userId),
+        ),
+      });
+      if (
+        !row ||
+        (context.principal.actorType === "agent" &&
+          (row.actorType !== "agent" || row.actorId !== context.principal.actorId))
+      )
+        throw new AppError(
+          "not_found",
+          "The starting-policy preview was not found for this authorization.",
+        );
+      return preview(row);
+    },
     async previewBudgetStart(context: Context, rawInput: unknown) {
       const input = previewFinanceBudgetStartInputSchema.parse(rawInput);
       if (!context.principal.scopes.has("finances:write"))
         throw new AppError("forbidden", "Finance write access is required.");
-      return db.transaction(async (tx) => {
-        const owner = await ownerLock(tx, context.principal.userId);
-        const existing = await tx.query.financeBudgetStartPreviews.findFirst({
-          where: and(
-            eq(financeBudgetStartPreviews.userId, owner.id),
-            eq(financeBudgetStartPreviews.idempotencyKey, input.idempotencyKey),
-          ),
-        });
-        if (existing) {
-          if (
-            existing.actorId !== context.principal.actorId ||
-            existing.actorType !== context.principal.actorType ||
-            existing.firstMonth !== input.firstMonth ||
-            existing.expectedPolicyRevision !== input.expectedPolicyRevision ||
-            existing.timezone !== owner.timezone
-          )
-            throw new AppError("conflict", "This preview key belongs to a different request.");
-          return preview(existing);
-        }
-        const current = await latest(tx, owner.id);
-        if ((current?.revision ?? 0) !== input.expectedPolicyRevision)
-          throw new AppError(
-            "conflict",
-            "The budget starting policy changed. Refresh and preview again.",
-          );
-        const attention = await readFinanceAttentionSnapshot(db, owner.id, now(), tx);
-        const fingerprint = `sha256:${createHash("sha256")
-          .update(
-            JSON.stringify({
+      return db.transaction(
+        async (tx) => {
+          const owner = await ownerLock(tx, context.principal.userId);
+          const existing = await tx.query.financeBudgetStartPreviews.findFirst({
+            where: and(
+              eq(financeBudgetStartPreviews.userId, owner.id),
+              eq(financeBudgetStartPreviews.idempotencyKey, input.idempotencyKey),
+            ),
+          });
+          if (existing) {
+            if (
+              existing.actorId !== context.principal.actorId ||
+              existing.actorType !== context.principal.actorType ||
+              existing.firstMonth !== input.firstMonth ||
+              existing.expectedPolicyRevision !== input.expectedPolicyRevision ||
+              existing.timezone !== owner.timezone
+            )
+              throw new AppError("conflict", "This preview key belongs to a different request.");
+            return preview(existing);
+          }
+          const current = await latest(tx, owner.id);
+          if ((current?.revision ?? 0) !== input.expectedPolicyRevision)
+            throw new AppError(
+              "conflict",
+              "The budget starting policy changed. Refresh and preview again.",
+            );
+          const at = now();
+          const attention = await readFinanceAttentionSnapshot(db, owner.id, at, tx);
+          const projectedAttention = await readFinanceAttentionSnapshot(db, owner.id, at, tx, {
+            firstMonth: input.firstMonth,
+          });
+          const fingerprint = `sha256:${createHash("sha256")
+            .update(
+              JSON.stringify({
+                userId: owner.id,
+                actorId: context.principal.actorId,
+                actorType: context.principal.actorType,
+                firstMonth: input.firstMonth,
+                expectedPolicyRevision: input.expectedPolicyRevision,
+                timezone: owner.timezone,
+                snapshot: attention.snapshot,
+              }),
+            )
+            .digest("hex")}`;
+          const [row] = await tx
+            .insert(financeBudgetStartPreviews)
+            .values({
               userId: owner.id,
               actorId: context.principal.actorId,
               actorType: context.principal.actorType,
+              idempotencyKey: input.idempotencyKey,
               firstMonth: input.firstMonth,
               expectedPolicyRevision: input.expectedPolicyRevision,
               timezone: owner.timezone,
-              snapshot: attention.snapshot,
-            }),
-          )
-          .digest("hex")}`;
-        const [row] = await tx
-          .insert(financeBudgetStartPreviews)
-          .values({
-            userId: owner.id,
-            actorId: context.principal.actorId,
-            actorType: context.principal.actorType,
-            idempotencyKey: input.idempotencyKey,
-            firstMonth: input.firstMonth,
-            expectedPolicyRevision: input.expectedPolicyRevision,
-            timezone: owner.timezone,
-            fingerprint,
-            attention,
-            createdAt: now(),
-          })
-          .returning();
-        if (!row)
-          throw new AppError("internal_error", "The starting policy preview was not created.");
-        return preview(row);
-      });
+              fingerprint,
+              attention,
+              projectedAttention,
+              createdAt: now(),
+            })
+            .returning();
+          if (!row)
+            throw new AppError("internal_error", "The starting policy preview was not created.");
+          return preview(row);
+        },
+        { isolationLevel: "repeatable read" },
+      );
     },
     async applyBudgetStart(context: Context, rawInput: unknown) {
       const input = applyFinanceBudgetStartInputSchema.parse(rawInput);
@@ -158,6 +189,11 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
           ),
         });
         if (!prepared) throw new AppError("not_found", "Starting policy preview not found.");
+        if (!prepared.projectedAttention)
+          throw new AppError(
+            "conflict",
+            "Prepare a fresh starting-policy preview with its expected impact.",
+          );
         if (prepared.fingerprint !== input.fingerprint)
           throw new AppError("conflict", "This approval does not match the preview.");
         const applied = await tx.query.financeBudgetStartPolicies.findFirst({

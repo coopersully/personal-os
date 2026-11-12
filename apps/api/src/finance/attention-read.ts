@@ -19,6 +19,7 @@ export async function readFinanceAttentionSnapshot(
   userId: string,
   at: Date,
   executor?: FinanceTransaction,
+  projection?: { firstMonth: string | null },
 ) {
   const read = async (tx: FinanceTransaction) => {
     const owner = await tx.query.users.findFirst({ where: eq(users.id, userId) });
@@ -82,7 +83,7 @@ export async function readFinanceAttentionSnapshot(
       budgetApproved: budget.state === "approved",
     };
     const projected = projectFinanceAttention({
-      firstMonth: start?.firstMonth ?? null,
+      firstMonth: projection ? projection.firstMonth : (start?.firstMonth ?? null),
       period: budget.month,
       complete,
       ...readiness,

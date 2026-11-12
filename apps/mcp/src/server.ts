@@ -8,6 +8,7 @@ import { registerAgentAccountTools } from "./tools/agent-account.js";
 import { registerAssistantTools } from "./tools/assistant.js";
 import { registerCalendarEventTools, registerCalendarListTools } from "./tools/calendar.js";
 import { registerCalendarManagementTools } from "./tools/calendar-management.js";
+import { registerFinanceAttentionTools } from "./tools/finance-attention.js";
 import { registerFinanceReviewBacklogTools } from "./tools/finance-review-backlog.js";
 import { registerFinanceTools } from "./tools/finances.js";
 import { registerFinanceManagementTools } from "./tools/finances-management.js";
@@ -84,6 +85,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   registerMailStewardshipTools(tools, options.api);
   registerFinanceTools(tools, options.api);
   registerFinanceReviewBacklogTools(tools, options.api);
+  registerFinanceAttentionTools(tools, options.api);
   registerFinanceManagementTools(tools, options.api);
   registerWorkspaceRecoveryTools(tools, options.api);
   registerWorkspaceNotificationTools(tools, options.api);

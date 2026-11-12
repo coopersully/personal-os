@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { financeAttentionSnapshotSchema } from "./attention.js";
 
 export const financeReviewBacklogGroupSchema = z.enum([
   "roundups",
@@ -127,6 +128,8 @@ export const financeReviewBacklogAssessmentSchema = z.object({
   snapshot: z.string().regex(/^[a-f0-9]{64}$/),
   scope: z.literal("all_owned_transactions_flagged_and_open_or_deferred_cases"),
   countingUnit: z.literal("transaction_flags_and_review_cases_separately"),
+  // Older server receipts may lack this field; live API always emits it.
+  attention: financeAttentionSnapshotSchema.optional(),
   month: z.string().regex(/^\d{4}-\d{2}$/),
   timezone: z.string().min(1).max(100),
   complete: z.literal(true),

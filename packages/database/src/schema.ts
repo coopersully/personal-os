@@ -6812,6 +6812,7 @@ export const financeBudgetStartPreviews = pgTable(
     idempotencyKey: text("idempotency_key").notNull(),
     fingerprint: text("fingerprint").notNull(),
     attention: jsonb("attention").$type<FinanceAttentionSnapshot>().notNull(),
+    projectedAttention: jsonb("projected_attention").$type<FinanceAttentionSnapshot>(),
     firstMonth: text("first_month"),
     timezone: text("timezone").notNull(),
     expectedPolicyRevision: integer("expected_policy_revision").notNull(),

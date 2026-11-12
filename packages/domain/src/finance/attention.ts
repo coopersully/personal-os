@@ -149,3 +149,16 @@ export const financeAttentionSnapshotSchema = z.strictObject({
   qualificationRecovery: z.enum(["opening_position_required", "none"]),
 });
 export type FinanceAttentionSnapshot = z.infer<typeof financeAttentionSnapshotSchema>;
+
+export const financeBudgetStartPreviewSchema = z.strictObject({
+  id: z.uuid(),
+  fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  proposedMonth: financeMonthSchema.nullable(),
+  timezone: z.string(),
+  expectedPolicyRevision: z.number().int().nonnegative(),
+  attention: financeAttentionSnapshotSchema,
+  projectedAttention: financeAttentionSnapshotSchema.nullable(),
+});
+export type FinanceBudgetStartPreview = z.infer<typeof financeBudgetStartPreviewSchema>;
+export type PreviewFinanceBudgetStartInput = z.infer<typeof previewFinanceBudgetStartInputSchema>;
+export type ApplyFinanceBudgetStartInput = z.infer<typeof applyFinanceBudgetStartInputSchema>;

@@ -11,6 +11,25 @@ function fixture() {
 }
 
 describe("Finance review backlog API client", () => {
+  it("preserves correction identity, accepted fingerprint and cancellation without automatic retries", async () => {
+    const { api, fetch } = fixture();
+    const input = { batchId: "batch", outcomeIndexes: [0, 2], idempotencyKey: "undo" };
+    await api.previewFinanceReviewBatchUndo(input);
+    await api.getFinanceReviewBatchUndo("undo/ ?");
+    const controller = new AbortController();
+    const acceptance = { fingerprint: `sha256:${"a".repeat(64)}`, limit: 2 };
+    await api.executeFinanceReviewBatchUndo("undo/ ?", acceptance, controller.signal);
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://example.test/v1/finances/review-batch-corrections",
+      "https://example.test/v1/finances/review-batch-corrections/undo%2F%20%3F",
+      "https://example.test/v1/finances/review-batch-corrections/undo%2F%20%3F/execute",
+    ]);
+    expect(fetch.mock.calls[0]?.[1]?.body).toBe(JSON.stringify(input));
+    expect(fetch.mock.calls[2]?.[1]).toMatchObject({
+      body: JSON.stringify(acceptance),
+      signal: controller.signal,
+    });
+  });
   it("composes authenticated assessment, page, and batch reads without losing cursors or IDs", async () => {
     const { api, fetch, response } = fixture();
     expect(await api.getFinanceReviewBacklog()).toEqual(response);

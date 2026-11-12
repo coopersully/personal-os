@@ -4,6 +4,7 @@ import {
   idSchema,
   listFinanceReviewBatchesInputSchema,
   previewFinanceReviewBatchInputSchema,
+  previewFinanceReviewBatchUndoInputSchema,
   qualifyFinanceMaintenanceWorkInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
@@ -33,6 +34,38 @@ export function registerFinanceReviewBacklogRoutes({
     c.header("Cache-Control", "no-store");
     await next();
   });
+  app.use("/v1/finances/review-batch-corrections*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    await next();
+  });
+  app.post(
+    "/v1/finances/review-batch-corrections",
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    async (c) =>
+      c.json(
+        await batches.previewUndo(
+          await parseBody(c, previewFinanceReviewBatchUndoInputSchema),
+          context(c),
+        ),
+        201,
+      ),
+  );
+  app.get("/v1/finances/review-batch-corrections/:id", requireScope("finances:read"), async (c) =>
+    c.json(await batches.getUndo(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  app.post(
+    "/v1/finances/review-batch-corrections/:id/execute",
+    requireScope("finances:write"),
+    async (c) =>
+      c.json(
+        await batches.executeUndo(
+          idSchema.parse(c.req.param("id")),
+          await parseBody(c, executeFinanceReviewBatchInputSchema),
+          { ...context(c), signal: c.req.raw.signal },
+        ),
+      ),
+  );
   app.get("/v1/finances/review-backlog", requireScope("finances:read"), async (c) =>
     c.json(await backlog.assess(c.get("principal").userId)),
   );

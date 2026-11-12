@@ -211,3 +211,7 @@ export const financeReviewBatchUndoSchema = z.strictObject({
   updatedAt: isoDateTimeSchema,
 });
 export type FinanceReviewBatchUndo = z.infer<typeof financeReviewBatchUndoSchema>;
+
+export type PreviewFinanceReviewBatchUndoInput = z.infer<
+  typeof previewFinanceReviewBatchUndoInputSchema
+>;

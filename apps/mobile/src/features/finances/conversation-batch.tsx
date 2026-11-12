@@ -76,7 +76,9 @@ export function BatchReference({ id }: { id: string }) {
     try {
       const receipt = cancel
         ? await api.cancelFinanceBatchContinuation(id)
-        : await api.approveFinanceBatchContinuation(id, batch.fingerprint);
+        : await (batch.decisions.some((decision) => decision.kind === "transfer_pair")
+            ? api.approveFinanceBatchContinuation(id, batch.fingerprint, true)
+            : api.approveFinanceBatchContinuation(id, batch.fingerprint));
       if (active.current) {
         client.setQueryData(["finances", owner, "batch-continuation", id], receipt);
         toast.success(
@@ -193,7 +195,12 @@ export function BatchReference({ id }: { id: string }) {
                     />
                     {counterpart ? (
                       <FinanceRow
-                        title="View other transfer leg"
+                        title={counterpart.summary?.merchant ?? "View other transfer leg"}
+                        subtitle={
+                          counterpart.summary
+                            ? `${counterpart.summary.currencyCode ? formatMoney(counterpart.summary.amountCents / 100, counterpart.summary.currencyCode) : "Currency unknown"} · ${counterpart.summary.date}`
+                            : undefined
+                        }
                         onPress={() =>
                           router.push({
                             pathname: "/finance-transaction",
@@ -217,6 +224,12 @@ export function BatchReference({ id }: { id: string }) {
                 );
               })}
             </Card>
+            {batch.decisions.some((decision) => decision.kind === "transfer_pair") ? (
+              <Copy>
+                Confirm that each pair is the same movement between your own accounts. Both
+                transactions will be excluded from income and spending.
+              </Copy>
+            ) : null}
             {blocker ? <Copy>{blocker}</Copy> : null}
             {categoryBlocker ? (
               <FinanceRow
@@ -250,7 +263,10 @@ export function BatchReference({ id }: { id: string }) {
             !approval.isError &&
             !approval.data ? (
               <Button onPress={() => void saveApproval()}>
-                Approve batch ({batch.pendingCount})
+                {batch.decisions.some((decision) => decision.kind === "transfer_pair")
+                  ? "Confirm transfers and approve"
+                  : "Approve batch"}{" "}
+                ({batch.pendingCount})
               </Button>
             ) : null}
             {processing ? (

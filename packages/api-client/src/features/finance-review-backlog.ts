@@ -25,10 +25,11 @@ export function createFinanceReviewBacklogApi(request: FinanceRequest) {
     approveFinanceBatchContinuation(
       id: string,
       fingerprint: string,
+      confirmTransferPairs?: boolean,
     ): Promise<FinanceReviewBatchContinuation> {
       return request(`${batch(id)}/approval`, {
         method: "POST",
-        body: JSON.stringify({ fingerprint }),
+        body: JSON.stringify({ fingerprint, confirmTransferPairs }),
       });
     },
     cancelFinanceBatchContinuation(id: string): Promise<FinanceReviewBatchContinuation> {
@@ -114,6 +115,15 @@ export function financeReviewBatchApprovalBlocker(batch: FinanceReviewBatchRun):
     )
   )
     return "Ask for a fresh batch with both transfer records attached.";
+  if (
+    batch.decisions.some(
+      (item, index) =>
+        item.kind === "transfer_pair" &&
+        !finished.has(index) &&
+        !batch.transferCounterparts?.find((leg) => leg.index === index)?.summary,
+    )
+  )
+    return "Ask for a fresh batch showing the merchant, amount and date for both transfer records.";
   return null;
 }
 export async function applyReviewedFinanceBatch(

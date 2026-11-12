@@ -153,7 +153,9 @@ export default function TodayHome() {
     (!finance.complete ||
       finance.activeDecisionCount > 0 ||
       finance.technicalBlockerCount > 0 ||
-      finance.processingCount > 0)
+      finance.processingCount > 0 ||
+      finance.readiness?.openingPositionQualified === false ||
+      finance.readiness?.budgetApproved === false)
   )
     attention.push({
       id: "reviews",
@@ -163,7 +165,11 @@ export default function TodayHome() {
           ? `${finance.activeDecisionCount} Finance ${finance.activeDecisionCount === 1 ? "decision needs" : "decisions need"} your input`
           : finance.technicalBlockerCount
             ? "Finance needs recovery"
-            : "Finance is processing",
+            : finance.processingCount
+              ? "Finance is processing"
+              : finance.readiness?.openingPositionQualified === false
+                ? "Verify Finance starting balances"
+                : "Review this month's budget",
       subtitle:
         finance.technicalBlockerCount && !finance.activeDecisionCount
           ? "Connection or evidence needs attention"
@@ -172,12 +178,21 @@ export default function TodayHome() {
       tone: "attention",
       icon: "categoryTags",
       workspace: "finances",
-      href: {
-        pathname: "/finances/assistant",
-        params: {
-          view: finance.complete && finance.activeDecisionCount > 0 ? "Conversation" : "For you",
-        },
-      },
+      href:
+        finance.complete &&
+        !finance.activeDecisionCount &&
+        !finance.technicalBlockerCount &&
+        !finance.processingCount
+          ? finance.readiness?.openingPositionQualified === false
+            ? { pathname: "/finance-opening-position" }
+            : { pathname: "/finances/planning" }
+          : {
+              pathname: "/finances/assistant",
+              params: {
+                view:
+                  finance.complete && finance.activeDecisionCount > 0 ? "Conversation" : "For you",
+              },
+            },
     });
   const budgetAlerts = (data.budgets.data ?? [])
     .map((item) => ({ ...item, pace: budgetPace(item.spent, item.budget.limit, timezone, now) }))

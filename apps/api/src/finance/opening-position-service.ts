@@ -18,6 +18,10 @@ import { and, desc, eq, gte, lt, lte } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
+import {
+  isFinanceAccountSourceCurrent,
+  isFinanceAccountSourceIdentified,
+} from "./account-source-current.js";
 import type { FinanceTransaction } from "./context.js";
 
 type Context = { principal: Principal; requestId: string };
@@ -126,7 +130,12 @@ export function createFinanceOpeningPositionService({
         return present(row);
       });
     },
-    async readOpeningPosition(userId: string, rawMonth: string, executor?: FinanceTransaction) {
+    async readOpeningPosition(
+      userId: string,
+      rawMonth: string,
+      executor?: FinanceTransaction,
+      historicalBoundary = false,
+    ) {
       const month = financeMonthSchema.parse(rawMonth);
       const read = async (tx: FinanceTransaction) => {
         const owner = await tx.query.users.findFirst({ where: eq(users.id, userId) });
@@ -204,13 +213,9 @@ export function createFinanceOpeningPositionService({
                   .slice(0, 10)
               : null;
             const item = items.find((row) => row.id === account.providerItemRecordId);
-            const sourceCurrent =
-              account.provider === "manual" ||
-              (account.status === "connected" &&
-                item?.syncState === "current" &&
-                !!item.lastSyncedAt &&
-                item.lastSyncedAt <= now() &&
-                item.lastSyncedAt.getTime() >= now().getTime() - 86400000);
+            const sourceCurrent = historicalBoundary
+              ? isFinanceAccountSourceIdentified(account, item)
+              : isFinanceAccountSourceCurrent(account, item, now());
             return {
               accountId: account.id,
               identityKey:

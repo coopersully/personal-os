@@ -3,6 +3,7 @@ import {
   auditEvents,
   type Database,
   financeAccounts,
+  financeCategories,
   financeClassificationDecisions,
   financeReviewCases,
   financeTransactionAllocations,
@@ -26,6 +27,23 @@ const fingerprint = (value: unknown) =>
     .digest("hex");
 const stateSchema = z.object({
   fingerprint: z.string(),
+  display: z
+    .object({
+      transactions: z.array(
+        z.object({
+          id: z.uuid(),
+          merchant: z.string(),
+          amountCents: z.number().int(),
+          currencyCode: z.string().nullable(),
+          date: z.iso.date(),
+        }),
+      ),
+      categories: z.array(z.object({ id: z.uuid(), name: z.string() })),
+      reviews: z.array(
+        z.object({ id: z.uuid(), transactionId: z.uuid().nullable(), reason: z.string() }),
+      ),
+    })
+    .optional(),
   classificationIds: z.array(z.uuid()),
   transactions: z
     .array(
@@ -117,9 +135,38 @@ export async function captureFinanceBatchEffect(
       ),
     )
     .orderBy(financeClassificationDecisions.id);
+  const categories = allocations.length
+    ? await tx
+        .select({ id: financeCategories.id, name: financeCategories.name })
+        .from(financeCategories)
+        .where(
+          and(
+            eq(financeCategories.userId, userId),
+            inArray(
+              financeCategories.id,
+              allocations.map((row) => row.categoryId),
+            ),
+          ),
+        )
+    : [];
   const digest = fingerprint({ transactions, allocations, reviews, classifications });
   return stateSchema.parse({
     fingerprint: digest,
+    display: {
+      transactions: transactions.map((row) => ({
+        id: row.id,
+        merchant: row.merchant,
+        amountCents: row.amount,
+        currencyCode: row.currencyCode,
+        date: row.transactionDate,
+      })),
+      categories,
+      reviews: reviews.map((row) => ({
+        id: row.id,
+        transactionId: row.transactionId,
+        reason: row.reason,
+      })),
+    },
     classificationIds: classifications.map((row) => row.id),
     transactions: transactions.map((row) => ({
       ...row,

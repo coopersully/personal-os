@@ -8,6 +8,8 @@ import {
 import {
   executeFinanceReviewBatchInputSchema,
   type FinanceReviewBatchOutcome,
+  type FinanceReviewBatchUndo,
+  financeReviewBatchCorrectionEffectSchema,
   financeReviewBatchOutcomeSchema,
   financeReviewBatchUndoSchema,
   previewFinanceReviewBatchUndoInputSchema,
@@ -21,10 +23,11 @@ import type { FinanceTransaction } from "./context.js";
 
 type Context = { principal: Principal; requestId: string; signal?: AbortSignal };
 type Row = typeof financeReviewBatchCorrections.$inferSelect;
-const present = (row: Row) => {
+const present = (row: Row, effects: FinanceReviewBatchUndo["effects"]) => {
   const outcomes = row.outcomes.map((item) => financeReviewBatchOutcomeSchema.parse(item));
   const pendingCount = row.outcomeIndexes.length - outcomes.length;
   return financeReviewBatchUndoSchema.parse({
+    effects,
     id: row.id,
     batchId: row.batchId,
     fingerprint: row.fingerprint,
@@ -63,6 +66,52 @@ export function createFinanceBatchCorrectionService({
   ) => Promise<typeof financeReviewBatchRuns.$inferSelect>;
   restore: ReturnType<typeof createFinanceService>["restoreReviewBatchEffect"];
 }) {
+  async function presentWithEffects(tx: Pick<Database, "select">, row: Row) {
+    const receipts = await tx
+      .select()
+      .from(financeReviewBatchEffects)
+      .where(
+        and(
+          eq(financeReviewBatchEffects.userId, row.userId),
+          eq(financeReviewBatchEffects.batchId, row.batchId),
+          inArray(financeReviewBatchEffects.outcomeIndex, row.outcomeIndexes),
+        ),
+      )
+      .orderBy(financeReviewBatchEffects.outcomeIndex);
+    const effects = receipts.flatMap((receipt) => {
+      const before = parseFinanceBatchEffect(receipt.before);
+      const after = parseFinanceBatchEffect(receipt.after);
+      if (!before.display) return [];
+      return [
+        {
+          index: receipt.outcomeIndex,
+          transactions: before.display.transactions.map((display) => ({
+            ...display,
+            before: before.transactions.find((item) => item.id === display.id),
+            after: after.transactions.find((item) => item.id === display.id),
+          })),
+          restoredAllocations: before.allocations.map((allocation) => ({
+            transactionId: allocation.transactionId,
+            categoryId: allocation.categoryId,
+            category:
+              before.display?.categories.find((item) => item.id === allocation.categoryId)?.name ??
+              null,
+            amountCents: allocation.amount,
+            treatment: allocation.treatment,
+          })),
+          reopenedReviews: before.display.reviews.filter(
+            (review) =>
+              before.reviews.some((item) => item.id === review.id && item.status !== "resolved") &&
+              after.reviews.some((item) => item.id === review.id && item.status === "resolved"),
+          ),
+        },
+      ];
+    });
+    return present(
+      row,
+      effects.map((effect) => financeReviewBatchCorrectionEffectSchema.parse(effect)),
+    );
+  }
   async function find(tx: FinanceTransaction, id: string, context: Context) {
     const p = context.principal;
     const [row] = await tx
@@ -115,7 +164,7 @@ export function createFinanceBatchCorrectionService({
             JSON.stringify(owned.outcomeIndexes) !== JSON.stringify(input.outcomeIndexes)
           )
             throw new AppError("conflict", "This correction key belongs to different effects.");
-          return present(owned);
+          return presentWithEffects(tx, owned);
         }
         const effects = await tx
           .select()
@@ -134,6 +183,11 @@ export function createFinanceBatchCorrectionService({
             "These outcomes do not have reversible effect receipts. Review a new correction.",
           );
         for (const effect of effects) {
+          if (!parseFinanceBatchEffect(effect.before).display)
+            throw new AppError(
+              "conflict",
+              "The original receipt lacks an exact display of the changes. Prepare a new correction with nohmi instead of undoing blindly.",
+            );
           const after = parseFinanceBatchEffect(effect.after);
           const current = await captureFinanceBatchEffect(
             tx,
@@ -171,13 +225,13 @@ export function createFinanceBatchCorrectionService({
           })
           .returning();
         if (!row) throw new AppError("internal_error", "The correction preview was not saved.");
-        return present(row);
+        return presentWithEffects(tx, row);
       });
     },
     async getUndo(id: string, context: Context) {
       return db.transaction(async (tx) => {
         await authorize(tx, context, "read");
-        return present(await find(tx, id, context));
+        return presentWithEffects(tx, await find(tx, id, context));
       });
     },
     async executeUndo(id: string, raw: unknown, context: Context) {
@@ -266,7 +320,7 @@ export function createFinanceBatchCorrectionService({
           "service_unavailable",
           "Correction paused. Read its saved progress before resuming.",
         );
-      return present(latest);
+      return presentWithEffects(db, latest);
     },
   };
 }

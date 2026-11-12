@@ -3,6 +3,7 @@ import {
   createDatabaseClient,
   financeAccounts,
   financeEconomicEvents,
+  financeProviderItems,
   financeTransactionCoverage,
   financeTransactionRelationships,
   financeTransactions,
@@ -64,6 +65,50 @@ describe.sequential("Finance opening statements", () => {
       db: database.db,
       now: () => new Date("2026-11-12T16:00:00Z"),
     });
+  it.each([
+    "identity",
+    "account_stale",
+  ])("rejects inconsistent connected opening evidence: %s", async (problem) => {
+    const f = await fixture();
+    const at = new Date("2026-11-12T16:00:00Z");
+    const [item] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        userId: f.context.principal.userId,
+        provider: "plaid",
+        providerItemId: "fixture-item",
+        encryptedCredentials: { ciphertext: "unused", iv: "unused", tag: "unused", version: 1 },
+        syncState: "current",
+        lastSyncedAt: at,
+      })
+      .returning();
+    const [account] = await database.db
+      .update(financeAccounts)
+      .set({
+        provider: "plaid",
+        status: "connected",
+        providerItemRecordId: item?.id,
+        providerItemId: problem === "identity" ? "wrong-item" : "fixture-item",
+        providerAccountId: "fixture-account",
+        providerPersistentAccountId: "fixture-persistent",
+        syncState: problem === "account_stale" ? "stale" : "current",
+        lastSyncedAt: at,
+      })
+      .where(eq(financeAccounts.id, f.account.id))
+      .returning();
+    if (!account) throw new Error("Missing account");
+    await service().confirmOpeningStatement(f.context, {
+      accountId: account.id,
+      month: "2026-11",
+      expectedAccountRevision: account.contextualRevision.toString(),
+      expectedStatementRevision: 0,
+      signedOpeningBalanceCents: 125000,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(
+      (await service().readOpeningPosition(f.context.principal.userId, "2026-11")).qualified,
+    ).toBe(false);
+  });
   it("requires explicit opening evidence instead of assuming today's account balance", async () => {
     const f = await fixture();
     expect(

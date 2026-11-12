@@ -94,7 +94,9 @@ export function FinanceConversationReviewBatch({
     try {
       const receipt = cancel
         ? await api.cancelFinanceBatchContinuation(id)
-        : await api.approveFinanceBatchContinuation(id, batch.fingerprint);
+        : await (batch.decisions.some((decision) => decision.kind === "transfer_pair")
+            ? api.approveFinanceBatchContinuation(id, batch.fingerprint, true)
+            : api.approveFinanceBatchContinuation(id, batch.fingerprint));
       if (live()) {
         client.setQueryData(approvalKey, receipt);
         toast.success(
@@ -222,7 +224,9 @@ export function FinanceConversationReviewBatch({
                       className="text-sm underline"
                       to={`/finances/transactions?transactionId=${encodeURIComponent(counterpart.transactionId)}`}
                     >
-                      View other transfer leg
+                      {counterpart.summary
+                        ? `${counterpart.summary.merchant} · ${formatReviewedAmount(counterpart.summary.amountCents, counterpart.summary.currencyCode)} · ${counterpart.summary.date}`
+                        : "View other transfer leg"}
                     </Link>
                   ) : null}
                   {outcome?.status === "applied" ? (
@@ -239,6 +243,12 @@ export function FinanceConversationReviewBatch({
               );
             })}
           </ol>
+          {batch.decisions.some((decision) => decision.kind === "transfer_pair") ? (
+            <p>
+              Confirm that each pair is the same movement between your own accounts. Both
+              transactions will be excluded from income and spending.
+            </p>
+          ) : null}
           {blocker ? <p>{blocker}</p> : null}
           {categoryBlocker ? (
             <Button
@@ -276,7 +286,10 @@ export function FinanceConversationReviewBatch({
               disabled={applying || query.isFetching || approval.isPending}
               onClick={() => void saveApproval()}
             >
-              Approve batch ({batch.pendingCount})
+              {batch.decisions.some((decision) => decision.kind === "transfer_pair")
+                ? "Confirm transfers and approve"
+                : "Approve batch"}{" "}
+              ({batch.pendingCount})
             </Button>
           ) : null}
           {processing ? (

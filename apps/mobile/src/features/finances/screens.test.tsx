@@ -3951,6 +3951,24 @@ it("reviews an undo against the original batch and preserves later-edit conflict
     batchId: pendingReviewBatch.id,
     fingerprint: "correction-exact",
     outcomeIndexes: [0],
+    effects: [
+      {
+        index: 0,
+        transactions: [
+          {
+            id: "t1",
+            merchant: "Grocery purchase",
+            amountCents: 1250,
+            currencyCode: "USD",
+            date: "2026-11-12",
+            before: { category: "Shopping", direction: "expense", needsReview: true },
+            after: { category: "Groceries", direction: "expense", needsReview: false },
+          },
+        ],
+        restoredAllocations: [],
+        reopenedReviews: [],
+      },
+    ],
     pendingCount: 1,
     outcomes: [],
   };
@@ -3972,7 +3990,7 @@ it("reviews an undo against the original batch and preserves later-edit conflict
   const undo = await screen.findByRole("button", { name: "Confirm undo (1)" });
   await waitFor(() => expect(undo).toBeEnabled());
   fireEvent.click(undo);
-  await screen.findByText("A later edit must be preserved.");
+  await screen.findByText(/A later edit must be preserved\./);
   expect(h.api.executeFinanceReviewBatchUndo).toHaveBeenCalledWith("correction", {
     fingerprint: "correction-exact",
     limit: 10,

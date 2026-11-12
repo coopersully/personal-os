@@ -24,6 +24,9 @@ export function FinanceConversationCorrection({
     retry: false,
   });
   const correction = query.data;
+  const completeEffects = !!correction?.outcomeIndexes.every((index) =>
+    correction.effects?.some((effect) => effect.index === index),
+  );
   const batchId = correction?.batchId;
   const batch = useQuery({
     queryKey: ["finance-conversation-review-batch", sessionKey, batchId],
@@ -47,6 +50,7 @@ export function FinanceConversationCorrection({
     const live = () => mounted.current && isCurrent();
     if (
       !correction ||
+      !completeEffects ||
       !batch.data ||
       !correction.pendingCount ||
       query.isError ||
@@ -103,7 +107,7 @@ export function FinanceConversationCorrection({
             your history.
           </p>
           <ul className="grid gap-3">
-            {correction.outcomeIndexes.map((index) => {
+            {(completeEffects ? [] : correction.outcomeIndexes).map((index) => {
               const decision = batch.data?.decisions[index];
               const summary = batch.data?.transactionSummaries?.find(
                 (item) => item.index === index,
@@ -130,9 +134,64 @@ export function FinanceConversationCorrection({
               ) : null;
             })}
           </ul>
+          {!completeEffects ? (
+            <p>
+              This older receipt does not show the exact changes. Ask nohmi for a new correction.
+            </p>
+          ) : null}
+          <ul className="grid gap-3">
+            {correction.effects?.flatMap((effect) =>
+              effect.transactions.map((transaction) => (
+                <li key={`${effect.index}:${transaction.id}`} className="grid gap-1">
+                  <Link
+                    className="font-medium underline"
+                    to={`/finances/transactions?transactionId=${encodeURIComponent(transaction.id)}`}
+                  >
+                    {transaction.merchant}
+                  </Link>
+                  <p>
+                    {formatReviewedAmount(transaction.amountCents, transaction.currencyCode)} ·{" "}
+                    {transaction.date}
+                  </p>
+                  <p>
+                    Category: {transaction.after.category ?? "Uncategorized"} →{" "}
+                    {transaction.before.category ?? "Uncategorized"}
+                  </p>
+                  <p>
+                    Treatment: {transaction.after.direction} → {transaction.before.direction}
+                  </p>
+                  {effect.restoredAllocations
+                    .filter((item) => item.transactionId === transaction.id)
+                    .map((item) => (
+                      <p key={item.categoryId}>
+                        Restore {item.category ?? "Unknown category"}:{" "}
+                        {formatReviewedAmount(item.amountCents, transaction.currencyCode)} (
+                        {item.treatment})
+                      </p>
+                    ))}
+                  {effect.reopenedReviews
+                    .filter((item) => item.transactionId === transaction.id)
+                    .map((item) => (
+                      <p key={item.id}>Reopens: {item.reason.replaceAll("_", " ")}</p>
+                    ))}
+                  <p>{transaction.before.needsReview ? "Returns to review" : "No review needed"}</p>
+                  {correction.outcomes.find((item) => item.index === effect.index)?.error ? (
+                    <p>
+                      {
+                        correction.outcomes.find((item) => item.index === effect.index)?.error
+                          ?.message
+                      }
+                    </p>
+                  ) : null}
+                </li>
+              )),
+            )}
+          </ul>
           {correction.pendingCount ? (
             <Button
-              disabled={pending || query.isFetching || batch.isFetching || !batch.data}
+              disabled={
+                !completeEffects || pending || query.isFetching || batch.isFetching || !batch.data
+              }
               onClick={() => void apply()}
             >
               Confirm undo ({correction.pendingCount})

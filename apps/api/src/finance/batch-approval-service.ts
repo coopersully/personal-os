@@ -4,11 +4,16 @@ import {
   type Database,
   financeConversationMessages,
   financeReviewBatchApprovals,
+  financeReviewBatchRuns,
 } from "@personal-os/database";
 import {
   approveFinanceReviewBatchInputSchema,
   type FinanceReviewBatchRun,
   financeReviewBatchContinuationSchema,
+  financeReviewBatchCounterpartSchema,
+  financeReviewBatchDecisionSchema,
+  financeReviewBatchOutcomeSchema,
+  financeReviewBatchTransactionSummarySchema,
 } from "@personal-os/domain";
 import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "../audit.js";
@@ -57,6 +62,34 @@ export async function assertFinanceBatchContinuation(
       "conflict",
       "This batch continuation was cancelled, expired or replaced. Read its current state.",
     );
+}
+/** A worker permit plus an immutable owner attestation binds each confirmed pair. */
+export async function hasFinanceBatchTransferAttestation(
+  tx: Transaction,
+  context: Context,
+  batchId: string,
+  fingerprint: string,
+  index: number,
+) {
+  const permit = permits.get(context);
+  if (!permit) return false;
+  const [event] = await tx
+    .select({ after: auditEvents.after })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.userId, context.principal.userId),
+        eq(auditEvents.actorType, "user"),
+        eq(auditEvents.actorId, context.principal.userId),
+        eq(auditEvents.action, "finance_review_batch.approved"),
+        eq(auditEvents.entityId, batchId),
+        sql`${auditEvents.after}->>'approvalId' = ${permit.approvalId}`,
+        sql`${auditEvents.after}->>'fingerprint' = ${fingerprint}`,
+      ),
+    )
+    .limit(1);
+  const indexes = event?.after?.confirmedTransferPairIndexes;
+  return Array.isArray(indexes) && indexes.includes(index);
 }
 const present = (row: Approval) =>
   financeReviewBatchContinuationSchema.parse({
@@ -131,6 +164,41 @@ export function createFinanceBatchApprovalService({
         const batch = await find(tx, batchId, context);
         if (batch.fingerprint !== input.fingerprint)
           throw new AppError("conflict", "Approve the exact displayed batch fingerprint.");
+        const [savedBatch] = await tx
+          .select()
+          .from(financeReviewBatchRuns)
+          .where(
+            and(
+              eq(financeReviewBatchRuns.id, batchId),
+              eq(financeReviewBatchRuns.userId, context.principal.userId),
+            ),
+          )
+          .limit(1);
+        const confirmedTransferPairIndexes = savedBatch?.manifest.flatMap((item, index) => {
+          const value =
+            typeof item === "object" && item !== null && "decision" in item ? item.decision : item;
+          if (financeReviewBatchDecisionSchema.parse(value).kind !== "transfer_pair") return [];
+          const details = item as { transactionSummary?: unknown; transferCounterpart?: unknown };
+          const counterpart = financeReviewBatchCounterpartSchema.safeParse(
+            details.transferCounterpart,
+          );
+          if (
+            !financeReviewBatchTransactionSummarySchema.safeParse(details.transactionSummary)
+              .success ||
+            !counterpart.success ||
+            !counterpart.data.summary
+          )
+            throw new AppError(
+              "conflict",
+              "Prepare a fresh preview showing both transfer transactions before confirming.",
+            );
+          return [index];
+        });
+        if (confirmedTransferPairIndexes?.length && input.confirmTransferPairs !== true)
+          throw new AppError(
+            "invalid_request",
+            "Confirm that each displayed pair is the same movement between your own accounts.",
+          );
         const [existing] = await ownedApproval(tx, batchId, context.principal.userId);
         if (existing) return present(existing);
         const at = now();
@@ -156,6 +224,7 @@ export function createFinanceBatchApprovalService({
             entityId: batchId,
             before: null,
             after: {
+              confirmedTransferPairIndexes,
               approvalId: row.id,
               fingerprint: row.fingerprint,
               expiresAt: row.expiresAt.toISOString(),
@@ -270,17 +339,36 @@ export function createFinanceBatchApprovalService({
         await guardFinanceExecutionTransaction(tx, claim.userId, {});
         const [current] = await ownedApproval(tx, claim.batchId, claim.userId);
         if (!current || current.claimId !== claim.claimId || current.state !== "running") return;
+        // Execution may have committed before a crash or lost response. Its durable
+        // receipts, not this attempt's return value or expiry, describe completed effects.
+        const [saved] = await tx
+          .select()
+          .from(financeReviewBatchRuns)
+          .where(
+            and(
+              eq(financeReviewBatchRuns.id, claim.batchId),
+              eq(financeReviewBatchRuns.userId, claim.userId),
+            ),
+          )
+          .for("update");
+        if (!saved || saved.fingerprint !== claim.fingerprint)
+          throw new AppError("conflict", "The approved batch receipt is unavailable.");
+        const receipts = saved.outcomes.map((item) => financeReviewBatchOutcomeSchema.parse(item));
+        const pending = saved.manifest.length - receipts.length;
+        const applied = receipts.filter((item) => item.status === "applied").length;
+        const other = receipts.length - applied;
         const failures = result ? 0 : current.failures + 1;
         const state =
-          result && !result.pendingCount
-            ? result.status === "completed"
-              ? "completed"
-              : "completed_with_exceptions"
+          pending === 0
+            ? other
+              ? "completed_with_exceptions"
+              : "completed"
             : current.expiresAt <= now()
               ? "expired"
-              : !result && failures >= 3
+              : !result && (failureCode === "forbidden" || failures >= 3)
                 ? "blocked"
                 : "pending";
+        if (!pending) failureCode = null;
         await tx
           .update(financeReviewBatchApprovals)
           .set({
@@ -294,13 +382,13 @@ export function createFinanceBatchApprovalService({
           })
           .where(eq(financeReviewBatchApprovals.id, claim.id));
         if (state === "pending") return;
-        const applied = result?.outcomes.filter((item) => item.status === "applied").length ?? 0;
-        const other = (result?.outcomes.length ?? 0) - applied;
         const text =
           state === "expired"
             ? "This batch approval expired. Review its saved progress before preparing a new batch."
             : state === "blocked"
-              ? "This batch paused after repeated execution failures. Review its saved progress before trying again."
+              ? failureCode === "forbidden"
+                ? "This batch no longer has the required approval or access. Review saved progress and prepare a fresh batch."
+                : "This batch paused after repeated execution failures. Review its saved progress before trying again."
               : other
                 ? `Batch finished: ${applied} changes applied; ${other} need another look.`
                 : `Batch finished: ${applied} changes applied.`;
@@ -340,7 +428,7 @@ export function createFinanceBatchApprovalService({
             after: {
               approvalId: claim.id,
               applied,
-              remaining: other,
+              remaining: pending + other,
               source: "persisted_owner_approval",
               state,
               failureCode,

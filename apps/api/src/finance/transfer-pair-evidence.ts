@@ -9,10 +9,10 @@ import type { FinanceTransferPairDecision } from "@personal-os/domain";
 import { and, eq, inArray } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
-import { effectiveSynchronization } from "../finance-status-service.js";
+import { isFinanceAccountSourceCurrent } from "./account-source-current.js";
 import type { FinanceTransaction } from "./context.js";
 
-/** Exact pair proof shared by preview and writer. Text/confidence never establishes proof. */
+/** Exact candidate evidence; owner confirmation is required before treating a candidate as a transfer. */
 export async function readTransferPairEvidence(
   tx: Pick<FinanceTransaction, "select" | "execute">,
   userId: string,
@@ -66,8 +66,15 @@ export async function readTransferPairEvidence(
     .select()
     .from(financeProviderItems)
     .where(eq(financeProviderItems.userId, userId));
-  const providerTransfer = (value: string | null) =>
-    value === "TRANSFER_IN" || value === "TRANSFER_OUT";
+  const providerTransfer = (row: typeof left) => {
+    const expected = row.providerDirection === "income" ? "TRANSFER_IN" : "TRANSFER_OUT";
+    return (
+      row.providerCategory === expected &&
+      (row.providerCategoryDetailed === null ||
+        row.providerCategoryDetailed === expected ||
+        row.providerCategoryDetailed === `${expected}_ACCOUNT_TRANSFER`)
+    );
+  };
   const eligible = (row: typeof left) =>
     !row.pending &&
     row.amount > 0 &&
@@ -76,7 +83,7 @@ export async function readTransferPairEvidence(
     !row.transferGroupId &&
     row.reconciliationStatus !== "matched" &&
     row.reconciliationStatus !== "confirmed" &&
-    (providerTransfer(row.providerCategory) || providerTransfer(row.providerCategoryDetailed));
+    providerTransfer(row);
   const counterparts = (row: typeof left) =>
     candidates.filter(
       (other) =>
@@ -110,22 +117,7 @@ export async function readTransferPairEvidence(
         "Confirm account ownership before resolving this transfer.",
       );
     const item = items.find((item) => item.id === account.providerItemRecordId);
-    const fresh =
-      account.provider === "manual"
-        ? account.status === "manual" &&
-          !account.providerItemRecordId &&
-          !account.providerAccountId &&
-          !account.providerItemId
-        : account.status === "connected" &&
-          !!item &&
-          item.provider === "plaid" &&
-          account.providerItemId === item.providerItemId &&
-          !!account.lastSyncedAt &&
-          account.lastSyncedAt <= at &&
-          !!item.lastSyncedAt &&
-          item.lastSyncedAt <= at &&
-          effectiveSynchronization(account, at).state === "current" &&
-          effectiveSynchronization(item, at).state === "current";
+    const fresh = isFinanceAccountSourceCurrent(account, item, at);
     if (!fresh)
       throw new AppError("conflict", "Refresh the transfer's account sources before resolving it.");
   }
@@ -174,6 +166,15 @@ export async function readTransferPairEvidence(
     pair,
     cases,
     fingerprint,
-    transferCounterpart: { transactionId: right.id, revision: right.contextualRevision.toString() },
+    transferCounterpart: {
+      transactionId: right.id,
+      revision: right.contextualRevision.toString(),
+      summary: {
+        merchant: right.merchant,
+        amountCents: right.amount,
+        currencyCode: right.currencyCode,
+        date: right.transactionDate,
+      },
+    },
   };
 }

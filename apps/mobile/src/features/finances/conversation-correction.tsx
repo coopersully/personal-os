@@ -14,6 +14,9 @@ export function CorrectionReference({ id }: { id: string }) {
     api.getFinanceReviewBatchUndo(id),
   );
   const correction = query.data;
+  const completeEffects = !!correction?.outcomeIndexes.every((index) =>
+    correction.effects?.some((effect) => effect.index === index),
+  );
   const batchId = correction?.batchId;
   const batch = useFinanceRead(
     ["chat-review-batch", batchId],
@@ -35,6 +38,7 @@ export function CorrectionReference({ id }: { id: string }) {
   async function apply() {
     if (
       !correction ||
+      !completeEffects ||
       !batch.data ||
       !correction.pendingCount ||
       query.isError ||
@@ -82,7 +86,7 @@ export function CorrectionReference({ id }: { id: string }) {
             </Copy>
             <ReadState query={batch}>
               <Card rows>
-                {correction.outcomeIndexes.map((index) => {
+                {(completeEffects ? [] : correction.outcomeIndexes).map((index) => {
                   const decision = batch.data?.decisions[index];
                   const summary = batch.data?.transactionSummaries?.find(
                     (item) => item.index === index,
@@ -113,10 +117,56 @@ export function CorrectionReference({ id }: { id: string }) {
                 })}
               </Card>
             </ReadState>
+            {!completeEffects ? (
+              <Copy>
+                This older receipt does not show the exact changes. Ask nohmi for a new correction.
+              </Copy>
+            ) : null}
+            <Card rows>
+              {correction.effects?.flatMap((effect) =>
+                effect.transactions.map((transaction) => (
+                  <FinanceRow
+                    key={`${effect.index}:${transaction.id}`}
+                    title={transaction.merchant}
+                    icon="receipt"
+                    subtitle={[
+                      `${transaction.currencyCode ? formatMoney(transaction.amountCents / 100, transaction.currencyCode) : "Currency unknown"} · ${transaction.date}`,
+                      `Category: ${transaction.after.category ?? "Uncategorized"} → ${transaction.before.category ?? "Uncategorized"}`,
+                      `Treatment: ${financeLabel(transaction.after.direction)} → ${financeLabel(transaction.before.direction)}`,
+                      ...effect.restoredAllocations
+                        .filter((item) => item.transactionId === transaction.id)
+                        .map(
+                          (item) =>
+                            `Restore ${item.category ?? "Unknown category"}: ${transaction.currencyCode ? formatMoney(item.amountCents / 100, transaction.currencyCode) : "Currency unknown"} (${financeLabel(item.treatment)})`,
+                        ),
+                      ...effect.reopenedReviews
+                        .filter((item) => item.transactionId === transaction.id)
+                        .map((item) => `Reopens: ${financeLabel(item.reason)}`),
+                      transaction.before.needsReview ? "Returns to review" : "No review needed",
+                      correction.outcomes.find((item) => item.index === effect.index)?.error
+                        ?.message,
+                    ]
+                      .filter(Boolean)
+                      .join("\n")}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/finance-transaction",
+                        params: { id: transaction.id },
+                      })
+                    }
+                  />
+                )),
+              )}
+            </Card>
             {correction.pendingCount ? (
               <Button
                 disabled={
-                  pending || query.isFetching || batch.isFetching || batch.isError || !batch.data
+                  !completeEffects ||
+                  pending ||
+                  query.isFetching ||
+                  batch.isFetching ||
+                  batch.isError ||
+                  !batch.data
                 }
                 onPress={() => void apply()}
               >

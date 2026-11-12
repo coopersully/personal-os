@@ -230,6 +230,7 @@ type MutationContext = {
     transactionId: string;
     reviewId: string | null;
     transferReview?: boolean;
+    ownerConfirmedTransferPair?: boolean;
     transferCounterpart?: { transactionId: string; revision: string };
   };
   financeExecution?: FinanceExecutionFence;
@@ -4499,6 +4500,15 @@ export function createFinanceService({
       if (!context.financeReviewBatchScope || !executor)
         throw new AppError("forbidden", "An exact Finance batch is required.");
       const decision = financeTransferPairDecisionSchema.parse(raw);
+      if (
+        context.principal.actorType !== "user" ||
+        context.principal.actorId !== context.principal.userId ||
+        !context.financeReviewBatchScope.ownerConfirmedTransferPair
+      )
+        throw new AppError(
+          "forbidden",
+          "A matching candidate is not proof of an internal transfer. Ask the owner to confirm both displayed legs.",
+        );
       await requireWorkspaceExecution(executor, context.principal, "finances", now());
       const proof = await readTransferPairEvidence(
         executor,
@@ -4529,6 +4539,7 @@ export function createFinanceService({
         );
       }
       const result = [];
+      const transferGroupId = randomUUID();
       for (const leg of proof.pair) {
         const other = proof.pair.find((row) => row.id !== leg.id);
         if (!other) throw new AppError("internal_error", "The transfer counterpart is missing.");
@@ -4566,6 +4577,18 @@ export function createFinanceService({
           ),
         );
       }
+      await executor
+        .update(financeTransactions)
+        .set({ transferGroupId })
+        .where(
+          and(
+            eq(financeTransactions.userId, context.principal.userId),
+            inArray(
+              financeTransactions.id,
+              proof.pair.map((leg) => leg.id),
+            ),
+          ),
+        );
       return result;
     },
     ...inbox,

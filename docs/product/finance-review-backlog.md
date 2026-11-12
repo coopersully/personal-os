@@ -47,6 +47,13 @@ internal account movements, card payments, ambiguous payments and ordinary categ
 Labels and merchant names are navigation aids, not proof. Agents inspect exact transactions,
 their revisions, account ownership, currency, amounts, dates, relationships and source evidence.
 Matching amounts or a high confidence score alone do not establish an internal transfer.
+Generic provider transfer labels, opposite signs, date proximity and uniqueness establish a
+candidate, not proof that the movements share a destination. For such pairs, show both frozen
+merchant/amount/date summaries and require the owner's explicit confirmation that they are the
+same movement between owned accounts. Agent execution alone cannot confirm these candidates.
+The confirmed pair shares a persistent transfer group; an exact undo restores the previous links,
+classifications, allocations and review states. The correction preview shows both affected legs
+and the saved values being restored, rather than asking the owner to approve opaque identifiers.
 
 An answered purpose and an unverified expense link are different facts. Preserve the answer and
 continue investigating the link; do not ask the person to repeat an already recorded answer.
@@ -145,3 +152,12 @@ unknowns need an owner answer. The supported carryover policy is `none`; unspent
 and unreceived income are not additional cash. Exact new versions require owner approval in
 Finance Chat. Actual unattended execution and phone delivery remain release acceptance,
 not claims established by this contract or synthetic tests.
+
+### Activation evidence and subsequent months
+
+Historical disposition uses the qualified starting-month boundary for each affected account,
+separately from the current month's opening and budget readiness. A missing December statement
+must not reactivate independent October work. An unqualified or relinked account holds its own
+history for triage; matching cross-boundary transfer candidates and persisted relationships keep
+potential dependencies active until resolved. Published batch and correction cards derive scope
+from their actual member transactions, with one human approval for a mixed-period batch.

@@ -42,6 +42,7 @@ import { requireWorkspaceExecution } from "../workspace-execution.js";
 import {
   assertFinanceBatchContinuation,
   createFinanceBatchApprovalService,
+  hasFinanceBatchTransferAttestation,
 } from "./batch-approval-service.js";
 import { createFinanceBatchCorrectionService } from "./batch-correction-service.js";
 import { captureFinanceBatchEffect } from "./batch-effect-state.js";
@@ -149,9 +150,15 @@ export function createFinanceReviewBatchService({
   executionBudgetMs?: number;
   transactionBudgetMs?: number;
 }) {
-  async function authorize(tx: Transaction, context: Context, mode: "read" | "write" | "execute") {
+  async function authorize(
+    tx: Transaction,
+    context: Context,
+    mode: "read" | "write" | "execute",
+    batchId?: string,
+  ) {
     const principal = context.principal;
     await guardFinanceExecutionTransaction(tx, principal.userId, {
+      batchIds: batchId ? [batchId] : [],
       actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
       connectionIds: principal.authorizationConnectionId
         ? [principal.authorizationConnectionId]
@@ -184,6 +191,26 @@ export function createFinanceReviewBatchService({
     }
     if (mode === "execute") await requireWorkspaceExecution(tx, principal, "finances", now());
   }
+  async function assertPreparationAuthority(tx: Transaction, row: Row) {
+    if (row.actorType !== "agent") return;
+    const [grant] = await tx
+      .select()
+      .from(accessTokens)
+      .where(and(eq(accessTokens.id, row.actorId), eq(accessTokens.userId, row.userId)))
+      .limit(1);
+    if (
+      !grant ||
+      grant.revokedAt ||
+      (grant.expiresAt && grant.expiresAt <= now()) ||
+      grant.authorizationConnectionId !== row.authorizationConnectionId ||
+      !grant.scopes.includes("finances:read") ||
+      !grant.scopes.includes("finances:write")
+    )
+      throw new AppError(
+        "forbidden",
+        "The original preparation grant is no longer active. Prepare a new owner-reviewed batch.",
+      );
+  }
   async function find(tx: Transaction, id: string, context: Context) {
     idSchema.parse(id);
     const [row] = await tx
@@ -209,7 +236,7 @@ export function createFinanceReviewBatchService({
   ): Promise<
     | {
         transferReview?: boolean;
-        transferCounterpart?: { transactionId: string; revision: string };
+        transferCounterpart?: z.infer<typeof financeReviewBatchCounterpartSchema>;
         pairFingerprint?: string;
       }
     | undefined
@@ -621,7 +648,15 @@ export function createFinanceReviewBatchService({
           }
           if (executionDenied) item.reasons.push("execution_not_authorized");
           else if (!approvalReady) item.reasons.push("approval_required");
-          work.push({ id: String(index), sourceReady, evidenceReady, approvalReady });
+          if (decision.kind === "transfer_pair") {
+            item.reasons.push("approval_required");
+          }
+          work.push({
+            id: String(index),
+            sourceReady,
+            evidenceReady,
+            approvalReady: decision.kind === "transfer_pair" ? false : approvalReady,
+          });
           items.push(item);
         }
         const selected = selectFinanceMaintenanceWork(work);
@@ -907,8 +942,9 @@ export function createFinanceReviewBatchService({
         return "cause" in error && error.cause !== error && isInterrupted(error.cause);
       };
       let latest = await bounded(async (tx) => {
-        await authorize(tx, context, "execute");
+        await authorize(tx, context, "execute", id);
         const row = await find(tx, id, context);
+        await assertPreparationAuthority(tx, row);
         await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
         if (row.fingerprint !== input.fingerprint)
           throw new AppError("conflict", "Execution must accept the exact preview fingerprint.");
@@ -921,8 +957,9 @@ export function createFinanceReviewBatchService({
         if (context.signal?.aborted || remaining() < Math.min(10_000, budget / 10)) break;
         try {
           const progressed = await bounded(async (tx, preserve) => {
-            await authorize(tx, context, "execute");
+            await authorize(tx, context, "execute", id);
             const row = await find(tx, id, context);
+            await assertPreparationAuthority(tx, row);
             await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
             if (row.fingerprint !== input.fingerprint)
               throw new AppError(
@@ -998,6 +1035,20 @@ export function createFinanceReviewBatchService({
                     requestId: context.requestId,
                     financeReviewBatchScope: {
                       transactionId: decision.transactionId,
+                      ownerConfirmedTransferPair:
+                        decision.kind === "transfer_pair" &&
+                        !!item.transactionSummary &&
+                        !!transferCounterpart?.summary &&
+                        context.principal.actorType === "user" &&
+                        context.principal.actorId === context.principal.userId &&
+                        (input.confirmTransferPairs === true ||
+                          (await hasFinanceBatchTransferAttestation(
+                            itemTx,
+                            context,
+                            row.id,
+                            row.fingerprint,
+                            index,
+                          ))),
                       transferReview: transferReview?.transferReview === true,
                       ...(currentCounterpart ? { transferCounterpart: currentCounterpart } : {}),
                       reviewId: decision.kind === "review" ? decision.reviewId : null,

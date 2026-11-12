@@ -26,6 +26,24 @@ it("requires an exact correction and exposes preserved later-edit conflicts", as
     fingerprint: "exact",
     pendingCount: 1,
     outcomeIndexes: [0],
+    effects: [
+      {
+        index: 0,
+        transactions: [
+          {
+            id: "t1",
+            merchant: "Grocery purchase",
+            amountCents: 1250,
+            currencyCode: "USD",
+            date: "2026-11-12",
+            before: { category: "Shopping", direction: "expense", needsReview: true },
+            after: { category: "Groceries", direction: "expense", needsReview: false },
+          },
+        ],
+        restoredAllocations: [],
+        reopenedReviews: [],
+      },
+    ],
     outcomes: [],
   };
   api.getFinanceReviewBatchUndo.mockResolvedValue(correction);
@@ -53,6 +71,7 @@ it("requires an exact correction and exposes preserved later-edit conflicts", as
   );
   const button = await screen.findByRole("button", { name: "Confirm undo (1)" });
   await waitFor(() => expect(button).toBeEnabled());
+  expect(screen.getByText("Category: Groceries → Shopping")).toBeVisible();
   fireEvent.click(button);
   await screen.findByText("Later edit preserved");
   expect(api.executeFinanceReviewBatchUndo).toHaveBeenCalledWith("undo", {
@@ -61,7 +80,7 @@ it("requires an exact correction and exposes preserved later-edit conflicts", as
   });
   expect(toast.info).toHaveBeenCalled();
   expect(toast.success).not.toHaveBeenCalled();
-  expect(screen.getByRole("link", { name: "View transaction" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "Grocery purchase" })).toHaveAttribute(
     "href",
     "/finances/transactions?transactionId=t1",
   );

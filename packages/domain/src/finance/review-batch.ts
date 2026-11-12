@@ -150,6 +150,7 @@ export const financeMaintenanceQualificationSchema = z.strictObject({
 export type FinanceMaintenanceQualification = z.infer<typeof financeMaintenanceQualificationSchema>;
 export type PreviewFinanceReviewBatchInput = z.infer<typeof previewFinanceReviewBatchInputSchema>;
 export const executeFinanceReviewBatchInputSchema = z.strictObject({
+  confirmTransferPairs: z.boolean().optional(),
   fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   limit: z.number().int().min(1).max(10).default(10),
 });
@@ -165,16 +166,17 @@ export const financeReviewBatchOutcomeSchema = z.object({
   undoAvailable: z.boolean().optional(),
 });
 export type FinanceReviewBatchOutcome = z.infer<typeof financeReviewBatchOutcomeSchema>;
-export const financeReviewBatchCounterpartSchema = z.strictObject({
-  transactionId: idSchema,
-  revision: basis.expectedTransactionRevision,
-});
-
 export const financeReviewBatchTransactionSummarySchema = z.strictObject({
   merchant: z.string(),
   amountCents: z.number().int(),
   currencyCode: z.string().nullable(),
   date: z.iso.date(),
+});
+
+export const financeReviewBatchCounterpartSchema = z.strictObject({
+  transactionId: idSchema,
+  revision: basis.expectedTransactionRevision,
+  summary: financeReviewBatchTransactionSummarySchema.optional(),
 });
 
 export const financeReviewBatchRunSchema = z.object({
@@ -211,7 +213,35 @@ export const previewFinanceReviewBatchUndoInputSchema = z.strictObject({
     .refine((values) => new Set(values).size === values.length, "Include each effect once."),
   idempotencyKey: z.string().trim().min(1).max(200),
 });
+const correctionStateSchema = z.object({
+  category: z.string().nullable(),
+  direction: z.enum(["expense", "income", "transfer"]),
+  needsReview: z.boolean(),
+});
+export const financeReviewBatchCorrectionEffectSchema = z.strictObject({
+  index: z.number().int().min(0).max(99),
+  transactions: z.array(
+    financeReviewBatchTransactionSummarySchema.extend({
+      id: idSchema,
+      before: correctionStateSchema,
+      after: correctionStateSchema,
+    }),
+  ),
+  restoredAllocations: z.array(
+    z.strictObject({
+      transactionId: idSchema,
+      categoryId: idSchema,
+      category: z.string().nullable(),
+      amountCents: z.number().int(),
+      treatment: z.enum(["personal", "reimbursable"]),
+    }),
+  ),
+  reopenedReviews: z.array(
+    z.strictObject({ id: idSchema, transactionId: idSchema.nullable(), reason: z.string() }),
+  ),
+});
 export const financeReviewBatchUndoSchema = z.strictObject({
+  effects: z.array(financeReviewBatchCorrectionEffectSchema).optional(),
   id: idSchema,
   batchId: idSchema,
   fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
@@ -230,6 +260,7 @@ export type PreviewFinanceReviewBatchUndoInput = z.infer<
 
 export const approveFinanceReviewBatchInputSchema = z.strictObject({
   fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  confirmTransferPairs: z.boolean().optional(),
 });
 export const financeReviewBatchContinuationSchema = z.strictObject({
   id: idSchema,

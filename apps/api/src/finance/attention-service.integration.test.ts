@@ -2,6 +2,9 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   financeAccounts,
+  financeConversationMessages,
+  financeOpeningStatements,
+  financeReviewBatchRuns,
   financeTransactions,
   migrateDatabase,
   users,
@@ -99,6 +102,201 @@ describe.sequential("Finance budget starting policy", () => {
       activeDecisionCount: 0,
       budgetReady: false,
       rawCounts: { transactionFlags: 1 },
+    });
+  });
+  async function qualifiedBoundary() {
+    const owner = await fixture();
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        userId: owner.principal.userId,
+        institution: "Synthetic Bank",
+        name: "Investments",
+        kind: "investment",
+        provider: "manual",
+        status: "manual",
+        currencyCode: "USD",
+        ownershipType: "individual",
+        ownershipShareBps: 10000,
+        includeInPlanning: true,
+      })
+      .returning();
+    if (!account) throw new Error("Missing account");
+    await database.db.insert(financeOpeningStatements).values({
+      userId: owner.principal.userId,
+      accountId: account.id,
+      month: "2026-11",
+      revision: 1,
+      accountRevision: account.contextualRevision.toString(),
+      timezone: "America/New_York",
+      signedOpeningBalanceCents: 100000,
+      currencyCode: "USD",
+      actorId: owner.principal.userId,
+      idempotencyKey: crypto.randomUUID(),
+      fingerprint: "fixture",
+      recordedAt: new Date("2026-11-01T12:00:00Z"),
+    });
+    const preview = await service().previewBudgetStart(owner, input());
+    await service().applyBudgetStart(owner, {
+      previewId: preview.id,
+      fingerprint: preview.fingerprint,
+    });
+    return { owner, account };
+  }
+  it("does not reactivate independent October history when December needs a new opening statement", async () => {
+    const { owner, account } = await qualifiedBoundary();
+    await database.db.insert(financeTransactions).values({
+      userId: owner.principal.userId,
+      accountId: account.id,
+      merchant: "Old purchase",
+      amount: 1000,
+      direction: "expense",
+      transactionDate: "2026-10-20",
+      needsReview: true,
+    });
+    expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      historicalRecordCount: 1,
+      activeTransactionCount: 0,
+    });
+    const december = createFinanceAttentionService({
+      db: database.db,
+      now: () => new Date("2026-12-02T16:00:00Z"),
+    });
+    expect(await december.getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      historicalRecordCount: 1,
+      activeTransactionCount: 0,
+      readiness: { openingPositionQualified: false },
+    });
+  });
+  it.each([
+    false,
+    true,
+  ])("scopes a published batch to its actual transactions (mixed=%s)", async (mixed) => {
+    const { owner, account } = await qualifiedBoundary();
+    const transactions = await database.db
+      .insert(financeTransactions)
+      .values(
+        (mixed ? ["2026-10-20", "2026-11-10"] : ["2026-10-20"]).map((date) => ({
+          userId: owner.principal.userId,
+          accountId: account.id,
+          merchant: "Reviewed purchase",
+          amount: 1000,
+          direction: "expense" as const,
+          transactionDate: date,
+          needsReview: true,
+        })),
+      )
+      .returning();
+    const [batch] = await database.db
+      .insert(financeReviewBatchRuns)
+      .values({
+        userId: owner.principal.userId,
+        actorType: "user",
+        actorId: owner.principal.userId,
+        idempotencyKey: crypto.randomUUID(),
+        fingerprint: `sha256:${"a".repeat(64)}`,
+        manifest: transactions.map((item) => ({
+          decision: {
+            kind: "categorization",
+            transactionId: item.id,
+            expectedTransactionRevision: item.contextualRevision.toString(),
+            expectedTransactionUpdatedAt: item.updatedAt.toISOString(),
+          },
+          transactionSummary: { date: item.transactionDate },
+        })),
+      })
+      .returning();
+    if (!batch) throw new Error("Missing batch");
+    await database.db.insert(financeConversationMessages).values({
+      userId: owner.principal.userId,
+      sequence: 1n,
+      authorKind: "agent",
+      text: "Review purchases",
+      recordRefs: [{ kind: "review_batch", id: batch.id }],
+      idempotencyKey: crypto.randomUUID(),
+      createdAt: new Date("2026-11-12T12:00:00Z"),
+    });
+    expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      activeDecisionCount: mixed ? 1 : 0,
+      historicalRecordCount: 2,
+      rawCounts: { approvals: 1 },
+    });
+  });
+  it("promotes only history belonging to an unqualified account", async () => {
+    const { owner, account } = await qualifiedBoundary();
+    const [other] = await database.db
+      .insert(financeAccounts)
+      .values({
+        userId: owner.principal.userId,
+        institution: "Synthetic Bank",
+        name: "Unknown opening",
+        provider: "manual",
+        status: "manual",
+        includeInPlanning: true,
+      })
+      .returning();
+    if (!other) throw new Error("Missing account");
+    await database.db.insert(financeTransactions).values(
+      [account, other].map((item) => ({
+        userId: owner.principal.userId,
+        accountId: item.id,
+        merchant: "Old purchase",
+        amount: 1000,
+        direction: "expense" as const,
+        transactionDate: "2026-10-20",
+        needsReview: true,
+      })),
+    );
+    expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      historicalRecordCount: 1,
+      activeTransactionCount: 1,
+      triageRecordCount: 1,
+    });
+  });
+  it("keeps an unlinked cross-boundary transfer candidate active with a qualified opening", async () => {
+    const { owner, account } = await qualifiedBoundary();
+    const [other] = await database.db
+      .insert(financeAccounts)
+      .values({
+        userId: owner.principal.userId,
+        institution: "Synthetic Bank",
+        name: "Other",
+        provider: "manual",
+        status: "manual",
+        includeInPlanning: false,
+      })
+      .returning();
+    if (!other) throw new Error("Missing other account");
+    await database.db.insert(financeTransactions).values([
+      {
+        userId: owner.principal.userId,
+        accountId: account.id,
+        merchant: "Outgoing",
+        amount: 1000,
+        direction: "expense",
+        providerDirection: "expense",
+        providerCategory: "TRANSFER_OUT",
+        currencyCode: "USD",
+        transactionDate: "2026-10-31",
+        needsReview: true,
+      },
+      {
+        userId: owner.principal.userId,
+        accountId: other.id,
+        merchant: "Incoming",
+        amount: 1000,
+        direction: "income",
+        providerDirection: "income",
+        providerCategory: "TRANSFER_IN",
+        currencyCode: "USD",
+        transactionDate: "2026-11-01",
+        needsReview: true,
+      },
+    ]);
+    expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      historicalRecordCount: 0,
+      activeTransactionCount: 2,
+      readiness: { openingPositionQualified: true },
     });
   });
   it("lets the owner inspect an agent preview without leaking it to another owner or agent", async () => {

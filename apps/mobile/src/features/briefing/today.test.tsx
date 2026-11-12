@@ -418,3 +418,21 @@ it("keeps historical reviews out of Today and shows technical recovery separatel
   expect(screen.queryByText(/2000|2,000/)).toBeNull();
   expect(screen.queryByText(/decisions need your input/)).toBeNull();
 });
+it.each([
+  [false, true, "Verify Finance starting balances", "/finance-opening-position"],
+  [true, false, "Review this month's budget", "/finances/planning"],
+])("surfaces remaining budget readiness work with zero review counts", (openingPositionQualified, budgetApproved, title, pathname) => {
+  h.data = {
+    ...data(),
+    reviews: query({
+      complete: true,
+      activeDecisionCount: 0,
+      technicalBlockerCount: 0,
+      processingCount: 0,
+      readiness: { openingPositionQualified, budgetApproved },
+    }),
+  };
+  render(<TodayHome />);
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(title) }));
+  expect(h.push).toHaveBeenLastCalledWith({ pathname });
+});

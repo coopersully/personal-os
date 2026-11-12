@@ -41,6 +41,7 @@ const projectionInputSchema = z
 export function projectFinanceAttention(input: z.input<typeof projectionInputSchema>) {
   const state = projectionInputSchema.parse(input);
   const decisions = new Set<string>();
+  const approvals = new Set<string>();
   const transactions = new Set<string>();
   const dependencyRefs: string[] = [];
   const rawCounts = { transactionFlags: 0, reviewCases: 0, questions: 0, approvals: 0 };
@@ -53,7 +54,10 @@ export function projectFinanceAttention(input: z.input<typeof projectionInputSch
     if (record.source === "transaction_flag") rawCounts.transactionFlags++;
     if (record.source === "review_case") rawCounts.reviewCases++;
     if (record.source === "question") rawCounts.questions++;
-    if (record.source === "approval") rawCounts.approvals++;
+    if (record.source === "approval") {
+      approvals.add(record.decisionKey ?? record.id);
+      rawCounts.approvals = approvals.size;
+    }
     const validDate = z.iso.date().safeParse(record.date);
     const month = validDate.success ? validDate.data.slice(0, 7) : null;
     const independent = record.dependency === "none";

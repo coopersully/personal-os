@@ -119,21 +119,16 @@ activation follows the owning domain's explicit approval policy.
 
 ## External scheduling boundary
 
-External platforms own maintenance schedules completely. nohmi exposes stable maintenance intents
-and setup instructions, but it does not create, edit, pause, resume, or execute their recurring
-schedules. A workspace may store the declared external host and expected cadence, show the last
-observed invocation, and report expected, overdue, or unknown check-in health; those values are
-observational and never trigger a run.
+External callers own their runtime and schedules. nohmi exposes work, knowledge and operations
+without requiring a named host, schedule declaration, cloud runtime or agent response-time target.
+Optional caller labels or declared cadence are observations, not mandatory setup or authority.
+There is no built-in agent and no nohmi editor for another platform's recurring schedule.
 
-Internal queues, leases, retries, delayed authorized effects, and recovery timers may finish work
-from an invocation nohmi already accepted. They do not constitute schedule ownership and cannot
-originate a new recurring maintenance turn. To change when maintenance begins, the person must
-change the schedule in its owning external platform.
-
-The person may configure multiple external schedules or hosts for the same workspace and intent.
-Each retains its own declared identity, cadence, check-in health, connection, and revocation state;
-compatible invocations coalesce or resume through the domain's durable-run contract rather than
-being rejected or allowed to duplicate effects.
+Multiple callers may overlap; domain claims, current permissions, revisions and idempotency prevent
+duplicate effects. Polling is supported; optional events report work availability without promising
+a host will run. Deterministic synchronization, rules and accepted-work recovery remain nohmi's
+responsibility. Communication preferences can guide adaptive coaching or optional daily check-ins
+but do not create a daily reasoning task inside nohmi.
 
 ## Shared notification policy and channel controls
 
@@ -219,7 +214,7 @@ every workspace setting has a global equivalent.
 | Global-only | Review bypass, cross-channel notification evaluation, Texting connection and consent, account security, connected-agent scopes, and hard privacy limits | One account value; a workspace or channel cannot override it |
 | Global default with workspace override | Maintenance notification mode, quiet hours, reminder behavior, safe content ceiling, and aggregation | Inherit the account preference until the person deliberately changes that workspace; evaluation is shared across channels |
 | Channel delivery | SMS, in-app, push, or email enablement, destination/device, supported interaction, link behavior, and medium-appropriate detail | Controls how an eligible notification is delivered; cannot create eligibility or widen privacy and action policy |
-| Workspace-only | Connected sources, source meanings, definition of maintained, declared external host/cadence, maintenance guidance, domain rules, learned behavior, and connector recovery | Configure inside the owning workspace; schedule changes still occur in the external host |
+| Workspace-only | Connected sources, source meanings, definition of maintained, maintenance guidance, domain rules, learned behavior, and connector recovery | Configure inside the owning workspace; schedule changes still occur in the external host |
 
 For example, the person could keep the default “send only questions and actions, use privacy-safe
 detail, and stay quiet overnight,” then let Mail inherit it while allowing Finances to send every

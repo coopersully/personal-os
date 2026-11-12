@@ -1,7 +1,7 @@
 # nohmi texting and SMS
 
 - Status: Living target product contract; transport and bounded Finance runtime merged, general inbox and live Finance launch evidence pending
-- Last reconciled: 2026-10-11
+- Last reconciled: 2026-10-12
 
 ## Product role
 
@@ -9,32 +9,39 @@ Texting is nohmi's shared conversational channel. It is a general inbox through 
 ask free-form questions, request work from any authorized workspace, answer outstanding questions,
 review exact reversible proposals, and receive concise maintenance results with useful links.
 
-Texting is not a fifth workspace and does not own Mail, Tasks, Calendar, or Finances behavior. It
-owns conversation state, delivery, inbound processing, intent routing, response composition, and
-channel policy; each workspace continues to own its ledger, expertise, authorization, operations,
-questions, and definition of maintained.
+Texting is not a fifth workspace and does not own Mail, Tasks, Calendar, or Finances behavior.
+It owns transport, conversation records, claims, explicit bindings, structured operation routing,
+channel policy and delivery. External agents interpret free-form messages, choose tools, ask
+clarifications and compose substantive replies. nohmi supplies the account's persistent brain,
+storage and tools, never a built-in agent. Agents can use permitted shared knowledge and prior work
+from other agents or earlier runs on the same account.
+
+The [full Texting design](../superpowers/specs/2026-09-28-texting-toolkit-design.md) records the
+coordinated completion design pending written review. Existing implementation boundaries below
+remain evidence of source capability, not assertions that the new target has shipped.
 
 ## General inbox and dispatch
 
-Every valid inbound message enters one durable nohmi conversation. The Texting coordinator should:
+Every valid inbound message enters one durable nohmi conversation. Texting must:
 
-1. claim each unprocessed inbound message exactly once;
-2. load the bounded conversation and User Knowledge needed to understand the request;
-3. distinguish an answer to an existing work node from a new free-form request;
-4. route each intent to the workspace or shared service that owns it;
-5. create linked child intents when one message spans several workspaces;
-6. wait for, resume, or summarize their durable results without duplicating effects;
-7. ask one concise clarification when routing or action remains ambiguous; and
-8. send one coherent reply with completed work, unresolved questions, and relevant deep links.
+1. authenticate, deduplicate and persist provider messages and work availability;
+2. expose bounded messages, exact work bindings, current revisions and permitted context;
+3. support expiring fenced claims so authorized agents can coordinate handling;
+4. validate explicit reply selectors and typed workspace operations without inferring free-form intent;
+5. preserve linked child operations and verified independent outcomes;
+6. expose ambiguity or missing authority as work for an external agent or the person; and
+7. deliver agent-authored responses or deterministic notices under channel policy.
 
-For example, “Move tomorrow's meeting and mark last night's dinner reimbursable” becomes separate
-Calendar and Finances child intents. Texting coordinates the response but cannot reproduce either
-workspace's scheduling or transaction-classification logic.
+For example, an external agent can interpret “Move tomorrow's meeting and mark last night's dinner
+reimbursable” and submit separate Calendar and Finance operations. nohmi validates the requests,
+preserves their results, and lets the agent compose a reply. It does not run an internal model.
 
-Inbound processing should be event-driven so a text receives a timely response. A target
-`maintain_texting` intent drains unprocessed messages, resumes interrupted child work, reconciles
-uncertain delivery, and verifies that every claimed message reached an honest terminal state. A
-manual or externally scheduled invocation is a catch-up and recovery path, not the only trigger.
+Inbound webhooks durably expose work promptly; authorized callers may poll or subscribe to optional
+work-availability events. Polling is a first-class supported path, not an inferior integration.
+Neither path requires a named host, schedule registry, cloud runtime or automatic agent wake-up.
+A target `maintain_texting` operation provides deterministic catch-up/reconciliation and outstanding
+work for agents; it never invents a reply to complete a queue. Waiting for an external caller is an
+honest state, without a promise about its response time.
 
 ## Workspace maintenance notifications
 
@@ -50,8 +57,11 @@ polls for replies directly.
 
 Proactive maintenance SMS is quiet by default unless the run needs an answer or action from the
 person, such as a bounded question, exact review, connector repair, or recovery step. A routine
-successful run or automatically recoverable failure sends no text; Texting still answers messages
-the person initiates.
+successful run or automatically recoverable failure sends no text unless an explicit check-in
+preference applies. Adaptive coaching is the default guidance for external agents: use shared
+knowledge and question history to ask useful questions and become quieter as uncertainty shrinks.
+The person may opt into a daily check-in; that preference does not schedule an agent inside nohmi.
+User-initiated messages remain available for external agents to answer.
 
 A maintenance message should normally contain:
 
@@ -134,8 +144,8 @@ deferral.
 During quiet hours, proactive maintenance texts wait until the window ends. Before release, Texting
 revalidates that each question or action is still current, suppresses resolved or expired items,
 recomputes relative dates, and consolidates multiple remaining items into one Reviews notification.
-Replies to a conversation the person initiated are immediate and are not proactive maintenance
-notifications.
+Replies to a conversation the person initiated are exempt from proactive quiet-hour deferral once
+submitted by an authorized caller. This does not promise immediate external-agent execution.
 
 ### Reminder suppression
 
@@ -210,6 +220,7 @@ widen authority, or exceed the shared privacy ceiling. The configurable SMS pref
 - whether maintenance may send SMS at all;
 - whether to keep the questions-and-actions-only default, turn maintenance SMS off, or send every
   completed run;
+- adaptive coaching guidance and optional daily check-ins, with per-period duplicate suppression;
 - whether SMS replies may answer questions and review exact reversible proposals;
 - useful contextual identifiers with privacy-safe detail, or explicitly expanded content;
 - whether to include first-party review and recovery links; and
@@ -230,39 +241,38 @@ its own SMS consumer. This is target scope, not delivered behavior.
 
 The minimum complete journey is:
 
-1. An authorized external automation invokes Finance maintenance and persists a question or exact
-   review under a durable Finance identity also visible in unified Reviews.
-2. Finance publishes a typed notification intent. Shared policy and Texting validate consent,
-   apply privacy, quiet hours and reminder suppression, and send a concise contextual question.
-3. A provider-authenticated inbound webhook is durably claimed, associated with the verified user's
-   Texting identity, and bound to the current question and outbound revision. Free-form facts remain user-authored context; ambiguous answers produce clarification
-   rather than a guessed classification or approval. New prospective context can exist without a
-   transaction. General requests outside the delivered slice receive an honest response.
-4. Texting acknowledges accepted context promptly and routes it to Finance. An acknowledgment does
-   not claim bookkeeping completed. The domain applies only authorized operations and records the
-   result, or leaves explicit work awaiting agent reasoning or user review.
-5. An external agent can retrieve and resume the durable work after its original session ended.
-   An approved host adapter may request event-driven continuation where the host supports it;
-   otherwise the reply remains available for its next invocation, with honest waiting status.
-6. Completion updates the same Finance case and app projection. Manual resolution, duplicate SMS,
-   overlapping agents, expired proposals and delayed responses cannot cause duplicate effects.
+1. An authorized caller persists an exact Finance question or proposal also visible in Reviews.
+2. Finance publishes a typed intent; shared policy and Texting validate consent, privacy, quiet
+   hours and reminder suppression before sending the bound question.
+3. A signed inbound message persists with owner, provider occurrence evidence and any exact
+   deterministic binding. Free-form facts retain the user's source text. Ambiguous meaning remains
+   work for an external agent; the toolkit does not guess an approval or financial classification.
+4. Deterministic admission records a valid answer or supported bounded approval using the same
+   domain operation. Other work waits for an authorized caller to interpret and submit. Any
+   acknowledgment describes only what was durably accepted, not bookkeeping completion.
+5. A fresh authorized session can discover and resume work after the original one ends. It can
+   retrieve permitted knowledge contributed by another agent. Polling suffices; optional events
+   advertise available work without promising agent execution.
+6. Completion updates the original Finance case and app projection. Duplicate messages, overlapping
+   agents, expired proposals and manual resolution races cannot duplicate effects.
 
-Both Codex and Claude are required for the Finance MVP. Prove prompt continuation independently
-on each exact supported host surface. MCP read/send tools alone cannot wake a suspended
-third-party task. A recurring next-pass-only integration is useful but cannot be advertised as
-immediate conversational agent support. External hosts retain schedule ownership; continuation
-of an accepted run does not grant nohmi authority to create recurring maintenance schedules.
+No specific Codex or Claude surface, host certification, automatic continuation attempt, or agent
+response-time target gates release. External callers own their execution and schedules. Real
+transport, work durability, retrieval, policy, resumption and app results remain required evidence.
+Vendor examples are optional interoperability documentation and must describe only verified scope.
 
-MVP work includes shared inbound claims/routing, work-bound replies and prospective context,
-notification policy, resumable Finance API/MCP contracts, a proven host continuation path, and
-visible delivery/processing/recovery states. Bounded reversible approvals must follow the existing
-authority contract; ambiguous or stronger approvals go to the authenticated app. Facts supplied by
-SMS cannot change budget boundaries or activate a rule.
+MVP work includes shared claims, work-bound replies, prospective context, notification policy,
+resumable API/MCP operations and visible delivery/processing/recovery states. Bounded reversible
+approvals require exact unexpired proposal binding and accepted reply vocabulary. An external
+agent's interpretation alone cannot convert free-form text into approval. Stronger or ambiguous
+authority uses authenticated app review or a new explicit confirmation. Facts do not change budget
+boundaries or activate rules.
 
-Release evidence must exercise a real authorized outbound question, inbound answer after the
-original agent session ends, safe resumption and visible app result, including a duplicate reply,
-manual resolution race, host outage, STOP and uncertain delivery. Existing mocked transport tests
-do not establish this journey. No production test text is authorized by this planning document.
+Release evidence exercises an authorized real outbound question, an inbound answer after the
+original client session ends, retrieval by a fresh authenticated caller, safe resolution and the
+visible app result. Include duplicate replies, manual resolution races, caller absence/revocation,
+STOP and uncertain delivery. Mocks do not establish this journey, and this specification does not
+authorize production test texts.
 
 ## Current transport foundation
 
@@ -315,8 +325,9 @@ The older cross-workspace queue component remains unrouted; generated legacy lin
 Account. The accepted unified multi-workspace destination is therefore still a gap. Current
 sources include reconnect-required Mail and Calendar accounts, but complete connector-failure and
 recovery coverage remains target work. Texting does not yet provide general-inbox intent
-classification, work-node answers, cross-workspace child intents, a general event-driven agent
-dispatcher, `maintain_texting`, or general per-workspace SMS controls. The bounded Finance runtime
+handling through external agents, generic work discovery/claims, cross-workspace child intents,
+`maintain_texting`, or complete per-workspace SMS controls. Internal free-form classification and
+agent dispatch are not required by the agreed toolkit target. The bounded Finance runtime
 does include notification discovery, signed `Finance:` context capture, exact question replies,
 restricted categorization approve/reject, durable acknowledgments and accepted-answer host
 continuations. These do not implement the general inbox or authorize stronger decisions by SMS.
@@ -547,9 +558,9 @@ uncertain rows for repair; it does not delete accepted evidence or restore forme
 
 Local adapter and transport tests establish deterministic code behavior only. The Finance producer
 still needs its own real mutation-versus-resolver race proof. Authorized production evidence must
-separately establish sender/carrier reachability, callback routing, consent and uncertain delivery;
-Codex and Claude continuation remains a later independently evidenced release gate. A mock resolver
-or passing test does not make production Finance SMS available.
+separately establish sender/carrier reachability, callback routing, consent and uncertain delivery.
+Fresh-session retrieval and safe resolution are toolkit release gates; named Codex/Claude host
+continuation is not. A mock resolver or passing test does not make production Finance SMS available.
 
 T0's private coordinator serializes the canonical user with `FOR NO KEY UPDATE` before acquiring a
 Texting connection lock. This preserves preference/timezone serialization while allowing consent
@@ -591,8 +602,9 @@ fires dispatch one exact case answer per session; unrelated answers remain pendi
 not retried. A human may move an undispatched waiting answer to a different live host.
 
 These are merged source claims. The PR's final verification record covers integrated local tests,
-builds, browser acceptance and review. Real authorized transport plus separate Codex and Claude
-post-session continuation trials, measured latency and usage remain launch evidence requirements.
+builds, browser acceptance and review. Real authorized transport and durable retrieval from a fresh authorized session require separate
+evidence. Optional host integrations need their own continuation evidence; no particular vendor,
+agent runtime, or external completion latency is a toolkit launch requirement.
 Source merge does not establish production activation or provider delivery.
 
 The Finance SMS switch gates pending question admission as well as approvals and delivery. Disabling it leaves previously bound replies retryable without a financial receipt or answer. Terminal admission outcomes retain policy, authority or delivery reason codes; they do not blame a registered Finance producer for a consent or handoff failure.

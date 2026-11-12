@@ -2,7 +2,7 @@
 
 - Status: Living master design; shipped and future behavior are labelled explicitly
 - Date: 2026-07-18
-- Last reconciled: 2026-09-11
+- Last reconciled: 2026-09-28
 - Supersedes: the product direction in `docs/product/mvp.md` for future planning. The MVP remains the record of what has already been built.
 
 ## 1. Decision and intentional scope expansion
@@ -47,10 +47,12 @@ has shipped. Light blue belongs to the external brand; signed-in product chrome 
 
 It must make useful action feel effortless while retaining the information density, fast paths, search, keyboard access, automation, and inspection a power user needs. Minimalism removes friction and decoration; it must not hide necessary information.
 
-Each workspace has a persistent expert steward that maintains its living ledger, applies its
-approved rulebook, asks only for irreducible human judgment, learns from answers and reinforced safe
-patterns, and produces an evidence-backed review and recommendations. Clients express intent; the
-workspace domain owns the expertise and durable workflow. The shared product doctrine is
+nohmi is the person's persistent brain, storage, and toolkit. It will never have a built-in agent.
+It reduces entropy through synchronization, normalization, reliable calculations, approved
+deterministic rules, and high-signal evidence and work queues. External agents reason, triage,
+converse, recommend, and manage the account's knowledge through these tools. Knowledge and work
+persist across authorized agents and previous runs; they do not belong to a model vendor or chat.
+Each workspace owns its ledger, playbook, policy and durable workflow support. The shared doctrine is
 [`nohmi workspace stewardship`](workspace-stewardship.md), the complete workspace contract is
 [`workspaces and interfaces`](workspaces.md), and the shared personal-context contract is
 [`User Knowledge`](user-knowledge.md).
@@ -61,8 +63,9 @@ Each user has an independently secured account and may have multiple Google/iClo
 variable attention and energy, a calendar that mixes work and life, an inbox that needs recurring
 cleanup, and one or more external agent hosts. The current implementation may begin with one user,
 but product, storage, authorization, retrieval, notification, and audit contracts must always be
-designed and tested for many mutually isolated users. Shared household or delegated access requires
-an explicit future sharing and consent model; it must never arise from weak tenant boundaries.
+designed and tested for many mutually isolated users. Each financial plan serves one person.
+Shared household or multiple-person financial management is permanently out of scope; authorized
+agents on the same account may share its knowledge within their current scopes.
 
 | Job | Success outcome |
 | --- | --- |
@@ -96,9 +99,10 @@ an explicit future sharing and consent model; it must never arise from weak tena
     silently collapsed into model-generated memory.
 16. **Confidence never grants authority.** Repeated safe evidence may activate an inferred belief,
     but scopes and approved policy alone authorize actions.
-17. **External schedulers invoke; nohmi executes.** ChatGPT, Codex, Claude, Gemini, operating-system
-    schedulers, and future MCP hosts may choose cadence and invoke an intent. nohmi owns durable
-    workflow state, expertise, policy, questions, recovery, and the verified outcome.
+17. **External agents reason; nohmi supplies the brain and tools.** External callers choose their
+    runtime and invocation cadence. nohmi owns account knowledge, workflows, deterministic
+    automation, policy, durable work, recovery, and verified operation outcomes. It does not
+    require or certify agent hosting, scheduling, availability, or response time.
 18. **Rule generation is not rule activation.** Guided setup may propose a complete rule set, but
     every rule remains inactive until a dedicated, version-bound preview exposes its scope,
     examples, consequences, conflicts, authority, and recovery path and the owning domain receives
@@ -182,7 +186,7 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 | Attention item | Domain, important/upcoming/follow-up/run-summary kind, importance, source/related material, lifecycle state, and optional occurrence/expiry. |
 | Rule | Common version/policy/source/profile envelope plus a domain-owned condition and action contract. |
 | External schedule declaration | Immutable nohmi-owned local identity, optional host automation identity, authenticated connection, intended workspace/intent and scope, expected cadence, observed check-in health, revocation, and linked durable runs. It is observational invocation metadata, never a nohmi-owned trigger or schedule. |
-| Maintenance/action run | Owner, invoking actor and authenticated connection, optional validated local schedule identity, intent and requested scope, playbook/rulebook/User Knowledge versions, evidence cutoff, durable steps and effects, policy decisions and approvals, idempotency and recovery state, work nodes, review artifact, and verified terminal state. Runs exist independently of schedule declarations and also represent manual, app, SMS, and other authorized invocations. |
+| Maintenance/action run | Owner, invoking actor and authenticated connection, optional caller run labels, intent and requested scope, playbook/rulebook/User Knowledge versions, evidence cutoff, durable steps and effects, policy decisions and approvals, idempotency and recovery state, work nodes, review artifact, and verified terminal state. Runs require no host or schedule declaration and also represent manual, app, SMS, and other authorized invocations. |
 | Activity/audit | Actor, request/run, operation, entity, redacted before/after, remote request/revision, reversible action, result and failure data. |
 
 ## 6. Complete experience design
@@ -403,28 +407,37 @@ collection or more charts is not the objective; useful understanding and less re
 The [Finance intelligence principles](finance-workspace-plan.md#finance-intelligence-and-visual-exploration)
 define this target alongside supported manual operation and exact human approval of budget changes.
 
-The first complete Finance release follows the [Finance MVP specification](finance-workspace-plan.md).
-It includes two-way day-to-day SMS with both Codex and Claude: durable questions and user context,
-safe continuation after an agent session ends, and the same manually editable results in the app.
-Each advertised host requires separate end-to-end evidence; this is target scope, not shipped
-capability. The wider Finance features below remain the master product direction.
+The first complete Finance release follows the reconciled
+[Finance MVP specification](finance-workspace-plan.md); the
+[full Finance design](../superpowers/specs/2026-09-28-finance-toolkit-design.md) describes staged
+completion of the larger target and awaits written review. Toolkit acceptance includes real
+two-way SMS, durable questions and answers retrievable by a fresh authorized session, safe
+resumption, and the same manually editable results in the app. No particular agent vendor, cloud
+runtime, host continuation mechanism, or agent response time gates release. These are target
+requirements, not shipped claims. Finance serves one person in USD; additional currencies may be
+considered later, but shared financial plans will not be supported.
 
-- The Finance workspace steward combines the useful methods of a bookkeeper, accountant/controller, financial
-  planner, investment analyst, auditor, and coach. Its maintenance turn reconciles and classifies a
-  selected period, balances it against budgets and goals, updates income/recurring/cash-flow/wealth
-  models, isolates questions, learns from explicit answers and reinforced safe patterns, and
-  publishes a period review. Learned knowledge never grants financial action authority.
+- Finance supplies agents with the useful methods of bookkeeping, accounting, financial planning,
+  investment analysis, auditing, and coaching as versioned knowledge and workflows. Deterministic
+  tools reconcile evidence, calculate models, enforce policy, and preserve results. External agents
+  resolve ambiguity, choose questions, and write advice and reviews with source evidence. Learned
+  knowledge never grants financial action authority.
 - Connect Plaid-supported institutions and selected accounts; show connection health, consent, refresh time, duplicate detection, data removal, and the connector's production-cost state. Manual accounts and CSV/OFX import remain first-class so budgeting and review do not require a paid connector.
 - Normalize balances, pending/posted transactions, transfers, merchant, location, category confidence, recurring inflow/outflow, account type, investments, liabilities, and manual transactions.
 - The daily finance queue is: new/uncategorized, low-confidence, split-needed, suspected transfer, recurring/subscription change, unusual spend, bills due, and review-complete. It is never mixed into Today unless it requires a decision.
 - Categorization uses provider categories, deterministic merchant rules, and agent suggestions. The user can correct one transaction, apply a rule to matching future items, split transactions, exclude/transfers, tag projects, and review all changed history.
 - Budgets support category, flexible, envelope/zero-based optional modes, rollovers, targets, recurring bills/income, cash-flow forecast, safe-to-spend/left-this-month, savings goals, watchlists, net worth, investments, subscriptions, and reports.
+- Category carryover is independently `none`, `surplus_only`, or `surplus_and_deficit`.
+  Automatic reallocations may touch only explicitly selected categories and must satisfy both
+  dollar and percentage limits, a cumulative monthly dollar cap, and category protected minimums.
+  Policy activation is explicit; the original monthly baseline remains immutable. Planned goal
+  contributions are distinct from confirmed funding or an explicit reservation of existing cash.
 - Budget pacing identifies material spending above and below the approved plan. The product
   explains whether the variance threatens an obligation or leaves a stated goal, need, or
   quality-of-life priority unfunded, then lets the person choose what to change.
 - The agent may explain and propose categorization/review work under a finance-read scope. The
-  Finance steward may provide evidence-backed informational planning, budget, savings, investment, and
-  market-context recommendations within the product's approved advisory model. It cannot transfer
+  external agent may use Finance evidence and knowledge for informational planning, budget, savings,
+  investment, and market-context recommendations. The toolkit cannot transfer
   money, trade, pay a bill, file a return, or claim a human professional credential.
 - Pending and posted transactions are separate states. Pending categorization is provisional, cannot create durable merchant rules or definitive budget/"safe to spend" claims, and must reconcile against provider removals/replacements before becoming settled data.
 - Finance data uses stronger consent, redaction, retention, export/delete, no-notification-content defaults, an explicit warning before sharing with an agent, and a visible last-refresh/provider-freshness indicator.
@@ -501,9 +514,11 @@ The Activity view filters by material, actor, source, result, date, and reversib
 ### 6.9 Texting: the general nohmi inbox
 
 Texting is a shared conversational channel rather than a fifth workspace. One durable conversation
-accepts free-form requests, exact answers, and reversible reviews; its coordinator routes work to
-Mail, Tasks, Calendar, Finances, or shared services and combines linked child results into one
-coherent response without reproducing domain expertise.
+accepts free-form requests, exact answers, and reversible reviews. External agents interpret
+messages, select workspace tools, clarify ambiguity, and compose substantive responses. nohmi
+stores and exposes conversation/work context, validates explicit bindings and structured operations,
+preserves child outcomes, and delivers responses under channel policy. It never substitutes an
+internal reasoning agent when an external caller is unavailable.
 
 - Inbound messages promptly enqueue durable processing; `maintain_texting` is the manual or scheduled
   catch-up and recovery intent for unprocessed messages, interrupted child work, and uncertain
@@ -515,8 +530,10 @@ coherent response without reproducing domain expertise.
 - Multi-item texts number each question or review and bind those short references to the exact
   message and proposal revisions. Replies identify every answered number; a bare bounded answer is
   accepted only for one unambiguous active item.
-- Proactive maintenance SMS defaults to questions and actions only. Routine successful runs stay
-  quiet, while a message initiated by the person still receives a response.
+- Proactive maintenance SMS defaults to adaptive coaching: external agents use shared preferences
+  and history to ask useful questions and become quieter as work settles. Routine success stays
+  quiet unless the person opts into daily check-ins. nohmi enforces notification policy; daily
+  invocation and substantive responses depend on external callers and are not runtime promises.
 - Actionable texts include the useful merchant, sender, event, task, or comparable context. Texting
   converts canonical times into the person's time zone and renders nearby dates as `today`,
   `yesterday`, or `tomorrow` immediately before sending.
@@ -532,7 +549,8 @@ coherent response without reproducing domain expertise.
   accepted requirement from the current legacy-link fallback.
 - Quiet hours default to 10:00 PM–8:00 AM in the person's current time zone. Proactive maintenance
   texts wait until the window ends unless the person selects `any time`; direct replies to the
-  person's messages remain immediate. Multiple deferred items consolidate into one Reviews alert.
+  person's messages are exempt from quiet-hour deferral once submitted by an authorized caller.
+  Multiple deferred items consolidate into one Reviews alert.
 - An actionable item is notified once and is not repeated by later maintenance runs. A reminder is
   eligible only after the user-configurable interval, which defaults to 7 days, and only after
   revalidation and deduplication. `Never` disables repeats without hiding the item from Reviews;
@@ -562,8 +580,11 @@ coherent response without reproducing domain expertise.
 
 The target product and architecture contracts are
 [`texting and SMS`](texting-operations.md) and
-[`ADR 0006`](../architecture/0006-texting-inbox.md). The current transport foundation does not yet
-ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
+[`ADR 0006`](../architecture/0006-texting-inbox.md). Current source composes bounded Finance question delivery, exact answers, categorization approvals
+and durable recovery. Explicit execution grants and owner-enabled bypass cover registered operations.
+General inbox routing, host-independent work retrieval and unified Reviews remain target gaps; see the
+[spec reconciliation](../engineering/finance-texting-spec-reconciliation.md). Source implementation
+does not establish production activation.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 

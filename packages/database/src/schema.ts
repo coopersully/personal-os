@@ -6826,3 +6826,79 @@ export const financeBudgetStartPreviews = pgTable(
     ),
   ],
 );
+
+/** Durable source-refresh intent; the existing Item scheduler owns provider transport. */
+export const financeEvidenceRefreshRequests = pgTable(
+  "finance_evidence_refresh_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    period: text("period").notNull(),
+    timezone: text("timezone").notNull(),
+    sources: jsonb("sources")
+      .$type<
+        Array<{
+          accountId: string;
+          accountRevision: string;
+          itemId: string | null;
+          providerAccountId: string | null;
+        }>
+      >()
+      .notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+    nextObservationAt: timestamp("next_observation_at", { withTimezone: true }).notNull(),
+    result: jsonb("result")
+      .$type<import("@personal-os/domain").FinanceEvidenceRefresh>()
+      .default(sql`NULL`),
+  },
+  (table) => [
+    uniqueIndex("finance_evidence_refresh_owner_key").on(table.userId, table.idempotencyKey),
+    index("finance_evidence_refresh_pending")
+      .on(table.nextObservationAt)
+      .where(sql`${table.result} IS NULL`),
+  ],
+);
+
+/** Explicit signed opening statements are facts, never fabricated ledger transactions. */
+export const financeOpeningStatements = pgTable(
+  "finance_opening_statements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id").notNull(),
+    month: text("month").notNull(),
+    revision: integer("revision").notNull(),
+    accountRevision: text("account_revision").notNull(),
+    timezone: text("timezone").notNull(),
+    signedOpeningBalanceCents: bigint("signed_opening_balance_cents", { mode: "number" }).notNull(),
+    currencyCode: text("currency_code").notNull(),
+    actorId: uuid("actor_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "finance_opening_statement_account_owner",
+      columns: [table.userId, table.accountId],
+      foreignColumns: [financeAccounts.userId, financeAccounts.id],
+    }).onDelete("cascade"),
+    uniqueIndex("finance_opening_statement_owner_key").on(table.userId, table.idempotencyKey),
+    uniqueIndex("finance_opening_statement_revision").on(
+      table.userId,
+      table.accountId,
+      table.month,
+      table.revision,
+    ),
+    check("finance_opening_statement_owner_actor", sql`${table.actorId} = ${table.userId}`),
+    check("finance_opening_statement_positive_revision", sql`${table.revision} > 0`),
+  ],
+);

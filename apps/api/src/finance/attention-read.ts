@@ -9,6 +9,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { readBudgetPlanContext } from "./budget-plan-projection.js";
 import type { FinanceTransaction } from "./context.js";
+import { createFinanceOpeningPositionService } from "./opening-position-service.js";
 
 /** One database snapshot across flags, cases, questions, approval and budget policy.
  * Historical independence needs opening-position qualification; until then it stays triage.
@@ -27,6 +28,10 @@ export async function readFinanceAttentionSnapshot(
       orderBy: desc(financeBudgetStartPolicies.revision),
     });
     const budget = await readBudgetPlanContext(tx, userId, at);
+    const opening = await createFinanceOpeningPositionService({
+      db,
+      now: () => at,
+    }).readOpeningPosition(userId, budget.month, tx);
     const result = await tx.execute<{ record: unknown }>(sql`
       WITH work AS (
         SELECT 'flag:' || t.id::text AS id, t.id::text AS transaction_id,
@@ -54,7 +59,17 @@ export async function readFinanceAttentionSnapshot(
         FROM finance_agent_action_reviews a WHERE a.user_id = ${userId}::uuid AND a.status = 'pending'
       ) SELECT jsonb_build_object('id', id, 'transactionId', transaction_id, 'source', source,
           'date', date, 'decisionKey', decision_key, 'workState', work_state,
-          'dependency', CASE WHEN date IS NULL OR date < ${`${budget.month}-01`} THEN 'unknown' ELSE 'none' END
+          'dependency', CASE
+            WHEN date IS NULL THEN 'unknown'
+            WHEN EXISTS (
+              SELECT 1 FROM finance_transaction_relationships rel
+              JOIN finance_transactions related ON related.user_id = ${userId}::uuid
+                AND rel.transaction_ids ? related.id::text
+              WHERE rel.user_id = ${userId}::uuid AND rel.transaction_ids ? work.transaction_id
+                AND related.transaction_date >= ${`${budget.month}-01`}
+            ) THEN 'affects_current'
+            WHEN date < ${`${budget.month}-01`} AND NOT ${opening.qualified} THEN 'unknown'
+            ELSE 'none' END
         ) AS record FROM work ORDER BY id COLLATE "C" LIMIT 10001
     `);
     const complete = result.rows.length <= 10000;
@@ -63,7 +78,7 @@ export async function readFinanceAttentionSnapshot(
       .map((row) => financeAttentionRecordSchema.parse(row.record));
     // Spending-comparison baseline approval is not proof of an opening account position.
     const readiness = {
-      openingPositionQualified: false,
+      openingPositionQualified: opening.qualified,
       budgetApproved: budget.state === "approved",
     };
     const projected = projectFinanceAttention({
@@ -78,11 +93,19 @@ export async function readFinanceAttentionSnapshot(
       asOf: at.toISOString(),
       timezone: owner.planningTimezone,
       snapshot: createHash("sha256")
-        .update(JSON.stringify({ start, budget, records, complete }))
+        .update(
+          JSON.stringify({
+            start,
+            budget,
+            records,
+            complete,
+            opening: { ...opening, asOf: undefined },
+          }),
+        )
         .digest("hex"),
       readiness,
       policy: start ? { firstMonth: start.firstMonth, revision: start.revision } : null,
-      qualificationRecovery: "opening_position_required" as const,
+      qualificationRecovery: opening.qualified ? "none" : "opening_position_required",
     });
   };
   return executor

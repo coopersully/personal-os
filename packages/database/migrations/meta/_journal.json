@@ -1030,6 +1030,20 @@
       "when": 1794499200000,
       "tag": "0139_finance_budget_start",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1794499200001,
+      "tag": "0140_finance_evidence_refresh",
+      "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1794499200002,
+      "tag": "0141_finance_opening_statements",
+      "breakpoints": true
     }
   ]
 }

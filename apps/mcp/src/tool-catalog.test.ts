@@ -96,3 +96,18 @@ it("exposes SMS work only with all Texting grants and removes it in read-only mo
     ).not.toContain(name);
   }
 });
+
+describe("knowledge scope discovery", () => {
+  it("requires both save scopes and hides writes in read-only sessions", () => {
+    for (const scopes of [[], ["knowledge:read"], ["knowledge:write"], ["tasks:write"]] as const) {
+      expect(availableToolNames(new Set(scopes), false)).not.toContain("save_knowledge");
+    }
+    const both = new Set(["knowledge:read", "knowledge:write"] as const);
+    expect(availableToolNames(both, false)).toEqual(
+      expect.arrayContaining(["save_knowledge", "get_knowledge"]),
+    );
+    expect(availableToolNames(both, true)).not.toContain("save_knowledge");
+    expect(availableToolNames(both, true)).toContain("get_knowledge");
+    expect(availableToolNames(new Set(["knowledge:write"]), false)).not.toContain("get_knowledge");
+  });
+});

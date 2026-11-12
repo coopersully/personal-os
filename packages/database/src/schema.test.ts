@@ -523,8 +523,10 @@ describe("database schema contracts", () => {
       "0127_finance_spending_week_default",
       "0128_shared_agent_accounts",
       "0129_finance_review_batches",
+      "0130_persistent_knowledge",
       "0130_finance_provider_account_identity",
       "0131_finance_institution_branding",
+      "0132_persistent_knowledge_recovery",
       "0132_texting_agent",
       "0133_texting_workspace_messages",
       "0134_texting_host_binding",
@@ -532,6 +534,7 @@ describe("database schema contracts", () => {
       "0136_finance_conversation_turns",
       "0137_native_push",
       "0138_finance_host_instruction_receipts",
+      "0139_persistent_knowledge_recovery",
     ]);
   });
 

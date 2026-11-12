@@ -1,6 +1,6 @@
 # ADR 0005: User Knowledge and purpose-bound context
 
-- Status: Accepted target architecture; implementation pending
+- Status: Accepted target architecture; initial save/read foundation implemented in source
 - Date: 2026-09-10
 
 ## Context
@@ -114,3 +114,51 @@ workflows declare knowledge contracts and consume context packs internally.
   layer; credential scopes and purpose-bounded context packs govern the initial target.
 - Current document-style profiles remain transitional and must not be described as complete
   persistent memory.
+
+## Initial save/read implementation
+
+The source now separates knowledge identity, initial immutable revision snapshots, sources,
+relationships and idempotency receipts in owner-keyed PostgreSQL tables. The API owns source
+classification and live disclosure checks; stateless MCP tools use the typed authenticated client.
+OAuth callers must explicitly request the knowledge scopes they need. Reads require
+`knowledge:read`; saves require both `knowledge:read` and `knowledge:write`. Consent describes
+these grants, and omitted scopes or refresh of earlier grants never add them. Knowledge text
+rejects NUL and unpaired UTF-16 surrogates before JSONB persistence, preserving valid Unicode.
+Source scope requirements propagate to derived records, which cannot broaden workspace, sensitivity
+or allowed purposes. Knowledge writes emit redacted audit metadata and never alter domain policy.
+Lifecycle mutations, retrieval indexes, context packs and user controls remain follow-up work;
+see the [current implementation boundary](../product/user-knowledge.md#relationship-to-current-implementation).
+
+## Forward migration recovery
+
+Published `0130_persistent_knowledge` remains immutable. The composed journal retains it before
+the separately published Finance `0130` and Accounts `0131`; historical duplicate journal index
+135 is preserved. `0132_persistent_knowledge_recovery` appends index 137 at `1793300055682`.
+Its transaction requires the exact Finance and Accounts timestamp/hash receipts before inspecting
+the five Knowledge relations. If all are absent, it creates the original-equivalent schema; if
+all are present, it validates columns and builtin default identities, owner keys, foreign keys
+and their enabled enforcement triggers, indexes and relation behavior. Partial or incompatible
+catalogs fail without repair or an advanced recovery receipt. The published common journal prefix
+retains its original array order; only the concurrent tail is composed.
+The original Knowledge receipt may remain absent on a skipped-cursor upgrade; recovery never
+fabricates it or rewrites existing records. Later migrations retain the caller's search path.
+
+Real PostgreSQL fixtures exercise fresh and upgraded published histories, preservation, retry,
+owner isolation and rollback. These establish source behavior, not deployed catalog acceptance.
+Deployment still requires one migration-capable writer, the reviewed backup/recovery procedure,
+actual deployed revision/ledger/catalog evidence and authenticated save/read observations.
+
+### Current-main consolidation — November 12, 2026
+
+The published Memory recovery and main's concurrent Texting tail both retain their original
+index 137 entries and SQL bytes. Their respective journal order is preserved. Main has since
+advanced through `0138_finance_host_instruction_receipts` at `1794348000002`, which skips both
+older Memory timestamps on upgrade. The appended `0139_persistent_knowledge_recovery` at
+`1794348000003` repeats the guarded recovery after that watermark. It preserves the same exact
+lower-receipt and catalog checks, creates only wholly absent Knowledge storage, and refuses
+partial or incompatible state. Historical recovery tests retain their original cutoff; additional
+current-main upgrade tests verify new recovery, unchanged existing receipts and rollback.
+
+This consolidation is development source, not production rollout acceptance. Previous candidate
+verification and operator observations remain bound to their historical revisions. The prior
+recovery-access prerequisite remains unresolved until verified for an actual release.

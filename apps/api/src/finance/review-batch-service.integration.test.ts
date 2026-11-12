@@ -9,13 +9,16 @@ import {
   financeAccounts,
   financeCategories,
   financeClassificationDecisions,
+  financeConversationMessages,
   financeMerchants,
   financeProviderItems,
   financeReviewActionRequests,
+  financeReviewBatchApprovals,
   financeReviewBatchRuns,
   financeReviewCases,
   financeTransactions,
   migrateDatabase,
+  nativePushEvents,
   users,
 } from "@personal-os/database";
 import {
@@ -2036,6 +2039,188 @@ describe.sequential("durable Finance review batches", () => {
         .from(financeClassificationDecisions)
         .where(eq(financeClassificationDecisions.userId, f.userId)),
     ).toHaveLength(1);
+  });
+  it("persists exact owner approval and resumes bounded work after the request is gone", async () => {
+    const f = await fixture(12);
+    const run = await f.service.preview(f.input, f.context);
+    const approval = await f.service.approveForContinuation(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.context,
+    );
+    expect(approval).toMatchObject({ batchId: run.id, state: "pending" });
+    expect(
+      await f.service.approveForContinuation(run.id, { fingerprint: run.fingerprint }, f.context),
+    ).toEqual(approval);
+    expect((await f.service.get(run.id, f.context)).pendingCount).toBe(12);
+    await f.service.processApproved();
+    expect((await f.service.get(run.id, f.context)).pendingCount).toBe(2);
+    // A freshly composed service continues the persisted approval, not an in-memory promise.
+    const resumed = createFinanceReviewBatchService({ db: database.db, now, finance: f.finance });
+    await resumed.processApproved();
+    expect((await resumed.get(run.id, f.context)).pendingCount).toBe(0);
+    expect(await resumed.getContinuation(run.id, f.context)).toMatchObject({ state: "completed" });
+    await resumed.processApproved();
+    expect((await resumed.get(run.id, f.context)).outcomes).toHaveLength(12);
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationMessages)
+        .where(eq(financeConversationMessages.userId, f.userId)),
+    ).toEqual([
+      expect.objectContaining({ text: "Batch finished: 12 changes applied.", authorKind: "agent" }),
+    ]);
+    expect(
+      await database.db
+        .select()
+        .from(nativePushEvents)
+        .where(eq(nativePushEvents.userId, f.userId)),
+    ).toHaveLength(1);
+  });
+  it("expires approval without effects and reports the saved recovery once", async () => {
+    const f = await fixture(1);
+    const run = await f.service.preview(f.input, f.context);
+    const approval = await f.service.approveForContinuation(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.context,
+    );
+    await database.db
+      .update(financeReviewBatchApprovals)
+      .set({ approvedAt: new Date(now().getTime() - 1000), expiresAt: now() })
+      .where(eq(financeReviewBatchApprovals.id, approval.id));
+    await f.service.processApproved();
+    await f.service.processApproved();
+    expect((await f.service.get(run.id, f.context)).pendingCount).toBe(1);
+    expect(await f.service.getContinuation(run.id, f.context)).toMatchObject({
+      state: "expired",
+      recovery: "new_preview",
+    });
+    expect(
+      await database.db
+        .select()
+        .from(nativePushEvents)
+        .where(eq(nativePushEvents.userId, f.userId)),
+    ).toHaveLength(1);
+  });
+  it("bounds unexpected continuation retries and keeps unsaved effects pending", async () => {
+    const f = await fixture(1);
+    const run = await f.service.preview(f.input, f.context);
+    const approval = await f.service.approveForContinuation(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.context,
+    );
+    const failure = vi
+      .spyOn(f.finance, "applyCategorizations")
+      .mockRejectedValue(new Error("Synthetic execution failure"));
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await database.db
+          .update(financeReviewBatchApprovals)
+          .set({ nextAttemptAt: now() })
+          .where(eq(financeReviewBatchApprovals.id, approval.id));
+        await f.service.processApproved();
+      }
+      expect(await f.service.getContinuation(run.id, f.context)).toMatchObject({
+        state: "blocked",
+        attempts: 3,
+        failureCode: "execution_failed",
+      });
+      expect((await f.service.get(run.id, f.context)).pendingCount).toBe(1);
+      expect(
+        await database.db
+          .select()
+          .from(nativePushEvents)
+          .where(eq(nativePushEvents.userId, f.userId)),
+      ).toHaveLength(1);
+    } finally {
+      failure.mockRestore();
+    }
+  });
+  it("recovers an expired worker lease but rejects changed source evidence with an honest result", async () => {
+    const f = await fixture(1);
+    const run = await f.service.preview(f.input, f.context);
+    const approval = await f.service.approveForContinuation(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.context,
+    );
+    await database.db
+      .update(financeReviewBatchApprovals)
+      .set({ state: "running", claimId: randomUUID(), leaseUntil: new Date(now().getTime() - 1) })
+      .where(eq(financeReviewBatchApprovals.id, approval.id));
+    await database.db
+      .update(financeTransactions)
+      .set({ amount: 9900, updatedAt: new Date(now().getTime() + 1000) })
+      .where(eq(financeTransactions.id, required(f.decisions[0]).transactionId));
+    await f.service.processApproved();
+    expect(await f.service.getContinuation(run.id, f.context)).toMatchObject({
+      state: "completed_with_exceptions",
+    });
+    expect((await f.service.get(run.id, f.context)).outcomes[0]?.status).toBe("failed");
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationMessages)
+        .where(eq(financeConversationMessages.userId, f.userId)),
+    ).toEqual([
+      expect.objectContaining({ text: "Batch finished: 0 changes applied; 1 need another look." }),
+    ]);
+    await f.service.cancelContinuation(run.id, f.context);
+    expect(await f.service.getContinuation(run.id, f.context)).toMatchObject({
+      state: "cancelled",
+    });
+  });
+  it("keeps approvals private and does not pick up an unexpired worker lease", async () => {
+    const f = await fixture(1),
+      other = await fixture(1);
+    const run = await f.service.preview(f.input, f.context);
+    expect(await f.service.getContinuation(run.id, f.context)).toBeNull();
+    await expect(f.service.cancelContinuation(run.id, f.context)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    const approval = await f.service.approveForContinuation(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.context,
+    );
+    await expect(other.service.getContinuation(run.id, other.context)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await database.db
+      .update(financeReviewBatchApprovals)
+      .set({
+        state: "running",
+        claimId: randomUUID(),
+        leaseUntil: new Date(now().getTime() + 120000),
+      })
+      .where(eq(financeReviewBatchApprovals.id, approval.id));
+    expect(await f.service.processApproved()).toEqual({ inspected: 0 });
+    expect((await f.service.get(run.id, f.context)).pendingCount).toBe(1);
+    await f.service.cancelContinuation(run.id, f.context);
+  });
+  it("never accepts agent approval and cancels queued work without applying it", async () => {
+    const f = await fixture(1);
+    const agentContext = await agent(f.userId, false);
+    const run = await f.service.preview(f.input, agentContext);
+    await expect(
+      f.service.approveForContinuation(run.id, { fingerprint: run.fingerprint }, agentContext),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      f.service.approveForContinuation(
+        run.id,
+        { fingerprint: `sha256:${"0".repeat(64)}` },
+        f.context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await f.service.approveForContinuation(run.id, { fingerprint: run.fingerprint }, f.context);
+    await f.service.cancelContinuation(run.id, f.context);
+    await f.service.processApproved();
+    expect((await f.service.get(run.id, f.context)).pendingCount).toBe(1);
+    expect(await f.service.getContinuation(run.id, f.context)).toMatchObject({
+      state: "cancelled",
+    });
   });
   it("allows the owner to discover and execute an agent preview with human audit attribution", async () => {
     const f = await fixture(1, true);

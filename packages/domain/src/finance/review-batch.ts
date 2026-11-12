@@ -215,3 +215,28 @@ export type FinanceReviewBatchUndo = z.infer<typeof financeReviewBatchUndoSchema
 export type PreviewFinanceReviewBatchUndoInput = z.infer<
   typeof previewFinanceReviewBatchUndoInputSchema
 >;
+
+export const approveFinanceReviewBatchInputSchema = z.strictObject({
+  fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+});
+export const financeReviewBatchContinuationSchema = z.strictObject({
+  id: idSchema,
+  batchId: idSchema,
+  fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  state: z.enum([
+    "pending",
+    "running",
+    "completed",
+    "completed_with_exceptions",
+    "cancelled",
+    "expired",
+    "blocked",
+  ]),
+  approvedAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  attempts: z.number().int().nonnegative(),
+  failureCode: z.string().max(100).nullable(),
+  recovery: z.enum(["none", "new_preview"]),
+});
+export type FinanceReviewBatchContinuation = z.infer<typeof financeReviewBatchContinuationSchema>;

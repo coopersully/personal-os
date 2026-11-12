@@ -1058,6 +1058,13 @@
       "when": 1794499200004,
       "tag": "0143_finance_budget_start_impact",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1794499200005,
+      "tag": "0144_finance_batch_approvals",
+      "breakpoints": true
     }
   ]
 }

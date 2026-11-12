@@ -203,7 +203,9 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
           ),
         });
         if (applied) return policy(applied);
-        const attention = await readFinanceAttentionSnapshot(db, owner.id, now(), tx);
+        const attention = await readFinanceAttentionSnapshot(db, owner.id, now(), tx, {
+          excludeBudgetStartPreviewId: prepared.id,
+        });
         if (attention.snapshot !== prepared.attention.snapshot)
           throw new AppError(
             "conflict",

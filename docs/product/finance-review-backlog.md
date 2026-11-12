@@ -105,3 +105,22 @@ routine, current-instruction bootstrap and notification controls. Each later mon
 policy with a fresh proposal and explicit carryover, rather than resetting history or automatically
 approving a plan. See the [detailed design](../superpowers/specs/2026-11-12-finance-inbox-zero-design.md)
 and [implementation plan](../superpowers/plans/2026-11-12-finance-inbox-zero.md).
+
+
+### Exact owner approval and resumable batches
+
+Approving a displayed review batch records a one-batch, exact-fingerprint instruction with
+24-hour expiry. Pending work survives the client closing and resumes through the existing
+bounded batch executor on the server maintenance tick. This does not create a standing agent
+grant. Every effect still checks current source revisions and the live approval, cancellation,
+expiry and worker claim. Cancellation stops future effects; it does not undo applied effects.
+Unexpected failures have bounded retries and an explicit recovery state. A completed batch
+reports its actual applied/exception counts in Finance Chat with a link to the saved outcomes.
+
+Shared Finance Chat also permits a connected Finance reader to inspect bounded conversation
+pages, and an agent with read/write/maintain grants to publish short attributed record cards.
+These annotations neither consume the original routine's source messages nor impersonate an
+owner answer. The original host's causal reply protocol, identity, cadence and grants remain
+unchanged. Pending published approvals contribute to active human attention; approved work
+contributes to processing, and stopped work retains technical recovery. Historical raw review
+counts remain separately available.

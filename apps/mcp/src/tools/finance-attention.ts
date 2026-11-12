@@ -12,6 +12,16 @@ import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 export function registerFinanceAttentionTools(server: McpServer, api: PersonalOsApiClient) {
   server.registerTool(
+    "get_finance_review_batch_continuation",
+    {
+      title: "Read approved batch progress",
+      description:
+        "Read the exact owner's saved batch approval and durable continuation state. Does not approve, cancel or expand agent authority. Requires finances:read.",
+      inputSchema: z.strictObject({ id: idSchema }),
+    },
+    async ({ id }) => apiResult(() => api.getFinanceBatchContinuation(id)),
+  );
+  server.registerTool(
     "get_finance_attention",
     {
       title: "Read active Finance attention",

@@ -38,6 +38,10 @@ import { type createFinanceService, isProviderTransfer } from "../finance-servic
 import { effectiveSynchronization } from "../finance-status-service.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
+import {
+  assertFinanceBatchContinuation,
+  createFinanceBatchApprovalService,
+} from "./batch-approval-service.js";
 import { createFinanceBatchCorrectionService } from "./batch-correction-service.js";
 import { captureFinanceBatchEffect } from "./batch-effect-state.js";
 import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
@@ -440,7 +444,7 @@ export function createFinanceReviewBatchService({
         );
     }
   }
-  return {
+  const service = {
     ...createFinanceBatchCorrectionService({
       db,
       now,
@@ -868,6 +872,7 @@ export function createFinanceReviewBatchService({
       let latest = await bounded(async (tx) => {
         await authorize(tx, context, "execute");
         const row = await find(tx, id, context);
+        await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
         if (row.fingerprint !== input.fingerprint)
           throw new AppError("conflict", "Execution must accept the exact preview fingerprint.");
         return row;
@@ -881,6 +886,7 @@ export function createFinanceReviewBatchService({
           const progressed = await bounded(async (tx, preserve) => {
             await authorize(tx, context, "execute");
             const row = await find(tx, id, context);
+            await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
             if (row.fingerprint !== input.fingerprint)
               throw new AppError(
                 "conflict",
@@ -1089,5 +1095,9 @@ export function createFinanceReviewBatchService({
       // remains recoverable via get/resume; no unbounded final database read is needed.
       return present(latest);
     },
+  };
+  return {
+    ...service,
+    ...createFinanceBatchApprovalService({ db, now, authorize, find, execute: service.execute }),
   };
 }

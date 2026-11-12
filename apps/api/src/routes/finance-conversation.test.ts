@@ -16,6 +16,8 @@ function fixture() {
     scopes: new Set<AccessScope>(["finances:read", "finances:write", "finances:maintain"]),
   };
   const service = {
+    getAgentHistory: vi.fn(async () => ({ messages: [], nextCursor: null })),
+    publishAgentCard: vi.fn(async () => ({ id: runId, authorKind: "agent" })),
     beginTurn: vi.fn(async () => ({ turn: null, messages: [] })),
     acknowledgeTurn: vi.fn(async () => ({ acknowledgedMessageIds: [] })),
     replyToTurn: vi.fn(async () => ({ id: runId })),
@@ -57,6 +59,35 @@ const post = (body: unknown): RequestInit => ({
 });
 
 describe("Finance conversation leaf routes", () => {
+  it("routes agent annotations without passing author or host authority from the request", async () => {
+    const f = fixture();
+    const input = {
+      text: "Review this proposal.",
+      idempotencyKey: "card",
+      recordRefs: [{ kind: "budget_start_preview", id: runId }],
+    };
+    expect((await f.app.request("/v1/finances/conversation/agent/cards", post(input))).status).toBe(
+      201,
+    );
+    expect(f.service.publishAgentCard).toHaveBeenCalledWith(
+      { principal: f.principal, requestId: "conversation-route" },
+      input,
+    );
+    expect(
+      (
+        await f.app.request(
+          "/v1/finances/conversation/agent/cards",
+          post({ ...input, authorKind: "user" }),
+        )
+      ).status,
+    ).toBe(400);
+    const read = await f.app.request("/v1/finances/conversation/agent/messages?limit=10");
+    expect(read.headers.get("cache-control")).toBe("no-store");
+    expect(f.service.getAgentHistory).toHaveBeenCalledWith(
+      { principal: f.principal, requestId: "conversation-route" },
+      { limit: "10" },
+    );
+  });
   it("routes bounded turn capture, acknowledgment and causal reply through authenticated service", async () => {
     const f = fixture();
     expect(

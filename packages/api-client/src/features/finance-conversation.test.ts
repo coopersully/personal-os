@@ -3,6 +3,21 @@ import { createFinanceConversationApi } from "./finance-conversation.js";
 import type { FinanceRequest } from "./finances.js";
 
 describe("Finance conversation client leaf", () => {
+  it("keeps agent card transport separate from human messages and original-host turns", async () => {
+    const request = vi.fn().mockResolvedValue({ message: { authorKind: "agent" } });
+    const api = createFinanceConversationApi(request);
+    await api.getFinanceAgentChat({ before: "9007199254740993", limit: 10 });
+    const input = {
+      text: "Review the proposal.",
+      idempotencyKey: "card",
+      recordRefs: [{ kind: "budget_start_preview" as const, id: "preview" }],
+    };
+    expect(await api.publishFinanceAgentCard(input)).toEqual({ authorKind: "agent" });
+    expect(request.mock.calls).toEqual([
+      ["/v1/finances/conversation/agent/messages?before=9007199254740993&limit=10"],
+      ["/v1/finances/conversation/agent/cards", { method: "POST", body: JSON.stringify(input) }],
+    ]);
+  });
   it("requests recent history and older pages without lossy cursor conversion", async () => {
     const request = vi.fn().mockResolvedValue({ messages: [], nextCursor: null });
     const api = createFinanceConversationApi(request);

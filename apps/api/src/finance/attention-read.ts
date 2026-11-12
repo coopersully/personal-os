@@ -19,7 +19,7 @@ export async function readFinanceAttentionSnapshot(
   userId: string,
   at: Date,
   executor?: FinanceTransaction,
-  projection?: { firstMonth: string | null },
+  projection?: { firstMonth?: string | null; excludeBudgetStartPreviewId?: string },
 ) {
   const read = async (tx: FinanceTransaction) => {
     const owner = await tx.query.users.findFirst({ where: eq(users.id, userId) });
@@ -58,6 +58,31 @@ export async function readFinanceAttentionSnapshot(
         SELECT 'action:' || a.id::text, NULL, CASE WHEN a.action_kind = 'question' THEN 'question' ELSE 'approval' END,
           NULL, 'action:' || a.id::text, 'needs_person'
         FROM finance_agent_action_reviews a WHERE a.user_id = ${userId}::uuid AND a.status = 'pending'
+        UNION ALL
+        SELECT 'start:' || p.id::text, NULL, 'approval', ${`${budget.month}-01`},
+          'start:' || p.id::text, 'needs_person'
+        FROM finance_budget_start_previews p
+        WHERE p.user_id = ${userId}::uuid
+          AND (${projection?.excludeBudgetStartPreviewId ?? null}::uuid IS NULL OR p.id <> ${projection?.excludeBudgetStartPreviewId ?? null}::uuid)
+          AND p.expected_policy_revision >= COALESCE((SELECT MAX(revision) FROM finance_budget_start_policies WHERE user_id = ${userId}::uuid), 0)
+          AND EXISTS (SELECT 1 FROM finance_conversation_messages m WHERE m.user_id = ${userId}::uuid
+            AND m.author_kind = 'agent' AND m.record_refs @> jsonb_build_array(jsonb_build_object('kind','budget_start_preview','id',p.id::text)))
+        UNION ALL
+        SELECT 'batch:' || b.id::text, NULL, 'approval', ${`${budget.month}-01`},
+          'batch:' || b.id::text, CASE WHEN a.id IS NULL THEN 'needs_person' WHEN a.state IN ('blocked','expired','completed_with_exceptions') THEN 'technical_blocker' ELSE 'processing' END
+        FROM finance_review_batch_runs b LEFT JOIN finance_review_batch_approvals a
+          ON a.batch_id = b.id AND a.user_id = b.user_id
+        WHERE b.user_id = ${userId}::uuid AND (jsonb_array_length(b.outcomes) < jsonb_array_length(b.manifest) OR a.state IN ('blocked','expired','completed_with_exceptions'))
+          AND (a.id IS NULL OR a.state <> 'cancelled')
+          AND EXISTS (SELECT 1 FROM finance_conversation_messages m WHERE m.user_id = ${userId}::uuid
+            AND m.author_kind = 'agent' AND m.record_refs @> jsonb_build_array(jsonb_build_object('kind','review_batch','id',b.id::text)))
+        UNION ALL
+        SELECT 'correction:' || c.id::text, NULL, 'approval', ${`${budget.month}-01`},
+          'correction:' || c.id::text, 'needs_person'
+        FROM finance_review_batch_corrections c
+        WHERE c.user_id = ${userId}::uuid AND jsonb_array_length(c.outcomes) < jsonb_array_length(c.outcome_indexes)
+          AND EXISTS (SELECT 1 FROM finance_conversation_messages m WHERE m.user_id = ${userId}::uuid
+            AND m.author_kind = 'agent' AND m.record_refs @> jsonb_build_array(jsonb_build_object('kind','review_batch_undo','id',c.id::text)))
       ) SELECT jsonb_build_object('id', id, 'transactionId', transaction_id, 'source', source,
           'date', date, 'decisionKey', decision_key, 'workState', work_state,
           'dependency', CASE
@@ -83,7 +108,8 @@ export async function readFinanceAttentionSnapshot(
       budgetApproved: budget.state === "approved",
     };
     const projected = projectFinanceAttention({
-      firstMonth: projection ? projection.firstMonth : (start?.firstMonth ?? null),
+      firstMonth:
+        projection?.firstMonth !== undefined ? projection.firstMonth : (start?.firstMonth ?? null),
       period: budget.month,
       complete,
       ...readiness,

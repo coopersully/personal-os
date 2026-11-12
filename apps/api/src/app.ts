@@ -511,6 +511,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const financeEvidenceRefresh = createFinanceEvidenceRefreshService({ db: dependencies.db, now });
+  const financeReviewBatches = createFinanceReviewBatchService({
+    db: dependencies.db,
+    now,
+    finance: finances,
+  });
   const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const financeSms = createFinanceSmsPort({
     decideSmsApproval: createFinanceSmsApprovalService({
@@ -1587,7 +1592,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   registerFinanceRoutes({
     reviewBacklog: createFinanceReviewBacklogService(dependencies.db, { now }),
-    reviewBatches: createFinanceReviewBatchService({ db: dependencies.db, now, finance: finances }),
+    reviewBatches: financeReviewBatches,
     actions: financeActions,
     app,
     db: dependencies.db,
@@ -1829,6 +1834,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }
     },
     async dispatchDueFinanceMaintenance() {
+      await financeReviewBatches.processApproved();
       const recovery = await canonicalFinanceMaintenance.recoverAcceptedWork();
       await financeMaintenance.dispatchDue(5);
       if (recovery.failedRecoveries)

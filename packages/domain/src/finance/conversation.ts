@@ -71,7 +71,15 @@ export type FinanceConversationReadiness = z.infer<typeof financeConversationRea
 
 const ordinaryReference = z
   .object({
-    kind: z.enum(["transaction", "account", "review_case", "contextual_question", "review_batch"]),
+    kind: z.enum([
+      "transaction",
+      "account",
+      "review_case",
+      "contextual_question",
+      "review_batch",
+      "budget_start_preview",
+      "review_batch_undo",
+    ]),
     id: idSchema,
   })
   .strict();
@@ -118,6 +126,15 @@ export const financeConversationSendInputSchema = z
   })
   .strict();
 export type FinanceConversationSendInput = z.infer<typeof financeConversationSendInputSchema>;
+/** An attributed card is informational; it does not acknowledge a host turn or approve an effect. */
+export const financeConversationAgentCardInputSchema = z.strictObject({
+  text: z.string().trim().min(1).max(1200),
+  idempotencyKey: z.string().trim().min(1).max(200),
+  recordRefs: z.array(financeConversationRecordReferenceSchema).min(1).max(12),
+});
+export type FinanceConversationAgentCardInput = z.infer<
+  typeof financeConversationAgentCardInputSchema
+>;
 export const financeConversationBatchSchema = z
   .object({
     runId: idSchema,

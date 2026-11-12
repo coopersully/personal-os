@@ -233,6 +233,13 @@ export const personalOsToolCatalog = {
     policy: "approved_rule",
   }),
   search_finance: read("finances", ["finances:read"]),
+  get_finance_chat: read("finances", ["finances:read"]),
+  publish_finance_chat_card: write(
+    "finances",
+    ["finances:read", "finances:write", "finances:maintain"],
+    { policy: "preview", stage: "prepare", idempotent: true },
+  ),
+  get_finance_review_batch_continuation: read("finances", ["finances:read"], "verify"),
   get_finance_attention: read("finances", ["finances:read"]),
   get_finance_budget_start: read("finances", ["finances:read"]),
   get_finance_budget_start_preview: read("finances", ["finances:read"]),

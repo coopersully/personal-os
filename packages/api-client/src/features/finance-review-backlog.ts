@@ -4,6 +4,7 @@ import type {
   FinanceReviewBacklogAssessment,
   FinanceReviewBacklogPage,
   FinanceReviewBacklogQuery,
+  FinanceReviewBatchContinuation,
   FinanceReviewBatchRun,
   FinanceReviewBatchUndo,
   PreviewFinanceReviewBatchInput,
@@ -18,6 +19,21 @@ export function createFinanceReviewBacklogApi(request: FinanceRequest) {
   const batches = "/v1/finances/review-batches";
   const batch = (id: string) => `${batches}/${encodeURIComponent(id)}`;
   return {
+    getFinanceBatchContinuation(id: string): Promise<FinanceReviewBatchContinuation | null> {
+      return request(`${batch(id)}/approval`);
+    },
+    approveFinanceBatchContinuation(
+      id: string,
+      fingerprint: string,
+    ): Promise<FinanceReviewBatchContinuation> {
+      return request(`${batch(id)}/approval`, {
+        method: "POST",
+        body: JSON.stringify({ fingerprint }),
+      });
+    },
+    cancelFinanceBatchContinuation(id: string): Promise<FinanceReviewBatchContinuation> {
+      return request(`${batch(id)}/approval/cancel`, { method: "POST", body: JSON.stringify({}) });
+    },
     previewFinanceReviewBatchUndo(
       input: PreviewFinanceReviewBatchUndoInput,
     ): Promise<FinanceReviewBatchUndo> {

@@ -1,4 +1,5 @@
 import {
+  approveFinanceReviewBatchInputSchema,
   executeFinanceReviewBatchInputSchema,
   financeReviewBacklogQuerySchema,
   idSchema,
@@ -98,6 +99,29 @@ export function registerFinanceReviewBacklogRoutes({
   );
   app.get("/v1/finances/review-batches/:id", requireScope("finances:read"), async (c) =>
     c.json(await batches.get(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  app.get("/v1/finances/review-batches/:id/approval", requireScope("finances:read"), async (c) =>
+    c.json(await batches.getContinuation(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  app.post(
+    "/v1/finances/review-batches/:id/approval",
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    async (c) =>
+      c.json(
+        await batches.approveForContinuation(
+          idSchema.parse(c.req.param("id")),
+          await parseBody(c, approveFinanceReviewBatchInputSchema),
+          context(c),
+        ),
+        202,
+      ),
+  );
+  app.post(
+    "/v1/finances/review-batches/:id/approval/cancel",
+    requireScope("finances:write"),
+    async (c) =>
+      c.json(await batches.cancelContinuation(idSchema.parse(c.req.param("id")), context(c))),
   );
   // Execution authority and revocation are checked inside every item's transaction.
   app.post("/v1/finances/review-batches/:id/execute", requireScope("finances:write"), async (c) =>

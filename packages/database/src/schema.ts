@@ -6431,6 +6431,7 @@ export const financeReviewBatchRuns = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_review_batch_runs_owner_id_idx").on(table.userId, table.id),
     uniqueIndex("finance_review_batch_runs_owner_key_unique").on(
       table.userId,
       table.idempotencyKey,
@@ -6944,5 +6945,57 @@ export const financeReviewBatchCorrections = pgTable(
   },
   (table) => [
     uniqueIndex("finance_batch_correction_owner_key").on(table.userId, table.idempotencyKey),
+  ],
+);
+
+/** Exact owner approval is a bounded durable handoff, never a standing agent grant. */
+export const financeReviewBatchApprovals = pgTable(
+  "finance_review_batch_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    batchId: uuid("batch_id").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    approvedBy: uuid("approved_by").notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    state: text("state")
+      .$type<
+        | "pending"
+        | "running"
+        | "completed"
+        | "completed_with_exceptions"
+        | "cancelled"
+        | "expired"
+        | "blocked"
+      >()
+      .notNull()
+      .default("pending"),
+    claimId: uuid("claim_id"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull(),
+    failureCode: text("failure_code"),
+    attempts: integer("attempts").notNull().default(0),
+    failures: integer("failures").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_batch_approval_once_idx").on(table.userId, table.batchId),
+    index("finance_batch_approval_due_idx").on(table.state, table.nextAttemptAt),
+    foreignKey({
+      name: "finance_batch_approval_batch_fk",
+      columns: [table.userId, table.batchId],
+      foreignColumns: [financeReviewBatchRuns.userId, financeReviewBatchRuns.id],
+    }).onDelete("cascade"),
+    check(
+      "finance_review_batch_approvals_state_check",
+      sql`${table.state} IN ('pending','running','completed','completed_with_exceptions','cancelled','expired','blocked')`,
+    ),
+    check("finance_review_batch_approvals_attempts_check", sql`${table.attempts} >= 0`),
+    check("finance_review_batch_approvals_failures_check", sql`${table.failures} >= 0`),
+    check("finance_batch_approval_owner", sql`${table.approvedBy} = ${table.userId}`),
+    check("finance_batch_approval_expiry", sql`${table.expiresAt} > ${table.approvedAt}`),
   ],
 );

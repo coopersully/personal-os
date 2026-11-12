@@ -796,3 +796,29 @@ Execution requires the separate execute grant. Undo retains audit history and re
 classification evidence created by the undone operation. Conflicting later edits require
 fresh inspection rather than overwriting them. Original batch actor/connection fences
 remain; owner review uses existing authenticated batch retrieval and human audit attribution.
+
+
+`get_finance_chat` reads bounded shared conversation history without marking it read or
+claiming the original routine's sources. `publish_finance_chat_card` requires read, write and
+maintain grants and posts a short, attributed annotation with actual owned references.
+Connection-scoped idempotency survives token rotation. It cannot impersonate the person,
+acknowledge a host turn, approve a proposal, or execute a financial change. Host causal replies
+continue to use the original registered turn/batch protocol. Cards support exact
+`budget_start_preview` and `review_batch_undo` references in addition to existing records.
+
+The owner may approve a review batch through the app's exact-fingerprint approval endpoint.
+This stores a 24-hour, one-batch approval; it is not an agent grant. The existing server
+maintenance tick advances at most ten effects per claim through the same batch executor,
+with a two-minute recoverable lease, per-effect cancellation/expiry checks, bounded database
+deadlines, and three bounded retries for unexpected failures. Source conflicts retain their
+actual failed receipts. `get_finance_review_batch_continuation` exposes saved progress.
+Only the owner can approve/cancel; no corresponding MCP approval tool exists. Cancellation
+stops uncommitted work after the current effect transaction and never undoes applied effects.
+Completed/failed work posts one saved Chat result and notification intent. APNs acceptance
+and physical display remain separate delivery evidence.
+
+Published pending policy, batch and correction cards contribute to the canonical human
+attention count. Approved running batches are processing; stopped batches are technical
+recovery. Dismissing a stopped continuation does not resolve its underlying transactions.
+Publishing a policy's own card must not invalidate that exact preview; policy application
+excludes only that self-reference from the financial-impact comparison.

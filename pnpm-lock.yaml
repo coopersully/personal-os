@@ -28,6 +28,9 @@ overrides:
 
 packageExtensionsChecksum: sha256-8qQAzxv/fubq0RUXUgLlYPi9QG2y9+SwL4xmQO1v/Rg=
 
+patchedDependencies:
+  sonner-native@0.27.0: b933e0341c9afdf49ffad5d1ef1a15699d01a16f8331d84f97a389833e680855
+
 importers:
 
   .:
@@ -270,7 +273,7 @@ importers:
         version: 0.13.0(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(react-native@0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
       sonner-native:
         specifier: ^0.27.0
-        version: 0.27.0(841e3cbdbd122c5fb5026c62f3a5c5a3)
+        version: 0.27.0(patch_hash=b933e0341c9afdf49ffad5d1ef1a15699d01a16f8331d84f97a389833e680855)(841e3cbdbd122c5fb5026c62f3a5c5a3)
     devDependencies:
       '@types/react':
         specifier: ~19.3.0
@@ -17374,7 +17377,7 @@ snapshots:
     dependencies:
       atomic-sleep: 1.0.0
 
-  sonner-native@0.27.0(841e3cbdbd122c5fb5026c62f3a5c5a3):
+  sonner-native@0.27.0(patch_hash=b933e0341c9afdf49ffad5d1ef1a15699d01a16f8331d84f97a389833e680855)(841e3cbdbd122c5fb5026c62f3a5c5a3):
     dependencies:
       react: 19.3.0
       react-native: 0.88.1(@babel/core@7.29.7)(@react-native/metro-config@0.88.1(@babel/core@7.29.7))(@types/react@19.3.0)(react@19.3.0)

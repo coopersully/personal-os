@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { AppState } from "react-native";
 import { useAuth } from "../auth/context";
 import { periodScope, upcomingScope } from "./presentation";
@@ -74,5 +74,30 @@ export function useFinanceRefresh(keys: readonly string[]) {
       });
       return () => listener.remove();
     }, [client, owner, keys]),
+  );
+}
+
+/** Poll saved work only while its screen is focused and the app is foregrounded. */
+export function useFinancePoll(enabled: boolean, reads: Array<() => Promise<unknown>>) {
+  const { owner } = useFinance();
+  const currentReads = useRef(reads);
+  currentReads.current = reads;
+  useFocusEffect(
+    useCallback(() => {
+      if (!enabled || !owner) return;
+      let foreground = AppState.currentState === "active";
+      const refresh = () => {
+        if (foreground) for (const read of currentReads.current) void read();
+      };
+      const timer = setInterval(refresh, 5_000);
+      const listener = AppState.addEventListener("change", (state) => {
+        foreground = state === "active";
+        if (foreground) refresh();
+      });
+      return () => {
+        clearInterval(timer);
+        listener.remove();
+      };
+    }, [enabled, owner]),
   );
 }

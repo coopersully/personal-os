@@ -18,7 +18,9 @@ import {
   usePreferenceSession,
 } from "../workspace-settings/account-save-session.js";
 import { financeConversationRecovery, financeRecoveryHref } from "./automation-recovery.js";
+import { FinanceConversationBudgetStart } from "./conversation-budget-start";
 import { FinanceConversationComposer } from "./conversation-composer.js";
+import { FinanceConversationCorrection } from "./conversation-correction";
 import { FinanceConversationHostSummary } from "./conversation-host-summary.js";
 import { FinanceConversationReviewBatch } from "./conversation-review-batch.js";
 import { FinanceConversationThread } from "./conversation-thread.js";
@@ -49,6 +51,8 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
   const [params] = useSearchParams();
   const questionId = params.get("question");
   const batchId = params.get("batch");
+  const startId = params.get("start");
+  const correctionId = params.get("correction");
   const targetMessageId = params.get("message");
   const draftStateKey = ["finance-conversation-local-drafts", ownerId, capturedSession.epoch];
   // Memory only: recovery navigation retains drafts and exact retry commands for this owner.
@@ -448,6 +452,22 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
           Showing the source message with nearby context. Other messages may be outside the loaded
           pages.
         </p>
+      ) : null}
+      {!accessDenied && startId ? (
+        <FinanceConversationBudgetStart
+          key={startId}
+          id={startId}
+          sessionKey={`${ownerId}:${capturedSession.epoch}`}
+          isCurrent={currentSession}
+        />
+      ) : null}
+      {!accessDenied && correctionId ? (
+        <FinanceConversationCorrection
+          key={correctionId}
+          id={correctionId}
+          sessionKey={`${ownerId}:${capturedSession.epoch}`}
+          isCurrent={currentSession}
+        />
       ) : null}
       {!accessDenied && batchId ? (
         <FinanceConversationReviewBatch

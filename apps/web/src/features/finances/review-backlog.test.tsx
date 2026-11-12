@@ -6,10 +6,9 @@ import type {
 } from "@personal-os/domain";
 import { emptyFinanceReviewBacklogCounts, financeReviewBacklogGroups } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { toast } from "sonner";
 import { vi } from "vitest";
 import { ReviewFlowHost } from "../reviews/flow";
 import { FinanceReviewBacklog } from "./review-backlog";
@@ -237,107 +236,17 @@ it("paginates only the selected group and resets its cursor on group changes", a
   });
 });
 
-it("authorizes an exact persisted manifest, resumes remaining work, and preserves exception outcomes", async () => {
-  const loading = vi.spyOn(toast, "loading");
-  const success = vi.spyOn(toast, "success");
-  let saved = batch();
-  api.listFinanceReviewBatches.mockResolvedValue([saved]);
-  api.getFinanceReviewBatch.mockImplementation(async () => saved);
-  api.executeFinanceReviewBatch.mockImplementation(async () => {
-    saved =
-      saved.outcomes.length === 0
-        ? {
-            ...saved,
-            status: "in_progress",
-            pendingCount: 1,
-            outcomes: [
-              {
-                index: 0,
-                transactionId: id,
-                status: "applied",
-                error: null,
-                recovery: "none",
-                completedAt: now,
-              },
-            ],
-          }
-        : {
-            ...saved,
-            status: "completed_with_exceptions",
-            pendingCount: 0,
-            outcomes: [
-              ...saved.outcomes,
-              {
-                index: 1,
-                transactionId: nextId,
-                status: "review_required",
-                error: { code: "stale_evidence", message: "Observed transaction changed." },
-                recovery: "new_preview",
-                completedAt: now,
-              },
-            ],
-          };
-    return saved;
-  });
+it("opens saved batches in the shared Finance Chat reviewer without executing them here", async () => {
+  api.listFinanceReviewBatches.mockResolvedValue([batch()]);
   const user = userEvent.setup();
-  const view = mount();
+  mount();
   await user.selectOptions(await screen.findByLabelText("Saved batch"), id);
-  expect(await screen.findByText("1. Categorize transaction")).toBeVisible();
-  expect(screen.getByText("2. defer")).toBeVisible();
-  expect(await screen.findByText("Category: Groceries")).toBeVisible();
-  expect(screen.getByRole("link", { name: "Open exact review" })).toHaveAttribute(
+  expect(await screen.findByRole("link", { name: "Review batch in Finance Chat" })).toHaveAttribute(
     "href",
-    `/finances?review=${encodeURIComponent(`finance-review:${nextId}`)}`,
+    `/finances/chat?batch=${id}`,
   );
-  for (const revision of screen.getAllByText(`Transaction revision: ${now}`, { exact: false }))
-    expect(revision).not.toBeVisible();
-  expect(screen.getByText("Evidence: Synthetic receipt line items")).toBeVisible();
-  expect(screen.getByText("The receipt identifies groceries.")).toBeVisible();
-  expect(await screen.findAllByText("Synthetic grocer")).toHaveLength(2);
-  await user.click(screen.getByRole("button", { name: "Process 2 decisions" }));
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Resume 1 decision" })).toBeEnabled(),
-  );
-  expect(api.executeFinanceReviewBatch).toHaveBeenLastCalledWith(id, {
-    fingerprint: batch().fingerprint,
-    limit: 10,
-  });
-  expect(api.getFinanceReviewBacklog.mock.calls.length).toBeGreaterThan(1);
-  expect(loading).toHaveBeenCalled();
-  expect(success).toHaveBeenCalledWith(
-    "Batch step recorded. Review the saved outcomes.",
-    expect.anything(),
-  );
-  expect(
-    screen.queryByText("Batch step recorded. Review the saved outcomes."),
-  ).not.toBeInTheDocument();
-  // Reloading reconstructs resume from the server, with no component-local run state.
-  view.unmount();
-  mount();
-  await user.selectOptions(await screen.findByLabelText("Saved batch"), id);
-  await user.click(await screen.findByRole("button", { name: "Resume 1 decision" }));
-  expect(await screen.findByText("Observed transaction changed. (stale_evidence)")).toBeVisible();
-  expect(screen.getByText("Needs a new preview with corrected evidence.")).toBeVisible();
-  expect(
-    within(screen.getByRole("list", { name: "Exact batch decisions" })).getByText("applied"),
-  ).toBeVisible();
-  expect(screen.queryByRole("button", { name: "Resume 1 decision" })).not.toBeInTheDocument();
-});
-
-it("reports an uncertain execution through Sonner and reloads committed state before resume", async () => {
-  const error = vi.spyOn(toast, "error");
-  const saved = batch();
-  api.listFinanceReviewBatches.mockResolvedValue([saved]);
-  api.getFinanceReviewBatch.mockResolvedValue(saved);
-  api.executeFinanceReviewBatch.mockRejectedValue(new Error("Connection dropped"));
-  const user = userEvent.setup();
-  mount();
-  await user.selectOptions(await screen.findByLabelText("Saved batch"), id);
-  await user.click(await screen.findByRole("button", { name: "Process 2 decisions" }));
-  await waitFor(() => expect(error).toHaveBeenCalled());
-  await waitFor(() => expect(api.getFinanceReviewBatch).toHaveBeenCalledTimes(2));
-  expect(api.executeFinanceReviewBatch).toHaveBeenCalledOnce();
-  expect(screen.queryByText("Connection dropped")).not.toBeInTheDocument();
+  expect(api.executeFinanceReviewBatch).not.toHaveBeenCalled();
+  expect(api.getFinanceReviewBatch).not.toHaveBeenCalled();
 });
 
 it("recovers an unavailable assessment without presenting it as an empty backlog", async () => {
@@ -379,46 +288,4 @@ it.each([
   expect(await screen.findByText("Synthetic roundup")).toBeVisible();
   expect(screen.getByRole("region", { name: "Saved review batches" })).toBeVisible();
   expect(screen.getByText(/completed in this session. Check the review backlog/)).toBeVisible();
-});
-
-it("does not authorize a category decision until its category can be identified", async () => {
-  api.listFinanceReviewBatches.mockResolvedValue([batch()]);
-  api.getFinanceReviewBatch.mockResolvedValue(batch());
-  api.getFinanceCategories.mockResolvedValue([]);
-  const user = userEvent.setup();
-  mount();
-  await user.selectOptions(await screen.findByLabelText("Saved batch"), id);
-  expect(await screen.findByText("Category: Unavailable — prepare a new preview")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Process 2 decisions" })).toBeDisabled();
-  expect(api.executeFinanceReviewBatch).not.toHaveBeenCalled();
-});
-
-it.each([
-  1, 11,
-])("labels the bounded process action for %i pending decisions", async (pendingCount) => {
-  const saved = {
-    ...batch(),
-    pendingCount,
-    decisions: Array.from({ length: pendingCount }, (_, index) => ({
-      ...batch().decisions[0],
-      transactionId: `11111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}`,
-    })),
-  };
-  api.listFinanceReviewBatches.mockResolvedValue([saved]);
-  api.getFinanceReviewBatch.mockResolvedValue(saved);
-  mount();
-  const user = userEvent.setup();
-  await user.selectOptions(await screen.findByLabelText("Saved batch"), id);
-  expect(
-    await screen.findByRole("button", {
-      name: pendingCount === 1 ? "Process 1 decision" : "Process next 10",
-    }),
-  ).toBeVisible();
-  expect(
-    screen.getByRole("option", {
-      name: new RegExp(
-        `${pendingCount} pending · ${pendingCount} ${pendingCount === 1 ? "decision" : "decisions"}$`,
-      ),
-    }),
-  ).toBeInTheDocument();
 });

@@ -23,6 +23,7 @@ import {
   financeReviewBatchCounterpartSchema,
   financeReviewBatchDecisionSchema,
   financeReviewBatchOutcomeSchema,
+  financeReviewBatchTransactionSummarySchema,
   idSchema,
   listFinanceReviewBatchesInputSchema,
   previewFinanceReviewBatchInputSchema,
@@ -32,7 +33,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool, PoolClient, QueryConfig, QueryResultRow } from "pg";
 import { z } from "zod";
-import { AppError } from "../errors.js";
+import { AppError, isUniqueViolation } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { type createFinanceService, isProviderTransfer } from "../finance-service.js";
 import { effectiveSynchronization } from "../finance-status-service.js";
@@ -65,6 +66,7 @@ type Finance = Pick<
 
 const manifestItemSchema = z.strictObject({
   decision: financeReviewBatchDecisionSchema,
+  transactionSummary: financeReviewBatchTransactionSummarySchema.optional(),
   transferCounterpart: financeReviewBatchCounterpartSchema.optional(),
   pairFingerprint: z
     .string()
@@ -77,6 +79,7 @@ function manifest(row: Row) {
       ? manifestItemSchema.parse(item)
       : {
           decision: financeReviewBatchDecisionSchema.parse(item),
+          transactionSummary: undefined,
           transferCounterpart: undefined,
           pairFingerprint: undefined,
         },
@@ -97,6 +100,9 @@ function present(row: Row): FinanceReviewBatchRun {
     decisions,
     transferCounterparts: items.flatMap(({ transferCounterpart }, index) =>
       transferCounterpart ? [{ index, ...transferCounterpart }] : [],
+    ),
+    transactionSummaries: items.flatMap(({ transactionSummary }, index) =>
+      transactionSummary ? [{ index, ...transactionSummary }] : [],
     ),
     outcomes: receipts,
     pendingCount,
@@ -634,63 +640,94 @@ export function createFinanceReviewBatchService({
     },
     async preview(raw: unknown, context: Context): Promise<FinanceReviewBatchRun> {
       const input = previewFinanceReviewBatchInputSchema.parse(raw);
-      return db.transaction(async (tx) => {
-        await authorize(tx, context, "write");
-        const [existing] = await tx
-          .select()
-          .from(financeReviewBatchRuns)
-          .where(
-            and(
-              eq(financeReviewBatchRuns.userId, context.principal.userId),
-              eq(financeReviewBatchRuns.idempotencyKey, input.idempotencyKey),
-            ),
-          )
-          .limit(1);
-        if (existing) {
-          const row = await find(tx, existing.id, context);
-          if (
-            JSON.stringify(manifest(row).map(({ decision }) => decision)) !==
-            JSON.stringify(input.decisions)
-          )
-            throw new AppError(
-              "conflict",
-              "That idempotency key already identifies a different manifest.",
+      const prepare = () =>
+        db.transaction(async (tx) => {
+          await tx.execute(sql`set transaction isolation level repeatable read`);
+          await authorize(tx, context, "write");
+          const [existing] = await tx
+            .select()
+            .from(financeReviewBatchRuns)
+            .where(
+              and(
+                eq(financeReviewBatchRuns.userId, context.principal.userId),
+                eq(financeReviewBatchRuns.idempotencyKey, input.idempotencyKey),
+              ),
+            )
+            .limit(1);
+          if (existing) {
+            const row = await find(tx, existing.id, context);
+            if (
+              JSON.stringify(manifest(row).map(({ decision }) => decision)) !==
+              JSON.stringify(input.decisions)
+            )
+              throw new AppError(
+                "conflict",
+                "That idempotency key already identifies a different manifest.",
+              );
+            return present(row);
+          }
+          const displayRows = await tx
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.userId, context.principal.userId),
+                inArray(
+                  financeTransactions.id,
+                  input.decisions.map((decision) => decision.transactionId),
+                ),
+              ),
             );
+          const items: z.infer<typeof manifestItemSchema>[] = [];
+          for (const decision of input.decisions) {
+            const checked = await validate(
+              tx,
+              decision,
+              context.principal.userId,
+              false,
+              context.principal.actorType === "agent",
+            );
+            const transaction = displayRows.find((row) => row.id === decision.transactionId);
+            if (!transaction)
+              throw new AppError("not_found", "The Finance transaction was not found.");
+            items.push({
+              decision,
+              transactionSummary: {
+                merchant: transaction.merchant,
+                amountCents: transaction.amount,
+                currencyCode: transaction.currencyCode,
+                date: transaction.transactionDate,
+              },
+              transferCounterpart: checked?.transferCounterpart,
+              pairFingerprint: checked?.pairFingerprint,
+            });
+          }
+          const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify(items)).digest("hex")}`;
+          const [row] = await tx
+            .insert(financeReviewBatchRuns)
+            .values({
+              userId: context.principal.userId,
+              actorId: context.principal.actorId,
+              actorType: context.principal.actorType,
+              authorizationConnectionId: context.principal.authorizationConnectionId ?? null,
+              idempotencyKey: input.idempotencyKey,
+              fingerprint,
+              manifest: items,
+              createdAt: now(),
+              updatedAt: now(),
+            })
+            .returning();
+          if (!row) throw new AppError("internal_error", "The Finance batch could not be saved.");
           return present(row);
-        }
-        const items: z.infer<typeof manifestItemSchema>[] = [];
-        for (const decision of input.decisions) {
-          const checked = await validate(
-            tx,
-            decision,
-            context.principal.userId,
-            false,
-            context.principal.actorType === "agent",
-          );
-          items.push({
-            decision,
-            transferCounterpart: checked?.transferCounterpart,
-            pairFingerprint: checked?.pairFingerprint,
-          });
-        }
-        const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify(items)).digest("hex")}`;
-        const [row] = await tx
-          .insert(financeReviewBatchRuns)
-          .values({
-            userId: context.principal.userId,
-            actorId: context.principal.actorId,
-            actorType: context.principal.actorType,
-            authorizationConnectionId: context.principal.authorizationConnectionId ?? null,
-            idempotencyKey: input.idempotencyKey,
-            fingerprint,
-            manifest: items,
-            createdAt: now(),
-            updatedAt: now(),
-          })
-          .returning();
-        if (!row) throw new AppError("internal_error", "The Finance batch could not be saved.");
-        return present(row);
-      });
+        });
+      try {
+        return await prepare();
+      } catch (error) {
+        // A concurrent request may commit the same owner/key after our snapshot.
+        // Reopen once so replay sees that receipt and repeats all authority/input checks.
+        if (!isUniqueViolation(error, "finance_review_batch_runs_owner_key_unique")) throw error;
+        return prepare();
+      }
     },
     async get(id: string, context: Context): Promise<FinanceReviewBatchRun> {
       return db.transaction(async (tx) => {

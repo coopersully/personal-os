@@ -89,7 +89,13 @@ function data() {
     tasks: query({ items: [], total: 0 }),
     overdue: query({ total: 0 }),
     nextTasks: query({ items: [] }),
-    reviews: query([]),
+    reviews: query({
+      complete: true,
+      activeDecisionCount: 0,
+      historicalRecordCount: 0,
+      technicalBlockerCount: 0,
+      processingCount: 0,
+    }),
     budgets: query([]),
     upcoming: query({ occurrences: [], unavailableSources: [] }),
     activity: query({ entries: [], nextCursor: null }),
@@ -195,10 +201,12 @@ it("distinguishes loading, unavailable, cached and truncated-history states", ()
 it("opens multi-review queues, pacing budgets, and confirmed activity without inventing transaction links", () => {
   h.data = {
     ...data(),
-    reviews: query([
-      { status: "needs_review", transaction: { id: "a", merchant: "Market" } },
-      { status: "needs_review", transaction: { id: "b", merchant: "Cafe" } },
-    ]),
+    reviews: query({
+      complete: true,
+      activeDecisionCount: 2,
+      technicalBlockerCount: 0,
+      processingCount: 0,
+    }),
     budgets: query([
       { spent: 60, budget: { id: "food", category: "Dining", month: "2026-11", limit: 100 } },
     ]),
@@ -219,10 +227,10 @@ it("opens multi-review queues, pacing budgets, and confirmed activity without in
     }),
   };
   render(<TodayHome />);
-  fireEvent.click(screen.getByRole("button", { name: /2 transactions need your input/ }));
+  fireEvent.click(screen.getByRole("button", { name: /2 Finance decisions need your input/ }));
   expect(h.push).toHaveBeenLastCalledWith({
     pathname: "/finances/assistant",
-    params: { view: "For you" },
+    params: { view: "Conversation" },
   });
   fireEvent.click(screen.getByRole("button", { name: /Dining/ }));
   expect(screen.getByText("Pacing high")).toBeVisible();
@@ -350,14 +358,16 @@ it("never calls unconfirmed, human, old or unrelated activity handled by nohmi",
   expect(screen.queryByText(entry.explanation)).toBeNull();
 });
 
-it("opens one review directly and links confirmed transaction activity to the same canonical detail", () => {
+it("opens active decisions separately from confirmed transaction activity", () => {
   h.skySource = "weather";
   h.data = {
     ...data(),
-    reviews: query([
-      { status: "needs_review", transaction: { id: "tx", merchant: "Corner Market" } },
-      { status: "resolved", transaction: { id: "done", merchant: "Already reviewed" } },
-    ]),
+    reviews: query({
+      complete: true,
+      activeDecisionCount: 1,
+      technicalBlockerCount: 0,
+      processingCount: 0,
+    }),
     activity: query({
       entries: [
         {
@@ -375,13 +385,13 @@ it("opens one review directly and links confirmed transaction activity to the sa
     }),
   };
   render(<TodayHome />);
-  expect(screen.getByText("1 transaction needs your input")).toBeVisible();
+  expect(screen.getByText("1 Finance decision needs your input")).toBeVisible();
   expect(screen.queryByText("Already reviewed")).toBeNull();
   expect(screen.queryByText(/Use local weather/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /Corner Market/ }));
+  fireEvent.click(screen.getByRole("button", { name: /1 Finance decision/ }));
   expect(h.push).toHaveBeenLastCalledWith({
-    pathname: "/finance-transaction",
-    params: { id: "tx" },
+    pathname: "/finances/assistant",
+    params: { view: "Conversation" },
   });
   fireEvent.click(screen.getByRole("button", { name: /Categorized the groceries purchase/ }));
   expect(h.push).toHaveBeenLastCalledWith({
@@ -391,3 +401,20 @@ it("opens one review directly and links confirmed transaction activity to the sa
 });
 
 vi.mock("../auth/context", () => ({ useOptionalAuth: () => null }));
+
+it("keeps historical reviews out of Today and shows technical recovery separately", () => {
+  h.data = {
+    ...data(),
+    reviews: query({
+      complete: true,
+      activeDecisionCount: 0,
+      historicalRecordCount: 2000,
+      technicalBlockerCount: 1,
+      processingCount: 0,
+    }),
+  };
+  render(<TodayHome />);
+  expect(screen.getByText("Finance needs recovery")).toBeVisible();
+  expect(screen.queryByText(/2000|2,000/)).toBeNull();
+  expect(screen.queryByText(/decisions need your input/)).toBeNull();
+});

@@ -46,8 +46,8 @@ export function useTodayData() {
   });
   const reviews = useQuery({
     ...common,
-    queryKey: ["finances", owner, "reviews"],
-    queryFn: () => api.getFinanceReviewQueue(),
+    queryKey: ["finances", owner, "attention"],
+    queryFn: () => api.getFinanceAttention(),
   });
   const budgets = useQuery({
     ...common,

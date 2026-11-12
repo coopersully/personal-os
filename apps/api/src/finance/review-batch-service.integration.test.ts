@@ -142,6 +142,28 @@ describe.sequential("durable Finance review batches", () => {
       input: { idempotencyKey: randomUUID(), decisions },
     };
   }
+  it("freezes server-owned transaction identity and amount with the reviewed manifest", async () => {
+    const f = await fixture();
+    const preview = await f.service.preview(f.input, f.context);
+    expect(preview).toMatchObject({
+      transactionSummaries: [
+        {
+          index: 0,
+          merchant: "Fixture grocery",
+          amountCents: 1500,
+          currencyCode: null,
+          date: "2026-10-24",
+        },
+      ],
+    });
+    await database.db
+      .update(financeTransactions)
+      .set({ merchant: "Changed later", amount: 2500 })
+      .where(eq(financeTransactions.id, required(f.decisions[0]).transactionId));
+    expect(await f.service.get(preview.id, f.context)).toMatchObject({
+      transactionSummaries: [{ merchant: "Fixture grocery", amountCents: 1500 }],
+    });
+  });
   async function agent(userId: string, execute = true) {
     const principal: Principal = {
       actorId: randomUUID(),

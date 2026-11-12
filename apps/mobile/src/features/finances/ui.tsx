@@ -17,18 +17,19 @@ import { radius, spacing, useTheme, workspaceColor } from "../../theme";
 import { useFinanceRefresh } from "./data";
 
 const refreshKeys: Record<string, readonly string[]> = {
-  Overview: ["spending", "upcoming", "accounts", "recent-activity"],
+  Overview: ["attention", "spending", "upcoming", "accounts", "recent-activity"],
   Spending: ["spending", "transactions"],
   Accounts: ["accounts"],
   Plan: ["budget-status", "budget", "upcoming", "accounts", "goals"],
-  Assistant: ["conversation-readiness", "reviews", "activity", "conversation"],
+  Assistant: ["attention", "conversation-readiness", "reviews", "activity", "conversation"],
 };
 const noKeys: readonly string[] = [];
 export function FinanceScreen({
   title,
   children,
   scroll = true,
-}: PropsWithChildren<{ title: string; scroll?: boolean }>) {
+  showTitle = true,
+}: PropsWithChildren<{ title: string; scroll?: boolean; showTitle?: boolean }>) {
   useFinanceRefresh(refreshKeys[title] ?? noKeys);
   const t = useTheme();
   return (
@@ -36,9 +37,14 @@ export function FinanceScreen({
       <View
         style={{ gap: spacing.lg, paddingTop: 8, ...(!scroll ? { flex: 1, minHeight: 0 } : {}) }}
       >
-        <Text accessibilityRole="header" style={{ color: t.ink, fontSize: 28, fontWeight: "700" }}>
-          {title}
-        </Text>
+        {showTitle ? (
+          <Text
+            accessibilityRole="header"
+            style={{ color: t.ink, fontSize: 28, fontWeight: "700" }}
+          >
+            {title}
+          </Text>
+        ) : null}
         {children}
       </View>
     </Screen>

@@ -32,6 +32,8 @@ it("renders both authors and navigates every supported record kind", () => {
               { kind: "review_case", id: "r &1" },
               { kind: "budget_plan", id: "p &1", budgetVersionId: "v &1" },
               { kind: "review_batch", id: "b &1" },
+              { kind: "budget_start_preview", id: "s &1" },
+              { kind: "review_batch_undo", id: "u &1" },
             ],
           },
           {
@@ -56,6 +58,14 @@ it("renders both authors and navigates every supported record kind", () => {
     ["budget proposal", "/finances/plan?planId=p%20%261&versionId=v%20%261"],
   ])
     expect(screen.getByRole("link", { name: `View ${name}` })).toHaveAttribute("href", href);
+  expect(screen.getByRole("link", { name: "Review starting month" })).toHaveAttribute(
+    "href",
+    "/finances/chat?start=s%20%261",
+  );
+  expect(screen.getByRole("link", { name: "Review correction" })).toHaveAttribute(
+    "href",
+    "/finances/chat?correction=u%20%261",
+  );
   expect(screen.getByRole("link", { name: "Review grouped decisions" })).toHaveAttribute(
     "href",
     "/finances/chat?batch=b%20%261",

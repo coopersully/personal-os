@@ -170,11 +170,23 @@ export const financeReviewBatchCounterpartSchema = z.strictObject({
   revision: basis.expectedTransactionRevision,
 });
 
+export const financeReviewBatchTransactionSummarySchema = z.strictObject({
+  merchant: z.string(),
+  amountCents: z.number().int(),
+  currencyCode: z.string().nullable(),
+  date: z.iso.date(),
+});
+
 export const financeReviewBatchRunSchema = z.object({
   id: idSchema,
   fingerprint: z.string(),
   idempotencyKey: z.string(),
   decisions: z.array(financeReviewBatchDecisionSchema),
+  transactionSummaries: z
+    .array(
+      financeReviewBatchTransactionSummarySchema.extend({ index: z.number().int().min(0).max(99) }),
+    )
+    .optional(),
   transferCounterparts: z
     .array(financeReviewBatchCounterpartSchema.extend({ index: z.number().int().min(0).max(99) }))
     .default([]),

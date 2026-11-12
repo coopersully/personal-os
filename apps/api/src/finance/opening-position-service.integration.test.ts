@@ -68,7 +68,17 @@ describe.sequential("Finance opening statements", () => {
     const f = await fixture();
     expect(
       await service().readOpeningPosition(f.context.principal.userId, "2026-11"),
-    ).toMatchObject({ qualified: false });
+    ).toMatchObject({
+      qualified: false,
+      accounts: [
+        {
+          accountId: f.account.id,
+          name: "Cash",
+          accountRevision: f.account.contextualRevision.toString(),
+          currencyCode: "USD",
+        },
+      ],
+    });
     const input = {
       accountId: f.account.id,
       month: "2026-11",

@@ -45,7 +45,7 @@ vi.mock("../auth/context", () => ({
     session: {
       api: () => ({
         listTaskWorkspace: h.read,
-        getFinanceReviewQueue: h.read,
+        getFinanceAttention: h.read,
         getFinanceBudgetStatus: h.read,
         listFinanceRecurringOccurrences: h.read,
         listFinanceActivity: h.read,

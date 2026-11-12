@@ -1,15 +1,12 @@
-import {
-  ApiClientError,
-  applyReviewedFinanceBatch,
-  financeReviewBatchApprovalBlocker,
-} from "@personal-os/api-client";
-import { useQuery } from "@tanstack/react-query";
+import { ApiClientError, financeReviewBatchApprovalBlocker } from "@personal-os/api-client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { TagsIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { api } from "../../api.js";
+import { formatReviewedAmount } from "./format";
 
 export function FinanceConversationReviewBatch({
   id,
@@ -20,23 +17,36 @@ export function FinanceConversationReviewBatch({
   sessionKey: string;
   isCurrent: () => boolean;
 }) {
+  const client = useQueryClient();
+  const navigate = useNavigate();
+  const approvalKey = ["finance-batch-continuation", sessionKey, id];
+  const approval = useQuery({
+    queryKey: approvalKey,
+    queryFn: () => api.getFinanceBatchContinuation(id),
+    retry: false,
+    refetchInterval: (query) =>
+      ["pending", "running"].includes(query.state.data?.state ?? "") ? 5_000 : false,
+  });
+  const processing = approval.data?.state === "pending" || approval.data?.state === "running";
   const query = useQuery({
     queryKey: ["finance-conversation-review-batch", sessionKey, id],
     queryFn: () => api.getFinanceReviewBatch(id),
     retry: false,
+    refetchInterval: processing ? 5_000 : false,
   });
+  const approvalState = approval.data?.state;
+  const refreshBatch = query.refetch;
+  useEffect(() => {
+    if (approvalState) void refreshBatch();
+  }, [approvalState, refreshBatch]);
   const busy = useRef(false);
   const [applying, setApplying] = useState(false);
-  const [confirmed, setConfirmed] = useState<typeof query.data>();
   const unavailable =
     query.error instanceof ApiClientError && [401, 403, 404].includes(query.error.status);
-  const retained =
-    confirmed && (!query.data || confirmed.pendingCount < query.data.pendingCount)
-      ? confirmed
-      : query.data;
-  const batch = unavailable ? undefined : retained;
+  const batch = unavailable ? undefined : query.data;
   const needsCategories = !!batch?.decisions.some(
-    (item) => item.kind === "categorization" || item.action === "recategorize",
+    (item) =>
+      item.kind === "categorization" || (item.kind === "review" && item.action === "recategorize"),
   );
   const categories = useQuery({
     queryKey: ["finance-conversation-categories", sessionKey],
@@ -50,57 +60,89 @@ export function FinanceConversationReviewBatch({
       categories.isError ||
       batch?.decisions.some(
         (item) =>
-          (item.kind === "categorization" || item.action === "recategorize") &&
+          (item.kind === "categorization" ||
+            (item.kind === "review" && item.action === "recategorize")) &&
           !categories.data?.some((category) => category.id === item.categoryId),
       ));
   const blocker = batch ? financeReviewBatchApprovalBlocker(batch) : null;
-  const cancellation = useRef<AbortController | null>(null);
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      cancellation.current?.abort();
     };
   }, []);
-  async function apply() {
+  async function saveApproval(cancel = false) {
     const live = () => mounted.current && isCurrent();
-    if (!batch || query.isError || busy.current || blocker || categoryBlocker || !live()) return;
-    const controller = new AbortController();
-    cancellation.current = controller;
+    if (!batch || busy.current || !live()) return;
+    if (
+      !cancel &&
+      (query.isError ||
+        blocker ||
+        categoryBlocker ||
+        approval.isPending ||
+        approval.isError ||
+        approval.data)
+    )
+      return;
+    if (cancel && !processing) return;
     busy.current = true;
     setApplying(true);
-    const feedback = toast.loading("Applying review decisions…");
+    const feedback = toast.loading(
+      cancel ? "Stopping remaining decisions…" : "Saving batch approval…",
+    );
     try {
-      const result = await applyReviewedFinanceBatch(
-        api,
-        batch,
-        controller.signal,
-        live,
-        (receipt) => {
-          if (live()) setConfirmed(receipt);
-        },
-      );
-      if (!live() || result.state === "cancelled") toast.dismiss(feedback);
-      else if (result.state === "completed")
-        toast.success("Reviewed batch applied", { id: feedback });
-      else if (result.state === "needs_review")
-        toast.info("Some decisions need review. Check the saved outcomes.", { id: feedback });
-      else
-        toast.info("Batch paused. Review the saved outcomes before continuing.", { id: feedback });
-    } catch {
-      if (live() && !controller.signal.aborted)
-        toast.error(
-          "Could not finish checking the batch. Refresh saved progress before retrying.",
-          {
-            id: feedback,
-          },
+      const receipt = cancel
+        ? await api.cancelFinanceBatchContinuation(id)
+        : await api.approveFinanceBatchContinuation(id, batch.fingerprint);
+      if (live()) {
+        client.setQueryData(approvalKey, receipt);
+        toast.success(
+          cancel
+            ? "Remaining decisions stopped. Saved changes are kept."
+            : "Batch approved. Progress is saved in Finance Chat.",
+          { id: feedback },
         );
+      } else toast.dismiss(feedback);
+    } catch {
+      if (live())
+        toast.error("Could not confirm the request. Refresh saved progress before retrying.", {
+          id: feedback,
+        });
       else toast.dismiss(feedback);
     } finally {
-      if (live()) await query.refetch();
+      if (live()) {
+        await Promise.all([query.refetch(), approval.refetch()]);
+        setApplying(false);
+      }
       busy.current = false;
-      cancellation.current = null;
+    }
+  }
+  const correctionKeys = useRef(new Map<number, string>());
+  async function previewUndo(index: number) {
+    const live = () => mounted.current && isCurrent();
+    if (!batch || busy.current || !live()) return;
+    busy.current = true;
+    setApplying(true);
+    const feedback = toast.loading("Preparing correction…");
+    const key = correctionKeys.current.get(index) ?? crypto.randomUUID();
+    correctionKeys.current.set(index, key);
+    try {
+      const correction = await api.previewFinanceReviewBatchUndo({
+        batchId: id,
+        outcomeIndexes: [index],
+        idempotencyKey: key,
+      });
+      toast.dismiss(feedback);
+      if (live()) navigate(`/finances/chat?correction=${encodeURIComponent(correction.id)}`);
+    } catch {
+      if (live())
+        toast.error("Could not prepare this correction. Check the latest saved changes.", {
+          id: feedback,
+        });
+      else toast.dismiss(feedback);
+    } finally {
+      busy.current = false;
       if (live()) setApplying(false);
     }
   }
@@ -136,14 +178,23 @@ export function FinanceConversationReviewBatch({
           <ol className="grid gap-3">
             {batch.decisions.map((decision, index) => {
               const target =
-                decision.kind === "categorization" || decision.action === "recategorize"
+                decision.kind === "categorization" ||
+                (decision.kind === "review" && decision.action === "recategorize")
                   ? categories.data?.find((category) => category.id === decision.categoryId)
                   : undefined;
+              const summary = batch.transactionSummaries?.find((item) => item.index === index);
               const outcome = batch.outcomes.find((item) => item.index === index);
               const counterpart = batch.transferCounterparts?.find((item) => item.index === index);
               return (
                 <li key={decision.transactionId} className="grid gap-1 border-t pt-3">
-                  <p className="font-medium">{decision.rationale}</p>
+                  <p className="font-medium">{summary?.merchant ?? decision.rationale}</p>
+                  {summary ? (
+                    <p className="text-sm">
+                      {formatReviewedAmount(summary.amountCents, summary.currencyCode)} ·{" "}
+                      {summary.date}
+                    </p>
+                  ) : null}
+                  {summary ? <p className="text-sm">{decision.rationale}</p> : null}
                   <p className="whitespace-pre-wrap text-sm text-muted-foreground">
                     {decision.evidence}
                   </p>
@@ -174,6 +225,16 @@ export function FinanceConversationReviewBatch({
                       View other transfer leg
                     </Link>
                   ) : null}
+                  {outcome?.status === "applied" ? (
+                    <Button
+                      variant="ghost"
+                      className="justify-self-start"
+                      disabled={applying || query.isFetching || query.isError}
+                      onClick={() => void previewUndo(index)}
+                    >
+                      Review undo for decision {index + 1}
+                    </Button>
+                  ) : null}
                 </li>
               );
             })}
@@ -188,14 +249,39 @@ export function FinanceConversationReviewBatch({
               Refresh target categories before applying
             </Button>
           ) : null}
-          {batch.pendingCount > 0 && !blocker && !categoryBlocker && !query.isError ? (
-            <Button disabled={applying || query.isFetching} onClick={() => void apply()}>
-              Apply reviewed batch ({batch.pendingCount})
+          {approval.data ? (
+            <p>
+              {approval.data.state === "pending"
+                ? "Approved · waiting to process"
+                : approval.data.state === "running"
+                  ? "Processing · safe to close this page"
+                  : approval.data.state.replaceAll("_", " ")}
+            </p>
+          ) : null}
+          {approval.data?.recovery === "new_preview" ? (
+            <p>Ask nohmi for a fresh preview of the remaining decisions.</p>
+          ) : null}
+          {approval.isError ? (
+            <Button variant="outline" onClick={() => void approval.refetch()}>
+              Refresh saved approval
             </Button>
           ) : null}
-          {applying ? (
-            <Button variant="outline" onClick={() => cancellation.current?.abort()}>
-              Stop applying
+          {batch.pendingCount > 0 &&
+          !blocker &&
+          !categoryBlocker &&
+          !query.isError &&
+          !approval.data &&
+          !approval.isError ? (
+            <Button
+              disabled={applying || query.isFetching || approval.isPending}
+              onClick={() => void saveApproval()}
+            >
+              Approve batch ({batch.pendingCount})
+            </Button>
+          ) : null}
+          {processing ? (
+            <Button variant="outline" disabled={applying} onClick={() => void saveApproval(true)}>
+              Stop remaining decisions
             </Button>
           ) : null}
         </>

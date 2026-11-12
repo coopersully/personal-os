@@ -142,6 +142,10 @@ export const financeOpeningPositionSchema = z.strictObject({
   accounts: z.array(
     z.strictObject({
       accountId: z.uuid(),
+      name: z.string(),
+      accountRevision: z.string().regex(/^[1-9][0-9]*$/),
+      currencyCode: z.string().nullable(),
+      kind: z.enum(["cash", "investment", "debt", "other"]),
       openingBalanceCents: cents.nullable(),
       reasons: z.array(z.string()),
       statementDate: z.iso.date().nullable(),

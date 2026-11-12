@@ -81,6 +81,14 @@ function AuthenticatedLayout() {
             />
             <Stack.Screen name="finance-notification" options={{ title: "Finance update" }} />
             <Stack.Screen name="finance-chat-reference" options={{ title: "Finance reference" }} />
+            <Stack.Screen
+              name="finance-opening-position"
+              options={{ title: "Starting balances" }}
+            />
+            <Stack.Screen
+              name="finance-historical-cleanup"
+              options={{ title: "Historical cleanup" }}
+            />
             <Stack.Screen name="finance-account" options={{ title: "account" }} />
             <Stack.Screen
               name="finance-transaction-edit"

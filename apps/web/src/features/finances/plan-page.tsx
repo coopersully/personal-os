@@ -46,6 +46,7 @@ import { WorkspaceHeaderControls } from "@/components/workspace-header-controls"
 import { api } from "../../api.js";
 import { PageLoading } from "../../components/async-state.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { sameSession, usePreferenceSession } from "../workspace-settings/account-save-session";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import {
   BudgetApprovalReadiness,
@@ -56,6 +57,7 @@ import { FinanceDisclosure } from "./disclosure";
 import { FinanceSection } from "./finance-section";
 import { formatMoney } from "./format.js";
 import { isConfirmedFinanceMutationFailure } from "./mutation-retry.js";
+import { FinanceOpeningPositionPanel } from "./opening-position";
 import { FinancePlanEditor } from "./plan-editor.js";
 import { allocationLabels, requireFinancePlanResult, resourceLabels } from "./plan-helpers.js";
 import { FinancePrerequisiteScreen } from "./prerequisite-screen.js";
@@ -239,6 +241,8 @@ function PlanDetails({ plan, relations }: { plan: FinanceBudgetVersion; relation
 
 export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boolean }) {
   const [params] = useSearchParams();
+  const openingClient = useQueryClient();
+  const openingSession = usePreferenceSession(openingClient);
   const requestedPlanId = params.get("planId");
   const referencedVersionId = params.get("versionId");
   const queryClient = useQueryClient();
@@ -453,6 +457,13 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
               ) : null}
             </div>
           </WorkspaceHeaderControls>
+        ) : null}
+        {params.get("opening") === "1" ? (
+          <FinanceOpeningPositionPanel
+            key={`${openingSession.owner}:${openingSession.epoch}`}
+            sessionKey={`${openingSession.owner}:${openingSession.epoch}`}
+            isCurrent={() => sameSession(openingClient, openingSession)}
+          />
         ) : null}
         {planQuery.isPending ? <PageLoading workspace="finances" /> : null}
         <QueryFeedback query={planQuery} title="Couldn’t load the plan." />

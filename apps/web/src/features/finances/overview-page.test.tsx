@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   getMe: vi.fn(),
   listAgentAccessWorkItems: vi.fn(),
   getFinanceSnapshot: vi.fn(),
+  getFinanceAttention: vi.fn(),
   getFinanceBudget: vi.fn(),
   getFinanceInbox: vi.fn(),
   getFinanceStatus: vi.fn(),
@@ -74,6 +75,16 @@ beforeEach(() => {
   );
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-20T01:00:00Z"));
+  api.getFinanceAttention.mockResolvedValue({
+    period: "2026-11",
+    complete: true,
+    activeDecisionCount: 0,
+    processingCount: 0,
+    technicalBlockerCount: 1,
+    historicalRecordCount: 2000,
+    budgetReady: false,
+    readiness: { openingPositionQualified: false, budgetApproved: true },
+  });
   api.getMe.mockResolvedValue({ id: "owner-a", planningTimezone: "America/New_York" });
   api.getFinanceSnapshot.mockResolvedValue(
     envelope({
@@ -249,6 +260,16 @@ it("does not show another owner's cached or late arriving schedule", async () =>
 });
 
 it("waits for a planning timezone without guessing upcoming dates", async () => {
+  api.getFinanceAttention.mockResolvedValue({
+    period: "2026-11",
+    complete: true,
+    activeDecisionCount: 0,
+    processingCount: 0,
+    technicalBlockerCount: 1,
+    historicalRecordCount: 2000,
+    budgetReady: false,
+    readiness: { openingPositionQualified: false, budgetApproved: true },
+  });
   api.getMe.mockResolvedValue({ id: "owner-a", planningTimezone: null });
   mount();
   expect(await screen.findByText(/Set your planning timezone/)).toBeVisible();
@@ -449,4 +470,13 @@ it("shows positive reimbursements and only the latest recorded maintenance summa
     "href",
     "/finances/reviews/review-1",
   );
+});
+
+it("keeps historical work separate from current decisions and budget qualification", async () => {
+  mount();
+  expect(await screen.findByText("No decisions waiting")).toBeInTheDocument();
+  expect(screen.getByText("Historical cleanup · 2,000 records")).toBeInTheDocument();
+  expect(screen.getByText("Needs evidence")).toBeInTheDocument();
+  expect(screen.getByText("Approved")).toBeInTheDocument();
+  expect(screen.queryByText("Budget ready")).not.toBeInTheDocument();
 });

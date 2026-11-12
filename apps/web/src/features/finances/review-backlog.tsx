@@ -2,9 +2,8 @@ import type {
   FinanceReviewBacklogAssessment,
   FinanceReviewBacklogGroup,
   FinanceReviewBacklogItem,
-  FinanceReviewBatchRun,
 } from "@personal-os/domain";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/api";
@@ -14,12 +13,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
+import { FinanceAttentionSummary } from "./attention-summary";
 import { FinanceSection } from "./finance-section";
+import { formatMoney } from "./format";
 
 const assessmentKey = ["finance-review-backlog"];
 const batchesKey = ["finance-review-batches"];
-const runKey = (id: string) => ["finance-review-batch", id];
 const words = (value: string) => value.replaceAll("_", " ");
 
 function Counts({ counts }: { counts: FinanceReviewBacklogAssessment["counts"] }) {
@@ -53,6 +52,9 @@ export function FinanceReviewBacklog() {
     "roundups";
   return (
     <div className="grid min-w-0 gap-6">
+      {assessment.data?.attention ? (
+        <FinanceAttentionSummary snapshot={assessment.data.attention} />
+      ) : null}
       <FinanceSection
         title="Review backlog"
         description="All dates. Transaction flags and review cases can refer to the same transaction."
@@ -178,7 +180,7 @@ function BacklogItem({ item }: { item: FinanceReviewBacklogItem }) {
         </ItemTitle>
         <ItemDescription>
           {transaction
-            ? `${transaction.date ?? "Undated"} · ${transaction.amountCents / 100} ${transaction.currencyCode ?? "currency unavailable"} · ${transaction.direction} · ${transaction.pending ? "Pending" : "Posted"}`
+            ? `${transaction.date ?? "Undated"} · ${!transaction.currencyCode || transaction.currencyCode === "USD" ? formatMoney(transaction.amountCents / 100) : `${transaction.currencyCode} ${(transaction.amountCents / 100).toFixed(2)}`} · ${transaction.direction} · ${transaction.pending ? "Pending" : "Posted"}`
             : "Transaction source unavailable"}
         </ItemDescription>
         <div className="flex flex-wrap gap-2">
@@ -269,160 +271,12 @@ function SavedBatches() {
 }
 
 function BatchPreview({ id }: { id: string }) {
-  const client = useQueryClient();
-  const run = useQuery({ queryKey: runKey(id), queryFn: () => api.getFinanceReviewBatch(id) });
-  const categories = useQuery({
-    queryKey: ["finance-categories"],
-    queryFn: () => api.getFinanceCategories(),
-    enabled: Boolean(run.data?.decisions.some((decision) => decision.categoryId)),
-  });
-  const missingCategory = run.data?.decisions.some(
-    (decision) =>
-      decision.categoryId &&
-      !categories.data?.some((category) => category.id === decision.categoryId),
-  );
-  const execute = useFeedbackMutation({
-    feedback: {
-      action: "process this batch step",
-      pending: "Processing up to ten decisions…",
-      success: "Batch step recorded. Review the saved outcomes.",
-      safeToRetry: false,
-    },
-    mutationFn: (manifest: FinanceReviewBatchRun) =>
-      api.executeFinanceReviewBatch(manifest.id, { fingerprint: manifest.fingerprint, limit: 10 }),
-    onSuccess: (result) => {
-      client.setQueryData(runKey(id), result);
-    },
-    // Even a lost response can follow committed items. Reload durable state before offering resume.
-    onSettled: async () => {
-      await client.invalidateQueries({
-        predicate: (query) =>
-          typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith("finance-"),
-      });
-    },
-  });
-  const record = run.data;
   return (
-    <div className="grid min-w-0 gap-3">
-      <DataViewRecovery
-        query={run}
-        title="Could not load batch decisions"
-        unavailableLabel="Batch decisions unavailable"
-      />
-      {run.isPending ? <DataViewLoading label="Loading batch decisions" /> : null}
-      <DataViewRecovery
-        query={categories}
-        title="Could not load categories"
-        unavailableLabel="Categories unavailable"
-      />
-      {record ? (
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{words(record.status)}</Badge>
-            <span className="text-sm">
-              {record.pendingCount} pending · {record.outcomes.length} recorded outcomes
-            </span>
-          </div>
-          <ItemGroup aria-label="Exact batch decisions">
-            {record.decisions.map((decision, index) => {
-              const outcome = record.outcomes.find((item) => item.index === index);
-              return (
-                <Item key={decision.transactionId}>
-                  <ItemContent className="min-w-0 break-words">
-                    <ItemTitle>
-                      {index + 1}.{" "}
-                      {decision.kind === "categorization"
-                        ? "Categorize transaction"
-                        : words(decision.action)}
-                    </ItemTitle>
-                    <Link
-                      className="text-sm underline underline-offset-4"
-                      to={`/finances/transactions?transactionId=${encodeURIComponent(decision.transactionId)}`}
-                    >
-                      <BatchTransactionName id={decision.transactionId} />
-                    </Link>
-                    {decision.kind === "review" ? (
-                      <Link
-                        className="text-sm underline underline-offset-4"
-                        to={`/finances?review=${encodeURIComponent(`finance-review:${decision.reviewId}`)}`}
-                      >
-                        Open exact review
-                      </Link>
-                    ) : null}
-                    {decision.categoryId ? (
-                      <p className="text-sm">
-                        Category:{" "}
-                        {categories.data?.find((category) => category.id === decision.categoryId)
-                          ?.name ??
-                          (categories.isPending
-                            ? "Loading category…"
-                            : "Unavailable — prepare a new preview")}
-                      </p>
-                    ) : null}
-                    {decision.kind === "review" && decision.nonTransferDirection ? (
-                      <p className="text-sm">Direction: {decision.nonTransferDirection}</p>
-                    ) : null}
-                    <p className="text-sm">{decision.rationale}</p>
-                    <p className="text-sm">Evidence: {decision.evidence}</p>
-                    <p className="text-sm text-muted-foreground">
-                      Agent confidence: {decision.confidence} · Merchant learning:{" "}
-                      {decision.learnMerchant}
-                    </p>
-                    <details>
-                      <summary className="text-sm">Decision technical details</summary>
-                      <div className="grid gap-1 break-all text-xs">
-                        <p>Transaction: {decision.transactionId}</p>
-                        {decision.kind === "review" ? (
-                          <p>
-                            Review: {decision.reviewId} · Revision:{" "}
-                            {decision.expectedReviewUpdatedAt}
-                          </p>
-                        ) : null}
-                        {decision.categoryId ? <p>Category: {decision.categoryId}</p> : null}
-                        <p>Transaction revision: {decision.expectedTransactionUpdatedAt}</p>
-                      </div>
-                    </details>
-                    <Badge variant="secondary">{outcome ? words(outcome.status) : "Pending"}</Badge>
-                    {outcome?.error ? (
-                      <p className="text-sm">
-                        {outcome.error.message} ({outcome.error.code})
-                      </p>
-                    ) : null}
-                    {outcome?.recovery === "new_preview" ? (
-                      <p className="text-sm">Needs a new preview with corrected evidence.</p>
-                    ) : null}
-                  </ItemContent>
-                </Item>
-              );
-            })}
-          </ItemGroup>
-          <details>
-            <summary className="text-sm">Batch technical details</summary>
-            <p className="break-all text-xs">Batch: {record.id}</p>
-            <p className="break-all text-xs">{record.fingerprint}</p>
-          </details>
-          {record.pendingCount > 0 ? (
-            <Button
-              className="justify-self-start"
-              disabled={execute.isPending || run.isFetching || run.isError || missingCategory}
-              onClick={() => execute.mutate(record)}
-            >
-              {record.outcomes.length ? "Resume" : "Process"}{" "}
-              {record.pendingCount > 10
-                ? "next 10"
-                : `${record.pendingCount} ${record.pendingCount === 1 ? "decision" : "decisions"}`}
-            </Button>
-          ) : null}
-        </>
-      ) : null}
-    </div>
+    <Link
+      className="text-sm underline underline-offset-4"
+      to={`/finances/chat?batch=${encodeURIComponent(id)}`}
+    >
+      Review batch in Finance Chat
+    </Link>
   );
-}
-
-function BatchTransactionName({ id }: { id: string }) {
-  const transaction = useQuery({
-    queryKey: ["finance-transaction", id],
-    queryFn: () => api.getFinanceTransaction(id),
-  });
-  return <>{transaction.data?.data?.merchant ?? "Open transaction evidence"}</>;
 }

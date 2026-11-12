@@ -9,6 +9,8 @@ const referenceRoutes = {
   review_case: ["View review case", "/finances/review/legacy?item="],
   budget_plan: ["View budget proposal", "/finances/plan?planId="],
   review_batch: ["Review grouped decisions", "/finances/chat?batch="],
+  budget_start_preview: ["Review starting month", "/finances/chat?start="],
+  review_batch_undo: ["Review correction", "/finances/chat?correction="],
 } as const;
 
 export function FinanceConversationThread({

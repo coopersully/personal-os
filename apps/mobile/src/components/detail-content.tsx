@@ -27,15 +27,21 @@ export function Facts({ facts }: { facts: { label: string; value: string }[] }) 
     </View>
   );
 }
-export function Button({ children, onPress }: PropsWithChildren<{ onPress: () => void }>) {
+export function Button({
+  children,
+  onPress,
+  disabled = false,
+}: PropsWithChildren<{ onPress: () => void; disabled?: boolean }>) {
   const t = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
+      disabled={disabled}
+      accessibilityState={{ disabled }}
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: t.ink, opacity: pressed ? 0.7 : 1 },
+        { backgroundColor: t.ink, opacity: disabled ? 0.45 : pressed ? 0.7 : 1 },
       ]}
     >
       <Text style={[styles.buttonText, { color: t.canvas }]}>{children}</Text>

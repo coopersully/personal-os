@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "../../api.js";
+import { FinanceAttentionSummary } from "./attention-summary";
 import { FinanceSection as OverviewSection } from "./finance-section";
 import { formatCompactMoney } from "./format";
 import { FinanceOverviewSettings } from "./overview-settings";
@@ -56,6 +57,10 @@ const maintenanceLabels = {
 
 export function FinanceOverviewPage() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
+  const attention = useQuery({
+    queryKey: ["finance-attention"],
+    queryFn: () => api.getFinanceAttention(),
+  });
   const snapshot = useQuery({
     queryKey: ["finance-snapshot"],
     queryFn: async () => requireFinanceResult(await api.getFinanceSnapshot()),
@@ -179,6 +184,8 @@ export function FinanceOverviewPage() {
           </OverviewSection>
         </Collapsible>
       ) : null}
+      <FinanceSourceState label="Active inbox" query={attention} />
+      {attention.data ? <FinanceAttentionSummary snapshot={attention.data} /> : null}
       <OverviewUpcomingMoney />
       <OverviewSection title="Complete plan">
         <FinanceSourceState label="Complete plan" query={budget} />

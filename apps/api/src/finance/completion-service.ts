@@ -5,6 +5,7 @@ import {
   financeReviewBatchCounterpartSchema,
   financeReviewBatchDecisionSchema,
   financeReviewBatchOutcomeSchema,
+  financeReviewBatchTransactionSummarySchema,
   financeReviewResolutionSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -181,6 +182,7 @@ export function validateFinanceCompletionBudget(input: {
 
 const wrappedDecisionSchema = z.strictObject({
   decision: financeReviewBatchDecisionSchema,
+  transactionSummary: financeReviewBatchTransactionSummarySchema.optional(),
   transferCounterpart: financeReviewBatchCounterpartSchema.optional(),
 });
 const batchSchema = z.object({

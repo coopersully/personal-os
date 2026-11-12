@@ -147,23 +147,37 @@ export default function TodayHome() {
     );
   const tasks = data.tasks.data?.items.map((item) => taskRow(item, timezone, now)) ?? [];
   const attention: Row[] = tasks.slice(0, 1);
-  const reviews = data.reviews.data?.filter((review) => review.status !== "resolved") ?? [];
-  if (reviews.length)
+  const finance = data.reviews.data;
+  if (
+    finance &&
+    (!finance.complete ||
+      finance.activeDecisionCount > 0 ||
+      finance.technicalBlockerCount > 0 ||
+      finance.processingCount > 0)
+  )
     attention.push({
       id: "reviews",
-      title: `${reviews.length} ${reviews.length === 1 ? "transaction needs" : "transactions need"} your input`,
+      title: !finance.complete
+        ? "Finance assessment incomplete"
+        : finance.activeDecisionCount
+          ? `${finance.activeDecisionCount} Finance ${finance.activeDecisionCount === 1 ? "decision needs" : "decisions need"} your input`
+          : finance.technicalBlockerCount
+            ? "Finance needs recovery"
+            : "Finance is processing",
       subtitle:
-        reviews.length === 1
-          ? reviews[0].transaction.merchant
-          : "Review categories and transaction details",
+        finance.technicalBlockerCount && !finance.activeDecisionCount
+          ? "Connection or evidence needs attention"
+          : "Continue in Finance Chat",
       value: "Review",
       tone: "attention",
       icon: "categoryTags",
       workspace: "finances",
-      href:
-        reviews.length === 1
-          ? { pathname: "/finance-transaction", params: { id: reviews[0].transaction.id } }
-          : { pathname: "/finances/assistant", params: { view: "For you" } },
+      href: {
+        pathname: "/finances/assistant",
+        params: {
+          view: finance.complete && finance.activeDecisionCount > 0 ? "Conversation" : "For you",
+        },
+      },
     });
   const budgetAlerts = (data.budgets.data ?? [])
     .map((item) => ({ ...item, pace: budgetPace(item.spent, item.budget.limit, timezone, now) }))

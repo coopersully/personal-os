@@ -9,6 +9,7 @@ import { upcomingCategory, useUpcomingCategories } from "./upcoming-category";
 
 export function FinanceOverviewScreen() {
   const spending = useSpending("month");
+  const attention = useFinanceRead(["attention"], (api) => api.getFinanceAttention());
   const upcoming = useUpcoming();
   const categories = useUpcomingCategories(
     !!upcoming.data?.occurrences.some((item) => item.source?.kind === "obligation"),
@@ -149,6 +150,32 @@ export function FinanceOverviewScreen() {
             </View>
           </View>
         )}
+      </ReadState>
+      <ReadState query={attention}>
+        {attention.data &&
+        (!attention.data.complete ||
+          attention.data.activeDecisionCount > 0 ||
+          attention.data.technicalBlockerCount > 0) ? (
+          <FinanceRow
+            title={
+              !attention.data.complete
+                ? "Finance assessment incomplete"
+                : attention.data.activeDecisionCount
+                  ? "Your decisions"
+                  : "Connection or evidence recovery"
+            }
+            value={
+              attention.data.activeDecisionCount
+                ? `${attention.data.activeDecisionCount} waiting`
+                : "Review"
+            }
+            valueTone="attention"
+            icon="categoryTags"
+            onPress={() =>
+              router.navigate({ pathname: "/finances/assistant", params: { view: "For you" } })
+            }
+          />
+        ) : null}
       </ReadState>
       <Section title="Coming next">
         <ReadState query={upcoming}>

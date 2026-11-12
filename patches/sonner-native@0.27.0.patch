@@ -1,0 +1,159 @@
+diff --git a/lib/module/gestures.js b/lib/module/gestures.js
+index 006393c2afe8dfe45719948c6df344a925e0c717..2058825a27a0f820f88f598caa00849e62b75e0a 100644
+--- a/lib/module/gestures.js
++++ b/lib/module/gestures.js
+@@ -142,7 +142,7 @@ export const ToastSwipeHandler = ({
+       aStyle.opacity = interpolate(translate.value, [0, direction === 'left' ? -windowWidth : -60], [1, 0]);
+     }
+     return aStyle;
+-  }, [direction, translate, windowWidth]);
++  }, Platform.OS === 'web' ? [direction, translate, windowWidth] : undefined);
+   return /*#__PURE__*/_jsx(GestureDetector, {
+     gesture: Gesture.Race(tap, pan),
+     children: /*#__PURE__*/_jsx(Animated.View, {
+diff --git a/lib/module/use-toast-animations.js b/lib/module/use-toast-animations.js
+index 52e05b6a4c5e41e394ec87d8f7dbb009893d2dd1..282e471ac7f9e9410ad97c7214b3280e6174e8eb 100644
+--- a/lib/module/use-toast-animations.js
++++ b/lib/module/use-toast-animations.js
+@@ -1,7 +1,7 @@
+ "use strict";
+ 
+ import * as React from 'react';
+-import { useWindowDimensions } from 'react-native';
++import { Platform, useWindowDimensions } from 'react-native';
+ import { useAnimatedStyle, useDerivedValue, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+ import { STACKING_ANIMATION_DURATION } from "./animations.js";
+ import { easeOutQuartFn } from "./easings.js";
+@@ -24,7 +24,7 @@ export const useToastAnimations = ({
+         scale: wiggleSharedValue.value
+       }]
+     };
+-  }, [wiggleSharedValue]);
++  }, Platform.OS === 'web' ? [wiggleSharedValue] : undefined);
+ 
+   // ScaleX: visual narrowing avoids layout-width changes that cause text rewrap
+   const {
+@@ -46,7 +46,7 @@ export const useToastAnimations = ({
+       duration: STACKING_ANIMATION_DURATION,
+       easing: easeOutQuartFn
+     });
+-  }, [enableStacking, numberOfToasts, index, toastPosition, isExpanded, stackGap, screenWidth]);
++  }, Platform.OS === 'web' ? [enableStacking, numberOfToasts, index, toastPosition, isExpanded, stackGap, screenWidth] : undefined);
+   const absolutePositionStyle = useAnimatedStyle(() => {
+     const base = {
+       position: 'absolute',
+@@ -63,7 +63,7 @@ export const useToastAnimations = ({
+       base.top = 0;
+     }
+     return base;
+-  }, [yPosition, toastPosition, stackScaleX]);
++  }, Platform.OS === 'web' ? [yPosition, toastPosition, stackScaleX] : undefined);
+   const wiggle = React.useCallback(() => {
+     'worklet';
+ 
+diff --git a/lib/module/use-toast-position.js b/lib/module/use-toast-position.js
+index 5ef8eaaf7bfe3f904c9407a3e73e927b31a78823..f5a384887510e0ced2b63a22dce99c4f4fd030d1 100644
+--- a/lib/module/use-toast-position.js
++++ b/lib/module/use-toast-position.js
+@@ -1,3 +1,4 @@
++import { Platform } from 'react-native';
+ "use strict";
+ 
+ import { useMemo } from 'react';
+@@ -37,7 +38,7 @@ export const useToastPosition = ({
+       duration: STACKING_ANIMATION_DURATION,
+       easing: easeOutQuartFn
+     });
+-  }, [id, index, numberOfToasts, enableStacking, position, toastHeightsVersion, gap, orderedIdsKey, isExpanded, stackGap]);
++  }, Platform.OS === 'web' ? [id, index, numberOfToasts, enableStacking, position, toastHeightsVersion, gap, orderedIdsKey, isExpanded, stackGap] : undefined);
+   return yPosition;
+ };
+ //# sourceMappingURL=use-toast-position.js.map
+\ No newline at end of file
+diff --git a/src/gestures.tsx b/src/gestures.tsx
+index a27988c3740c6a15165dfc2aa72d66b7fada1899..c15ef6997594231979f2cd0e735bc1a561f8d5ed 100644
+--- a/src/gestures.tsx
++++ b/src/gestures.tsx
+@@ -188,7 +188,7 @@ export const ToastSwipeHandler: React.FC<
+     }
+ 
+     return aStyle;
+-  }, [direction, translate, windowWidth]);
++  }, Platform.OS === 'web' ? [direction, translate, windowWidth] : undefined);
+ 
+   return (
+     <GestureDetector gesture={Gesture.Race(tap, pan)}>
+diff --git a/src/use-toast-animations.ts b/src/use-toast-animations.ts
+index 6da145f28a8c505e7e4326f0b6d604845c84015b..137f06504ca0ef9790401dc27f5d38081cb66403 100644
+--- a/src/use-toast-animations.ts
++++ b/src/use-toast-animations.ts
+@@ -1,5 +1,5 @@
+ import * as React from 'react';
+-import { useWindowDimensions } from 'react-native';
++import { Platform, useWindowDimensions } from 'react-native';
+ import {
+   useAnimatedStyle,
+   useDerivedValue,
+@@ -39,7 +39,7 @@ export const useToastAnimations = ({
+     return {
+       transform: [{ scale: wiggleSharedValue.value }],
+     };
+-  }, [wiggleSharedValue]);
++  }, Platform.OS === 'web' ? [wiggleSharedValue] : undefined);
+ 
+   // ScaleX: visual narrowing avoids layout-width changes that cause text rewrap
+   const { width: screenWidth } = useWindowDimensions();
+@@ -60,7 +60,7 @@ export const useToastAnimations = ({
+       duration: STACKING_ANIMATION_DURATION,
+       easing: easeOutQuartFn,
+     });
+-  }, [
++  }, Platform.OS === 'web' ? [
+     enableStacking,
+     numberOfToasts,
+     index,
+@@ -68,7 +68,7 @@ export const useToastAnimations = ({
+     isExpanded,
+     stackGap,
+     screenWidth,
+-  ]);
++  ] : undefined);
+ 
+   const absolutePositionStyle = useAnimatedStyle(() => {
+     const base: Record<string, unknown> = {
+@@ -85,7 +85,7 @@ export const useToastAnimations = ({
+       base.top = 0;
+     }
+     return base;
+-  }, [yPosition, toastPosition, stackScaleX]);
++  }, Platform.OS === 'web' ? [yPosition, toastPosition, stackScaleX] : undefined);
+ 
+   const wiggle = React.useCallback(() => {
+     'worklet';
+diff --git a/src/use-toast-position.ts b/src/use-toast-position.ts
+index 0f9b5c7e3eab01b009790c94026bfa20b6cf61a2..d8b2df4ae95628fe71fb6ea56fc8debdd831f703 100644
+--- a/src/use-toast-position.ts
++++ b/src/use-toast-position.ts
+@@ -1,3 +1,4 @@
++import { Platform } from 'react-native';
+ import { useMemo } from 'react';
+ import { useDerivedValue, withTiming } from 'react-native-reanimated';
+ import { STACKING_ANIMATION_DURATION } from './animations';
+@@ -54,7 +55,7 @@ export const useToastPosition = ({
+       duration: STACKING_ANIMATION_DURATION,
+       easing: easeOutQuartFn,
+     });
+-  }, [
++  }, Platform.OS === 'web' ? [
+     id,
+     index,
+     numberOfToasts,
+@@ -65,7 +66,7 @@ export const useToastPosition = ({
+     orderedIdsKey,
+     isExpanded,
+     stackGap,
+-  ]);
++  ] : undefined);
+ 
+   return yPosition;
+ };

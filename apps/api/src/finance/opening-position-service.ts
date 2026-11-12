@@ -261,6 +261,17 @@ export function createFinanceOpeningPositionService({
         });
         return {
           ...result,
+          accounts: result.accounts.map((position) => {
+            const account = accounts.find((account) => account.id === position.accountId);
+            if (!account) throw new AppError("internal_error", "Opening account unavailable.");
+            return {
+              ...position,
+              name: account.name,
+              accountRevision: account.contextualRevision.toString(),
+              currencyCode: account.currencyCode,
+              kind: account.kind,
+            };
+          }),
           statements: statements.map(present),
           asOf: now().toISOString(),
           timezone: owner.planningTimezone,

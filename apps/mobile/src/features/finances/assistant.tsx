@@ -1,12 +1,11 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { View } from "react-native";
-import { categoryIcon } from "./category-presentation";
+import { FinanceAttentionSummary } from "./attention-summary";
 import { Conversation } from "./conversation";
 import { useFinance, useFinanceRead } from "./data";
-import { financeLabel, recordAmount } from "./presentation";
-import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section, Segments } from "./ui";
+import { financeLabel } from "./presentation";
+import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Segments } from "./ui";
 
 function Activity() {
   const { api, owner } = useFinance();
@@ -45,45 +44,20 @@ function Activity() {
     </ReadState>
   );
 }
-function Attention() {
-  const query = useFinanceRead(["reviews"], (api) => api.getFinanceReviewQueue());
+function Attention({ onDecisions }: { onDecisions: () => void }) {
+  const query = useFinanceRead(["attention"], (api) => api.getFinanceAttention());
   return (
-    <Section title="Needs your input">
-      <ReadState query={query}>
-        <View style={{ gap: 12 }}>
-          {query.data?.length ? (
-            query.data.map((review) => (
-              <Card key={review.id}>
-                <View style={{ flex: 1 }}>
-                  <FinanceRow
-                    title={review.transaction.merchant}
-                    value={recordAmount(review.transaction.amount, review.transaction.currencyCode)}
-                    subtitle={
-                      review.transaction.category ??
-                      review.suggestedCategory?.name ??
-                      "Choose a category"
-                    }
-                    icon={categoryIcon(
-                      review.transaction.category ??
-                        review.suggestedCategory?.name ??
-                        "Uncategorized",
-                    )}
-                    onPress={() =>
-                      router.push({
-                        pathname: "/finance-transaction",
-                        params: { id: review.transaction.id },
-                      })
-                    }
-                  />
-                </View>
-              </Card>
-            ))
-          ) : (
-            <Copy secondary>No transaction reviews waiting.</Copy>
-          )}
-        </View>
-      </ReadState>
-    </Section>
+    <ReadState query={query}>
+      {query.data ? (
+        <FinanceAttentionSummary
+          snapshot={query.data}
+          onDecisions={onDecisions}
+          onBudget={() => router.push({ pathname: "/finances/plan", params: { view: "Budget" } })}
+          onOpening={() => router.push("/finance-opening-position")}
+          onHistory={() => router.push("/finance-historical-cleanup")}
+        />
+      ) : null}
+    </ReadState>
   );
 }
 export function FinanceAssistantScreen() {
@@ -109,7 +83,12 @@ export function FinanceAssistantScreen() {
         <Activity />
       ) : (
         <>
-          <Attention />
+          <Attention
+            onDecisions={() => {
+              setMode("Conversation");
+              router.setParams({ view: "Conversation" });
+            }}
+          />
           <Card>
             <FinanceRow
               title="Your Finance conversation"

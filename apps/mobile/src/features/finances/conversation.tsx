@@ -12,6 +12,8 @@ const referenceLabels = {
   account: "View account",
   budget_plan: "View budget proposal",
   review_batch: "Review grouped decisions",
+  budget_start_preview: "Review starting month",
+  review_batch_undo: "Review correction",
   review_case: "View review case",
   contextual_question: "View question",
 } as const;

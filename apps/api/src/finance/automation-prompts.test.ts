@@ -93,3 +93,11 @@ it("keeps maintained-month triage separate from historical counts and uses exact
   ])
     expect(text).toContain(required);
 });
+it("consumes independent monthly work even when the historical run stays blocked", () => {
+  const text = renderFinanceHostInstructions({
+    id: "schedule",
+    hostSurface: "claude_code_routine",
+  });
+  expect(text).toContain("monthlyWork");
+  expect(text).toContain("even if the retained run is blocked");
+});

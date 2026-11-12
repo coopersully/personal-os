@@ -124,3 +124,24 @@ owner answer. The original host's causal reply protocol, identity, cadence and g
 unchanged. Pending published approvals contribute to active human attention; approved work
 contributes to processing, and stopped work retains technical recovery. Historical raw review
 counts remain separately available.
+
+### Monthly continuity and retained runs
+
+The approved first month is a floor, not a fixed reporting month. `maintain_finances`
+returns `monthlyWork` for an approved start policy: current owner-local month, canonical
+attention, current/previous/upcoming budget versions and domain-owned next-work guidance.
+A future start remains disabled; reversing the policy restores the all-outstanding workflow.
+An old run's scope, host identity, saved candidate and approvals remain unchanged. Its
+blocked or completed state does not establish readiness for the current month.
+
+The current-month date window is a discovery aid, not permission to omit unresolved work
+since activation or exact historical dependencies. Approved independent batches continue via
+the existing durable worker even while aggregate bookkeeping is blocked. Historical records
+are retained; late postings and cross-period refunds can return them to active attention.
+
+Monthly budget preparation reuses an existing target proposal when present. Previous approved
+allocations are a template only: changed income and bills need fresh evidence, and material
+unknowns need an owner answer. The supported carryover policy is `none`; unspent allocations
+and unreceived income are not additional cash. Exact new versions require owner approval in
+Finance Chat. Actual unattended execution and phone delivery remain release acceptance,
+not claims established by this contract or synthetic tests.

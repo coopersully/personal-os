@@ -361,7 +361,8 @@ function BatchReference({ id }: { id: string }) {
             <Card rows>
               {batch.decisions.map((decision, index) => {
                 const target =
-                  decision.kind === "categorization" || decision.action === "recategorize"
+                  decision.kind === "categorization" ||
+                  (decision.kind === "review" && decision.action === "recategorize")
                     ? categories.data?.find((category) => category.id === decision.categoryId)
                     : undefined;
                 const outcome = batch.outcomes.find((item) => item.index === index);

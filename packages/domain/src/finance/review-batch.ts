@@ -14,7 +14,21 @@ const basis = {
   confidence: z.number().min(0).max(1),
   learnMerchant: z.literal("never").default("never"),
 };
+export const financeTransferPairDecisionSchema = z
+  .strictObject({
+    ...basis,
+    kind: z.literal("transfer_pair"),
+    counterpartTransactionId: idSchema,
+    expectedCounterpartUpdatedAt: isoDateTimeSchema,
+    expectedCounterpartRevision: basis.expectedTransactionRevision,
+  })
+  .refine(
+    (value) => value.transactionId !== value.counterpartTransactionId,
+    "Choose two distinct transactions.",
+  );
+export type FinanceTransferPairDecision = z.infer<typeof financeTransferPairDecisionSchema>;
 export const financeReviewBatchDecisionSchema = z.discriminatedUnion("kind", [
+  financeTransferPairDecisionSchema,
   z.strictObject({
     ...basis,
     kind: z.literal("categorization"),
@@ -53,6 +67,7 @@ function uniqueDecisions(
   value.decisions.forEach((decision, index) => {
     if (
       transactions.has(decision.transactionId) ||
+      (decision.kind === "transfer_pair" && transactions.has(decision.counterpartTransactionId)) ||
       (decision.kind === "review" && reviews.has(decision.reviewId))
     )
       context.addIssue({
@@ -61,6 +76,7 @@ function uniqueDecisions(
         path: ["decisions", index],
       });
     transactions.add(decision.transactionId);
+    if (decision.kind === "transfer_pair") transactions.add(decision.counterpartTransactionId);
     if (decision.kind === "review") reviews.add(decision.reviewId);
   });
 }
@@ -146,6 +162,7 @@ export const financeReviewBatchOutcomeSchema = z.object({
   recovery: z.enum(["none", "new_preview"]),
   completedAt: isoDateTimeSchema,
   appliedTransferRevision: basis.expectedTransactionRevision.optional(),
+  undoAvailable: z.boolean().optional(),
 });
 export type FinanceReviewBatchOutcome = z.infer<typeof financeReviewBatchOutcomeSchema>;
 export const financeReviewBatchCounterpartSchema = z.strictObject({
@@ -172,3 +189,25 @@ export type FinanceReviewBatchRun = z.infer<typeof financeReviewBatchRunSchema>;
 export const listFinanceReviewBatchesInputSchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
+
+export const previewFinanceReviewBatchUndoInputSchema = z.strictObject({
+  batchId: idSchema,
+  outcomeIndexes: z
+    .array(z.number().int().min(0).max(99))
+    .min(1)
+    .max(10)
+    .refine((values) => new Set(values).size === values.length, "Include each effect once."),
+  idempotencyKey: z.string().trim().min(1).max(200),
+});
+export const financeReviewBatchUndoSchema = z.strictObject({
+  id: idSchema,
+  batchId: idSchema,
+  fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  outcomeIndexes: z.array(z.number().int().min(0).max(99)),
+  outcomes: z.array(financeReviewBatchOutcomeSchema),
+  pendingCount: z.number().int().nonnegative(),
+  status: z.enum(["previewed", "in_progress", "completed", "completed_with_exceptions"]),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+export type FinanceReviewBatchUndo = z.infer<typeof financeReviewBatchUndoSchema>;

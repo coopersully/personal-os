@@ -9,6 +9,7 @@ import {
   financeAccounts,
   financeCategories,
   financeClassificationDecisions,
+  financeMerchants,
   financeProviderItems,
   financeReviewActionRequests,
   financeReviewBatchRuns,
@@ -231,6 +232,321 @@ describe.sequential("durable Finance review batches", () => {
       agentContext: await agent(f.userId),
     };
   }
+  async function pairFixture(caseCount = 0) {
+    const f = await transferFixture();
+    await database.db.delete(financeReviewCases).where(eq(financeReviewCases.userId, f.userId));
+    await database.db
+      .update(financeAccounts)
+      .set({ status: "manual", ownershipType: "individual", ownershipShareBps: 10000 })
+      .where(eq(financeAccounts.userId, f.userId));
+    for (const id of [f.decision.transactionId, f.counterpart.id].slice(0, caseCount)) {
+      await database.db
+        .insert(financeReviewCases)
+        .values({ userId: f.userId, transactionId: id, reason: "possible_transfer" });
+    }
+    const left = required(await transaction(f.decision.transactionId));
+    const right = required(await transaction(f.counterpart.id));
+    const decision = {
+      kind: "transfer_pair",
+      transactionId: left.id,
+      expectedTransactionUpdatedAt: left.updatedAt.toISOString(),
+      expectedTransactionRevision: left.contextualRevision.toString(),
+      counterpartTransactionId: right.id,
+      expectedCounterpartUpdatedAt: right.updatedAt.toISOString(),
+      expectedCounterpartRevision: right.contextualRevision.toString(),
+      rationale: "The two signed source movements match between fully owned accounts.",
+      evidence: "Exact USD pair and account ownership.",
+      confidence: 1,
+      learnMerchant: "never",
+    };
+    return { ...f, left, right, pairDecision: decision };
+  }
+  it.each([
+    0, 1, 2,
+  ])("resolves an exact transfer pair with %i existing cases without inventing reviews", async (caseCount) => {
+    const f = await pairFixture(caseCount);
+    const { left, right, pairDecision: decision } = f;
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [decision] },
+      f.agentContext,
+    );
+    const result = await f.service.execute(
+      preview.id,
+      { fingerprint: preview.fingerprint },
+      f.agentContext,
+    );
+    expect(result).toMatchObject({ status: "completed", outcomes: [{ status: "applied" }] });
+    expect(await transaction(left.id)).toMatchObject({
+      needsReview: false,
+      direction: "transfer",
+      reconciliationStatus: "confirmed",
+    });
+    expect(await transaction(right.id)).toMatchObject({
+      needsReview: false,
+      direction: "transfer",
+      reconciliationStatus: "confirmed",
+    });
+    const cases = await database.db.query.financeReviewCases.findMany({
+      where: eq(financeReviewCases.userId, f.userId),
+    });
+    expect(cases).toHaveLength(caseCount);
+    expect(cases.every((row) => row.status === "resolved")).toBe(true);
+    expect(
+      await f.service.execute(preview.id, { fingerprint: preview.fingerprint }, f.agentContext),
+    ).toEqual(result);
+  });
+  it("keeps unrelated review reasons open when the transfer pair is resolved", async () => {
+    const f = await pairFixture(2);
+    const [unrelated] = await database.db
+      .insert(financeReviewCases)
+      .values({ userId: f.userId, transactionId: f.left.id, reason: "possible_reimbursement" })
+      .returning();
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.pairDecision] },
+      f.agentContext,
+    );
+    await f.service.execute(preview.id, { fingerprint: preview.fingerprint }, f.agentContext);
+    expect(await transaction(f.left.id)).toMatchObject({ needsReview: true });
+    expect(await transaction(f.right.id)).toMatchObject({ needsReview: false });
+    expect(
+      await database.db.query.financeReviewCases.findFirst({
+        where: eq(financeReviewCases.id, required(unrelated).id),
+      }),
+    ).toMatchObject({ status: "open" });
+  });
+  it.each([
+    "pending",
+    "currency",
+    "fees",
+    "unknown destination",
+    "source stale",
+    "ambiguous",
+  ])("rejects a transfer pair with %s evidence", async (scenario) => {
+    const f = await pairFixture();
+    if (scenario === "pending")
+      await database.db
+        .update(financeTransactions)
+        .set({ pending: true })
+        .where(eq(financeTransactions.id, f.right.id));
+    if (scenario === "currency")
+      await database.db
+        .update(financeTransactions)
+        .set({ currencyCode: "EUR" })
+        .where(eq(financeTransactions.id, f.right.id));
+    if (scenario === "fees")
+      await database.db
+        .update(financeTransactions)
+        .set({ amount: 1499 })
+        .where(eq(financeTransactions.id, f.right.id));
+    if (scenario === "unknown destination")
+      await database.db
+        .update(financeAccounts)
+        .set({ ownershipType: "unknown", ownershipShareBps: null })
+        .where(eq(financeAccounts.id, f.right.accountId));
+    if (scenario === "source stale")
+      await database.db
+        .update(financeAccounts)
+        .set({ status: "needs_reauth" })
+        .where(eq(financeAccounts.id, f.right.accountId));
+    if (scenario === "ambiguous")
+      await database.db.insert(financeTransactions).values({
+        userId: f.userId,
+        accountId: f.right.accountId,
+        merchant: "Other equal movement",
+        amount: f.right.amount,
+        direction: "transfer",
+        providerDirection: "income",
+        providerCategory: "TRANSFER_IN",
+        currencyCode: "USD",
+        transactionDate: f.right.transactionDate,
+      });
+    const right = required(await transaction(f.right.id));
+    const decision = {
+      ...f.pairDecision,
+      expectedCounterpartRevision: right.contextualRevision.toString(),
+      expectedCounterpartUpdatedAt: right.updatedAt.toISOString(),
+    };
+    await expect(
+      f.service.preview({ idempotencyKey: randomUUID(), decisions: [decision] }, f.agentContext),
+    ).rejects.toBeInstanceOf(Error);
+    expect(await transaction(f.left.id)).toMatchObject({ needsReview: true });
+  });
+  it("refuses a changed case or source between pair preview and execution", async () => {
+    const f = await pairFixture(1);
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.pairDecision] },
+      f.agentContext,
+    );
+    await database.db
+      .update(financeReviewCases)
+      .set({ reason: "possible_reimbursement" })
+      .where(eq(financeReviewCases.userId, f.userId));
+    expect(
+      await f.service.execute(preview.id, { fingerprint: preview.fingerprint }, f.agentContext),
+    ).toMatchObject({
+      status: "completed_with_exceptions",
+      outcomes: [{ status: "failed", recovery: "new_preview" }],
+    });
+    expect(await transaction(f.left.id)).toMatchObject({ needsReview: true });
+    expect(await transaction(f.right.id)).toMatchObject({ needsReview: true });
+  });
+  it("undoes a pair as a new audited correction and replays the receipt without repeating effects", async () => {
+    const f = await pairFixture(2);
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.pairDecision] },
+      f.context,
+    );
+    await f.service.execute(preview.id, { fingerprint: preview.fingerprint }, f.context);
+    const applied = required(await transaction(f.left.id));
+    const correction = await f.service.previewUndo(
+      { batchId: preview.id, outcomeIndexes: [0], idempotencyKey: randomUUID() },
+      f.context,
+    );
+    const result = await f.service.executeUndo(
+      correction.id,
+      { fingerprint: correction.fingerprint, limit: 10 },
+      f.context,
+    );
+    expect(result).toMatchObject({ status: "completed", outcomes: [{ status: "applied" }] });
+    const restored = required(await transaction(f.left.id));
+    expect(restored).toMatchObject({
+      categoryId: f.left.categoryId,
+      needsReview: true,
+      reconciliationStatus: f.left.reconciliationStatus,
+    });
+    expect(restored.contextualRevision > applied.contextualRevision).toBe(true);
+    const classificationEvidence = await database.db.query.financeClassificationDecisions.findMany({
+      where: eq(financeClassificationDecisions.userId, f.userId),
+    });
+    expect(classificationEvidence).toHaveLength(2);
+    expect(
+      classificationEvidence.every((row) => "retractedAt" in row && row.retractedAt !== null),
+    ).toBe(true);
+    expect(await transaction(f.right.id)).toMatchObject({
+      categoryId: f.right.categoryId,
+      needsReview: true,
+    });
+    expect(
+      (
+        await database.db.query.financeReviewCases.findMany({
+          where: eq(financeReviewCases.userId, f.userId),
+        })
+      ).every((row) => row.status === "open"),
+    ).toBe(true);
+    expect(
+      await f.service.executeUndo(
+        correction.id,
+        { fingerprint: correction.fingerprint, limit: 10 },
+        f.context,
+      ),
+    ).toEqual(result);
+  });
+  it("refuses undo after a later edit instead of overwriting that edit", async () => {
+    const f = await pairFixture();
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.pairDecision] },
+      f.context,
+    );
+    await f.service.execute(preview.id, { fingerprint: preview.fingerprint }, f.context);
+    const correction = await f.service.previewUndo(
+      { batchId: preview.id, outcomeIndexes: [0], idempotencyKey: randomUUID() },
+      f.context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ notes: "Later owner edit" })
+      .where(eq(financeTransactions.id, f.left.id));
+    const result = await f.service.executeUndo(
+      correction.id,
+      { fingerprint: correction.fingerprint, limit: 10 },
+      f.context,
+    );
+    expect(result).toMatchObject({
+      status: "completed_with_exceptions",
+      outcomes: [{ status: "failed", recovery: "new_preview" }],
+    });
+    expect(await transaction(f.left.id)).toMatchObject({
+      notes: "Later owner edit",
+      reconciliationStatus: "confirmed",
+    });
+  });
+  it("guards correction authority and serializes duplicate correction execution", async () => {
+    const f = await pairFixture();
+    const other = await fixture();
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.pairDecision] },
+      f.agentContext,
+    );
+    await f.service.execute(preview.id, { fingerprint: preview.fingerprint }, f.agentContext);
+    const input = { batchId: preview.id, outcomeIndexes: [0], idempotencyKey: randomUUID() };
+    const correction = await f.service.previewUndo(input, f.agentContext);
+    expect(await f.service.previewUndo(input, f.agentContext)).toEqual(correction);
+    await expect(f.service.getUndo(correction.id, other.context)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    const alternateAgent = await agent(f.userId);
+    await expect(f.service.getUndo(correction.id, alternateAgent)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      f.service.executeUndo(
+        correction.id,
+        { fingerprint: `sha256:${"0".repeat(64)}` },
+        f.agentContext,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await database.db
+      .update(accessTokens)
+      .set({ revokedAt: now() })
+      .where(eq(accessTokens.id, f.agentContext.principal.actorId));
+    await expect(
+      f.service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.agentContext),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    const [a, b] = await Promise.all([
+      f.service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.context),
+      f.service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.context),
+    ]);
+    expect(a).toEqual(b);
+    expect(a).toMatchObject({ status: "completed", outcomes: [{ status: "applied" }] });
+  });
+  it("rolls back a lost correction writer and resumes without duplicate effects", async () => {
+    const f = await pairFixture(1);
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.pairDecision] },
+      f.context,
+    );
+    await f.service.execute(preview.id, { fingerprint: preview.fingerprint }, f.context);
+    const correction = await f.service.previewUndo(
+      { batchId: preview.id, outcomeIndexes: [0], idempotencyKey: randomUUID() },
+      f.context,
+    );
+    let fail = true;
+    const service = createFinanceReviewBatchService({
+      db: database.db,
+      now,
+      finance: {
+        ...f.finance,
+        async restoreReviewBatchEffect(...args) {
+          await f.finance.restoreReviewBatchEffect(...args);
+          if (fail) {
+            fail = false;
+            throw new Error("Synthetic correction process loss");
+          }
+        },
+      },
+    });
+    await expect(
+      service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.context),
+    ).rejects.toThrow("Synthetic correction process loss");
+    expect(await transaction(f.left.id)).toMatchObject({ reconciliationStatus: "confirmed" });
+    expect(await service.getUndo(correction.id, f.context)).toMatchObject({
+      pendingCount: 1,
+      outcomes: [],
+    });
+    expect(
+      await service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.context),
+    ).toMatchObject({ status: "completed" });
+  });
   async function qualifyFixture() {
     const f = await transferFixture();
     await database.db
@@ -281,6 +597,69 @@ describe.sequential("durable Finance review batches", () => {
     expect(
       await database.db.select().from(auditEvents).where(eq(auditEvents.userId, f.userId)),
     ).toEqual([]);
+  });
+  it("qualifies categorization only against the current server-owned merchant evidence", async () => {
+    const f = await fixture(4);
+    const base = required(f.decisions[0]);
+    if (base.kind !== "categorization") throw new Error("Missing category fixture");
+    const [merchant] = await database.db
+      .insert(financeMerchants)
+      .values({
+        userId: f.userId,
+        displayName: "Blue Finch Fixture",
+        normalizedName: "blue finch fixture",
+      })
+      .returning();
+    await database.db
+      .update(financeAccounts)
+      .set({ status: "manual" })
+      .where(eq(financeAccounts.userId, f.userId));
+    await database.db
+      .update(financeTransactions)
+      .set({
+        merchantId: required(merchant).id,
+        merchant: "Blue Finch Fixture",
+        currencyCode: "USD",
+      })
+      .where(eq(financeTransactions.userId, f.userId));
+    for (const decision of f.decisions.slice(1))
+      await database.db.insert(financeClassificationDecisions).values({
+        userId: f.userId,
+        transactionId: decision.transactionId,
+        merchantId: required(merchant).id,
+        categoryId: base.categoryId,
+        categoryName: "Food",
+        source: "user",
+        confidence: 10000,
+        outcome: "confirmed",
+      });
+    const proposals = await f.finance.proposeCategorizations(f.userId, {
+      limit: 10,
+      review: "needs_review",
+    });
+    const proposal = required(
+      proposals.items.find((row) => row.transaction.id === base.transactionId),
+    );
+    expect(proposal.meetsPolicyThreshold).toBe(true);
+    const current = required(await transaction(base.transactionId));
+    const decision = {
+      ...base,
+      confidence: proposal.confidence,
+      expectedTransactionRevision: current.contextualRevision.toString(),
+    };
+    const result = await f.service.qualify({ decisions: [decision] }, await agent(f.userId));
+    expect(result.items[0]).toMatchObject({ state: "eligible", reasons: [] });
+    const wrong = await f.service.qualify(
+      { decisions: [{ ...decision, confidence: 0.01 }] },
+      await agent(f.userId),
+    );
+    expect(wrong.items[0]?.state).toBe("awaiting_evidence");
+    await database.db
+      .update(financeClassificationDecisions)
+      .set({ retractedAt: now() })
+      .where(eq(financeClassificationDecisions.userId, f.userId));
+    const retracted = await f.service.qualify({ decisions: [decision] }, await agent(f.userId));
+    expect(retracted.items[0]?.state).toBe("awaiting_evidence");
   });
   it("does not infer evidence readiness from valid current rows or confidence", async () => {
     const f = await fixture();
@@ -1804,7 +2183,19 @@ describe.sequential("durable Finance review batches", () => {
           ...f.input,
           idempotencyKey: randomUUID(),
           decisions: [
-            { ...required(f.decisions[0]), categoryId: required(other.decisions[0]).categoryId },
+            {
+              ...required(f.decisions[0]),
+              categoryId: required(
+                "categoryId" in required(other.decisions[0])
+                  ? (
+                      other.decisions[0] as Extract<
+                        FinanceReviewBatchDecision,
+                        { kind: "categorization" }
+                      >
+                    ).categoryId
+                  : undefined,
+              ),
+            },
           ],
         },
         f.context,

@@ -2986,6 +2986,7 @@ export const financeTransactionRelationships = pgTable(
 export const financeClassificationDecisions = pgTable(
   "finance_classification_decisions",
   {
+    retractedAt: timestamp("retracted_at", { withTimezone: true }),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -6900,5 +6901,47 @@ export const financeOpeningStatements = pgTable(
     ),
     check("finance_opening_statement_owner_actor", sql`${table.actorId} = ${table.userId}`),
     check("finance_opening_statement_positive_revision", sql`${table.revision} > 0`),
+  ],
+);
+
+/** Immutable before/after effect evidence; corrections append rather than erasing receipts. */
+export const financeReviewBatchEffects = pgTable(
+  "finance_review_batch_effects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    batchId: uuid("batch_id")
+      .notNull()
+      .references(() => financeReviewBatchRuns.id, { onDelete: "cascade" }),
+    outcomeIndex: integer("outcome_index").notNull(),
+    before: jsonb("before").$type<unknown>().notNull(),
+    after: jsonb("after").$type<unknown>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [uniqueIndex("finance_batch_effect_unique").on(table.batchId, table.outcomeIndex)],
+);
+export const financeReviewBatchCorrections = pgTable(
+  "finance_review_batch_corrections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    batchId: uuid("batch_id")
+      .notNull()
+      .references(() => financeReviewBatchRuns.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    outcomeIndexes: jsonb("outcome_indexes").$type<number[]>().notNull(),
+    outcomes: jsonb("outcomes").$type<unknown[]>().notNull().default([]),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_batch_correction_owner_key").on(table.userId, table.idempotencyKey),
   ],
 );

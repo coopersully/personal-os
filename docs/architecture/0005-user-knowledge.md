@@ -54,6 +54,14 @@ preferences, and inferences.
 
 ## Promotion
 
+The November 12 [memory completion design](../superpowers/specs/2026-11-12-persistent-memory-design.md)
+separates inferred/stated origin from acceptance and status. Automatic acceptance is a deterministic,
+allowlisted evidence rule; it never changes origin or grants authority. Legacy revision snapshots
+remain immutable through a metadata projection; ordinary changes append revisions. Explicit forgetting
+is the content-erasure exception, with dependent-copy removal, receipt redaction and restore admission
+against an independent deletion ledger. Production ledger configuration and recovery access remain
+unverified release prerequisites. No memory lifecycle or UI completion is claimed by this design.
+
 User-authored knowledge may be active immediately when unambiguous. Agent-inferred knowledge begins
 as a proposal and may become active through explicit user promotion or a domain-defined safe
 promotion rule after independent reinforcement or successful reuse.

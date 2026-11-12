@@ -108,6 +108,31 @@ the only evidence for a durable belief.
 
 ## Learning lifecycle
 
+### November 12, 2026 completion decision
+
+Cooper confirmed that sufficiently evidenced low-risk preferences may be accepted automatically,
+while retaining their inferred origin and easy correction. Sensitive facts require explicit owner
+confirmation. Knowledge confirmation never changes agent authority; permission or action-policy
+changes still require the owning domain's separate approval flow.
+
+The [dedicated memory design](../superpowers/specs/2026-11-12-persistent-memory-design.md) and
+[implementation plan](../superpowers/plans/2026-11-12-persistent-memory.md) now own completion scope.
+They supersede the memory portions of the historical shared-toolkit plans, without adopting their
+unrelated Finance/Texting, general work-claim or goal-redesign work.
+
+Initial engineering defaults restrict automatic acceptance to presentation detail and format:
+three independent first-party user selections on three distinct local dates within 30 days,
+no contrary selection or conflict, and enabled learning. Inferred origin remains visible after
+acceptance. Owner correction or rejection suppresses automatic relearning until explicitly reset.
+Other inferred claims remain proposals. Sensitive agent proposals are owner-only and confirmation
+does not enable sensitive agent disclosure in this release.
+
+Correction preserves ordinary history; forgetting deliberately erases live and historical content,
+dependent copies and receipt replay, retaining only content-free recovery metadata. Original domain
+records remain separately owned. Restore-safe deletion requires the independently durable deletion
+ledger and verified recovery path described in the design; external agents' already received copies
+cannot be recalled. These are target requirements, not claims of implemented behavior.
+
 1. A user statement may create active knowledge immediately when its meaning and scope are clear.
 2. An agent observation creates proposed knowledge with evidence, confidence, scope, sensitivity,
    and an expiry or review condition.

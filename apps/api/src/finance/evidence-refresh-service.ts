@@ -327,20 +327,8 @@ export function createFinanceEvidenceRefreshService({
             after: { period: row.period, sources: row.sources },
           }),
         );
-        const itemIds = [
-          ...new Set(sources.flatMap((source) => (source.itemId ? [source.itemId] : []))),
-        ];
-        if (itemIds.length)
-          await tx
-            .update(financeProviderItems)
-            .set({ nextSyncAt: now() })
-            .where(
-              and(
-                eq(financeProviderItems.userId, owner.id),
-                inArray(financeProviderItems.id, itemIds),
-                inArray(financeProviderItems.syncState, ["current", "stale"]),
-              ),
-            );
+        // The provider worker claims this exact request with its current grant.
+        // Do not change the independent owner schedule at request acceptance.
         const result = await observe(tx, row);
         if (result.status !== "accepted")
           await tx

@@ -118,7 +118,7 @@ describe.sequential("durable Finance evidence refresh", () => {
     const item = await database.db.query.financeProviderItems.findFirst({
       where: eq(financeProviderItems.id, f.item.id),
     });
-    expect(item?.nextSyncAt).toEqual(clock);
+    expect(item?.nextSyncAt).toEqual(f.item.nextSyncAt);
     clock = new Date("2026-11-12T16:01:00Z");
     await database.db
       .update(financeProviderItems)

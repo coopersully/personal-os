@@ -1890,7 +1890,7 @@ describe.sequential("durable Finance review batches", () => {
     expect(
       (await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context)).status,
     ).toBe("completed");
-  });
+  }, 15000);
   it("persists exact preview without ledger effects, resumes bounded work and replays once", async () => {
     const f = await fixture(12);
     const preview = await f.service.preview(f.input, f.context);

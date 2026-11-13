@@ -1311,9 +1311,10 @@ server search.
   `(receivedAt, id)`. `GET /v1/mail/threads` and the web client are unchanged.
 - The native lists cache summaries only. Message bodies are detail reads held while the reader is
   open and dropped when it closes.
-- Search is read from the `mailSearch` route parameter. The shared workspace header does not set
-  that parameter yet, so typing in the header on Mail still shows sample results until the header
-  is wired; the screens and their tests are ready for it.
+- Search is typed in the shared workspace header, which writes the `mailSearch` route parameter
+  on Mail and shows no sample results there; the list reads that parameter and searches the server.
+- Further pages load as the list reaches its end. "Load more messages" appears only after a page
+  fails to load.
 - Triage, compose, reply, attachments downloads and rules are not included. This is a local
   candidate covered by focused tests; it is not a production or TestFlight release.
 

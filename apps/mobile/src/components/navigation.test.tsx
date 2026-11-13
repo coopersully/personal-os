@@ -31,6 +31,7 @@ vi.mock("@tanstack/react-query", async () => {
 });
 const h = vi.hoisted(() => ({
   path: "/",
+  params: {} as { accountSearch?: string; mailSearch?: string },
   accessibilityTap: undefined as undefined | (() => void),
   platform: { OS: "web" },
   reduced: false,
@@ -51,7 +52,7 @@ const h = vi.hoisted(() => ({
 vi.mock("expo-router", () => ({
   router: { navigate: h.navigate, push: h.push, setParams: h.setParams },
   usePathname: () => h.path,
-  useLocalSearchParams: () => ({}),
+  useLocalSearchParams: () => h.params,
   useGlobalSearchParams: () => ({}),
   Stack: () => <div data-testid="page-stack" />,
 }));
@@ -171,6 +172,7 @@ vi.mock("react-native", async () => {
 beforeEach(() => {
   vi.clearAllMocks();
   h.path = "/";
+  h.params = {};
   h.platform.OS = "web";
   h.reduced = false;
   h.responders = [];
@@ -218,14 +220,22 @@ it("keeps search mounted while selecting a workspace and shows account/settings 
   }
 });
 it("limits sample search by workspace and opens the matching detail", async () => {
-  h.path = "/mail";
+  h.path = "/calendar";
   const { rerender } = render(<Shell />);
   await act(async () => {});
-  fireEvent.change(screen.getByLabelText("Search mail sample data"), { target: { value: "Maya" } });
+  fireEvent.change(screen.getByLabelText("Search calendar sample data"), {
+    target: { value: "Maya" },
+  });
+  expect(screen.getByText("No sample matches. Try another search.")).toBeVisible();
+  h.path = "/";
+  rerender(<Shell />);
+  fireEvent.change(screen.getByLabelText("Search today sample data"), {
+    target: { value: "Maya" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Maya needs a reply" }));
   expect(h.push).toHaveBeenCalledWith("/detail/reply");
-  fireEvent.change(screen.getByLabelText("Search mail sample data"), {
-    target: { value: "dentist" },
+  fireEvent.change(screen.getByLabelText("Search today sample data"), {
+    target: { value: "no such item" },
   });
   expect(screen.getByText("No sample matches. Try another search.")).toBeVisible();
   h.path = "/tasks";
@@ -416,6 +426,33 @@ it("routes Finance account search to the real account list without sample result
   fireEvent.change(screen.getByLabelText("Search accounts"), { target: { value: "Checking" } });
   expect(h.setParams).toHaveBeenCalledWith({ accountSearch: "Checking" });
   expect(screen.queryByText(/sample results/)).toBeNull();
+});
+
+it("routes Mail search to the server-backed list without sample results", () => {
+  for (const path of ["/mail", "/mail/mailboxes"]) {
+    h.path = path;
+    h.params = {};
+    const view = render(
+      <WorkspaceMotion>
+        <WorkspaceHeader />
+      </WorkspaceMotion>,
+    );
+    expect(screen.queryByLabelText("Search mail sample data")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Search mail"), { target: { value: "Maya" } });
+    expect(h.setParams).toHaveBeenLastCalledWith({ mailSearch: "Maya" });
+    expect(screen.queryByText(/sample results/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Maya needs a reply" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dismiss navigation menu or search" })).toBeNull();
+    // The field shows the route's search, so it survives a remount of the header.
+    h.params = { mailSearch: "Maya" };
+    view.rerender(
+      <WorkspaceMotion>
+        <WorkspaceHeader />
+      </WorkspaceMotion>,
+    );
+    expect(screen.getByLabelText("Search mail")).toHaveValue("Maya");
+    view.unmount();
+  }
 });
 
 it("supports accessibility activation, pointer preview and focus dismissal without replacing search", async () => {

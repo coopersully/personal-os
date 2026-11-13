@@ -60,7 +60,10 @@ export function useMailThreads(scope: MailScope, search: string) {
       }),
     getNextPageParam: nextMailPage,
   });
-  return { threads, query, searching: typed !== query };
+  // Covers the typing pause and the server read, so a search never looks idle while in flight.
+  const searching =
+    typed !== query || (!!query && threads.isFetching && !threads.isFetchingNextPage);
+  return { threads, query, searching };
 }
 
 /** Connected Mail accounts with their mailboxes and unread counts. */

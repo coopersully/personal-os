@@ -12,7 +12,15 @@ export function ThreadRow({ thread, onOpen }: { thread: MailThreadSummary; onOpe
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[thread.unread ? "Unread" : "", sender, subject, thread.snippet]
+      accessibilityLabel={[
+        thread.unread ? "Unread" : "",
+        thread.starred ? "Starred" : "",
+        sender,
+        subject,
+        thread.snippet,
+        messageTime(thread.receivedAt),
+        thread.messageCount > 1 ? `${thread.messageCount} messages` : "",
+      ]
         .filter(Boolean)
         .join(". ")}
       accessibilityHint="Opens the conversation."

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { MailMessage, MailSetupAccount, MailThreadSummary } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import InboxRoute from "../../app/(workspaces)/mail/index";
@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
   params: {} as { mailSearch?: string },
   setParams: vi.fn(),
   focus: undefined as undefined | (() => (() => void) | undefined),
+  endReached: undefined as undefined | (() => void),
   foreground: undefined as undefined | ((status: string) => void),
   summaries: vi.fn(),
   accounts: vi.fn(),
@@ -28,15 +29,24 @@ const h = vi.hoisted(() => ({
   fullThreads: vi.fn(),
   toast: { error: vi.fn(), loading: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
 }));
-vi.mock("react-native", async () => ({
-  ...(await import("../../../test/native")),
-  AppState: {
-    addEventListener: (_event: string, listener: (status: string) => void) => {
-      h.foreground = listener;
-      return { remove: vi.fn() };
+vi.mock("react-native", async () => {
+  const native = await import("../../../test/native");
+  type ListProps = Parameters<typeof native.FlatList>[0] & { onEndReached?: () => void };
+  return {
+    ...native,
+    // The shared list double never scrolls; expose the end-of-list callback to the tests.
+    FlatList: ({ onEndReached, ...props }: ListProps) => {
+      h.endReached = onEndReached;
+      return native.FlatList(props);
     },
-  },
-}));
+    AppState: {
+      addEventListener: (_event: string, listener: (status: string) => void) => {
+        h.foreground = listener;
+        return { remove: vi.fn() };
+      },
+    },
+  };
+});
 vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
@@ -133,6 +143,7 @@ beforeEach(() => {
   h.params = {};
   h.focus = undefined;
   h.foreground = undefined;
+  h.endReached = undefined;
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   h.summaries.mockResolvedValue([
     summary("one", { unread: true, messageCount: 2 }),
@@ -161,10 +172,10 @@ it("lists the unified inbox from body-free summaries", async () => {
   expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
   expect(screen.getByRole("progressbar")).toBeTruthy();
   const unread = await screen.findByRole("button", {
-    name: "Unread. Maya Chen. Board packet. The updated agenda is attached",
+    name: "Unread. Maya Chen. Board packet. The updated agenda is attached. Nov 9. 2 messages",
   });
   expect(within(unread).getByText("Board packet · 2")).toBeTruthy();
-  const plain = screen.getByRole("button", { name: "billing@example.test. No subject" });
+  const plain = screen.getByRole("button", { name: "billing@example.test. No subject. Nov 9" });
   expect(within(plain).getByText("No preview available")).toBeTruthy();
   expect(h.summaries).toHaveBeenCalledExactlyOnceWith({
     mailboxRole: "inbox",
@@ -186,8 +197,11 @@ it("pages with the last row's cursor and shows each conversation once", async ()
     .mockResolvedValueOnce(first)
     .mockResolvedValueOnce([first[MAIL_PAGE_SIZE - 1], summary("older", { subject: "Older" })]);
   render(wrap(<InboxRoute />));
+  await screen.findAllByRole("button", { name: /Maya Chen/ });
+  // Paging is automatic, so a healthy list never offers a manual command.
+  expect(screen.queryByRole("button", { name: "Load more messages" })).toBeNull();
 
-  fireEvent.click(await screen.findByRole("button", { name: "Load more messages" }));
+  act(() => h.endReached?.());
 
   expect(await screen.findByText("Older")).toBeTruthy();
   expect(h.summaries).toHaveBeenLastCalledWith({
@@ -197,6 +211,41 @@ it("pages with the last row's cursor and shows each conversation once", async ()
     beforeReceivedAt: first[MAIL_PAGE_SIZE - 1]?.receivedAt,
   });
   expect(screen.getAllByRole("button", { name: /Maya Chen/ })).toHaveLength(MAIL_PAGE_SIZE + 1);
+  expect(screen.queryByRole("button", { name: "Load more messages" })).toBeNull();
+  // The short last page ends the list: reaching the end again reads nothing more.
+  act(() => h.endReached?.());
+  expect(h.summaries).toHaveBeenCalledTimes(2);
+});
+
+it("offers Load more only after a page fails, and retries it with one toast", async () => {
+  const first = Array.from({ length: MAIL_PAGE_SIZE }, (_, index) => summary(`thread-${index}`));
+  h.summaries
+    .mockResolvedValueOnce(first)
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValueOnce([summary("older", { subject: "Older", starred: true })]);
+  render(wrap(<InboxRoute />));
+  await screen.findAllByRole("button", { name: /Maya Chen/ });
+
+  act(() => h.endReached?.());
+
+  const more = await screen.findByRole("button", { name: "Load more messages" });
+  // The rows already read stay, and a failed page is not retried by scrolling alone.
+  expect(screen.getAllByRole("button", { name: /Maya Chen/ })).toHaveLength(MAIL_PAGE_SIZE);
+  expect(h.toast.error).not.toHaveBeenCalled();
+  act(() => h.endReached?.());
+  expect(h.summaries).toHaveBeenCalledTimes(2);
+
+  fireEvent.click(more);
+
+  expect(
+    await screen.findByRole("button", { name: /^Starred\. Maya Chen\. Older\./ }),
+  ).toBeTruthy();
+  expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Loading mail…", {
+    id: "mail-read-retry",
+  });
+  expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Mail loaded", {
+    id: "mail-read-retry",
+  });
   expect(screen.queryByRole("button", { name: "Load more messages" })).toBeNull();
 });
 
@@ -238,6 +287,13 @@ it("searches on the server after a pause and keeps results apart from the inbox"
   h.params = { mailSearch: "  venue " };
   view.rerender(wrap(<InboxRoute />));
   expect(screen.getByRole("progressbar")).toBeTruthy();
+  // The indicator stays through the server read, not only the typing pause.
+  let finish: (rows: MailThreadSummary[]) => void = () => {};
+  h.summaries.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(2));
+  expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+  expect(screen.queryByText("No matching messages")).toBeNull();
+  finish([summary("match", { subject: "Venue contract" })]);
 
   expect(await screen.findByText("Venue contract")).toBeTruthy();
   expect(screen.getByText("Results for “venue”")).toBeTruthy();
@@ -351,6 +407,9 @@ it("lists each account's mailboxes and switches between them", async () => {
   expect(screen.getByRole("heading", { name: "Work · work@example.test" })).toBeTruthy();
   const rows = screen.getAllByRole("button").map((row) => row.textContent);
   expect(rows).toEqual(["All inboxes", "Inbox3", "Sent", "Receipts", "Inbox"]);
+  // The unread count is part of the row's name; a mailbox with none is named plainly.
+  expect(screen.getByRole("button", { name: "Inbox, 3 unread" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Inbox" })).toBeTruthy();
   expect(h.summaries).not.toHaveBeenCalled();
 
   h.summaries.mockResolvedValue([summary("sent", { subject: "Sent note" })]);

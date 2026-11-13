@@ -28,7 +28,7 @@ const menuWorkspaces = workspaceOrder.flatMap((id) =>
 );
 type Workspace = (typeof workspaces)[number];
 
-/** Shared workspace chrome. Tasks and Accounts search their live lists; other destinations use preview fixtures. */
+/** Shared workspace chrome. Tasks, Accounts and Mail search their live lists; other destinations use preview fixtures. */
 export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   const chromeInk = chromeDark === undefined ? undefined : chromeDark ? "#f8f8fc" : "#202024";
   const chromeSecondary = chromeDark === undefined ? undefined : chromeDark ? "#d0d6e8" : "#4f5360";
@@ -51,7 +51,10 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   const motion = useWorkspaceMotion();
   const path = usePathname();
   const isFinanceAccounts = path === "/finances/accounts";
-  const { accountSearch = "" } = useLocalSearchParams<{ accountSearch?: string }>();
+  const { accountSearch = "", mailSearch = "" } = useLocalSearchParams<{
+    accountSearch?: string;
+    mailSearch?: string;
+  }>();
   const current =
     workspaces.find(
       (workspace) =>
@@ -60,6 +63,8 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
         (workspace.id === "finances" && path.startsWith("/finance-")),
     ) ?? workspaces[0];
   const isSettings = path === "/settings" || path.startsWith("/settings/");
+  // Mail lists read this route param and search the server, so no sample overlay applies.
+  const isMail = !isSettings && current.id === "mail";
   const [open, setOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -231,11 +236,18 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
           </View>
           <TextInput
             value={
-              isFinanceAccounts ? accountSearch : current.id === "tasks" ? taskSearch.search : query
+              isFinanceAccounts
+                ? accountSearch
+                : isMail
+                  ? mailSearch
+                  : current.id === "tasks"
+                    ? taskSearch.search
+                    : query
             }
             onChangeText={(value) => {
               close();
               if (isFinanceAccounts) router.setParams({ accountSearch: value });
+              else if (isMail) router.setParams({ mailSearch: value });
               else if (current.id === "tasks") taskSearch.setSearch(value);
               else setQuery(value);
             }}
@@ -243,7 +255,7 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
             accessibilityLabel={
               isFinanceAccounts
                 ? "Search accounts"
-                : `Search ${isSettings ? "settings" : current.label}${current.id === "tasks" ? "" : " sample data"}`
+                : `Search ${isSettings ? "settings" : current.label}${current.id === "tasks" || isMail ? "" : " sample data"}`
             }
             placeholder={`Search ${isFinanceAccounts ? "accounts" : isSettings ? "settings" : current.label}`}
             placeholderTextColor={chromeSecondary ?? t.secondary}

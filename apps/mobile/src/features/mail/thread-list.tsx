@@ -97,7 +97,7 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
           <View
             style={{ padding: spacing.xl, gap: spacing.md, alignItems: "center", marginTop: 60 }}
           >
-            {threads.isPending ? (
+            {searching ? null : threads.isPending ? (
               <ActivityIndicator accessibilityLabel={`Loading ${title}`} />
             ) : threads.isError ? (
               <>
@@ -140,7 +140,8 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
         ListFooterComponent={
           threads.isFetchingNextPage ? (
             <ActivityIndicator accessibilityLabel="Loading more messages" />
-          ) : threads.hasNextPage ? (
+          ) : threads.isFetchNextPageError ? (
+            // Paging is automatic; the command appears only to retry a page that failed.
             link("Load more messages", () => void retryMailRead(() => threads.fetchNextPage()))
           ) : undefined
         }

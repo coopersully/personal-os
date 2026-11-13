@@ -86,14 +86,16 @@ export function MailboxesScreen() {
                         key={mailbox.id}
                         style={index ? { borderTopWidth: 0.5, borderTopColor: t.line } : undefined}
                       >
-                        <RecordRow
-                          centered
-                          title={mailboxLabel(mailbox)}
-                          value={mailbox.unreadCount ? String(mailbox.unreadCount) : undefined}
-                          accessibilityHint={
-                            mailbox.unreadCount ? `${mailbox.unreadCount} unread` : undefined
+                        {/* Labelled here so the unread count is read with the name, not as a hint. */}
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            mailbox.unreadCount
+                              ? `${mailboxLabel(mailbox)}, ${mailbox.unreadCount} unread`
+                              : mailboxLabel(mailbox)
                           }
-                          leading={<Icon name={mailboxIcon(mailbox.role)} color={accent} />}
+                          accessibilityHint="Shows this mailbox's conversations."
+                          style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
                           onPress={() =>
                             show({
                               kind: "mailbox",
@@ -102,7 +104,17 @@ export function MailboxesScreen() {
                               account: account.label,
                             })
                           }
-                        />
+                        >
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <RecordRow
+                              centered
+                              title={mailboxLabel(mailbox)}
+                              value={mailbox.unreadCount ? String(mailbox.unreadCount) : undefined}
+                              leading={<Icon name={mailboxIcon(mailbox.role)} color={accent} />}
+                            />
+                          </View>
+                          <Icon name="chevron" size={16} color={t.secondary} />
+                        </Pressable>
                       </View>
                     ))
                   ) : (

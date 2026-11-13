@@ -1957,6 +1957,9 @@ export function createMailService({
       const conditions = await threadConditions(userId, query);
       if (cursor?.beforeReceivedAt && cursor.beforeId) {
         // Row comparison mirrors the (receivedAt, id) ordering, so equal timestamps never skip.
+        // The cursor is an ISO string with millisecond precision. That is exact because every
+        // receivedAt is written from a JavaScript Date, which carries no finer precision; a
+        // writer storing microseconds would need the cursor to carry them too.
         conditions.push(
           sql`(${mailThreads.receivedAt}, ${mailThreads.id}) < (${new Date(cursor.beforeReceivedAt)}, ${cursor.beforeId})`,
         );

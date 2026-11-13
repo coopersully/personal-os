@@ -272,8 +272,9 @@ Coming next and Cash flow show the scheduled date, saved recurring type and matc
 ### Calendar day and agenda
 
 Calendar on iPhone is one screen with Day and Agenda segments; it does not reproduce the web week
-grid. The heading names the chosen day. Previous/next arrows step one day, a Sunday-first week
-strip jumps within the week and marks today and days that have events, and Today returns to the
+grid. The heading names the chosen day. Previous/next arrows step one day, a week strip that starts on
+the account's "Week starts on" setting jumps within the week and marks today and days that have
+events, and Today returns to the
 current day in the account planning timezone. Day shows all-day events as rows above an hour
 timeline that covers 8 AM–6 PM and widens to contain earlier or later events; overlapping events
 sit side by side and say so in their accessible label. Agenda lists the next 14 days from the

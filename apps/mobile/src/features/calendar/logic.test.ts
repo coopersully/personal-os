@@ -13,7 +13,9 @@ import {
   formatDay,
   formatHour,
   layoutDayEvents,
+  reminderLabel,
   timelineHours,
+  timeZoneName,
   weekDays,
 } from "./logic";
 
@@ -72,6 +74,10 @@ function calendar(extra: Partial<Calendar> = {}) {
 describe("calendar day model", () => {
   it("bounds a week and a local-day range in the account timezone", () => {
     expect(weekDays(friday).map((day) => day.day)).toEqual([8, 9, 10, 11, 12, 13, 14]);
+    expect(weekDays(friday, "monday").map((day) => day.day)).toEqual([9, 10, 11, 12, 13, 14, 15]);
+    // A Sunday belongs to the Monday-first week that began six days earlier.
+    expect(weekDays({ day: 15, month: 11, year: 2026 }, "monday")[0]?.day).toBe(9);
+    expect(weekDays({ day: 9, month: 11, year: 2026 }, "monday")[0]?.day).toBe(9);
     expect(calendarRange(friday, 1, zone)).toEqual({
       from: "2026-11-13T05:00:00.000Z",
       to: "2026-11-14T05:00:00.000Z",
@@ -183,6 +189,12 @@ describe("calendar labels", () => {
     expect(eventTimeLabel(standup, friday, zone)).toBe("9:00 AM – 9:30 AM");
     expect(eventTimeLabel(standup, friday, "Europe/London")).toBe("2:00 PM – 2:30 PM");
     expect(eventTimeLabel(overnight, friday, zone)).toBe("From 11:00 PM");
+    // Ending exactly at midnight is the end of that day, not a continuation into the next.
+    const late = event("late", "2026-11-14T03:00:00.000Z", "2026-11-14T05:00:00.000Z");
+    expect(eventTimeLabel(late, friday, zone)).toBe("10:00 PM – 12:00 AM");
+    expect(dayEvents([late], saturday, zone).timed).toEqual([]);
+    const instant = event("instant", "2026-11-13T05:00:00.000Z", "2026-11-13T05:00:00.000Z");
+    expect(eventTimeLabel(instant, friday, zone)).toBe("12:00 AM – 12:00 AM");
     expect(eventTimeLabel(overnight, saturday, zone)).toBe("Until 1:00 AM");
     const retreat = event("retreat", "2026-11-12T15:00:00.000Z", "2026-11-14T15:00:00.000Z");
     expect(eventTimeLabel(retreat, friday, zone)).toBe("Continues all day");
@@ -234,6 +246,17 @@ describe("calendar labels", () => {
         zone,
       ).label,
     ).toBe("Quota exceeded.");
+  });
+
+  it("words reminders as durations and time zones by name", () => {
+    expect(reminderLabel(0)).toBe("At start");
+    expect(reminderLabel(1)).toBe("1 minute before");
+    expect(reminderLabel(90)).toBe("1 hour 30 minutes before");
+    expect(reminderLabel(1440)).toBe("1 day before");
+    expect(reminderLabel(20_160)).toBe("2 weeks before");
+    expect(timeZoneName(zone, "2026-11-13T14:00:00.000Z")).toBe("Eastern Standard Time");
+    expect(timeZoneName(zone, "2026-07-13T14:00:00.000Z")).toBe("Eastern Daylight Time");
+    expect(timeZoneName("Mars/Olympus_Mons", "2026-11-13T14:00:00.000Z")).toBe("Mars/Olympus Mons");
   });
 
   it("labels guests by name, role and response", () => {

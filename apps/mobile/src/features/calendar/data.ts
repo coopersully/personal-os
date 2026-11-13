@@ -1,12 +1,13 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { Calendar, CalendarEvent, LocalDate } from "@personal-os/domain";
 import { localDateAt, localDateToIso, parseLocalDate } from "@personal-os/domain";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
 import { holdReadFeedback } from "../../components/read-feedback-scope";
 import { useAuth } from "../auth/context";
 import { useSettingsAction, useSettingsResource } from "../settings/data";
-import { calendarRange } from "./logic";
+import { calendarRange, type WeekStart } from "./logic";
 
 export function useCalendarScope() {
   const { session, state } = useAuth();
@@ -37,6 +38,18 @@ export function useCalendars() {
   return useSettingsResource("calendar-sources", (api) => api.listCalendars());
 }
 
+/**
+ * The account's "Week starts on" choice, shared with Settings. Null until it is known, so the
+ * week is not read twice; a failed read falls back to the product default after its notice.
+ */
+export function useWeekStart(): WeekStart | null {
+  const settings = useSettingsResource("workspace-calendar", (api) =>
+    api.getWorkspaceSettings("calendar"),
+  );
+  if (settings.isPending) return null;
+  return settings.data?.preferences.weekStartsOn ?? "sunday";
+}
+
 /** One bounded read of `days` local days; the server returns only shown calendars. */
 export function useCalendarEvents(from: LocalDate | null, days: number) {
   const { api, epoch, owner, timeZone } = useCalendarScope();
@@ -48,7 +61,13 @@ export function useCalendarEvents(from: LocalDate | null, days: number) {
       return api.listEvents(range);
     },
     enabled: !!owner && !!range,
+    // Moving to another week or view keeps the last events on screen until the new ones arrive.
+    placeholderData: keepPreviousData,
   });
+}
+
+export function isNotFound(error: unknown) {
+  return error instanceof ApiClientError && error.status === 404;
 }
 
 /** Opens from the list's copy when present, then confirms against the record itself. */
@@ -59,6 +78,13 @@ export function useCalendarEvent(id: string | undefined) {
     queryKey: ["calendar", owner, epoch, "event", id],
     queryFn: () => api.getEvent(id as string),
     enabled: !!owner && !!id,
+    // A deleted event will not come back; other failures keep the client's usual retries.
+    retry: (failures, error) => {
+      if (isNotFound(error)) return false;
+      const usual = cache.getDefaultOptions().queries?.retry ?? 3;
+      if (typeof usual === "function") return usual(failures, error);
+      return typeof usual === "number" ? failures < usual : usual;
+    },
     placeholderData: () =>
       cache
         .getQueriesData<CalendarEvent[]>({ queryKey: ["calendar", owner, epoch, "events"] })

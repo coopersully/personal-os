@@ -49,8 +49,14 @@ export function CalendarPicker({ onClose }: { onClose: () => void }) {
                   <Pressable
                     key={calendar.id}
                     accessibilityRole="checkbox"
-                    accessibilityLabel={`Show ${calendar.name}`}
-                    accessibilityHint={`${calendarSourceLabel(calendar)}. ${freshness.label}`}
+                    accessibilityLabel={[
+                      `Show ${calendar.name}`,
+                      calendarSourceLabel(calendar),
+                      calendar.isWritable ? null : "Read only",
+                    ]
+                      .filter(Boolean)
+                      .join(", ")}
+                    accessibilityHint={freshness.label}
                     accessibilityState={{
                       checked: calendar.isSelected,
                       disabled: selection.pending,

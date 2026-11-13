@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ApiClientError } from "@personal-os/api-client";
 import type { Calendar, CalendarEvent } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -31,6 +32,7 @@ const h = vi.hoisted(() => ({
     listEvents: vi.fn(),
     listCalendars: vi.fn(),
     getEvent: vi.fn(),
+    getWorkspaceSettings: vi.fn(),
     setCalendarSelected: vi.fn(),
   },
 }));
@@ -161,6 +163,9 @@ beforeEach(() => {
   h.api.listEvents.mockReset().mockResolvedValue([standup, review, lunch, overnight, holiday]);
   h.api.listCalendars.mockReset().mockResolvedValue([work, personal, holidays]);
   h.api.getEvent.mockReset().mockResolvedValue(standup);
+  h.api.getWorkspaceSettings
+    .mockReset()
+    .mockResolvedValue({ workspace: "calendar", preferences: { weekStartsOn: "sunday" } });
   h.api.setCalendarSelected.mockReset();
   h.openURL.mockReset().mockResolvedValue(undefined);
 });
@@ -230,6 +235,49 @@ it("moves between days with the arrows, the week strip and Today", async () => {
   expect(screen.queryByRole("button", { name: "Go to today" })).toBeNull();
 });
 
+it("starts the week strip on the account's chosen weekday", async () => {
+  h.api.getWorkspaceSettings.mockResolvedValue({
+    workspace: "calendar",
+    preferences: { weekStartsOn: "monday" },
+  });
+  mount(<CalendarRoute />);
+  await screen.findByText("All day");
+  expect(h.api.getWorkspaceSettings).toHaveBeenCalledWith("calendar");
+  expect(ranges()).toEqual(["11-09→11-16"]);
+  const strip = screen
+    .getAllByRole("button")
+    .map((button) => button.getAttribute("aria-label") ?? "")
+    .filter((label) => /^\w+day, November/.test(label));
+  expect(strip[0]).toBe("Monday, November 9");
+  expect(strip[6]).toBe("Sunday, November 15");
+  cleanup();
+
+  h.api.listEvents.mockClear();
+  h.api.getWorkspaceSettings.mockRejectedValue(new Error("offline"));
+  mount(<CalendarRoute />);
+  await screen.findByText("All day");
+  expect(ranges()).toEqual(["11-08→11-15"]);
+});
+
+it("keeps the last events on screen while another week or view loads", async () => {
+  mount(<CalendarRoute />);
+  await screen.findByText("All day");
+  h.api.listEvents.mockReturnValue(new Promise(() => {}));
+
+  press("Agenda");
+  expect(screen.getByRole("button", { name: /^Standup/ })).toBeVisible();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+
+  press("Day");
+  press("Next day");
+  press("Next day");
+  expect(heading()).toBe("Sun, Nov 15");
+  await waitFor(() => expect(ranges().at(-1)).toBe("11-15→11-22"));
+  expect(screen.getByRole("progressbar")).toBeVisible();
+  expect(screen.queryByText("Nothing scheduled.")).toBeNull();
+  expect(screen.queryByRole("button", { name: /has events/ })).toBeNull();
+});
+
 it("follows the account's day when the app returns to the foreground", async () => {
   mount(<CalendarRoute />);
   await screen.findByText("All day");
@@ -267,14 +315,22 @@ it("saves which calendars are shown and re-reads events", async () => {
   await screen.findByText("2 of 3 calendars shown");
   press("Choose calendars");
   const sheet = within(screen.getByRole("dialog"));
-  expect(sheet.getByRole("checkbox", { name: "Show Work" })).toBeChecked();
-  expect(sheet.getByRole("checkbox", { name: "Show Holidays" })).not.toBeChecked();
+  expect(sheet.getByRole("checkbox", { name: "Show Work, work@example.test" })).toBeChecked();
+  expect(
+    sheet.getByRole("checkbox", { name: "Show Holidays, work@example.test, Read only" }),
+  ).not.toBeChecked();
   expect(sheet.getByText("work@example.test · Read only")).toBeVisible();
   expect(sheet.getByText("Stored in nohmi")).toBeVisible();
   expect(sheet.getAllByText("Updated Fri, Nov 13, 9:41 AM")).toHaveLength(2);
 
-  fireEvent.click(sheet.getByRole("checkbox", { name: "Show Holidays" }));
-  await waitFor(() => expect(sheet.getByRole("checkbox", { name: "Show Holidays" })).toBeChecked());
+  fireEvent.click(
+    sheet.getByRole("checkbox", { name: "Show Holidays, work@example.test, Read only" }),
+  );
+  await waitFor(() =>
+    expect(
+      sheet.getByRole("checkbox", { name: "Show Holidays, work@example.test, Read only" }),
+    ).toBeChecked(),
+  );
   expect(h.api.setCalendarSelected).toHaveBeenCalledWith("holidays", true);
   await waitFor(() => expect(h.api.listEvents).toHaveBeenCalledTimes(2));
   expect(screen.queryByText(/calendars shown/)).toBeNull();
@@ -290,10 +346,10 @@ it("reports a failed calendar choice through Sonner and keeps the saved choice",
   mount(<CalendarRoute />);
   await screen.findByText("2 of 3 calendars shown");
   press("Choose calendars");
-  fireEvent.click(screen.getByRole("checkbox", { name: "Show Work" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Show Work, work@example.test" }));
   await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
   expect(h.error.mock.calls[0]?.[0]).toMatch(/Couldn’t confirm the result/);
-  expect(screen.getByRole("checkbox", { name: "Show Work" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Show Work, work@example.test" })).toBeChecked();
   expect(screen.queryByText(/Couldn’t confirm/)).toBeNull();
   expect(h.api.listEvents).toHaveBeenCalledTimes(1);
 });
@@ -320,7 +376,9 @@ it("explains hidden, missing and unavailable calendars instead of an empty day",
   press("Choose calendars");
   const sheet = within(screen.getByRole("dialog"));
   fireEvent.click(await sheet.findByRole("button", { name: "Retry loading" }));
-  expect(await sheet.findByRole("checkbox", { name: "Show Work" })).toBeChecked();
+  expect(
+    await sheet.findByRole("checkbox", { name: "Show Work, work@example.test" }),
+  ).toBeChecked();
   failed.unmount();
 
   h.api.listCalendars.mockReturnValue(new Promise(() => {}));
@@ -380,7 +438,7 @@ it("shows read-only event details with time zone, source, freshness, place and c
     recurrence: ["RRULE:FREQ=DAILY"],
     url: "https://example.test/agenda",
     notes: "Bring the roadmap.",
-    reminders: [{ minutes: 10 }, { minutes: 0 }],
+    reminders: [{ minutes: 10 }, { minutes: 90 }, { minutes: 0 }],
     attendees: [
       { email: "ada@example.test", name: "Ada", response: "accepted", isOrganizer: true },
       { email: "sam@example.test", name: null, response: "declined", isOrganizer: false },
@@ -393,14 +451,14 @@ it("shows read-only event details with time zone, source, freshness, place and c
   expect(screen.getByText("Friday, November 13 · 9:00 AM – 9:30 AM")).toBeVisible();
   expect(
     screen.getByText(
-      "Times shown in America/New_York · Event set in Europe/London · Tentative · Repeats",
+      "Times shown in Eastern Standard Time · Event set in Greenwich Mean Time · Tentative · Repeats",
     ),
   ).toBeVisible();
   expect(screen.getByText("Room 4")).toBeVisible();
   expect(await screen.findByText("Work")).toBeVisible();
   expect(screen.getByText("work@example.test")).toBeVisible();
   expect(screen.getByText("Updated Fri, Nov 13, 9:41 AM")).toBeVisible();
-  expect(screen.getByText("10 min before · At start")).toBeVisible();
+  expect(screen.getByText("10 minutes before · 1 hour 30 minutes before · At start")).toBeVisible();
   expect(screen.getByText("Organizer · Accepted")).toBeVisible();
   expect(screen.getByText("sam@example.test")).toBeVisible();
   expect(screen.getByText("Bring the roadmap.")).toBeVisible();
@@ -464,4 +522,21 @@ it("opens from the list's copy, and recovers from a missing or failed event", as
   mount(<CalendarEventRoute />);
   expect(screen.getByText("This event is no longer available.")).toBeVisible();
   expect(h.api.getEvent).toHaveBeenCalledTimes(2);
+  cleanup();
+
+  h.params = { id: "Review" };
+  h.api.getEvent
+    .mockReset()
+    .mockRejectedValue(
+      new ApiClientError({ code: "not_found", message: "Event not found", status: 404 }),
+    );
+  const deleted = new QueryClient({ defaultOptions: { queries: { retry: 2, retryDelay: 0 } } });
+  render(
+    <QueryClientProvider client={deleted}>
+      <CalendarEventRoute />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("This event is no longer available.")).toBeVisible();
+  expect(screen.queryByText("Retry loading")).toBeNull();
+  expect(h.api.getEvent).toHaveBeenCalledTimes(1);
 });

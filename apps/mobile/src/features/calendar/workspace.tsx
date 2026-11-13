@@ -14,6 +14,7 @@ import {
   useCalendarScope,
   useCalendars,
   useToday,
+  useWeekStart,
 } from "./data";
 import {
   agendaDayCount,
@@ -53,7 +54,8 @@ export function CalendarScreen() {
   const [view, setView] = useState<(typeof views)[number]>("Day");
   const [choosing, setChoosing] = useState(false);
   const day = picked ?? today;
-  const week = useMemo(() => (day ? weekDays(day) : []), [day]);
+  const weekStart = useWeekStart();
+  const week = useMemo(() => (day && weekStart ? weekDays(day, weekStart) : []), [day, weekStart]);
   const events = useCalendarEvents(
     view === "Day" ? (week[0] ?? null) : day,
     view === "Day" ? 7 : agendaDayCount,
@@ -131,7 +133,10 @@ export function CalendarScreen() {
             {week.map((date) => {
               const selected = sameLocalDate(date, day);
               const current = sameLocalDate(date, today);
-              const busy = events.data?.some((event) => eventOccursOnDay(event, date, timeZone));
+              // Kept events belong to the previous range, so they cannot mark this week's days.
+              const busy =
+                !events.isPlaceholderData &&
+                events.data?.some((event) => eventOccursOnDay(event, date, timeZone));
               return (
                 <Pressable
                   key={date.day}
@@ -229,7 +234,13 @@ export function CalendarScreen() {
             </Copy>
           </Card>
         ) : view === "Day" ? (
-          <DayView events={events.data} day={day} timeZone={timeZone} calendars={calendarsById} />
+          <DayView
+            events={events.data}
+            day={day}
+            timeZone={timeZone}
+            calendars={calendarsById}
+            loading={events.isPlaceholderData}
+          />
         ) : (
           <AgendaView
             events={events.data}
@@ -237,6 +248,7 @@ export function CalendarScreen() {
             today={today}
             timeZone={timeZone}
             calendars={calendarsById}
+            loading={events.isPlaceholderData}
           />
         )}
       </View>
@@ -267,19 +279,38 @@ function IconButton({
   );
 }
 
-type ViewProps = { events: CalendarEvent[]; timeZone: string; calendars: CalendarsById };
+type ViewProps = {
+  events: CalendarEvent[];
+  timeZone: string;
+  calendars: CalendarsById;
+  /** The events are the previous range's, kept on screen while this range loads. */
+  loading: boolean;
+};
 
-function DayView({ events, day, timeZone, calendars }: ViewProps & { day: LocalDate }) {
+/** Kept events cannot prove a day is empty; say it is loading instead. */
+function Empty({ loading, children }: { loading: boolean; children: string }) {
+  const t = useTheme();
+  if (loading)
+    return (
+      <ActivityIndicator
+        color={t.secondary}
+        accessibilityLabel="Loading calendar"
+        style={{ padding: 24 }}
+      />
+    );
+  return (
+    <Card>
+      <Copy>{children}</Copy>
+    </Card>
+  );
+}
+
+function DayView({ events, day, timeZone, calendars, loading }: ViewProps & { day: LocalDate }) {
   const { allDay, timed } = useMemo(
     () => dayEvents(events, day, timeZone),
     [events, day, timeZone],
   );
-  if (!allDay.length && !timed.length)
-    return (
-      <Card>
-        <Copy>Nothing scheduled.</Copy>
-      </Card>
-    );
+  if (!allDay.length && !timed.length) return <Empty loading={loading}>Nothing scheduled.</Empty>;
   return (
     <>
       {!!allDay.length && (
@@ -401,17 +432,14 @@ function AgendaView({
   today,
   timeZone,
   calendars,
+  loading,
 }: ViewProps & { from: LocalDate; today: LocalDate }) {
   const sections = useMemo(
     () => agendaSections(events, from, agendaDayCount, timeZone),
     [events, from, timeZone],
   );
   if (!sections.length)
-    return (
-      <Card>
-        <Copy>Nothing scheduled in these {agendaDayCount} days.</Copy>
-      </Card>
-    );
+    return <Empty loading={loading}>{`Nothing scheduled in these ${agendaDayCount} days.`}</Empty>;
   return (
     <>
       {sections.map(({ day, allDay, timed }) => (

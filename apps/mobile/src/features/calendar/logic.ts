@@ -51,9 +51,14 @@ function localMinuteAt(instant: Date, timeZone: string) {
   return Number(values.hour) * 60 + Number(values.minute);
 }
 
-/** The seven local days of the Sunday-first week containing `day`. */
-export function weekDays(day: LocalDate): LocalDate[] {
-  const start = startOfLocalWeek(day);
+export type WeekStart = "sunday" | "monday";
+
+/** The seven local days of the week containing `day`, starting on the account's chosen weekday. */
+export function weekDays(day: LocalDate, weekStartsOn: WeekStart = "sunday"): LocalDate[] {
+  const start =
+    weekStartsOn === "monday"
+      ? addLocalDays(startOfLocalWeek(addLocalDays(day, -1)), 1)
+      : startOfLocalWeek(day);
   return Array.from({ length: 7 }, (_, index) => addLocalDays(start, index));
 }
 
@@ -215,7 +220,11 @@ export function formatDay(day: LocalDate, style: "long" | "short" | "weekday" = 
 export function eventTimeLabel(event: CalendarEvent, day: LocalDate, timeZone: string) {
   if (event.allDay) return "All day";
   const startsToday = sameLocalDate(localDateAt(new Date(event.startsAt), timeZone), day);
-  const endsToday = sameLocalDate(localDateAt(new Date(event.endsAt), timeZone), day);
+  // An end is exclusive: an event ending exactly at midnight ends on the day before.
+  const lastInstant = new Date(
+    Math.max(new Date(event.startsAt).getTime(), new Date(event.endsAt).getTime() - 1),
+  );
+  const endsToday = sameLocalDate(localDateAt(lastInstant, timeZone), day);
   const start = formatClock(event.startsAt, timeZone);
   const end = formatClock(event.endsAt, timeZone);
   if (startsToday && endsToday) return `${start} – ${end}`;
@@ -239,6 +248,38 @@ export function eventWhenLabel(event: CalendarEvent, timeZone: string) {
   return sameLocalDate(first, last)
     ? `${formatDay(first)} · ${start} – ${end}`
     : `${formatDay(first, "short")}, ${start} – ${formatDay(last, "short")}, ${end}`;
+}
+
+const reminderUnits = [
+  ["week", 10_080],
+  ["day", 1440],
+  ["hour", 60],
+  ["minute", 1],
+] as const;
+/** "90" becomes "1 hour 30 minutes before"; zero is the start itself. */
+export function reminderLabel(minutes: number) {
+  if (minutes <= 0) return "At start";
+  let rest = minutes;
+  const parts: string[] = [];
+  for (const [unit, size] of reminderUnits) {
+    const count = Math.floor(rest / size);
+    rest -= count * size;
+    if (count) parts.push(`${count} ${unit}${count === 1 ? "" : "s"}`);
+  }
+  return `${parts.join(" ")} before`;
+}
+
+/** A zone's spoken name at the event's time, such as "Eastern Standard Time". */
+export function timeZoneName(timeZone: string, at: string) {
+  try {
+    const name = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "long" })
+      .formatToParts(new Date(at))
+      .find((part) => part.type === "timeZoneName")?.value;
+    if (name) return name;
+  } catch {
+    // An identifier this runtime does not know still reads better without underscores.
+  }
+  return timeZone.replace(/_/g, " ");
 }
 
 const providerLabels = { google: "Google", icloud: "iCloud", local: "nohmi" } as const;

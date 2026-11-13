@@ -5,13 +5,15 @@ import { Icon, type IconName } from "../../components/icons";
 import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
 import { spacing, useTheme, workspaceColor } from "../../theme";
-import { useCalendarEvent, useCalendarScope, useCalendars } from "./data";
+import { isNotFound, useCalendarEvent, useCalendarScope, useCalendars } from "./data";
 import {
   attendeeLabel,
   calendarFreshness,
   calendarSourceLabel,
   eventWhenLabel,
   fallbackEventColor,
+  reminderLabel,
+  timeZoneName,
 } from "./logic";
 import { CalendarDot, Card, Copy, SectionTitle } from "./ui";
 
@@ -33,14 +35,15 @@ export function CalendarEventScreen() {
   const query = useCalendarEvent(typeof id === "string" ? id : undefined);
   const calendars = useCalendars();
   const event = query.data;
-  if (!event)
+  if (!event) {
+    const gone = !id || isNotFound(query.error);
     return (
       <Screen>
-        {query.isError || !id ? (
+        {query.isError || gone ? (
           <RecordRow
-            title={id ? "Retry loading" : "This event is no longer available."}
+            title={gone ? "This event is no longer available." : "Retry loading"}
             leading={<Icon name="disconnected" color={tint} />}
-            onPress={id ? () => void query.refetch() : undefined}
+            onPress={gone ? undefined : () => void query.refetch()}
           />
         ) : (
           <ActivityIndicator
@@ -51,6 +54,7 @@ export function CalendarEventScreen() {
         )}
       </Screen>
     );
+  }
   const calendar = calendars.data?.find((candidate) => candidate.id === event.calendarId);
   const freshness = calendar ? calendarFreshness(calendar, timeZone) : null;
   const icon = (name: IconName) => <Icon name={name} color={tint} />;
@@ -70,9 +74,9 @@ export function CalendarEventScreen() {
           <RecordRow
             title={eventWhenLabel(event, timeZone)}
             subtitle={[
-              event.allDay ? null : `Times shown in ${timeZone}`,
+              event.allDay ? null : `Times shown in ${timeZoneName(timeZone, event.startsAt)}`,
               !event.allDay && event.timezone !== timeZone
-                ? `Event set in ${event.timezone}`
+                ? `Event set in ${timeZoneName(event.timezone, event.startsAt)}`
                 : null,
               event.status === "tentative" ? "Tentative" : null,
               event.status === "cancelled" ? "Cancelled" : null,
@@ -134,9 +138,7 @@ export function CalendarEventScreen() {
           {!!reminders.length && (
             <RecordRow
               title="Reminders"
-              subtitle={reminders
-                .map(({ minutes }) => (minutes ? `${minutes} min before` : "At start"))
-                .join(" · ")}
+              subtitle={reminders.map(({ minutes }) => reminderLabel(minutes)).join(" · ")}
               leading={icon("notification")}
             />
           )}

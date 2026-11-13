@@ -47,6 +47,13 @@ internal account movements, card payments, ambiguous payments and ordinary categ
 Labels and merchant names are navigation aids, not proof. Agents inspect exact transactions,
 their revisions, account ownership, currency, amounts, dates, relationships and source evidence.
 Matching amounts or a high confidence score alone do not establish an internal transfer.
+Generic provider transfer labels, opposite signs, date proximity and uniqueness establish a
+candidate, not proof that the movements share a destination. For such pairs, show both frozen
+merchant/amount/date summaries and require the owner's explicit confirmation that they are the
+same movement between owned accounts. Agent execution alone cannot confirm these candidates.
+The confirmed pair shares a persistent transfer group; an exact undo restores the previous links,
+classifications, allocations and review states. The correction preview shows both affected legs
+and the saved values being restored, rather than asking the owner to approve opaque identifiers.
 
 An answered purpose and an unverified expense link are different facts. Preserve the answer and
 continue investigating the link; do not ask the person to repeat an already recorded answer.
@@ -84,3 +91,73 @@ Results retain every supplied item in order. Source checks use the owned transac
 The first evidence adapter qualifies exact reciprocal transfer confirmations only. Other decisions remain `awaiting_evidence` until their owning evidence adapter establishes sufficiency; caller explanations, confidence, routing groups and `current_record` do not establish it. Missing execute permission is reported as `authorization_denied`, separately from source failure. Valid permission without standing approval remains `awaiting_approval`. A human inspection request itself does not grant approval. Independent qualified items remain visible alongside all held items, so a caller can prepare a separate exact preview for justified work without creating another maintenance run.
 
 The response includes canonical source references and an observation time, plus explicit `advisoryOnly`, `previewRequired` and `executionRevalidationRequired` markers. Re-read or requalify after source changes; the strict existing preview and execution paths remain authoritative. The MCP tool `qualify_finance_maintenance_work` uses the same service and typed client with only `finances:read`, including read-only discovery; it requires no maintenance or execution scope to inspect. Its catalog entry is read-only, prepare-stage and closed-world. Natural-host consumption and useful independent progress remain outcome acceptance, not a consequence of passing source tests.
+
+## November-first budgeting and the active inbox
+
+Accepted product direction on November 12, 2026; implementation remains a target until separately
+verified. Cooper's first maintained budget month is November 2026 in the user's default timezone.
+Preserve all prior transactions, reviews and provenance. Historical work belongs in a separately
+inspectable cleanup queue unless it affects current balances, spending, obligations or allocations.
+Moving work out of the active scope never resolves it or establishes historical completeness.
+Unknown dates and uncertain dependencies require triage rather than automatic historical placement.
+
+The active inbox counts distinct human decisions, with transaction flags, review cases, processing
+work and technical blockers reported separately. Zero human decisions does not imply budget-ready:
+material evidence dependencies must be resolved and the exact current plan approved. The opening
+position requires qualified balance anchors and interval coverage; missing information is not zero.
+
+Finance Chat owns concise, linked questions and batch approvals. Answers durably resume authorized
+work and receive a verified result; they do not silently create permanent rules. Reuse the original
+routine, current-instruction bootstrap and notification controls. Each later month uses the same
+policy with a fresh proposal and explicit carryover, rather than resetting history or automatically
+approving a plan. See the [detailed design](../superpowers/specs/2026-11-12-finance-inbox-zero-design.md)
+and [implementation plan](../superpowers/plans/2026-11-12-finance-inbox-zero.md).
+
+
+### Exact owner approval and resumable batches
+
+Approving a displayed review batch records a one-batch, exact-fingerprint instruction with
+24-hour expiry. Pending work survives the client closing and resumes through the existing
+bounded batch executor on the server maintenance tick. This does not create a standing agent
+grant. Every effect still checks current source revisions and the live approval, cancellation,
+expiry and worker claim. Cancellation stops future effects; it does not undo applied effects.
+Unexpected failures have bounded retries and an explicit recovery state. A completed batch
+reports its actual applied/exception counts in Finance Chat with a link to the saved outcomes.
+
+Shared Finance Chat also permits a connected Finance reader to inspect bounded conversation
+pages, and an agent with read/write/maintain grants to publish short attributed record cards.
+These annotations neither consume the original routine's source messages nor impersonate an
+owner answer. The original host's causal reply protocol, identity, cadence and grants remain
+unchanged. Pending published approvals contribute to active human attention; approved work
+contributes to processing, and stopped work retains technical recovery. Historical raw review
+counts remain separately available.
+
+### Monthly continuity and retained runs
+
+The approved first month is a floor, not a fixed reporting month. `maintain_finances`
+returns `monthlyWork` for an approved start policy: current owner-local month, canonical
+attention, current/previous/upcoming budget versions and domain-owned next-work guidance.
+A future start remains disabled; reversing the policy restores the all-outstanding workflow.
+An old run's scope, host identity, saved candidate and approvals remain unchanged. Its
+blocked or completed state does not establish readiness for the current month.
+
+The current-month date window is a discovery aid, not permission to omit unresolved work
+since activation or exact historical dependencies. Approved independent batches continue via
+the existing durable worker even while aggregate bookkeeping is blocked. Historical records
+are retained; late postings and cross-period refunds can return them to active attention.
+
+Monthly budget preparation reuses an existing target proposal when present. Previous approved
+allocations are a template only: changed income and bills need fresh evidence, and material
+unknowns need an owner answer. The supported carryover policy is `none`; unspent allocations
+and unreceived income are not additional cash. Exact new versions require owner approval in
+Finance Chat. Actual unattended execution and phone delivery remain release acceptance,
+not claims established by this contract or synthetic tests.
+
+### Activation evidence and subsequent months
+
+Historical disposition uses the qualified starting-month boundary for each affected account,
+separately from the current month's opening and budget readiness. A missing December statement
+must not reactivate independent October work. An unqualified or relinked account holds its own
+history for triage; matching cross-boundary transfer candidates and persisted relationships keep
+potential dependencies active until resolved. Published batch and correction cards derive scope
+from their actual member transactions, with one human approval for a mixed-period batch.

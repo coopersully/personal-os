@@ -763,3 +763,62 @@ maintenance, write and execution grants; loading does not require Chat proof bec
 also guide the existing handshake. Failed delivery/acknowledgment stops a bootstrap invocation.
 The stable bootstrap and dynamic instruction version are independent. Host scheduling and actual
 obedience remain external evidence, never inferred from issuance or acknowledgment.
+
+
+### Finance attention, evidence and corrections
+
+`get_finance_attention` is the authoritative current-period projection. It separates active
+human decisions, processing, technical blockers, historical records and budget readiness.
+Status and backlog assessment return this same `attention` projection from their database
+snapshot. The backlog's existing totals still mean all outstanding flags and cases; they
+must not be summed into a human-question count. Older stored receipts may omit `attention`;
+clients must show unavailable/loading, never infer zero from absence.
+
+`get_finance_budget_start`, `preview_finance_budget_start` and
+`get_finance_budget_start_preview` expose a versioned starting-month policy and its exact
+before/after impact. The preview changes no financial record. Only the authenticated owner
+can approve it through the application API. Agent write permission is not owner approval;
+there is intentionally no agent `apply_finance_budget_start` tool. An approval remains
+separate from opening-position qualification and budget-plan approval.
+
+`get_finance_opening_position` identifies qualified opening balances and missing evidence.
+`prepare_finance_evidence_refresh` requires read, write and maintain grants, persists its
+exact source revisions and period, and uses the existing provider sync scheduler.
+`get_finance_evidence_refresh` reconciles the saved request; the scheduler also observes
+pending requests after sync, including failed sync attempts. Read its durable receipt before
+retrying. Provider freshness does not establish historical interval coverage. Missing
+coverage can require an explicit owner opening statement; tools cannot manufacture it.
+
+`preview_finance_review_batch_undo` prepares compensation for at most ten exact applied
+outcomes. `get_finance_review_batch_undo` reads progress and
+`execute_finance_review_batch_undo` rechecks authority, policy and later edits per effect.
+Execution requires the separate execute grant. Undo retains audit history and retracts the
+classification evidence created by the undone operation. Conflicting later edits require
+fresh inspection rather than overwriting them. Original batch actor/connection fences
+remain; owner review uses existing authenticated batch retrieval and human audit attribution.
+
+
+`get_finance_chat` reads bounded shared conversation history without marking it read or
+claiming the original routine's sources. `publish_finance_chat_card` requires read, write and
+maintain grants and posts a short, attributed annotation with actual owned references.
+Connection-scoped idempotency survives token rotation. It cannot impersonate the person,
+acknowledge a host turn, approve a proposal, or execute a financial change. Host causal replies
+continue to use the original registered turn/batch protocol. Cards support exact
+`budget_start_preview` and `review_batch_undo` references in addition to existing records.
+
+The owner may approve a review batch through the app's exact-fingerprint approval endpoint.
+This stores a 24-hour, one-batch approval; it is not an agent grant. The existing server
+maintenance tick advances at most ten effects per claim through the same batch executor,
+with a two-minute recoverable lease, per-effect cancellation/expiry checks, bounded database
+deadlines, and three bounded retries for unexpected failures. Source conflicts retain their
+actual failed receipts. `get_finance_review_batch_continuation` exposes saved progress.
+Only the owner can approve/cancel; no corresponding MCP approval tool exists. Cancellation
+stops uncommitted work after the current effect transaction and never undoes applied effects.
+Completed/failed work posts one saved Chat result and notification intent. APNs acceptance
+and physical display remain separate delivery evidence.
+
+Published pending policy, batch and correction cards contribute to the canonical human
+attention count. Approved running batches are processing; stopped batches are technical
+recovery. Dismissing a stopped continuation does not resolve its underlying transactions.
+Publishing a policy's own card must not invalidate that exact preview; policy application
+excludes only that self-reference from the financial-impact comparison.

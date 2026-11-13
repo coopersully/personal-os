@@ -229,7 +229,9 @@ export function eventTimeLabel(event: CalendarEvent, day: LocalDate, timeZone: s
   const end = formatClock(event.endsAt, timeZone);
   if (startsToday && endsToday) return `${start} – ${end}`;
   if (startsToday) return `From ${start}`;
-  if (endsToday) return `Until ${end}`;
+  // Ending at the midnight that closes this day fills it; "Until 12:00 AM" would read as its start.
+  if (endsToday && sameLocalDate(localDateAt(new Date(event.endsAt), timeZone), day))
+    return `Until ${end}`;
   return "Continues all day";
 }
 

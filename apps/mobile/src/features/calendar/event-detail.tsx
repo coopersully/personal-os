@@ -130,7 +130,9 @@ export function CalendarEventScreen() {
             <RecordRow
               title={freshness.label}
               subtitle={freshness.attention ? "Source · This event may be out of date" : "Source"}
-              leading={icon("refresh")}
+              leading={
+                freshness.attention ? <Icon name="attention" color={t.warning} /> : icon("refresh")
+              }
             />
           )}
           {!!reminders.length && (

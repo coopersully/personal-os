@@ -63,7 +63,9 @@ vi.mock("sonner-native", () => ({
   toast: { error: h.error, success: h.success, loading: h.loading, dismiss: h.dismiss },
 }));
 vi.mock("../../components/icons", () => ({
-  Icon: ({ name }: { name: string }) => <span data-icon={name} />,
+  Icon: ({ name, color }: { name: string; color?: string }) => (
+    <span data-icon={name} data-color={color} />
+  ),
 }));
 vi.mock("../../components/screen", () => ({
   Screen: ({ children, onRefresh }: PropsWithChildren<{ onRefresh?: () => Promise<unknown> }>) => (
@@ -502,6 +504,12 @@ it("is honest about all-day, cancelled, unsynced and pending-call events", async
   expect(await screen.findByText("work@example.test · Read only")).toBeVisible();
   expect(screen.getByText("Not updated yet")).toBeVisible();
   expect(screen.getByText("Source · This event may be out of date")).toBeVisible();
+  // A stale source is marked by a warning-coloured glyph, not by its wording alone.
+  expect(document.querySelector('[data-icon="attention"]')).toHaveAttribute(
+    "data-color",
+    "#89501b",
+  );
+  expect(document.querySelector('[data-icon="refresh"]')).toBeNull();
   first.unmount();
 
   h.api.listCalendars.mockResolvedValue([]);

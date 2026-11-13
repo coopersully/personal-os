@@ -137,6 +137,9 @@ describe("calendar day model", () => {
       startMinute: 0,
       endMinute: 60,
     });
+    const weekend = event("weekend", "2026-11-13T03:00:00.000Z", "2026-11-15T05:00:00.000Z");
+    expect(eventTimeLabel(weekend, friday, zone)).toBe("Continues all day");
+    expect(eventTimeLabel(weekend, saturday, zone)).toBe("Continues all day");
     const instant = event("ping", "2026-11-13T15:00:00.000Z", "2026-11-13T15:01:00.000Z");
     expect(layoutDayEvents([instant], friday, zone)[0]).toMatchObject({
       startMinute: 600,

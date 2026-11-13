@@ -19,7 +19,7 @@ import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { Icon } from "../../components/icons";
 import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
-import { useTheme } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { useSettingsRefresh } from "../settings/data";
 import { SettingsViewSwitcher } from "../settings/view-switcher";
@@ -72,6 +72,7 @@ function GoalsHome() {
           ]}
           onChange={setTab}
         />
+        <View style={{ height: spacing.lg }} />
 
         <ReadState
           pending={tab === "motives" ? motives.isPending : goals.isPending}

@@ -57,7 +57,7 @@ export function GlassButton({
           alignItems: "center",
           justifyContent: "center",
           paddingHorizontal: icon ? 0 : 16,
-          opacity: disabled ? 0.4 : pressed ? 0.6 : 1,
+          opacity: disabled ? 0.5 : pressed ? 0.6 : 1,
         })}
       >
         {icon ? (

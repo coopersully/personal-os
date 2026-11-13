@@ -164,7 +164,7 @@ describe("GlassButton", () => {
     );
     const button = screen.getByRole("button", { name: "Save changes" });
     expect(button).toBeDisabled();
-    expect(styleOf(button)).toMatchObject({ opacity: 0.4 });
+    expect(styleOf(button)).toMatchObject({ opacity: 0.5 });
     expect(h.icons.at(-1)?.color).toBe("#202024");
     expect(styleOf(screen.getByTestId("glass"))).toMatchObject({
       marginBottom: 34,

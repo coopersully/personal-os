@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [opened, ready_for_review, reopened, synchronize]
   push:
     branches: [main, "feature/**"]
 
@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       required_jobs: ${{ steps.scope.outputs.required_jobs }}
+      lane: ${{ steps.scope.outputs.lane }}
       full: ${{ steps.scope.outputs.full }}
       repo: ${{ steps.scope.outputs.repo }}
       terraform: ${{ steps.scope.outputs.terraform }}
@@ -41,6 +42,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
           CI_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+          # A draft runs the fast lane: the classifier omits the browser and desktop
+          # matrices from required_jobs and the aggregate below reports nothing.
+          CI_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
@@ -70,6 +74,10 @@ jobs:
           path: ${{ runner.temp }}/source-candidate.json
           if-no-files-found: error
           retention-days: 7
+      - name: Explain the draft fast lane
+        if: steps.scope.outputs.lane == 'fast'
+        run: |
+          echo "::notice title=Draft fast lane::Browser and desktop acceptance are deferred and Source verification is not reported. Mark the pull request ready for review, or add the ci:full label and push, to run complete verification."
 
   infrastructure:
     name: Terraform
@@ -303,11 +311,17 @@ jobs:
       - quality
       - browser
       - desktop
-    if: ${{ !cancelled() }}
+    # A fast-lane draft run reports no aggregate; a failed classification still does.
+    if: ${{ !cancelled() && needs.changes.outputs.lane != 'fast' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Verify required CI results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
@@ -343,3 +357,17 @@ jobs:
             process.exit(1);
           }
           NODE
+
+      # The protected `CI required` gate lives in pr-metadata.yml. Starting it here,
+      # once this run has a result, replaces a job that held a runner while polling.
+      # The gate still observes this run through the API; nothing here vouches for it.
+      - name: Start the metadata gate for this candidate
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: node .github/scripts/start-metadata-gate.mjs

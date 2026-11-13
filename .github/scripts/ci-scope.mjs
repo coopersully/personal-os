@@ -367,10 +367,32 @@ export function requiredGate(results, scope) {
   );
 }
 
-function githubOutputs(scope) {
+// A draft is still being iterated. Its fast lane defers the expensive acceptance
+// matrices until the PR is ready for review; `ci:full` opts a draft back in.
+// A fast-lane run never reports Source verification, so it can never satisfy
+// the protected gate: the canonical scope and its expected jobs are unchanged.
+export const deferredDraftJobs = ["browser", "desktop"];
+
+export function sourceLane(scope, options = {}) {
+  const selected = expectedJobs(scope);
+  return options.draft === true &&
+    options.forceFull !== true &&
+    selected?.some((job) => deferredDraftJobs.includes(job))
+    ? "fast"
+    : "full";
+}
+
+export function laneJobs(scope, lane) {
+  const selected = expectedJobs(scope);
+  if (!selected || lane !== "fast") return selected;
+  return selected.filter((job) => !deferredDraftJobs.includes(job));
+}
+
+function githubOutputs(scope, lane) {
   return [
     ...scopeKeys.map((key) => `${key}=${scope[key]}`),
-    `required_jobs=${JSON.stringify(expectedJobs(scope))}`,
+    `lane=${lane}`,
+    `required_jobs=${JSON.stringify(laneJobs(scope, lane))}`,
     `changed_packages=${JSON.stringify(scope.changed_packages)}`,
     `scope_json=${JSON.stringify(scope)}`,
   ].join("\n");
@@ -414,9 +436,9 @@ function parseArguments(args) {
 function runCli() {
   let options;
   let scope;
+  const forceFull = process.env.CI_FULL === "true";
   try {
     options = parseArguments(process.argv.slice(2));
-    const forceFull = process.env.CI_FULL === "true";
     scope = options.githubPush
       ? classifyGitHubPush({ forceFull })
       : options.base !== undefined && options.head !== undefined
@@ -432,7 +454,8 @@ function runCli() {
   }
 
   if (options?.githubOutput) {
-    appendFileSync(options.githubOutput, `${githubOutputs(scope)}\n`);
+    const lane = sourceLane(scope, { draft: process.env.CI_DRAFT === "true", forceFull });
+    appendFileSync(options.githubOutput, `${githubOutputs(scope, lane)}\n`);
   }
   if (options?.json || !options?.githubOutput) {
     process.stdout.write(`${JSON.stringify(scope)}\n`);

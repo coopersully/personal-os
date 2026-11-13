@@ -18,9 +18,12 @@ import {
   classifyChanges,
   classifyGitChanges,
   classifyPushChanges,
+  deferredDraftJobs,
   expectedJobs,
   jobIds,
+  laneJobs,
   requiredGate,
+  sourceLane,
 } from "./ci-scope.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -292,7 +295,7 @@ function assertFullScopeJobGates(workflow) {
 
 test("full opt-in preserves PR events, provenance and all existing job gates", () => {
   const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
-  assert.match(workflow, /types: \[opened, reopened, synchronize\]/);
+  assert.match(workflow, /types: \[opened, ready_for_review, reopened, synchronize\]/);
   assert.doesNotMatch(
     workflow,
     /workflow_dispatch|pull_request_target|labeled|issues: write|contents: write/,
@@ -888,4 +891,104 @@ test("readiness full-source inventory matches workflow names and both complete m
     ),
   );
   assert.deepEqual(inventory.sort(), names.sort());
+});
+
+test("only a draft without the full opt-in defers the acceptance matrices", () => {
+  const full = scope({ full: true });
+  const prose = scope({ prose_only: true, repo: true });
+  assert.deepEqual(deferredDraftJobs, ["browser", "desktop"]);
+  assert.equal(sourceLane(full, { draft: true }), "fast");
+  assert.equal(sourceLane(full, { draft: true, forceFull: true }), "full");
+  assert.equal(sourceLane(full, { draft: false }), "full");
+  assert.equal(sourceLane(full), "full");
+  // Only the exact boolean selects the fast lane.
+  for (const draft of ["true", 1, null, undefined])
+    assert.equal(sourceLane(full, { draft }), "full");
+  // Prose-only scope selects neither matrix, so a draft has nothing to defer.
+  assert.equal(sourceLane(prose, { draft: true }), "full");
+  assert.equal(sourceLane({ ...full, repo: true }, { draft: true }), "full");
+  assert.deepEqual(
+    laneJobs(full, "fast"),
+    jobIds.filter((job) => !["browser", "desktop"].includes(job)),
+  );
+  assert.deepEqual(laneJobs(full, "full"), jobIds);
+  assert.deepEqual(laneJobs(prose, "fast"), ["changes", "repository"]);
+  assert.equal(laneJobs({ ...full, repo: true }, "fast"), null);
+});
+
+test("a fast-lane selection can never satisfy the required gate", () => {
+  const full = scope({ full: true });
+  const fast = laneJobs(full, "fast");
+  // The canonical scope is unchanged, so the deferred matrices remain required.
+  assert.deepEqual(expectedJobs(full), jobIds);
+  assert.equal(requiredGate(resultsFor(fast), full), false);
+});
+
+test("CLI emits the lane and its selection from the exact draft flag", (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), "nohmi-lane-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const emit = (env) => {
+    const outputFile = resolve(root, `out-${Object.values(env).join("-")}`);
+    execFileSync(
+      process.execPath,
+      [
+        resolve(scriptDirectory, "ci-scope.mjs"),
+        "--base",
+        "",
+        "--head",
+        "",
+        "--github-output",
+        outputFile,
+      ],
+      { encoding: "utf8", env: { ...process.env, CI_FULL: "", CI_DRAFT: "", ...env } },
+    );
+    return readFileSync(outputFile, "utf8");
+  };
+  const fastJobs = JSON.stringify(jobIds.filter((job) => !deferredDraftJobs.includes(job)));
+  const fast = emit({ CI_DRAFT: "true" });
+  assert.ok(fast.includes("lane=fast\n"));
+  assert.ok(fast.includes(`required_jobs=${fastJobs}\n`));
+  // The receipt-bound scope stays canonical in either lane.
+  assert.ok(fast.includes(`scope_json=${JSON.stringify(scope({ full: true }))}\n`));
+  for (const env of [
+    { CI_DRAFT: "false" },
+    { CI_DRAFT: "TRUE" },
+    { CI_DRAFT: "" },
+    { CI_DRAFT: "true", CI_FULL: "true" },
+  ]) {
+    const output = emit(env);
+    assert.ok(output.includes("lane=full\n"));
+    assert.ok(output.includes(`required_jobs=${JSON.stringify(jobIds)}\n`));
+  }
+});
+
+test("workflow defers draft matrices in the classifier and starts the gate last", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const blocks = workflowJobBlocks(workflow);
+  const block = (job) => blocks.find((candidate) => candidate.startsWith(`  ${job}:\n`));
+  assert.match(
+    block("changes"),
+    /CI_DRAFT: \$\{\{ github.event_name == 'pull_request' && github.event.pull_request.draft == true \}\}/,
+  );
+  assert.match(block("changes"), /lane: \$\{\{ steps.scope.outputs.lane \}\}/);
+  // Selection stays in the tested classifier; no job grows its own draft condition.
+  for (const job of fullScopeJobs) assert.doesNotMatch(block(job), /draft/);
+  const required = block("required");
+  // A failed classification has no lane and must still report a failing aggregate.
+  assert.match(
+    required,
+    /^ {4}if: \$\{\{ !cancelled\(\) && needs.changes.outputs.lane != 'fast' \}\}$/m,
+  );
+  assert.match(required, /permissions:\n {6}contents: read\n {6}actions: write\n/);
+  assert.match(required, /uses: actions\/checkout@v7\n {8}with:\n {10}persist-credentials: false/);
+  const gate = required.indexOf("Verify required CI results");
+  const start = required.indexOf("run: node .github/scripts/start-metadata-gate.mjs");
+  assert.ok(gate > 0 && start > gate);
+  assert.match(
+    required,
+    /if: \$\{\{ !cancelled\(\) && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository \}\}/,
+  );
+  // Only the aggregate job can start workflows; the workflow default stays read-only.
+  assert.equal(workflow.match(/actions: write/g).length, 1);
+  assert.match(workflow, /^permissions:\n {2}contents: read\n\nconcurrency:/m);
 });

@@ -244,7 +244,8 @@ Productive remediation has no pass limit. Unchanged blocking/waiting stays quiet
 | --- | --- |
 | CI queued/running, review requested, eligible approval absent | Wait on identified provider record; no code edits just to provoke activity. |
 | Missing independent deep-review | Obtain current-candidate independent acceptance; optional CodeRabbit absence/rate limits do not block. Actual feedback and required GitHub checks still apply. |
-| Source workflow is retried on the same head | Record the source run/attempt and its metadata run/attempt. After source recovery, rerun the failed/canceled PR metadata workflow with `gh run rerun <metadata-run-id> --failed` and await its new `CI required` result. A source retry alone does not refresh that gate. Never edit the body only to trigger it. |
+| Source workflow is retried on the same head | Record the source run/attempt and its metadata run/attempt. A source retry that reruns `Source verification` starts a fresh metadata gate when it finishes; await that `CI required` result. If none appears, rerun the failed/canceled PR metadata workflow with `gh run rerun <metadata-run-id> --failed`. Never edit the body only to trigger it. |
+| Draft PR shows no `Source verification` or `CI required` | Expected: drafts run the fast lane. Mark the PR ready for review when the readiness gate supports it, or apply `ci:full` before the final push. |
 | Missing selected CI job | Diagnose workflow scope/trigger; request an applicable run when authorized; never remove the requirement. |
 | Failed code check | Read logs, reproduce, repair root cause, verify, push, refresh evidence. |
 | Transient API/runner failure | Bounded retry with backoff; no repeated identical pushes. |

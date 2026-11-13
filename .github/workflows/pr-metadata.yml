@@ -1,15 +1,33 @@
 name: PR metadata
 
+# Source CI starts this gate once it has a result (see the last step of ci.yml), so
+# no runner waits while tests run. A description edit re-validates the Work map.
+# The `CI required` job must never be skipped: branch protection treats a skipped
+# required job as passing. Keep every condition inside the script.
 on:
   pull_request:
-    types: [edited, opened, ready_for_review, reopened, synchronize]
+    types: [edited]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request whose head is the selected branch
+        required: true
+        type: string
+      base_sha:
+        description: Expected base commit (optional)
+        required: false
+        type: string
+      base_ref:
+        description: Expected base branch (optional)
+        required: false
+        type: string
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: pr-metadata-${{ github.event.pull_request.number }}
+  group: pr-metadata-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
@@ -28,9 +46,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           PR_RETARGETED: ${{ github.event.action == 'edited' && github.event.changes.base != null }}
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || inputs.base_ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.base_sha }}
+          # A dispatched run reports on the commit it was started for. Binding the
+          # expected head to that commit stops a green pull request from vouching
+          # for a different branch.
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_DRAFT: ${{ github.event.pull_request.draft == true }}
+          PR_FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
         run: node .github/scripts/wait-source-ci.mjs

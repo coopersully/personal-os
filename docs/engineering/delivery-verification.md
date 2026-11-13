@@ -90,8 +90,8 @@ successful equivalent hosted gates; do not keep rerunning the whole local suite 
 
 ## Opt in to complete hosted verification
 
-Apply the repository label `ci:full` to the PR before its next genuine opened, reopened, or
-synchronize event (normally the final source or catchup push). CI reads the label from that PR
+Apply the repository label `ci:full` to the PR before its next genuine opened, reopened,
+ready-for-review or synchronize event (normally the final source or catchup push). CI reads the label from that PR
 event payload and selects full scope: repository contracts, lint, Node quality, both browser
 projects, Terraform, and the existing macOS/Windows native matrix. The normal PR merge checkout,
 head/base association, read-only permissions, source aggregate and metadata gate remain unchanged.
@@ -261,14 +261,53 @@ runner while code is edited beneath it; stop only the owned run before edits.
 
 ## CI metadata isolation
 
-`ci.yml` runs source checks on opened, reopened, synchronize, and supported pushes.
-Its aggregate is `Source verification`. `pr-metadata.yml` runs on those PR events plus edits and ready-for-review and owns
-`CI required`, preserving the existing protection name/provider. It validates the live PR Work map
-and waits for the latest applicable successful source workflow for that PR on its exact head and base. Missing, pending,
+`ci.yml` runs source checks on opened, reopened, ready-for-review, synchronize, and supported pushes.
+Its aggregate is `Source verification`. `pr-metadata.yml` owns `CI required`, preserving the existing
+protection name/provider. It validates the live PR Work map and requires the latest applicable
+successful source workflow for that PR on its exact head and base. Missing, pending,
 failed, or canceled source runs cannot pass the gate. Each workflow has a separate concurrency group;
 editing a description cancels only a superseded metadata gate, never source tests.
 
-Stage A metadata observation retains polling and the single protected `CI required` context.
+The gate starts in two ways. The last step of `Source verification` dispatches it on the PR branch
+once that run has a result, pass or fail, so no runner polls while tests execute. A description edit
+starts it through the `pull_request` `edited` event; if source CI is still running, that run polls as
+before. A dispatched gate reports on the commit it was started for and expects that commit to be the
+live PR head, so a green PR cannot vouch for another branch. The dispatch needs `actions: write`,
+granted to the aggregate job alone; its checkout does not persist the token, and the workflow default
+stays read-only. The gate still observes the completed source run through the API. The dispatch
+supplies no evidence.
+
+The `CI required` job has no job or step condition. Branch protection treats a skipped required job
+as passing, so every decision stays inside the script. Three cases start no gate and leave
+`CI required` absent, which blocks the merge:
+
+- A fork PR. Its token is read-only. Edit the description after source CI completes.
+- A run whose token cannot start workflows, such as a Dependabot event. A maintainer runs the
+  `PR metadata` workflow on the branch with the PR number, or edits the description.
+- A branch that predates the dispatch trigger. Catch up with the base and push.
+
+## Draft fast lane
+
+A draft PR is still being iterated, so its source run defers the browser and desktop matrices.
+Classification, Terraform, repository contracts, lint and Node quality still run. The classifier
+makes this decision from the PR event's draft flag and omits the two matrices from
+`required_jobs`; no job carries its own draft condition. The canonical scope, its expected jobs and
+the source receipt are unchanged, so the deferred matrices remain required for acceptance.
+
+A fast-lane run does not report `Source verification` and does not start the metadata gate. It can
+therefore never satisfy `CI required`. A description edit on such a draft fails the gate at once
+with the remedy instead of waiting. To obtain complete verification, mark the PR ready for review,
+which starts a full source run, or apply `ci:full` before the next push. A prose-only draft defers
+nothing and is verified as before. Pushes to `main` always run the full lane.
+
+Measured on 2026-11-13, a full source run used about 95 runner-minutes across 15 jobs, of which the
+two deferred matrices used about 68. The account's 20-job limit was saturated (20 running, 52
+queued) mostly by draft pushes whose runs were cancelled by the next push, and the polling metadata
+job held a runner for 19.6 minutes on average when it passed. These are the reasons for both
+changes, not a measured result of them; record actual queue and elapsed times after rollout.
+
+Stage A metadata observation retains polling for edits made while source CI runs, and the single
+protected `CI required` context.
 It validates the live PR body, not the historical event body, and requires stable PR head/base,
 body hash and latest source run/attempt before accepting completed source evidence. Reads have a
 120-second observation budget, 15-second command timeouts, at most three 100-row pages per

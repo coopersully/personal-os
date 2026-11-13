@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vitest/config";
 
@@ -48,8 +49,9 @@ export default defineConfig({
     ],
     // Keep the large DOM suite from contending with API integration-test containers.
     // Four local workers made otherwise-fast setup flows exceed their timeout under
-    // full `pnpm verify` load; matching CI keeps the repository-wide gate deterministic.
-    maxWorkers: 2,
+    // full `pnpm verify` load, so the shared development host stays at two. A hosted
+    // runner is dedicated to one job: use its cores, leaving one for those containers.
+    maxWorkers: process.env.CI ? Math.max(2, availableParallelism() - 1) : 2,
     // A few end-to-end interaction tests intentionally cover several user actions. Their
     // deterministic work completes locally, but shared two-core runners need headroom;
     // keep the normal five-second fast-failure limit outside CI.

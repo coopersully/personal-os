@@ -1,5 +1,49 @@
 import { pathToFileURL } from "node:url";
+import { classifyGitChanges, sourceLane } from "./ci-scope.mjs";
 import { SourceClient, stableObservation } from "./source-observation.mjs";
+
+const shaPattern = /^[0-9a-f]{40}$/u;
+
+// Source CI starts a dispatched gate with the base it tested. A person starting
+// one by hand may omit it: the observation still binds the live base to the run.
+// Every other event must name both commits.
+export function candidateIdentity(env) {
+  const number = Number(env.PR_NUMBER);
+  const dispatched = env.GITHUB_EVENT_NAME === "workflow_dispatch";
+  const base = env.PR_BASE_SHA ?? "";
+  if (
+    !Number.isSafeInteger(number) ||
+    number < 1 ||
+    !env.GH_REPO ||
+    !shaPattern.test(env.PR_HEAD_SHA ?? "") ||
+    !(shaPattern.test(base) || (dispatched && base === ""))
+  )
+    throw new Error("Missing candidate identity");
+  // The check lands on the commit this run was started for; never report on another.
+  if (dispatched && env.GITHUB_SHA !== env.PR_HEAD_SHA)
+    throw new Error("Dispatched metadata gate is not bound to its own commit");
+  return {
+    repository: env.GH_REPO,
+    number,
+    expected: {
+      headSha: env.PR_HEAD_SHA,
+      baseSha: base || undefined,
+      baseRef: env.PR_BASE_REF || undefined,
+      retargeted: env.PR_RETARGETED === "true",
+    },
+  };
+}
+
+// A draft's fast-lane run never reports Source verification, so waiting on it
+// would hold a runner for a result that cannot arrive. Source CI makes the same
+// lane decision from the same classifier, including its fail-closed full scope.
+export function deferredDraft(env, classify = classifyGitChanges) {
+  if (env.PR_DRAFT !== "true" || env.PR_FULL === "true") return false;
+  return sourceLane(classify(env.PR_BASE_SHA, env.PR_HEAD_SHA), { draft: true }) === "fast";
+}
+
+export const draftRemedy =
+  "Draft candidates run the fast lane only. Mark the pull request ready for review, or add the ci:full label and push, to obtain source verification.";
 
 export function sourceDecision(runs, head, base, number) {
   const applicable = runs
@@ -39,27 +83,7 @@ export async function readRuns(
 }
 
 async function main() {
-  const {
-    GH_REPO: repository,
-    PR_HEAD_SHA: head,
-    PR_BASE_SHA: base,
-    PR_NUMBER: numberText,
-  } = process.env;
-  const number = Number(numberText);
-  if (
-    !Number.isSafeInteger(number) ||
-    number < 1 ||
-    !repository ||
-    !/^[0-9a-f]{40}$/.test(head ?? "") ||
-    !/^[0-9a-f]{40}$/.test(base ?? "")
-  )
-    throw new Error("Missing candidate identity");
-  const expected = {
-    headSha: head,
-    baseSha: base,
-    baseRef: process.env.PR_BASE_REF,
-    retargeted: process.env.PR_RETARGETED === "true",
-  };
+  const { repository, number, expected } = candidateIdentity(process.env);
   // Collector snapshots use this same observer, without publishing a check or changing polling.
   if (process.argv.includes("--collect")) {
     process.stdout.write(
@@ -67,15 +91,26 @@ async function main() {
     );
     return;
   }
-  const deadline = Date.now() + 55 * 60 * 1000;
+  const draft = deferredDraft(process.env);
+  const started = Date.now();
+  const deadline = started + 55 * 60 * 1000;
   while (Date.now() < deadline) {
-    const observation = stableObservation(
-      new SourceClient(repository, number, Math.min(120000, deadline - Date.now())),
-      expected,
-    );
+    let observation;
+    try {
+      observation = stableObservation(
+        new SourceClient(repository, number, Math.min(120000, deadline - Date.now())),
+        expected,
+      );
+    } catch (error) {
+      if (draft) console.error(draftRemedy);
+      throw error;
+    }
     if (observation.state === "success") return;
+    if (draft) throw new Error(draftRemedy);
+    // A dispatched gate starts seconds before its source run is marked complete.
+    const interval = Date.now() - started < 120000 ? 10000 : 30000;
     await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(30000, Math.max(0, deadline - Date.now()))),
+      setTimeout(resolve, Math.min(interval, Math.max(0, deadline - Date.now()))),
     );
   }
   throw new Error("Source CI did not finish within the metadata gate deadline");

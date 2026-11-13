@@ -60,12 +60,14 @@ grep -Eq '^## Work map$' .github/pull_request_template.md &&
   exit 1
 }
 
-grep -Fq 'types: [edited, opened, ready_for_review, reopened, synchronize]' .github/workflows/pr-metadata.yml || {
-  echo "Metadata CI must revalidate the PR Work map whenever pull request metadata changes" >&2
+grep -Fq 'types: [edited]' .github/workflows/pr-metadata.yml &&
+  grep -Fq 'workflow_dispatch:' .github/workflows/pr-metadata.yml &&
+  grep -Fq 'run: node .github/scripts/start-metadata-gate.mjs' .github/workflows/ci.yml || {
+  echo "Metadata CI must revalidate the PR Work map when source CI completes and whenever pull request metadata changes" >&2
   exit 1
 }
 
 node --test .github/scripts/collect-node-coverage.test.mjs
 node --test .github/scripts/collect-browser-diagnostics.test.mjs
-node --test .github/scripts/source-observation.test.mjs .github/scripts/wait-source-ci.test.mjs scripts/verification-plan.test.mjs scripts/development-plan.test.mjs
+node --test .github/scripts/source-observation.test.mjs .github/scripts/wait-source-ci.test.mjs .github/scripts/start-metadata-gate.test.mjs scripts/verification-plan.test.mjs scripts/development-plan.test.mjs
 echo "Codex repository check passed."

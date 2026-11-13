@@ -89,6 +89,18 @@ must demonstrate branch-hit equivalence against the single-run raw-V8 aggregatio
 uncovered branches, before replacing the existing coverage gate. Unchanged threshold numbers alone
 do not prove equivalent enforcement.
 
+Draft PRs defer both hosted matrices; see the draft fast lane in
+[delivery verification](delivery-verification.md). Every matrix member remains required once the PR
+is ready for review.
+
+Hosted Vitest uses one worker fewer than the runner's available cores, never fewer than two. The
+shared development host stays at two workers, where four made setup flows time out under full
+`pnpm verify` load. A hosted runner is dedicated to one job, and the spare core is left for the
+integration-test PostgreSQL containers. This changes scheduling only: the single unsharded coverage
+run, its raw-V8 aggregation, thresholds and test timeouts are unchanged. Compare the hosted
+`pnpm test:coverage` duration against the 989 seconds recorded on run 43508749100 before claiming
+a speedup, and revert to two workers if hosted timeouts appear.
+
 ## Node phase budgets
 
 The hosted Node quality job runs type checking, coverage tests and production builds as separate,

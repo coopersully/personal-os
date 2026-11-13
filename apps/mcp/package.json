@@ -22,7 +22,7 @@
     "@personal-os/api-client": "workspace:*",
     "@personal-os/domain": "workspace:*",
     "express": "^5.1.0",
-    "hono": "^4.13.13",
+    "hono": "^4.13.16",
     "zod": "4.6.6"
   },
   "devDependencies": {

@@ -5711,7 +5711,7 @@ Resume at most 10 pending decisions from the exact persisted preview fingerprint
 
 ## execute_finance_review_batch_undo
 
-Apply at most ten pending corrections from the exact preview fingerprint. Authorization, policy and later edits are checked again per effect. Requires finances:read, finances:write and finances:execute.
+Apply at most ten pending corrections from the exact preview fingerprint. Authorization, policy and later edits are checked again per effect. Only changes this agent applied under its own authority can be undone here; changes the owner executed or approved, including confirmed transfer pairs, are forbidden and need the owner to apply the published preview. Requires finances:read, finances:write and finances:execute.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:read, finances:write, finances:execute.

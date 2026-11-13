@@ -781,6 +781,12 @@ can approve it through the application API. Agent write permission is not owner 
 there is intentionally no agent `apply_finance_budget_start` tool. An approval remains
 separate from opening-position qualification and budget-plan approval.
 
+Declining a published batch, starting-month preview or correction preview is likewise an
+owner-only application API action with no MCP tool: a decline is the person's own answer and
+cannot be relayed by an agent grant. After a decline, approval, application and execution of
+that exact item return a conflict with `recovery: new_preview`; prepare a new preview only if
+the person asks for one.
+
 `get_finance_opening_position` identifies qualified opening balances and missing evidence.
 `prepare_finance_evidence_refresh` requires read, write and maintain grants, persists its
 exact source revisions and period, and uses the existing provider sync scheduler.
@@ -792,7 +798,10 @@ coverage can require an explicit owner opening statement; tools cannot manufactu
 `preview_finance_review_batch_undo` prepares compensation for at most ten exact applied
 outcomes. `get_finance_review_batch_undo` reads progress and
 `execute_finance_review_batch_undo` rechecks authority, policy and later edits per effect.
-Execution requires the separate execute grant. Undo retains audit history and retracts the
+Execution requires the separate execute grant, and an agent can execute an undo only when
+its own authority applied every targeted effect. If the owner executed or approved any of
+them, including any confirmed transfer pair, execution is `forbidden` for the agent: publish
+the preview and let the owner apply it. Undo retains audit history and retracts the
 classification evidence created by the undone operation. Conflicting later edits require
 fresh inspection rather than overwriting them. Original batch actor/connection fences
 remain; owner review uses existing authenticated batch retrieval and human audit attribution.

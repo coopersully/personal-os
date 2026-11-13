@@ -125,6 +125,38 @@ grant. Every effect still checks current source revisions and the live approval,
 expiry and worker claim. Cancellation stops future effects; it does not undo applied effects.
 Unexpected failures have bounded retries and an explicit recovery state. A completed batch
 reports its actual applied/exception counts in Finance Chat with a link to the saved outcomes.
+A failure while recording an attempt's result counts toward the same bound of three, after which
+the approval is `blocked`; that path records the state without posting a chat message.
+Approved-batch execution runs after maintenance recovery and dispatch on the server tick, and its
+failure is logged without preventing them. An approval that is cancelled, expired or blocked
+never restarts: approving it again is a conflict that asks for a new preview.
+
+### Declining a published card
+
+The owner can decline a published review batch that has no approval yet, a starting-month
+preview, or a correction preview:
+
+- `POST /v1/finances/review-batches/{id}/decline`
+- `POST /v1/finances/budget-start/previews/{id}/decline`
+- `POST /v1/finances/review-batch-corrections/{id}/decline`
+
+Only the authenticated owner session can decline; an agent is refused whatever its scopes, and
+there is no MCP tool. The decline is stored with its actor and time, is audited once, and
+repeating it returns the first result. A declined card leaves active attention immediately. It
+can never be approved, applied or executed afterward: those requests return a conflict with
+`recovery: new_preview`. Effects already applied before the decline remain and are corrected
+through a new correction preview. A batch that already has an approval is cancelled through the
+existing approval cancellation instead, and an approved starting month is changed with a new
+preview.
+
+### Who may apply a correction
+
+Undo keeps the approval boundary of the change it reverses. Each applied effect records whose
+authority applied it. An agent can prepare a correction preview for any batch it prepared, but
+can apply it only when its own authority applied every targeted effect. When the owner executed
+or approved any of them, including every confirmed transfer pair, only the owner can apply the
+correction; the agent publishes the preview for that decision. Effects recorded before this
+rule carry no authority record and are treated as the owner's.
 
 Shared Finance Chat also permits a connected Finance reader to inspect bounded conversation
 pages, and an agent with read/write/maintain grants to publish short attributed record cards.

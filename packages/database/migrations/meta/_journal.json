@@ -1023,6 +1023,48 @@
       "when": 1794348000002,
       "tag": "0138_finance_host_instruction_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1794499200000,
+      "tag": "0139_finance_budget_start",
+      "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "7",
+      "when": 1794499200001,
+      "tag": "0140_finance_evidence_refresh",
+      "breakpoints": true
+    },
+    {
+      "idx": 146,
+      "version": "7",
+      "when": 1794499200002,
+      "tag": "0141_finance_opening_statements",
+      "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1794499200003,
+      "tag": "0142_finance_batch_corrections",
+      "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1794499200004,
+      "tag": "0143_finance_budget_start_impact",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1794499200005,
+      "tag": "0144_finance_batch_approvals",
+      "breakpoints": true
     }
   ]
 }

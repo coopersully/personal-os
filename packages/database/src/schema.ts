@@ -33,6 +33,7 @@ import type {
   ConnectorSyncStatus,
   ConnectorSyncTriggerReason,
   DomainProfile,
+  FinanceAttentionSnapshot,
   FinanceBudgetPolicyEvaluation,
   FinanceBudgetPolicyEvaluationInput,
   FinanceBudgetPolicyPlanSnapshot,
@@ -2985,6 +2986,7 @@ export const financeTransactionRelationships = pgTable(
 export const financeClassificationDecisions = pgTable(
   "finance_classification_decisions",
   {
+    retractedAt: timestamp("retracted_at", { withTimezone: true }),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -6429,6 +6431,7 @@ export const financeReviewBatchRuns = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_review_batch_runs_owner_id_idx").on(table.userId, table.id),
     uniqueIndex("finance_review_batch_runs_owner_key_unique").on(
       table.userId,
       table.idempotencyKey,
@@ -6770,5 +6773,229 @@ export const financeHostInstructionReceipts = pgTable(
       "finance_host_instruction_receipts_text_check",
       sql`length(${table.text}) BETWEEN 1 AND 20000`,
     ),
+  ],
+);
+
+/** Append-only approved scope decisions. They never resolve or delete ledger history. */
+export const financeBudgetStartPolicies = pgTable(
+  "finance_budget_start_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    firstMonth: text("first_month"),
+    timezone: text("timezone").notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    approvedBy: text("approved_by").notNull(),
+    previewId: uuid("preview_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_budget_start_owner_revision").on(table.userId, table.revision),
+    uniqueIndex("finance_budget_start_preview").on(table.previewId),
+    check("finance_budget_start_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "finance_budget_start_month_valid",
+      sql`${table.firstMonth} IS NULL OR ${table.firstMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`,
+    ),
+  ],
+);
+export const financeBudgetStartPreviews = pgTable(
+  "finance_budget_start_previews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    actorType: text("actor_type").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    attention: jsonb("attention").$type<FinanceAttentionSnapshot>().notNull(),
+    projectedAttention: jsonb("projected_attention").$type<FinanceAttentionSnapshot>(),
+    firstMonth: text("first_month"),
+    timezone: text("timezone").notNull(),
+    expectedPolicyRevision: integer("expected_policy_revision").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("finance_budget_start_preview_owner_key").on(table.userId, table.idempotencyKey),
+    check("finance_budget_start_preview_revision", sql`${table.expectedPolicyRevision} >= 0`),
+    check("finance_budget_start_preview_actor", sql`${table.actorType} IN ('user', 'agent')`),
+    check(
+      "finance_budget_start_preview_month",
+      sql`${table.firstMonth} IS NULL OR ${table.firstMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`,
+    ),
+  ],
+);
+
+/** Durable source-refresh intent; the existing Item scheduler owns provider transport. */
+export const financeEvidenceRefreshRequests = pgTable(
+  "finance_evidence_refresh_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    period: text("period").notNull(),
+    timezone: text("timezone").notNull(),
+    sources: jsonb("sources")
+      .$type<
+        Array<{
+          accountId: string;
+          accountRevision: string;
+          itemId: string | null;
+          providerAccountId: string | null;
+        }>
+      >()
+      .notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+    nextObservationAt: timestamp("next_observation_at", { withTimezone: true }).notNull(),
+    result: jsonb("result")
+      .$type<import("@personal-os/domain").FinanceEvidenceRefresh>()
+      .default(sql`NULL`),
+  },
+  (table) => [
+    uniqueIndex("finance_evidence_refresh_owner_key").on(table.userId, table.idempotencyKey),
+    index("finance_evidence_refresh_pending")
+      .on(table.nextObservationAt)
+      .where(sql`${table.result} IS NULL`),
+  ],
+);
+
+/** Explicit signed opening statements are facts, never fabricated ledger transactions. */
+export const financeOpeningStatements = pgTable(
+  "finance_opening_statements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id").notNull(),
+    month: text("month").notNull(),
+    revision: integer("revision").notNull(),
+    accountRevision: text("account_revision").notNull(),
+    timezone: text("timezone").notNull(),
+    signedOpeningBalanceCents: bigint("signed_opening_balance_cents", { mode: "number" }).notNull(),
+    currencyCode: text("currency_code").notNull(),
+    actorId: uuid("actor_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "finance_opening_statement_account_owner",
+      columns: [table.userId, table.accountId],
+      foreignColumns: [financeAccounts.userId, financeAccounts.id],
+    }).onDelete("cascade"),
+    uniqueIndex("finance_opening_statement_owner_key").on(table.userId, table.idempotencyKey),
+    uniqueIndex("finance_opening_statement_revision").on(
+      table.userId,
+      table.accountId,
+      table.month,
+      table.revision,
+    ),
+    check("finance_opening_statement_owner_actor", sql`${table.actorId} = ${table.userId}`),
+    check("finance_opening_statement_positive_revision", sql`${table.revision} > 0`),
+  ],
+);
+
+/** Immutable before/after effect evidence; corrections append rather than erasing receipts. */
+export const financeReviewBatchEffects = pgTable(
+  "finance_review_batch_effects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    batchId: uuid("batch_id")
+      .notNull()
+      .references(() => financeReviewBatchRuns.id, { onDelete: "cascade" }),
+    outcomeIndex: integer("outcome_index").notNull(),
+    before: jsonb("before").$type<unknown>().notNull(),
+    after: jsonb("after").$type<unknown>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [uniqueIndex("finance_batch_effect_unique").on(table.batchId, table.outcomeIndex)],
+);
+export const financeReviewBatchCorrections = pgTable(
+  "finance_review_batch_corrections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    batchId: uuid("batch_id")
+      .notNull()
+      .references(() => financeReviewBatchRuns.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    outcomeIndexes: jsonb("outcome_indexes").$type<number[]>().notNull(),
+    outcomes: jsonb("outcomes").$type<unknown[]>().notNull().default([]),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_batch_correction_owner_key").on(table.userId, table.idempotencyKey),
+  ],
+);
+
+/** Exact owner approval is a bounded durable handoff, never a standing agent grant. */
+export const financeReviewBatchApprovals = pgTable(
+  "finance_review_batch_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    batchId: uuid("batch_id").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    approvedBy: uuid("approved_by").notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    state: text("state")
+      .$type<
+        | "pending"
+        | "running"
+        | "completed"
+        | "completed_with_exceptions"
+        | "cancelled"
+        | "expired"
+        | "blocked"
+      >()
+      .notNull()
+      .default("pending"),
+    claimId: uuid("claim_id"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull(),
+    failureCode: text("failure_code"),
+    attempts: integer("attempts").notNull().default(0),
+    failures: integer("failures").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_batch_approval_once_idx").on(table.userId, table.batchId),
+    index("finance_batch_approval_due_idx").on(table.state, table.nextAttemptAt),
+    foreignKey({
+      name: "finance_batch_approval_batch_fk",
+      columns: [table.userId, table.batchId],
+      foreignColumns: [financeReviewBatchRuns.userId, financeReviewBatchRuns.id],
+    }).onDelete("cascade"),
+    check(
+      "finance_review_batch_approvals_state_check",
+      sql`${table.state} IN ('pending','running','completed','completed_with_exceptions','cancelled','expired','blocked')`,
+    ),
+    check("finance_review_batch_approvals_attempts_check", sql`${table.attempts} >= 0`),
+    check("finance_review_batch_approvals_failures_check", sql`${table.failures} >= 0`),
+    check("finance_batch_approval_owner", sql`${table.approvedBy} = ${table.userId}`),
+    check("finance_batch_approval_expiry", sql`${table.expiresAt} > ${table.approvedAt}`),
   ],
 );

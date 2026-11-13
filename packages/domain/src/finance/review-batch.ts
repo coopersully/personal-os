@@ -14,7 +14,21 @@ const basis = {
   confidence: z.number().min(0).max(1),
   learnMerchant: z.literal("never").default("never"),
 };
+export const financeTransferPairDecisionSchema = z
+  .strictObject({
+    ...basis,
+    kind: z.literal("transfer_pair"),
+    counterpartTransactionId: idSchema,
+    expectedCounterpartUpdatedAt: isoDateTimeSchema,
+    expectedCounterpartRevision: basis.expectedTransactionRevision,
+  })
+  .refine(
+    (value) => value.transactionId !== value.counterpartTransactionId,
+    "Choose two distinct transactions.",
+  );
+export type FinanceTransferPairDecision = z.infer<typeof financeTransferPairDecisionSchema>;
 export const financeReviewBatchDecisionSchema = z.discriminatedUnion("kind", [
+  financeTransferPairDecisionSchema,
   z.strictObject({
     ...basis,
     kind: z.literal("categorization"),
@@ -53,6 +67,7 @@ function uniqueDecisions(
   value.decisions.forEach((decision, index) => {
     if (
       transactions.has(decision.transactionId) ||
+      (decision.kind === "transfer_pair" && transactions.has(decision.counterpartTransactionId)) ||
       (decision.kind === "review" && reviews.has(decision.reviewId))
     )
       context.addIssue({
@@ -61,6 +76,7 @@ function uniqueDecisions(
         path: ["decisions", index],
       });
     transactions.add(decision.transactionId);
+    if (decision.kind === "transfer_pair") transactions.add(decision.counterpartTransactionId);
     if (decision.kind === "review") reviews.add(decision.reviewId);
   });
 }
@@ -134,6 +150,7 @@ export const financeMaintenanceQualificationSchema = z.strictObject({
 export type FinanceMaintenanceQualification = z.infer<typeof financeMaintenanceQualificationSchema>;
 export type PreviewFinanceReviewBatchInput = z.infer<typeof previewFinanceReviewBatchInputSchema>;
 export const executeFinanceReviewBatchInputSchema = z.strictObject({
+  confirmTransferPairs: z.boolean().optional(),
   fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   limit: z.number().int().min(1).max(10).default(10),
 });
@@ -146,11 +163,20 @@ export const financeReviewBatchOutcomeSchema = z.object({
   recovery: z.enum(["none", "new_preview"]),
   completedAt: isoDateTimeSchema,
   appliedTransferRevision: basis.expectedTransactionRevision.optional(),
+  undoAvailable: z.boolean().optional(),
 });
 export type FinanceReviewBatchOutcome = z.infer<typeof financeReviewBatchOutcomeSchema>;
+export const financeReviewBatchTransactionSummarySchema = z.strictObject({
+  merchant: z.string(),
+  amountCents: z.number().int(),
+  currencyCode: z.string().nullable(),
+  date: z.iso.date(),
+});
+
 export const financeReviewBatchCounterpartSchema = z.strictObject({
   transactionId: idSchema,
   revision: basis.expectedTransactionRevision,
+  summary: financeReviewBatchTransactionSummarySchema.optional(),
 });
 
 export const financeReviewBatchRunSchema = z.object({
@@ -158,6 +184,11 @@ export const financeReviewBatchRunSchema = z.object({
   fingerprint: z.string(),
   idempotencyKey: z.string(),
   decisions: z.array(financeReviewBatchDecisionSchema),
+  transactionSummaries: z
+    .array(
+      financeReviewBatchTransactionSummarySchema.extend({ index: z.number().int().min(0).max(99) }),
+    )
+    .optional(),
   transferCounterparts: z
     .array(financeReviewBatchCounterpartSchema.extend({ index: z.number().int().min(0).max(99) }))
     .default([]),
@@ -172,3 +203,83 @@ export type FinanceReviewBatchRun = z.infer<typeof financeReviewBatchRunSchema>;
 export const listFinanceReviewBatchesInputSchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
+
+export const previewFinanceReviewBatchUndoInputSchema = z.strictObject({
+  batchId: idSchema,
+  outcomeIndexes: z
+    .array(z.number().int().min(0).max(99))
+    .min(1)
+    .max(10)
+    .refine((values) => new Set(values).size === values.length, "Include each effect once."),
+  idempotencyKey: z.string().trim().min(1).max(200),
+});
+const correctionStateSchema = z.object({
+  category: z.string().nullable(),
+  direction: z.enum(["expense", "income", "transfer"]),
+  needsReview: z.boolean(),
+});
+export const financeReviewBatchCorrectionEffectSchema = z.strictObject({
+  index: z.number().int().min(0).max(99),
+  transactions: z.array(
+    financeReviewBatchTransactionSummarySchema.extend({
+      id: idSchema,
+      before: correctionStateSchema,
+      after: correctionStateSchema,
+    }),
+  ),
+  restoredAllocations: z.array(
+    z.strictObject({
+      transactionId: idSchema,
+      categoryId: idSchema,
+      category: z.string().nullable(),
+      amountCents: z.number().int(),
+      treatment: z.enum(["personal", "reimbursable"]),
+    }),
+  ),
+  reopenedReviews: z.array(
+    z.strictObject({ id: idSchema, transactionId: idSchema.nullable(), reason: z.string() }),
+  ),
+});
+export const financeReviewBatchUndoSchema = z.strictObject({
+  effects: z.array(financeReviewBatchCorrectionEffectSchema).optional(),
+  id: idSchema,
+  batchId: idSchema,
+  fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  outcomeIndexes: z.array(z.number().int().min(0).max(99)),
+  outcomes: z.array(financeReviewBatchOutcomeSchema),
+  pendingCount: z.number().int().nonnegative(),
+  status: z.enum(["previewed", "in_progress", "completed", "completed_with_exceptions"]),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+});
+export type FinanceReviewBatchUndo = z.infer<typeof financeReviewBatchUndoSchema>;
+
+export type PreviewFinanceReviewBatchUndoInput = z.infer<
+  typeof previewFinanceReviewBatchUndoInputSchema
+>;
+
+export const approveFinanceReviewBatchInputSchema = z.strictObject({
+  fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  confirmTransferPairs: z.boolean().optional(),
+});
+export const financeReviewBatchContinuationSchema = z.strictObject({
+  id: idSchema,
+  batchId: idSchema,
+  fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  state: z.enum([
+    "pending",
+    "running",
+    "completed",
+    "completed_with_exceptions",
+    "cancelled",
+    "expired",
+    "blocked",
+  ]),
+  approvedAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  attempts: z.number().int().nonnegative(),
+  failureCode: z.string().max(100).nullable(),
+  recovery: z.enum(["none", "new_preview"]),
+});
+export type FinanceReviewBatchContinuation = z.infer<typeof financeReviewBatchContinuationSchema>;

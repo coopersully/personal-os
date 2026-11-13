@@ -1,5 +1,5 @@
 import { router, Stack, useGlobalSearchParams, usePathname } from "expo-router";
-import { editorDismissOptions } from "../../components/editor-header";
+import { editorDismissOptions, stackChromeOptions } from "../../components/editor-header";
 import {
   SettingsAccentProvider,
   settingsWorkspaceForRoute,
@@ -13,15 +13,7 @@ export default function SettingsLayout() {
   const workspace = settingsWorkspaceForRoute(path, params);
   return (
     <SettingsAccentProvider workspace={workspace}>
-      <Stack
-        screenOptions={{
-          headerTintColor: t.ink,
-          headerStyle: { backgroundColor: t.canvas },
-          contentStyle: { backgroundColor: t.canvas },
-          headerShadowVisible: false,
-          headerBackButtonDisplayMode: "minimal",
-        }}
-      >
+      <Stack screenOptions={stackChromeOptions(t)}>
         <Stack.Screen
           name="index"
           options={{

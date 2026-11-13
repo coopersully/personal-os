@@ -21,6 +21,7 @@ vi.mock("../components/editor-header", () => ({
     navigation.dismiss = onPress;
     return {};
   },
+  stackChromeOptions: () => ({}),
 }));
 vi.mock("../theme", () => ({ useTheme: () => ({ ink: "black", canvas: "white" }) }));
 vi.mock("expo-router", () => {

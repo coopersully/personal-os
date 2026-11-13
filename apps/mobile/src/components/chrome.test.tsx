@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { PropsWithChildren, ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EditorClose } from "./editor-close";
-import { editorActionsOptions, editorDismissOptions } from "./editor-header";
+import { editorActionsOptions, editorDismissOptions, stackChromeOptions } from "./editor-header";
 import { GlassButton, glassButtonSize } from "./glass-button";
 import { SheetHeader } from "./sheet-header";
 
@@ -26,6 +26,8 @@ type Styled = PropsWithChildren<{
   disabled?: boolean;
   onPress?: () => void;
   numberOfLines?: number;
+  maxFontSizeMultiplier?: number;
+  adjustsFontSizeToFit?: boolean;
 }>;
 vi.mock("react-native", () => ({
   Platform: h.platform,
@@ -38,9 +40,21 @@ vi.mock("react-native", () => ({
       </div>
     );
   },
-  Text: ({ children, style, accessibilityRole, numberOfLines }: Styled) =>
+  Text: ({
+    children,
+    style,
+    accessibilityRole,
+    numberOfLines,
+    maxFontSizeMultiplier,
+    adjustsFontSizeToFit,
+  }: Styled) =>
     accessibilityRole === "header" ? (
-      <h2 data-style={JSON.stringify(style)} data-lines={numberOfLines}>
+      <h2
+        data-style={JSON.stringify(style)}
+        data-lines={numberOfLines}
+        data-max-scale={maxFontSizeMultiplier}
+        data-fit={String(!!adjustsFontSizeToFit)}
+      >
         {children}
       </h2>
     ) : (
@@ -196,6 +210,9 @@ describe("SheetHeader", () => {
     const heading = screen.getByRole("heading", { name: title });
     expect(styleOf(heading)).toMatchObject({ textAlign: "center", flex: 1, minWidth: 0 });
     expect(heading).toHaveAttribute("data-lines", "1");
+    // Large text: the title grows no more than the glass controls and shrinks to fit.
+    expect(heading).toHaveAttribute("data-max-scale", "1.3");
+    expect(heading).toHaveAttribute("data-fit", "true");
     expect(sides()).toEqual([0, 0]);
     // The leading control is the wider side; the empty trailing slot must match it.
     act(() => h.layouts[0]?.({ nativeEvent: { layout: { width: 83.4 } } }));
@@ -332,6 +349,20 @@ describe("stack header options", () => {
     expect(screen.getByRole("group", { name: "Edit transaction" })).toHaveTextContent(
       "Edit transaction",
     );
+  });
+  it.each([
+    [false, "light", "dark"],
+    [true, "dark", "light"],
+  ] as const)("styles every stack's bar from the app theme (dark %s)", (dark, bar, status) => {
+    expect(stackChromeOptions({ dark, ink: "ink", canvas: "canvas" })).toEqual({
+      headerTintColor: "ink",
+      statusBarStyle: status,
+      headerUserInterfaceStyle: bar,
+      headerStyle: { backgroundColor: "canvas" },
+      contentStyle: { backgroundColor: "canvas" },
+      headerShadowVisible: false,
+      headerBackButtonDisplayMode: "minimal",
+    });
   });
   it("keeps a single destructive action red in the screen's theme", () => {
     const archive = action("Archive", true);

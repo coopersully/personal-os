@@ -58,6 +58,11 @@ export function SheetHeader({
       <Text
         accessibilityRole="header"
         numberOfLines={1}
+        // Scale with the controls beside it (they cap at 1.3), then shrink before truncating,
+        // so large text never leaves a clipped title between full-size buttons.
+        maxFontSizeMultiplier={1.3}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
         style={{
           flex: 1,
           minWidth: 0,

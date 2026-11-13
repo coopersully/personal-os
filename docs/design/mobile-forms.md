@@ -66,6 +66,10 @@ These live in `apps/mobile/src/components` and are the only way to build form an
   name) keeps its spelling. A screen has one title: the bar names the kind of screen and the
   page heading, when there is one, shows the record's own name. Never repeat the bar title as
   the page heading; set the bar title to `""` when the page heading already says it.
+- `stackChromeOptions` is the `screenOptions` of every native stack. It sets the bar's interface
+  style from the app theme; a stack without it draws light glass controls under the dark theme.
+- The `SheetHeader` title grows with large text no further than the glass controls (1.3 times)
+  and shrinks to fit before it truncates.
 - `GlassButton` is the one Liquid Glass button: a 44-point capsule for a text label, a 44-point
   circle for a bar icon and a 56-point circle for the floating Save/Add. Labels are primary ink in
   both appearances; callers may place it but cannot resize or recolor its label.

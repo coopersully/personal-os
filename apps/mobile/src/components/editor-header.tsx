@@ -6,6 +6,24 @@ import { RowActions } from "./row-actions";
 
 /** The theme colors a header action may take; pass the screen's `useTheme()` value. */
 type ActionTheme = { destructive: string };
+type StackTheme = { dark: boolean; ink: string; canvas: string };
+
+/**
+ * The one set of screen options for every native stack. The bar's interface style follows
+ * the app theme, so its glass controls and their labels match in light and dark on every
+ * stack; a stack that omits it draws light glass under a dark theme.
+ */
+export function stackChromeOptions(theme: StackTheme) {
+  return {
+    headerTintColor: theme.ink,
+    statusBarStyle: theme.dark ? ("light" as const) : ("dark" as const),
+    headerUserInterfaceStyle: theme.dark ? ("dark" as const) : ("light" as const),
+    headerStyle: { backgroundColor: theme.canvas },
+    contentStyle: { backgroundColor: theme.canvas },
+    headerShadowVisible: false,
+    headerBackButtonDisplayMode: "minimal" as const,
+  };
+}
 type DismissAction = { label: string; onPress: () => void; disabled?: boolean };
 
 /**

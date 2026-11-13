@@ -1335,4 +1335,3 @@ server search.
   fails to load.
 - Triage, compose, reply, attachments downloads and rules are not included. This is a local
   candidate covered by focused tests; it is not a production or TestFlight release.
-

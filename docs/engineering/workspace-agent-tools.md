@@ -5681,6 +5681,50 @@ Resume at most 10 pending decisions from the exact persisted preview fingerprint
 {
   "type": "object",
   "properties": {
+    "confirmTransferPairs": {
+      "type": "boolean"
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "limit": {
+      "default": 10,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "fingerprint",
+    "id"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## execute_finance_review_batch_undo
+
+Apply at most ten pending corrections from the exact preview fingerprint. Authorization, policy and later edits are checked again per effect. Requires finances:read, finances:write and finances:execute.
+
+- Domain: finances; stage: commit; policy: approved_rule.
+- Grants (all): finances:read, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `executeFinanceReviewBatchUndo`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "confirmTransferPairs": {
+      "type": "boolean"
+    },
     "fingerprint": {
       "type": "string",
       "pattern": "^sha256:[a-f0-9]{64}$"
@@ -6035,6 +6079,24 @@ Compare an owned redundant account with the account to keep tracking. Inspect ma
 }
 ```
 
+## get_finance_attention
+
+Read the canonical active decisions, historical work, processing, blockers and budget readiness. Zero questions alone is not budget-ready. Requires finances:read.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `getFinanceAttention`.
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## get_finance_automation_settings
 
 Read the account-wide review policy inherited by Finance. The setting is informational only: nohmi still enforces scopes, registered actions, and stronger approval requirements.
@@ -6214,6 +6276,51 @@ Read the stored proposal, revision and evidence binding. Requires finances:read.
 }
 ```
 
+## get_finance_budget_start
+
+Read the approved first maintained month; historical work is retained, not resolved. Requires finances:read.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `getFinanceBudgetStart`.
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## get_finance_budget_start_preview
+
+Read an exact preview available to this authorization. The owner can approve it in Finance Chat; agent write access is not human approval. Requires finances:read.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `getFinanceBudgetStartPreview`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## get_finance_budget_status
 
 Read the active budget and disclose resources, allocations, buffer or deficit, and material assumptions before spending advice.
@@ -6327,6 +6434,45 @@ Read monthly category budget limits, actual spending and remaining amounts. This
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## get_finance_chat
+
+Read a bounded page of the owner's shared Finance conversation using this connection's read grant. Does not mark messages read, acknowledge a routine turn, claim work or alter the original host. Requires finances:read.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-agent-chat.ts); typed API methods: `getFinanceAgentChat`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "after": {
+      "type": "string",
+      "maxLength": 19,
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "before": {
+      "type": "string",
+      "maxLength": 19,
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "latest": {
+      "type": "string",
+      "const": "true"
+    },
+    "limit": {
+      "default": 50,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 
@@ -6499,6 +6645,33 @@ Read the committed financial-effect receipt for one exact existing Finance run, 
     "runId",
     "candidateId",
     "candidateRevision"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## get_finance_evidence_refresh
+
+Read the timestamped refresh receipt, pending work or exact recovery reason. A completed observation is not perpetual freshness. Requires finances:read.
+
+- Domain: finances; stage: verify; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `getFinanceEvidenceRefresh`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "id"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false
@@ -6815,6 +6988,32 @@ Read the current owner's durable Finance setup revision, actual source/context e
 }
 ```
 
+## get_finance_opening_position
+
+Read exact opening balances or missing evidence for the selected month. Current balances and provider sync are not proof of historical completeness. Requires finances:read.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `getFinanceOpeningPosition`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "month": {
+      "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+    }
+  },
+  "required": [
+    "month"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## get_finance_overview
 
 Read finance accounts, budgets, recent transactions, spending, and the uncategorized review queue.
@@ -6977,6 +7176,60 @@ Read one durable review batch and its applied, deferred, review-required, or fai
 - Grants (all): finances:read.
 - Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
 - [Adapter source](../../apps/mcp/src/tools/finance-review-backlog.ts); typed API methods: `getFinanceReviewBatch`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## get_finance_review_batch_continuation
+
+Read the exact owner's saved batch approval and durable continuation state. Does not approve, cancel or expand agent authority. Requires finances:read.
+
+- Domain: finances; stage: verify; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `getFinanceBatchContinuation`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## get_finance_review_batch_undo
+
+Read a saved correction and its actual outcomes before retrying. Requires finances:read.
+
+- Domain: finances; stage: verify; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `getFinanceReviewBatchUndo`.
 
 ```json
 {
@@ -10687,6 +10940,63 @@ Prepare a durable, exact monthly baseline review for the selected budget version
 }
 ```
 
+## prepare_finance_evidence_refresh
+
+Persist an exact-source refresh request using the existing provider scheduler. Read its saved outcome before retrying. Freshness and historical coverage are separate; this does not classify transactions. Requires finances:read, finances:write and finances:maintain.
+
+- Domain: finances; stage: recover; policy: preview.
+- Grants (all): finances:read, finances:write, finances:maintain.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `prepareFinanceEvidenceRefresh`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sourceRefs": {
+      "minItems": 1,
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "expectedAccountRevision": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          }
+        },
+        "required": [
+          "accountId",
+          "expectedAccountRevision"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "period": {
+      "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "sourceRefs",
+    "period",
+    "idempotencyKey"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## preview_calendar_commitment
 
 Preview one exact Calendar candidate from caller-supplied commitment evidence. The API checks destination capability, projection freshness, exact duplicates, profile alignment, and requested policy without writing an event. Caller-supplied evidence remains unverified and can never authorize approved_rule. This is the Calendar-owned intake shape for a later durable integration; do not scan Mail here.
@@ -11326,6 +11636,51 @@ Evaluate a policy against qualified position evidence. This computes a read-only
 }
 ```
 
+## preview_finance_budget_start
+
+Prepare an exact current and proposed attention breakdown for an owner approval card. Does not change policy or clear records. Requires finances:read and finances:write.
+
+- Domain: finances; stage: prepare; policy: preview.
+- Grants (all): finances:read, finances:write.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `previewFinanceBudgetStart`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "firstMonth": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "expectedPolicyRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "firstMonth",
+    "expectedPolicyRevision",
+    "idempotencyKey"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## preview_finance_review_batch
 
 Persist up to 100 explicit evidence-backed decisions with required timestamps and authoritative decimal-string revisions from backlog provenance: expectedTransactionRevision for every decision, plus expectedReviewRevision and expectedActionRevision for review decisions. Include an idempotency key. This creates durable preview state; it does not execute decisions or learn merchant rules. Requires finances:read and finances:write.
@@ -11350,6 +11705,94 @@ Persist up to 100 explicit evidence-backed decisions with required timestamps an
       "type": "array",
       "items": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "transactionId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "expectedTransactionUpdatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                ]
+              },
+              "expectedTransactionRevision": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "learnMerchant": {
+                "default": "never",
+                "type": "string",
+                "const": "never"
+              },
+              "kind": {
+                "type": "string",
+                "const": "transfer_pair"
+              },
+              "counterpartTransactionId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "expectedCounterpartUpdatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                ]
+              },
+              "expectedCounterpartRevision": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]*$"
+              }
+            },
+            "required": [
+              "transactionId",
+              "expectedTransactionUpdatedAt",
+              "expectedTransactionRevision",
+              "rationale",
+              "evidence",
+              "confidence",
+              "kind",
+              "counterpartTransactionId",
+              "expectedCounterpartUpdatedAt",
+              "expectedCounterpartRevision"
+            ],
+            "additionalProperties": false
+          },
           {
             "type": "object",
             "properties": {
@@ -11541,6 +11984,50 @@ Persist up to 100 explicit evidence-backed decisions with required timestamps an
   "required": [
     "idempotencyKey",
     "decisions"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## preview_finance_review_batch_undo
+
+Prepare revision-safe compensating changes for exact completed batch outcomes. Refuses later edits and retains original audit evidence. Requires finances:read and finances:write.
+
+- Domain: finances; stage: prepare; policy: preview.
+- Grants (all): finances:read, finances:write.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-attention.ts); typed API methods: `previewFinanceReviewBatchUndo`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "batchId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "outcomeIndexes": {
+      "minItems": 1,
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 99
+      }
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "batchId",
+    "outcomeIndexes",
+    "idempotencyKey"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false
@@ -11961,9 +12448,104 @@ Prepare conservative category proposals for transactions needing review. This re
 }
 ```
 
+## publish_finance_chat_card
+
+Publish a short attributed agent note with one to twelve actual saved record references. Use one question or result and at most three short sentences; details belong in linked cards. This is not a human message, financial approval, execution receipt or acknowledgment of an original routine's turn. Reuse the exact idempotency key on retry and read Chat to reconcile. Native notification delivery is queued, not confirmed displayed. Requires finances:read, finances:write and finances:maintain.
+
+- Domain: finances; stage: prepare; policy: preview.
+- Grants (all): finances:read, finances:write, finances:maintain.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-agent-chat.ts); typed API methods: `publishFinanceAgentCard`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1200
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "recordRefs": {
+      "minItems": 1,
+      "maxItems": 12,
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "transaction",
+                  "account",
+                  "review_case",
+                  "contextual_question",
+                  "review_batch",
+                  "budget_start_preview",
+                  "review_batch_undo"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "budget_plan"
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "budgetVersionId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "budgetVersionId"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "text",
+    "idempotencyKey",
+    "recordRefs"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## qualify_finance_maintenance_work
 
-Read current source, counterpart, revision and execution-qualification states for up to 25 explicit decisions. Keeps qualified and held items in order; currently only exact reciprocal transfer confirmations can qualify. Other decisions require their owning evidence adapter. Creates no run, claim, preview, question, approval or financial effect and makes no provider call. Qualification is advisory: strict preview and execution revalidation remain required. Requires finances:read.
+Read current source, counterpart, revision and execution-qualification states for up to 25 explicit decisions. Keeps qualified and held items in order; exact reciprocal transfer pairs and supported categorizations use their canonical server evidence. Other decisions remain held until their owning evidence adapter qualifies them. Creates no run, claim, preview, question, approval or financial effect and makes no provider call. Qualification is advisory: strict preview and execution revalidation remain required. Requires finances:read.
 
 - Domain: finances; stage: prepare; policy: read_only.
 - Grants (all): finances:read.
@@ -11980,6 +12562,94 @@ Read current source, counterpart, revision and execution-qualification states fo
       "type": "array",
       "items": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "transactionId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "expectedTransactionUpdatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                ]
+              },
+              "expectedTransactionRevision": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "learnMerchant": {
+                "default": "never",
+                "type": "string",
+                "const": "never"
+              },
+              "kind": {
+                "type": "string",
+                "const": "transfer_pair"
+              },
+              "counterpartTransactionId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "expectedCounterpartUpdatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                ]
+              },
+              "expectedCounterpartRevision": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]*$"
+              }
+            },
+            "required": [
+              "transactionId",
+              "expectedTransactionUpdatedAt",
+              "expectedTransactionRevision",
+              "rationale",
+              "evidence",
+              "confidence",
+              "kind",
+              "counterpartTransactionId",
+              "expectedCounterpartUpdatedAt",
+              "expectedCounterpartRevision"
+            ],
+            "additionalProperties": false
+          },
           {
             "type": "object",
             "properties": {
@@ -13365,7 +14035,9 @@ Persist a contextual reply to exact source messages delivered within this existi
                   "account",
                   "review_case",
                   "contextual_question",
-                  "review_batch"
+                  "review_batch",
+                  "budget_start_preview",
+                  "review_batch_undo"
                 ]
               },
               "id": {
@@ -13487,7 +14159,9 @@ Commit one reply to exact delivered sources of a fixed conversation turn. Retry 
                   "account",
                   "review_case",
                   "contextual_question",
-                  "review_batch"
+                  "review_batch",
+                  "budget_start_preview",
+                  "review_batch_undo"
                 ]
               },
               "id": {

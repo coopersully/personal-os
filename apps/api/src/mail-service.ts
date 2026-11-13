@@ -28,6 +28,7 @@ import type {
   MailRule,
   MailRulePreview,
   MailSetupContext,
+  MailSummaryCursor,
   MailThread,
   PreviewMailRuleInput,
   SendMailDraftInput,
@@ -1948,8 +1949,18 @@ export function createMailService({
       } as import("@personal-os/domain").MailNavigationCounts;
     },
 
-    async listThreads(userId: string, query: MailListQuery): Promise<MailThread[]> {
+    async listThreads(
+      userId: string,
+      query: MailListQuery,
+      cursor?: MailSummaryCursor,
+    ): Promise<MailThread[]> {
       const conditions = await threadConditions(userId, query);
+      if (cursor?.beforeReceivedAt && cursor.beforeId) {
+        // Row comparison mirrors the (receivedAt, id) ordering, so equal timestamps never skip.
+        conditions.push(
+          sql`(${mailThreads.receivedAt}, ${mailThreads.id}) < (${new Date(cursor.beforeReceivedAt)}, ${cursor.beforeId})`,
+        );
+      }
       const records = await db
         .select()
         .from(mailThreads)

@@ -1299,3 +1299,21 @@ coarsened for weather requests, and never tracked in the background. Saved-locat
 honest time-only sky cover denied permissions, unavailable fixes, stale observations and outages.
 See `docs/engineering/mobile-today-sky.md` for lifecycle, privacy and verification boundaries.
 This is a local candidate, not a production or TestFlight release.
+
+## 2026-11-13 — Native Mail reading candidate
+
+COO-230 — Read and search Mail threads on iPhone replaces the title-only Inbox and Mailboxes
+screens with a unified inbox, a per-account mailbox list, an in-memory conversation reader and
+server search.
+
+- `GET /v1/mail/thread-summaries` returns thread rows without body text, recipient lists or the
+  provider thread identifier, is `no-store`, requires `mail:read`, and pages after the last row's
+  `(receivedAt, id)`. `GET /v1/mail/threads` and the web client are unchanged.
+- The native lists cache summaries only. Message bodies are detail reads held while the reader is
+  open and dropped when it closes.
+- Search is read from the `mailSearch` route parameter. The shared workspace header does not set
+  that parameter yet, so typing in the header on Mail still shows sample results until the header
+  is wired; the screens and their tests are ready for it.
+- Triage, compose, reply, attachments downloads and rules are not included. This is a local
+  candidate covered by focused tests; it is not a production or TestFlight release.
+

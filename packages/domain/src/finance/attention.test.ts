@@ -127,6 +127,24 @@ describe("Finance active attention", () => {
       budgetReady: false,
     });
   });
+  it("counts approvals without a shared decision key as separate approvals", () => {
+    const approval = (id: string, decisionKey: string | null) =>
+      record({
+        id,
+        transactionId: null,
+        source: "approval",
+        workState: "needs_person",
+        decisionKey,
+      });
+    expect(
+      project([
+        approval("action:1", null),
+        approval("action:2", null),
+        approval("batch:1:1", "batch:1"),
+        approval("batch:1:2", "batch:1"),
+      ]),
+    ).toMatchObject({ activeDecisionCount: 3, rawCounts: { approvals: 3 } });
+  });
   it("rejects duplicate record identities rather than undercounting work", () => {
     expect(() => project([record(), record()])).toThrow();
   });

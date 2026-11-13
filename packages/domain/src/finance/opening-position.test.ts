@@ -123,6 +123,53 @@ describe("qualified opening position", () => {
       }).qualified,
     ).toBe(false);
   });
+  it("treats one account listed twice as a duplicate even without a provider identity", () => {
+    const unidentified = { ...account, identityKey: null };
+    const output = qualifyFinanceOpeningPosition({
+      month: "2026-11",
+      accounts: [unidentified, unidentified],
+    });
+    expect(output.qualified).toBe(false);
+    expect(output.accounts.map((item) => item.reasons)).toEqual([
+      ["account_identity_unknown", "duplicate_account"],
+      ["account_identity_unknown", "duplicate_account"],
+    ]);
+    expect(output.accounts.every((item) => item.openingBalanceCents === null)).toBe(true);
+  });
+  it("ignores an inverted coverage interval rather than counting it as evidence", () => {
+    expect(
+      qualify([{ ...account, coverage: [{ from: "2026-11-03", through: "2026-11-01" }] }]),
+    ).toMatchObject({
+      qualified: false,
+      reasons: ["incomplete_coverage"],
+      accounts: [{ openingBalanceCents: null }],
+    });
+  });
+  it("refuses an opening balance or movement total beyond exact integer range", () => {
+    const huge = Number.MAX_SAFE_INTEGER;
+    const movement = { ...firstMovement, signedBalanceDeltaCents: huge };
+    expect(
+      qualify([
+        {
+          ...account,
+          movements: [movement, { ...movement, id: "second" }],
+        },
+      ]),
+    ).toMatchObject({
+      qualified: false,
+      reasons: ["amount_out_of_range"],
+      accounts: [{ openingBalanceCents: null }],
+    });
+    expect(
+      qualify([
+        {
+          ...account,
+          statement: { ...account.statement, signedClosingBalanceCents: huge },
+          movements: [{ ...firstMovement, signedBalanceDeltaCents: -huge }],
+        },
+      ]),
+    ).toMatchObject({ qualified: false, reasons: ["amount_out_of_range"] });
+  });
   it("supports negative signed liability positions without turning them into spendable cash", () => {
     expect(
       qualify([

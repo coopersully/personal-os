@@ -36,6 +36,7 @@ import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
 import { readFinanceAttentionSnapshot } from "./attention-read.js";
 import { createFinanceBatchApprovalService } from "./batch-approval-service.js";
+import { captureFinanceBatchEffect } from "./batch-effect-state.js";
 import { validateFinanceCompletionBatch } from "./completion-service.js";
 import { createFinanceReviewBatchService } from "./review-batch-service.js";
 
@@ -887,6 +888,195 @@ describe.sequential("durable Finance review batches", () => {
       f.service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.context),
     ).rejects.toMatchObject({ code: "conflict", details: { recovery: "new_preview" } });
     expect(await transaction(f.left.id)).toMatchObject({ reconciliationStatus: "confirmed" });
+  });
+  async function confirmedPair() {
+    const f = await pairFixture();
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.pairDecision] },
+      f.context,
+    );
+    await f.service.execute(
+      preview.id,
+      { fingerprint: preview.fingerprint, confirmTransferPairs: true },
+      f.context,
+    );
+    const undo = (outcomeIndexes = [0], idempotencyKey: string = randomUUID()) =>
+      f.service.previewUndo({ batchId: preview.id, outcomeIndexes, idempotencyKey }, f.context);
+    return { ...f, preview, undo };
+  }
+  it("refuses to prepare a correction it could not apply exactly", async () => {
+    const f = await confirmedPair();
+    // Only applied outcomes with a saved receipt can be reversed.
+    await expect(f.undo([1])).rejects.toMatchObject({
+      code: "invalid_request",
+      message: expect.stringContaining("reversible effect receipts"),
+    });
+    const key = randomUUID();
+    const correction = await f.undo([0], key);
+    await expect(f.undo([0, 1], key)).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("different effects"),
+    });
+    expect(await f.undo([0], key)).toEqual(correction);
+    await database.db
+      .update(financeTransactions)
+      .set({ notes: "Later owner edit" })
+      .where(eq(financeTransactions.id, f.left.id));
+    await expect(f.undo()).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("changed after the batch"),
+    });
+    // A receipt that cannot show what it would restore is never undone blindly.
+    await database.db
+      .update(financeReviewBatchEffects)
+      .set({ before: sql`${financeReviewBatchEffects.before} - 'display'` })
+      .where(eq(financeReviewBatchEffects.batchId, f.preview.id));
+    await expect(f.undo()).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("exact display"),
+    });
+    expect((await f.service.getUndo(correction.id, f.context)).effects).toEqual([]);
+    expect(await transaction(f.left.id)).toMatchObject({ reconciliationStatus: "confirmed" });
+  });
+  it("pauses a cancelled correction and refuses one whose receipt is gone", async () => {
+    const f = await confirmedPair();
+    const correction = await f.undo();
+    const accept = { fingerprint: correction.fingerprint };
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await expect(
+      f.service.executeUndo(correction.id, accept, { ...f.context, signal: cancelled.signal }),
+    ).rejects.toMatchObject({
+      code: "service_unavailable",
+      message: expect.stringContaining("Correction paused"),
+    });
+    await database.db
+      .delete(financeReviewBatchEffects)
+      .where(eq(financeReviewBatchEffects.batchId, f.preview.id));
+    await expect(f.service.executeUndo(correction.id, accept, f.context)).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("unavailable"),
+    });
+    expect(await f.service.getUndo(correction.id, f.context)).toMatchObject({
+      status: "previewed",
+      pendingCount: 1,
+      outcomes: [],
+    });
+    expect(await transaction(f.left.id)).toMatchObject({ reconciliationStatus: "confirmed" });
+  });
+  it("reports partial correction progress and refuses to decline a finished correction", async () => {
+    const f = await fixture(2);
+    const run = await f.service.preview(f.input, f.context);
+    const executed = await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+    expect(executed.outcomes.map((outcome) => outcome.status)).toEqual(["applied", "applied"]);
+    const correction = await f.service.previewUndo(
+      { batchId: run.id, outcomeIndexes: [0, 1], idempotencyKey: randomUUID() },
+      f.context,
+    );
+    const accept = { fingerprint: correction.fingerprint };
+    expect(
+      await f.service.executeUndo(correction.id, { ...accept, limit: 1 }, f.context),
+    ).toMatchObject({ status: "in_progress", pendingCount: 1, outcomes: [{ status: "applied" }] });
+    expect(await f.service.executeUndo(correction.id, accept, f.context)).toMatchObject({
+      status: "completed",
+      pendingCount: 0,
+    });
+    await expect(f.service.declineUndo(correction.id, f.context)).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("already finished"),
+    });
+    for (const decision of f.decisions)
+      expect(await transaction(decision.transactionId)).toMatchObject({ needsReview: true });
+  });
+  it("keeps a transfer pair behind owner approval when qualifying and rejects unknown transactions", async () => {
+    const f = await pairFixture();
+    const qualified = await f.service.qualify({ decisions: [f.pairDecision] }, f.agentContext);
+    expect(qualified.items[0]?.reasons).toContain("approval_required");
+    expect(qualified.items[0]?.state).not.toBe("qualified");
+    await expect(
+      f.service.preview(
+        {
+          idempotencyKey: randomUUID(),
+          decisions: [{ ...f.pairDecision, transactionId: randomUUID() }],
+        },
+        f.context,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+  it("stops an agent's own execution once its preparation grant has expired", async () => {
+    const f = await transferFixture("recategorize");
+    const run = await f.service.preview(f.input, f.agentContext);
+    await database.db
+      .update(accessTokens)
+      .set({ expiresAt: new Date(now().getTime() - 1) })
+      .where(eq(accessTokens.id, f.agentContext.principal.actorId));
+    await expect(
+      f.service.execute(run.id, { fingerprint: run.fingerprint }, f.agentContext),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect((await f.service.get(run.id, f.context)).outcomes).toEqual([]);
+  });
+  it("confirms or restores a pair only inside an exact owner-confirmed batch", async () => {
+    const f = await pairFixture();
+    const scope = { transactionId: f.left.id, reviewId: null };
+    await database.db.transaction(async (tx) => {
+      await expect(
+        f.finance.applyVerifiedTransferPair(f.pairDecision, f.context, tx),
+      ).rejects.toMatchObject({ code: "forbidden", message: expect.stringContaining("exact") });
+      await expect(f.finance.restoreReviewBatchEffect({}, {}, f.context, tx)).rejects.toMatchObject(
+        { code: "forbidden", message: expect.stringContaining("exact") },
+      );
+      // A batch scope alone is not the owner's confirmation of both displayed legs.
+      await expect(
+        f.finance.applyVerifiedTransferPair(
+          f.pairDecision,
+          { ...f.context, financeReviewBatchScope: scope },
+          tx,
+        ),
+      ).rejects.toMatchObject({
+        code: "forbidden",
+        message: expect.stringContaining("Ask the owner"),
+      });
+      await expect(
+        f.finance.applyVerifiedTransferPair(
+          f.pairDecision,
+          {
+            ...f.agentContext,
+            financeReviewBatchScope: { ...scope, ownerConfirmedTransferPair: true },
+          },
+          tx,
+        ),
+      ).rejects.toMatchObject({ code: "forbidden" });
+    });
+    const preview = (decision: typeof f.pairDecision) =>
+      f.service.preview({ idempotencyKey: randomUUID(), decisions: [decision] }, f.context);
+    await expect(
+      preview({ ...f.pairDecision, expectedCounterpartRevision: "999" }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("pair changed"),
+    });
+    await expect(
+      preview({ ...f.pairDecision, counterpartTransactionId: randomUUID() }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(await transaction(f.left.id)).toMatchObject({ needsReview: true });
+    expect(await transaction(f.right.id)).toMatchObject({ needsReview: true });
+  });
+  it("captures an effect only for one existing transaction or one distinct pair", async () => {
+    const f = await pairFixture();
+    for (const ids of [[], [f.left.id, f.left.id], [f.left.id, f.right.id, randomUUID()]])
+      await expect(captureFinanceBatchEffect(database.db, f.userId, ids)).rejects.toMatchObject({
+        code: "invalid_request",
+      });
+    await expect(
+      captureFinanceBatchEffect(database.db, f.userId, [f.left.id, randomUUID()]),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const other = await fixture();
+    await expect(
+      captureFinanceBatchEffect(database.db, other.userId, [f.left.id]),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const state = await captureFinanceBatchEffect(database.db, f.userId, [f.left.id, f.right.id]);
+    expect(state.transactions.map((row) => row.id).sort()).toEqual([f.left.id, f.right.id].sort());
+    expect(state.display?.transactions).toHaveLength(2);
   });
   it("rolls back a lost correction writer and resumes without duplicate effects", async () => {
     const f = await pairFixture(1);
@@ -2545,6 +2735,131 @@ describe.sequential("durable Finance review batches", () => {
     ).rejects.toMatchObject({ code: "conflict" });
     // The worker claims approvals across owners; never leave this one for a later test.
     await f.service.cancelContinuation(run.id, f.context);
+  });
+  it("approves a batch saved in the earlier bare-decision manifest format", async () => {
+    const f = await fixture(1);
+    const run = await f.service.preview(f.input, f.context);
+    await database.db
+      .update(financeReviewBatchRuns)
+      .set({ manifest: f.decisions })
+      .where(eq(financeReviewBatchRuns.id, run.id));
+    expect(
+      await f.service.approveForContinuation(run.id, { fingerprint: run.fingerprint }, f.context),
+    ).toMatchObject({ batchId: run.id, state: "pending" });
+    await f.service.cancelContinuation(run.id, f.context);
+  });
+  it("counts an unexpected failure while recording an attempt and keeps the approval retryable", async () => {
+    const f = await fixture(1);
+    const run = await f.service.preview(f.input, f.context);
+    const approval = await f.service.approveForContinuation(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.context,
+    );
+    const worker = createFinanceBatchApprovalService({
+      db: database.db,
+      now,
+      authorize: async () => {},
+      find: async () => ({ id: run.id, fingerprint: run.fingerprint }),
+      // The saved receipt becomes unreadable before the attempt's result is recorded.
+      execute: async () => {
+        await database.db
+          .update(financeReviewBatchRuns)
+          .set({ outcomes: [{ unreadable: true }] })
+          .where(eq(financeReviewBatchRuns.id, run.id));
+        return {} as never;
+      },
+    });
+    await expect(worker.processApproved()).rejects.toBeDefined();
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeReviewBatchApprovals)
+          .where(eq(financeReviewBatchApprovals.id, approval.id))
+      )[0],
+    ).toMatchObject({
+      state: "pending",
+      failures: 1,
+      failureCode: "reconciliation_failed",
+      claimId: null,
+      leaseUntil: null,
+    });
+    await database.db
+      .update(financeReviewBatchRuns)
+      .set({ outcomes: [] })
+      .where(eq(financeReviewBatchRuns.id, run.id));
+    await f.service.cancelContinuation(run.id, f.context);
+  });
+  it("lists only the caller's own batches, newest first, and nothing for a new owner", async () => {
+    const f = await fixture(1);
+    const preparer = await agent(f.userId);
+    const stranger = await fixture(1);
+    expect(await f.service.list(f.context)).toEqual([]);
+    const mine = await f.service.preview(f.input, f.context);
+    const agents = await f.service.preview({ ...f.input, idempotencyKey: randomUUID() }, preparer);
+    // The owner sees every batch on the account; an agent sees only what it prepared.
+    expect((await f.service.list(f.context)).map((run) => run.id).sort()).toEqual(
+      [mine.id, agents.id].sort(),
+    );
+    expect((await f.service.list(preparer)).map((run) => run.id)).toEqual([agents.id]);
+    expect(await f.service.list(preparer, { limit: 1 })).toHaveLength(1);
+    expect(await f.service.list(stranger.context)).toEqual([]);
+    expect((await f.service.list(f.context)).every((run) => run.declinedAt === null)).toBe(true);
+  });
+  it("returns the same cancelled approval when cancelled twice", async () => {
+    const f = await fixture(1);
+    const run = await f.service.preview(f.input, f.context);
+    await f.service.approveForContinuation(run.id, { fingerprint: run.fingerprint }, f.context);
+    const cancelled = await f.service.cancelContinuation(run.id, f.context);
+    expect(cancelled).toMatchObject({ state: "cancelled", recovery: "new_preview" });
+    expect(await f.service.cancelContinuation(run.id, f.context)).toEqual(cancelled);
+    expect(
+      (await database.db.select().from(auditEvents).where(eq(auditEvents.userId, f.userId))).filter(
+        (event) => event.action === "finance_review_batch.cancelled",
+      ),
+    ).toHaveLength(1);
+    const unapproved = await f.service.preview(
+      { ...f.input, idempotencyKey: randomUUID() },
+      f.context,
+    );
+    await expect(f.service.cancelContinuation(unapproved.id, f.context)).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+  it("does not overwrite a cancellation that lands while an approved attempt is executing", async () => {
+    const f = await fixture(1);
+    const run = await f.service.preview(f.input, f.context);
+    const approval = await f.service.approveForContinuation(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.context,
+    );
+    const worker = createFinanceBatchApprovalService({
+      db: database.db,
+      now,
+      authorize: async () => {},
+      find: async () => ({ id: run.id, fingerprint: run.fingerprint }),
+      // The owner cancels after the attempt started and before its result is recorded.
+      execute: async () => {
+        await database.db
+          .update(financeReviewBatchApprovals)
+          .set({ state: "cancelled", claimId: null, leaseUntil: null })
+          .where(eq(financeReviewBatchApprovals.id, approval.id));
+        return f.service.get(run.id, f.context);
+      },
+    });
+    expect(await worker.processApproved()).toEqual({ inspected: 1 });
+    expect(await f.service.getContinuation(run.id, f.context)).toMatchObject({
+      state: "cancelled",
+      failureCode: null,
+    });
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationMessages)
+        .where(eq(financeConversationMessages.userId, f.userId)),
+    ).toEqual([]);
   });
   it("stops remaining owner-approved effects when the originating preparation grant is revoked", async () => {
     const f = await fixture(12);

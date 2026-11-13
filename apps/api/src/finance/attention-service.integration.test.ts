@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   financeAccounts,
+  financeBudgetStartPreviews,
   financeConversationMessages,
   financeEconomicEvents,
   financeOpeningStatements,
@@ -13,7 +14,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import { createFinanceAttentionService } from "./attention-service.js";
 
@@ -524,6 +525,78 @@ describe.sequential("Finance budget starting policy", () => {
     await expect(service().declineBudgetStartPreview(owner, approved.id)).rejects.toMatchObject({
       code: "conflict",
     });
+  });
+  it("refuses previews and reads without the matching scope, owner, policy revision or time zone", async () => {
+    const context = await fixture();
+    const scoped = (scopes: Principal["scopes"]) => ({
+      ...context,
+      principal: { ...context.principal, scopes },
+    });
+    await expect(
+      service().previewBudgetStart(scoped(new Set(["finances:read"])), input()),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    const prepared = await service().previewBudgetStart(context, input());
+    await expect(
+      service().getBudgetStartPreview(scoped(new Set(["finances:write"])), prepared.id),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    // A preview built against a policy revision that is not current is refused up front.
+    await expect(
+      service().previewBudgetStart(context, { ...input(), expectedPolicyRevision: 4 }),
+    ).rejects.toMatchObject({ code: "conflict", message: expect.stringContaining("changed") });
+    const missing = crypto.randomUUID();
+    const stranger = {
+      ...context,
+      principal: { ...context.principal, actorId: missing, userId: missing },
+    };
+    await expect(service().previewBudgetStart(stranger, input())).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(service().getAttentionSnapshot(missing)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "Not/A_Zone" })
+      .where(eq(users.id, context.principal.userId));
+    await expect(service().previewBudgetStart(context, input())).rejects.toMatchObject({
+      code: "invalid_request",
+      message: expect.stringContaining("time zone"),
+    });
+    expect(await service().getBudgetStart(context.principal.userId)).toBeNull();
+  });
+  it("refuses approval after the owner's time zone changes or for a preview without its impact", async () => {
+    const context = await fixture();
+    const prepared = await service().previewBudgetStart(context, input());
+    const apply = { previewId: prepared.id, fingerprint: prepared.fingerprint };
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "America/Chicago" })
+      .where(eq(users.id, context.principal.userId));
+    await expect(service().applyBudgetStart(context, apply)).rejects.toMatchObject({
+      code: "conflict",
+      // The saved preview no longer describes this account, whichever check notices first.
+      message: expect.stringContaining("changed"),
+    });
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "America/New_York" })
+      .where(eq(users.id, context.principal.userId));
+    // Previews saved before the impact projection existed cannot be approved blind.
+    await database.db
+      .update(financeBudgetStartPreviews)
+      .set({ projectedAttention: null })
+      .where(eq(financeBudgetStartPreviews.id, prepared.id));
+    await expect(service().applyBudgetStart(context, apply)).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("expected impact"),
+    });
+    expect(await service().getBudgetStart(context.principal.userId)).toBeNull();
+    const replacement = await service().previewBudgetStart(context, input());
+    const policy = await service().applyBudgetStart(context, {
+      previewId: replacement.id,
+      fingerprint: replacement.fingerprint,
+    });
+    expect(await service().getBudgetStart(context.principal.userId)).toEqual(policy);
   });
   it("requires an exact preview, records server-derived approval, and replays safely", async () => {
     const context = await fixture();

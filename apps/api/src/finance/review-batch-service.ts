@@ -90,10 +90,6 @@ function manifest(row: Row) {
 function outcomes(row: Row) {
   return row.outcomes.map((item) => financeReviewBatchOutcomeSchema.parse(item));
 }
-function required([run]: FinanceReviewBatchRun[]): FinanceReviewBatchRun {
-  if (!run) throw new AppError("internal_error", "The Finance batch could not be read.");
-  return run;
-}
 function present(row: Row, declinedAt: string | null = null): FinanceReviewBatchRun {
   const items = manifest(row);
   const decisions = items.map(({ decision }) => decision);
@@ -125,17 +121,19 @@ function present(row: Row, declinedAt: string | null = null): FinanceReviewBatch
     declinedAt,
   };
 }
-async function presentCurrent(tx: Transaction, rows: Row[]) {
-  const userId = rows[0]?.userId;
-  const declined = userId
-    ? await readFinanceDeclinedAt(
-        tx,
-        userId,
-        "review_batch",
-        rows.map((row) => row.id),
-      )
-    : new Map<string, string>();
+/** Reads carry the owner's decline, so a declined batch is not shown as awaiting approval. */
+async function presentCurrent(tx: Transaction, userId: string, rows: Row[]) {
+  const declined = await readFinanceDeclinedAt(
+    tx,
+    userId,
+    "review_batch",
+    rows.map((row) => row.id),
+  );
   return rows.map((row) => present(row, declined.get(row.id) ?? null));
+}
+async function presentOne(tx: Transaction, row: Row) {
+  const declined = await readFinanceDeclinedAt(tx, row.userId, "review_batch", [row.id]);
+  return present(row, declined.get(row.id) ?? null);
 }
 function binding(principal: Principal) {
   if (principal.actorType === "user") return eq(financeReviewBatchRuns.userId, principal.userId);
@@ -717,7 +715,7 @@ export function createFinanceReviewBatchService({
                 "conflict",
                 "That idempotency key already identifies a different manifest.",
               );
-            return required(await presentCurrent(tx, [row]));
+            return presentOne(tx, row);
           }
           const displayRows = await tx
             .select()
@@ -785,7 +783,7 @@ export function createFinanceReviewBatchService({
     async get(id: string, context: Context): Promise<FinanceReviewBatchRun> {
       return db.transaction(async (tx) => {
         await authorize(tx, context, "read");
-        return required(await presentCurrent(tx, [await find(tx, id, context)]));
+        return presentOne(tx, await find(tx, id, context));
       });
     },
     async list(context: Context, raw: unknown = {}): Promise<FinanceReviewBatchRun[]> {
@@ -798,7 +796,7 @@ export function createFinanceReviewBatchService({
           .where(binding(context.principal))
           .orderBy(desc(financeReviewBatchRuns.createdAt), desc(financeReviewBatchRuns.id))
           .limit(limit);
-        return presentCurrent(tx, rows);
+        return presentCurrent(tx, context.principal.userId, rows);
       });
     },
     async execute(id: string, raw: unknown, context: Context): Promise<FinanceReviewBatchRun> {

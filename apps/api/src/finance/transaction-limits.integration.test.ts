@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { createDatabaseClient, type DatabaseClient, migrateDatabase } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { sql } from "drizzle-orm";
+import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import { createFinanceBatchApprovalService } from "./batch-approval-service.js";
 
@@ -70,6 +71,32 @@ describe.sequential("bounded Finance approval transactions", () => {
     expect(await service(0).getContinuation(randomUUID(), context)).toBeNull();
   }, 20_000);
 
+  it("keeps the connection after a business refusal and discards it after an unexpected failure", async () => {
+    const failing = (failure: Error) =>
+      createFinanceBatchApprovalService({
+        db: database.db,
+        now: () => new Date("2026-11-12T16:00:00Z"),
+        authorize: async () => {},
+        find: async () => {
+          throw failure;
+        },
+        execute: async () => {
+          throw new Error("Never executes.");
+        },
+      });
+    expect(await service(0).getContinuation(randomUUID(), context)).toBeNull();
+    const open = database.pool.totalCount;
+    const refusal = new AppError("conflict", "Synthetic refusal");
+    await expect(failing(refusal).getContinuation(randomUUID(), context)).rejects.toBe(refusal);
+    expect(database.pool.totalCount).toBe(open);
+    const unexpected = new Error("Synthetic unexpected failure");
+    await expect(failing(unexpected).getContinuation(randomUUID(), context)).rejects.toBe(
+      unexpected,
+    );
+    // Its state is unknown, so it is closed rather than handed to the next request.
+    expect(database.pool.totalCount).toBe(open - 1);
+    expect(await service(0).getContinuation(randomUUID(), context)).toBeNull();
+  }, 20_000);
   it("leaves no transaction limit behind on pooled connections", async () => {
     expect(await service(1).getContinuation(randomUUID(), context)).toBeNull();
     expect(new Set(await sessionTimeouts())).toEqual(new Set(["0"]));

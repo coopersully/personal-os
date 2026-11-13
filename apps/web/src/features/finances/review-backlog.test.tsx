@@ -237,6 +237,41 @@ it("paginates only the selected group and resets its cursor on group changes", a
   });
 });
 
+it("labels unavailable sources, undated pending activity and review cases without guessing", async () => {
+  const base = item();
+  api.listFinanceReviewBacklogItems.mockResolvedValue({
+    items: [
+      { ...base, id: nextId, transaction: null, savedClarification: null },
+      {
+        ...base,
+        source: "review_case",
+        status: "deferred",
+        transaction: base.transaction && {
+          ...base.transaction,
+          merchant: "Synthetic pending card",
+          date: null,
+          currencyCode: null,
+          pending: true,
+        },
+        savedClarification: { source: "evidence", text: "A long saved note", truncated: true },
+      },
+    ],
+    total: 2,
+    nextCursor: null,
+    complete: true,
+  });
+  mount();
+  // A missing source is named as missing, never shown as a blank or zero-amount record.
+  expect(await screen.findByRole("link", { name: "Unavailable transaction" })).toBeVisible();
+  expect(screen.getByText("Transaction source unavailable")).toBeVisible();
+  expect(screen.getByText("Undated · 0.12 currency unavailable · expense · Pending")).toBeVisible();
+  expect(screen.getByText("deferred review")).toBeVisible();
+  expect(
+    screen.getByText("Saved clarification: A long saved note… (open evidence for the full note)"),
+  ).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Next records" })).not.toBeInTheDocument();
+});
+
 it("authorizes an exact persisted manifest, resumes remaining work, and preserves exception outcomes", async () => {
   const loading = vi.spyOn(toast, "loading");
   const success = vi.spyOn(toast, "success");
@@ -381,6 +416,37 @@ it.each([
   expect(screen.getByText(/completed in this session. Check the review backlog/)).toBeVisible();
 });
 
+it("shows a saved transfer pair by its kind without asking for or inventing a category", async () => {
+  const saved: FinanceReviewBatchRun = {
+    ...batch(),
+    pendingCount: 1,
+    decisions: [
+      {
+        kind: "transfer_pair",
+        transactionId: id,
+        counterpartTransactionId: nextId,
+        expectedTransactionUpdatedAt: now,
+        expectedTransactionRevision: "1",
+        expectedCounterpartUpdatedAt: now,
+        expectedCounterpartRevision: "1",
+        rationale: "Both legs are the same movement.",
+        evidence: "Synthetic statements show opposite amounts.",
+        confidence: 0.9,
+        learnMerchant: "never",
+      },
+    ],
+  };
+  api.listFinanceReviewBatches.mockResolvedValue([saved]);
+  api.getFinanceReviewBatch.mockResolvedValue(saved);
+  const user = userEvent.setup();
+  mount();
+  await user.selectOptions(await screen.findByLabelText("Saved batch"), id);
+  const decisions = await screen.findByRole("list", { name: "Exact batch decisions" });
+  expect(within(decisions).getByText(/1\. transfer pair/)).toBeVisible();
+  expect(within(decisions).getByText("Both legs are the same movement.")).toBeVisible();
+  expect(within(decisions).queryByText(/Category:/)).not.toBeInTheDocument();
+  expect(api.getFinanceCategories).not.toHaveBeenCalled();
+});
 it("does not authorize a category decision until its category can be identified", async () => {
   api.listFinanceReviewBatches.mockResolvedValue([batch()]);
   api.getFinanceReviewBatch.mockResolvedValue(batch());

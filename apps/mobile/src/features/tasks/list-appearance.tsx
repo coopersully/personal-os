@@ -1,10 +1,12 @@
 import type { TaskListIcon } from "@personal-os/domain";
 import { useState } from "react";
-import { Modal, Pressable, Text, View } from "react-native";
+import { Modal, Pressable, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { GlassButton } from "../../components/glass-button";
 import { Icon, type IconName } from "../../components/icons";
+import { SheetHeader } from "../../components/sheet-header";
 import { useTheme } from "../../theme";
-import { Action, Field, FormBody, Section, styles } from "./ui";
+import { Field, FormBody, Section } from "./ui";
 export const listIcons: Record<TaskListIcon, IconName> = {
   list: "views",
   home: "home",
@@ -67,18 +69,21 @@ export function ListAppearance({
         onRequestClose={() => setOpen(false)}
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
-          <View style={[styles.settingRow, { justifyContent: "space-between" }]}>
-            <Action label="Cancel" onPress={() => setOpen(false)} />
-            <Text style={{ color: t.ink, fontSize: 18, fontWeight: "600" }}>Appearance</Text>
-            <Action
-              label="Done"
-              disabled={!valid}
-              onPress={() => {
-                onChange(draftIcon, draftColor);
-                setOpen(false);
-              }}
-            />
-          </View>
+          <SheetHeader
+            title="Appearance"
+            label="Cancel"
+            onClose={() => setOpen(false)}
+            trailing={
+              <GlassButton
+                label="Done"
+                disabled={!valid}
+                onPress={() => {
+                  onChange(draftIcon, draftColor);
+                  setOpen(false);
+                }}
+              />
+            }
+          />
           <FormBody>
             <Section title="Icon">
               <View style={{ flexDirection: "row", flexWrap: "wrap", padding: 16, gap: 8 }}>

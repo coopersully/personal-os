@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Pressable, Text, useWindowDimensions, View } from "react-native";
+import { formRow } from "../../components/forms/form-row";
 import { Icon, type IconName } from "../../components/icons";
 import { type SettingsWorkspace, useSettingsAccent } from "../../components/settings-accent";
 import { SettingLabel, SettingValue } from "../../components/settings-row-content";
@@ -23,15 +24,7 @@ export function SettingsRow({
       accessibilityRole="button"
       accessibilityLabel={value ? `${label}, ${value}` : label}
       onPress={onPress}
-      style={({ pressed }) => ({
-        minHeight: 52,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        opacity: pressed ? 0.6 : 1,
-      })}
+      style={({ pressed }) => ({ ...rowStyle, opacity: pressed ? 0.6 : 1 })}
     >
       {icon &&
         (workspace ? (
@@ -174,11 +167,4 @@ export function SettingsIdentity({
     </View>
   );
 }
-const rowStyle = {
-  minHeight: 56,
-  paddingHorizontal: spacing.lg,
-  paddingVertical: spacing.md,
-  flexDirection: "row" as const,
-  alignItems: "center" as const,
-  gap: spacing.md,
-};
+const rowStyle = formRow;

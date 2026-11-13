@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { Text, TextInput, View } from "react-native";
-import { useTheme } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 export type PlanningPickerProps = {
   label: string;
   value: string;
@@ -22,7 +22,7 @@ export function PlanningPicker({
   disabledRef.current = disabled;
   const t = useTheme();
   return (
-    <View>
+    <View style={{ paddingHorizontal: spacing.lg, paddingVertical: spacing.md }}>
       <Text style={{ color: t.secondary }}>{label}</Text>
       <TextInput
         accessibilityLabel={label}

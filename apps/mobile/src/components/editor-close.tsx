@@ -1,5 +1,9 @@
-import { Pressable, Text } from "react-native";
-import { spacing, touchTarget, useTheme } from "../theme";
+import { GlassButton } from "./glass-button";
+
+/**
+ * The standard leading dismissal (Close, Cancel, Back or Done) for sheet chrome and for
+ * platforms without native bar items. Stack headers on iOS use `editorDismissOptions`.
+ */
 export function EditorClose({
   label,
   onPress,
@@ -9,22 +13,5 @@ export function EditorClose({
   onPress: () => void;
   disabled?: boolean;
 }) {
-  const t = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={{
-        minHeight: touchTarget,
-        paddingHorizontal: spacing.lg,
-        justifyContent: "center",
-        opacity: disabled ? 0.5 : 1,
-      }}
-    >
-      <Text style={{ color: t.ink, fontSize: 17 }}>{label}</Text>
-    </Pressable>
-  );
+  return <GlassButton label={label} onPress={onPress} disabled={disabled} />;
 }

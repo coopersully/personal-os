@@ -13,9 +13,8 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { AppToaster } from "../../components/app-toaster";
-import { EditorClose } from "../../components/editor-close";
+import { editorActionsOptions, editorDismissOptions } from "../../components/editor-header";
 import { Icon } from "../../components/icons";
-import { RowActions } from "../../components/row-actions";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { actWithUndo, type ItemAction, useTaskAction, useTaskApi, useTaskResources } from "./data";
@@ -26,7 +25,7 @@ import { loadTrashedRecord } from "./logic";
 import { RecordIdentity } from "./record-identity";
 import { SearchableChoice } from "./searchable-choice";
 import { TagsField } from "./tags-field";
-import { Action, Choice, confirm, Field, FormBody, Section, State, styles } from "./ui";
+import { Action, Choice, confirm, Field, FormBody, Section, State } from "./ui";
 
 type TaskEditorParams = {
   id?: string;
@@ -66,8 +65,8 @@ function TaskEditorRecord({ params }: { params: TaskEditorParams }) {
         <Stack.Screen
           options={{
             title: `${kind} details`,
-            headerRight: () => null,
-            headerLeft: () => <EditorClose label="Close" onPress={() => router.back()} />,
+            ...editorActionsOptions("Record actions", []),
+            ...editorDismissOptions({ label: "Close", onPress: () => router.back() }),
           }}
         />
         <State
@@ -309,74 +308,64 @@ function TaskEditor({
         options={{
           title: persisted ? `${kind} details` : `new ${kind}`,
           gestureEnabled: false,
-          headerLeft: () => (
-            <EditorClose
-              label={edited ? "Cancel" : "Close"}
-              disabled={action.pending}
-              onPress={() =>
-                edited
-                  ? confirm("Discard changes?", "Unsaved edits will be lost.", finish)
-                  : finish()
-              }
-            />
-          ),
-          headerRight: () => (
-            <View style={styles.toolbar}>
-              {persisted && (
-                <RowActions
-                  label="Record actions"
-                  placement="header"
-                  actions={
-                    deleted
+          ...editorDismissOptions({
+            label: edited ? "Cancel" : "Close",
+            disabled: action.pending,
+            onPress: () =>
+              edited
+                ? confirm("Discard changes?", "Unsaved edits will be lost.", finish)
+                : finish(),
+          }),
+          ...editorActionsOptions(
+            "Record actions",
+            !persisted
+              ? []
+              : deleted
+                ? [
+                    {
+                      id: "restore",
+                      label: "Restore",
+                      icon: "history",
+                      disabled: action.pending || readOnly || conflict,
+                      onPress: () => transition("restore"),
+                    },
+                  ]
+                : [
+                    {
+                      id: "complete",
+                      label: (task ? task.lifecycle !== "open" : !!persisted.completedAt)
+                        ? "Reopen"
+                        : "Complete",
+                      icon: "check",
+                      disabled: action.pending || readOnly || conflict,
+                      onPress: () =>
+                        transition(
+                          (task ? task.lifecycle !== "open" : !!persisted.completedAt)
+                            ? "reopen"
+                            : "complete",
+                        ),
+                    },
+                    ...(task?.lifecycle === "open"
                       ? [
                           {
-                            id: "restore",
-                            label: "Restore",
-                            icon: "history",
-                            disabled: action.pending || readOnly || conflict,
-                            onPress: () => transition("restore"),
-                          },
-                        ]
-                      : [
-                          {
-                            id: "complete",
-                            label: (task ? task.lifecycle !== "open" : !!persisted.completedAt)
-                              ? "Reopen"
-                              : "Complete",
-                            icon: "check",
-                            disabled: action.pending || readOnly || conflict,
-                            onPress: () =>
-                              transition(
-                                (task ? task.lifecycle !== "open" : !!persisted.completedAt)
-                                  ? "reopen"
-                                  : "complete",
-                              ),
-                          },
-                          ...(task?.lifecycle === "open"
-                            ? [
-                                {
-                                  id: "cancel",
-                                  destructive: true,
-                                  label: "Cancel task",
-                                  icon: "cancel" as const,
-                                  disabled: action.pending || readOnly || conflict,
-                                  onPress: () => transition("cancel"),
-                                },
-                              ]
-                            : []),
-                          {
-                            id: "trash",
-                            label: "Move to Trash",
-                            icon: "trash",
+                            id: "cancel",
                             destructive: true,
+                            label: "Cancel task",
+                            icon: "cancel" as const,
                             disabled: action.pending || readOnly || conflict,
-                            onPress: () => transition("trash"),
+                            onPress: () => transition("cancel"),
                           },
                         ]
-                  }
-                />
-              )}
-            </View>
+                      : []),
+                    {
+                      id: "trash",
+                      label: "Move to Trash",
+                      icon: "trash",
+                      destructive: true,
+                      disabled: action.pending || readOnly || conflict,
+                      onPress: () => transition("trash"),
+                    },
+                  ],
           ),
         }}
       />

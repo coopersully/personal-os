@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { AppToaster } from "../../components/app-toaster";
+import { editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
 import { Icon } from "../../components/icons";
 import { useTheme, workspaceColor } from "../../theme";
@@ -241,16 +242,11 @@ function LimitForm({ record, onDone }: { record: FinanceBudget; onDone?: () => v
       <Stack.Screen
         options={{
           gestureEnabled: false,
-          headerLeft: () => (
-            <Pressable
-              disabled={pending}
-              accessibilityRole="button"
-              onPress={close}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: t.ink }}>{edited && !submitted ? "Cancel" : "Close"}</Text>
-            </Pressable>
-          ),
+          ...editorDismissOptions({
+            label: edited && !submitted ? "Cancel" : "Close",
+            disabled: pending,
+            onPress: close,
+          }),
         }}
       />
       <FinanceScreen title={snapshot.category}>

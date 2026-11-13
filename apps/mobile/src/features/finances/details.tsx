@@ -2,7 +2,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef } from "react";
 import { Linking, View } from "react-native";
 import { toast } from "sonner-native";
-import { RowActions } from "../../components/row-actions";
+import { editorActionsOptions } from "../../components/editor-header";
 import { mobileAppOrigin, useAuth } from "../auth/context";
 import { AccountPreferences } from "./account-preferences";
 import { categoryIcon } from "./category-presentation";
@@ -148,12 +148,10 @@ export function FinanceTransactionScreen() {
     <FinanceScreen title={item?.merchant ?? "Transaction"}>
       <Stack.Screen
         options={{
-          headerRight: () =>
-            item ? (
-              <RowActions
-                placement="header"
-                label="Transaction actions"
-                actions={[
+          ...editorActionsOptions(
+            "Transaction actions",
+            item
+              ? [
                   {
                     id: "edit",
                     label: "Edit transaction",
@@ -161,9 +159,9 @@ export function FinanceTransactionScreen() {
                     onPress: () =>
                       router.push({ pathname: "/finance-transaction-edit", params: { id } }),
                   },
-                ]}
-              />
-            ) : null,
+                ]
+              : [],
+          ),
         }}
       />
       <ReadState query={query}>

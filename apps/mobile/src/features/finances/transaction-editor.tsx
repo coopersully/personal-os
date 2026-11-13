@@ -3,9 +3,10 @@ import type { FinanceTransaction } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, Text, TextInput, View } from "react-native";
+import { Alert, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { AppToaster } from "../../components/app-toaster";
+import { editorDismissOptions } from "../../components/editor-header";
 import { EntityPicker } from "../../components/forms/entity-picker";
 import { FormSave, useFormKeyboardOffset } from "../../components/forms/form-save";
 import { useTheme } from "../../theme";
@@ -108,18 +109,11 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
         options={{
           title: "edit transaction",
           gestureEnabled: false,
-          headerLeft: () => (
-            <Pressable
-              accessibilityRole="button"
-              disabled={pending}
-              onPress={close}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: t.ink, fontSize: 16 }}>
-                {edited && !submitted ? "Cancel" : "Close"}
-              </Text>
-            </Pressable>
-          ),
+          ...editorDismissOptions({
+            label: edited && !submitted ? "Cancel" : "Close",
+            disabled: pending,
+            onPress: close,
+          }),
         }}
       />
       <FinanceScreen title={record.merchant}>

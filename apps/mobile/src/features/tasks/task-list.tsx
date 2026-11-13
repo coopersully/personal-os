@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { FlatList, Modal, RefreshControl, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { FloatingAdd } from "../../components/floating-add";
+import { SheetHeader } from "../../components/sheet-header";
 import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { entityDictionary } from "../../product/entities";
 import { spacing, useTheme } from "../../theme";
@@ -361,15 +362,7 @@ export function TaskListScreen({
         onRequestClose={() => setShowFilters(false)}
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
-          <View style={[styles.settingRow, { justifyContent: "space-between" }]}>
-            <Text
-              accessibilityRole="header"
-              style={{ color: t.ink, fontSize: 22, fontWeight: "600" }}
-            >
-              Filters
-            </Text>
-            <Action label="Done" onPress={() => setShowFilters(false)} />
-          </View>
+          <SheetHeader title="Filters" label="Done" onClose={() => setShowFilters(false)} />
           <FormBody>
             <Section title="Match items">
               {menuChoices

@@ -12,10 +12,11 @@ import { File, Paths } from "expo-file-system";
 import { router, Stack, useLocalSearchParams, usePreventRemove } from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Share, Text, View } from "react-native";
+import { Alert, Share, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { EnumChoice } from "../../components/forms/enum-choice";
+import { SectionItem, SectionNote } from "../../components/forms/form-rows";
 import { FormSave } from "../../components/forms/form-save";
 import { PlanningPicker } from "../../components/forms/planning-picker";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
@@ -26,6 +27,7 @@ import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { Action, Field, ReadState, Section, ToggleRow } from "../goals/controls";
 import { useSettingsRefresh } from "../settings/data";
+import { SettingsActionRow, SettingsRow } from "../settings/settings-row";
 import { DaySelection } from "./day-selection";
 
 let devicePromise: Promise<string> | undefined;
@@ -60,7 +62,7 @@ export function RitualsSettingsScreen() {
   return <RitualHome key={state.user?.id} />;
 }
 function RitualHome() {
-  const t = useTheme();
+  const _t = useTheme();
   const { state, session } = useAuth();
   const api = session.api();
   const client = useQueryClient();
@@ -121,26 +123,41 @@ function RitualHome() {
         error={definitions.isError}
         retry={() => void definitions.refetch()}
       />
-      {(definitions.data ? (["morning", "night"] as const) : []).map((kind) => {
-        const definition = definitions.data?.rituals.find((d) => d.kind === kind);
-        return (
-          <RecordRow
-            leading={<Icon name="clock" color={t.secondary} />}
-            key={kind}
-            title={kind === "morning" ? "Morning" : "Evening"}
-            value={
-              definition
-                ? `${new Intl.DateTimeFormat(undefined, { timeZone: "UTC", hour: "numeric", minute: "2-digit" }).format(new Date(`2000-01-01T${definition.time}:00Z`))} · ${definition.enabled ? "Enabled" : "Disabled"}`
-                : "Not configured"
-            }
-            onPress={() => router.push({ pathname: "/settings/rituals/edit", params: { kind } })}
-          />
-        );
-      })}
-      <Action onPress={() => router.push("/settings/rituals/history")}>History</Action>
-      <Action disabled={pending} onPress={() => void action()}>
-        Export ritual data
-      </Action>
+      {definitions.data && (
+        <Section title="Rituals">
+          {(["morning", "night"] as const).map((kind) => {
+            const definition = definitions.data.rituals.find((d) => d.kind === kind);
+            return (
+              <SettingsRow
+                icon="clock"
+                key={kind}
+                label={kind === "morning" ? "Morning" : "Evening"}
+                value={
+                  definition
+                    ? `${new Intl.DateTimeFormat(undefined, { timeZone: "UTC", hour: "numeric", minute: "2-digit" }).format(new Date(`2000-01-01T${definition.time}:00Z`))} · ${definition.enabled ? "Enabled" : "Disabled"}`
+                    : "Not configured"
+                }
+                onPress={() =>
+                  router.push({ pathname: "/settings/rituals/edit", params: { kind } })
+                }
+              />
+            );
+          })}
+        </Section>
+      )}
+      <Section title="Records">
+        <SettingsRow
+          icon="history"
+          label="History"
+          onPress={() => router.push("/settings/rituals/history")}
+        />
+        <SettingsActionRow
+          icon="send"
+          label="Export ritual data"
+          disabled={pending}
+          onPress={() => void action()}
+        />
+      </Section>
       <Section title="Delete data">
         {(["morning", "night"] as const).map((kind) => (
           <Action
@@ -157,11 +174,11 @@ function RitualHome() {
         ))}
       </Section>
       {confirmKind && (
-        <>
-          <Text>
+        <Section title="Confirm deletion">
+          <SectionNote>
             This permanently deletes the definition, answers and history. Type{" "}
             {confirmKind === "morning" ? "Morning" : "Evening"} to confirm.
-          </Text>
+          </SectionNote>
           <Field label="Ritual name" value={confirmation} onChange={setConfirmation} />
           <Action
             destructive
@@ -180,7 +197,7 @@ function RitualHome() {
           <Action disabled={pending} onPress={() => setConfirmKind(null)}>
             Cancel deletion
           </Action>
-        </>
+        </Section>
       )}
     </Screen>
   );
@@ -361,10 +378,10 @@ function RitualEditor({
             value={draft.reminderTime}
             onChange={(reminderTime) => change({ reminderTime })}
           />
-          <Text style={{ color: t.secondary }}>
+          <SectionNote>
             Uses your Profile timezone:{" "}
             {state.user?.planningTimezone ?? "Set a timezone in Profile"}
-          </Text>
+          </SectionNote>
         </Section>
         {draft.steps.map((step, index) => (
           <Section key={step.id} title={`Step ${index + 1}`}>
@@ -410,18 +427,17 @@ function RitualEditor({
                 onChange={(value) => stepChange(index, { options: value.split("\n") })}
               />
             )}
-            <View style={{ flexDirection: "row", gap: 16 }}>
-              <Action disabled={pending || index === 0} onPress={() => moveStep(step.id, -1)}>
-                Move step {index + 1} up
-              </Action>
-              <Action
-                disabled={pending || index === draft.steps.length - 1}
-                onPress={() => moveStep(step.id, 1)}
-              >
-                Move step {index + 1} down
-              </Action>
-            </View>
+            <Action disabled={pending || index === 0} onPress={() => moveStep(step.id, -1)}>
+              Move step {index + 1} up
+            </Action>
             <Action
+              disabled={pending || index === draft.steps.length - 1}
+              onPress={() => moveStep(step.id, 1)}
+            >
+              Move step {index + 1} down
+            </Action>
+            <Action
+              destructive
               disabled={pending}
               onPress={() => change({ steps: draft.steps.filter((_, i) => i !== index) })}
             >
@@ -429,21 +445,23 @@ function RitualEditor({
             </Action>
           </Section>
         ))}
-        <Action
-          disabled={pending || draft.steps.length >= 20}
-          onPress={() =>
-            change({
-              steps: [...draft.steps, { id: randomUUID(), label: "", kind: "checkbox" }],
-            })
-          }
-        >
-          Add step
-        </Action>
-        {conflict && (
-          <Action disabled={pending} onPress={() => void save()}>
-            Load latest revision and keep draft
-          </Action>
-        )}
+        <Section>
+          <SettingsActionRow
+            icon="add"
+            label="Add step"
+            disabled={pending || draft.steps.length >= 20}
+            onPress={() =>
+              change({
+                steps: [...draft.steps, { id: randomUUID(), label: "", kind: "checkbox" }],
+              })
+            }
+          />
+          {conflict && (
+            <Action disabled={pending} onPress={() => void save()}>
+              Load latest revision and keep draft
+            </Action>
+          )}
+        </Section>
         <View style={{ height: 90 }} />
       </Screen>
       <FormSave
@@ -454,6 +472,7 @@ function RitualEditor({
   );
 }
 function RitualHistory({ close }: { close: () => void }) {
+  const t = useTheme();
   const { state, session } = useAuth();
   const [kind, setKind] = useState("all");
   const [status, setStatus] = useState("all");
@@ -509,7 +528,7 @@ function RitualHistory({ close }: { close: () => void }) {
     [() => history.refetch({ throwOnError: true })],
     "Ritual history refreshed",
   );
-  const t = useTheme();
+  const _t = useTheme();
   return (
     <Screen onRefresh={refreshHistory}>
       <Stack.Screen
@@ -523,124 +542,141 @@ function RitualHistory({ close }: { close: () => void }) {
       />
       {detail ? (
         <>
-          <Text style={{ color: t.ink }}>
-            {detail.definition.title} · {detail.scheduledLocalDate} · {detail.status}
-          </Text>
-          <Text style={{ color: t.secondary }}>
-            Timezone: {detail.timeZone}; revision {detail.definitionRevision}; due {detail.dueAt},
-            expires {detail.expiresAt}; settled {detail.settledAt ?? "Not settled"}; snoozed until{" "}
-            {detail.snoozedUntil ?? "None"}
-          </Text>
-          {detail.definition.steps.map((step) => (
-            <Text key={step.id} style={{ color: t.ink }}>
-              {step.label} ({step.kind}
-              {step.optional ? ", optional" : ""})
-            </Text>
-          ))}
-          {detail.responses.map((response) => (
-            <Text key={response.id} style={{ color: t.ink }}>
-              {detail.definition.steps.find((s) => s.id === response.stepId)?.label ??
-                response.stepId}
-              : {String(response.value)} · {response.submitted ? "Submitted" : "Draft"} · observed{" "}
-              {response.observedAt} · recorded {response.recordedAt}
-            </Text>
-          ))}
-          {detail.actions.map((action) => (
-            <Text key={action.id} style={{ color: t.ink }}>
-              {action.kind} · {action.outcome} · count {action.count} · observed {action.observedAt}{" "}
-              · recorded {action.recordedAt}
-            </Text>
-          ))}
-          {detail.optionalFollowUp && (
-            <Text style={{ color: t.ink }}>
-              Optional follow-up due {detail.optionalFollowUp.dueAt}:{" "}
-              {detail.optionalFollowUp.stepIds.join(", ")}
-            </Text>
+          <Section title="Occurrence">
+            <SectionNote ink>
+              {detail.definition.title} · {detail.scheduledLocalDate} · {detail.status}
+            </SectionNote>
+            <SectionNote>
+              Timezone: {detail.timeZone}; revision {detail.definitionRevision}; due {detail.dueAt},
+              expires {detail.expiresAt}; settled {detail.settledAt ?? "Not settled"}; snoozed until{" "}
+              {detail.snoozedUntil ?? "None"}
+            </SectionNote>
+          </Section>
+          <Section title="Steps">
+            {detail.definition.steps.map((step) => (
+              <SectionNote ink key={step.id}>
+                {step.label} ({step.kind}
+                {step.optional ? ", optional" : ""})
+              </SectionNote>
+            ))}
+          </Section>
+          {(detail.responses.length > 0 ||
+            detail.actions.length > 0 ||
+            !!detail.optionalFollowUp) && (
+            <Section title="Activity">
+              {detail.responses.map((response) => (
+                <SectionNote ink key={response.id}>
+                  {detail.definition.steps.find((s) => s.id === response.stepId)?.label ??
+                    response.stepId}
+                  : {String(response.value)} · {response.submitted ? "Submitted" : "Draft"} ·
+                  observed {response.observedAt} · recorded {response.recordedAt}
+                </SectionNote>
+              ))}
+              {detail.actions.map((action) => (
+                <SectionNote ink key={action.id}>
+                  {action.kind} · {action.outcome} · count {action.count} · observed{" "}
+                  {action.observedAt} · recorded {action.recordedAt}
+                </SectionNote>
+              ))}
+              {detail.optionalFollowUp && (
+                <SectionNote ink>
+                  Optional follow-up due {detail.optionalFollowUp.dueAt}:{" "}
+                  {detail.optionalFollowUp.stepIds.join(", ")}
+                </SectionNote>
+              )}
+            </Section>
           )}
         </>
       ) : (
         <>
-          <EnumChoice
-            label="Ritual"
-            value={kind}
-            options={[
-              { label: "All Rituals", value: "all" },
-              { label: "Morning", value: "morning" },
-              { label: "Evening", value: "night" },
-            ]}
-            onChange={setKind}
-          />
-          <EnumChoice
-            label="Status"
-            value={status}
-            options={[
-              "all",
-              "pending",
-              "completed",
-              "skipped",
-              "missed",
-              "cancelled_configuration",
-            ].map((value) => ({
-              value,
-              label: value
-                .split("_")
-                .map((word) => word[0]?.toUpperCase() + word.slice(1))
-                .join(" "),
-            }))}
-            onChange={setStatus}
-          />
-          <Field label="Search history" value={search} onChange={setSearch} />
-          <PlanningPicker
-            mode="date"
-            optional
-            timeZone={state.user?.planningTimezone ?? "UTC"}
-            label="From date"
-            value={dateFrom}
-            onChange={setDateFrom}
-          />
-          <PlanningPicker
-            label="To date"
-            mode="date"
-            optional
-            timeZone={state.user?.planningTimezone ?? "UTC"}
-            value={dateTo}
-            onChange={setDateTo}
-          />
-          <EnumChoice
-            label="Order"
-            value={sort}
-            options={[
-              { label: "Newest First", value: "newest" },
-              { label: "Oldest First", value: "oldest" },
-            ]}
-            onChange={(value) => setSort(value as "newest" | "oldest")}
-          />
+          <Section title="Filters">
+            <EnumChoice
+              label="Ritual"
+              value={kind}
+              options={[
+                { label: "All Rituals", value: "all" },
+                { label: "Morning", value: "morning" },
+                { label: "Evening", value: "night" },
+              ]}
+              onChange={setKind}
+            />
+            <EnumChoice
+              label="Status"
+              value={status}
+              options={[
+                "all",
+                "pending",
+                "completed",
+                "skipped",
+                "missed",
+                "cancelled_configuration",
+              ].map((value) => ({
+                value,
+                label: value
+                  .split("_")
+                  .map((word) => word[0]?.toUpperCase() + word.slice(1))
+                  .join(" "),
+              }))}
+              onChange={setStatus}
+            />
+            <Field label="Search history" value={search} onChange={setSearch} />
+            <PlanningPicker
+              mode="date"
+              optional
+              timeZone={state.user?.planningTimezone ?? "UTC"}
+              label="From date"
+              value={dateFrom}
+              onChange={setDateFrom}
+            />
+            <PlanningPicker
+              label="To date"
+              mode="date"
+              optional
+              timeZone={state.user?.planningTimezone ?? "UTC"}
+              value={dateTo}
+              onChange={setDateTo}
+            />
+            <EnumChoice
+              label="Order"
+              value={sort}
+              options={[
+                { label: "Newest First", value: "newest" },
+                { label: "Oldest First", value: "oldest" },
+              ]}
+              onChange={(value) => setSort(value as "newest" | "oldest")}
+            />
+          </Section>
           <ReadState
             pending={history.isPending}
             error={history.isError}
             retry={() => void history.refetch()}
           />
-          {history.data?.pages
-            .flatMap((page) => page.items)
-            .map((item) => (
-              <RecordRow
-                leading={<Icon name="clock" color={t.secondary} />}
-                key={item.id}
-                title={item.definition.title}
-                subtitle={`${item.scheduledLocalDate} · ${item.status}`}
-                onPress={() => selectDetail(item)}
-              />
-            ))}
-          {history.isSuccess && history.data.pages.every((p) => !p.items.length) && (
-            <Text style={{ color: t.ink }}>No matching history.</Text>
-          )}
-          {history.hasNextPage && (
-            <Action
-              disabled={history.isFetchingNextPage}
-              onPress={() => void history.fetchNextPage()}
-            >
-              Load more history
-            </Action>
+          {history.data && (
+            <Section title="History">
+              {history.data.pages
+                .flatMap((page) => page.items)
+                .map((item) => (
+                  <SectionItem key={item.id}>
+                    <RecordRow
+                      leading={<Icon name="clock" color={t.secondary} />}
+                      title={item.definition.title}
+                      subtitle={`${item.scheduledLocalDate} · ${item.status}`}
+                      onPress={() => selectDetail(item)}
+                    />
+                  </SectionItem>
+                ))}
+              {history.isSuccess && history.data.pages.every((p) => !p.items.length) && (
+                <SectionNote>No matching history.</SectionNote>
+              )}
+              {history.hasNextPage && (
+                <Action
+                  disabled={history.isFetchingNextPage}
+                  onPress={() => void history.fetchNextPage()}
+                >
+                  Load more history
+                </Action>
+              )}
+            </Section>
           )}
         </>
       )}

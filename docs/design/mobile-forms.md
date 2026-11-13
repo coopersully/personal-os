@@ -29,9 +29,28 @@ therefore be top-aligned on a project card and vertically centered in a Project 
   the canonical entity icon, search, selection, cancellation, and a no-results state.
 - `ToggleRow` owns label/switch presentation. `DateField` owns the native date/time control.
 - `Section`/`Group` own rounded surfaces and inset seams. `FormBody` owns scroll and keyboard insets.
-- `styles.settingRow` defines the shared horizontal row geometry: minimum 56 points high,
-  16-point padding, 12-point gaps, vertically centered contents. Keep interactive targets at least
-  44 points. Use the theme's 4-point spacing scale and 16-point grouped-surface radius.
+- `formRow` (`components/forms/form-row.ts`) is the single row geometry: minimum 56 points high,
+  16-point side padding, 12-point vertical padding and gaps, vertically centered contents. Every
+  label/value, toggle, picker, navigation and action row uses it; `styles.settingRow` is an alias.
+  Keep interactive targets at least 44 points. Use the theme's 4-point spacing scale and 16-point
+  grouped-surface radius. Never give one screen's row its own padding.
+- Rows always sit inside a `Section`/`Group`. `SectionNote` owns explanatory or read-only copy in a
+  group and `SectionItem` gives a content row such as `RecordRow` the group's side padding.
+
+### Shared chrome
+
+These live in `apps/mobile/src/components` and are the only way to build form and settings chrome:
+
+- `editorDismissOptions` declares a stack screen's leading Close, Cancel, Back or Done. On iOS it
+  is a native bar item, so UIKit owns the glass, label width and centered title. Do not pass a
+  custom view as `headerLeft`: the bar wraps it in a second, icon-sized glass capsule.
+- `editorActionsOptions` declares trailing record actions: none renders nothing (never an empty
+  glass circle), one is a native icon button, several use the shared ellipsis menu.
+- `SheetHeader` is the header of an in-content sheet. Both side slots reserve the wider side's
+  width, so the title is centered on the sheet and a long title truncates between the controls.
+- `GlassButton` is the one Liquid Glass button: a 44-point capsule for a text label, a 44-point
+  circle for a bar icon and a 56-point circle for the floating Save/Add. Labels are primary ink in
+  both appearances; callers may place it but cannot resize or recolor its label.
 
 Icons identify meaningful concepts, not every primitive setting. Resolve entity identities from
 `src/product/entities.ts`; List and Project retain their glyph across pages, pickers and editors.

@@ -366,7 +366,7 @@ it("shows real amounts and source qualifications without a duplicate review read
   expect(screen.getByText(/Your share of spending/)).toBeTruthy();
   expect(screen.getByText(/Only part of this month/)).toBeTruthy();
   expect(screen.getByText("Some sources need an update.")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Close information" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(screen.queryByText(/Your share of spending/)).toBeNull();
   expect(h.api.getFinanceReviewQueue).not.toHaveBeenCalled();
 });
@@ -1385,7 +1385,7 @@ it("keeps healthy overview cards quiet and opens account explanations without na
   expect(screen.getByText("Included accounts")).toBeTruthy();
   expect(screen.getByText("Everyday checking")).toBeTruthy();
   expect(h.navigate).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Close information" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
   fireEvent.click(screen.getByRole("button", { name: /^Cash,/ }));
   expect(h.navigate).toHaveBeenCalledWith("/finances/accounts");
 });

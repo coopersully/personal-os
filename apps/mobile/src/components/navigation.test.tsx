@@ -371,9 +371,12 @@ it("offers workspace-specific tabs and contextual capture while leaving previews
   h.path = "/tasks/views";
   rerender(<Shell />);
   expect(screen.queryByRole("button", { name: /Add/ })).not.toBeInTheDocument();
-  h.path = "/mail";
-  rerender(<Shell />);
-  expect(screen.getByRole("button", { name: "Compose mail" })).toBeDisabled();
+  // Compose is not built yet, so neither Mail tab offers an add button.
+  for (const path of ["/mail", "/mail/mailboxes"]) {
+    h.path = path;
+    rerender(<Shell />);
+    expect(screen.queryByRole("button", { name: /Compose|Add/ })).not.toBeInTheDocument();
+  }
   h.path = "/calendar";
   rerender(<Shell />);
   expect(screen.getByRole("button", { name: "Add event" })).toBeDisabled();

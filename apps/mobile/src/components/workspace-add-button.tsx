@@ -4,7 +4,7 @@ import { useTheme, workspaceColor } from "../theme";
 import { GlassSurface } from "./glass-surface";
 import { Icon } from "./icons";
 
-/** Contextual capture for Tasks; other workspaces retain layout placeholders. */
+/** Contextual capture for Tasks; Calendar keeps a layout placeholder. Mail has none until compose exists. */
 export function WorkspaceAddButton() {
   const [, owner, page] = usePathname().split("/");
   const container =
@@ -15,7 +15,7 @@ export function WorkspaceAddButton() {
       : null;
   const theme = useTheme();
   if (owner === "tasks" && page === "views") return null;
-  if (owner !== "tasks" && owner !== "mail" && owner !== "calendar") return null;
+  if (owner !== "tasks" && owner !== "calendar") return null;
   return (
     <GlassSurface
       style={[styles.floating, Platform.OS === "ios" && owner !== "calendar" && { bottom: 96 }]}
@@ -25,11 +25,9 @@ export function WorkspaceAddButton() {
         accessibilityLabel={
           container
             ? `Add ${container}`
-            : owner === "mail"
-              ? "Compose mail"
-              : owner === "tasks"
-                ? "Add task"
-                : "Add event"
+            : owner === "tasks"
+              ? "Add task"
+              : "Add event"
         }
         accessibilityHint={
           container

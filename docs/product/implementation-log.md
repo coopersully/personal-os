@@ -1318,6 +1318,19 @@ honest time-only sky cover denied permissions, unavailable fixes, stale observat
 See `docs/engineering/mobile-today-sky.md` for lifecycle, privacy and verification boundaries.
 This is a local candidate, not a production or TestFlight release.
 
+## 2026-11-13 — Native Finance account management (local implementation)
+
+COO-221 — Manage Finance accounts on iPhone. Accounts opens a manual account form; account details
+offer Edit account, Sync account, Review duplicate and Stop tracking account, and duplicate review
+runs in the app instead of handing off to the browser. Every action uses existing Finance
+endpoints, one toast from loading to the confirmed result, and a native confirmation before
+tracking stops. Unknown outcomes never claim success: edits, stop tracking and duplicate
+resolution retry under the same idempotency key, and an unconfirmed add looks for the earlier
+attempt before writing again. Connecting a bank is not part of this change.
+
+Focused Finance tests, mobile types and lint passed. This is a local candidate: it was not run on
+a simulator or device, and it does not establish production or TestFlight acceptance.
+
 ## 2026-11-13 — Native Mail reading candidate
 
 COO-230 — Read and search Mail threads on iPhone replaces the title-only Inbox and Mailboxes

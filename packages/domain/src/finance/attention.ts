@@ -171,3 +171,12 @@ export const financeBudgetStartPreviewSchema = z.strictObject({
 export type FinanceBudgetStartPreview = z.infer<typeof financeBudgetStartPreviewSchema>;
 export type PreviewFinanceBudgetStartInput = z.infer<typeof previewFinanceBudgetStartInputSchema>;
 export type ApplyFinanceBudgetStartInput = z.infer<typeof applyFinanceBudgetStartInputSchema>;
+
+/** The owner's durable refusal of one published card; only a new preview can follow. */
+export const financeDecisionDeclineSchema = z.strictObject({
+  kind: z.enum(["review_batch", "budget_start_preview", "review_batch_undo"]),
+  id: z.uuid(),
+  declinedAt: z.iso.datetime(),
+  recovery: z.literal("new_preview"),
+});
+export type FinanceDecisionDecline = z.infer<typeof financeDecisionDeclineSchema>;

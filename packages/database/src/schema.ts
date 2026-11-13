@@ -6921,8 +6921,17 @@ export const financeReviewBatchEffects = pgTable(
     before: jsonb("before").$type<unknown>().notNull(),
     after: jsonb("after").$type<unknown>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    // Whose authority applied this effect. Null predates the column and is never an agent's.
+    appliedByActorType: text("applied_by_actor_type").$type<"user" | "agent">(),
+    appliedByActorId: text("applied_by_actor_id"),
   },
-  (table) => [uniqueIndex("finance_batch_effect_unique").on(table.batchId, table.outcomeIndex)],
+  (table) => [
+    uniqueIndex("finance_batch_effect_unique").on(table.batchId, table.outcomeIndex),
+    check(
+      "finance_review_batch_effects_applied_by_actor_type_check",
+      sql`${table.appliedByActorType} IN ('user','agent')`,
+    ),
+  ],
 );
 export const financeReviewBatchCorrections = pgTable(
   "finance_review_batch_corrections",
@@ -6997,5 +7006,34 @@ export const financeReviewBatchApprovals = pgTable(
     check("finance_review_batch_approvals_failures_check", sql`${table.failures} >= 0`),
     check("finance_batch_approval_owner", sql`${table.approvedBy} = ${table.userId}`),
     check("finance_batch_approval_expiry", sql`${table.expiresAt} > ${table.approvedAt}`),
+  ],
+);
+
+/** The owner's durable "no" to a published card. The target row is never rewritten. */
+export const financeDecisionDeclines = pgTable(
+  "finance_decision_declines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    targetKind: text("target_kind")
+      .$type<"review_batch" | "budget_start_preview" | "review_batch_undo">()
+      .notNull(),
+    targetId: uuid("target_id").notNull(),
+    declinedBy: uuid("declined_by").notNull(),
+    declinedAt: timestamp("declined_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_decision_decline_once_idx").on(
+      table.userId,
+      table.targetKind,
+      table.targetId,
+    ),
+    check(
+      "finance_decision_declines_target_kind_check",
+      sql`${table.targetKind} IN ('review_batch','budget_start_preview','review_batch_undo')`,
+    ),
+    check("finance_decision_decline_owner", sql`${table.declinedBy} = ${table.userId}`),
   ],
 );

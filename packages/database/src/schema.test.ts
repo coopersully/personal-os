@@ -538,6 +538,7 @@ describe("database schema contracts", () => {
       "0142_finance_batch_corrections",
       "0143_finance_budget_start_impact",
       "0144_finance_batch_approvals",
+      "0145_finance_decision_declines",
     ]);
   });
 

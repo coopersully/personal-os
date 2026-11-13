@@ -253,7 +253,10 @@ account's actions while it runs, and refresh freshness afterwards whatever the r
 a definitive rejection from an unknown outcome (timeout, lost connection, server fault). An unknown
 outcome never claims success or failure, keeps the same idempotency key for the retry, and tells
 the person what to check. Adding a manual account has no retry key, so after an unknown outcome the
-next Save looks for the earlier attempt before writing again.
+next Save looks for the earlier attempt, under the name and institution it was sent with, before
+writing again; a corrected draft is not written as a second account. A rejected or unknown edit
+re-reads accounts so reopening the editor starts from the latest revision. An invalid Currency or
+Balance states the correction beside the field rather than relying on colour.
 
 Duplicate review happens in the app. The person chooses the account to keep from accounts that are
 connected and current, reads both identities, freshness and the overlapping and unique transaction

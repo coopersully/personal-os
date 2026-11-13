@@ -23,25 +23,34 @@ const kinds: readonly { value: FinanceAccountKind; label: string }[] = [
 
 function TextRow({
   label,
-  invalid = false,
+  correction,
   ...input
-}: TextInputProps & { label: string; invalid?: boolean }) {
+}: TextInputProps & { label: string; correction?: string }) {
   const t = useTheme();
   return (
-    <View style={{ minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12 }}>
-      <SettingLabel style={{ flex: 0, flexShrink: 0 }}>{label}</SettingLabel>
-      <TextInput
-        accessibilityLabel={label}
-        placeholderTextColor={t.secondary}
-        {...input}
-        style={{
-          flex: 1,
-          minHeight: 44,
-          textAlign: "right",
-          fontSize: 17,
-          color: invalid ? t.destructive : t.ink,
-        }}
-      />
+    <View style={{ minHeight: 56, justifyContent: "center" }}>
+      <View style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <SettingLabel style={{ flex: 0, flexShrink: 0 }}>{label}</SettingLabel>
+        <TextInput
+          accessibilityLabel={label}
+          accessibilityHint={correction}
+          placeholderTextColor={t.secondary}
+          {...input}
+          style={{
+            flex: 1,
+            minHeight: 44,
+            textAlign: "right",
+            fontSize: 17,
+            color: correction ? t.destructive : t.ink,
+          }}
+        />
+      </View>
+      {correction ? (
+        // The correction is written out so an invalid field is not signalled by colour alone.
+        <Text style={{ color: t.destructive, fontSize: 13, textAlign: "right", paddingBottom: 8 }}>
+          {correction}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -64,7 +73,7 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
   const [pending, setPending] = useState(false);
   const lock = useRef(false);
   const attempt = useRef<{ payload: string; key: string } | null>(null);
-  const unconfirmed = useRef(false);
+  const unconfirmed = useRef<{ name: string; institution: string } | null>(null);
   const active = useRef(true);
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
@@ -83,8 +92,9 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
   };
   const amount = parseBalance(balance);
   const invalidCurrency = !!currency && !/^[A-Z]{3}$/.test(currency);
+  const invalidBalance = manual && amount === undefined;
   const invalid =
-    !name.trim() || !institution.trim() || amount === undefined || (!snapshot && invalidCurrency);
+    !name.trim() || !institution.trim() || invalidBalance || (!snapshot && invalidCurrency);
   const close = () =>
     edited
       ? Alert.alert("Discard changes?", "Unsaved edits will be lost.", [
@@ -103,16 +113,18 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
       name: name.trim(),
       provider: "manual" as const,
     };
-    if (unconfirmed.current) {
-      // Account creation has no retry key: look for the earlier attempt before writing again.
+    const earlier = unconfirmed.current;
+    if (earlier) {
+      // Account creation has no retry key: look for the earlier attempt, under the values it
+      // was sent with, before writing again. The draft may have been corrected since.
       let recorded: boolean;
       try {
         recorded = (await api.listFinanceAccounts()).accounts.some(
           (item) =>
             !knownIds.includes(item.id) &&
             item.provider === "manual" &&
-            item.name === input.name &&
-            item.institution === input.institution,
+            item.name === earlier.name &&
+            item.institution === earlier.institution,
         );
       } catch {
         if (current())
@@ -124,17 +136,25 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
       if (recorded) {
         await refresh();
         if (!current()) return void toast.dismiss(id);
-        toast.success("Account added", { id });
+        if (earlier.name === input.name && earlier.institution === input.institution)
+          toast.success("Account added", { id });
+        else
+          toast.info(
+            `Your earlier attempt already added “${earlier.name}”. Edit that account to change it.`,
+            { id },
+          );
         router.back();
         return;
       }
-      unconfirmed.current = false;
+      unconfirmed.current = null;
     }
     try {
       await api.createFinanceAccount(input);
     } catch (error) {
       if (!current()) return void toast.dismiss(id);
-      unconfirmed.current = !confirmedRejection(error);
+      unconfirmed.current = confirmedRejection(error)
+        ? null
+        : { name: input.name, institution: input.institution };
       toast.error(
         unconfirmed.current
           ? "Couldn’t confirm the account was added. Your draft is still here; saving again checks Accounts first."
@@ -192,6 +212,8 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
             : "Couldn’t confirm the save. Your draft is still here. Check the account before retrying.",
         { id },
       );
+      // Rejected or unknown, the cached record may be stale: reopening must show the latest.
+      void refresh();
     }
   }
 
@@ -259,7 +281,7 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
               value={currency}
               onChangeText={(value) => edit(setCurrency)(value.toUpperCase())}
               editable={!pending}
-              invalid={invalidCurrency}
+              correction={invalidCurrency ? "Use a three-letter code such as USD." : undefined}
               maxLength={3}
               autoCapitalize="characters"
               autoCorrect={false}
@@ -272,7 +294,7 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
               value={balance}
               onChangeText={edit(setBalance)}
               editable={!pending}
-              invalid={amount === undefined}
+              correction={invalidBalance ? "Enter an amount such as 2400.00." : undefined}
               keyboardType="numbers-and-punctuation"
               placeholder="2,400.00"
             />

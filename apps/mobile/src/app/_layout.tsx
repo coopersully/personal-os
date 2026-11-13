@@ -82,6 +82,11 @@ function AuthenticatedLayout() {
             <Stack.Screen name="finance-notification" options={{ title: "Finance update" }} />
             <Stack.Screen name="finance-chat-reference" options={{ title: "Finance reference" }} />
             <Stack.Screen name="finance-account" options={{ title: "account" }} />
+            <Stack.Screen name="finance-account-edit" options={{ title: "edit account" }} />
+            <Stack.Screen
+              name="finance-account-duplicate"
+              options={{ title: "duplicate account" }}
+            />
             <Stack.Screen
               name="finance-transaction-edit"
               options={{ title: "edit transaction", presentation: "modal" }}

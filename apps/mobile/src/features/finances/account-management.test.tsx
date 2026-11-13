@@ -244,8 +244,13 @@ it("adds a manual account only once its fields are valid", async () => {
   type("Currency", "eu");
   type("Balance", "12.345");
   expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty("disabled", true);
+  // An invalid field says what to correct instead of relying on colour.
+  expect(screen.getByText("Use a three-letter code such as USD.")).toBeTruthy();
+  expect(screen.getByText("Enter an amount such as 2400.00.")).toBeTruthy();
   type("Currency", "eur");
   type("Balance", "1,250.50");
+  expect(screen.queryByText("Use a three-letter code such as USD.")).toBeNull();
+  expect(screen.queryByText("Enter an amount such as 2400.00.")).toBeNull();
   press("Account type, Cash");
   press("Investments");
   press("Save changes");
@@ -325,6 +330,53 @@ it("does not add a second account after an uncertain result that was recorded", 
   expect(h.back).toHaveBeenCalledOnce();
 });
 
+it("matches an uncertain add by the values it was sent with after the draft is corrected", async () => {
+  h.api.createFinanceAccount.mockRejectedValue(new Error("timeout"));
+  mount(<FinanceAccountEditor />);
+  await screen.findByLabelText("Name");
+  type("Name", "Savigns");
+  type("Institution", "Harbor Credit Union");
+  press("Save changes");
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  // The first attempt was recorded under the misspelt name.
+  h.api.listFinanceAccounts.mockResolvedValue(
+    accounts([
+      manual,
+      linked,
+      { ...manual, id: "manual-9", name: "Savigns", institution: "Harbor Credit Union" },
+    ]),
+  );
+  type("Name", "Savings");
+  press("Save changes");
+  await waitFor(() =>
+    expect(h.info).toHaveBeenCalledWith(
+      "Your earlier attempt already added “Savigns”. Edit that account to change it.",
+      { id: "feedback" },
+    ),
+  );
+  expect(h.api.createFinanceAccount).toHaveBeenCalledOnce();
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.back).toHaveBeenCalledOnce();
+  expectNoInlineResult();
+});
+
+it("adds the corrected draft when the earlier uncertain attempt was not recorded", async () => {
+  h.api.createFinanceAccount
+    .mockRejectedValueOnce(new Error("timeout"))
+    .mockResolvedValue({ ...manual, id: "manual-2" });
+  mount(<FinanceAccountEditor />);
+  await screen.findByLabelText("Name");
+  type("Name", "Savigns");
+  type("Institution", "Harbor Credit Union");
+  press("Save changes");
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  type("Name", "Savings");
+  press("Save changes");
+  await waitFor(() => expect(h.success).toHaveBeenCalledWith("Account added", { id: "feedback" }));
+  expect(h.api.createFinanceAccount).toHaveBeenCalledTimes(2);
+  expect(h.api.createFinanceAccount.mock.calls[1][0].name).toBe("Savings");
+});
+
 it("retries an uncertain add once the account is confirmed absent", async () => {
   h.api.createFinanceAccount
     .mockRejectedValueOnce(rejection(503))
@@ -393,6 +445,7 @@ it("keeps a rename draft when the account changed elsewhere", async () => {
   h.api.updateFinanceAccount.mockRejectedValue(rejection(409));
   mount(<FinanceAccountEditor />);
   await screen.findByLabelText("Name");
+  const reads = h.api.listFinanceAccounts.mock.calls.length;
   type("Name", "Bills");
   press("Save changes");
   await waitFor(() =>
@@ -401,6 +454,8 @@ it("keeps a rename draft when the account changed elsewhere", async () => {
       { id: "feedback" },
     ),
   );
+  // The conflict re-reads accounts, so reopening the editor starts from the latest revision.
+  await waitFor(() => expect(h.api.listFinanceAccounts).toHaveBeenCalledTimes(reads + 1));
   expect(h.back).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Name")).toHaveProperty("value", "Bills");
   // A confirmed conflict wrote nothing, so the next attempt is a new request.
@@ -424,11 +479,14 @@ it("retries an uncertain rename with the same key and reports unapplied outcomes
   await screen.findByLabelText("Name");
   type("Name", "Bills");
   press("Save changes");
+  const reads = h.api.listFinanceAccounts.mock.calls.length;
   await waitFor(() =>
     expect(h.error).toHaveBeenCalledWith(expect.stringContaining("Couldn’t confirm the save."), {
       id: "feedback",
     }),
   );
+  // An unknown outcome also re-reads accounts.
+  await waitFor(() => expect(h.api.listFinanceAccounts).toHaveBeenCalledTimes(reads + 1));
   press("Save changes");
   await waitFor(() =>
     expect(h.info).toHaveBeenCalledWith("Approve this change in Finance chat", { id: "feedback" }),
@@ -441,6 +499,21 @@ it("retries an uncertain rename with the same key and reports unapplied outcomes
   );
   expect(h.success).not.toHaveBeenCalled();
   expect(h.back).not.toHaveBeenCalled();
+});
+
+it("renames a connected account whose provider balance is not a two-decimal amount", async () => {
+  h.params = { id: linked.id };
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([{ ...linked, balance: 12.345 }]));
+  h.api.updateFinanceAccount.mockResolvedValue(completed(linked));
+  mount(<FinanceAccountEditor />);
+  await screen.findByLabelText("Name");
+  expect(screen.queryByLabelText("Balance")).toBeNull();
+  type("Name", "Bills");
+  press("Save changes");
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Account updated", { id: "feedback" }),
+  );
+  expect(h.api.updateFinanceAccount.mock.calls[0][1]).not.toHaveProperty("balance");
 });
 
 it("says when the account to edit is unavailable", async () => {
@@ -717,6 +790,31 @@ it("reloads the comparison when the accounts changed before resolution", async (
   const [first, second] = h.api.resolveFinanceAccountDuplicate.mock.calls;
   expect(second[1].revision).toBe("c".repeat(64));
   expect(second[1].idempotencyKey).not.toBe(first[1].idempotencyKey);
+  expectNoInlineResult();
+});
+
+it("keeps the changed-accounts message for a conflict and words singular counts correctly", async () => {
+  h.params = { id: linked.id };
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([linked, twin], [[linked.id, twin.id]]));
+  h.api.getFinanceAccountDuplicatePreview.mockResolvedValue(
+    completed({ ...preview, uniqueRedundantTransactionCount: 1 }),
+  );
+  h.api.resolveFinanceAccountDuplicate.mockRejectedValue(rejection(403));
+  mount(<FinanceAccountDuplicate />);
+  fireEvent.click(await screen.findByRole("button", { name: /Stop tracking duplicate/ }));
+  expect(h.alert).toHaveBeenCalledWith(
+    `Stop tracking ${linked.name}?`,
+    expect.stringContaining(`1 transaction found only in ${linked.name} leaves planning.`),
+    expect.any(Array),
+  );
+  confirm("Stop tracking");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Couldn’t stop tracking this duplicate. Nothing was stopped.",
+      { id: "feedback" },
+    ),
+  );
+  expect(h.back).not.toHaveBeenCalled();
   expectNoInlineResult();
 });
 

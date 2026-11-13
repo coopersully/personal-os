@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceAccount } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
@@ -107,9 +108,11 @@ function Resolution({
       const rejected = confirmedRejection(error);
       if (rejected) attempt.current = null;
       toast.error(
-        rejected
+        error instanceof ApiClientError && error.status === 409
           ? "These accounts changed, so nothing was stopped. Review the refreshed comparison."
-          : "Couldn’t confirm tracking stopped. Check both accounts before retrying.",
+          : rejected
+            ? "Couldn’t stop tracking this duplicate. Nothing was stopped."
+            : "Couldn’t confirm tracking stopped. Check both accounts before retrying.",
         { id },
       );
       void client.invalidateQueries({ queryKey: ["finances", owner] });
@@ -142,6 +145,11 @@ function Resolution({
                 .filter(Boolean)
                 .join(" · ")}
               value={candidate.id === keepId ? "Keeping" : undefined}
+              accessibilityHint={
+                candidate.id === keepId
+                  ? "Selected as the account to keep tracking."
+                  : "Selects this as the account to keep tracking."
+              }
               leading={<InstitutionLogo account={candidate} />}
               onPress={pending ? undefined : () => setChosen(candidate.id)}
             />
@@ -203,7 +211,13 @@ function Resolution({
                       : () =>
                           Alert.alert(
                             `Stop tracking ${preview.redundantAccount.name}?`,
-                            `${preview.keptAccount.name} stays tracked. ${preview.uniqueRedundantTransactionCount} transactions found only in ${preview.redundantAccount.name} leave planning.`,
+                            `${preview.keptAccount.name} stays tracked. ${
+                              preview.uniqueRedundantTransactionCount === 1
+                                ? "1 transaction"
+                                : `${preview.uniqueRedundantTransactionCount} transactions`
+                            } found only in ${preview.redundantAccount.name} ${
+                              preview.uniqueRedundantTransactionCount === 1 ? "leaves" : "leave"
+                            } planning.`,
                             [
                               { text: "Keep both", style: "cancel" },
                               {

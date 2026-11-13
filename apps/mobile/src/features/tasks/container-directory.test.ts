@@ -1,6 +1,10 @@
 import type { TaskList, TaskProject } from "@personal-os/domain";
 import { describe, expect, it } from "vitest";
-import { containerDirectory, projectStatusCounts } from "./container-directory";
+import {
+  containerDirectory,
+  projectEmptyMessage,
+  projectStatusCounts,
+} from "./container-directory";
 
 const list = (id: string, name: string, overrides: object = {}) =>
   ({
@@ -67,6 +71,13 @@ describe("container directory", () => {
       project("other", "Other"),
     ];
     expect(names(directory({ projects: explained, search: "LEASE" }))).toEqual(["Move", "Taxes"]);
+  });
+  it("names the empty status, or the search when one is hiding finished projects", () => {
+    expect(projectEmptyMessage("active", "")).toMatch(/^No matching projects\. Add a project/);
+    expect(projectEmptyMessage("completed", " ")).toBe("No completed projects.");
+    expect(projectEmptyMessage("cancelled", "")).toBe("No cancelled projects.");
+    expect(projectEmptyMessage("completed", "lease")).toBe("No matching projects.");
+    expect(projectEmptyMessage("all", "")).toBe("No matching projects.");
   });
   it("orders by the saved preference with a stable name tie-break", () => {
     const dated = [

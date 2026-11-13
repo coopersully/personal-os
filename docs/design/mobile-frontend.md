@@ -82,9 +82,17 @@ section; omit an empty pinned row. Inbox remains the default list for unorganize
 Browse has no Add action. Upcoming and History share its top cards; below them group Task views
 (All, Tasks, Reminders, Scheduled), Storage (Archive, Trash), and Preferences.
 
+Projects has Active, Completed, Cancelled and All status chips with counts above its pinned row;
+Active is the default. A completed or cancelled project stays in Projects under its status until it
+is archived, and opening it shows all of its tasks, including finished ones. Rows for finished
+projects lead their metadata with the status. Counts cover projects outside Archive and Trash and
+ignore the current search; an empty status names itself, and a search that hides every project says
+no projects match. Lists have no completed or cancelled state and no status chips. Lists, Projects
+and Archive search matches names plus list descriptions and project why and notes.
+
 Upcoming means due/reserved after today; Scheduled means a task has reserved time, regardless of
 date. History contains completed/cancelled records outside archived containers. Archive contains
-archived containers, not merely closed projects. Trash contains deleted records and supports
+archived containers, not merely closed projects; those remain under Projects. Trash contains deleted records and supports
 Restore. Give Archive and Trash distinct icons. Trash does not offer capture or permanent deletion
 without an explicit product decision and confirmation. A failed restore keeps the item recoverable.
 

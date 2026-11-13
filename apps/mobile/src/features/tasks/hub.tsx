@@ -9,6 +9,7 @@ import { radius, spacing, useTheme, workspaceColor } from "../../theme";
 import {
   containerDirectory,
   type ProjectStatus,
+  projectEmptyMessage,
   projectStatusCounts,
   projectStatuses,
 } from "./container-directory";
@@ -281,9 +282,7 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
                   : undefined
               }
               empty={
-                mode === "projects"
-                  ? (projectStatuses.find(({ value }) => value === status)?.empty ?? "")
-                  : "No matching lists."
+                mode === "projects" ? projectEmptyMessage(status, search) : "No matching lists."
               }
             />
           )

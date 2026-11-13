@@ -17,6 +17,12 @@ export const projectStatuses: readonly { value: ProjectStatus; label: string; em
   { value: "all", label: "All", empty: "No matching projects." },
 ];
 
+/** A search that hides every project says so, whatever status is selected. */
+export const projectEmptyMessage = (status: ProjectStatus, search: string) =>
+  status !== "active" && search.trim()
+    ? "No matching projects."
+    : (projectStatuses.find(({ value }) => value === status)?.empty ?? "No matching projects.");
+
 const matchesStatus = (project: TaskProject, status: ProjectStatus) =>
   status === "all" || project.lifecycle === (status === "active" ? "open" : status);
 

@@ -475,6 +475,8 @@ it("reaches completed and cancelled projects through status chips and opens thei
   fireEvent.click(screen.getByRole("button", { name: "All · 3" }));
   expect(screen.getByRole("button", { name: "Open Trip" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Open Move" })).toBeVisible();
+  expect(screen.getByText("Completed · Inbox")).toBeVisible();
+  expect(screen.getByText("Cancelled · Inbox")).toBeVisible();
 });
 it("explains an empty project status and keeps status chips off Lists", async () => {
   h.projects = [project("trip", "Trip")];

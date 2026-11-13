@@ -121,7 +121,15 @@ export function ProjectRow({
     <ContainerRow
       {...actions}
       name={record.name}
-      subtitle={[listName, record.targetDate ? `Target ${record.targetDate}` : null]
+      subtitle={[
+        record.lifecycle === "completed"
+          ? "Completed"
+          : record.lifecycle === "cancelled"
+            ? "Cancelled"
+            : null,
+        listName,
+        record.targetDate ? `Target ${record.targetDate}` : null,
+      ]
         .filter(Boolean)
         .join(" · ")}
       icon={entityDictionary.project.icon}

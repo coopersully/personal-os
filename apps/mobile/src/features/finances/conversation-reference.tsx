@@ -289,7 +289,8 @@ function BatchReference({ id }: { id: string }) {
       ? confirmed
       : query.data;
   const needsCategories = !!batch?.decisions.some(
-    (item) => item.kind === "categorization" || item.action === "recategorize",
+    (item) =>
+      item.kind === "categorization" || (item.kind === "review" && item.action === "recategorize"),
   );
   const categories = useFinanceRead(
     ["categories"],
@@ -302,7 +303,8 @@ function BatchReference({ id }: { id: string }) {
       categories.isError ||
       batch?.decisions.some(
         (item) =>
-          (item.kind === "categorization" || item.action === "recategorize") &&
+          (item.kind === "categorization" ||
+            (item.kind === "review" && item.action === "recategorize")) &&
           !categories.data?.some((category) => category.id === item.categoryId),
       ));
   const active = useMountedReference();
@@ -361,7 +363,8 @@ function BatchReference({ id }: { id: string }) {
             <Card rows>
               {batch.decisions.map((decision, index) => {
                 const target =
-                  decision.kind === "categorization" || decision.action === "recategorize"
+                  decision.kind === "categorization" ||
+                  (decision.kind === "review" && decision.action === "recategorize")
                     ? categories.data?.find((category) => category.id === decision.categoryId)
                     : undefined;
                 const outcome = batch.outcomes.find((item) => item.index === index);

@@ -171,38 +171,42 @@ export function Conversation() {
                       <Text selectable style={{ color: t.ink, fontSize: 16, lineHeight: 23 }}>
                         {mine ? message.text : agentMessageText(message.text)}
                       </Text>
-                      {message.recordRefs?.map((ref) => (
-                        <FinanceRow
-                          key={`${ref.kind}:${ref.id}${ref.kind === "budget_plan" ? `:${ref.budgetVersionId}` : ""}`}
-                          title={
-                            ref.kind === "account" && ref.displayLabel
-                              ? ref.displayLabel
-                              : referenceLabels[ref.kind]
-                          }
-                          onPress={() => {
-                            if (ref.kind === "transaction" || ref.kind === "account") {
-                              router.push({
-                                pathname:
-                                  ref.kind === "transaction"
-                                    ? "/finance-transaction"
-                                    : "/finance-account",
-                                params: { id: ref.id },
-                              });
-                              return;
+                      {message.recordRefs?.map((ref) => {
+                        // Reference kinds this client cannot open yet are omitted.
+                        if (!(ref.kind in referenceLabels)) return null;
+                        return (
+                          <FinanceRow
+                            key={`${ref.kind}:${ref.id}${ref.kind === "budget_plan" ? `:${ref.budgetVersionId}` : ""}`}
+                            title={
+                              ref.kind === "account" && ref.displayLabel
+                                ? ref.displayLabel
+                                : referenceLabels[ref.kind as keyof typeof referenceLabels]
                             }
-                            router.push({
-                              pathname: "/finance-chat-reference",
-                              params: {
-                                kind: ref.kind,
-                                id: ref.id,
-                                ...(ref.kind === "budget_plan"
-                                  ? { versionId: ref.budgetVersionId }
-                                  : {}),
-                              },
-                            });
-                          }}
-                        />
-                      ))}
+                            onPress={() => {
+                              if (ref.kind === "transaction" || ref.kind === "account") {
+                                router.push({
+                                  pathname:
+                                    ref.kind === "transaction"
+                                      ? "/finance-transaction"
+                                      : "/finance-account",
+                                  params: { id: ref.id },
+                                });
+                                return;
+                              }
+                              router.push({
+                                pathname: "/finance-chat-reference",
+                                params: {
+                                  kind: ref.kind,
+                                  id: ref.id,
+                                  ...(ref.kind === "budget_plan"
+                                    ? { versionId: ref.budgetVersionId }
+                                    : {}),
+                                },
+                              });
+                            }}
+                          />
+                        );
+                      })}
                     </View>
                   </View>
                 );

@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { View } from "react-native";
-import { Field, Section, TitleField } from "./ui";
+import { Field, Section, TitleField } from "../../components/forms/form-rows";
 
 /** Shared identity block; the description uses each domain's existing notes/description field. */
 export function RecordIdentity({
@@ -22,29 +21,13 @@ export function RecordIdentity({
 }) {
   return (
     <Section>
-      <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
-        {icon && (
-          <View
-            style={{
-              marginLeft: 16,
-              marginTop: 16,
-              width: 44,
-              minHeight: 56,
-              alignItems: "center",
-            }}
-          >
-            {icon}
-          </View>
-        )}
-        <View style={{ flex: 1 }}>
-          <TitleField
-            label="Title"
-            value={title}
-            onChangeText={onTitleChange}
-            placeholder={placeholder}
-          />
-        </View>
-      </View>
+      <TitleField
+        label="Title"
+        leading={icon}
+        value={title}
+        onChangeText={onTitleChange}
+        placeholder={placeholder}
+      />
       <Field
         compact={false}
         label="Description"

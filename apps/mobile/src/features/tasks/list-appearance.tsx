@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { GlassButton } from "../../components/glass-button";
 import { Icon, type IconName } from "../../components/icons";
 import { SheetHeader } from "../../components/sheet-header";
-import { useTheme } from "../../theme";
+import { touchTarget, useTheme } from "../../theme";
 import { Field, FormBody, Section } from "./ui";
 export const listIcons: Record<TaskListIcon, IconName> = {
   list: "views",
@@ -52,13 +52,12 @@ export function ListAppearance({
           setColor(color);
           setOpen(true);
         }}
-        style={{
-          width: 44,
-          minHeight: 56,
+        style={({ pressed }) => ({
+          width: touchTarget,
+          minHeight: touchTarget,
           alignItems: "center",
-          justifyContent: "flex-start",
-          paddingTop: 4,
-        }}
+          opacity: pressed ? 0.6 : 1,
+        })}
       >
         <Icon name={listIcons[icon]} color={color || t.ink} size={28} />
       </Pressable>

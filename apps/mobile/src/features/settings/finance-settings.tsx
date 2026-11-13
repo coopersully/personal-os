@@ -23,7 +23,6 @@ import { FormSave } from "../../components/forms/form-save";
 import { PlanningPicker } from "../../components/forms/planning-picker";
 import { SectionNote } from "../../components/forms/section-content";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
-import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
 import { useSettingsAction, useSettingsResource } from "./data";
@@ -146,7 +145,6 @@ function NullableNumber({
   );
 }
 export function FinanceConfigurationSettings() {
-  const _t = useTheme();
   const configuration = useSettingsResource("finance-configuration", (api) =>
     api.getFinanceConfiguration(),
   );
@@ -317,7 +315,6 @@ function FinancialProfileLoader() {
 }
 function FinancialProfileEditor({ initial }: { initial: FinanceProfileVersion | null }) {
   const { state } = useAuth();
-  const _t = useTheme();
   const action = useSettingsAction();
   const cache = useQueryClient();
   const [baseline, setBaseline] = useState(initial);

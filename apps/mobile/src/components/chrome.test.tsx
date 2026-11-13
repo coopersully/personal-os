@@ -230,6 +230,36 @@ describe("SheetHeader", () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(done).toHaveBeenCalledOnce();
   });
+  it("keeps the title hidden until both sides are measured, so no frame is off-center", () => {
+    render(<SheetHeader title="Filters" onClose={vi.fn()} />);
+    const heading = screen.getByRole("heading", { name: "Filters" });
+    expect(styleOf(heading)).toMatchObject({ opacity: 0 });
+    act(() => h.layouts[0]?.({ nativeEvent: { layout: { width: 70 } } }));
+    expect(styleOf(heading)).toMatchObject({ opacity: 0 });
+    act(() => h.layouts[1]?.({ nativeEvent: { layout: { width: 0 } } }));
+    expect(styleOf(heading)).toMatchObject({ opacity: 1 });
+    expect(sides()).toEqual([70, 70]);
+  });
+  it.each([
+    ["Filters", "Done"],
+    [longTitle, "Done"],
+  ])("puts a confirming-only %s sheet's %s on the trailing side, still centered", (title, label) => {
+    const close = vi.fn();
+    render(<SheetHeader title={title} label={label} dismiss="trailing" onClose={close} />);
+    const done = screen.getByRole("button", { name: label });
+    expect(screen.getByTestId("sheet-header-trailing").contains(done)).toBe(true);
+    expect(screen.getByTestId("sheet-header-leading").contains(done)).toBe(false);
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    act(() => h.layouts[0]?.({ nativeEvent: { layout: { width: 0 } } }));
+    act(() => h.layouts[1]?.({ nativeEvent: { layout: { width: 71.2 } } }));
+    expect(sides()).toEqual([72, 72]);
+    expect(styleOf(screen.getByRole("heading", { name: title }))).toMatchObject({
+      textAlign: "center",
+      opacity: 1,
+    });
+    fireEvent.click(done);
+    expect(close).toHaveBeenCalledOnce();
+  });
   it("defaults to Close, supports edge-to-edge sheets and disables dismissal while pending", () => {
     const close = vi.fn();
     const view = render(<SheetHeader title="Connect iCloud" onClose={close} disabled />);
@@ -244,6 +274,7 @@ describe("SheetHeader", () => {
 });
 
 describe("stack header options", () => {
+  const theme = { destructive: "#ba2944" };
   const action = (id: string, destructive = false) => ({
     id,
     label: id,
@@ -271,20 +302,20 @@ describe("stack header options", () => {
     h.platform.OS = "web";
     const options = editorDismissOptions({ label: "Close", onPress: vi.fn() });
     expect("unstable_headerLeftItems" in options).toBe(false);
-    expect("unstable_headerRightItems" in editorActionsOptions("Actions", [])).toBe(false);
-    expect("unstable_headerRightItems" in editorActionsOptions("Actions", [action("a")])).toBe(
-      false,
-    );
+    expect("unstable_headerRightItems" in editorActionsOptions("Actions", [], theme)).toBe(false);
+    expect(
+      "unstable_headerRightItems" in editorActionsOptions("Actions", [action("a")], theme),
+    ).toBe(false);
   });
   it("renders no trailing control, and clears native items, when there are no actions", () => {
-    expect(editorActionsOptions("Record actions", [])).toEqual({
+    expect(editorActionsOptions("Record actions", [], theme)).toEqual({
       headerRight: undefined,
       unstable_headerRightItems: undefined,
     });
   });
   it("gives one action a native icon button", () => {
     const edit = action("Edit transaction");
-    const options = editorActionsOptions("Transaction actions", [edit]);
+    const options = editorActionsOptions("Transaction actions", [edit], theme);
     expect(options.unstable_headerRightItems?.()).toEqual([
       {
         type: "button",
@@ -295,16 +326,30 @@ describe("stack header options", () => {
         onPress: edit.onPress,
       },
     ]);
+    // An ordinary action takes the bar's own tint.
+    expect(options.unstable_headerRightItems?.()[0]).not.toHaveProperty("tintColor");
     render(options.headerRight?.() as ReactElement);
     expect(screen.getByRole("group", { name: "Edit transaction" })).toHaveTextContent(
       "Edit transaction",
     );
   });
+  it("keeps a single destructive action red in the screen's theme", () => {
+    const archive = action("Archive", true);
+    const light = editorActionsOptions("Record actions", [archive], theme);
+    expect(light.unstable_headerRightItems?.()[0]).toMatchObject({
+      label: "Archive",
+      icon: { type: "image", source: "Trash.png" },
+      tintColor: "#ba2944",
+    });
+    const dark = editorActionsOptions("Record actions", [archive], { destructive: "#ff8190" });
+    expect(dark.unstable_headerRightItems?.()[0]).toMatchObject({ tintColor: "#ff8190" });
+  });
   it("gives several actions the shared menu and no competing native item", () => {
-    const options = editorActionsOptions("Record actions", [
-      action("Complete"),
-      action("Move to Trash", true),
-    ]);
+    const options = editorActionsOptions(
+      "Record actions",
+      [action("Complete"), action("Move to Trash", true)],
+      theme,
+    );
     expect(options.unstable_headerRightItems).toBeUndefined();
     render(options.headerRight?.() as ReactElement);
     expect(screen.getByRole("group", { name: "Record actions" })).toHaveTextContent(

@@ -1,13 +1,14 @@
 import DateTimePicker from "@expo/ui/community/datetime-picker";
 import { localDateAt, localDateTimeToUtc } from "@personal-os/domain";
 import { useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { Action, Actions, formRow } from "../../components/forms/form-rows";
 import { useSettingsAccent } from "../../components/settings-accent";
-import { spacing, touchTarget, useTheme } from "../../theme";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
+import { spacing, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import type { DateFieldProps } from "./date-field";
 import { isPastDue, relativeDueDate } from "./due-date";
-import { Action } from "./ui";
 export function DateField({
   label,
   value,
@@ -37,19 +38,10 @@ export function DateField({
         accessibilityRole="button"
         accessibilityLabel={`${label}${overdue ? ", overdue" : ""}, ${value}`}
         onPress={() => setEditing(true)}
-        style={{
-          padding: spacing.lg,
-          minHeight: 56,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: spacing.md,
-        }}
+        style={({ pressed }) => [formRow, { opacity: pressed ? 0.6 : 1 }]}
       >
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-        <Text
-          numberOfLines={1}
-          style={{ color: overdue ? t.destructive : t.secondary, fontSize: 17, maxWidth: "60%" }}
-        >
+        <SettingLabel>{label}</SettingLabel>
+        <SettingValue numberOfLines={1} style={overdue ? { color: t.destructive } : undefined}>
           {dateOnly
             ? new Intl.DateTimeFormat(undefined, {
                 timeZone: timezone,
@@ -74,7 +66,7 @@ export function DateField({
                 hour: "numeric",
                 minute: "2-digit",
               }).format(new Date(value))}
-        </Text>
+        </SettingValue>
       </Pressable>
     );
   if (!value && !editing)
@@ -85,33 +77,29 @@ export function DateField({
         onPress={() => {
           setEditing(true);
         }}
-        style={({ pressed }) => ({
-          minHeight: touchTarget,
-          padding: spacing.lg,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: spacing.md,
-          opacity: pressed ? 0.6 : 1,
-        })}
+        style={({ pressed }) => [formRow, { opacity: pressed ? 0.6 : 1 }]}
       >
-        <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{label}</Text>
-        <Text style={{ color: accent, fontSize: 17 }}>Not set</Text>
+        <SettingLabel>{label}</SettingLabel>
+        <SettingValue style={{ color: accent }}>Not set</SettingValue>
       </Pressable>
     );
   return (
-    <View
-      style={{
-        padding: spacing.lg,
-        gap: spacing.sm,
-        alignItems: "stretch",
-      }}
-    >
-      <Text style={{ color: overdue ? t.destructive : t.ink, fontSize: 17, flexGrow: 1 }}>
-        {label}
-        {overdue ? " · Overdue" : ""}
-      </Text>
+    <View>
+      <View style={formRow}>
+        <SettingLabel style={overdue ? { color: t.destructive } : undefined}>
+          {label}
+          {overdue ? " · Overdue" : ""}
+        </SettingLabel>
+      </View>
       {due && (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs }}>
+        <View
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: spacing.xs,
+            paddingHorizontal: spacing.lg,
+          }}
+        >
           {(
             [
               { value: "hour", label: "In 1 hour" },
@@ -130,7 +118,7 @@ export function DateField({
           ))}
         </View>
       )}
-      <View style={{ alignItems: "stretch", gap: spacing.sm }}>
+      <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.md, gap: spacing.sm }}>
         <DateTimePicker
           value={
             !value
@@ -167,14 +155,16 @@ export function DateField({
             }}
           />
         )}
-        <Action
-          label="Clear"
-          onPress={() => {
-            if (value) onChange(null);
-            setEditing(false);
-          }}
-        />
-        <Action label="Done" onPress={() => setEditing(false)} />
+        <Actions inset={false}>
+          <Action
+            label="Clear"
+            onPress={() => {
+              if (value) onChange(null);
+              setEditing(false);
+            }}
+          />
+          <Action label="Done" onPress={() => setEditing(false)} />
+        </Actions>
       </View>
     </View>
   );

@@ -4,6 +4,8 @@ import { icons } from "./icons";
 import type { RowAction } from "./row-action-button";
 import { RowActions } from "./row-actions";
 
+/** The theme colors a header action may take; pass the screen's `useTheme()` value. */
+type ActionTheme = { destructive: string };
 type DismissAction = { label: string; onPress: () => void; disabled?: boolean };
 
 /**
@@ -26,16 +28,21 @@ export function editorDismissOptions(action: DismissAction) {
  * The trailing record actions of a stack screen: nothing for no actions (never an empty
  * glass circle), one native icon button for one action, and the shared ellipsis menu for
  * several. The menu stays a hosted control because its semantic-color glyphs are not
- * template images a native bar menu could tint.
+ * template images a native bar menu could tint. A destructive action stays red in every
+ * form, so the theme is required rather than optional.
  */
-export function editorActionsOptions(label: string, actions: readonly RowAction[]) {
+export function editorActionsOptions(
+  label: string,
+  actions: readonly RowAction[],
+  theme: ActionTheme,
+) {
   const [only] = actions;
   if (!only)
     return {
       headerRight: undefined,
       ...(Platform.OS === "ios" && { unstable_headerRightItems: undefined }),
     };
-  if (actions.length === 1) return editorActionOptions(only);
+  if (actions.length === 1) return editorActionOptions(only, theme);
   return {
     headerRight: () => <RowActions placement="header" label={label} actions={actions} />,
     ...(Platform.OS === "ios" && { unstable_headerRightItems: undefined }),
@@ -43,7 +50,7 @@ export function editorActionsOptions(label: string, actions: readonly RowAction[
 }
 
 /** Single header actions use the same native bar-item sizing and material as dismissal. */
-export function editorActionOptions(action: RowAction) {
+export function editorActionOptions(action: RowAction, theme: ActionTheme) {
   return {
     headerRight: () => <RowActions placement="header" label={action.label} actions={[action]} />,
     ...(Platform.OS === "ios" && {
@@ -54,6 +61,7 @@ export function editorActionOptions(action: RowAction) {
           accessibilityLabel: action.label,
           icon: { type: "image" as const, source: icons[action.icon] },
           disabled: action.disabled,
+          ...(action.destructive && { tintColor: theme.destructive }),
           onPress: action.onPress,
         },
       ],

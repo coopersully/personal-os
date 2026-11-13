@@ -31,6 +31,7 @@ export function ContainerEditorScreen() {
   return <ContainerEditorRecord key={`${params.kind}:${params.id}`} params={params} />;
 }
 function ContainerEditorRecord({ params }: { params: { id?: string; kind?: string } }) {
+  const t = useTheme();
   const api = useTaskApi();
   const kind = params.kind === "project" ? "project" : "list";
   const recordIdentity = `${kind}:${params.id ?? "new"}`;
@@ -54,7 +55,7 @@ function ContainerEditorRecord({ params }: { params: { id?: string; kind?: strin
         <Stack.Screen
           options={{
             title: `${kind} details`,
-            ...editorActionsOptions("Record actions", []),
+            ...editorActionsOptions("Record actions", [], t),
             ...editorDismissOptions({ label: "Close", onPress: () => router.back() }),
           }}
         />
@@ -266,6 +267,7 @@ function ContainerForm({
                       ]
                     : []),
                 ],
+            t,
           ),
         }}
       />

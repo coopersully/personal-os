@@ -8,12 +8,11 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { router, Stack, usePreventRemove } from "expo-router";
 import { useEffect, useState } from "react";
-import { AppState, Linking, Text } from "react-native";
+import { AppState, Linking } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { SectionNote } from "../../components/forms/section-content";
 import { holdReadFeedback } from "../../components/read-feedback-scope";
-import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
 import { useSettingsAction, useSettingsResource } from "./data";
@@ -23,7 +22,6 @@ export function TextingSettingsScreen() {
   return state.user ? <Texting key={`${state.user.id}:${session.epoch()}`} /> : null;
 }
 function Texting() {
-  const t = useTheme();
   const { state, session } = useAuth();
   const cache = useQueryClient();
   const action = useSettingsAction();
@@ -200,25 +198,20 @@ function Texting() {
       <Section title="Texting">
         {connection.data ? (
           <>
-            <Text style={{ padding: 16, color: t.ink, fontSize: 17 }}>
-              {connection.data.maskedPhoneNumber ?? "No phone connected"}
-            </Text>
-            <Text
-              style={{
-                paddingHorizontal: 16,
-                paddingBottom: 16,
-                color: connection.data.state === "active" ? t.secondary : t.warning,
-              }}
-            >
+            <SettingsDetailRow
+              label="Phone number"
+              value={connection.data.maskedPhoneNumber ?? "No phone connected"}
+            />
+            <SectionNote warning={connection.data.state !== "active"}>
               {connection.data.state?.replaceAll("_", " ") ?? "Not connected"}
               {!connection.data.providerReady
                 ? " · Texting is unavailable on this deployment."
                 : ""}
-            </Text>
+            </SectionNote>
             {connection.data.senderPhoneNumber && (
-              <Text selectable style={{ padding: 16, color: t.secondary }}>
+              <SectionNote selectable>
                 nohmi number: {connection.data.senderPhoneNumber}
-              </Text>
+              </SectionNote>
             )}
             {connected && !editing && (
               <Action

@@ -22,7 +22,6 @@ import { FloatingAdd, FormSave } from "../../components/forms/form-save";
 import { SectionNote } from "../../components/forms/section-content";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import type { IconName } from "../../components/icons";
-import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { TaskPreferencesScreen } from "../tasks/preferences";
 import { Action, Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
@@ -156,7 +155,6 @@ const preferenceGroups = [
   },
 ];
 function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings }) {
-  const _t = useTheme();
   const action = useSettingsAction();
   const cache = useQueryClient();
   const { state, session } = useAuth();
@@ -335,7 +333,6 @@ function NumberPreference({
   );
 }
 function GuidanceEditor({ initial }: { initial: DomainProfile }) {
-  const _t = useTheme();
   const action = useSettingsAction();
   const cache = useQueryClient();
   const [baseline, setBaseline] = useState(initial);

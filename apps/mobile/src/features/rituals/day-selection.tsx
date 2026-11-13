@@ -52,7 +52,12 @@ export function DaySelection({
         onRequestClose={() => setExpanded(false)}
       >
         <View accessibilityViewIsModal style={{ flex: 1, backgroundColor: t.canvas }}>
-          <SheetHeader title={label} label="Done" onClose={() => setExpanded(false)} />
+          <SheetHeader
+            title={label}
+            label="Done"
+            dismiss="trailing"
+            onClose={() => setExpanded(false)}
+          />
           <ScrollView contentContainerStyle={{ padding: spacing.page }}>
             <Group>
               {days.map((day, index) => (

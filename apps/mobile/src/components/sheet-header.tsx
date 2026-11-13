@@ -8,7 +8,12 @@ import { EditorClose } from "./editor-close";
  *
  * Both side slots reserve the width of the wider one, so the title is centered on the sheet
  * rather than in whatever space the dismissal leaves, and a long title truncates between
- * the controls instead of running under them.
+ * the controls instead of running under them. The title stays hidden until the sides are
+ * measured, so the first frame is never off-center.
+ *
+ * A sheet that only confirms (Done) puts its control on the trailing side with
+ * `dismiss="trailing"`; a sheet that can be abandoned keeps Close or Cancel leading and
+ * passes its confirming control as `trailing`.
  */
 export function SheetHeader({
   title,
@@ -16,6 +21,7 @@ export function SheetHeader({
   onClose,
   disabled = false,
   trailing,
+  dismiss = "leading",
   inset = true,
 }: {
   title: string;
@@ -23,14 +29,18 @@ export function SheetHeader({
   onClose: () => void;
   disabled?: boolean;
   trailing?: ReactNode;
+  dismiss?: "leading" | "trailing";
   inset?: boolean;
 }) {
   const t = useTheme();
   const [side, setSide] = useState(0);
-  const measure = (event: LayoutChangeEvent) => {
+  const [measured, setMeasured] = useState({ leading: false, trailing: false });
+  const measure = (slot: "leading" | "trailing") => (event: LayoutChangeEvent) => {
     const width = Math.ceil(event.nativeEvent.layout.width);
     setSide((current) => Math.max(current, width));
+    setMeasured((current) => (current[slot] ? current : { ...current, [slot]: true }));
   };
+  const close = <EditorClose label={label} onPress={onClose} disabled={disabled} />;
   return (
     <View
       style={{
@@ -43,9 +53,7 @@ export function SheetHeader({
       }}
     >
       <View testID="sheet-header-leading" style={{ minWidth: side, alignItems: "flex-start" }}>
-        <View onLayout={measure}>
-          <EditorClose label={label} onPress={onClose} disabled={disabled} />
-        </View>
+        <View onLayout={measure("leading")}>{dismiss === "leading" ? close : null}</View>
       </View>
       <Text
         accessibilityRole="header"
@@ -57,12 +65,13 @@ export function SheetHeader({
           fontSize: 17,
           fontWeight: "600",
           textAlign: "center",
+          opacity: measured.leading && measured.trailing ? 1 : 0,
         }}
       >
         {title}
       </Text>
       <View testID="sheet-header-trailing" style={{ minWidth: side, alignItems: "flex-end" }}>
-        <View onLayout={measure}>{trailing}</View>
+        <View onLayout={measure("trailing")}>{dismiss === "trailing" ? close : trailing}</View>
       </View>
     </View>
   );

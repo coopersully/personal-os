@@ -5,7 +5,7 @@ import { Pressable, View } from "react-native";
 import { spacing, useTheme } from "../../theme";
 import { useSettingsAccentColor } from "../settings-accent";
 import { SettingLabel, SettingValue } from "../settings-row-content";
-import { Action, formRow } from "./form-rows";
+import { Action, Actions, formRow } from "./form-rows";
 import type { PlanningPickerProps } from "./planning-picker";
 export function PlanningPicker({
   label,
@@ -84,7 +84,7 @@ export function PlanningPicker({
               }
             }}
           />
-          <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: spacing.sm }}>
+          <Actions inset={false}>
             {optional && (
               <Action
                 label={`Clear ${label.toLowerCase()}`}
@@ -97,7 +97,7 @@ export function PlanningPicker({
               />
             )}
             <Action label="Done" onPress={() => setEditing(false)} />
-          </View>
+          </Actions>
         </View>
       )}
     </View>

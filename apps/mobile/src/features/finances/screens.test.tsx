@@ -2475,7 +2475,11 @@ it("edits the monthly limit inline and stays on category details", async () => {
   h.api.createFinanceBudget.mockResolvedValue({ ...categoryBudget, limit: 700 });
   mount(<FinanceBudgetCategoryScreen />);
   fireEvent.click(await screen.findByText("Monthly limit"));
+  // The inline editor ends with the shared text commands, not hand-built icon buttons.
+  expect(screen.getByRole("button", { name: "Close" })).toHaveTextContent("Close");
   fireEvent.change(screen.getByLabelText("Monthly budget limit"), { target: { value: "700" } });
+  expect(screen.getByRole("button", { name: "Cancel" })).toHaveTextContent("Cancel");
+  expect(screen.getByRole("button", { name: "Save budget limit" })).toHaveTextContent("Save");
   fireEvent.click(screen.getByRole("button", { name: "Save budget limit" }));
   await waitFor(() =>
     expect(h.success).toHaveBeenCalledWith("Budget limit updated", expect.anything()),
@@ -2491,6 +2495,8 @@ it("saves an inline transaction note with its original revision and no category 
   fireEvent.change(screen.getByLabelText("Transaction note"), {
     target: { value: "Gift for Maya" },
   });
+  expect(screen.getByRole("button", { name: "Cancel" })).toHaveTextContent("Cancel");
+  expect(screen.getByRole("button", { name: "Save note" })).toHaveTextContent("Save");
   fireEvent.click(screen.getByRole("button", { name: "Save note" }));
   await waitFor(() =>
     expect(h.api.updateFinanceTransaction).toHaveBeenCalledWith(transaction.id, {
@@ -2541,6 +2547,10 @@ it("requires an explicit valid joint ownership share and reports failed outcomes
   fireEvent.click(screen.getByRole("button", { name: "Joint" }));
   fireEvent.change(screen.getByLabelText("Ownership percentage"), { target: { value: "150" } });
   expect(screen.getByRole("button", { name: "Save ownership" })).toHaveProperty("disabled", true);
+  expect(screen.getByRole("button", { name: "Save ownership" })).toHaveTextContent("Save");
+  expect(screen.getByRole("button", { name: "Cancel ownership change" })).toHaveTextContent(
+    "Cancel",
+  );
   fireEvent.change(screen.getByLabelText("Ownership percentage"), { target: { value: "50" } });
   fireEvent.click(screen.getByRole("button", { name: "Save ownership" }));
   await waitFor(() =>

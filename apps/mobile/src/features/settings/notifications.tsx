@@ -8,7 +8,6 @@ import { editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
 import { SectionNote } from "../../components/forms/section-content";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
-import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { NotificationSettings } from "../notifications/provider";
 import { Choice, confirm, Field, FormBody, Section, State, ToggleRow } from "../tasks/ui";
@@ -92,7 +91,6 @@ function NotificationPolicy({
   refresh: () => Promise<unknown>;
 }) {
   const action = useSettingsAction();
-  const _t = useTheme();
   const saved = initial.preferences.find((row) => row.scope === scope);
   const global =
     initial.preferences.find((row) => row.scope === "global")?.preferences ??

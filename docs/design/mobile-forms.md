@@ -35,7 +35,13 @@ therefore be top-aligned on a project card and vertically centered in a Project 
   Keep interactive targets at least 44 points. Use the theme's 4-point spacing scale and 16-point
   grouped-surface radius. Never give one screen's row its own padding.
 - Rows always sit inside a `Section`/`Group`. `SectionNote` owns explanatory or read-only copy in a
-  group and `SectionItem` gives a content row such as `RecordRow` the group's side padding.
+  group (secondary, ink or warning), `SectionItem` gives a content row such as `RecordRow` the
+  group's side padding, and `SectionFootnote` sets copy under the group it explains.
+- `insetRow` is the same row for a surface that already pads its sides, such as a finance card.
+  `formBlock` is the padding of a stacked block: a label above its editor or chips.
+- An expanding row (date, time, tags, an inline finance editor) ends with `Actions`: one
+  right-aligned line of text `Action`s, dismissing command first and confirming command last.
+- `TitleField` owns the leading identity slot of a record title; do not position an icon beside it.
 
 ### Shared chrome
 
@@ -45,9 +51,13 @@ These live in `apps/mobile/src/components` and are the only way to build form an
   is a native bar item, so UIKit owns the glass, label width and centered title. Do not pass a
   custom view as `headerLeft`: the bar wraps it in a second, icon-sized glass capsule.
 - `editorActionsOptions` declares trailing record actions: none renders nothing (never an empty
-  glass circle), one is a native icon button, several use the shared ellipsis menu.
+  glass circle), one is a native icon button, several use the shared ellipsis menu. It takes the
+  screen's theme so a destructive action stays red. Never set `headerRight: () => null`.
 - `SheetHeader` is the header of an in-content sheet. Both side slots reserve the wider side's
-  width, so the title is centered on the sheet and a long title truncates between the controls.
+  width, so the title is centered on the sheet and a long title truncates between the controls;
+  the title is hidden until both sides are measured. A sheet that can be abandoned keeps Close
+  or Cancel leading and passes its confirming control as `trailing`. A sheet that only confirms
+  puts Done on the trailing side with `dismiss="trailing"`.
 - `GlassButton` is the one Liquid Glass button: a 44-point capsule for a text label, a 44-point
   circle for a bar icon and a 56-point circle for the floating Save/Add. Labels are primary ink in
   both appearances; callers may place it but cannot resize or recolor its label.

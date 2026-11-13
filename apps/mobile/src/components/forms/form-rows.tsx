@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactNode } from "react";
 import { Children, useState } from "react";
 import {
   Pressable,
@@ -14,27 +14,31 @@ import { radius, spacing, touchTarget, useTheme } from "../../theme";
 import { Icon, type IconName } from "../icons";
 import { useSettingsAccent, useSettingsAccentColor } from "../settings-accent";
 import { SettingLabel, SettingValue } from "../settings-row-content";
-import { formRow } from "./form-row";
+import { formBlock, formRow } from "./form-row";
 
-export { formRow } from "./form-row";
-export { SectionItem, SectionNote } from "./section-content";
+export { formBlock, formRow, insetRow } from "./form-row";
+export { SectionFootnote, SectionItem, SectionNote } from "./section-content";
 
 export function Action({
   label,
   onPress,
   disabled = false,
   destructive = false,
+  accessibilityLabel,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   destructive?: boolean;
+  /** Only when the visible label alone is ambiguous to a screen reader. */
+  accessibilityLabel?: string;
 }) {
   const t = useTheme();
   const accent = useSettingsAccent();
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
@@ -59,11 +63,31 @@ export function Action({
     </Pressable>
   );
 }
+/**
+ * The trailing commands of an inline editor (Cancel, Clear, Done, Save): one right-aligned
+ * line of text actions, so every expanding row ends the same way.
+ */
+export function Actions({ children, inset = true }: PropsWithChildren<{ inset?: boolean }>) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        flexWrap: "wrap",
+        justifyContent: "flex-end",
+        gap: spacing.sm,
+        paddingHorizontal: inset ? spacing.lg : 0,
+      }}
+    >
+      {children}
+    </View>
+  );
+}
 /** A single rounded group: rows own their padding; the group owns its surface and seams. */
 export function Group({ children }: PropsWithChildren) {
   const t = useTheme();
   return (
     <View
+      testID="form-group"
       style={{
         backgroundColor: t.surface,
         borderRadius: radius.panel,
@@ -201,10 +225,23 @@ export function groupEdges(first: boolean, last: boolean) {
     borderCurve: "continuous" as const,
   };
 }
-export function TitleField({ label, ...props }: TextInputProps & { label: string }) {
+/** A record's title, with an optional leading identity (icon or icon button) in a fixed slot. */
+export function TitleField({
+  label,
+  leading,
+  ...props
+}: TextInputProps & { label: string; leading?: ReactNode }) {
   const t = useTheme();
   return (
-    <View style={{ padding: spacing.lg }}>
+    <View style={{ padding: spacing.lg, flexDirection: "row", alignItems: "flex-start" }}>
+      {leading && (
+        <View
+          testID="title-field-leading"
+          style={{ width: touchTarget, marginRight: spacing.lg, alignItems: "center" }}
+        >
+          {leading}
+        </View>
+      )}
       <TextInput
         accessibilityLabel={label}
         placeholderTextColor={t.secondary}
@@ -214,6 +251,7 @@ export function TitleField({ label, ...props }: TextInputProps & { label: string
         {...props}
         style={[
           {
+            flex: 1,
             color: t.ink,
             fontSize: 24,
             fontWeight: "600",
@@ -294,7 +332,7 @@ export function Field({
       </Pressable>
     );
   return (
-    <View style={{ paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: spacing.sm }}>
+    <View style={formBlock}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
         {icon && <Icon name={icon} size={22} color={t.secondary} />}
         <SettingLabel>{label}</SettingLabel>

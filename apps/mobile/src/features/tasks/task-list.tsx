@@ -362,7 +362,12 @@ export function TaskListScreen({
         onRequestClose={() => setShowFilters(false)}
       >
         <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
-          <SheetHeader title="Filters" label="Done" onClose={() => setShowFilters(false)} />
+          <SheetHeader
+            title="Filters"
+            label="Done"
+            dismiss="trailing"
+            onClose={() => setShowFilters(false)}
+          />
           <FormBody>
             <Section title="Match items">
               {menuChoices

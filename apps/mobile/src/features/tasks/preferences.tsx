@@ -2,7 +2,7 @@ import type { TasksWorkspacePreferences, WorkspaceSettings } from "@personal-os/
 import { router, Stack } from "expo-router";
 import { type ReactNode, useState } from "react";
 import { View } from "react-native";
-import { editorDismissOptions } from "../../components/editor-header";
+import { editorActionsOptions, editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
 import { SectionNote } from "../../components/forms/section-content";
 import { useTheme } from "../../theme";
@@ -41,7 +41,7 @@ function Preferences({
   relatedSettings?: ReactNode;
   lists: { value: string; label: string }[];
 }) {
-  const _t = useTheme();
+  const t = useTheme();
   const api = useTaskApi();
   const action = useTaskAction();
   const [initial, setInitial] = useState(opened);
@@ -72,7 +72,7 @@ function Preferences({
                   )
                 : router.back(),
           }),
-          headerRight: () => null,
+          ...editorActionsOptions("Preference actions", [], t),
         }}
       />
       <FormBody>

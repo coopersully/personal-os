@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { Linking, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorActionsOptions } from "../../components/editor-header";
+import { useTheme } from "../../theme";
 import { mobileAppOrigin, useAuth } from "../auth/context";
 import { AccountPreferences } from "./account-preferences";
 import { categoryIcon } from "./category-presentation";
@@ -131,6 +132,7 @@ export function FinanceAccountScreen() {
   );
 }
 export function FinanceTransactionScreen() {
+  const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const query = useFinanceRead(["transaction", id], (api) => api.getFinanceTransaction(id), !!id);
   const accounts = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
@@ -161,6 +163,7 @@ export function FinanceTransactionScreen() {
                   },
                 ]
               : [],
+            t,
           ),
         }}
       />

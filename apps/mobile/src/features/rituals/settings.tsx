@@ -62,7 +62,6 @@ export function RitualsSettingsScreen() {
   return <RitualHome key={state.user?.id} />;
 }
 function RitualHome() {
-  const _t = useTheme();
   const { state, session } = useAuth();
   const api = session.api();
   const client = useQueryClient();
@@ -513,6 +512,7 @@ function RitualHistory({ close }: { close: () => void }) {
     blocked: denialLatch.current,
     items: history.data?.pages.flatMap((page) => page.items) ?? [],
   };
+  const rows = history.data?.pages.flatMap((page) => page.items) ?? [];
   const selectDetail = (item: RitualOccurrence) => {
     const current = selectionBoundary.current;
     if (current.blocked || !current.items.includes(item)) return;
@@ -528,7 +528,6 @@ function RitualHistory({ close }: { close: () => void }) {
     [() => history.refetch({ throwOnError: true })],
     "Ritual history refreshed",
   );
-  const _t = useTheme();
   return (
     <Screen onRefresh={refreshHistory}>
       <Stack.Screen
@@ -651,23 +650,18 @@ function RitualHistory({ close }: { close: () => void }) {
             error={history.isError}
             retry={() => void history.refetch()}
           />
-          {history.data && (
+          {rows.length > 0 && (
             <Section title="History">
-              {history.data.pages
-                .flatMap((page) => page.items)
-                .map((item) => (
-                  <SectionItem key={item.id}>
-                    <RecordRow
-                      leading={<Icon name="clock" color={t.secondary} />}
-                      title={item.definition.title}
-                      subtitle={`${item.scheduledLocalDate} · ${item.status}`}
-                      onPress={() => selectDetail(item)}
-                    />
-                  </SectionItem>
-                ))}
-              {history.isSuccess && history.data.pages.every((p) => !p.items.length) && (
-                <SectionNote>No matching history.</SectionNote>
-              )}
+              {rows.map((item) => (
+                <SectionItem key={item.id}>
+                  <RecordRow
+                    leading={<Icon name="clock" color={t.secondary} />}
+                    title={item.definition.title}
+                    subtitle={`${item.scheduledLocalDate} · ${item.status}`}
+                    onPress={() => selectDetail(item)}
+                  />
+                </SectionItem>
+              ))}
               {history.hasNextPage && (
                 <Action
                   disabled={history.isFetchingNextPage}
@@ -676,6 +670,11 @@ function RitualHistory({ close }: { close: () => void }) {
                   Load more history
                 </Action>
               )}
+            </Section>
+          )}
+          {history.isSuccess && rows.length === 0 && (
+            <Section>
+              <SectionNote>No matching history.</SectionNote>
             </Section>
           )}
         </>

@@ -40,6 +40,7 @@ export function TaskEditorScreen() {
   return <TaskEditorRecord key={`${params.kind}:${params.id}:${params.deleted}`} params={params} />;
 }
 function TaskEditorRecord({ params }: { params: TaskEditorParams }) {
+  const t = useTheme();
   const api = useTaskApi();
   const kind = params.kind === "reminder" ? "reminder" : "task";
   const recordIdentity = `${kind}:${params.id ?? "new"}`;
@@ -65,7 +66,7 @@ function TaskEditorRecord({ params }: { params: TaskEditorParams }) {
         <Stack.Screen
           options={{
             title: `${kind} details`,
-            ...editorActionsOptions("Record actions", []),
+            ...editorActionsOptions("Record actions", [], t),
             ...editorDismissOptions({ label: "Close", onPress: () => router.back() }),
           }}
         />
@@ -366,6 +367,7 @@ function TaskEditor({
                       onPress: () => transition("trash"),
                     },
                   ],
+            t,
           ),
         }}
       />

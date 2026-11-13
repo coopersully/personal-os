@@ -13,3 +13,16 @@ export const formRow = {
   alignItems: "center",
   gap: spacing.md,
 } as const;
+
+/**
+ * The same row inside a surface that already pads its sides (a finance card, a sheet body):
+ * identical height, vertical padding and gaps, with no second side padding.
+ */
+export const insetRow = { ...formRow, paddingHorizontal: 0 } as const;
+
+/** A stacked block inside a group (a label above its editor or chips): the row's padding. */
+export const formBlock = {
+  paddingHorizontal: spacing.lg,
+  paddingVertical: spacing.md,
+  gap: spacing.sm,
+} as const;

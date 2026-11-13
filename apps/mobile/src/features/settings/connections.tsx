@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { AppState, Linking, Modal, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
-import { SectionNote } from "../../components/forms/section-content";
+import { formRow } from "../../components/forms/form-row";
+import { SectionFootnote, SectionNote } from "../../components/forms/section-content";
 import { Icon } from "../../components/icons";
 import { Screen } from "../../components/screen";
 import { SheetHeader } from "../../components/sheet-header";
@@ -106,7 +107,6 @@ function Connections({ detailId }: { detailId?: string } = {}) {
           {accounts.data?.length === 0 && <State empty="No connected accounts." />}
           {accounts.data?.map((account) => (
             <View key={account.id}>
-              {" "}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Account ${account.label}, ${account.email ?? account.provider}`}
@@ -116,7 +116,7 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                     params: { id: account.id },
                   })
                 }
-                style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52 }}
+                style={({ pressed }) => [formRow, { opacity: pressed ? 0.6 : 1 }]}
               >
                 <AccountAvatar
                   url={account.avatarUrl}
@@ -202,14 +202,9 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                   icon="clock"
                 />
                 {account.health.message && (
-                  <Text
-                    style={{
-                      color: account.health.state === "ready" ? t.secondary : t.warning,
-                      padding: 16,
-                    }}
-                  >
+                  <SectionNote warning={account.health.state !== "ready"}>
                     {account.health.message}
-                  </Text>
+                  </SectionNote>
                 )}
               </Section>
               <Section title="Services">
@@ -323,12 +318,10 @@ function Connections({ detailId }: { detailId?: string } = {}) {
               <State retry={() => void x.refetch()} />
             ) : x.data ? (
               <>
-                <Text style={{ padding: 16, color: t.ink, fontSize: 17 }}>
+                <SectionNote ink>
                   @{x.data.username} · {x.data.syncStatus}
-                </Text>
-                {x.data.syncError && (
-                  <Text style={{ padding: 16, color: t.warning }}>{x.data.syncError}</Text>
-                )}
+                </SectionNote>
+                {x.data.syncError && <SectionNote warning>{x.data.syncError}</SectionNote>}
                 <SearchableChoice
                   label="Bookmark folder"
                   value={x.data.selectedFolderId ?? ""}
@@ -589,10 +582,10 @@ function ICloudForm({
               }}
             />
           </Section>
-          <Text style={{ color: t.secondary }}>
+          <SectionFootnote>
             Use an app-specific password created in your Apple Account. Your password stays only in
             this form until submitted.
-          </Text>
+          </SectionFootnote>
         </FormBody>
       </SafeAreaView>
     </Modal>

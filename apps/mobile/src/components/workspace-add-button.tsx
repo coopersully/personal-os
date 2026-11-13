@@ -23,11 +23,7 @@ export function WorkspaceAddButton() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={
-          container
-            ? `Add ${container}`
-            : owner === "tasks"
-              ? "Add task"
-              : "Add event"
+          container ? `Add ${container}` : owner === "tasks" ? "Add task" : "Add event"
         }
         accessibilityHint={
           container

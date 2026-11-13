@@ -458,7 +458,7 @@ it("reaches completed and cancelled projects through status chips and opens thei
   fireEvent.click(screen.getByRole("button", { name: "Completed · 1" }));
   expect(screen.queryByRole("button", { name: "Open Trip" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Open Old" })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Open Move" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open Move, completed" }));
   expect(h.push).toHaveBeenLastCalledWith({
     pathname: "/task-browser",
     params: {
@@ -471,12 +471,85 @@ it("reaches completed and cancelled projects through status chips and opens thei
     },
   });
   fireEvent.click(screen.getByRole("button", { name: "Cancelled · 1" }));
-  expect(screen.getByRole("button", { name: "Open Boat" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Open Boat, cancelled" })).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "All · 3" }));
   expect(screen.getByRole("button", { name: "Open Trip" })).toBeVisible();
-  expect(screen.getByRole("button", { name: "Open Move" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Open Move, completed" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Open Boat, cancelled" })).toBeVisible();
   expect(screen.getByText("Completed · Inbox")).toBeVisible();
   expect(screen.getByText("Cancelled · Inbox")).toBeVisible();
+});
+it("shows bare status chips, never a zero count, while projects are loading or failed", async () => {
+  h.projects = [project("trip", "Trip")];
+  h.listTaskProjects.mockReset().mockImplementation(() => new Promise(() => {}));
+  const pending = render(
+    <MobileDataProvider>
+      <TasksHub mode="projects" />
+    </MobileDataProvider>,
+  );
+  await waitFor(() => expect(h.listTaskLists).toHaveBeenCalled());
+  for (const label of ["Active", "Completed", "Cancelled", "All"])
+    expect(screen.getByRole("button", { name: label })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /· \d/ })).not.toBeInTheDocument();
+  pending.unmount();
+  h.listTaskProjects
+    .mockReset()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockImplementation(async () => ({ items: h.projects, nextCursor: null }));
+  render(
+    <MobileDataProvider>
+      <TasksHub mode="projects" />
+    </MobileDataProvider>,
+  );
+  const retry = await screen.findByRole("button", { name: "Retry loading" });
+  expect(screen.getByRole("button", { name: "Active" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /· \d/ })).not.toBeInTheDocument();
+  fireEvent.click(retry);
+  expect(await screen.findByRole("button", { name: "Active · 1" })).toBeVisible();
+});
+it("names the status on a pinned finished project and says when there are no projects at all", async () => {
+  h.projects = [project("move", "Move", { lifecycle: "completed" })];
+  h.preferences.pinnedProjectIds = ["move"];
+  const view = render(
+    <MobileDataProvider>
+      <TasksHub mode="projects" />
+    </MobileDataProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Completed · 1" }));
+  expect(
+    await screen.findByRole("button", { name: "Open pinned project: Move, completed" }),
+  ).toBeVisible();
+  expect(screen.getByText("Completed")).toBeVisible();
+  view.unmount();
+  h.projects = [];
+  h.preferences.pinnedProjectIds = [];
+  render(
+    <MobileDataProvider>
+      <TasksHub mode="projects" />
+    </MobileDataProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "All · 0" }));
+  expect(await screen.findByText("No projects yet.")).toBeVisible();
+});
+it.each([
+  ["completed", { lifecycle: "completed" }],
+  ["cancelled", { lifecycle: "cancelled" }],
+  ["archived", { availability: "archived" }],
+])("offers no Add inside a %s project, where the server would reject the save", async (_name, state) => {
+  h.projects = [project("move", "Move", state), project("trip", "Trip")];
+  const view = show({
+    standalone: true,
+    scope: { view: "all", status: "all", projectId: "move", listId: "inbox" },
+  });
+  await loaded();
+  await waitFor(() => expect(h.listTaskProjects).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument(),
+  );
+  view.unmount();
+  show({ standalone: true, scope: { view: "all", projectId: "trip", listId: "inbox" } });
+  await loaded();
+  expect(screen.getByRole("button", { name: "Add task" })).toBeVisible();
 });
 it("explains an empty project status and keeps status chips off Lists", async () => {
   h.projects = [project("trip", "Trip")];

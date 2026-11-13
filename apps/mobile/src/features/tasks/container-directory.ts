@@ -14,8 +14,20 @@ export const projectStatuses: readonly { value: ProjectStatus; label: string; em
   },
   { value: "completed", label: "Completed", empty: "No completed projects." },
   { value: "cancelled", label: "Cancelled", empty: "No cancelled projects." },
-  { value: "all", label: "All", empty: "No matching projects." },
+  { value: "all", label: "All", empty: "No projects yet." },
 ];
+
+/** "Completed" or "Cancelled" for a finished project; null while it is open. */
+export const finishedProjectLabel = (project: Pick<TaskProject, "lifecycle">) =>
+  project.lifecycle === "completed"
+    ? "Completed"
+    : project.lifecycle === "cancelled"
+      ? "Cancelled"
+      : null;
+
+/** The server rejects new work in a finished or archived project, so capture is not offered. */
+export const projectAcceptsNewWork = (project: Pick<TaskProject, "lifecycle" | "availability">) =>
+  project.lifecycle === "open" && project.availability === "active";
 
 /** A search that hides every project says so, whatever status is selected. */
 export const projectEmptyMessage = (status: ProjectStatus, search: string) =>

@@ -2,6 +2,8 @@ import type { TaskList, TaskProject } from "@personal-os/domain";
 import { describe, expect, it } from "vitest";
 import {
   containerDirectory,
+  finishedProjectLabel,
+  projectAcceptsNewWork,
   projectEmptyMessage,
   projectStatusCounts,
 } from "./container-directory";
@@ -77,7 +79,16 @@ describe("container directory", () => {
     expect(projectEmptyMessage("completed", " ")).toBe("No completed projects.");
     expect(projectEmptyMessage("cancelled", "")).toBe("No cancelled projects.");
     expect(projectEmptyMessage("completed", "lease")).toBe("No matching projects.");
-    expect(projectEmptyMessage("all", "")).toBe("No matching projects.");
+    expect(projectEmptyMessage("all", "")).toBe("No projects yet.");
+    expect(projectEmptyMessage("all", "lease")).toBe("No matching projects.");
+  });
+  it("labels finished projects and offers new work only in open, active ones", () => {
+    expect(finishedProjectLabel(project("a", "A"))).toBeNull();
+    expect(finishedProjectLabel(project("a", "A", { lifecycle: "completed" }))).toBe("Completed");
+    expect(finishedProjectLabel(project("a", "A", { lifecycle: "cancelled" }))).toBe("Cancelled");
+    expect(projectAcceptsNewWork(project("a", "A"))).toBe(true);
+    expect(projectAcceptsNewWork(project("a", "A", { lifecycle: "completed" }))).toBe(false);
+    expect(projectAcceptsNewWork(project("a", "A", { availability: "archived" }))).toBe(false);
   });
   it("orders by the saved preference with a stable name tie-break", () => {
     const dated = [

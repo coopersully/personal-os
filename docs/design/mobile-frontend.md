@@ -84,10 +84,13 @@ Browse has no Add action. Upcoming and History share its top cards; below them g
 
 Projects has Active, Completed, Cancelled and All status chips with counts above its pinned row;
 Active is the default. A completed or cancelled project stays in Projects under its status until it
-is archived, and opening it shows all of its tasks, including finished ones. Rows for finished
-projects lead their metadata with the status. Counts cover projects outside Archive and Trash and
-ignore the current search; an empty status names itself, and a search that hides every project says
-no projects match. Lists have no completed or cancelled state and no status chips. Lists, Projects
+is archived, and opening it shows all of its tasks, including finished ones. Rows and pinned cards
+for finished projects show the status and include it in the accessibility label ("Open Move,
+completed"). A finished or archived project offers no Add, because the server rejects new work
+there. Counts cover projects outside Archive and Trash and ignore the current search; chips show
+their bare label until lists and projects have loaded, never a zero from a pending or failed read.
+An empty status names itself, All with no projects says "No projects yet.", and a search that hides
+every project says no projects match. Lists have no completed or cancelled state and no status chips. Lists, Projects
 and Archive search matches names plus list descriptions and project why and notes.
 
 Upcoming means due/reserved after today; Scheduled means a task has reserved time, regardless of

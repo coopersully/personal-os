@@ -40,7 +40,9 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
           lists,
           projects,
         });
-  const statusCounts = projectStatusCounts(lists, projects);
+  // Counts are facts about loaded data; a pending or failed read shows the bare label, not "0".
+  const statusCounts =
+    resources.lists.data && resources.projects.data ? projectStatusCounts(lists, projects) : null;
   const { pinned: pinnedRows, directory: directoryRows } = partitionPinned(
     filtered,
     mode === "archive" ? undefined : preferences,
@@ -235,7 +237,7 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
                 {projectStatuses.map(({ value, label }) => (
                   <FilterChip
                     key={value}
-                    label={`${label} · ${statusCounts[value]}`}
+                    label={statusCounts ? `${label} · ${statusCounts[value]}` : label}
                     selected={status === value}
                     color={workspaceColor(t, "tasks")}
                     onPress={() => setStatus(value)}

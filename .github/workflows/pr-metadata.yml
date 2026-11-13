@@ -13,6 +13,10 @@ on:
         description: Pull request whose head is the selected branch
         required: true
         type: string
+      head_sha:
+        description: Expected head commit (optional)
+        required: false
+        type: string
       base_sha:
         description: Expected base commit (optional)
         required: false
@@ -54,6 +58,9 @@ jobs:
           # expected head to that commit stops a green pull request from vouching
           # for a different branch.
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Source CI names the head it verified. If the branch has moved since, this
+          # run is on a newer commit and must not report for the older one.
+          PR_DISPATCHED_HEAD_SHA: ${{ inputs.head_sha }}
           PR_DRAFT: ${{ github.event.pull_request.draft == true }}
           PR_FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
         run: node .github/scripts/wait-source-ci.mjs

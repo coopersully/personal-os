@@ -149,6 +149,15 @@ test("a dispatched gate reports only on the commit it was started for", () => {
   });
   // A hand-started gate may omit the base; the observation still binds the live one.
   assert.equal(candidateIdentity({ ...dispatched, PR_BASE_SHA: "" }).expected.baseSha, undefined);
+  // Source CI names the head it verified; a branch that moved since must not report.
+  assert.equal(
+    candidateIdentity({ ...dispatched, PR_DISPATCHED_HEAD_SHA: head }).expected.headSha,
+    head,
+  );
+  assert.throws(
+    () => candidateIdentity({ ...dispatched, PR_DISPATCHED_HEAD_SHA: base }),
+    /Branch moved after its source run/,
+  );
   for (const foreign of [base, "", undefined])
     assert.throws(
       () => candidateIdentity({ ...dispatched, GITHUB_SHA: foreign }),

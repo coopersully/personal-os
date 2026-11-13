@@ -275,16 +275,24 @@ before. A dispatched gate reports on the commit it was started for and expects t
 live PR head, so a green PR cannot vouch for another branch. The dispatch needs `actions: write`,
 granted to the aggregate job alone; its checkout does not persist the token, and the workflow default
 stays read-only. The gate still observes the completed source run through the API. The dispatch
-supplies no evidence.
+supplies no evidence, so a dispatch that cannot be sent never fails `Source verification`: it leaves
+an error annotation and an absent gate. Source CI also passes the head it verified; a gate that
+starts on a newer commit fails at once and that commit's own run reports for it.
+
+A dispatched gate reads the run seconds after it completes. If the run reads completed while a
+selected job of that same attempt does not yet, the gate waits up to two minutes for the inventory
+to agree. A skipped, failed, missing or foreign-attempt job is still an immediate failure.
 
 The `CI required` job has no job or step condition. Branch protection treats a skipped required job
-as passing, so every decision stays inside the script. Three cases start no gate and leave
+as passing, so every decision stays inside the script. These cases start no gate and leave
 `CI required` absent, which blocks the merge:
 
 - A fork PR. Its token is read-only. Edit the description after source CI completes.
 - A run whose token cannot start workflows, such as a Dependabot event. A maintainer runs the
   `PR metadata` workflow on the branch with the PR number, or edits the description.
 - A branch that predates the dispatch trigger. Catch up with the base and push.
+- A request GitHub rejects twice, or a branch name that cannot be passed safely. Run the
+  `PR metadata` workflow on the branch, or edit the description.
 
 ## Draft fast lane
 
@@ -299,6 +307,12 @@ therefore never satisfy `CI required`. A description edit on such a draft fails 
 with the remedy instead of waiting. To obtain complete verification, mark the PR ready for review,
 which starts a full source run, or apply `ci:full` before the next push. A prose-only draft defers
 nothing and is verified as before. Pushes to `main` always run the full lane.
+
+Marking a draft ready leaves two source runs on the same head: the fast-lane run with skipped
+checks, and the full run. The gate uses the latest run. The readiness evaluator supersedes only
+attempts of one run, so it reports those names as duplicated until the inventory records the
+supersession as its state reference describes. A final push after marking ready, or `ci:full`
+before the final draft push, leaves a single run and needs no supersession record.
 
 Measured on 2026-11-13, a full source run used about 95 runner-minutes across 15 jobs, of which the
 two deferred matrices used about 68. The account's 20-job limit was saturated (20 running, 52

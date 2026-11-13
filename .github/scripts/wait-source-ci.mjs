@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { classifyGitChanges, sourceLane } from "./ci-scope.mjs";
-import { SourceClient, stableObservation } from "./source-observation.mjs";
+import { SourceClient, SourceSettling, stableObservation } from "./source-observation.mjs";
 
 const shaPattern = /^[0-9a-f]{40}$/u;
 
@@ -22,6 +22,8 @@ export function candidateIdentity(env) {
   // The check lands on the commit this run was started for; never report on another.
   if (dispatched && env.GITHUB_SHA !== env.PR_HEAD_SHA)
     throw new Error("Dispatched metadata gate is not bound to its own commit");
+  if (dispatched && env.PR_DISPATCHED_HEAD_SHA && env.PR_DISPATCHED_HEAD_SHA !== env.GITHUB_SHA)
+    throw new Error("Branch moved after its source run; the newer candidate reports its own gate");
   return {
     repository: env.GH_REPO,
     number,
@@ -42,6 +44,7 @@ export function deferredDraft(env, classify = classifyGitChanges) {
   return sourceLane(classify(env.PR_BASE_SHA, env.PR_HEAD_SHA), { draft: true }) === "fast";
 }
 
+export const settleBudget = 120000;
 export const draftRemedy =
   "Draft candidates run the fast lane only. Mark the pull request ready for review, or add the ci:full label and push, to obtain source verification.";
 
@@ -102,10 +105,14 @@ async function main() {
         expected,
       );
     } catch (error) {
-      if (draft) console.error(draftRemedy);
-      throw error;
+      // A dispatched gate reads the run seconds after it completes. Give the job
+      // inventory a bounded time to agree before treating the gap as a failure.
+      if (!(error instanceof SourceSettling) || Date.now() - started >= settleBudget) {
+        if (draft) console.error(draftRemedy);
+        throw error;
+      }
     }
-    if (observation.state === "success") return;
+    if (observation?.state === "success") return;
     if (draft) throw new Error(draftRemedy);
     // A dispatched gate starts seconds before its source run is marked complete.
     const interval = Date.now() - started < 120000 ? 10000 : 30000;

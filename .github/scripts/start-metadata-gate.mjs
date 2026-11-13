@@ -4,21 +4,26 @@ import { pathToFileURL } from "node:url";
 const shaPattern = /^[a-f0-9]{40}$/u;
 
 // Values reach `gh` as separate argv entries, never through a shell. The branch
-// name is still attacker-influenced text, so reject anything that could be read
-// as an option or a ref expression.
+// name is still attacker-influenced text: Git allows most punctuation, so reject
+// only what could be read as an option, a ref expression or a control sequence.
+const refName = (value) =>
+  typeof value === "string" &&
+  value.length > 0 &&
+  value.length <= 255 &&
+  !value.startsWith("-") &&
+  !value.includes("..") &&
+  !/[\s\p{Cc}~^:?*[\\]/u.test(value);
+
 export function dispatchArguments(env) {
   const number = Number(env.PR_NUMBER);
   if (
     !/^[\w.-]+\/[\w.-]+$/u.test(env.GH_REPO ?? "") ||
     !Number.isSafeInteger(number) ||
     number < 1 ||
-    typeof env.HEAD_REF !== "string" ||
-    !/^[\w./-]+$/u.test(env.HEAD_REF) ||
-    env.HEAD_REF.startsWith("-") ||
-    env.HEAD_REF.includes("..") ||
+    !refName(env.HEAD_REF) ||
+    !shaPattern.test(env.PR_HEAD_SHA ?? "") ||
     !shaPattern.test(env.PR_BASE_SHA ?? "") ||
-    typeof env.PR_BASE_REF !== "string" ||
-    !/^[\w./-]+$/u.test(env.PR_BASE_REF)
+    !refName(env.PR_BASE_REF)
   )
     throw new Error("Missing candidate identity");
   return [
@@ -32,6 +37,8 @@ export function dispatchArguments(env) {
     "-f",
     `pr_number=${number}`,
     "-f",
+    `head_sha=${env.PR_HEAD_SHA}`,
+    "-f",
     `base_sha=${env.PR_BASE_SHA}`,
     "-f",
     `base_ref=${env.PR_BASE_REF}`,
@@ -44,14 +51,23 @@ export function predatesDispatch(stderr) {
   return /HTTP 422/u.test(stderr) && /workflow_dispatch/u.test(stderr);
 }
 
-// A Dependabot-triggered run can be held to a read-only token. The gate is then
-// simply absent, which blocks the merge until a maintainer starts it.
+// A Dependabot-triggered run can be held to a read-only token. A rate-limit 403
+// is a different failure and is retried like any other.
 export function readOnlyToken(stderr) {
-  return /HTTP 403/u.test(stderr);
+  return /HTTP 403/u.test(stderr) && /Resource not accessible by integration/u.test(stderr);
 }
 
+// Starting the gate supplies no evidence, so failing to start it must not turn a
+// verified source run red: that would force a complete rerun. Every outcome other
+// than "started" leaves `CI required` absent, which blocks the merge until the
+// gate is started by hand or by a description edit.
 export function startGate(env, run = execFileSync, pause = () => {}) {
-  const args = dispatchArguments(env);
+  let args;
+  try {
+    args = dispatchArguments(env);
+  } catch {
+    return "invalid";
+  }
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       run("gh", args, { stdio: ["ignore", "pipe", "pipe"], timeout: 30000 });
@@ -60,32 +76,30 @@ export function startGate(env, run = execFileSync, pause = () => {}) {
       const stderr = String(error?.stderr ?? "");
       if (predatesDispatch(stderr)) return "predates";
       if (readOnlyToken(stderr)) return "read-only";
-      if (attempt === 1) throw new Error("Metadata gate could not be started");
-      pause();
+      if (attempt === 0) pause();
     }
   }
+  return "failed";
 }
 
+const recovery =
+  "Run the PR metadata workflow on this branch with the pull request number, or edit the pull request description, to report CI required.";
+export const notices = {
+  started: "Metadata gate started for this candidate.",
+  predates:
+    "::warning title=Metadata gate not started::This branch predates the dispatched metadata gate. Catch up with the base branch and push; CI required is reported after that run.",
+  "read-only": `::warning title=Metadata gate not started::This run's token cannot start workflows. ${recovery}`,
+  invalid: `::error title=Metadata gate not started::The candidate identity could not be passed safely. ${recovery}`,
+  failed: `::error title=Metadata gate not started::GitHub did not accept the request after one retry. ${recovery}`,
+};
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  try {
-    const outcome = startGate(process.env, execFileSync, () =>
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000),
-    );
-    if (outcome === "predates")
-      console.log(
-        "::warning title=Metadata gate not started::This branch predates the dispatched metadata gate. Catch up with the base branch and push; CI required is reported after that run.",
-      );
-    else if (outcome === "read-only")
-      console.log(
-        "::warning title=Metadata gate not started::This run's token cannot start workflows. A maintainer can run the PR metadata workflow on this branch, or edit the pull request description, to report CI required.",
-      );
-    else console.log("Metadata gate started for this candidate.");
-  } catch (error) {
-    // Never print provider bodies or token-bearing command diagnostics.
-    console.error(
-      error instanceof Error ? error.message : "Metadata gate could not be started",
-      "- rerun this job, or edit the pull request description to start the gate.",
-    );
-    process.exitCode = 1;
-  }
+  // Never print provider bodies or token-bearing command diagnostics.
+  console.log(
+    notices[
+      startGate(process.env, execFileSync, () =>
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000),
+      )
+    ],
+  );
 }

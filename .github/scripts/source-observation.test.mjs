@@ -7,6 +7,7 @@ import {
   ObservationChanged,
   observeSource,
   SourceClient,
+  SourceSettling,
   stableObservation,
 } from "./source-observation.mjs";
 import { createReceipt, selectedJobNames, sha256 } from "./source-receipt.mjs";
@@ -684,4 +685,29 @@ test("Git scope recomputation uses the remaining command timeout and historical 
     return Buffer.from(JSON.stringify(classifyChanges([])));
   };
   assert.equal(client.scope(base, head, true).full, true);
+});
+
+test("a fast-lane draft run is green and receipted but can never be source evidence", () => {
+  const client = fixture();
+  // The shape a draft produces: the aggregate and both matrices are skipped.
+  for (const job of client.jobs)
+    if (/^(Source verification|Browser acceptance|Desktop) ?/u.test(job.name))
+      job.conclusion = "skipped";
+  assert.ok(client.jobs.some((job) => job.conclusion === "skipped"));
+  assert.throws(() => observeSource(client), /Selected source job missing or not successful/);
+});
+
+test("a selected job still reporting is settling, not failed and never success", () => {
+  const client = fixture();
+  client.jobs[1].status = "in_progress";
+  client.jobs[1].conclusion = null;
+  assert.throws(() => observeSource(client), SourceSettling);
+  // A job from another attempt is still a hard failure, not a reason to wait.
+  const foreign = fixture();
+  foreign.jobs[1].status = "in_progress";
+  foreign.jobs[1].run_attempt = 2;
+  assert.throws(
+    () => observeSource(foreign),
+    (error) => !(error instanceof SourceSettling) && /Selected source job/.test(error.message),
+  );
 });

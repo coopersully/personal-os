@@ -311,7 +311,8 @@ jobs:
       - quality
       - browser
       - desktop
-    # A fast-lane draft run reports no aggregate; a failed classification still does.
+    # A fast-lane draft run reports no aggregate. A classification that failed before
+    # choosing a lane still does, and fails.
     if: ${{ !cancelled() && needs.changes.outputs.lane != 'fast' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -368,6 +369,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: node .github/scripts/start-metadata-gate.mjs

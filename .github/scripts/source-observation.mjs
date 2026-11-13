@@ -15,6 +15,8 @@ const fail = (reason) => {
   throw new Error(reason);
 };
 export class ObservationChanged extends Error {}
+// The run reads completed while a selected job of that same attempt does not yet.
+export class SourceSettling extends Error {}
 
 export class SourceClient {
   constructor(repository, number, budget = 120000) {
@@ -256,6 +258,14 @@ function mergeCommitEvidence(client, sourceSha, identity) {
 export function validateJobs(jobs, run, scope) {
   return selectedJobNames(scope).map((name) => {
     const matches = jobs.filter((job) => job.name === name);
+    if (
+      matches.length === 1 &&
+      matches[0].run_id === run.id &&
+      matches[0].run_attempt === run.run_attempt &&
+      matches[0].head_sha === run.head_sha &&
+      matches[0].status !== "completed"
+    )
+      throw new SourceSettling("Selected source job has not reported completion yet");
     if (
       matches.length !== 1 ||
       !Number.isSafeInteger(matches[0].id) ||

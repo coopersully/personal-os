@@ -211,9 +211,9 @@ describe("Group, Section, Actions and TitleField", () => {
     ).toHaveLength(0);
   });
   it.each([
-    [true, 16],
-    [false, 0],
-  ])("right-aligns inline editor commands (inset %s)", (inset, padding) => {
+    [true, 4],
+    [false, -12],
+  ])("right-aligns inline editor commands on the row edge (inset %s)", (inset, margin) => {
     const save = vi.fn();
     const view = render(
       <Actions inset={inset}>
@@ -223,7 +223,7 @@ describe("Group, Section, Actions and TitleField", () => {
     );
     expect(styleOf(view.container.firstElementChild)).toMatchObject({
       ...trailingActions,
-      paddingHorizontal: padding,
+      marginHorizontal: margin,
     });
     const buttons = screen.getAllByRole("button");
     expect(buttons.map((button) => button.textContent)).toEqual(["Cancel", "Save"]);
@@ -335,7 +335,10 @@ describe("picker rows", () => {
     const body = screen.getByTestId(`native-${mode}-picker`).parentElement;
     expect(styleOf(body)).toEqual(pickerBody);
     const done = screen.getByRole("button", { name: "Done" });
-    expect(styleOf(done.parentElement)).toMatchObject({ ...trailingActions, paddingHorizontal: 0 });
+    expect(styleOf(done.parentElement)).toMatchObject({
+      ...trailingActions,
+      marginHorizontal: -12,
+    });
     expect(
       Array.from(done.parentElement?.children ?? []).map((child) => child.textContent),
     ).toEqual([`Clear ${label.toLowerCase()}`, "Done"]);
@@ -350,7 +353,10 @@ describe("picker rows", () => {
     const body = screen.getByTestId("native-date-picker").parentElement;
     expect(styleOf(body)).toEqual(pickerBody);
     const done = screen.getByRole("button", { name: "Done" });
-    expect(styleOf(done.parentElement)).toMatchObject({ ...trailingActions, paddingHorizontal: 0 });
+    expect(styleOf(done.parentElement)).toMatchObject({
+      ...trailingActions,
+      marginHorizontal: -12,
+    });
     expect(
       Array.from(done.parentElement?.children ?? []).map((child) => child.textContent),
     ).toEqual(["Clear", "Done"]);

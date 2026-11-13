@@ -97,7 +97,8 @@ export function DateField({
             flexDirection: "row",
             flexWrap: "wrap",
             gap: spacing.xs,
-            paddingHorizontal: spacing.lg,
+            // Each shortcut pads its own label; start the first label on the row's edge.
+            paddingHorizontal: spacing.lg - spacing.md,
           }}
         >
           {(

@@ -65,7 +65,9 @@ export function Action({
 }
 /**
  * The trailing commands of an inline editor (Cancel, Clear, Done, Save): one right-aligned
- * line of text actions, so every expanding row ends the same way.
+ * line of text actions, so every expanding row ends the same way. Each action pads its own
+ * label, so the line is pulled out by that padding to end the last label on the row's edge.
+ * `inset` adds the row's side padding; leave it off inside a container that already pads.
  */
 export function Actions({ children, inset = true }: PropsWithChildren<{ inset?: boolean }>) {
   return (
@@ -75,7 +77,7 @@ export function Actions({ children, inset = true }: PropsWithChildren<{ inset?: 
         flexWrap: "wrap",
         justifyContent: "flex-end",
         gap: spacing.sm,
-        paddingHorizontal: inset ? spacing.lg : 0,
+        marginHorizontal: (inset ? spacing.lg : 0) - spacing.md,
       }}
     >
       {children}

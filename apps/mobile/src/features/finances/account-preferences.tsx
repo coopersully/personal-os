@@ -5,11 +5,11 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { EnumChoice } from "../../components/forms/enum-choice";
-import { Action, Actions, formRow } from "../../components/forms/form-rows";
+import { Action, Actions, formRow, PaddedSurfaceRows } from "../../components/forms/form-rows";
 import { Icon } from "../../components/icons";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SettingLabel, SettingValue } from "../../components/settings-row-content";
-import { spacing, useTheme } from "../../theme";
+import { useTheme } from "../../theme";
 import { useFinance } from "./data";
 import { financeLabel } from "./presentation";
 
@@ -71,8 +71,7 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
     }
   }
   return (
-    // The account card pads its own sides; shared rows bring theirs, so they span the card.
-    <View style={{ marginHorizontal: -spacing.lg }}>
+    <PaddedSurfaceRows>
       <EnumChoice
         label="Ownership"
         icon="people"
@@ -177,6 +176,6 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
             void save({ includeInPlanning: value === "included" });
         }}
       />
-    </View>
+    </PaddedSurfaceRows>
   );
 }

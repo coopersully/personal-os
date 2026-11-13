@@ -10,6 +10,18 @@ export function SectionItem({ children }: PropsWithChildren) {
     </View>
   );
 }
+/**
+ * Shared rows inside a surface that pads its own sides (a finance card). Rows bring their
+ * own side padding, so without this they sit one inset deeper than the surface's other
+ * content; this lets them span the surface and line up with its siblings.
+ */
+export function PaddedSurfaceRows({ children }: PropsWithChildren) {
+  return (
+    <View testID="padded-surface-rows" style={{ marginHorizontal: -spacing.lg }}>
+      {children}
+    </View>
+  );
+}
 /** Explanatory or read-only copy inside a group, aligned with the rows around it. */
 export function SectionNote({
   children,

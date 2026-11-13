@@ -9,7 +9,7 @@ import { EntityPicker } from "./entity-picker";
 import { formBlock, formRow, insetRow } from "./form-row";
 import { Action, Actions, Field, Group, Section, TitleField } from "./form-rows";
 import { PlanningPicker } from "./planning-picker.ios";
-import { SectionFootnote, SectionItem, SectionNote } from "./section-content";
+import { PaddedSurfaceRows, SectionFootnote, SectionItem, SectionNote } from "./section-content";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -172,6 +172,17 @@ describe("SectionNote, SectionItem and SectionFootnote", () => {
     const item = screen.getByTestId("section-item");
     expect(styleOf(item)).toEqual({ paddingHorizontal: 16 });
     expect(item).toHaveTextContent("Swim twice a week");
+  });
+  it("lets shared rows span a surface that pads its own sides, so they match its siblings", () => {
+    render(
+      <PaddedSurfaceRows>
+        <span>Ownership</span>
+      </PaddedSurfaceRows>,
+    );
+    const rows = screen.getByTestId("padded-surface-rows");
+    // The surface pads 16 and the row pads 16; pulling out 16 leaves the row's own inset.
+    expect(styleOf(rows)).toEqual({ marginHorizontal: -formRow.paddingHorizontal });
+    expect(rows).toHaveTextContent("Ownership");
   });
   it("sets a footnote under the group it explains, aligned with the group's text", () => {
     render(<SectionFootnote>Your password stays only in this form.</SectionFootnote>);

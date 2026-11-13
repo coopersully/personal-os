@@ -38,6 +38,8 @@ therefore be top-aligned on a project card and vertically centered in a Project 
   group (secondary, ink or warning), `SectionItem` gives a content row such as `RecordRow` the
   group's side padding, and `SectionFootnote` sets copy under the group it explains.
 - `insetRow` is the same row for a surface that already pads its sides, such as a finance card.
+  When a shared row component (`EnumChoice`, `Field`, `ToggleRow`) sits in such a surface, wrap it
+  in `PaddedSurfaceRows` so it lines up with the surface's other rows instead of indenting twice.
   `formBlock` is the padding of a stacked block: a label above its editor or chips.
 - An expanding row (date, time, tags, an inline finance editor) ends with `Actions`: one
   right-aligned line of text `Action`s, dismissing command first and confirming command last.
@@ -58,6 +60,12 @@ These live in `apps/mobile/src/components` and are the only way to build form an
   the title is hidden until both sides are measured. A sheet that can be abandoned keeps Close
   or Cancel leading and passes its confirming control as `trailing`. A sheet that only confirms
   puts Done on the trailing side with `dismiss="trailing"`.
+- Stack header titles are app-owned copy and follow the lowercase rule in
+  [Lowercase interface typography](system.md#lowercase-interface-typography): "account",
+  "edit transaction", "new project". A title that is user content (a rule, calendar or record
+  name) keeps its spelling. A screen has one title: the bar names the kind of screen and the
+  page heading, when there is one, shows the record's own name. Never repeat the bar title as
+  the page heading; set the bar title to `""` when the page heading already says it.
 - `GlassButton` is the one Liquid Glass button: a 44-point capsule for a text label, a 44-point
   circle for a bar icon and a 56-point circle for the floating Save/Add. Labels are primary ink in
   both appearances; callers may place it but cannot resize or recolor its label.

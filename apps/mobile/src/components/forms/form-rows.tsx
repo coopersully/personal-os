@@ -17,7 +17,12 @@ import { SettingLabel, SettingValue } from "../settings-row-content";
 import { formBlock, formRow } from "./form-row";
 
 export { formBlock, formRow, insetRow } from "./form-row";
-export { SectionFootnote, SectionItem, SectionNote } from "./section-content";
+export {
+  PaddedSurfaceRows,
+  SectionFootnote,
+  SectionItem,
+  SectionNote,
+} from "./section-content";
 
 export function Action({
   label,

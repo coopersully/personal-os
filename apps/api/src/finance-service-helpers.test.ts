@@ -15,6 +15,7 @@ import {
   financeCsvImportErrorMessage,
   formatCurrency,
   isCardPayment,
+  isCreditCardPaymentMovement,
   isProviderTransfer,
   isRefundOrReversal,
   isRentMerchant,
@@ -247,5 +248,50 @@ describe("Finance service deterministic helpers", () => {
     expect(budgetImpact(row("income", "INCOME"))).toBe(0);
     expect(budgetImpact(row("income", "Transfers"))).toBe(0);
     expect(budgetImpact(row("expense", "Dining"))).toBe(2500);
+  });
+
+  it("excludes a linked card's payment legs unless a decision names a real purchase", () => {
+    const cardPayment = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT";
+    const row = (
+      direction: "expense" | "income",
+      providerCategoryDetailed: string | null,
+      categorySource: string | null = "provider",
+      category = "LOAN_PAYMENTS",
+    ) =>
+      ({
+        amount: 302_060,
+        category,
+        categorySource,
+        direction,
+        pending: false,
+        providerCategoryDetailed,
+      }) as never;
+    expect(budgetImpact(row("expense", cardPayment), false, true)).toBe(0);
+    expect(budgetImpact(row("income", cardPayment), false, true)).toBe(0);
+    // Without a linked card the purchases are unseen, so the payment still counts.
+    expect(budgetImpact(row("expense", cardPayment))).toBe(302_060);
+    expect(budgetImpact(row("expense", cardPayment), false, false)).toBe(302_060);
+    expect(budgetImpact(row("expense", "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT"), false, true)).toBe(
+      302_060,
+    );
+    expect(budgetImpact(row("expense", null), false, true)).toBe(302_060);
+    for (const source of ["user", "agent", "rule"]) {
+      // A decision that names a purchase overrides the provider label.
+      expect(budgetImpact(row("expense", cardPayment, source, "Therapy"), false, true)).toBe(
+        302_060,
+      );
+      // Confirming the payment or calling it a transfer keeps it out of spending.
+      expect(budgetImpact(row("expense", cardPayment, source), false, true)).toBe(0);
+      expect(budgetImpact(row("expense", cardPayment, source, "Transfers"), false, true)).toBe(0);
+    }
+    // Clearing the category names no purchase, so the payment stays excluded.
+    expect(
+      isCreditCardPaymentMovement(
+        { category: null, categorySource: "user", providerCategoryDetailed: cardPayment },
+        true,
+      ),
+    ).toBe(true);
+    expect(isCreditCardPaymentMovement(row("expense", cardPayment), true)).toBe(true);
+    expect(isCreditCardPaymentMovement(row("expense", cardPayment), false)).toBe(false);
   });
 });

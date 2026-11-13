@@ -25,6 +25,7 @@ const h = vi.hoisted(() => ({
   navigate: vi.fn(),
   back: vi.fn(),
   alert: vi.fn(),
+  screen: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
   dismiss: vi.fn(),
@@ -64,12 +65,20 @@ vi.mock("react-native", () => {
       onPress,
       disabled,
       accessibilityLabel,
+      accessibilityHint,
     }: PropsWithChildren<{
       onPress?: () => void;
       disabled?: boolean;
       accessibilityLabel?: string;
+      accessibilityHint?: string;
     }>) => (
-      <button type="button" aria-label={accessibilityLabel} disabled={disabled} onClick={onPress}>
+      <button
+        type="button"
+        aria-label={accessibilityLabel}
+        aria-description={accessibilityHint}
+        disabled={disabled}
+        onClick={onPress}
+      >
         {children}
       </button>
     ),
@@ -119,13 +128,16 @@ vi.mock("expo-router", () => ({
     Screen: ({
       options,
     }: {
-      options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode };
-    }) => (
-      <>
-        {options.headerLeft?.() ?? null}
-        {options.headerRight?.() ?? null}
-      </>
-    ),
+      options: { title?: string; headerLeft?: () => ReactNode; headerRight?: () => ReactNode };
+    }) => {
+      h.screen(options);
+      return (
+        <>
+          {options.headerLeft?.() ?? null}
+          {options.headerRight?.() ?? null}
+        </>
+      );
+    },
   },
 }));
 
@@ -242,6 +254,7 @@ it("adds a manual account only once its fields are valid", async () => {
   // The form says why Save is unavailable, and the page heading names the screen once.
   expect(screen.getByText(/Name and Institution are required\./)).toBeTruthy();
   expect(screen.getAllByText("Add account").length).toBe(1);
+  expect(h.screen.mock.lastCall?.[0]).toMatchObject({ title: "", headerBackVisible: false });
   type("Name", "  Travel fund ");
   type("Institution", "Harbor Credit Union");
   type("Currency", "eu");
@@ -755,8 +768,14 @@ it("requires choosing which account to keep when several qualify", async () => {
   mount(<FinanceAccountDuplicate />);
   await screen.findByText("Choose the account to keep before reviewing the comparison.");
   expect(h.api.getFinanceAccountDuplicatePreview).not.toHaveBeenCalled();
+  const hint = (name: RegExp) =>
+    screen.getByRole("button", { name }).getAttribute("aria-description");
+  expect(hint(/Checking \(old login\)/)).toBe("Selects this as the account to keep tracking.");
   press(/Checking \(old login\)/);
   await screen.findByRole("button", { name: /Stop tracking duplicate/ });
+  // The chosen row announces its selection; the other still offers to be chosen.
+  expect(hint(/Checking \(old login\)/)).toBe("Selected as the account to keep tracking.");
+  expect(hint(/Checking \(new login\)/)).toBe("Selects this as the account to keep tracking.");
   expect(h.api.getFinanceAccountDuplicatePreview).toHaveBeenCalledWith(linked.id, third.id);
   expect(screen.getByText(/may be duplicates/)).toBeTruthy();
 });

@@ -68,6 +68,7 @@ import { createFinanceConversationUnreadService } from "./finance/conversation-u
 import { createFinanceEvidenceRefreshService } from "./finance/evidence-refresh-service.js";
 import { createFinanceMaintenanceExecutionService } from "./finance/maintenance-execution-service.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
+import { runFinanceMaintenanceTick } from "./finance/maintenance-tick.js";
 import { createFinanceOnboardingEvidenceLoader } from "./finance/onboarding-evidence.js";
 import { createFinanceOnboardingRepository } from "./finance/onboarding-repository.js";
 import { createFinanceOpeningPositionService } from "./finance/opening-position-service.js";
@@ -1834,11 +1835,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }
     },
     async dispatchDueFinanceMaintenance() {
-      await financeReviewBatches.processApproved();
-      const recovery = await canonicalFinanceMaintenance.recoverAcceptedWork();
-      await financeMaintenance.dispatchDue(5);
-      if (recovery.failedRecoveries)
-        throw new Error("Some Finance maintenance handoffs could not be recovered.");
+      await runFinanceMaintenanceTick({
+        recoverAcceptedWork: () => canonicalFinanceMaintenance.recoverAcceptedWork(),
+        dispatchDue: () => financeMaintenance.dispatchDue(5),
+        processApprovedBatches: () => financeReviewBatches.processApproved(),
+        log: dependencies.log,
+      });
     },
   });
 }

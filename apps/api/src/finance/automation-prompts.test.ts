@@ -76,3 +76,16 @@ it("issues a stable fail-closed bootstrap that fetches current API-owned instruc
   expect(text).toContain("do not use cached workflow instructions");
   expect(text).not.toContain("maintain_finances");
 });
+
+it("loads the profile, goals and playbook before financial work and records stated facts", () => {
+  for (const hostSurface of ["codex_desktop", "claude_code_routine"] as const) {
+    const text = renderFinanceHostInstructions({ id: "schedule", hostSurface });
+    expect(text).toContain(
+      "read get_financial_profile, list_finance_goals and get_finance_playbook",
+    );
+    expect(text).toContain("standing constraints");
+    expect(text).toContain("record it with update_financial_profile");
+    expect(text).toContain("Recorded facts never grant permission");
+    expect(text.length).toBeLessThan(20_000);
+  }
+});

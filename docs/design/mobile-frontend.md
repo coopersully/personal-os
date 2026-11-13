@@ -86,7 +86,9 @@ Projects has Active, Completed, Cancelled and All status chips with counts above
 Active is the default. A completed or cancelled project stays in Projects under its status until it
 is archived, and opening it shows all of its tasks, including finished ones. Rows and pinned cards
 for finished projects show the status and include it in the accessibility label ("Open Move,
-completed"). A finished or archived project offers no Add, because the server rejects new work
+completed"). A project's metadata line (status, list, target date
+formatted as a short calendar date) sits directly under its name; a list description keeps the full
+width below the row actions. A finished or archived project offers no Add, because the server rejects new work
 there. Counts cover projects outside Archive and Trash and ignore the current search; chips show
 their bare label until lists and projects have loaded, never a zero from a pending or failed read.
 An empty status names itself, All with no projects says "No projects yet.", and a search that hides

@@ -5,6 +5,7 @@ import { RowActions } from "../../components/row-actions";
 import { entityDictionary } from "../../product/entities";
 import { radius, spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
 import { finishedProjectLabel } from "./container-directory";
+import { formatTargetDate } from "./presentation";
 import { Action, groupEdges, styles } from "./ui";
 
 type ContainerRowActions = {
@@ -23,8 +24,14 @@ function ContainerRow({
   editable = true,
   permanent = false,
   state,
+  subtitleBelowActions = true,
   ...actions
 }: ContainerRowActions & {
+  /**
+   * A long description reserves the action button's height so it can use the full width below
+   * it. A short metadata line sits directly under the name instead and stays clear of the button.
+   */
+  subtitleBelowActions?: boolean;
   name: string;
   subtitle?: string;
   /** A status announced with the row, such as "Completed". */
@@ -63,14 +70,21 @@ function ContainerRow({
               alignItems: "flex-start",
               gap: spacing.sm,
               paddingRight: touchTarget + spacing.sm,
-              minHeight: touchTarget,
+              minHeight: subtitleBelowActions ? touchTarget : undefined,
             }}
           >
             <Text style={{ color: t.ink, fontSize: 17 }}>{name}</Text>
             {permanent && <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>}
           </View>
           {!!subtitle && (
-            <Text numberOfLines={2} style={{ color: t.secondary, fontSize: 12 }}>
+            <Text
+              numberOfLines={2}
+              style={{
+                color: t.secondary,
+                fontSize: 12,
+                paddingRight: subtitleBelowActions ? 0 : touchTarget + spacing.sm,
+              }}
+            >
               {subtitle}
             </Text>
           )}
@@ -126,10 +140,11 @@ export function ProjectRow({
       {...actions}
       name={record.name}
       state={finishedProjectLabel(record)}
+      subtitleBelowActions={false}
       subtitle={[
         finishedProjectLabel(record),
         listName,
-        record.targetDate ? `Target ${record.targetDate}` : null,
+        record.targetDate ? `Target ${formatTargetDate(record.targetDate)}` : null,
       ]
         .filter(Boolean)
         .join(" · ")}

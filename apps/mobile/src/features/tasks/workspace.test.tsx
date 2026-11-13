@@ -424,6 +424,8 @@ it("opens and edits active projects while keeping archived and deleted records s
     </MobileDataProvider>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Open Trip" }));
+  expect(screen.getByText(/^Inbox · Target .*2026$/)).toBeVisible();
+  expect(screen.queryByText(/2026-12-01/)).not.toBeInTheDocument();
   expect(h.push).toHaveBeenLastCalledWith({
     pathname: "/task-browser",
     params: { title: "Trip", view: "all", kind: "task", projectId: "trip", listId: "inbox" },

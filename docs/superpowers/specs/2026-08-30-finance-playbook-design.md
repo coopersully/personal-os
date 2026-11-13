@@ -67,7 +67,8 @@ The assessment adds `rubric`: one result per check with `healthy`, `watch`, `gap
 never produces a guessed score. The service reads plan context and stated income as optional
 evidence. The spending basis is the approved plan for the month, else the last approved plan,
 else an unapproved proposal, and the detail line names which; an incomplete draft is never used.
-A reserve target of zero is treated as unrecorded. If either read fails, its checks are
+A reserve target of zero is treated as unrecorded. An empty debt list with no recorded answer
+about debts is `not_assessed`, not healthy. A recorded housing cost of zero is assessed. If either read fails, its checks are
 `not_assessed` and the profile-based readiness is unchanged. The wealth summary is still not required.
 
 Results are observations, not advice. Bands for housing share are lending convention, not a

@@ -29,6 +29,7 @@ describe("Finance playbook service", () => {
         jurisdiction: "US",
         liquidReserves: 20000,
         preferences: { emergencyReserveMonths: 4 },
+        provenance: {},
       },
     }));
     const service = createFinancePlaybookService({
@@ -37,7 +38,13 @@ describe("Finance playbook service", () => {
     });
 
     await expect(service.get("11111111-1111-4111-8111-111111111111")).resolves.toMatchObject({
-      assessment: { readiness: "on_track" },
+      assessment: {
+        readiness: "on_track",
+        // No recorded answer about debts: an empty list is unknown, not "no debt".
+        rubric: expect.arrayContaining([
+          expect.objectContaining({ id: "costly_debt", status: "not_assessed" }),
+        ]),
+      },
       playbook: expect.objectContaining({ id: "nohmi-finance", owner: "nohmi-finance" }),
     });
   });
@@ -61,6 +68,7 @@ describe("Finance playbook service", () => {
             jurisdiction: "US",
             liquidReserves: 27_000,
             preferences: { emergencyReserveMonths: 6 },
+            provenance: { debts: { actorType: "user" } },
           },
         })),
         getProfile: vi.fn(async () => ({ grossAnnualIncome: 90_000, monthlyHousingCost: 2_000 })),
@@ -72,6 +80,7 @@ describe("Finance playbook service", () => {
     expect(
       Object.fromEntries(assessment.rubric.map((item) => [item.id, item.status])),
     ).toMatchObject({
+      costly_debt: "healthy",
       housing_share: "healthy",
       plan_current: "gap",
       reserve_months: "healthy",
@@ -122,6 +131,7 @@ describe("Finance playbook service", () => {
             jurisdiction: "US",
             liquidReserves: 1_000,
             preferences: { emergencyReserveMonths: null },
+            provenance: {},
           },
         })),
         getProfile: vi.fn(async () => null),

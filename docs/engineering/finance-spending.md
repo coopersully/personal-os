@@ -27,12 +27,15 @@ Only supported USD activity with known ownership and a recorded ownership share 
 precise totals. Invalidated or non-reconciling splits are withheld with qualifications rather than
 silently reassigned. Unknown ownership/currency remains inspectable through qualification source IDs.
 Transfers and unclassified income do not become ordinary spending.
-When the person has a planning-included card account, either leg of a payment the provider labels
-`LOAN_PAYMENTS_CREDIT_CARD_PAYMENT` contributes nothing to spending, refunds or budget pace, paired
-or not: the purchases it settles were already spending. Without such an account the purchases are
-unseen and the payment still counts. A category decided by the person, an agent or a merchant rule
-overrides the label only when it names a purchase; confirming it as a payment or transfer keeps it
-excluded. Other loan payments still count. The exclusion is a reader rule; it does not link or resolve the
+When the person has a planning-included credit card that the provider is currently syncing, either
+leg of a payment the provider labels `LOAN_PAYMENTS_CREDIT_CARD_PAYMENT` contributes nothing to
+spending, refunds or budget pace, paired or not: the purchases it settles were already spending.
+A manual liability, a loan, or a card awaiting re-authentication does not qualify; without a
+qualifying card the purchases are unseen and the payment still counts. A category decided by the
+person, an agent or a merchant rule overrides the label only when it names a purchase; confirming
+it as a payment or transfer, or clearing the category, keeps it excluded. Other loan payments still
+count. Known limit: the funding-side leg does not identify which card it paid, so a person with one
+connected card and another unlinked card also has payments to the unlinked card excluded. The exclusion is a reader rule; it does not link or resolve the
 pair, which remains transfer-reconciliation work.
 
 Personal cost deducts recorded expected reimbursements; canceled claims deduct only amounts already

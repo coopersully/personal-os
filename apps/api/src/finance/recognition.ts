@@ -13,6 +13,9 @@ type RecognitionAccount = {
   kind: "cash" | "debt" | "investment" | "other";
   ownershipShareBps: number | null;
   ownershipType: "individual" | "joint" | "unknown";
+  /** Present on ledger rows; absent means card purchases are not known to be observed. */
+  providerType?: string | null;
+  status?: string | null;
 };
 
 type RecognitionTransaction = {

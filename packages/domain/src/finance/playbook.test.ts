@@ -167,6 +167,27 @@ describe("Finance playbook rubric", () => {
     ).toMatchObject({ costly_debt: "not_assessed", protection: "not_assessed" });
   });
 
+  it("leaves debt unassessed until the person has answered, and scores a zero housing cost", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: { ...profile, debts: [], debtsConfirmed: false },
+      evidence: { grossAnnualIncome: 120_000, monthlyHousingCost: 0 },
+    });
+    const byId = Object.fromEntries(rubric.map((item) => [item.id, item]));
+    expect(byId.costly_debt).toMatchObject({ status: "not_assessed" });
+    expect(byId.costly_debt?.detail).toContain("not been confirmed");
+    expect(byId.housing_share).toMatchObject({ status: "healthy" });
+    expect(byId.housing_share?.detail).toContain("0%");
+    const confirmed = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: { ...profile, debts: [], debtsConfirmed: true },
+      evidence: { grossAnnualIncome: 0, monthlyHousingCost: 0 },
+    });
+    const confirmedById = Object.fromEntries(confirmed.rubric.map((item) => [item.id, item]));
+    expect(confirmedById.costly_debt).toMatchObject({ status: "healthy" });
+    expect(confirmedById.housing_share).toMatchObject({ status: "not_assessed" });
+  });
+
   it("never scores an empty reserve healthy against a zero target", () => {
     const { rubric } = assessFinancePlaybook({
       now: "2026-11-13T12:00:00.000Z",

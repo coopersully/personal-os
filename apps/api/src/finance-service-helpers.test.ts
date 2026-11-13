@@ -284,6 +284,13 @@ describe("Finance service deterministic helpers", () => {
       expect(budgetImpact(row("expense", cardPayment, source), false, true)).toBe(0);
       expect(budgetImpact(row("expense", cardPayment, source, "Transfers"), false, true)).toBe(0);
     }
+    // Clearing the category names no purchase, so the payment stays excluded.
+    expect(
+      isCreditCardPaymentMovement(
+        { category: null, categorySource: "user", providerCategoryDetailed: cardPayment },
+        true,
+      ),
+    ).toBe(true);
     expect(isCreditCardPaymentMovement(row("expense", cardPayment), true)).toBe(true);
     expect(isCreditCardPaymentMovement(row("expense", cardPayment), false)).toBe(false);
   });

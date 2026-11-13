@@ -53,6 +53,7 @@ export function createFinancePlaybookService({
           profile: profile.data
             ? {
                 ...profile.data,
+                debtsConfirmed: profile.data.provenance.debts !== undefined,
                 reserveTargetMonths: profile.data.preferences.emergencyReserveMonths,
               }
             : null,

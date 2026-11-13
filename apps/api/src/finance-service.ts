@@ -2318,7 +2318,7 @@ export function createFinanceService({
     }
     return plaid;
   }
-  /** Card purchases are only observed when a planning-included liability account exists. */
+  /** Mirrors `observesCardPurchases`: a planning-included credit card the provider is syncing. */
   async function hasPlanningCardAccount(userId: string, executor: FinanceReadExecutor = db) {
     const [row] = await executor
       .select({ id: financeAccounts.id })
@@ -2328,6 +2328,8 @@ export function createFinanceService({
           eq(financeAccounts.userId, userId),
           eq(financeAccounts.kind, "debt"),
           eq(financeAccounts.includeInPlanning, true),
+          eq(financeAccounts.providerType, "credit"),
+          eq(financeAccounts.status, "connected"),
         ),
       )
       .limit(1);
@@ -9209,7 +9211,7 @@ export function createFinanceService({
       );
       const refunds = scopedTransactions.reduce(
         (sum, item) =>
-          isRefundOrReversal(item)
+          isRefundOrReversal(item) && !isCreditCardPaymentMovement(item, cardLinked)
             ? sum - (reimbursement.matchedByCredit.get(item.id) ?? 0) + item.amount
             : sum,
         0,

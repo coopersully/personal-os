@@ -631,6 +631,8 @@ export function scoreFinancePlaybookRubric(
 
   if (!profile) {
     add("costly_debt", "not_assessed", "No financial profile exists yet.");
+  } else if (profile.debtsConfirmed === false && profile.debts.length === 0) {
+    add("costly_debt", "not_assessed", "Debts have not been confirmed in the profile.");
   } else {
     // A known costly debt is a gap even when another debt's rate is unverified.
     const costly = profile.debts.filter((debt) => (debt.interestRate ?? 0) >= COSTLY_DEBT_RATE);
@@ -663,12 +665,18 @@ export function scoreFinancePlaybookRubric(
     );
   }
 
-  if (positive(evidence.monthlyHousingCost) && positive(evidence.grossAnnualIncome)) {
-    const ratio = (evidence.monthlyHousingCost * 12) / evidence.grossAnnualIncome;
+  const housing = evidence.monthlyHousingCost;
+  if (
+    typeof housing === "number" &&
+    Number.isFinite(housing) &&
+    housing >= 0 &&
+    positive(evidence.grossAnnualIncome)
+  ) {
+    const ratio = (housing * 12) / evidence.grossAnnualIncome;
     add(
       "housing_share",
       ratio <= 0.28 ? "healthy" : ratio <= 0.33 ? "watch" : "gap",
-      `Housing ${usd(evidence.monthlyHousingCost)} a month is ${percent(ratio)} of gross income ${usd(evidence.grossAnnualIncome)} a year.`,
+      `Housing ${usd(housing)} a month is ${percent(ratio)} of gross income ${usd(evidence.grossAnnualIncome)} a year.`,
     );
   } else {
     add("housing_share", "not_assessed", "Needs monthly housing cost and gross annual income.");
@@ -691,6 +699,8 @@ export function assessFinancePlaybook(input: {
     incomeStability: "stable" | "variable" | "seasonal" | "unknown";
     reserveTargetMonths: number | null;
     debts: Array<{ balance: number; interestRate: number | null }>;
+    /** False when the person has never answered about debts; an empty list is then unknown. */
+    debtsConfirmed?: boolean;
     insurance: Array<{ status: string; kind?: string }>;
     jurisdiction: string | null;
   } | null;

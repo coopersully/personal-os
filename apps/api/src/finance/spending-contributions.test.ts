@@ -77,6 +77,8 @@ describe("recognized Spending contributions", () => {
       ...account,
       id: "card",
       kind: "debt",
+      providerType: "credit",
+      status: "connected",
     };
     const transactions = [
       tx("purchase", { amount: 4000 }),
@@ -117,6 +119,17 @@ describe("recognized Spending contributions", () => {
       scope,
     );
     expect(excluded.netCents).toBe(451_060);
+
+    // A manual liability, a loan, or a card awaiting re-authentication observes no purchases.
+    for (const unobserved of [
+      { ...card, providerType: null, status: "manual" },
+      { ...card, providerType: "loan" },
+      { ...card, status: "needs_reauth" },
+    ])
+      expect(
+        projectFinanceSpending(input({ accounts: [account, unobserved], transactions }), scope)
+          .netCents,
+      ).toBe(451_060);
   });
 
   it("resolves pending replacements before bins or date selection", () => {

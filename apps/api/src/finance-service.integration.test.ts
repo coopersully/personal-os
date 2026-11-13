@@ -3,6 +3,7 @@ import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createPlaidConnector } from "@personal-os/connectors";
 import {
+  accessTokens,
   attentionItems,
   auditEvents,
   createDatabaseClient,
@@ -22,6 +23,7 @@ import {
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
+  financeMutationRecords,
   financePeriodReviews,
   financeProfiles,
   financeProviderItems,
@@ -31,6 +33,7 @@ import {
   financeReviewCases,
   financeSetupBackfillState,
   financeTransactionAllocations,
+  financeTransactionRevisions,
   financeTransactions,
   goals,
   migrateDatabase,
@@ -38,11 +41,13 @@ import {
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
+import { financeProviderSourceAdmissionResultSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
-import { financeActionFingerprint } from "./finance-action-identity.js";
+import { financeActionFingerprint, stableFinanceActionInput } from "./finance-action-identity.js";
+import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -11491,6 +11496,561 @@ describe.sequential("finance service", () => {
         ledgerSnapshot,
       };
     }
+
+    async function admissionFixture() {
+      const f = await historyCompositionFixture();
+      const [native] = await database.db
+        .update(financeTransactions)
+        .set({ amount: 2425, currencyCode: null, providerDirection: null })
+        .where(eq(financeTransactions.id, f.transaction.id))
+        .returning();
+      if (!native) throw new Error("Missing admission target.");
+      const principal: Principal = {
+        ...f.principal,
+        scopes: new Set(["finances:read", "finances:write"]),
+      };
+      const prior = f.readHistory.getMockImplementation();
+      if (!prior) throw new Error("Missing synthetic history response.");
+      const response = await prior({
+        accessToken: "synthetic-private",
+        itemId: "synthetic-private-item",
+        startDate: "2026-07-19",
+        endDate: "2026-07-19",
+        targets: [],
+      });
+      f.readHistory.mockResolvedValue({
+        ...response,
+        coverage: {
+          ...response.coverage,
+          state: "complete",
+          reason: "exhausted",
+          pages: 1,
+          returnedTransactions: 1,
+        },
+      });
+      const actions = createFinanceActionService({
+        db: database.db,
+        finances: f.service,
+        now: () => now,
+      });
+      const input = {
+        operation: "admit_source_facts",
+        idempotencyKey: `admission-${crypto.randomUUID()}`,
+        targets: [
+          {
+            transactionId: native.id,
+            expectedTransactionRevision: native.contextualRevision.toString(),
+            expectedAccountRevision: f.account.contextualRevision.toString(),
+          },
+        ],
+      };
+      const context = {
+        principal,
+        requestId: "source-admission",
+        sourceFactsSessionHash: f.sessionTokenHash,
+      };
+      const run = () => actions.performDirect("transaction", input, context);
+      const receipts = () =>
+        database.db
+          .select()
+          .from(financeMutationRecords)
+          .where(eq(financeMutationRecords.userId, f.owner.id));
+      const revisions = () =>
+        database.db
+          .select()
+          .from(financeTransactionRevisions)
+          .where(eq(financeTransactionRevisions.userId, f.owner.id));
+      return {
+        ...f,
+        principal,
+        context,
+        input,
+        actions,
+        run,
+        receipts,
+        revisions,
+        native,
+        response,
+      };
+    }
+
+    it("admits only missing source facts through the public action pipeline and replays its actor-bound receipt without provider access", async () => {
+      const f = await admissionFixture();
+      const before = await f.ledgerSnapshot();
+      const outcome = await f.run();
+      expect(outcome).toMatchObject({
+        status: "applied",
+        result: {
+          snapshotConsistency: "not_atomic",
+          entries: [
+            {
+              transactionId: f.native.id,
+              changed: true,
+              before: { currencyCode: null, providerDirection: null },
+              after: { currencyCode: "USD", providerDirection: "income" },
+            },
+          ],
+        },
+      });
+      const after = await f.ledgerSnapshot();
+      expect(after.transactions).toEqual([
+        expect.objectContaining({
+          ...f.native,
+          currencyCode: "USD",
+          providerDirection: "income",
+          contextualRevision: f.native.contextualRevision + 1n,
+          updatedAt: now,
+        }),
+      ]);
+      expect(after.accounts).toEqual(before.accounts);
+      expect(after.items).toEqual(before.items);
+      expect(after.allocations).toEqual(before.allocations);
+      expect(after.reviews).toEqual(before.reviews);
+      expect(after.audits).toHaveLength(before.audits.length + 1);
+      expect(await f.revisions()).toHaveLength(1);
+      expect(await f.receipts()).toMatchObject([
+        {
+          status: "completed",
+          actorId: f.principal.actorId,
+          operation: "finance.transaction.admit_source_facts",
+        },
+      ]);
+      expect(await f.run()).toEqual(outcome);
+      expect(await f.ledgerSnapshot()).toEqual(after);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(outcome)).not.toMatch(/composition-private|composition-secret/);
+      expect(f.sync).not.toHaveBeenCalled();
+      expect(f.initialize).not.toHaveBeenCalled();
+      expect(f.transport).not.toHaveBeenCalled();
+    });
+
+    it("rejects missing, wrong and expired presenting sessions before acquisition and keeps every native row and receipt unchanged", async () => {
+      const f = await admissionFixture();
+      const before = await f.ledgerSnapshot();
+      for (const hash of [undefined, "wrong-presented-hash"])
+        await expect(
+          f.actions.performDirect("transaction", f.input, {
+            principal: f.principal,
+            requestId: "denied",
+            ...(hash ? { sourceFactsSessionHash: hash } : {}),
+          }),
+        ).rejects.toMatchObject({ code: "forbidden" });
+      await database.db
+        .update(sessions)
+        .set({ expiresAt: new Date(now.getTime() - 1) })
+        .where(eq(sessions.id, f.session.id));
+      await expect(f.run()).rejects.toMatchObject({ code: "forbidden" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(f.readHistory).not.toHaveBeenCalled();
+    });
+
+    it("rejects changed replay payload, another actor and tampered receipt evidence before another provider acquisition", async () => {
+      const f = await admissionFixture();
+      await f.run();
+      const after = await f.ledgerSnapshot();
+      await expect(
+        f.actions.performDirect(
+          "transaction",
+          { ...f.input, targets: [{ ...f.input.targets[0], expectedTransactionRevision: "999" }] },
+          f.context,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+      await expect(
+        f.actions.performDirect("transaction", f.input, {
+          ...f.context,
+          principal: { ...f.principal, actorId: crypto.randomUUID() },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+      const [receipt] = await f.receipts();
+      if (!receipt) throw new Error("Receipt missing.");
+      await database.db
+        .update(financeMutationRecords)
+        .set({ response: { ...receipt.response, sourceHash: `sha256:${"b".repeat(64)}` } })
+        .where(eq(financeMutationRecords.id, receipt.id));
+      await expect(f.run()).rejects.toMatchObject({ code: "invalid_request" });
+      await database.db
+        .update(financeMutationRecords)
+        .set({ response: { ...receipt.response, observedAt: "2026-01-01T00:00:00.000Z" } })
+        .where(eq(financeMutationRecords.id, receipt.id));
+      await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      expect(await f.ledgerSnapshot()).toEqual(after);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      "source_changed",
+      "authority_expired",
+      "target_changed",
+    ])("rolls back all admission effects when %s occurs during the external read", async (change) => {
+      const f = await admissionFixture();
+      f.readHistory.mockImplementationOnce(async () => {
+        if (change === "authority_expired")
+          await database.db
+            .update(sessions)
+            .set({ expiresAt: new Date(now.getTime() - 1) })
+            .where(eq(sessions.id, f.session.id));
+        if (change === "target_changed")
+          await database.db
+            .update(financeTransactions)
+            .set({ notes: "Concurrent native edit" })
+            .where(eq(financeTransactions.id, f.native.id));
+        if (change === "source_changed")
+          await database.db
+            .update(financeAccounts)
+            .set({ providerAccountId: "different-private-account" })
+            .where(eq(financeAccounts.id, f.account.id));
+        return {
+          ...f.response,
+          coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+        };
+      });
+      await expect(f.run()).rejects.toMatchObject({
+        code: change === "authority_expired" ? "forbidden" : "conflict",
+      });
+      const after = await f.ledgerSnapshot();
+      expect(after.transactions[0]).toMatchObject({ currencyCode: null, providerDirection: null });
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+      expect(after.audits.filter((a) => a.action === "finance.source_facts_admitted")).toEqual([]);
+    });
+
+    it("rolls back every native fill, revision and receipt after a later application failure, then atomically admits all targets", async () => {
+      const f = await admissionFixture();
+      const [second] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: f.owner.id,
+          accountId: f.account.id,
+          amount: 2425,
+          direction: "income",
+          currencyCode: null,
+          providerDirection: null,
+          merchant: "Second missing source",
+          notes: "Preserve second notes",
+          transactionDate: "2026-07-19",
+          providerTransactionId: "second-private-transaction",
+        })
+        .returning();
+      if (!second) throw new Error("Second target missing.");
+      f.input.targets.push({
+        transactionId: second.id,
+        expectedTransactionRevision: second.contextualRevision.toString(),
+        expectedAccountRevision: f.account.contextualRevision.toString(),
+      });
+      const first = f.response.entries[0];
+      if (!first) throw new Error("Source fixture missing.");
+      f.readHistory.mockResolvedValue({
+        ...f.response,
+        entries: [first, { ...first, transactionId: "second-private-transaction" }],
+        coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+      });
+      const before = await f.ledgerSnapshot();
+      await expect(
+        f.service.runProviderSourceAdmission(
+          { ...f.input, operation: "admit_source_facts" },
+          f.context,
+          async (tx, acquisition, sourceHash) => {
+            const applied = await f.service.applyProviderSourceFacts(
+              acquisition,
+              sourceHash,
+              { ...f.input, operation: "admit_source_facts" },
+              f.context,
+              tx,
+            );
+            expect(applied).toHaveLength(2);
+            expect(applied.every((entry) => entry.changed)).toBe(true);
+            throw new Error("Synthetic failure after both native writes.");
+          },
+        ),
+      ).rejects.toThrow("Synthetic failure after both native writes.");
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+      const outcome = await f.run();
+      expect(outcome).toMatchObject({
+        status: "applied",
+        result: {
+          entries: expect.arrayContaining([
+            {
+              transactionId: f.native.id,
+              accountId: f.account.id,
+              changed: true,
+              before: expect.anything(),
+              after: expect.objectContaining({ currencyCode: "USD", providerDirection: "income" }),
+              source: expect.anything(),
+            },
+          ]),
+        },
+      });
+      const after = await f.ledgerSnapshot();
+      expect(after.transactions).toHaveLength(2);
+      expect(
+        after.transactions.every(
+          (row) => row.currencyCode === "USD" && row.providerDirection === "income",
+        ),
+      ).toBe(true);
+      expect(after.allocations).toEqual(before.allocations);
+      expect(after.accounts).toEqual(before.accounts);
+      expect(after.items).toEqual(before.items);
+      expect(await f.receipts()).toHaveLength(1);
+      expect(await f.revisions()).toHaveLength(2);
+    });
+
+    it("rejects an Item generation change within the same JavaScript millisecond before source admission", async () => {
+      const f = await admissionFixture();
+      await database.db
+        .update(financeProviderItems)
+        .set({
+          updatedAt: sql`date_trunc('milliseconds', ${financeProviderItems.updatedAt}) + interval '100 microseconds'`,
+        })
+        .where(eq(financeProviderItems.id, f.item.id));
+      const [before] = await database.db
+        .select({
+          at: financeProviderItems.updatedAt,
+          exact: sql<string>`${financeProviderItems.updatedAt}::text`,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, f.item.id));
+      if (!before) throw new Error("Missing native Item fence.");
+      f.readHistory.mockImplementationOnce(async () => {
+        await database.db
+          .update(financeProviderItems)
+          .set({ updatedAt: sql`${financeProviderItems.updatedAt} + interval '1 microsecond'` })
+          .where(eq(financeProviderItems.id, f.item.id));
+        return {
+          ...f.response,
+          coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+        };
+      });
+      await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      const [after] = await database.db
+        .select({
+          at: financeProviderItems.updatedAt,
+          exact: sql<string>`${financeProviderItems.updatedAt}::text`,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, f.item.id));
+      if (!after) throw new Error("Missing native Item fence.");
+      expect(after.at).toEqual(before.at);
+      expect(after.exact).not.toBe(before.exact);
+      expect((await f.ledgerSnapshot()).transactions[0]).toMatchObject({
+        currencyCode: null,
+        providerDirection: null,
+      });
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a foreign source admission target before provider acquisition and preserves both owners", async () => {
+      const f = await admissionFixture();
+      const foreign = await historyCompositionFixture();
+      f.input.targets.push({
+        transactionId: foreign.transaction.id,
+        expectedTransactionRevision: foreign.transaction.contextualRevision.toString(),
+        expectedAccountRevision: foreign.account.contextualRevision.toString(),
+      });
+      const before = await f.ledgerSnapshot();
+      const foreignBefore = await foreign.ledgerSnapshot();
+      await expect(f.run()).rejects.toMatchObject({ code: "not_found" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await foreign.ledgerSnapshot()).toEqual(foreignBefore);
+      expect(await f.receipts()).toEqual([]);
+      expect(f.port).not.toHaveBeenCalled();
+      expect(f.readHistory).not.toHaveBeenCalled();
+      expect(foreign.port).not.toHaveBeenCalled();
+      expect(foreign.readHistory).not.toHaveBeenCalled();
+    });
+
+    it("admits and replays for a canonical admitted agent with all three current scopes and persisted owner bypass", async () => {
+      const f = await admissionFixture();
+      const [token] = await database.db
+        .insert(accessTokens)
+        .values({
+          userId: f.owner.id,
+          name: "Admitted source fixture",
+          tokenHash: crypto.randomUUID(),
+          scopes: ["finances:read", "finances:write", "finances:execute"],
+        })
+        .returning();
+      if (!token) throw new Error("Missing source grant.");
+      await database.db
+        .insert(executionPolicySettings)
+        .values({ userId: f.owner.id, reviewBypassEnabled: true });
+      const principal: Principal = {
+        actorId: token.id,
+        actorType: "agent",
+        userId: f.owner.id,
+        authorizationConnectionId: token.authorizationConnectionId,
+        scopes: new Set(token.scopes),
+      };
+      const context = { principal, requestId: "canonical-agent-source" };
+      const result = await f.actions.performDirect("transaction", f.input, context);
+      expect(result).toMatchObject({
+        status: "applied",
+        result: {
+          entries: [{ changed: true, after: { currencyCode: "USD", providerDirection: "income" } }],
+        },
+      });
+      expect(await f.actions.performDirect("transaction", f.input, context)).toEqual(result);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+      if (result.status !== "applied") throw new Error("Source admission did not apply.");
+      const response = financeProviderSourceAdmissionResultSchema.parse(result.result);
+      // sourceKind is part of the canonical persisted hash, not an independent receipt column.
+      const requestHash = `sha256:${createHash("sha256")
+        .update(
+          stableFinanceActionInput({
+            actorId: token.id,
+            actorType: "agent",
+            operation: "finance.transaction.admit_source_facts",
+            payload: { actionKind: "transaction", input: f.input, sourceHash: response.sourceHash },
+            sourceKind: "agent",
+          }),
+        )
+        .digest("hex")}`;
+      expect(await f.receipts()).toMatchObject([
+        { actorId: token.id, actorType: "agent", requestHash, status: "completed" },
+      ]);
+    });
+
+    it("rejects a conflicting second source target without changing the first target, allocations, receipt or history", async () => {
+      const f = await admissionFixture();
+      const [second] = await database.db
+        .insert(financeTransactions)
+        .values({
+          userId: f.owner.id,
+          accountId: f.account.id,
+          amount: 2425,
+          direction: "income",
+          currencyCode: "EUR",
+          providerDirection: null,
+          merchant: "Second source target",
+          transactionDate: "2026-07-19",
+          providerTransactionId: "second-private-transaction",
+        })
+        .returning();
+      if (!second) throw new Error("Second target missing.");
+      f.input.targets.push({
+        transactionId: second.id,
+        expectedTransactionRevision: second.contextualRevision.toString(),
+        expectedAccountRevision: f.account.contextualRevision.toString(),
+      });
+      const first = f.response.entries[0];
+      if (!first) throw new Error("Source fixture missing.");
+      f.readHistory.mockResolvedValueOnce({
+        ...f.response,
+        entries: [first, { ...first, transactionId: "second-private-transaction" }],
+        coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+      });
+      const before = await f.ledgerSnapshot();
+      await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+    });
+
+    it("checks persisted agent execution authority again after acquisition and denies a rotated/revoked actor without source writes", async () => {
+      const f = await admissionFixture();
+      const [token] = await database.db
+        .insert(accessTokens)
+        .values({
+          userId: f.owner.id,
+          name: "Source fixture",
+          tokenHash: crypto.randomUUID(),
+          scopes: ["finances:read", "finances:write", "finances:execute"],
+        })
+        .returning();
+      if (!token) throw new Error("Missing source grant.");
+      const principal: Principal = {
+        actorId: token.id,
+        actorType: "agent",
+        userId: f.owner.id,
+        authorizationConnectionId: token.authorizationConnectionId,
+        scopes: new Set(token.scopes),
+      };
+      const context = { principal, requestId: "agent-admission" };
+      await expect(f.actions.performDirect("transaction", f.input, context)).rejects.toMatchObject({
+        code: "forbidden",
+      });
+      expect(f.readHistory).not.toHaveBeenCalled();
+      await database.db
+        .insert(executionPolicySettings)
+        .values({ userId: f.owner.id, reviewBypassEnabled: true });
+      const before = await f.ledgerSnapshot();
+      f.readHistory.mockImplementationOnce(async () => {
+        await database.db
+          .update(accessTokens)
+          .set({ revokedAt: now })
+          .where(eq(accessTokens.id, token.id));
+        return {
+          ...f.response,
+          coverage: { ...f.response.coverage, state: "complete", reason: "exhausted" },
+        };
+      });
+      await expect(f.actions.performDirect("transaction", f.input, context)).rejects.toMatchObject({
+        code: "forbidden",
+      });
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(await f.revisions()).toEqual([]);
+    });
+
+    it("does not retain a receipt or native write when acquisition fails, and does not overlap an in-flight same-key request", async () => {
+      const f = await admissionFixture();
+      const before = await f.ledgerSnapshot();
+      let release: (() => void) | undefined;
+      let entered: (() => void) | undefined;
+      const arrived = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      f.readHistory.mockImplementationOnce(async () => {
+        entered?.();
+        await gate;
+        throw new Error("Synthetic private provider failure.");
+      });
+      const running = f.run();
+      const failed = expect(running).rejects.toMatchObject({
+        code: "service_unavailable",
+        message: "Historical provider evidence is unavailable.",
+      });
+      await arrived;
+      try {
+        await expect(f.run()).rejects.toMatchObject({ code: "conflict" });
+      } finally {
+        release?.();
+      }
+      await failed;
+      expect(await f.ledgerSnapshot()).toEqual(before);
+      expect(await f.receipts()).toEqual([]);
+      expect(f.readHistory).toHaveBeenCalledTimes(1);
+    });
+
+    it("validates all targets before writes and preserves an already-identical source without revision churn", async () => {
+      const f = await admissionFixture();
+      await database.db
+        .update(financeTransactions)
+        .set({ currencyCode: "USD", providerDirection: "income" })
+        .where(eq(financeTransactions.id, f.native.id));
+      const [native] = await database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, f.native.id));
+      if (!native) throw new Error("Target missing.");
+      const target = f.input.targets[0];
+      if (!target) throw new Error("Selection missing.");
+      target.expectedTransactionRevision = native.contextualRevision.toString();
+      const before = await f.ledgerSnapshot();
+      expect(await f.run()).toMatchObject({
+        status: "applied",
+        result: { entries: [{ changed: false }] },
+      });
+      expect((await f.ledgerSnapshot()).transactions).toEqual(before.transactions);
+      expect(await f.revisions()).toEqual([]);
+    });
 
     it("delegates exact owned source through the public facade and preserves safe partial signed evidence without writes", async () => {
       const f = await historyCompositionFixture();

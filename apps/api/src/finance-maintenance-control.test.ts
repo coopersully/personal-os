@@ -165,3 +165,14 @@ it("never replays economic work for an ambiguous receipt checkpoint", async () =
   expect(f.health).not.toHaveBeenCalled();
   expect(f.period).not.toHaveBeenCalled();
 });
+it("reports actual active human decisions instead of historical case totals", async () => {
+  const f = fixture();
+  const observed = await f.options.status.getFinanceStatus();
+  f.options.status.getFinanceStatus.mockResolvedValue({
+    ...observed,
+    details: { ...observed.details, review: { total: 2000 } },
+    attention: { complete: true, activeDecisionCount: 2 },
+  } as typeof observed);
+  const result = await f.service.dispatchRun(f.id);
+  expect(result?.settledResult).toMatchObject({ questions: { total: 2 } });
+});

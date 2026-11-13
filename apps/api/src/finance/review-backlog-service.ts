@@ -19,6 +19,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "../errors.js";
+import { readFinanceAttentionSnapshot } from "./attention-read.js";
 
 const transactionSchema = z.object({
   id: z.uuid(),
@@ -298,6 +299,7 @@ export function createFinanceReviewBacklogService(
           snapshot,
           scope: "all_owned_transactions_flagged_and_open_or_deferred_cases",
           countingUnit: "transaction_flags_and_review_cases_separately",
+          attention: await readFinanceAttentionSnapshot(db, userId, asOf, tx),
           month,
           timezone,
           complete: true,

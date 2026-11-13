@@ -5,6 +5,7 @@ import {
   automationHostSchedules,
   type Database,
   financeAccounts,
+  financeBudgetStartPreviews,
   financeBudgetVersions,
   financeContextRevisions,
   financeContextualQuestions,
@@ -16,6 +17,7 @@ import {
   financeConversations,
   financeConversationTurnMessages,
   financeConversationTurns,
+  financeReviewBatchCorrections,
   financeReviewBatchRuns,
   financeReviewCases,
   financeTransactions,
@@ -38,6 +40,7 @@ import { AppError } from "../errors.js";
 import { enqueueNativePushEvent } from "../native-push-service.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
+import { createFinanceAgentConversationService } from "./conversation-agent-service.js";
 import {
   advanceConversationProof,
   type ConversationProof,
@@ -190,7 +193,7 @@ async function lockOwner(tx: Transaction, userId: string) {
     sql`select pg_advisory_xact_lock(hashtextextended(${`finance-maintenance:${userId}`}, 0))`,
   );
 }
-async function nextSequence(tx: Transaction, userId: string) {
+export async function nextFinanceConversationSequence(tx: Transaction, userId: string) {
   const [row] = await tx
     .insert(financeConversations)
     .values({ userId, nextSequence: 1n })
@@ -462,7 +465,11 @@ export function createFinanceConversationService({
               ? financeReviewCases
               : ref.kind === "review_batch"
                 ? financeReviewBatchRuns
-                : financeContextualQuestions;
+                : ref.kind === "budget_start_preview"
+                  ? financeBudgetStartPreviews
+                  : ref.kind === "review_batch_undo"
+                    ? financeReviewBatchCorrections
+                    : financeContextualQuestions;
       const [owned] = await tx
         .select({ id: table.id })
         .from(table)
@@ -552,6 +559,15 @@ export function createFinanceConversationService({
     await lockOwner(tx, principal.userId);
   }
   return {
+    ...createFinanceAgentConversationService({
+      db,
+      now,
+      lockOwner,
+      nextSequence: nextFinanceConversationSequence,
+      validateContext,
+      present: messageValue,
+      presentMany: messageValues,
+    }),
     /** Atomic bounded capture/resume; no financial run is created, rebound or advanced. */
     async beginTurn(principal: Principal, scheduleId: string) {
       return db.transaction(async (tx) => {
@@ -793,7 +809,7 @@ export function createFinanceConversationService({
             recordRefs,
             runId: null,
             sourceMessageIds: input.sourceMessageIds,
-            sequence: await nextSequence(tx, principal.userId),
+            sequence: await nextFinanceConversationSequence(tx, principal.userId),
             createdAt: now(),
           })
           .returning();
@@ -874,7 +890,7 @@ export function createFinanceConversationService({
             "Verify an active Finance host message protocol before sending.",
           );
         await validateContext(tx, principal.userId, input);
-        const sequence = await nextSequence(tx, principal.userId);
+        const sequence = await nextFinanceConversationSequence(tx, principal.userId);
         const [row] = await tx
           .insert(financeConversationMessages)
           .values({
@@ -1229,7 +1245,7 @@ export function createFinanceConversationService({
             recordRefs,
             runId: input.runId,
             sourceMessageIds: input.sourceMessageIds,
-            sequence: await nextSequence(tx, principal.userId),
+            sequence: await nextFinanceConversationSequence(tx, principal.userId),
             createdAt: now(),
           })
           .returning();

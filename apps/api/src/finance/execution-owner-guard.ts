@@ -6,6 +6,7 @@ import {
   financeLedgerChallenges,
   financeMaintenanceCandidates,
   financeMaintenanceExecutionBindings,
+  financeReviewBatchRuns,
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
@@ -19,6 +20,7 @@ const guards = new WeakMap<
   { ownerId: string; tokenIds: Set<string> | null; connectionIds: Set<string> }
 >();
 export type FinanceTokenLockPlan = {
+  batchIds?: readonly string[];
   actorIds?: readonly string[];
   connectionIds?: readonly string[];
   runIds?: readonly string[];
@@ -57,6 +59,25 @@ export async function lockFinanceExecutionTokens(
     (plan.actorIds ?? []).filter((id) => /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)),
   );
   const runs = new Set(plan.runIds ?? []);
+  if (plan.batchIds?.length) {
+    const rows = await tx
+      .select({
+        actorId: financeReviewBatchRuns.actorId,
+        actorType: financeReviewBatchRuns.actorType,
+        connectionId: financeReviewBatchRuns.authorizationConnectionId,
+      })
+      .from(financeReviewBatchRuns)
+      .where(
+        and(
+          eq(financeReviewBatchRuns.userId, ownerId),
+          inArray(financeReviewBatchRuns.id, [...plan.batchIds]),
+        ),
+      );
+    for (const row of rows) {
+      if (row.actorType === "agent") actors.add(row.actorId);
+      if (row.connectionId) connections.add(row.connectionId);
+    }
+  }
   if (plan.candidateIds?.length) {
     const rows = await tx
       .select({ runId: financeMaintenanceCandidates.runId })

@@ -5,6 +5,7 @@ import {
   financeReviewBatchCounterpartSchema,
   financeReviewBatchDecisionSchema,
   financeReviewBatchOutcomeSchema,
+  financeReviewBatchTransactionSummarySchema,
   financeReviewResolutionSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -181,6 +182,7 @@ export function validateFinanceCompletionBudget(input: {
 
 const wrappedDecisionSchema = z.strictObject({
   decision: financeReviewBatchDecisionSchema,
+  transactionSummary: financeReviewBatchTransactionSummarySchema.optional(),
   transferCounterpart: financeReviewBatchCounterpartSchema.optional(),
 });
 const batchSchema = z.object({
@@ -401,8 +403,9 @@ export function qualifyFinanceCompletionTarget(input: {
       return unavailable("source_unavailable");
     if (outcome.status !== "applied") return pending("nonapplied_outcome");
     if (
-      decision.kind === "review" &&
-      (decision.action === "defer" || decision.action === "confirm_transfer")
+      decision.kind === "transfer_pair" ||
+      (decision.kind === "review" &&
+        (decision.action === "defer" || decision.action === "confirm_transfer"))
     )
       return unavailable("requires_financial_effect_validator");
     if (

@@ -8,6 +8,7 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeAnswerContinuations,
+  financeBudgetStartPolicies,
   financeConversationBatches,
   financeEconomicEvents,
   financeLedgerChallenges,
@@ -119,6 +120,89 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
     });
     return { userId: user.id, principal, service, dispatchRun, recoverHandoff, getFinanceStatus };
   }
+  it.each([
+    ["2026-12-01T04:59:59Z", "2026-11", "2026-11-30"],
+    ["2026-12-01T05:00:00Z", "2026-12", "2026-12-31"],
+    ["2027-01-01T05:00:00Z", "2027-01", "2027-01-31"],
+    ["2027-03-14T07:01:00Z", "2027-03", "2027-03-31"],
+  ])("projects the current owner month independently of a historical blocked run at %s", async (at, month, end) => {
+    const f = await fixture({ now: () => new Date(at), planningTimezone: "America/New_York" });
+    await database.db.insert(financeBudgetStartPolicies).values({
+      userId: f.userId,
+      firstMonth: "2026-11",
+      revision: 1,
+      timezone: "America/New_York",
+      approvedBy: f.userId,
+      previewId: randomUUID(),
+      approvedAt: new Date(at),
+    });
+    const [old] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: f.userId,
+        domain: "finances",
+        scope: { type: "all_outstanding" },
+        rulebookVersion: "test-v1",
+        status: "blocked",
+        settledResult: { code: "historical_source_missing" },
+      })
+      .returning();
+    f.getFinanceStatus.mockResolvedValue({
+      details: { rulebookVersion: "test-v1" },
+      state: "blocked",
+      freshness: { blockers: [] },
+    } as unknown as FinanceStatus);
+    const result = await f.service.maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      f.principal,
+    );
+    expect(result.data.run?.id).toBe(old?.id);
+    expect(result.data.run?.status).toBe("blocked");
+    expect(result.data.monthlyWork).toMatchObject({
+      enabled: true,
+      period: month,
+      scope: { type: "window", start: `${month}-01`, end },
+      carryover: "none",
+      budget: { month, recovery: "create_proposal" },
+      attention: { policy: { firstMonth: "2026-11" }, activeDecisionCount: 0, budgetReady: false },
+    });
+    expect(result.outcome).toBe("work_remaining");
+    expect(result.remainingWork.categories).toContain("current_month_budget");
+    expect(
+      result.communication.requiredDisclosures.map((item) => item.message).join(" "),
+    ).toContain("not budget-ready");
+  });
+  it("does not enable a future starting month and respects an owner policy reversal", async () => {
+    const f = await fixture({
+      now: () => new Date("2026-11-12T12:00:00Z"),
+      planningTimezone: "America/New_York",
+    });
+    const input = { operation: "start", scope: { type: "all_outstanding" } } as const;
+    expect((await f.service.maintainFinances(input, f.principal)).data.monthlyWork).toBeNull();
+    await database.db.insert(financeBudgetStartPolicies).values({
+      userId: f.userId,
+      firstMonth: "2026-12",
+      revision: 1,
+      timezone: "America/New_York",
+      approvedBy: f.userId,
+      previewId: randomUUID(),
+      approvedAt: now(),
+    });
+    expect((await f.service.maintainFinances(input, f.principal)).data.monthlyWork).toMatchObject({
+      enabled: false,
+      period: "2026-11",
+    });
+    await database.db.insert(financeBudgetStartPolicies).values({
+      userId: f.userId,
+      firstMonth: null,
+      revision: 2,
+      timezone: "America/New_York",
+      approvedBy: f.userId,
+      previewId: randomUUID(),
+      approvedAt: now(),
+    });
+    expect((await f.service.maintainFinances(input, f.principal)).data.monthlyWork).toBeNull();
+  });
   async function legacy(
     userId: string,
     scope: Record<string, unknown>,

@@ -33,6 +33,7 @@ import {
   financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
   financePositionReadScopeSchema,
+  financeProviderSourceAdmissionInputSchema,
   financeProviderTransactionEvidenceInputSchema,
   financeReceiptReviewInputSchema,
   financeRecurringOccurrencesQuerySchema,
@@ -174,6 +175,40 @@ export function registerFinanceRoutes({
       await finances.readFinanceProviderTransactionEvidence(principal, input, sessionTokenHash),
     );
   });
+
+  // This explicit effect route precedes the generic POST feature guard; execution remains API-owned.
+  app.post(
+    "/v1/finances/provider-transaction-evidence/admit",
+    requireFinanceRead,
+    requireScope("finances:write"),
+    async (context) => {
+      context.header("Cache-Control", "no-store");
+      if (!actions) throw new AppError("conflict", "Finance action service is unavailable.");
+      const principal = context.get("principal");
+      const authorization = context.req.header("authorization");
+      if (
+        principal.actorType === "user" &&
+        (!authorization?.startsWith("Session ") || authorization.length <= 8)
+      )
+        throw new AppError(
+          "forbidden",
+          "Source admission requires the authenticated Session header.",
+        );
+      const input = await parseBody(context, financeProviderSourceAdmissionInputSchema);
+      return context.json(
+        await actions.performDirect(
+          "transaction",
+          { ...input, operation: "admit_source_facts" },
+          {
+            ...mutationContext(context),
+            ...(principal.actorType === "user" && authorization?.startsWith("Session ")
+              ? { sourceFactsSessionHash: hashToken(authorization.slice(8)) }
+              : {}),
+          },
+        ),
+      );
+    },
+  );
 
   const requireFinanceMaintenance = requireScope("finances:maintain");
   const requireActions = () => {

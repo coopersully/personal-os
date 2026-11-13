@@ -7,7 +7,13 @@ import { createFinanceProviderTransactionEvidenceService } from "./provider-tran
 const id = "11111111-1111-4111-8111-111111111111",
   accountId = "22222222-2222-4222-8222-222222222222";
 const date = new Date("2026-11-05T12:00:00.000Z");
+const rawSource: {
+  amount: number;
+  currencyCode: string | null;
+  providerDirection: "income" | "expense" | null;
+} = { amount: 1000, currencyCode: null, providerDirection: null };
 const row = {
+  ...rawSource,
   transactionId: id,
   transactionRevision: 1n,
   transactionUpdatedAt: date,
@@ -229,5 +235,219 @@ describe("historical provider reader", () => {
       f.service.read(principal, { transactionIds: [id] }, "session-hash"),
     ).rejects.toMatchObject({ code: "forbidden" });
     expect(f.readTransactionHistory).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("server-private source fact acquisition prerequisite", () => {
+  const targets = [
+    { transactionId: id, expectedTransactionRevision: "1", expectedAccountRevision: "2" },
+  ];
+  function ready(after = row, firstRows = [row]) {
+    const f = fixture(after, firstRows);
+    f.evidence.coverage = {
+      state: "complete",
+      scope: "provider_available_window",
+      reason: "exhausted",
+      pages: 1,
+      returnedTransactions: 1,
+    };
+    return f;
+  }
+  it("acquires fresh signed source facts with native revision/content fences without writing", async () => {
+    const f = ready();
+    const result = await f.service.acquireSourceFacts(principal, targets, "session-hash");
+    expect(result.facts).toEqual([
+      {
+        transactionId: id,
+        accountId,
+        transactionRevision: "1",
+        accountRevision: "2",
+        currencyCode: "USD",
+        providerDirection: "income",
+        sourceAmount: -10,
+        date: "2026-11-01",
+      },
+    ]);
+    expect(result.nativeSnapshot[0]).toMatchObject({
+      amount: 1000,
+      currencyCode: null,
+      providerDirection: null,
+    });
+    expect(result.snapshotConsistency).toBe("not_atomic");
+    expect(f.readTransactionHistory).toHaveBeenCalledTimes(1);
+    expect(f.writes).not.toHaveBeenCalled();
+  });
+  it("derives expense ONLY from positive provider sign, not native economic direction", async () => {
+    const f = ready();
+    const entry = f.evidence.entries[0];
+    if (!entry) throw Error("fixture");
+    entry.sourceAmount = 10;
+    entry.economicDirection = "outflow";
+    expect(
+      (await f.service.acquireSourceFacts(principal, targets, "session-hash")).facts[0]
+        ?.providerDirection,
+    ).toBe("expense");
+  });
+  it("permits already identical native raw facts without rewriting them", async () => {
+    const identical = { ...row, currencyCode: "USD", providerDirection: "income" as const };
+    const f = ready(identical, [identical]);
+    await expect(
+      f.service.acquireSourceFacts(principal, targets, "session-hash"),
+    ).resolves.toMatchObject({ facts: [{ currencyCode: "USD", providerDirection: "income" }] });
+    expect(f.writes).not.toHaveBeenCalled();
+  });
+  it.each([
+    "expectedTransactionRevision",
+    "expectedAccountRevision",
+  ] as const)("rejects stale %s before provider access", async (key) => {
+    const f = ready();
+    await expect(
+      f.service.acquireSourceFacts(
+        principal,
+        [
+          {
+            ...targets[0],
+            transactionId: id,
+            expectedTransactionRevision: "1",
+            expectedAccountRevision: "2",
+            [key]: "9",
+          },
+        ],
+        "session-hash",
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(f.readTransactionHistory).not.toHaveBeenCalled();
+  });
+  it.each([
+    "partial",
+    "conflict",
+    "unavailable",
+  ] as const)("does not promote %s advisory evidence to admission candidates", async (state) => {
+    const f = ready();
+    f.evidence.coverage.state = state;
+    await expect(
+      f.service.acquireSourceFacts(principal, targets, "session-hash"),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(f.writes).not.toHaveBeenCalled();
+  });
+  it.each([
+    "missing",
+    "unobserved",
+    "conflict",
+    "invalid_currency",
+  ] as const)("rejects target status %s", async (status) => {
+    const f = ready();
+    const entry = f.evidence.entries[0];
+    if (!entry) throw Error("fixture");
+    entry.status = status;
+    await expect(
+      f.service.acquireSourceFacts(principal, targets, "session-hash"),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+  it.each([
+    0,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    -10.001,
+  ])("rejects unproven or inexact source amount %s", async (sourceAmount) => {
+    const f = ready();
+    const entry = f.evidence.entries[0];
+    if (!entry) throw Error("fixture");
+    entry.sourceAmount = sourceAmount;
+    entry.normalizedAmount = Math.abs(sourceAmount);
+    await expect(
+      f.service.acquireSourceFacts(principal, targets, "session-hash"),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+  it.each([
+    { currencyCode: "EUR" },
+    { providerDirection: "expense" as const },
+    { amount: 1001 },
+  ])("rejects incompatible existing source facts/content", async (delta) => {
+    const changed = { ...row, ...delta };
+    const f = ready(changed, [changed]);
+    await expect(
+      f.service.acquireSourceFacts(principal, targets, "session-hash"),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(f.writes).not.toHaveBeenCalled();
+  });
+  it("rejects a source date mismatch without changing the native date", async () => {
+    const f = ready();
+    const entry = f.evidence.entries[0];
+    if (!entry) throw Error("fixture");
+    entry.date = "2026-11-02";
+    await expect(
+      f.service.acquireSourceFacts(principal, targets, "session-hash"),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(f.writes).not.toHaveBeenCalled();
+  });
+  it("rejects duplicate source identities and native content changes after network", async () => {
+    const f = ready();
+    const entry = f.evidence.entries[0];
+    if (!entry) throw Error("fixture");
+    f.evidence.entries.push({ ...entry });
+    await expect(
+      f.service.acquireSourceFacts(principal, targets, "session-hash"),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const raced = ready({ ...row, amount: 1001 });
+    await expect(
+      raced.service.acquireSourceFacts(principal, targets, "session-hash"),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(raced.writes).not.toHaveBeenCalled();
+  });
+  it("requires current presenting read authority even for a private acquisition", async () => {
+    const f = ready();
+    await expect(f.service.acquireSourceFacts(principal, targets)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(f.readTransactionHistory).not.toHaveBeenCalled();
+  });
+  it("validates a conflicting second requested target before returning any candidates", async () => {
+    const second = {
+      ...row,
+      transactionId: "33333333-3333-4333-8333-333333333333",
+      providerTransactionId: "private-second",
+      currencyCode: "USD",
+    };
+    const f = ready(row, [row, second]);
+    f.queue[5] = [row, second];
+    f.evidence.entries.push({
+      accountId: "private-account-canary",
+      transactionId: "private-second",
+      status: "found",
+      sourceAmount: 10,
+      normalizedAmount: 10,
+      economicDirection: "outflow",
+      currencyCode: "EUR",
+      date: "2026-11-01",
+    });
+    await expect(
+      f.service.acquireSourceFacts(
+        principal,
+        [
+          ...targets,
+          {
+            ...targets[0],
+            transactionId: second.transactionId,
+            expectedTransactionRevision: "1",
+            expectedAccountRevision: "2",
+          },
+        ],
+        "session-hash",
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(f.writes).not.toHaveBeenCalled();
+  });
+  it.each([
+    null,
+    "ZZZ",
+  ])("rejects unproven currency without any native fallback", async (currencyCode) => {
+    const f = ready();
+    const entry = f.evidence.entries[0];
+    if (!entry) throw Error("fixture");
+    entry.currencyCode = currencyCode;
+    await expect(
+      f.service.acquireSourceFacts(principal, targets, "session-hash"),
+    ).rejects.toMatchObject({ code: "conflict" });
   });
 });

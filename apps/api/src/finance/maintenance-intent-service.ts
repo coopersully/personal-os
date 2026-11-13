@@ -64,6 +64,7 @@ import {
   createLegacyFinanceMaintenanceService,
   legacyMaintenanceScope,
 } from "./maintenance-service.js";
+import { readFinanceMonthlyWork } from "./monthly-work.js";
 import { canRecoverFinancePreflight } from "./preflight-recovery.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -311,13 +312,23 @@ export function createFinanceMaintenanceIntentService({
     const conversationBatch = run
       ? await postgresConversationBatchStore.findBatch(db as unknown as Transaction, userId, run.id)
       : null;
-    return { run, challengeId, nextAction, recovery, conversationBatch };
+    return {
+      run,
+      challengeId,
+      nextAction,
+      recovery,
+      conversationBatch,
+      monthlyWork: await readFinanceMonthlyWork(db, userId, now()),
+    };
   }
   function result(data: FinanceMaintenancePayload): FinanceToolResult<FinanceMaintenancePayload> {
-    const completed = data.run?.status === "completed";
-    const inputRequired =
-      !data.run ||
-      ["completed_with_questions", "blocked", "awaiting_approval"].includes(data.run.status);
+    const monthly = data.monthlyWork?.enabled ? data.monthlyWork : null;
+    const completed =
+      data.run?.status === "completed" && (!monthly || monthly.attention.budgetReady);
+    const inputRequired = monthly
+      ? monthly.attention.activeDecisionCount > 0
+      : !data.run ||
+        ["completed_with_questions", "blocked", "awaiting_approval"].includes(data.run.status);
     const failed = data.run?.status === "failed_terminal";
     return {
       schemaVersion: 1,
@@ -335,7 +346,16 @@ export function createFinanceMaintenanceIntentService({
                   ? "The Finance candidate is ready for a complete evidence challenge."
                   : "Finance maintenance is saved. Its current state and remaining work are available below.",
         optionalDetails: [],
-        requiredDisclosures: [],
+        requiredDisclosures:
+          monthly && !monthly.attention.budgetReady
+            ? [
+                {
+                  importance: "important",
+                  message:
+                    "The current month is not budget-ready. The monthly assessment is independent of the retained maintenance run.",
+                },
+              ]
+            : [],
       },
       outcome: completed
         ? "completed"
@@ -345,8 +365,15 @@ export function createFinanceMaintenanceIntentService({
             ? "user_input_required"
             : "work_remaining",
       remainingWork: {
-        categories: completed ? [] : ["finance_maintenance"],
-        count: completed ? 0 : 1,
+        categories: completed
+          ? []
+          : [
+              "finance_maintenance",
+              ...(monthly && !monthly.attention.readiness.budgetApproved
+                ? ["current_month_budget"]
+                : []),
+            ],
+        count: completed ? 0 : 1 + (monthly && !monthly.attention.readiness.budgetApproved ? 1 : 0),
       },
       ...(data.nextAction ? { nextAction: data.nextAction } : {}),
     };

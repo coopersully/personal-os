@@ -11,7 +11,7 @@ import {
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import type { MaintenanceScope } from "@personal-os/domain";
-import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { readProjectionRows } from "./search-projection-bounds.js";
 
@@ -149,6 +149,7 @@ export async function findUnverifiedLegacyFinanceEffects(
       .from(financeClassificationDecisions)
       .where(
         and(
+          isNull(financeClassificationDecisions.retractedAt),
           eq(financeClassificationDecisions.userId, userId),
           eq(financeClassificationDecisions.source, "user"),
           inArray(financeClassificationDecisions.transactionId, transactionIds),

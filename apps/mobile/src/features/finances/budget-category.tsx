@@ -190,7 +190,11 @@ function LimitForm({ record, onDone }: { record: FinanceBudget; onDone?: () => v
     return (
       <SettingsAccentProvider workspace="finances">
         <View style={insetRow}>
-          <Icon name={categoryIcon(snapshot.category)} color={workspaceColor(t, "finances")} />
+          <Icon
+            name={categoryIcon(snapshot.category)}
+            color={workspaceColor(t, "finances")}
+            size={22}
+          />
           <SettingLabel>Monthly limit</SettingLabel>
           <Text style={{ color: invalid ? t.destructive : t.ink, fontSize: 17 }}>$</Text>
           <TextInput

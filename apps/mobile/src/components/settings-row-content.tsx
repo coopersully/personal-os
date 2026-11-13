@@ -29,3 +29,8 @@ export function SettingValue({ style, ...props }: TextProps) {
     />
   );
 }
+/** Secondary line under a row's label: an address, a status, a short description. */
+export function SettingDetail({ style, ...props }: TextProps) {
+  const t = useTheme();
+  return <Text {...props} style={[{ minWidth: 0, color: t.secondary, fontSize: 15 }, style]} />;
+}

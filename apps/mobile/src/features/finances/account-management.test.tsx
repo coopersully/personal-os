@@ -43,7 +43,9 @@ const h = vi.hoisted(() => ({
   },
 }));
 vi.mock("react-native", () => {
-  const Box = ({ children }: PropsWithChildren) => <div>{children}</div>;
+  const Box = ({ children, testID }: PropsWithChildren<{ testID?: string }>) => (
+    <div data-testid={testID}>{children}</div>
+  );
   return {
     StyleSheet: { create: (value: unknown) => value },
     AppState: { currentState: "active", addEventListener: () => ({ remove: vi.fn() }) },
@@ -267,6 +269,10 @@ it("adds a manual account only once its fields are valid", async () => {
   type("Balance", "1,250.50");
   expect(screen.queryByText("Use a three-letter code such as USD.")).toBeNull();
   expect(screen.queryByText("Enter an amount such as 2400.00.")).toBeNull();
+  // Every field, typed or chosen, sits in the one wrapper that lines rows up with the card.
+  const rows = screen.getByTestId("padded-surface-rows");
+  expect(rows.contains(screen.getByLabelText("Name"))).toBe(true);
+  expect(rows.contains(screen.getByRole("button", { name: "Account type, Cash" }))).toBe(true);
   press("Account type, Cash");
   press("Investments");
   press("Save changes");

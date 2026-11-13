@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { GlassButton } from "../../components/glass-button";
 import { Icon, type IconName } from "../../components/icons";
 import { SheetHeader } from "../../components/sheet-header";
-import { touchTarget, useTheme } from "../../theme";
+import { spacing, touchTarget, useTheme } from "../../theme";
 import { Field, FormBody, Section } from "./ui";
 export const listIcons: Record<TaskListIcon, IconName> = {
   list: "views",
@@ -85,7 +85,14 @@ export function ListAppearance({
           />
           <FormBody>
             <Section title="Icon">
-              <View style={{ flexDirection: "row", flexWrap: "wrap", padding: 16, gap: 8 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  padding: spacing.lg,
+                  gap: spacing.sm,
+                }}
+              >
                 {(Object.keys(listIcons) as TaskListIcon[]).map((item) => (
                   <Pressable
                     key={item}
@@ -112,7 +119,14 @@ export function ListAppearance({
               </View>
             </Section>
             <Section title="Color">
-              <View style={{ flexDirection: "row", flexWrap: "wrap", padding: 16, gap: 8 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  padding: spacing.lg,
+                  gap: spacing.sm,
+                }}
+              >
                 {colors.map((item) => (
                   <Pressable
                     key={item}

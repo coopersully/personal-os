@@ -2,13 +2,14 @@ import type { CalendarAccount } from "@personal-os/api-client";
 import { connectICloudInputSchema } from "@personal-os/domain";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { AppState, Linking, Modal, Pressable, Text, View } from "react-native";
+import { AppState, Linking, Modal, Pressable, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
 import { formRow } from "../../components/forms/form-row";
 import { SectionFootnote, SectionNote } from "../../components/forms/section-content";
 import { Icon } from "../../components/icons";
 import { Screen } from "../../components/screen";
+import { SettingDetail, SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { SheetHeader } from "../../components/sheet-header";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
@@ -123,40 +124,37 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                   name={account.label || account.email || account.provider}
                 />
                 <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={{ color: t.ink, fontSize: 17, fontWeight: "600" }}>
+                  <SettingLabel style={{ flex: 0, fontWeight: "600" }}>
                     {account.label || (account.provider === "google" ? "Google" : "iCloud")}
-                  </Text>
-                  <Text style={{ color: t.secondary, fontSize: 14 }}>
-                    {account.email ?? account.provider}
-                  </Text>
+                  </SettingLabel>
+                  <SettingDetail>{account.email ?? account.provider}</SettingDetail>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
                     {account.mailEnabled && (
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                         <Icon name="mail" color={t.secondary} size={14} />
-                        <Text style={{ color: t.secondary, fontSize: 13 }}>Mail</Text>
+                        <SettingDetail style={{ fontSize: 13 }}>Mail</SettingDetail>
                       </View>
                     )}
                     {account.calendarEnabled && (
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                         <Icon name="calendar" color={t.secondary} size={14} />
-                        <Text style={{ color: t.secondary, fontSize: 13 }}>Calendar</Text>
+                        <SettingDetail style={{ fontSize: 13 }}>Calendar</SettingDetail>
                       </View>
                     )}
                     {!account.mailEnabled && !account.calendarEnabled && (
-                      <Text style={{ color: t.secondary, fontSize: 13 }}>No services enabled</Text>
+                      <SettingDetail style={{ fontSize: 13 }}>No services enabled</SettingDetail>
                     )}
                   </View>
                 </View>
-                <Text
+                <SettingValue
                   style={{
-                    color: account.health.state === "ready" ? t.secondary : t.warning,
                     fontSize: 13,
                     maxWidth: "30%",
-                    textAlign: "right",
+                    ...(account.health.state === "ready" ? {} : { color: t.warning }),
                   }}
                 >
                   {account.health.state === "ready" ? "Connected" : "Needs attention"}
-                </Text>
+                </SettingValue>
                 <Icon name="chevron" color={t.secondary} size={16} />
               </Pressable>
             </View>

@@ -3,7 +3,7 @@ import { Pressable, Text, useWindowDimensions, View } from "react-native";
 import { formRow } from "../../components/forms/form-row";
 import { Icon, type IconName } from "../../components/icons";
 import { type SettingsWorkspace, useSettingsAccent } from "../../components/settings-accent";
-import { SettingLabel, SettingValue } from "../../components/settings-row-content";
+import { SettingDetail, SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { spacing, useTheme, workspaceColor } from "../../theme";
 export function SettingsRow({
   label,
@@ -158,11 +158,7 @@ export function SettingsIdentity({
       {leading}
       <View style={{ flex: 1, minWidth: 0, gap: spacing.xs }}>
         <Text style={{ color: t.ink, fontSize: 20, fontWeight: "600" }}>{name}</Text>
-        {detail && (
-          <Text selectable style={{ color: t.secondary, fontSize: 15 }}>
-            {detail}
-          </Text>
-        )}
+        {detail && <SettingDetail selectable>{detail}</SettingDetail>}
       </View>
     </View>
   );

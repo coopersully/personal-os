@@ -86,9 +86,18 @@ describe("container directory", () => {
     expect(finishedProjectLabel(project("a", "A"))).toBeNull();
     expect(finishedProjectLabel(project("a", "A", { lifecycle: "completed" }))).toBe("Completed");
     expect(finishedProjectLabel(project("a", "A", { lifecycle: "cancelled" }))).toBe("Cancelled");
-    expect(projectAcceptsNewWork(project("a", "A"))).toBe(true);
-    expect(projectAcceptsNewWork(project("a", "A", { lifecycle: "completed" }))).toBe(false);
-    expect(projectAcceptsNewWork(project("a", "A", { availability: "archived" }))).toBe(false);
+    const home = list("l", "Home");
+    expect(projectAcceptsNewWork(project("a", "A"), home)).toBe(true);
+    expect(projectAcceptsNewWork(project("a", "A", { lifecycle: "completed" }), home)).toBe(false);
+    expect(projectAcceptsNewWork(project("a", "A", { availability: "archived" }), home)).toBe(
+      false,
+    );
+    expect(
+      projectAcceptsNewWork(project("a", "A"), list("l", "Home", { availability: "archived" })),
+    ).toBe(false);
+    expect(
+      projectAcceptsNewWork(project("a", "A"), list("l", "Home", { deletedAt: "2026-01-03" })),
+    ).toBe(false);
   });
   it("orders by the saved preference with a stable name tie-break", () => {
     const dated = [

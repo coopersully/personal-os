@@ -25,9 +25,18 @@ export const finishedProjectLabel = (project: Pick<TaskProject, "lifecycle">) =>
       ? "Cancelled"
       : null;
 
-/** The server rejects new work in a finished or archived project, so capture is not offered. */
-export const projectAcceptsNewWork = (project: Pick<TaskProject, "lifecycle" | "availability">) =>
-  project.lifecycle === "open" && project.availability === "active";
+/**
+ * The server rejects new work in a finished or archived project, and in a project whose owning
+ * list is archived or deleted, so capture is not offered there.
+ */
+export const projectAcceptsNewWork = (
+  project: Pick<TaskProject, "lifecycle" | "availability">,
+  list: Pick<TaskList, "availability" | "deletedAt">,
+) =>
+  project.lifecycle === "open" &&
+  project.availability === "active" &&
+  list.availability === "active" &&
+  !list.deletedAt;
 
 /** A search that hides every project says so, whatever status is selected. */
 export const projectEmptyMessage = (status: ProjectStatus, search: string) =>

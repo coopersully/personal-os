@@ -79,7 +79,11 @@ export function TaskListScreen({
   };
   const menuChoices = buildViewOptions(query, scope);
   const scopedProject = resources.projects.data?.find((row) => row.id === scope.projectId);
-  const closedProject = !!scopedProject && !projectAcceptsNewWork(scopedProject);
+  const scopedList = resources.lists.data?.find((row) => row.id === scopedProject?.listId);
+  // Until the project and its list are known, capture stays hidden rather than offered wrongly.
+  const closedProject =
+    !!scope.projectId &&
+    !(scopedProject && scopedList && projectAcceptsNewWork(scopedProject, scopedList));
   const identity = JSON.stringify(query);
   // biome-ignore lint/correctness/useExhaustiveDependencies: selection belongs to this exact query scope.
   useEffect(() => {

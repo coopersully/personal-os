@@ -5,7 +5,7 @@
 - COO-217 — The native Projects tab has Active, Completed, Cancelled and All status chips with
   counts. Completed and cancelled projects that are not archived are reachable there and open with
   all of their tasks, including finished ones; their rows and pinned cards name the status, also
-  to assistive technology. Finished and archived projects offer no Add. Counts appear only once
+  to assistive technology. Finished and archived projects, and projects in an archived list, offer no Add. Counts appear only once
   lists and projects have loaded. Previously Projects
   listed only open projects and Archive only archived ones, so these had no entry point.
 - Lists, Projects and Archive search also matches list descriptions and project why and notes.

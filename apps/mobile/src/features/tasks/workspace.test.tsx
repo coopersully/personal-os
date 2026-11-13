@@ -553,6 +553,25 @@ it.each([
   await loaded();
   expect(screen.getByRole("button", { name: "Add task" })).toBeVisible();
 });
+it("offers no Add in a project whose list is archived, or before the project is known", async () => {
+  h.lists.push(list("old", "Old list", { availability: "archived" }));
+  h.projects = [project("attic", "Attic", { listId: "old" }), project("trip", "Trip")];
+  const view = show({
+    standalone: true,
+    scope: { view: "all", status: "all", projectId: "attic", listId: "old" },
+  });
+  await loaded();
+  await waitFor(() => expect(h.listTaskProjects).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument(),
+  );
+  view.unmount();
+  h.listTaskProjects.mockReset().mockRejectedValue(new Error("offline"));
+  show({ standalone: true, scope: { view: "all", projectId: "trip", listId: "inbox" } });
+  await loaded();
+  await waitFor(() => expect(h.listTaskProjects).toHaveBeenCalled());
+  expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
+});
 it("explains an empty project status and keeps status chips off Lists", async () => {
   h.projects = [project("trip", "Trip")];
   const view = render(

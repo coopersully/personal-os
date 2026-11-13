@@ -24,6 +24,7 @@ import {
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMerchants,
+  financeMutationRecords,
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
@@ -92,11 +93,14 @@ import type {
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import {
+  type FinanceProviderSourceAdmissionResult,
   financeDomainProfileSchema,
   financeMaintenanceCandidateItemDraftSchema,
   financeMaintenanceCandidateItemPageSchema,
   financeMaintenanceCandidateItemProjectionSchema,
   financeMaintenanceCandidateSchema,
+  financeProviderSourceActionInputSchema,
+  financeProviderSourceAdmissionResultSchema,
   financeReviewReasonSchema,
   idSchema,
   localDateAt,
@@ -141,10 +145,13 @@ import { createFinanceBudgetBucketService } from "./finance/budget-bucket-servic
 import { readFinanceConfiguration } from "./finance/configuration-service.js";
 import { createFinanceConnectionHandoffService } from "./finance/connection-handoff-service.js";
 import {
+  executeFinanceAdmittedMutation,
   executeFinanceIdempotently,
   type FinanceMutationContext,
   loadFinanceAuthorization,
+  readFinanceAdmittedReceipt,
   requireFinanceExecution,
+  type FinanceTransaction as SourceAdmissionTransaction,
 } from "./finance/context.js";
 import {
   contextualSubtype,
@@ -832,6 +839,122 @@ export function createFinanceService({
       readTransactionHistory: (input) => providerItems.readTransactionHistory(input, plaid),
     },
   });
+  type SourceAcquisition = Awaited<
+    ReturnType<typeof providerTransactionEvidence.acquireSourceFacts>
+  >;
+  type SourceInput = ReturnType<typeof financeProviderSourceActionInputSchema.parse>;
+  type SourceContext = { principal: Principal; requestId: string; sourceFactsSessionHash?: string };
+  const activeSourceAdmissions = new Set<string>();
+  const sourceDigest = (value: unknown) =>
+    `sha256:${createHash("sha256")
+      .update(
+        stableFinanceActionInput(
+          JSON.parse(
+            JSON.stringify(value, (_, child) =>
+              typeof child === "bigint" ? child.toString() : child,
+            ),
+          ),
+        ),
+      )
+      .digest("hex")}`;
+  const sourceOperation = (input: SourceInput, sourceHash: string, principal: Principal) => ({
+    idempotencyKey: input.idempotencyKey,
+    operation: "finance.transaction.admit_source_facts",
+    payload: { actionKind: "transaction", input, sourceHash },
+    sourceKind: principal.actorType === "agent" ? ("agent" as const) : ("app" as const),
+  });
+  async function sourceAuthority(tx: SourceAdmissionTransaction, context: SourceContext) {
+    if (!context.principal.scopes.has("finances:write"))
+      throw new AppError("forbidden", "Finance source admission requires finances:write.");
+    await providerTransactionEvidence.assertCurrentAuthority(
+      context.principal,
+      tx,
+      context.sourceFactsSessionHash,
+    );
+    const authorization = await loadFinanceAuthorization({
+      db: tx,
+      principal: context.principal,
+      requestId: context.requestId,
+    });
+    await requireFinanceExecution(tx, authorization, now());
+    return authorization;
+  }
+  async function lockSourceAdmission(
+    tx: SourceAdmissionTransaction,
+    input: SourceInput,
+    context: SourceContext,
+  ) {
+    await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+      actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+      connectionIds: context.principal.authorizationConnectionId
+        ? [context.principal.authorizationConnectionId]
+        : [],
+    });
+    const authorization = await sourceAuthority(tx, context);
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${context.principal.userId}`}, 0))`,
+    );
+    for (const id of input.targets.map((target) => target.transactionId).sort())
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`transaction:${id}`}, 0))`,
+      );
+    return authorization;
+  }
+  async function sourceReplay(
+    tx: SourceAdmissionTransaction,
+    input: SourceInput,
+    context: SourceContext,
+    authorization: FinanceMutationContext,
+  ) {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`finance-mutation:${context.principal.userId}:${input.idempotencyKey}`}, 0))`,
+    );
+    const existing = await tx.query.financeMutationRecords.findFirst({
+      where: and(
+        eq(financeMutationRecords.userId, context.principal.userId),
+        eq(financeMutationRecords.idempotencyKey, input.idempotencyKey),
+      ),
+    });
+    if (!existing) return null;
+    if (
+      existing.actorType !== context.principal.actorType ||
+      existing.actorId !== context.principal.actorId ||
+      existing.operation !== "finance.transaction.admit_source_facts"
+    )
+      throw new AppError(
+        "invalid_request",
+        "That idempotency key belongs to different Finance work.",
+      );
+    if (existing.status !== "completed" || !existing.response)
+      throw new AppError("conflict", "Source admission is already in progress or failed.");
+    const parsed = financeProviderSourceAdmissionResultSchema.safeParse(existing.response);
+    if (!parsed.success) throw new AppError("conflict", "The source admission receipt is invalid.");
+    await readFinanceAdmittedReceipt(
+      tx,
+      authorization,
+      sourceOperation(input, parsed.data.sourceHash, context.principal),
+    );
+    const audits = await tx
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.userId, context.principal.userId),
+          eq(auditEvents.entityId, existing.id),
+          eq(auditEvents.action, "finance.source_facts_admitted"),
+        ),
+      );
+    const audit = audits.length === 1 ? audits[0] : undefined;
+    if (
+      !audit ||
+      audit.actorId !== context.principal.actorId ||
+      audit.actorType !== context.principal.actorType ||
+      audit.after?.sourceHash !== parsed.data.sourceHash ||
+      audit.after?.responseHash !== sourceDigest(parsed.data)
+    )
+      throw new AppError("conflict", "The source admission audit does not match its receipt.");
+    return parsed.data;
+  }
   const accountHandoff = createFinanceConnectionHandoffService({
     db,
     ...(log ? { log } : {}),
@@ -4125,6 +4248,147 @@ export function createFinanceService({
     resolveScopeAccountId: maintenanceScopeAccountId,
   });
   return {
+    /** Transaction-action orchestration: replay first; provider read outside locks; one guarded commit. */
+    async runProviderSourceAdmission(
+      rawInput: SourceInput,
+      context: SourceContext,
+      apply: (
+        tx: SourceAdmissionTransaction,
+        acquisition: SourceAcquisition,
+        sourceHash: string,
+      ) => Promise<unknown>,
+    ): Promise<FinanceProviderSourceAdmissionResult> {
+      const input = financeProviderSourceActionInputSchema.parse(rawInput);
+      const replay = await db.transaction(async (tx) => {
+        const authorization = await lockSourceAdmission(tx, input, context);
+        return sourceReplay(tx, input, context, authorization);
+      });
+      if (replay) return replay;
+      const activeKey = `${context.principal.userId}:${input.idempotencyKey}`;
+      if (activeSourceAdmissions.has(activeKey))
+        throw new AppError("conflict", "Source admission is already in progress.");
+      activeSourceAdmissions.add(activeKey);
+      try {
+        const acquisition = await providerTransactionEvidence.acquireSourceFacts(
+          context.principal,
+          input.targets,
+          context.sourceFactsSessionHash,
+        );
+        const sourceHash = sourceDigest(acquisition);
+        return await db.transaction(async (tx) => {
+          const authorization = await lockSourceAdmission(tx, input, context);
+          const committed = await sourceReplay(tx, input, context, authorization);
+          if (committed) return committed;
+          const result = await executeFinanceAdmittedMutation(
+            tx,
+            authorization,
+            sourceOperation(input, sourceHash, context.principal),
+            async () => {
+              await providerTransactionEvidence.revalidateSourceFacts(
+                context.principal,
+                input.targets,
+                acquisition,
+                tx,
+                context.sourceFactsSessionHash,
+              );
+              return { state: "admitted", prepared: acquisition };
+            },
+            async () => {
+              const entries = await apply(tx, acquisition, sourceHash);
+              if (!Array.isArray(entries))
+                throw new AppError(
+                  "internal_error",
+                  "Source admission returned an invalid result.",
+                );
+              const response = financeProviderSourceAdmissionResultSchema.parse({
+                sourceHash,
+                observedAt: acquisition.observedAt,
+                providerUpdatedAt: acquisition.providerUpdatedAt,
+                snapshotConsistency: "not_atomic",
+                entries: financeProviderSourceAdmissionResultSchema.shape.entries.element
+                  .omit({ source: true })
+                  .array()
+                  .parse(entries)
+                  .map((entry) => {
+                    const fact = acquisition.facts.find(
+                      (fact) => fact.transactionId === entry.transactionId,
+                    );
+                    if (!fact)
+                      throw new AppError("internal_error", "A source admission target was lost.");
+                    return {
+                      ...entry,
+                      source: {
+                        amount: fact.sourceAmount,
+                        currencyCode: fact.currencyCode,
+                        date: fact.date,
+                      },
+                    };
+                  }),
+              });
+              const receipt = await tx.query.financeMutationRecords.findFirst({
+                where: and(
+                  eq(financeMutationRecords.userId, context.principal.userId),
+                  eq(financeMutationRecords.idempotencyKey, input.idempotencyKey),
+                ),
+              });
+              if (!receipt)
+                throw new AppError("internal_error", "Source admission receipt was not created.");
+              await tx.insert(auditEvents).values({
+                userId: context.principal.userId,
+                actorId: context.principal.actorId,
+                actorType: context.principal.actorType,
+                requestId: context.requestId,
+                entityType: "finance_source_admission",
+                entityId: receipt.id,
+                action: "finance.source_facts_admitted",
+                before: {
+                  entries: response.entries.map((entry) => ({
+                    transactionId: entry.transactionId,
+                    ...entry.before,
+                  })),
+                },
+                after: {
+                  sourceHash,
+                  responseHash: sourceDigest(response),
+                  entries: response.entries.map((entry) => ({
+                    transactionId: entry.transactionId,
+                    ...entry.after,
+                  })),
+                },
+              });
+              await sourceAuthority(tx, context);
+              return response;
+            },
+          );
+          await sourceAuthority(tx, context);
+          return financeProviderSourceAdmissionResultSchema.parse(result);
+        });
+      } finally {
+        activeSourceAdmissions.delete(activeKey);
+      }
+    },
+    async applyProviderSourceFacts(
+      acquisition: SourceAcquisition,
+      sourceHash: string,
+      input: SourceInput,
+      context: SourceContext,
+      tx: SourceAdmissionTransaction,
+    ) {
+      const authorization = await sourceAuthority(tx, context);
+      await providerTransactionEvidence.revalidateSourceFacts(
+        context.principal,
+        input.targets,
+        acquisition,
+        tx,
+        context.sourceFactsSessionHash,
+      );
+      return canonicalLedger.admitProviderSourceFacts(
+        acquisition.facts,
+        sourceHash,
+        authorization,
+        tx,
+      );
+    },
     readFinanceProviderTransactionEvidence(
       principal: Principal,
       input: FinanceProviderTransactionEvidenceInput,

@@ -115,11 +115,35 @@ notification sender, financial operation or authority.
 The status transaction supplies its authenticated owner, exact current approved plan/version and
 one observation instant. Baseline qualification, personal-cost Spending, position and canonical
 cashflow readers accept that caller-owned transaction rather than opening independent snapshots.
-The reader validates persisted budget ownership and version before projection. Composed input
-preflights retain at most the existing cashflow source ceiling plus one owner-ID row per source
-table. Exceeding that ceiling withholds the new room context before full row loading; evidence is
-never silently truncated. This bound does not certify source completeness or classify financial
-materiality. Spending covers the
+The reader validates persisted budget ownership and version before projection. Its private scoped
+ledger reader seeds the qualified accounts and observed local posting days, then follows complete
+recognition dependencies: current latest-per-event relationship versions and transaction-set
+supersession, pending/posted
+provider identities, reconciled transfer groups, allocations, reimbursements and matched credits.
+Historical links discover distinct event identities; only their latest versions consume the
+current relationship bound and supply peer references. This also prevents a malformed superseding
+version from disappearing merely because its historical pointer touched the selected scope.
+Superseded versions remain stored history and do not pull their obsolete peers into the closure. Relevant peers remain included across account and period boundaries.
+Every query and closure set
+uses the unchanged 1,000-row per-source ceiling plus one overflow row; overflow, malformed or
+missing required owned evidence withholds the new room context. No truncated graph is admitted as
+complete. Unrelated lifetime transaction history does not by itself suppress a small observed scope.
+Non-ledger metadata still uses its existing bounded complete-owner reads; this change does not
+remove those separate limits.
+
+Spending and Position consume that graph only through private caller-transaction inputs bound to
+the exact owner, period and account set. Their private source revisions include the closed rows,
+including native revisions and relevant external edges, while standalone reader contracts remain
+unchanged. Cashflow uses the same bounded graph mechanism for recognition, but retains all known
+selected-funding-account history for opening-balance reflection checks. Historical funding overflow
+therefore keeps payday evidence unavailable instead of dropping unreviewed actuals. Closure
+completeness certifies only that these dependencies were read, not statement coverage, trustworthy
+financial facts, obligation completeness or authority. Private cashflow reads additionally retain
+bounded owned relationship history touching the closed transaction set for the existing persisted
+match fingerprint and linked-eligibility contract. This history does not expand recognition edges;
+current/trusted recognition still uses the owning oracle. Historical relationship overflow withholds
+cashflow estimates without suppressing complete observed category amounts. Existing fingerprint
+bytes and standalone matching defaults remain unchanged. Spending covers the
 qualified budget accounts from the month's first day through the owner's current local date;
 future dates are not observed usage. Cashflow funding uses the owned cash-account subset, not debt
 or excluded accounts. A payday income identity must be explicitly attached to all income resources

@@ -235,6 +235,21 @@ it("moves between days with the arrows, the week strip and Today", async () => {
   expect(screen.queryByRole("button", { name: "Go to today" })).toBeNull();
 });
 
+it("keeps every crowded event named when five overlap", async () => {
+  const names = ["Design review", "Roadmap sync", "Hiring panel", "Budget check", "Vendor call"];
+  h.api.listEvents.mockResolvedValue(
+    names.map((name) => event(name, "2026-11-13T15:00:00.000Z", "2026-11-13T16:00:00.000Z")),
+  );
+  mount(<CalendarRoute />);
+  for (const name of names) {
+    const block = await screen.findByRole("button", {
+      name: `${name}, 10:00 AM – 11:00 AM, Work, overlaps another event`,
+    });
+    // Narrow columns give their room to the title rather than a clipped time.
+    expect(block).toHaveTextContent(new RegExp(`^${name}$`));
+  }
+});
+
 it("starts the week strip on the account's chosen weekday", async () => {
   h.api.getWorkspaceSettings.mockResolvedValue({
     workspace: "calendar",
@@ -486,6 +501,7 @@ it("is honest about all-day, cancelled, unsynced and pending-call events", async
   expect(screen.getByText("The video link is still being created.")).toBeVisible();
   expect(await screen.findByText("work@example.test · Read only")).toBeVisible();
   expect(screen.getByText("Not updated yet")).toBeVisible();
+  expect(screen.getByText("Source · This event may be out of date")).toBeVisible();
   first.unmount();
 
   h.api.listCalendars.mockResolvedValue([]);

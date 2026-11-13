@@ -128,10 +128,8 @@ export function CalendarEventScreen() {
           />
           {freshness && (
             <RecordRow
-              title="Source"
-              value={freshness.label}
-              valueTone={freshness.attention ? "attention" : undefined}
-              accessibilityHint={freshness.attention ? "This event may be out of date." : undefined}
+              title={freshness.label}
+              subtitle={freshness.attention ? "Source · This event may be out of date" : "Source"}
               leading={icon("refresh")}
             />
           )}

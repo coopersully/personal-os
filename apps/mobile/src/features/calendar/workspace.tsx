@@ -372,6 +372,9 @@ function Timeline({
           const color = eventColor(event, calendars);
           const height = Math.max(28, ((endMinute - startMinute) / 60) * hourHeight - 2);
           const time = eventTimeLabel(event, day, timeZone);
+          // Three or more side-by-side blocks are too narrow for one line; let the title wrap
+          // through the block's height. The accessible label always carries the whole event.
+          const narrow = columns > 2;
           return (
             <Pressable
               key={event.id}
@@ -404,15 +407,23 @@ function Timeline({
                   borderLeftWidth: 3,
                   borderLeftColor: color,
                   backgroundColor: `${color}26`,
-                  paddingHorizontal: spacing.sm,
+                  paddingHorizontal: narrow ? spacing.xs : spacing.sm,
                   paddingVertical: 4,
                   opacity: event.status === "cancelled" ? 0.6 : 1,
                 }}
               >
-                <Text numberOfLines={1} style={{ color: t.ink, fontSize: 14, fontWeight: "600" }}>
+                <Text
+                  numberOfLines={narrow ? Math.max(1, Math.floor((height - 8) / 16)) : 1}
+                  style={{
+                    color: t.ink,
+                    fontSize: narrow ? 12 : 14,
+                    lineHeight: narrow ? 16 : undefined,
+                    fontWeight: "600",
+                  }}
+                >
                   {event.title}
                 </Text>
-                {height >= 44 && (
+                {height >= 44 && !narrow && (
                   <Text numberOfLines={1} style={{ color: t.secondary, fontSize: 12 }}>
                     {[time, event.location].filter(Boolean).join(" · ")}
                   </Text>

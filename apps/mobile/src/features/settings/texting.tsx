@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { AppState, Linking, Text } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
+import { SectionNote } from "../../components/forms/section-content";
 import { holdReadFeedback } from "../../components/read-feedback-scope";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
@@ -140,17 +141,17 @@ function Texting() {
               />
             </>
           )}
-          <Text style={{ padding: 16, color: t.secondary }}>
+          <SectionNote>
             Texting is unavailable on this deployment. Phone setup and verification are unavailable
             until the service is configured.
-          </Text>
+          </SectionNote>
         </Section>
         {(challenge || dirty) && (
           <Section title="Phone Setup">
-            <Text style={{ padding: 16, color: t.secondary }}>
+            <SectionNote>
               A code already requested may still arrive. Cancel phone setup to clear this local
               setup.
-            </Text>
+            </SectionNote>
             <Action label="Cancel phone setup" disabled={action.pending} onPress={cancel} />
           </Section>
         )}
@@ -243,12 +244,12 @@ function Texting() {
         <Section title={challenge ? "Verify phone" : "Connect phone"}>
           {challenge ? (
             <>
-              <Text style={{ padding: 16, color: t.secondary }}>
+              <SectionNote>
                 Code requested for {challenge.maskedPhoneNumber}.{" "}
                 {expired
                   ? "This code has expired."
                   : `Expires ${new Date(challenge.expiresAt).toLocaleTimeString()}.`}
-              </Text>
+              </SectionNote>
               <Field
                 label="Verification code"
                 placeholder="123456"
@@ -324,13 +325,13 @@ function Texting() {
                 disabled={action.pending}
                 onChange={setConsent}
               />
-              <Text style={{ padding: 16, color: t.secondary }}>
+              <SectionNote>
                 I agree to receive verification codes and conversational agent texts, reminders,
                 workspace updates, and questions from nohmi at the number I provide. Message
                 frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or
                 HELP for help. Consent is optional and is not a condition of purchase or of using
                 nohmi.
-              </Text>
+              </SectionNote>
               <Action label="Privacy policy" onPress={() => open("privacy")} />
               <Action label="Terms of use" onPress={() => open("terms")} />
               <Action label="SMS terms" onPress={() => open("sms")} />

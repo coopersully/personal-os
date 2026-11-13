@@ -102,7 +102,10 @@ vi.mock("../../components/forms/planning-picker", () => ({
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../theme", () => ({
+  spacing: { xs: 4, sm: 8, md: 12, lg: 16, page: 20 },
+  useTheme: () => ({}),
+}));
 vi.mock("../auth/context", () => ({
   useAuth: () => ({
     state: { user: { id: "fixture", planningTimezone: h.timezone } },

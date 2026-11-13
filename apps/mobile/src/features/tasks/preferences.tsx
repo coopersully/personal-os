@@ -1,9 +1,10 @@
 import type { TasksWorkspacePreferences, WorkspaceSettings } from "@personal-os/domain";
 import { router, Stack } from "expo-router";
 import { type ReactNode, useState } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
+import { SectionNote } from "../../components/forms/section-content";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { useTaskAction, useTaskApi, useTaskResources } from "./data";
@@ -40,7 +41,7 @@ function Preferences({
   relatedSettings?: ReactNode;
   lists: { value: string; label: string }[];
 }) {
-  const t = useTheme();
+  const _t = useTheme();
   const api = useTaskApi();
   const action = useTaskAction();
   const [initial, setInitial] = useState(opened);
@@ -172,9 +173,7 @@ function Preferences({
           />
         </Section>
         <Section title="Task row details">
-          <Text style={{ color: t.secondary, padding: 16 }}>
-            These row-detail preferences configure the web app.
-          </Text>
+          <SectionNote>These row-detail preferences configure the web app.</SectionNote>
           {(["estimate", "tags", "notes"] as const).map((detail) => (
             <ToggleRow
               key={detail}

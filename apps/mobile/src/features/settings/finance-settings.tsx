@@ -17,10 +17,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
 import { router, Stack } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FormSave } from "../../components/forms/form-save";
 import { PlanningPicker } from "../../components/forms/planning-picker";
+import { SectionNote } from "../../components/forms/section-content";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
@@ -145,7 +146,7 @@ function NullableNumber({
   );
 }
 export function FinanceConfigurationSettings() {
-  const t = useTheme();
+  const _t = useTheme();
   const configuration = useSettingsResource("finance-configuration", (api) =>
     api.getFinanceConfiguration(),
   );
@@ -166,10 +167,10 @@ export function FinanceConfigurationSettings() {
         />
         <Action label="Payroll details" onPress={() => router.push("/settings/finances/payroll")} />
         {Object.entries(config.capabilities).map(([key, value]) => (
-          <Text key={key} style={{ color: t.secondary, padding: 16 }}>
+          <SectionNote key={key}>
             {human(key)}: {human(value.state)}
             {value.reason ? ` · ${value.reason}` : ""}
-          </Text>
+          </SectionNote>
         ))}
       </Section>
       {config.preferences.state === "loaded" && config.accounts.state === "loaded" ? (
@@ -316,7 +317,7 @@ function FinancialProfileLoader() {
 }
 function FinancialProfileEditor({ initial }: { initial: FinanceProfileVersion | null }) {
   const { state } = useAuth();
-  const t = useTheme();
+  const _t = useTheme();
   const action = useSettingsAction();
   const cache = useQueryClient();
   const [baseline, setBaseline] = useState(initial);
@@ -537,10 +538,10 @@ function FinancialProfileEditor({ initial }: { initial: FinanceProfileVersion | 
             )
           }
         />
-        <Text style={{ color: t.secondary, padding: 16 }}>
+        <SectionNote>
           Profile version {baseline?.version ?? 0}. Reliable income, stated planning needs and
           qualified account balances are separate.
-        </Text>
+        </SectionNote>
       </FormBody>
       <FormSave
         workspace="finances"

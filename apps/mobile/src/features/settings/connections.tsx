@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AppState, Linking, Modal, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
+import { SectionNote } from "../../components/forms/section-content";
 import { Icon } from "../../components/icons";
 import { Screen } from "../../components/screen";
 import { SheetHeader } from "../../components/sheet-header";
@@ -223,7 +224,7 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                   icon="calendar"
                 />
                 {!account.mailEnabled && !account.calendarEnabled && (
-                  <Text style={{ color: t.secondary, padding: 16 }}>No services enabled</Text>
+                  <SectionNote>No services enabled</SectionNote>
                 )}
                 {Object.entries(account.capabilities ?? {}).map(([service, capability]) => (
                   <SettingsDetailRow
@@ -394,7 +395,7 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                 />
               </>
             ) : (
-              <Text style={{ padding: 16, color: t.secondary }}>No X account connected.</Text>
+              <SectionNote>No X account connected.</SectionNote>
             )}
             <SettingsActionRow
               leading={<ProviderMark brand="x" decorative />}

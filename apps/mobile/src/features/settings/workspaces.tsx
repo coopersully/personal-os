@@ -15,10 +15,11 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FloatingAdd, FormSave } from "../../components/forms/form-save";
+import { SectionNote } from "../../components/forms/section-content";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import type { IconName } from "../../components/icons";
 import { useTheme } from "../../theme";
@@ -155,7 +156,7 @@ const preferenceGroups = [
   },
 ];
 function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings }) {
-  const t = useTheme();
+  const _t = useTheme();
   const action = useSettingsAction();
   const cache = useQueryClient();
   const { state, session } = useAuth();
@@ -287,7 +288,7 @@ function WorkspacePreferencesEditor({ initial }: { initial: WorkspaceSettings })
         const keys = group.keys.filter((key) => key in draft);
         return keys.length > 0 ? (
           <Section key={group.title} title={group.title}>
-            {group.help && <Text style={{ color: t.secondary, padding: 16 }}>{group.help}</Text>}
+            {group.help && <SectionNote>{group.help}</SectionNote>}
             {keys.map(control)}
           </Section>
         ) : null;
@@ -334,7 +335,7 @@ function NumberPreference({
   );
 }
 function GuidanceEditor({ initial }: { initial: DomainProfile }) {
-  const t = useTheme();
+  const _t = useTheme();
   const action = useSettingsAction();
   const cache = useQueryClient();
   const [baseline, setBaseline] = useState(initial);
@@ -411,9 +412,9 @@ function GuidanceEditor({ initial }: { initial: DomainProfile }) {
               }),
             }}
           />
-          <Text style={{ color: t.secondary, padding: 16 }}>
+          <SectionNote>
             Version {baseline.version} · {baseline.status}
-          </Text>
+          </SectionNote>
           <Field
             label="Objective"
             value={objective}

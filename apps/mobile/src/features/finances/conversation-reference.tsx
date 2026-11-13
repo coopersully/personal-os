@@ -84,25 +84,35 @@ function BudgetReference({ id, versionId }: { id: string; versionId: string }) {
     (api) => api.getFinanceCategories(),
     !!plan?.allocations.some((item) => item.kind === "spending" && !!item.categoryId),
   );
-  const needsAccounts = !!plan?.allocations.some((item) => item.kind === "debt");
+  const needsAccounts =
+    !!plan?.allocations.some((item) => item.kind === "debt") ||
+    !!plan?.resources.some((item) => item.sourceId);
   const needsGoals = !!plan?.allocations.some((item) => "goalId" in item && !!item.goalId);
   const accounts = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts(), needsAccounts);
   const goals = useFinanceRead(["goals"], (api) => api.listFinanceGoals(), needsGoals);
-  const identitiesReady = plan?.allocations.every((item) => {
-    if (item.kind === "debt")
-      return (
-        !accounts.isError &&
-        !accounts.isFetching &&
-        accounts.data?.accounts.some((account) => account.id === item.accountId)
-      );
-    if ("goalId" in item && item.goalId)
-      return (
-        !goals.isError &&
-        !goals.isFetching &&
-        goals.data?.data.some((goal) => goal.id === item.goalId)
-      );
-    return true;
-  });
+  const identitiesReady =
+    plan?.resources.every(
+      (item) =>
+        !item.sourceId ||
+        (!accounts.isError &&
+          !accounts.isFetching &&
+          accounts.data?.accounts.some((account) => account.id === item.sourceId)),
+    ) &&
+    plan?.allocations.every((item) => {
+      if (item.kind === "debt")
+        return (
+          !accounts.isError &&
+          !accounts.isFetching &&
+          accounts.data?.accounts.some((account) => account.id === item.accountId)
+        );
+      if ("goalId" in item && item.goalId)
+        return (
+          !goals.isError &&
+          !goals.isFetching &&
+          goals.data?.data.some((goal) => goal.id === item.goalId)
+        );
+      return true;
+    });
   const [showAssumptions, setShowAssumptions] = useState(false);
   const active = useMountedReference();
   const approval = useRef<{ version: string; key: string } | null>(null);
@@ -121,6 +131,7 @@ function BudgetReference({ id, versionId }: { id: string; versionId: string }) {
         expectedVersion: plan.version,
         expectedProfileVersionId: plan.profileVersionId ?? null,
         approvalSource: "user_instruction",
+        confirmExpectedResources: true,
         idempotencyKey: approval.current.key,
       });
       if (
@@ -157,7 +168,16 @@ function BudgetReference({ id, versionId }: { id: string; versionId: string }) {
                 {plan.resources.map((resource) => (
                   <FinanceRow
                     key={resource.key}
-                    title={resource.description ?? financeLabel(resource.kind)}
+                    title={resource.description ?? resource.key}
+                    subtitle={[
+                      financeLabel(resource.kind),
+                      resource.sourceId
+                        ? (accounts.data?.accounts.find(
+                            (account) => account.id === resource.sourceId,
+                          )?.name ?? "Source unavailable")
+                        : "Owner estimate",
+                    ].join(" · ")}
+                    icon="wallet"
                     value={formatMoney(resource.amount, null)}
                   />
                 ))}
@@ -260,9 +280,16 @@ function BudgetReference({ id, versionId }: { id: string; versionId: string }) {
             !query.isError &&
             !query.isFetching &&
             !pending ? (
-              <Button onPress={() => void approve()}>
-                Approve {month} v{plan.version} · {formatMoney(plan.allocatedTotal, null)}
-              </Button>
+              <>
+                <Copy secondary>
+                  Confirm that you reasonably expect the listed resources to fund this month’s plan.
+                  Expected funding is not received or spendable cash.
+                </Copy>
+                <Button onPress={() => void approve()}>
+                  Confirm resources and approve {month} v{plan.version} ·{" "}
+                  {formatMoney(plan.allocatedTotal, null)}
+                </Button>
+              </>
             ) : plan.status === "proposed" && readiness && !readiness.ready ? (
               <Copy>{readiness.message}</Copy>
             ) : null}

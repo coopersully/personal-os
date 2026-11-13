@@ -14,6 +14,7 @@ import {
   financeProviderItems,
   financeReviewActionRequests,
   financeReviewBatchApprovals,
+  financeReviewBatchEffects,
   financeReviewBatchRuns,
   financeReviewCases,
   financeTransactions,
@@ -644,6 +645,37 @@ describe.sequential("durable Finance review batches", () => {
         f.context,
       ),
     ).toEqual(result);
+  });
+  it("rejects a saved legacy correction without frozen impact details before changing either leg", async () => {
+    const f = await pairFixture(2);
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.pairDecision] },
+      f.context,
+    );
+    await f.service.execute(
+      preview.id,
+      { fingerprint: preview.fingerprint, confirmTransferPairs: true },
+      f.context,
+    );
+    const correction = await f.service.previewUndo(
+      { batchId: preview.id, outcomeIndexes: [0], idempotencyKey: randomUUID() },
+      f.context,
+    );
+    const beforeLeft = await transaction(f.left.id);
+    const beforeRight = await transaction(f.right.id);
+    await database.db
+      .update(financeReviewBatchEffects)
+      .set({ before: sql`${financeReviewBatchEffects.before} - 'display'` })
+      .where(eq(financeReviewBatchEffects.batchId, preview.id));
+    await expect(
+      f.service.executeUndo(
+        correction.id,
+        { fingerprint: correction.fingerprint, limit: 10 },
+        f.context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await transaction(f.left.id)).toEqual(beforeLeft);
+    expect(await transaction(f.right.id)).toEqual(beforeRight);
   });
   it("refuses undo after a later edit instead of overwriting that edit", async () => {
     const f = await pairFixture();

@@ -1918,7 +1918,7 @@ const proposal = {
   allocations: [{ key: "food-groceries", kind: "spending", categoryId: "category", amount: 500 }],
   assumptions: ["Confirm recurring income"],
 };
-const approveLabel = /Approve November 2026 v8.*500/;
+const approveLabel = /Confirm resources and approve November 2026 v8.*500/;
 it("approves the exact linked budget and keeps its retry identity after an uncertain response", async () => {
   h.params = { kind: "budget_plan", id: "plan-1", versionId: "version-8" };
   h.api.getFinanceBudget.mockResolvedValue({ data: proposal, approvalReadiness: { ready: true } });
@@ -2031,6 +2031,7 @@ it("requires exact account and goal identities before allowing approval", async 
   h.api.getFinanceBudget.mockResolvedValue({
     data: {
       ...proposal,
+      resources: [{ key: "Expected pay", kind: "income", amount: 500, sourceId: account.id }],
       allocations: [
         {
           key: "debt",
@@ -4086,4 +4087,27 @@ it("shows frozen merchant and currency amount on the batch approval card", async
   mount(<FinanceConversationReference />);
   expect(await screen.findByText("Neighborhood market")).toBeVisible();
   expect(screen.getByText(/\$78\.25/)).toBeVisible();
+});
+
+it("keeps approved funding that needs confirmation visible on Plan", async () => {
+  h.params = { view: "Budget" };
+  h.api.getFinanceBudget.mockResolvedValue({
+    data: {
+      allocatedTotal: 500,
+      effectiveFrom: "2026-11",
+      status: "active",
+      version: 1,
+      allocations: [],
+      resources: [],
+      assumptions: [],
+    },
+    planContext: { inputsCurrent: true, resourcesConfirmed: false },
+  });
+  mount(<FinancePlanScreen />);
+  await screen.findByText("Review needed");
+  fireEvent.click(screen.getByRole("button", { name: /Plan inputs/ }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/finances/assistant",
+    params: { view: "Conversation" },
+  });
 });

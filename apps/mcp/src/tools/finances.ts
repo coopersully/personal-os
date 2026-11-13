@@ -133,6 +133,12 @@ const resource = z.object({
   sourceId: id.optional(),
 });
 const budget = {
+  expectedInputFingerprint: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .describe(
+      "Exact planningInputs fingerprint returned by get_finance_budget for this month. Review that snapshot before constructing resources and allocations.",
+    ),
   allocations: z.array(allocation).min(1).max(500),
   assumptions: z.array(z.string().min(1).max(1000)).max(100),
   effectiveFrom: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
@@ -758,11 +764,20 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read the latest complete budget version, all resources and allocations, its balance proof, assumptions, and approval state.",
-      inputSchema: { planId: id.optional() },
+        "Read the latest complete budget version, all resources and allocations, its balance proof, assumptions, approval state, and exact planningInputs snapshot. Pass the target month before preparing a new proposal; use the returned fingerprint when creating or revising it.",
+      inputSchema: {
+        planId: id.optional(),
+        month: z
+          .string()
+          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+          .optional(),
+      },
       title: "Get Finance budget",
     },
-    async ({ planId }) => financeApiResult(() => api.getFinanceBudget(planId)),
+    async ({ planId, month }) =>
+      financeApiResult(() =>
+        month ? api.getFinanceBudget(planId, month) : api.getFinanceBudget(planId),
+      ),
   );
 
   server.registerTool(

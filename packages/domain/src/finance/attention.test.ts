@@ -22,6 +22,14 @@ const project = (records: FinanceAttentionRecord[], overrides = {}) =>
   });
 
 describe("Finance active attention", () => {
+  it("does not report budget-ready when an approved budget has stale planning inputs", () => {
+    expect(project([], { budgetInputsCurrent: false })).toMatchObject({
+      activeDecisionCount: 0,
+      budgetReady: false,
+    });
+    expect(project([], { budgetInputsCurrent: true }).budgetReady).toBe(true);
+    expect(project([], { budgetResourcesConfirmed: false }).budgetReady).toBe(false);
+  });
   it("separates historical work without treating flags as human decisions", () => {
     expect(
       project([

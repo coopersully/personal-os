@@ -1166,7 +1166,15 @@ export function registerFinanceRoutes({
   );
   app.get("/v1/finances/budget-plans", async (context) =>
     context.json(
-      await finances.getFinanceBudget(context.get("principal").userId, context.req.query("planId")),
+      await finances.getFinanceBudget(
+        context.get("principal").userId,
+        context.req.query("planId"),
+        z
+          .string()
+          .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+          .optional()
+          .parse(context.req.query("month")),
+      ),
     ),
   );
   app.post("/v1/finances/budget-plans", async (context) =>

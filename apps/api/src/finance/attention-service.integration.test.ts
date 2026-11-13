@@ -4,12 +4,16 @@ import {
   financeAccounts,
   financeConversationMessages,
   financeOpeningStatements,
+  financeReviewBatchApprovals,
+  financeReviewBatchCorrections,
+  financeReviewBatchEffects,
   financeReviewBatchRuns,
   financeTransactions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import { createFinanceAttentionService } from "./attention-service.js";
 
@@ -168,10 +172,7 @@ describe.sequential("Finance budget starting policy", () => {
       readiness: { openingPositionQualified: false },
     });
   });
-  it.each([
-    false,
-    true,
-  ])("scopes a published batch to its actual transactions (mixed=%s)", async (mixed) => {
+  async function publishedBatch(mixed: boolean) {
     const { owner, account } = await qualifiedBoundary();
     const transactions = await database.db
       .insert(financeTransactions)
@@ -216,10 +217,110 @@ describe.sequential("Finance budget starting policy", () => {
       idempotencyKey: crypto.randomUUID(),
       createdAt: new Date("2026-11-12T12:00:00Z"),
     });
+    return { owner, account, transactions, batch };
+  }
+  it.each([
+    false,
+    true,
+  ])("scopes a published batch to its actual transactions (mixed=%s)", async (mixed) => {
+    const { owner } = await publishedBatch(mixed);
     expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
       activeDecisionCount: mixed ? 1 : 0,
       historicalRecordCount: 2,
       rawCounts: { approvals: 1 },
+    });
+  });
+  it.each([
+    false,
+    true,
+  ])("scopes a published correction to both saved legs (mixed=%s)", async (mixed) => {
+    const { owner, transactions, batch } = await publishedBatch(mixed);
+    await database.db
+      .update(financeReviewBatchRuns)
+      .set({ outcomes: transactions.map((_, index) => ({ index, status: "applied" })) })
+      .where(eq(financeReviewBatchRuns.id, batch.id));
+    await database.db
+      .update(financeTransactions)
+      .set({ needsReview: false })
+      .where(eq(financeTransactions.userId, owner.principal.userId));
+    await database.db.insert(financeReviewBatchEffects).values({
+      userId: owner.principal.userId,
+      batchId: batch.id,
+      outcomeIndex: 0,
+      before: { transactions: transactions.map((item) => ({ id: item.id })) },
+      after: {},
+      createdAt: new Date("2026-11-12T12:00:00Z"),
+    });
+    const [correction] = await database.db
+      .insert(financeReviewBatchCorrections)
+      .values({
+        userId: owner.principal.userId,
+        batchId: batch.id,
+        actorId: owner.principal.userId,
+        actorType: "user",
+        idempotencyKey: crypto.randomUUID(),
+        fingerprint: "frozen-fixture",
+        outcomeIndexes: [0],
+      })
+      .returning();
+    if (!correction) throw new Error("Missing correction");
+    await database.db.insert(financeConversationMessages).values({
+      userId: owner.principal.userId,
+      sequence: 2n,
+      authorKind: "agent",
+      text: "Review correction",
+      createdAt: new Date("2026-11-12T12:00:00Z"),
+      recordRefs: [{ kind: "review_batch_undo", id: correction.id }],
+      idempotencyKey: crypto.randomUUID(),
+    });
+    expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      activeDecisionCount: mixed ? 1 : 0,
+      historicalRecordCount: 1,
+      rawCounts: { approvals: 1 },
+    });
+    await database.db
+      .update(financeReviewBatchCorrections)
+      .set({ outcomes: [{ index: 0, status: "applied" }] })
+      .where(eq(financeReviewBatchCorrections.id, correction.id));
+    expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      activeDecisionCount: 0,
+      rawCounts: { approvals: 0 },
+    });
+  });
+  it("does not keep a replaced or resolved terminal batch as an immortal blocker", async () => {
+    const { owner, transactions, batch } = await publishedBatch(true);
+    await database.db.insert(financeReviewBatchApprovals).values({
+      userId: owner.principal.userId,
+      batchId: batch.id,
+      fingerprint: batch.fingerprint,
+      approvedBy: owner.principal.userId,
+      approvedAt: new Date("2026-11-12T12:00:00Z"),
+      expiresAt: new Date("2026-11-13T12:00:00Z"),
+      state: "completed_with_exceptions",
+      nextAttemptAt: new Date("2026-11-12T12:00:00Z"),
+      updatedAt: new Date("2026-11-12T12:00:00Z"),
+    });
+    expect(
+      (await service().getAttentionSnapshot(owner.principal.userId)).technicalBlockerCount,
+    ).toBe(1);
+    await database.db
+      .update(financeTransactions)
+      .set({ needsReview: false })
+      .where(eq(financeTransactions.userId, owner.principal.userId));
+    expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      technicalBlockerCount: 0,
+      rawCounts: { approvals: 0 },
+    });
+    for (const item of transactions)
+      await database.db
+        .update(financeTransactions)
+        .set({ needsReview: true, contextualRevision: item.contextualRevision + 1n })
+        .where(eq(financeTransactions.id, item.id));
+    expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      technicalBlockerCount: 0,
+      activeDecisionCount: 0,
+      processingCount: 1,
+      rawCounts: { approvals: 0 },
     });
   });
   it("promotes only history belonging to an unqualified account", async () => {

@@ -369,11 +369,22 @@ export function createFinanceMaintenanceIntentService({
           ? []
           : [
               "finance_maintenance",
-              ...(monthly && !monthly.attention.readiness.budgetApproved
+              ...(monthly &&
+              (!monthly.attention.readiness.budgetApproved ||
+                monthly.attention.readiness.budgetInputsCurrent === false ||
+                monthly.attention.readiness.budgetResourcesConfirmed === false)
                 ? ["current_month_budget"]
                 : []),
             ],
-        count: completed ? 0 : 1 + (monthly && !monthly.attention.readiness.budgetApproved ? 1 : 0),
+        count: completed
+          ? 0
+          : 1 +
+            (monthly &&
+            (!monthly.attention.readiness.budgetApproved ||
+              monthly.attention.readiness.budgetInputsCurrent === false ||
+              monthly.attention.readiness.budgetResourcesConfirmed === false)
+              ? 1
+              : 0),
       },
       ...(data.nextAction ? { nextAction: data.nextAction } : {}),
     };

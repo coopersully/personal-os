@@ -3572,6 +3572,8 @@ export const financeBudgetVersions = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
     profileVersionId: uuid("profile_version_id"),
+    inputFingerprint: text("input_fingerprint"),
+    resourcesConfirmedBy: uuid("resources_confirmed_by"),
     status: text("status")
       .$type<"active" | "incomplete" | "proposed" | "retired">()
       .notNull()
@@ -3591,6 +3593,10 @@ export const financeBudgetVersions = pgTable(
     ...timestamps,
   },
   (table) => [
+    check(
+      "finance_budget_resources_owner_check",
+      sql`${table.resourcesConfirmedBy} IS NULL OR ${table.resourcesConfirmedBy} = ${table.userId}`,
+    ),
     uniqueIndex("finance_budget_versions_id_plan_user_idx").on(
       table.id,
       table.planId,

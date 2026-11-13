@@ -14,6 +14,21 @@ function Budget() {
   return (
     <>
       <BudgetOverview />
+      {(query.data?.planContext?.inputsCurrent === false ||
+        query.data?.planContext?.resourcesConfirmed === false) &&
+      budget ? (
+        <Card rows>
+          <FinanceRow
+            title="Plan inputs"
+            value="Review needed"
+            valueTone="attention"
+            icon="wallet"
+            onPress={() =>
+              router.push({ pathname: "/finances/assistant", params: { view: "Conversation" } })
+            }
+          />
+        </Card>
+      ) : null}
       <ReadState query={query}>
         {budget ? (
           <>

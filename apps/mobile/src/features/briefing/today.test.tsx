@@ -436,3 +436,23 @@ it.each([
   fireEvent.click(screen.getByRole("button", { name: new RegExp(title) }));
   expect(h.push).toHaveBeenLastCalledWith({ pathname });
 });
+
+it("opens budget revision when approved inputs have changed and there are no questions", () => {
+  h.data = {
+    ...data(),
+    reviews: query({
+      complete: true,
+      activeDecisionCount: 0,
+      technicalBlockerCount: 0,
+      processingCount: 0,
+      readiness: {
+        openingPositionQualified: true,
+        budgetApproved: true,
+        budgetInputsCurrent: false,
+      },
+    }),
+  };
+  render(<TodayHome />);
+  fireEvent.click(screen.getByRole("button", { name: /Review this month's budget/ }));
+  expect(h.push).toHaveBeenLastCalledWith({ pathname: "/finances/planning" });
+});

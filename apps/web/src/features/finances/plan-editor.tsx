@@ -81,6 +81,8 @@ function RecordChoice({
 
 export function FinancePlanEditor({
   plan,
+  planningInputs,
+  onPlanningMonthChange,
   categories,
   accounts,
   goals,
@@ -91,6 +93,8 @@ export function FinancePlanEditor({
   onReload,
 }: {
   plan: FinanceBudgetVersion | null;
+  planningInputs?: { month: string; fingerprint: string } | undefined;
+  onPlanningMonthChange?: (month: string) => void;
   categories: FinanceCategory[];
   accounts: FinanceAccount[];
   goals: FinanceGoal[];
@@ -170,11 +174,19 @@ export function FinancePlanEditor({
   }
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!balanced || pending) return;
+    if (
+      !balanced ||
+      pending ||
+      (onPlanningMonthChange !== undefined && planningInputs?.month !== month)
+    )
+      return;
     const input = {
       allocations: allocations.map((row) => ({ ...row.value, amount: Number(row.amount) })),
       assumptions: assumptions.map((row) => row.value),
       effectiveFrom: month,
+      ...(planningInputs?.month === month
+        ? { expectedInputFingerprint: planningInputs.fingerprint }
+        : {}),
       name,
       rationale,
       resources: resources.map((row) => ({ ...row.value, amount: Number(row.amount) })),
@@ -243,7 +255,10 @@ export function FinancePlanEditor({
                       type="month"
                       required
                       value={month}
-                      onChange={(event) => setMonth(event.target.value)}
+                      onChange={(event) => {
+                        setMonth(event.target.value);
+                        onPlanningMonthChange?.(event.target.value);
+                      }}
                     />
                   </Field>
                 </FieldGroup>
@@ -655,7 +670,15 @@ export function FinancePlanEditor({
               <Button type="button" variant="outline" disabled={pending} onClick={onClose}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={!balanced || pending || isFinancePlanConflict(error)}>
+              <Button
+                type="submit"
+                disabled={
+                  !balanced ||
+                  pending ||
+                  (onPlanningMonthChange !== undefined && planningInputs?.month !== month) ||
+                  isFinancePlanConflict(error)
+                }
+              >
                 {pending ? "Saving proposal…" : "Save proposal"}
               </Button>
             </DialogFooter>

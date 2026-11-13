@@ -78,7 +78,7 @@ describe("Finance activation through MCP", () => {
   });
   it("keeps agent proposals inactive until exact human approval and preserves both actor identities", async () => {
     await f.setBypass(true);
-    const { client } = await f.connectAgent([
+    const { client, api } = await f.connectAgent([
       "finances:read",
       "finances:write",
       "finances:execute",
@@ -95,6 +95,8 @@ describe("Finance activation through MCP", () => {
     });
     const budget = await call("create_finance_budget", {
       name: "Fixture plan",
+      expectedInputFingerprint: (await api.getFinanceBudget(undefined, "2026-10")).planningInputs
+        ?.fingerprint,
       effectiveFrom: "2026-10",
       resources: [{ amount: 1000, key: "income", kind: "income" }],
       allocations: [{ amount: 1000, key: "buffer", kind: "buffer" }],

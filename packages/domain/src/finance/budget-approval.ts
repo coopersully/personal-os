@@ -19,6 +19,8 @@ export const financeBudgetPlanContextSchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u),
   timezone: z.string(),
   state: z.enum(["approved", "missing"]),
+  inputsCurrent: z.boolean().optional(),
+  resourcesConfirmed: z.boolean().optional(),
   recovery: z.enum(["none", "create_proposal", "review_proposal", "revise_proposal"]),
   current: financeBudgetPlanSummarySchema.nullable(),
   previous: financeBudgetPlanSummarySchema.nullable(),
@@ -34,6 +36,7 @@ export const financeBudgetApprovalReadinessSchema = z.object({
     "not_proposed",
     "invalid_budget",
     "profile_changed",
+    "inputs_changed",
     "superseded",
   ]),
   recovery: z.enum(["approve", "create_proposal", "revise_proposal", "refresh_plan", "none"]),
@@ -46,6 +49,7 @@ export type FinanceBudgetApprovalReadiness = z.infer<typeof financeBudgetApprova
 export type FinanceBudgetReadResult = FinanceToolResult<FinanceBudgetVersion | null> & {
   approvalReadiness: FinanceBudgetApprovalReadiness;
   planContext?: FinanceBudgetPlanContext;
+  planningInputs?: { month: string; fingerprint: string; evidence: unknown };
 };
 
 /** Data prerequisites only. Approval still checks authenticated authority and locks current state. */
@@ -97,6 +101,12 @@ export function getFinanceBudgetApprovalReadiness(input: {
       "profile_changed",
       "revise_proposal",
       "Your financial profile changed. Review and save a new proposal using the current profile.",
+    );
+  if (budget.inputEvidenceCurrent === false)
+    return blocked(
+      "inputs_changed",
+      "revise_proposal",
+      "Income, bills or planning inputs changed or have not been verified. Review and save a fresh proposal.",
     );
   return {
     ...base,

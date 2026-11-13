@@ -75,6 +75,9 @@ describe.sequential("immutable monthly budget qualification", () => {
     );
     const proposal = await budgets.createFinanceBudget(
       {
+        expectedInputFingerprint: (
+          await budgets.getFinanceBudget(context.userId, undefined, "2026-09")
+        ).planningInputs?.fingerprint,
         name: "Monthly baseline",
         effectiveFrom: "2026-09",
         resources: [{ amount: 100, key: "income", kind: "income" }],
@@ -99,6 +102,7 @@ describe.sequential("immutable monthly budget qualification", () => {
         expectedVersion: proposal.data.version,
         expectedProfileVersionId: profile.data.id,
         approvalSource: "user_instruction",
+        confirmExpectedResources: true,
         idempotencyKey: crypto.randomUUID(),
       },
       context,

@@ -25,10 +25,15 @@ import type {
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
 import { getFinanceBudgetApprovalReadiness } from "@personal-os/domain";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { requireBudgetApproval } from "./budget-authority.js";
+import {
+  budgetInputEvidenceSql,
+  readBudgetInputFingerprint,
+  readBudgetPlanningInputs,
+} from "./budget-input-evidence.js";
 import { readBudgetPlanContext } from "./budget-plan-projection.js";
 import { budgetRoomCommunication } from "./budget-room.js";
 import { readFinanceBudgetRoom } from "./budget-room-service.js";
@@ -221,6 +226,11 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
       expectedResources: fromCents(row.expectedResources),
       id: row.id,
       profileVersionId: row.profileVersionId,
+      resourcesConfirmed: row.resourcesConfirmedBy === row.userId,
+      inputEvidenceCurrent:
+        row.inputFingerprint !== null &&
+        row.inputFingerprint ===
+          (await readBudgetInputFingerprint(executor, row.userId, row.effectiveFrom)),
       planId: row.planId,
       rationale: row.rationale,
       resources: (row.resources as FinanceBudgetResource[]).map((resource) => ({
@@ -243,6 +253,37 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
       orderBy: [desc(financeProfileVersions.version)],
       where: eq(financeProfileVersions.userId, context.userId),
     });
+    const inputFingerprint = await readBudgetInputFingerprint(
+      executor,
+      context.userId,
+      input.effectiveFrom,
+    );
+    if (input.expectedInputFingerprint && input.expectedInputFingerprint !== inputFingerprint)
+      throw new AppError(
+        "conflict",
+        "Planning inputs changed. Read the current budget planning inputs and revise the proposal.",
+      );
+    const resourceIds = input.resources.flatMap((resource) =>
+      resource.sourceId ? [resource.sourceId] : [],
+    );
+    if (resourceIds.length) {
+      const accounts = await executor
+        .select({ id: financeAccounts.id })
+        .from(financeAccounts)
+        .where(
+          and(eq(financeAccounts.userId, context.userId), inArray(financeAccounts.id, resourceIds)),
+        );
+      const ownedAccounts = new Set(accounts.map((item) => item.id));
+      if (
+        input.resources.some(
+          (resource) => resource.sourceId && !ownedAccounts.has(resource.sourceId),
+        )
+      )
+        throw new AppError(
+          "invalid_request",
+          "A linked budget resource must reference an owned account.",
+        );
+    }
     await validateAllocations(executor, context.userId, input.allocations);
     if (
       [...input.resources, ...input.allocations].some(
@@ -296,6 +337,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
           })),
           status: input.status ?? "proposed",
           profileVersionId: currentProfile?.id ?? null,
+          inputFingerprint: input.expectedInputFingerprint ?? null,
           userId: context.userId,
           version: (existingPlan?.latestVersion ?? 0) + 1,
         })
@@ -338,6 +380,17 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
 
   function budgetDisclosures(budget: FinanceBudgetVersion): string[] {
     return [
+      ...(budget.inputEvidenceCurrent === false
+        ? [
+            "Planning inputs changed or have not been verified. Review a fresh proposal; a saved approval does not establish current budget readiness.",
+          ]
+        : []),
+      ...(budget.status === "active" && !budget.resourcesConfirmed
+        ? [
+            "Expected funding has not been confirmed by the owner. This approval does not establish budget readiness.",
+          ]
+        : []),
+      "Resources are proposed expectations for owner review. Planning-input freshness is not proof of available cash or a guarantee of income.",
       `Expected resources: ${formatMoney(budget.expectedResources)}. Total allocated: ${formatMoney(budget.allocatedTotal)}. Balance: ${formatMoney(budget.balanceDelta)}.`,
       ...(budget.assumptions.length > 0
         ? [
@@ -389,7 +442,11 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
       );
     },
 
-    async getFinanceBudget(userId: string, planId?: string): Promise<FinanceBudgetReadResult> {
+    async getFinanceBudget(
+      userId: string,
+      planId?: string,
+      planningMonth?: string,
+    ): Promise<FinanceBudgetReadResult> {
       return db.transaction(
         async (tx) => {
           const row = await tx.query.financeBudgetVersions.findFirst({
@@ -405,7 +462,13 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
           });
           const data = row ? await budgetValue(row, tx) : null;
           const profile = await latestProfile(userId, tx);
+          const planContext = await readBudgetPlanContext(tx, userId, now());
           return {
+            planningInputs: await readBudgetPlanningInputs(
+              tx,
+              userId,
+              planningMonth ?? row?.effectiveFrom ?? planContext.month,
+            ),
             ...withFinanceBudgetPresentation(
               result({
                 data,
@@ -415,7 +478,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
                   : "No budget exists yet.",
               }),
             ),
-            planContext: await readBudgetPlanContext(tx, userId, now()),
+            planContext,
             approvalReadiness: getFinanceBudgetApprovalReadiness({
               budget: data,
               currentProfileVersionId: profile?.id ?? null,
@@ -540,6 +603,14 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
           "forbidden",
           "Budget approval source must match the authenticated actor.",
         );
+      if (
+        input.confirmExpectedResources &&
+        (context.actorType !== "user" || context.actorId !== context.userId)
+      )
+        throw new AppError(
+          "forbidden",
+          "Only the owner can confirm expected funding for this exact plan.",
+        );
       if (context.actorType === "agent") context.requiresApprovalBypass = true;
       return executeFinanceIdempotently(
         db,
@@ -577,7 +648,9 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
             });
             if (!readiness.ready) {
               throw new AppError(
-                readiness.code === "profile_changed" || readiness.code === "superseded"
+                readiness.code === "profile_changed" ||
+                  readiness.code === "superseded" ||
+                  readiness.code === "inputs_changed"
                   ? "conflict"
                   : "invalid_request",
                 readiness.message,
@@ -594,6 +667,13 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
                 { code: "approval_input_changed", recovery: "refresh_plan" },
               );
             }
+            const approvalInputs = await readBudgetPlanningInputs(
+              tx,
+              context.userId,
+              version.effectiveFrom,
+            );
+            if (approvalInputs.fingerprint !== version.inputFingerprint)
+              throw new AppError("conflict", "Planning inputs changed. Review a fresh proposal.");
             await tx
               .update(financeBudgetVersions)
               .set({ status: "retired", updatedAt: approvedAt })
@@ -610,12 +690,25 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
                 approvedAt,
                 approvedByActorId: context.actorId,
                 approvedByActorType: context.actorType,
+                resourcesConfirmedBy:
+                  input.confirmExpectedResources === true ? context.userId : null,
                 status: "active",
                 updatedAt: approvedAt,
               })
-              .where(eq(financeBudgetVersions.id, version.id))
+              .where(
+                and(
+                  eq(financeBudgetVersions.id, version.id),
+                  // Atomic optimistic boundary: committed changes visible to this statement reject
+                  // activation. Overlapping later source writes may stale the saved approval.
+                  sql`${budgetInputEvidenceSql(context.userId, version.effectiveFrom)} = ${JSON.stringify(approvalInputs.evidence)}::jsonb`,
+                ),
+              )
               .returning();
-            if (!active) throw new AppError("internal_error", "The budget was not activated.");
+            if (!active)
+              throw new AppError(
+                "conflict",
+                "Planning inputs changed before approval. Review a fresh proposal.",
+              );
             await tx.insert(auditEvents).values(
               auditValues({
                 action:
@@ -628,6 +721,16 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
                   profileVersionId: version.profileVersionId,
                   budgetVersionId: version.id,
                   budgetVersion: version.version,
+                  expectedResourcesConfirmed: input.confirmExpectedResources === true,
+                  fundingConfirmation:
+                    input.confirmExpectedResources === true
+                      ? {
+                          ownerId: context.userId,
+                          month: version.effectiveFrom,
+                          resources: version.resources,
+                          inputFingerprint: version.inputFingerprint,
+                        }
+                      : null,
                 },
                 before: { status: version.status },
                 entityId: active.id,

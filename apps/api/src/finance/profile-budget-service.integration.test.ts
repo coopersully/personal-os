@@ -8,6 +8,9 @@ import {
   financeAccounts,
   financeBudgetVersions,
   financeCategories,
+  financeIncomeStreams,
+  financeRecurringObligations,
+  financeRecurringScheduleVersions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
@@ -17,7 +20,53 @@ import { eq } from "drizzle-orm";
 import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
 import { loadFinanceAuthorization } from "./context.js";
-import { createProfileBudgetService } from "./profile-budget-service.js";
+import { createProfileBudgetService as createRawProfileBudgetService } from "./profile-budget-service.js";
+
+// Fixture clients follow the planning snapshot read → proposal write protocol.
+// Race/missing-evidence tests use the raw service or explicitly retain an old fingerprint.
+function createProfileBudgetService(options: Parameters<typeof createRawProfileBudgetService>[0]) {
+  const service = createRawProfileBudgetService(options);
+  return {
+    ...service,
+    async approveFinanceBudget(
+      input: Parameters<typeof service.approveFinanceBudget>[0],
+      context: Parameters<typeof service.approveFinanceBudget>[1],
+    ) {
+      return service.approveFinanceBudget(
+        { ...(context.actorType === "user" ? { confirmExpectedResources: true } : {}), ...input },
+        context,
+      );
+    },
+    async createFinanceBudget(
+      input: Parameters<typeof service.createFinanceBudget>[0],
+      context: Parameters<typeof service.createFinanceBudget>[1],
+    ) {
+      const planning = await service.getFinanceBudget(
+        context.userId,
+        undefined,
+        input.effectiveFrom,
+      );
+      return service.createFinanceBudget(
+        { expectedInputFingerprint: planning.planningInputs?.fingerprint, ...input },
+        context,
+      );
+    },
+    async reviseFinanceBudget(
+      input: Parameters<typeof service.reviseFinanceBudget>[0],
+      context: Parameters<typeof service.reviseFinanceBudget>[1],
+    ) {
+      const planning = await service.getFinanceBudget(
+        context.userId,
+        undefined,
+        input.effectiveFrom,
+      );
+      return service.reviseFinanceBudget(
+        { expectedInputFingerprint: planning.planningInputs?.fingerprint, ...input },
+        context,
+      );
+    },
+  };
+}
 
 describe.sequential("Finance profile and budget lifecycle", () => {
   let container: StartedPostgreSqlContainer;
@@ -52,6 +101,331 @@ describe.sequential("Finance profile and budget lifecycle", () => {
   afterAll(async () => {
     await database.close();
     await container.stop();
+  });
+
+  it("fences proposal construction and approval against changing material inputs", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Input race",
+        email: "input-race@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing owner");
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        userId: owner.id,
+        scopes: new Set(["finances:write"]),
+      },
+      requestId: "input-race",
+    });
+    const raw = createRawProfileBudgetService({ db: database.db, now: () => now });
+    const input = {
+      name: "Race fixture",
+      effectiveFrom: "2026-08",
+      assumptions: [],
+      rationale: "Allocate confirmed income",
+      resources: [{ key: "Pay", kind: "income" as const, amount: 100 }],
+      allocations: [{ key: "Buffer", kind: "buffer" as const, amount: 100 }],
+      idempotencyKey: "race-create",
+    };
+    const staleInputs = (await raw.getFinanceBudget(owner.id, undefined, input.effectiveFrom))
+      .planningInputs;
+    const [income] = await database.db
+      .insert(financeIncomeStreams)
+      .values({
+        userId: owner.id,
+        payer: "Fixture Salary",
+        displayName: "Pay",
+        cadence: "monthly",
+        expectedAmount: 10000,
+        amountTolerance: 0,
+        confidence: 10000,
+        source: "user",
+        status: "active",
+        nextExpectedDate: "2026-08-30",
+      })
+      .returning();
+    if (!income || !staleInputs) throw new Error("Missing fixture");
+    await expect(
+      raw.createFinanceBudget(
+        { ...input, expectedInputFingerprint: staleInputs.fingerprint },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      raw.createFinanceBudget(
+        {
+          ...input,
+          idempotencyKey: "foreign-resource",
+          resources: [{ key: "Pay", kind: "income", amount: 100, sourceId: crypto.randomUUID() }],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const missing = (
+      await raw.createFinanceBudget({ ...input, idempotencyKey: "race-missing" }, context)
+    ).data;
+    await expect(
+      raw.approveFinanceBudget(
+        {
+          budgetVersionId: missing.id,
+          expectedVersion: 1,
+          approvalSource: "user_instruction",
+          idempotencyKey: "race-missing-approve",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect((await raw.getFinanceBudget(owner.id)).planContext).toMatchObject({
+      state: "missing",
+      recovery: "revise_proposal",
+    });
+    const fresh = (await raw.getFinanceBudget(owner.id, undefined, input.effectiveFrom))
+      .planningInputs;
+    if (!fresh) throw new Error("Missing planning snapshot");
+    const baseline = (
+      await raw.createFinanceBudget(
+        { ...input, idempotencyKey: "race-fresh", expectedInputFingerprint: fresh.fingerprint },
+        context,
+      )
+    ).data;
+    await raw.approveFinanceBudget(
+      {
+        budgetVersionId: baseline.id,
+        expectedVersion: 1,
+        approvalSource: "user_instruction",
+        idempotencyKey: "race-baseline",
+        confirmExpectedResources: true,
+      },
+      context,
+    );
+    const proposal = (
+      await raw.reviseFinanceBudget(
+        {
+          ...input,
+          planId: baseline.planId,
+          expectedVersion: 1,
+          idempotencyKey: "race-revise",
+          expectedInputFingerprint: fresh.fingerprint,
+        },
+        context,
+      )
+    ).data;
+    const isolated = createDatabaseClient({
+      connectionString: container.getConnectionUri(),
+      max: 1,
+    });
+    const connected = isolated.pool.connect.bind(isolated.pool);
+    const wrapped = new WeakSet<object>();
+    let intercepted = false;
+    Object.defineProperty(isolated.pool, "connect", {
+      value: async () => {
+        const client = await connected();
+        if (!wrapped.has(client)) {
+          wrapped.add(client);
+          client.query = new Proxy(client.query, {
+            apply(query, receiver, args) {
+              const text = typeof args[0] === "string" ? args[0] : (args[0]?.text ?? "");
+              if (
+                !intercepted &&
+                text.startsWith('update "finance_budget_versions"') &&
+                text.includes("jsonb_build_object")
+              ) {
+                intercepted = true;
+                return database.db
+                  .update(financeIncomeStreams)
+                  .set({ nextExpectedDate: "2026-09-01" })
+                  .where(eq(financeIncomeStreams.id, income.id))
+                  .then(() => Reflect.apply(query, receiver, args));
+              }
+              return Reflect.apply(query, receiver, args);
+            },
+          });
+        }
+        return client;
+      },
+    });
+    try {
+      const racing = createRawProfileBudgetService({ db: isolated.db, now: () => now });
+      await expect(
+        racing.approveFinanceBudget(
+          {
+            budgetVersionId: proposal.id,
+            expectedVersion: 2,
+            approvalSource: "user_instruction",
+            idempotencyKey: "race-approve",
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "conflict" });
+      expect(intercepted).toBe(true);
+      expect(
+        (
+          await database.db
+            .select()
+            .from(financeBudgetVersions)
+            .where(eq(financeBudgetVersions.id, baseline.id))
+        )[0]?.status,
+      ).toBe("active");
+      expect((await raw.getFinanceBudget(owner.id)).approvalReadiness.code).toBe("inputs_changed");
+      expect(
+        (
+          await database.db
+            .select()
+            .from(financeBudgetVersions)
+            .where(eq(financeBudgetVersions.id, proposal.id))
+        )[0]?.approvedAt,
+      ).toBeNull();
+    } finally {
+      await isolated.close();
+    }
+  });
+
+  it("requires a new proposal when material income or bill inputs change without erasing approval history", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Budget input fixture",
+        email: "budget-inputs@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing owner");
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        userId: owner.id,
+        scopes: new Set(["finances:write"]),
+      },
+      requestId: "input-evidence-test",
+    });
+    const service = createProfileBudgetService({ db: database.db, now: () => now });
+    const input = {
+      name: "August",
+      effectiveFrom: "2026-08",
+      assumptions: [],
+      rationale: "Allocate confirmed income",
+      resources: [{ key: "Income", kind: "income" as const, amount: 100 }],
+      allocations: [{ key: "Buffer", kind: "buffer" as const, amount: 100 }],
+      idempotencyKey: "inputs-create",
+    };
+    const proposal = (await service.createFinanceBudget(input, context)).data;
+    await service.approveFinanceBudget(
+      {
+        budgetVersionId: proposal.id,
+        expectedVersion: 1,
+        approvalSource: "user_instruction",
+        idempotencyKey: "inputs-approve",
+      },
+      context,
+    );
+    expect((await service.getFinanceBudget(owner.id)).planContext).toMatchObject({
+      state: "approved",
+      inputsCurrent: true,
+      resourcesConfirmed: true,
+      recovery: "none",
+    });
+    const [income] = await database.db
+      .insert(financeIncomeStreams)
+      .values({
+        userId: owner.id,
+        payer: "Fixture Employer",
+        displayName: "Salary",
+        cadence: "monthly",
+        expectedAmount: 10000,
+        amountTolerance: 0,
+        confidence: 10000,
+        source: "user",
+        status: "active",
+      })
+      .returning();
+    if (!income) throw new Error("Missing income");
+    expect((await service.getFinanceBudget(owner.id)).planContext).toMatchObject({
+      state: "approved",
+      inputsCurrent: false,
+      recovery: "revise_proposal",
+      current: { id: proposal.id },
+    });
+    const revision = (
+      await service.reviseFinanceBudget(
+        { ...input, planId: proposal.planId, expectedVersion: 1, idempotencyKey: "inputs-revise" },
+        context,
+      )
+    ).data;
+    await database.db
+      .update(financeIncomeStreams)
+      .set({ lastObservedDate: "2026-08-23", displayName: "Paycheck", revision: 2 })
+      .where(eq(financeIncomeStreams.id, income.id));
+    expect((await service.getFinanceBudget(owner.id)).approvalReadiness.ready).toBe(true);
+    expect((await service.getFinanceBudget(owner.id)).planContext).toMatchObject({
+      state: "approved",
+      inputsCurrent: false,
+      recovery: "review_proposal",
+    });
+    await database.db.insert(financeRecurringObligations).values({
+      userId: owner.id,
+      merchant: "Fixture Rent",
+      displayName: "Rent",
+      kind: "bill",
+      cadence: "monthly",
+      expectedAmount: 5000,
+      amountTolerance: 0,
+      confidence: 10000,
+      source: "user",
+      status: "active",
+    });
+    await expect(
+      service.approveFinanceBudget(
+        {
+          budgetVersionId: revision.id,
+          expectedVersion: 2,
+          approvalSource: "user_instruction",
+          idempotencyKey: "inputs-stale-approval",
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect((await service.getFinanceBudget(owner.id)).approvalReadiness).toMatchObject({
+      code: "inputs_changed",
+      recovery: "revise_proposal",
+    });
+    expect((await service.getFinanceBudget(owner.id)).planContext?.recovery).toBe(
+      "revise_proposal",
+    );
+    const [original] = await database.db
+      .select()
+      .from(financeBudgetVersions)
+      .where(eq(financeBudgetVersions.id, proposal.id));
+    expect(original?.approvedAt).not.toBeNull();
+    expect(original?.status).toBe("active");
+    await database.db.insert(financeRecurringScheduleVersions).values({
+      userId: owner.id,
+      actorUserId: owner.id,
+      incomeStreamId: income.id,
+      sourceRevision: 2,
+      cadence: "monthly",
+      timezone: "UTC",
+      anchorLocalDate: "2026-08-01",
+      effectiveFrom: "2026-08-01",
+      amountCents: 10000,
+      amountBasis: "fixed",
+      currencyCode: "USD",
+    });
+    const scheduled = (await service.getFinanceBudget(owner.id)).planningInputs?.fingerprint;
+    await database.db
+      .update(financeIncomeStreams)
+      .set({ revision: 3 })
+      .where(eq(financeIncomeStreams.id, income.id));
+    expect((await service.getFinanceBudget(owner.id)).planningInputs?.fingerprint).not.toBe(
+      scheduled,
+    );
   });
 
   it("revises an approved October v7 into an idempotent November proposal and requires exact approval", async () => {
@@ -1299,8 +1673,16 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await expect(
       service.approveFinanceBudget({ ...input, approvalSource: "user_instruction" }, authority),
     ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      service.approveFinanceBudget({ ...input, confirmExpectedResources: true }, authority),
+    ).rejects.toMatchObject({ code: "forbidden" });
     await expect(service.approveFinanceBudget(input, authority)).resolves.toMatchObject({
-      data: { status: "active" },
+      data: { status: "active", resourcesConfirmed: false },
+    });
+    expect((await service.getFinanceBudget(owner.id)).planContext).toMatchObject({
+      state: "approved",
+      resourcesConfirmed: false,
+      recovery: "revise_proposal",
     });
     const audit = await database.db.query.auditEvents.findFirst({
       where: eq(auditEvents.action, "finance.budget.agent_self_approved"),

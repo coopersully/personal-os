@@ -75,3 +75,11 @@ it("distinguishes stale profile and superseded plan recovery", () => {
     ready: false,
   });
 });
+
+it("requires a refreshed proposal for changed material inputs", () => {
+  expect(inspect({ ...budget, inputEvidenceCurrent: false })).toMatchObject({
+    ready: false,
+    code: "inputs_changed",
+    recovery: "revise_proposal",
+  });
+});

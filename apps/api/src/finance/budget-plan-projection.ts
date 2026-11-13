@@ -22,6 +22,7 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { AppError } from "../errors.js";
+import { readBudgetInputFingerprint } from "./budget-input-evidence.js";
 
 type Reader = Pick<Database, "select">;
 
@@ -157,17 +158,25 @@ async function loadBudgetPlanContext(
       spendingTotal: Number(spending?.amount ?? 0) / 100,
     };
   }
+  const fingerprint = await readBudgetInputFingerprint(reader, userId, month);
+  const inputsCurrent = current?.version.inputFingerprint === fingerprint;
+  const resourcesConfirmed = current?.version.resourcesConfirmedBy === userId;
+  const targetProposal = upcoming?.version.effectiveFrom === month ? upcoming.version : null;
+  const recovery =
+    inputsCurrent && resourcesConfirmed
+      ? "none"
+      : targetProposal?.status === "proposed" && targetProposal.inputFingerprint === fingerprint
+        ? "review_proposal"
+        : current || targetProposal
+          ? "revise_proposal"
+          : "create_proposal";
   return financeBudgetPlanContextSchema.parse({
+    inputsCurrent,
+    resourcesConfirmed,
     month,
     timezone: owner.timezone,
     state: current ? "approved" : "missing",
-    recovery: current
-      ? "none"
-      : upcoming?.version.status === "proposed" && upcoming.version.effectiveFrom === month
-        ? "review_proposal"
-        : upcoming?.version.status === "incomplete" && upcoming.version.effectiveFrom === month
-          ? "revise_proposal"
-          : "create_proposal",
+    recovery,
     current: await summary(current),
     previous: await summary(previous),
     upcoming: await summary(upcoming),

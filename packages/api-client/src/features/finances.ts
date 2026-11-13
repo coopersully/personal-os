@@ -736,9 +736,9 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "PATCH",
       });
     },
-    async getFinanceBudget(planId?: string): Promise<FinanceBudgetReadResult> {
+    async getFinanceBudget(planId?: string, month?: string): Promise<FinanceBudgetReadResult> {
       return request(
-        `/v1/finances/budget-plans${planId ? `?planId=${encodeURIComponent(planId)}` : ""}`,
+        `/v1/finances/budget-plans${planId ? `?planId=${encodeURIComponent(planId)}` : ""}${month ? `${planId ? "&" : "?"}month=${encodeURIComponent(month)}` : ""}`,
       );
     },
     async reviseFinanceBudget(

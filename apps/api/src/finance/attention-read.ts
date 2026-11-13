@@ -159,6 +159,8 @@ export async function readFinanceAttentionSnapshot(
     const readiness = {
       openingPositionQualified: opening.qualified,
       budgetApproved: budget.state === "approved",
+      budgetInputsCurrent: budget.inputsCurrent === true,
+      budgetResourcesConfirmed: budget.resourcesConfirmed === true,
     };
     const projected = projectFinanceAttention({
       firstMonth:

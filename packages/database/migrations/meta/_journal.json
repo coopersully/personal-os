@@ -1065,6 +1065,13 @@
       "when": 1794499200005,
       "tag": "0144_finance_batch_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1794499200006,
+      "tag": "0145_finance_budget_input_evidence",
+      "breakpoints": true
     }
   ]
 }

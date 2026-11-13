@@ -22,6 +22,8 @@ const projectionInputSchema = z
     complete: z.boolean(),
     openingPositionQualified: z.boolean(),
     budgetApproved: z.boolean(),
+    budgetInputsCurrent: z.boolean().optional(),
+    budgetResourcesConfirmed: z.boolean().optional(),
     records: z.array(financeAttentionRecordSchema),
   })
   .superRefine(({ records }, context) => {
@@ -96,6 +98,8 @@ export function projectFinanceAttention(input: z.input<typeof projectionInputSch
       state.complete &&
       state.openingPositionQualified &&
       state.budgetApproved &&
+      state.budgetInputsCurrent !== false &&
+      state.budgetResourcesConfirmed !== false &&
       decisions.size === 0 &&
       processingCount === 0 &&
       technicalBlockerCount === 0 &&
@@ -143,7 +147,12 @@ export const financeAttentionSnapshotSchema = z.strictObject({
   asOf: z.iso.datetime(),
   timezone: z.string().min(1),
   snapshot: z.string().regex(/^[a-f0-9]{64}$/),
-  readiness: z.strictObject({ openingPositionQualified: z.boolean(), budgetApproved: z.boolean() }),
+  readiness: z.strictObject({
+    openingPositionQualified: z.boolean(),
+    budgetApproved: z.boolean(),
+    budgetInputsCurrent: z.boolean().optional(),
+    budgetResourcesConfirmed: z.boolean().optional(),
+  }),
   policy: z
     .strictObject({
       firstMonth: financeMonthSchema.nullable(),

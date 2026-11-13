@@ -161,3 +161,36 @@ must not reactivate independent October work. An unqualified or relinked account
 history for triage; matching cross-boundary transfer candidates and persisted relationships keep
 potential dependencies active until resolved. Published batch and correction cards derive scope
 from their actual member transactions, with one human approval for a mixed-period batch.
+
+### Budget input freshness
+
+An approval is an immutable historical fact, not permanent proof that the plan fits current
+income and bills. `get_finance_budget` accepts a target month and returns `planningInputs`:
+the material source snapshot and its fingerprint. Preparation must read that snapshot before
+constructing resources and allocations, and send its exact `expectedInputFingerprint` on
+create/revise. Missing legacy evidence may remain a draft but cannot qualify for approval;
+changed evidence requires a new proposal. Never stamp a newly read fingerprint onto amounts
+computed from older evidence.
+
+The snapshot includes profile identity, planning timezone, active income and obligations,
+expected dates, applicable schedule semantics and canonical schedule validity. Cosmetic names
+and observation timestamps do not independently invalidate it. Approval compares this evidence
+again in the same statement that activates the version. This is an optimistic statement boundary,
+not a guarantee that sources cannot change afterward. An overlapping later update can stale an
+approval immediately; readiness is freshly projected and the approval history is retained.
+
+Current-month readiness requires both an approved plan and current inputs. Today and Finance
+surface a concise budget review action even when there are no transaction questions. The
+assistant must revise changed inputs through the existing proposal and owner-approval flow;
+it must not erase the prior approval, automatically carry money forward or claim inbox zero
+from an empty question count alone.
+
+Expected funding has a separate, explicit owner confirmation. The exact-version approval
+screen presents every resource's kind, amount and linked owned account (or manual estimate),
+plus assumptions, and asks the owner to confirm that they reasonably expect those resources
+to fund this month. `confirmExpectedResources` is accepted only from the actual owner. The
+immutable approval audit binds the month, version, resources and planning fingerprint; the
+version records the confirming owner. Agents cannot provide this attestation. Legacy or
+agent-approved versions can remain historical approvals without qualifying budget readiness.
+This supports owner-confirmed expectations, not guaranteed income, received funds, or permission
+to ignore contradictory evidence and unresolved dependencies. No old approval is backfilled.

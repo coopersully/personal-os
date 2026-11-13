@@ -247,6 +247,14 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
   const referencedVersionId = params.get("versionId");
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ plan: FinanceBudgetVersion | null } | null>(null);
+  const [planningMonth, setPlanningMonth] = useState("");
+  const planningInputsQuery = useQuery({
+    queryKey: ["finance-plan-inputs", planningMonth],
+    queryFn: () => api.getFinanceBudget(undefined, planningMonth),
+    enabled: editing !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(planningMonth),
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });
   const [approvalNeedsRefresh, setApprovalNeedsRefresh] = useState(false);
   const approvalKeys = useRef(new Map<string, string>());
   const planQuery = useQuery({
@@ -329,6 +337,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
           expectedVersion: displayed.version,
           expectedProfileVersionId: displayed.profileVersionId ?? null,
           approvalSource: "user_instruction",
+          confirmExpectedResources: true,
           idempotencyKey: key,
         }),
       );
@@ -351,6 +360,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
     if (approvalTask) return;
     approve.reset();
     save.reset();
+    setPlanningMonth(plan?.effectiveFrom ?? new Date().toISOString().slice(0, 7));
     setEditing({ plan: plan ?? null });
   }
 
@@ -373,6 +383,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
     approve.reset();
     save.reset();
     setEditing(null);
+    void queryClient.invalidateQueries({ queryKey: ["finance-plan-inputs"] });
     void refresh();
   }
 
@@ -466,6 +477,12 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
           />
         ) : null}
         {planQuery.isPending ? <PageLoading workspace="finances" /> : null}
+        {editing ? (
+          <QueryFeedback
+            query={planningInputsQuery}
+            title="Couldn’t load current planning inputs."
+          />
+        ) : null}
         <QueryFeedback query={planQuery} title="Couldn’t load the plan." />
         <QueryFeedback query={categoryQuery} title="Couldn’t load categories." />
         <QueryFeedback query={accountQuery} title="Couldn’t load accounts." />
@@ -542,7 +559,8 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                     </div>
                   ) : null}
                   <p className="text-sm text-muted-foreground">
-                    These are planned amounts. Review actual spending in Transactions.
+                    Confirm that you reasonably expect the listed resources to fund this month’s
+                    plan. Expected funding is not received or spendable cash.
                   </p>
                   {plan.status !== "active" &&
                   plan.status !== "proposed" &&
@@ -569,7 +587,9 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                         }
                         onClick={() => approve.mutate(plan)}
                       >
-                        {approve.isPending ? "Approving…" : `Approve version ${plan.version}`}
+                        {approve.isPending
+                          ? "Approving…"
+                          : `Confirm resources and approve version ${plan.version}`}
                       </Button>
                       <p className="text-sm text-muted-foreground">
                         Activates this exact proposal for {plan.effectiveFrom}.
@@ -636,6 +656,8 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
       {!approvalTask && editing ? (
         <FinancePlanEditor
           plan={editing.plan}
+          planningInputs={planningInputsQuery.data?.planningInputs}
+          onPlanningMonthChange={setPlanningMonth}
           accounts={relations.accounts}
           categories={relations.categories}
           goals={relations.goals}

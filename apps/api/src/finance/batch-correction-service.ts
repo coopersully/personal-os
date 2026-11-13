@@ -268,6 +268,11 @@ export function createFinanceBatchCorrectionService({
           if (!effect)
             throw new AppError("conflict", "The original effect receipt is unavailable.");
           const before = parseFinanceBatchEffect(effect.before);
+          if (!before.display)
+            throw new AppError(
+              "conflict",
+              "The original receipt lacks exact impact details. Prepare a new correction with nohmi.",
+            );
           const transactionId = before.transactions[0]?.id;
           if (!transactionId)
             throw new AppError("conflict", "The original effect receipt is incomplete.");

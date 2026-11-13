@@ -155,7 +155,9 @@ export default function TodayHome() {
       finance.technicalBlockerCount > 0 ||
       finance.processingCount > 0 ||
       finance.readiness?.openingPositionQualified === false ||
-      finance.readiness?.budgetApproved === false)
+      finance.readiness?.budgetApproved === false ||
+      finance.readiness?.budgetInputsCurrent === false ||
+      finance.readiness?.budgetResourcesConfirmed === false)
   )
     attention.push({
       id: "reviews",

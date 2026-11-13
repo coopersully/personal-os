@@ -62,6 +62,8 @@ export const financeBudgetVersionSchema = z
     expectedResources: financePositiveMoneySchema,
     id: idSchema,
     profileVersionId: idSchema.nullable().optional(),
+    inputEvidenceCurrent: z.boolean().optional(),
+    resourcesConfirmed: z.boolean().optional(),
     planId: idSchema,
     rationale: z.string().trim().min(1).max(4_000),
     resources: z.array(financeBudgetResourceSchema).max(100),
@@ -99,6 +101,10 @@ export const createFinanceBudgetVersionInputSchema = z
     allocations: z.array(financeBudgetAllocationSchema).max(500),
     assumptions: z.array(z.string().trim().min(1).max(1_000)).max(100),
     effectiveFrom: financeMonthSchema,
+    expectedInputFingerprint: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     status: z.enum(["incomplete", "proposed"]).optional(),
     name: z.string().trim().min(1).max(160).default("Monthly plan"),
     rationale: z.string().trim().min(1).max(4_000),
@@ -123,6 +129,7 @@ export type ReviseFinanceBudgetInput = z.infer<typeof reviseFinanceBudgetInputSc
 export const approveFinanceBudgetInputSchema = financeMutationMetaSchema.and(
   z.object({
     approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
+    confirmExpectedResources: z.boolean().optional(),
     budgetVersionId: idSchema,
     expectedProfileVersionId: idSchema.nullable().optional(),
     expectedVersion: z.number().int().positive(),

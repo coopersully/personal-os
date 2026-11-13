@@ -61,8 +61,22 @@ export function FinanceAttentionSummary({
         <FinanceRow
           title="Budget"
           icon="wallet"
-          value={snapshot.readiness.budgetApproved ? "Approved" : "Not approved"}
-          valueTone={snapshot.readiness.budgetApproved ? undefined : "attention"}
+          value={
+            snapshot.readiness.budgetResourcesConfirmed === false
+              ? "Confirm funding"
+              : snapshot.readiness.budgetInputsCurrent === false
+                ? "Review inputs"
+                : snapshot.readiness.budgetApproved
+                  ? "Approved"
+                  : "Not approved"
+          }
+          valueTone={
+            snapshot.readiness.budgetApproved &&
+            snapshot.readiness.budgetInputsCurrent !== false &&
+            snapshot.readiness.budgetResourcesConfirmed !== false
+              ? undefined
+              : "attention"
+          }
           onPress={onBudget}
         />
       </Card>

@@ -5715,6 +5715,96 @@ describe.sequential("finance service", () => {
     }
   });
 
+  it("leaves a card payment out of spending and refunds only when a connected card received it", async () => {
+    const [cardUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Card payer",
+        email: "card-payer@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!cardUser) throw new Error("Card user was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(cardUser.id), requestId: "card-payment" };
+    const checking = await service.createAccount(
+      { balance: 5000, institution: "Test bank", name: "Checking", provider: "manual" },
+      context,
+    );
+    const card = await service.createAccount(
+      { balance: 300, institution: "Test bank", name: "Card", provider: "manual" },
+      context,
+    );
+    const observe = (status: "connected" | "needs_reauth") =>
+      database.db
+        .update(financeAccounts)
+        .set({ kind: "debt", providerType: "credit", status })
+        .where(eq(financeAccounts.id, card.id));
+    await observe("connected");
+    const add = async (
+      accountId: string,
+      amount: number,
+      direction: "expense" | "income",
+      category: string,
+      date: string,
+      cardPayment: boolean,
+    ) => {
+      const created = await service.createTransaction(
+        {
+          accountId,
+          amount,
+          category,
+          categoryConfidence: null,
+          date,
+          direction,
+          merchant: `${category} ${amount}`,
+          notes: null,
+        },
+        context,
+      );
+      if (cardPayment)
+        await database.db
+          .update(financeTransactions)
+          .set({ providerCategoryDetailed: "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" })
+          .where(eq(financeTransactions.id, created.id));
+    };
+    await add(card.id, 40, "expense", "Shopping", "2026-07-08", false);
+    await add(checking.id, 300, "expense", "LOAN_PAYMENTS", "2026-07-10", true);
+    await add(card.id, 300, "income", "LOAN_PAYMENTS", "2026-07-11", true);
+    // No observed card received this one: it paid a card nohmi cannot see.
+    await add(checking.id, 77, "expense", "LOAN_PAYMENTS", "2026-07-12", true);
+    await reviewedCreateBudget(
+      service,
+      { category: "LOAN_PAYMENTS", limit: 500, month: "2026-07" },
+      context,
+    );
+
+    await expect(service.listOverview(cardUser.id, "2026-07")).resolves.toMatchObject({
+      refundCreditsThisMonth: 0,
+      spendingThisMonth: 117,
+    });
+    await expect(service.getBudgetStatus(cardUser.id, "2026-07")).resolves.toEqual([
+      expect.objectContaining({ spent: 77 }),
+    ]);
+    await expect(service.getBudgetPace(cardUser.id, "month")).resolves.toMatchObject({
+      cells: expect.arrayContaining([
+        // Cumulative: the settled payment and its receipt add nothing on the 10th and 11th.
+        expect.objectContaining({ date: "2026-07-11", spent: 40 }),
+        expect.objectContaining({ date: "2026-07-12", spent: 117 }),
+      ]),
+    });
+
+    // A card awaiting re-authentication observes no purchases, so nothing is left out.
+    await observe("needs_reauth");
+    await expect(service.listOverview(cardUser.id, "2026-07")).resolves.toMatchObject({
+      refundCreditsThisMonth: 300,
+    });
+    await expect(service.getBudgetStatus(cardUser.id, "2026-07")).resolves.toEqual([
+      expect.objectContaining({ spent: 77 }),
+    ]);
+  });
+
   it("uses posted net spending, preserves refunds, and exposes complete ledger health and export data", async () => {
     const [integrityUser] = await database.db
       .insert(users)

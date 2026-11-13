@@ -18696,7 +18696,7 @@ Correct a transaction category or note with provenance. Requires finances:write,
 
 ## update_financial_profile
 
-Persist one confirmed profile answer immediately before asking the next question. Changes facts only, never permissions or bypass mode.
+Persist one confirmed profile answer immediately before asking the next question. Records income, reserves, household, jurisdiction, debts, insurance policies and planning preferences (reserve target in months, buffer, debt priority, standing notes). debts, insurance and preferences replace the whole stored list or object, so read get_financial_profile first and send the complete value. Record only what the person stated or authenticated evidence shows. Changes facts only, never permissions or bypass mode.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write.
@@ -18710,6 +18710,61 @@ Persist one confirmed profile answer immediately before asking the next question
     "changes": {
       "type": "object",
       "properties": {
+        "debts": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "accountId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "balance": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000000
+              },
+              "interestRate": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "minimumMonthlyPayment": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000000
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              }
+            },
+            "required": [
+              "accountId",
+              "balance",
+              "interestRate",
+              "minimumMonthlyPayment",
+              "name"
+            ]
+          }
+        },
         "dependents": {
           "anyOf": [
             {
@@ -18754,6 +18809,71 @@ Persist one confirmed profile answer immediately before asking the next question
             "unknown"
           ]
         },
+        "insurance": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "annualPremium": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100000000
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "coverageAmount": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100000000
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "health",
+                  "life",
+                  "disability",
+                  "property",
+                  "liability",
+                  "other"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "lapsed",
+                  "cancelled",
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "annualPremium",
+              "coverageAmount",
+              "kind",
+              "name",
+              "status"
+            ]
+          }
+        },
         "jurisdiction": {
           "anyOf": [
             {
@@ -18774,6 +18894,66 @@ Persist one confirmed profile answer immediately before asking the next question
             {
               "type": "null"
             }
+          ]
+        },
+        "preferences": {
+          "type": "object",
+          "properties": {
+            "bufferTarget": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100000000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "debtPriority": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "avalanche",
+                    "snowball",
+                    "minimums",
+                    "custom"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "emergencyReserveMonths": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 60
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "notes": {
+              "maxItems": 100,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              }
+            }
+          },
+          "required": [
+            "bufferTarget",
+            "debtPriority",
+            "emergencyReserveMonths",
+            "notes"
           ]
         }
       }

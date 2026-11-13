@@ -71,6 +71,88 @@ const link = (
 });
 
 describe("recognized Spending contributions", () => {
+  it("leaves out a card payment only when an observed card received it", () => {
+    const cardPayment = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT";
+    const card: SpendingEvidenceInput["accounts"][number] = {
+      ...account,
+      id: "card",
+      kind: "debt",
+      providerType: "credit",
+      status: "connected",
+    };
+    const transactions = [
+      tx("purchase", { amount: 4000 }),
+      tx("bank-leg", {
+        amount: 302_060,
+        category: "LOAN_PAYMENTS",
+        categorySource: "provider",
+        providerCategoryDetailed: cardPayment,
+      }),
+      tx("confirmed-bank-leg", {
+        amount: 100_000,
+        category: "LOAN_PAYMENTS",
+        categorySource: "user",
+        providerCategoryDetailed: cardPayment,
+      }),
+      tx("rule-decided", {
+        amount: 45_000,
+        category: "Therapy",
+        categorySource: "rule",
+        providerCategoryDetailed: cardPayment,
+      }),
+      // No observed card received this amount: it paid a card nohmi cannot see.
+      tx("unlinked-card-payment", {
+        amount: 77_700,
+        category: "LOAN_PAYMENTS",
+        categorySource: "provider",
+        providerCategoryDetailed: cardPayment,
+      }),
+      tx("card-receipt", {
+        accountId: "card",
+        amount: 302_060,
+        category: "Transfers",
+        direction: "transfer",
+        providerCategoryDetailed: cardPayment,
+      }),
+      tx("card-receipt-unlabelled", {
+        accountId: "card",
+        amount: 100_000,
+        category: "Transfers",
+        direction: "transfer",
+      }),
+    ];
+    const linked = projectFinanceSpending(
+      input({ accounts: [account, card], transactions }),
+      scope,
+    );
+    expect(linked.contributions.map((item) => item.transactionId).sort()).toEqual([
+      "purchase",
+      "rule-decided",
+      "unlinked-card-payment",
+    ]);
+    expect(linked.netCents).toBe(126_700);
+
+    const unlinked = projectFinanceSpending(input({ transactions }), scope);
+    expect(unlinked.netCents).toBe(528_760);
+
+    const excluded = projectFinanceSpending(
+      input({ accounts: [account, { ...card, includeInPlanning: false }], transactions }),
+      scope,
+    );
+    expect(excluded.netCents).toBe(528_760);
+
+    // A manual liability, a loan, or a card awaiting re-authentication observes no purchases.
+    for (const unobserved of [
+      { ...card, providerType: null, status: "manual" },
+      { ...card, providerType: "loan" },
+      { ...card, status: "needs_reauth" },
+    ])
+      expect(
+        projectFinanceSpending(input({ accounts: [account, unobserved], transactions }), scope)
+          .netCents,
+      ).toBe(528_760);
+  });
+
   it("resolves pending replacements before bins or date selection", () => {
     const evidence = input({
       transactions: [

@@ -109,3 +109,22 @@ explicit issuance; missing API metadata is shown as unavailable. Issuance and up
 current schedule revision, retain readable history on failure, and are hidden for terminal hosts or
 an unavailable connection. Stored instructions do not prove external installation or Chat capability.
 Copy, issue and host-setting action results use Sonner notifications without duplicate inline errors.
+
+## Host instruction version 3 (COO-243)
+
+Per-invocation instructions now tell the agent to read `get_financial_profile`,
+`list_finance_goals` and `get_finance_playbook` before categorizing, budgeting, advising or
+deciding whether to message the person. Profile preferences and notes are standing constraints,
+the playbook's ledger rules and alert tiers govern treatment and messaging, and a durable fact the
+person states is recorded with `update_financial_profile` at the current profile version.
+Recorded facts never grant permission. The bootstrap prompt is unchanged, so an adopted host
+picks this up on its next invocation; a host still running a pre-bootstrap issued prompt does not.
+
+## Host instruction version 4 (COO-153)
+
+Version 4 keeps every version 3 instruction and adds the inbox-zero guidance: follow the returned
+`monthlyWork` even when the retained run is blocked, read `get_finance_attention` and the opening
+position before cleanup, refresh exact stale evidence without manufacturing coverage, link exact
+previews for owner approval (agent write access is not owner approval), and ask one coherent
+question per group. Version 3 was already issued from main with different text, so the combined
+text is a new version rather than a second meaning for 3.

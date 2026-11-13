@@ -253,6 +253,32 @@ Account identities use validated provider institution artwork without recoloring
 failed artwork falls back to institution initials, never a fabricated company logo. Reuse the same
 identity component in account rows and details.
 
+### Finance account management
+
+Accounts has a floating plus that opens the manual account form; connecting a bank is a separate
+flow. Account details keep ownership and planning as direct rows and put Edit account, Sync
+account, Review duplicate and the destructive Stop tracking account in the top-right action menu.
+Offer Sync only for a connected account, and neither Sync nor Stop tracking once tracking has
+stopped. A connected account's balance stays read-only; only a manual account edits its balance.
+
+Sync is a provider handoff: keep one toast from loading to the confirmed result, disable the
+account's actions while it runs, and refresh freshness afterwards whatever the result. Distinguish
+a definitive rejection from an unknown outcome (timeout, lost connection, server fault). An unknown
+outcome never claims success or failure, keeps the same idempotency key for the retry, and tells
+the person what to check. Adding a manual account has no retry key, so after an unknown outcome the
+next Save looks for the earlier attempt, under the name and institution it was sent with, before
+writing again; a corrected draft is not written as a second account. A rejected or unknown edit
+re-reads accounts so reopening the editor starts from the latest revision. An invalid Currency or
+Balance states the correction beside the field rather than relying on colour.
+The form names its required fields, uses Required/Optional as placeholders rather than sample
+values, and keeps one title: the page heading, with only dismissal in the navigation bar.
+
+Duplicate review happens in the app. The person chooses the account to keep from accounts that are
+connected and current, reads both identities, freshness and the overlapping and unique transaction
+counts, then confirms. Resolution is bound to the reviewed comparison revision; a changed
+comparison stops nothing and reloads. Stop tracking and duplicate resolution each keep a native
+confirmation that names the account and what is preserved.
+
 ### Transaction conversations and review
 
 - Needs your input cards show merchant, amount and category, and open the canonical transaction details page. Details place attention on the category row itself, with direct selection and approval. Do not duplicate the field with a separate Choose category banner/button. Notes remain optional and never count as a missing required field. This is record state, not action-result feedback.

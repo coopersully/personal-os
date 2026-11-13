@@ -14,12 +14,22 @@ import {
   financeReviewBatchUndoSchema,
   previewFinanceReviewBatchUndoInputSchema,
 } from "@personal-os/domain";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
 import { captureFinanceBatchEffect, parseFinanceBatchEffect } from "./batch-effect-state.js";
 import type { FinanceTransaction } from "./context.js";
+import {
+  assertFinanceDecisionNotDeclined,
+  recordFinanceDecisionDecline,
+  requireFinanceDeclineOwner,
+} from "./decision-decline.js";
+import {
+  type FinanceTransactionLimits,
+  financeBatchTransactionLimits,
+  runBoundedFinanceTransaction,
+} from "./transaction-limits.js";
 
 type Context = { principal: Principal; requestId: string; signal?: AbortSignal };
 type Row = typeof financeReviewBatchCorrections.$inferSelect;
@@ -51,9 +61,11 @@ export function createFinanceBatchCorrectionService({
   authorize,
   findBatch,
   restore,
+  limits = financeBatchTransactionLimits,
 }: {
   db: Database;
   now: () => Date;
+  limits?: FinanceTransactionLimits;
   authorize: (
     tx: FinanceTransaction,
     context: Context,
@@ -141,7 +153,51 @@ export function createFinanceBatchCorrectionService({
       throw new AppError("not_found", "The correction was not found for this authorization.");
     return row;
   }
+  /**
+   * Undo keeps the approval boundary of the effect it reverses. An agent may prepare any
+   * correction it can see, but applies one only when its own authority applied every
+   * targeted effect. Effects the owner applied or approved need the owner again.
+   */
+  async function assertUndoAuthority(tx: FinanceTransaction, row: Row, context: Context) {
+    const { principal } = context;
+    if (principal.actorType !== "agent") return;
+    const effects = await tx
+      .select({
+        actorType: financeReviewBatchEffects.appliedByActorType,
+        actorId: financeReviewBatchEffects.appliedByActorId,
+      })
+      .from(financeReviewBatchEffects)
+      .where(
+        and(
+          eq(financeReviewBatchEffects.userId, row.userId),
+          eq(financeReviewBatchEffects.batchId, row.batchId),
+          inArray(financeReviewBatchEffects.outcomeIndex, row.outcomeIndexes),
+        ),
+      );
+    if (
+      effects.length !== row.outcomeIndexes.length ||
+      effects.some((effect) => effect.actorType !== "agent" || effect.actorId !== principal.actorId)
+    )
+      throw new AppError(
+        "forbidden",
+        "The owner applied or approved these changes, so only the owner can apply this correction. Publish the preview for their approval.",
+      );
+  }
   return {
+    /** The owner's "no" to a correction preview; effects already corrected remain. */
+    async declineUndo(id: string, context: Context) {
+      requireFinanceDeclineOwner(context);
+      return runBoundedFinanceTransaction(db, limits, async (tx) => {
+        await authorize(tx, context, "write");
+        const row = await find(tx, id, context);
+        if (row.outcomes.length === row.outcomeIndexes.length)
+          throw new AppError(
+            "conflict",
+            "This correction already finished. Prepare a new correction to change its result.",
+          );
+        return recordFinanceDecisionDecline(tx, context, "review_batch_undo", row.id, now());
+      });
+    },
     async previewUndo(raw: unknown, context: Context) {
       const input = previewFinanceReviewBatchUndoInputSchema.parse(raw);
       return db.transaction(async (tx) => {
@@ -240,15 +296,14 @@ export function createFinanceBatchCorrectionService({
       let latest: Row | undefined;
       for (let chunk = 0; chunk < input.limit; chunk++) {
         if (context.signal?.aborted || performance.now() >= deadline) break;
-        latest = await db.transaction(async (tx) => {
-          await tx.execute(sql`SET LOCAL transaction_timeout = '10000ms'`);
-          await tx.execute(sql`SET LOCAL statement_timeout = '8000ms'`);
-          await tx.execute(sql`SET LOCAL lock_timeout = '2000ms'`);
+        latest = await runBoundedFinanceTransaction(db, limits, async (tx) => {
           await authorize(tx, context, "execute");
           const row = await find(tx, id, context);
           await findBatch(tx, row.batchId, context);
+          await assertFinanceDecisionNotDeclined(tx, row.userId, "review_batch_undo", row.id);
           if (row.fingerprint !== input.fingerprint)
             throw new AppError("conflict", "Accept the exact correction preview.");
+          await assertUndoAuthority(tx, row, context);
           const outcomes = row.outcomes.map((item) => financeReviewBatchOutcomeSchema.parse(item));
           const index = row.outcomeIndexes.find(
             (index) => !outcomes.some((outcome) => outcome.index === index),

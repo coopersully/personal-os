@@ -21,7 +21,17 @@ import { AppError } from "../errors.js";
 import { enqueueNativePushEvent } from "../native-push-service.js";
 import type { Principal } from "../types.js";
 import { nextFinanceConversationSequence } from "./conversation-persistence.js";
+import {
+  assertFinanceDecisionNotDeclined,
+  recordFinanceDecisionDecline,
+  requireFinanceDeclineOwner,
+} from "./decision-decline.js";
 import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
+import {
+  type FinanceTransactionLimits,
+  financeBatchTransactionLimits,
+  runBoundedFinanceTransaction,
+} from "./transaction-limits.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Context = { principal: Principal; requestId: string; signal?: AbortSignal };
@@ -110,9 +120,11 @@ export function createFinanceBatchApprovalService({
   authorize,
   find,
   execute,
+  limits = financeBatchTransactionLimits,
 }: {
   db: Database;
   now: () => Date;
+  limits?: FinanceTransactionLimits;
   authorize: (
     tx: Transaction,
     context: Context,
@@ -130,12 +142,7 @@ export function createFinanceBatchApprovalService({
   ) => Promise<FinanceReviewBatchRun>;
 }) {
   const bounded = <T>(work: (tx: Transaction) => Promise<T>) =>
-    db.transaction(async (tx) => {
-      await tx.execute(sql`set local transaction_timeout = '10000ms'`);
-      await tx.execute(sql`set local statement_timeout = '8000ms'`);
-      await tx.execute(sql`set local lock_timeout = '2000ms'`);
-      return work(tx);
-    });
+    runBoundedFinanceTransaction(db, limits, work);
   function owner(context: Context) {
     if (
       context.principal.actorType !== "user" ||
@@ -162,6 +169,12 @@ export function createFinanceBatchApprovalService({
       return bounded(async (tx) => {
         await authorize(tx, context, "write");
         const batch = await find(tx, batchId, context);
+        await assertFinanceDecisionNotDeclined(
+          tx,
+          context.principal.userId,
+          "review_batch",
+          batchId,
+        );
         if (batch.fingerprint !== input.fingerprint)
           throw new AppError("conflict", "Approve the exact displayed batch fingerprint.");
         const [savedBatch] = await tx
@@ -206,6 +219,13 @@ export function createFinanceBatchApprovalService({
             throw new AppError(
               "conflict",
               "This batch already has an approval for a different fingerprint. Read its current state.",
+            );
+          // A stopped approval never restarts; saying "approved" again would change nothing.
+          if (["cancelled", "expired", "blocked"].includes(saved.state))
+            throw new AppError(
+              "conflict",
+              `This batch approval is ${saved.state} and cannot be approved again. Prepare a new preview.`,
+              { recovery: "new_preview" },
             );
           return present(saved);
         };
@@ -252,6 +272,21 @@ export function createFinanceBatchApprovalService({
           }),
         );
         return present(row);
+      });
+    },
+    /** The owner's "no" to a published batch that has no approval yet. */
+    async declineBatch(batchId: string, context: Context) {
+      requireFinanceDeclineOwner(context);
+      return bounded(async (tx) => {
+        await authorize(tx, context, "write");
+        await find(tx, batchId, context);
+        const [approval] = await ownedApproval(tx, batchId, context.principal.userId);
+        if (approval)
+          throw new AppError(
+            "conflict",
+            "This batch was already approved. Cancel its approval instead (cancelContinuation: POST /v1/finances/review-batches/{id}/approval/cancel).",
+          );
+        return recordFinanceDecisionDecline(tx, context, "review_batch", batchId, now());
       });
     },
     async getContinuation(batchId: string, context: Context) {
@@ -355,108 +390,139 @@ export function createFinanceBatchApprovalService({
       } finally {
         permits.delete(context);
       }
-      await bounded(async (tx) => {
-        await guardFinanceExecutionTransaction(tx, claim.userId, {});
-        const [current] = await ownedApproval(tx, claim.batchId, claim.userId);
-        if (!current || current.claimId !== claim.claimId || current.state !== "running") return;
-        // Execution may have committed before a crash or lost response. Its durable
-        // receipts, not this attempt's return value or expiry, describe completed effects.
-        const [saved] = await tx
-          .select()
-          .from(financeReviewBatchRuns)
-          .where(
-            and(
-              eq(financeReviewBatchRuns.id, claim.batchId),
-              eq(financeReviewBatchRuns.userId, claim.userId),
-            ),
-          )
-          .for("update");
-        if (!saved || saved.fingerprint !== claim.fingerprint)
-          throw new AppError("conflict", "The approved batch receipt is unavailable.");
-        const receipts = saved.outcomes.map((item) => financeReviewBatchOutcomeSchema.parse(item));
-        const pending = saved.manifest.length - receipts.length;
-        const applied = receipts.filter((item) => item.status === "applied").length;
-        const other = receipts.length - applied;
-        const failures = result ? 0 : current.failures + 1;
-        const state =
-          pending === 0
-            ? other
-              ? "completed_with_exceptions"
-              : "completed"
-            : current.expiresAt <= now()
-              ? "expired"
-              : !result && (failureCode === "forbidden" || failures >= 3)
-                ? "blocked"
-                : "pending";
-        if (!pending) failureCode = null;
-        await tx
-          .update(financeReviewBatchApprovals)
-          .set({
-            state,
-            failures,
-            failureCode,
-            claimId: null,
-            leaseUntil: null,
-            nextAttemptAt: new Date(now().getTime() + (result ? 0 : 60000)),
-            updatedAt: now(),
-          })
-          .where(eq(financeReviewBatchApprovals.id, claim.id));
-        if (state === "pending") return;
-        const text =
-          state === "expired"
-            ? "This batch approval expired. Review its saved progress before preparing a new batch."
-            : state === "blocked"
-              ? failureCode === "forbidden"
-                ? "This batch no longer has the required approval or access. Review saved progress and prepare a fresh batch."
-                : "This batch paused after repeated execution failures. Review its saved progress before trying again."
-              : other
-                ? `Batch finished: ${applied} changes applied; ${other} need another look.`
-                : `Batch finished: ${applied} changes applied.`;
-        const key = `approved-batch-result:${claim.id}`;
-        const [message] = await tx
-          .insert(financeConversationMessages)
-          .values({
-            userId: claim.userId,
-            sequence: await nextFinanceConversationSequence(tx, claim.userId),
-            authorKind: "agent",
-            text,
-            recordRefs: [{ kind: "review_batch", id: claim.batchId }],
-            sourceMessageIds: [],
-            idempotencyKey: key,
-            createdAt: now(),
-          })
-          .onConflictDoNothing()
-          .returning();
-        if (message)
-          await enqueueNativePushEvent(tx, {
-            userId: claim.userId,
-            sourceId: message.id,
-            kind: "reply",
-            sourceRevision: "1",
-            createdAt: message.createdAt,
-          });
-        await tx.insert(auditEvents).values(
-          auditValues({
-            ...context,
-            action:
-              state === "blocked" || state === "expired"
-                ? "finance_review_batch.continuation_stopped"
-                : "finance_review_batch.continuation_completed",
-            entityType: "finance_review_batch",
-            entityId: claim.batchId,
-            before: null,
-            after: {
-              approvalId: claim.id,
-              applied,
-              remaining: pending + other,
-              source: "persisted_owner_approval",
+      try {
+        await bounded(async (tx) => {
+          await guardFinanceExecutionTransaction(tx, claim.userId, {});
+          const [current] = await ownedApproval(tx, claim.batchId, claim.userId);
+          if (!current || current.claimId !== claim.claimId || current.state !== "running") return;
+          // Execution may have committed before a crash or lost response. Its durable
+          // receipts, not this attempt's return value or expiry, describe completed effects.
+          const [saved] = await tx
+            .select()
+            .from(financeReviewBatchRuns)
+            .where(
+              and(
+                eq(financeReviewBatchRuns.id, claim.batchId),
+                eq(financeReviewBatchRuns.userId, claim.userId),
+              ),
+            )
+            .for("update");
+          if (!saved || saved.fingerprint !== claim.fingerprint)
+            throw new AppError("conflict", "The approved batch receipt is unavailable.");
+          const receipts = saved.outcomes.map((item) =>
+            financeReviewBatchOutcomeSchema.parse(item),
+          );
+          const pending = saved.manifest.length - receipts.length;
+          const applied = receipts.filter((item) => item.status === "applied").length;
+          const other = receipts.length - applied;
+          const failures = result ? 0 : current.failures + 1;
+          const state =
+            pending === 0
+              ? other
+                ? "completed_with_exceptions"
+                : "completed"
+              : current.expiresAt <= now()
+                ? "expired"
+                : !result && (failureCode === "forbidden" || failures >= 3)
+                  ? "blocked"
+                  : "pending";
+          if (!pending) failureCode = null;
+          await tx
+            .update(financeReviewBatchApprovals)
+            .set({
               state,
+              failures,
               failureCode,
-              messageId: message?.id ?? null,
-            },
-          }),
-        );
-      });
+              claimId: null,
+              leaseUntil: null,
+              nextAttemptAt: new Date(now().getTime() + (result ? 0 : 60000)),
+              updatedAt: now(),
+            })
+            .where(eq(financeReviewBatchApprovals.id, claim.id));
+          if (state === "pending") return;
+          const text =
+            state === "expired"
+              ? "This batch approval expired. Review its saved progress before preparing a new batch."
+              : state === "blocked"
+                ? failureCode === "forbidden"
+                  ? "This batch no longer has the required approval or access. Review saved progress and prepare a fresh batch."
+                  : "This batch paused after repeated execution failures. Review its saved progress before trying again."
+                : other
+                  ? `Batch finished: ${applied} changes applied; ${other} need another look.`
+                  : `Batch finished: ${applied} changes applied.`;
+          const key = `approved-batch-result:${claim.id}`;
+          const [message] = await tx
+            .insert(financeConversationMessages)
+            .values({
+              userId: claim.userId,
+              sequence: await nextFinanceConversationSequence(tx, claim.userId),
+              authorKind: "agent",
+              text,
+              recordRefs: [{ kind: "review_batch", id: claim.batchId }],
+              sourceMessageIds: [],
+              idempotencyKey: key,
+              createdAt: now(),
+            })
+            .onConflictDoNothing()
+            .returning();
+          if (message)
+            await enqueueNativePushEvent(tx, {
+              userId: claim.userId,
+              sourceId: message.id,
+              kind: "reply",
+              sourceRevision: "1",
+              createdAt: message.createdAt,
+            });
+          await tx.insert(auditEvents).values(
+            auditValues({
+              ...context,
+              action:
+                state === "blocked" || state === "expired"
+                  ? "finance_review_batch.continuation_stopped"
+                  : "finance_review_batch.continuation_completed",
+              entityType: "finance_review_batch",
+              entityId: claim.batchId,
+              before: null,
+              after: {
+                approvalId: claim.id,
+                applied,
+                remaining: pending + other,
+                source: "persisted_owner_approval",
+                state,
+                failureCode,
+                messageId: message?.id ?? null,
+              },
+            }),
+          );
+        });
+      } catch (error) {
+        // Reconciliation itself failed. Without this the claim would stay `running`, be
+        // re-claimed when its lease lapses and never count toward the retry bound.
+        const reconciliationCode =
+          error instanceof AppError ? `reconciliation_${error.code}` : "reconciliation_failed";
+        await bounded(async (tx) => {
+          const [current] = await tx
+            .select()
+            .from(financeReviewBatchApprovals)
+            .where(eq(financeReviewBatchApprovals.id, claim.id))
+            .for("update");
+          if (!current || current.claimId !== claim.claimId || current.state !== "running") return;
+          const failures = current.failures + 1;
+          await tx
+            .update(financeReviewBatchApprovals)
+            .set({
+              state: failures >= 3 ? "blocked" : "pending",
+              failures,
+              failureCode: reconciliationCode,
+              claimId: null,
+              leaseUntil: null,
+              nextAttemptAt: new Date(now().getTime() + 60000),
+              updatedAt: now(),
+            })
+            .where(eq(financeReviewBatchApprovals.id, claim.id));
+        });
+        throw error;
+      }
       return { inspected: 1 };
     },
   };

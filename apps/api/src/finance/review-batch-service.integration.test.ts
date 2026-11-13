@@ -10,10 +10,12 @@ import {
   financeCategories,
   financeClassificationDecisions,
   financeConversationMessages,
+  financeDecisionDeclines,
   financeMerchants,
   financeProviderItems,
   financeReviewActionRequests,
   financeReviewBatchApprovals,
+  financeReviewBatchEffects,
   financeReviewBatchRuns,
   financeReviewCases,
   financeTransactions,
@@ -32,6 +34,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { PoolClient } from "pg";
 import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
+import { readFinanceAttentionSnapshot } from "./attention-read.js";
 import { createFinanceBatchApprovalService } from "./batch-approval-service.js";
 import { validateFinanceCompletionBatch } from "./completion-service.js";
 import { createFinanceReviewBatchService } from "./review-batch-service.js";
@@ -694,6 +697,11 @@ describe.sequential("durable Finance review batches", () => {
     const input = { batchId: preview.id, outcomeIndexes: [0], idempotencyKey: randomUUID() };
     const correction = await f.service.previewUndo(input, f.agentContext);
     expect(await f.service.previewUndo(input, f.agentContext)).toEqual(correction);
+    // The owner confirmed this pair, so the preparing agent cannot reverse it alone.
+    await expect(
+      f.service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.agentContext),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(await transaction(f.left.id)).toMatchObject({ reconciliationStatus: "confirmed" });
     await expect(f.service.getUndo(correction.id, other.context)).rejects.toMatchObject({
       code: "not_found",
     });
@@ -721,6 +729,146 @@ describe.sequential("durable Finance review batches", () => {
     ]);
     expect(a).toEqual(b);
     expect(a).toMatchObject({ status: "completed", outcomes: [{ status: "applied" }] });
+  });
+  it("lets an agent apply a correction only to effects its own authority applied", async () => {
+    const f = await transferFixture("recategorize");
+    const run = await f.service.preview(f.input, f.agentContext);
+    const executed = await f.service.execute(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.agentContext,
+    );
+    expect(executed.outcomes[0]).toMatchObject({ status: "applied" });
+    const correction = await f.service.previewUndo(
+      { batchId: run.id, outcomeIndexes: [0], idempotencyKey: randomUUID() },
+      f.agentContext,
+    );
+    // Legacy receipts carry no authority record and are treated as the owner's.
+    await database.db
+      .update(financeReviewBatchEffects)
+      .set({ appliedByActorType: null, appliedByActorId: null })
+      .where(eq(financeReviewBatchEffects.batchId, run.id));
+    await expect(
+      f.service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.agentContext),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await database.db
+      .update(financeReviewBatchEffects)
+      .set({ appliedByActorType: "agent", appliedByActorId: f.agentContext.principal.actorId })
+      .where(eq(financeReviewBatchEffects.batchId, run.id));
+    expect(
+      await f.service.executeUndo(
+        correction.id,
+        { fingerprint: correction.fingerprint },
+        f.agentContext,
+      ),
+    ).toMatchObject({ status: "completed", outcomes: [{ status: "applied" }] });
+  });
+  async function publish(userId: string, kind: "review_batch" | "review_batch_undo", id: string) {
+    await database.db.insert(financeConversationMessages).values({
+      userId,
+      sequence: BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000)),
+      authorKind: "agent",
+      text: "Synthetic card",
+      recordRefs: [{ kind, id }],
+      idempotencyKey: randomUUID(),
+      createdAt: now(),
+    });
+  }
+  const decisions = async (userId: string) =>
+    (await readFinanceAttentionSnapshot(database.db, userId, now())).activeDecisionCount;
+  it("lets only the owner decline a published batch, durably and exactly once", async () => {
+    const f = await fixture(2);
+    const other = await fixture();
+    const preparer = await agent(f.userId);
+    const run = await f.service.preview(f.input, preparer);
+    await publish(f.userId, "review_batch", run.id);
+    expect(await decisions(f.userId)).toBe(1);
+    // Write and execute grants are not the person's answer.
+    await expect(f.service.declineBatch(run.id, preparer)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await expect(f.service.declineBatch(run.id, other.context)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(await decisions(f.userId)).toBe(1);
+    const declined = await f.service.declineBatch(run.id, f.context);
+    expect(declined).toMatchObject({ kind: "review_batch", id: run.id, recovery: "new_preview" });
+    expect(await f.service.declineBatch(run.id, { ...f.context, requestId: randomUUID() })).toEqual(
+      declined,
+    );
+    expect(await decisions(f.userId)).toBe(0);
+    const refused = { code: "conflict", details: { recovery: "new_preview" } };
+    await expect(
+      f.service.approveForContinuation(run.id, { fingerprint: run.fingerprint }, f.context),
+    ).rejects.toMatchObject(refused);
+    await expect(
+      f.service.execute(run.id, { fingerprint: run.fingerprint }, preparer),
+    ).rejects.toMatchObject(refused);
+    expect((await f.service.get(run.id, f.context)).outcomes).toEqual([]);
+    expect(
+      await database.db
+        .select()
+        .from(financeDecisionDeclines)
+        .where(eq(financeDecisionDeclines.targetId, run.id)),
+    ).toEqual([expect.objectContaining({ userId: f.userId, declinedBy: f.userId })]);
+    expect(
+      (await database.db.select().from(auditEvents).where(eq(auditEvents.userId, f.userId))).filter(
+        (event) => event.action === "finance_review_batch.declined",
+      ),
+    ).toEqual([expect.objectContaining({ actorType: "user", actorId: f.userId })]);
+  });
+  it("refuses to decline an approved batch and to re-approve a stopped approval", async () => {
+    const f = await fixture(2);
+    const run = await f.service.preview(f.input, f.context);
+    await f.service.approveForContinuation(run.id, { fingerprint: run.fingerprint }, f.context);
+    await expect(f.service.declineBatch(run.id, f.context)).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("approval/cancel"),
+    });
+    expect(await f.service.cancelContinuation(run.id, f.context)).toMatchObject({
+      state: "cancelled",
+    });
+    // Approving again must not report success for an approval that will never run.
+    await expect(
+      f.service.approveForContinuation(run.id, { fingerprint: run.fingerprint }, f.context),
+    ).rejects.toMatchObject({ code: "conflict", details: { recovery: "new_preview" } });
+    expect(await f.service.getContinuation(run.id, f.context)).toMatchObject({
+      state: "cancelled",
+    });
+  });
+  it("lets only the owner decline a published correction, which then cannot be applied", async () => {
+    const f = await pairFixture();
+    const other = await fixture();
+    const preview = await f.service.preview(
+      { idempotencyKey: randomUUID(), decisions: [f.pairDecision] },
+      f.agentContext,
+    );
+    await f.service.execute(
+      preview.id,
+      { fingerprint: preview.fingerprint, confirmTransferPairs: true },
+      f.context,
+    );
+    const correction = await f.service.previewUndo(
+      { batchId: preview.id, outcomeIndexes: [0], idempotencyKey: randomUUID() },
+      f.agentContext,
+    );
+    const before = await decisions(f.userId);
+    await publish(f.userId, "review_batch_undo", correction.id);
+    expect(await decisions(f.userId)).toBe(before + 1);
+    await expect(f.service.declineUndo(correction.id, f.agentContext)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await expect(f.service.declineUndo(correction.id, other.context)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    const declined = await f.service.declineUndo(correction.id, f.context);
+    expect(declined).toMatchObject({ kind: "review_batch_undo", id: correction.id });
+    expect(await f.service.declineUndo(correction.id, f.context)).toEqual(declined);
+    expect(await decisions(f.userId)).toBe(before);
+    await expect(
+      f.service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.context),
+    ).rejects.toMatchObject({ code: "conflict", details: { recovery: "new_preview" } });
+    expect(await transaction(f.left.id)).toMatchObject({ reconciliationStatus: "confirmed" });
   });
   it("rolls back a lost correction writer and resumes without duplicate effects", async () => {
     const f = await pairFixture(1);
@@ -2496,6 +2644,50 @@ describe.sequential("durable Finance review batches", () => {
     } finally {
       failure.mockRestore();
     }
+  });
+  it("counts a failed reconciliation toward the retry bound instead of re-claiming it forever", async () => {
+    const f = await fixture(1);
+    const run = await f.service.preview(f.input, f.context);
+    const approval = await f.service.approveForContinuation(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.context,
+    );
+    // The saved receipt no longer matches the approval, so reconciliation itself throws.
+    await database.db
+      .update(financeReviewBatchRuns)
+      .set({ fingerprint: `sha256:${"e".repeat(64)}` })
+      .where(eq(financeReviewBatchRuns.id, run.id));
+    const saved = async () =>
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeReviewBatchApprovals)
+            .where(eq(financeReviewBatchApprovals.id, approval.id))
+        )[0],
+      );
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await database.db
+        .update(financeReviewBatchApprovals)
+        .set({ nextAttemptAt: now() })
+        .where(eq(financeReviewBatchApprovals.id, approval.id));
+      await expect(f.service.processApproved()).rejects.toMatchObject({ code: "conflict" });
+      expect(await saved()).toMatchObject({
+        state: attempt < 3 ? "pending" : "blocked",
+        failures: attempt,
+        failureCode: "reconciliation_conflict",
+        claimId: null,
+        leaseUntil: null,
+      });
+    }
+    // Terminal: even when due again it is never claimed.
+    await database.db
+      .update(financeReviewBatchApprovals)
+      .set({ nextAttemptAt: now() })
+      .where(eq(financeReviewBatchApprovals.id, approval.id));
+    expect(await f.service.processApproved()).toEqual({ inspected: 0 });
+    expect(await saved()).toMatchObject({ state: "blocked", attempts: 3 });
   });
   it("recovers an expired worker lease but rejects changed source evidence with an honest result", async () => {
     const f = await fixture(1);

@@ -466,6 +466,61 @@ describe.sequential("Finance budget starting policy", () => {
     ).rejects.toMatchObject({ code: "forbidden" });
     expect(await service().getBudgetStart(owner.principal.userId)).toBeNull();
   });
+  it("lets only the owner decline a published starting-month preview", async () => {
+    const owner = await fixture();
+    const other = await fixture();
+    const agent = {
+      ...owner,
+      principal: {
+        ...owner.principal,
+        actorType: "agent" as const,
+        actorId: crypto.randomUUID(),
+        scopes: new Set(["finances:read", "finances:write", "finances:execute"] as const),
+      },
+    };
+    const prepared = await service().previewBudgetStart(agent, input());
+    await database.db.insert(financeConversationMessages).values({
+      userId: owner.principal.userId,
+      sequence: 1n,
+      authorKind: "agent",
+      text: "Start in November?",
+      recordRefs: [{ kind: "budget_start_preview", id: prepared.id }],
+      idempotencyKey: crypto.randomUUID(),
+      createdAt: new Date("2026-11-12T12:00:00Z"),
+    });
+    const snapshot = () => service().getAttentionSnapshot(owner.principal.userId);
+    expect(await snapshot()).toMatchObject({ activeDecisionCount: 1, rawCounts: { approvals: 1 } });
+    await expect(service().declineBudgetStartPreview(agent, prepared.id)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await expect(service().declineBudgetStartPreview(other, prepared.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    const declined = await service().declineBudgetStartPreview(owner, prepared.id);
+    expect(declined).toMatchObject({
+      kind: "budget_start_preview",
+      id: prepared.id,
+      recovery: "new_preview",
+    });
+    expect(await service().declineBudgetStartPreview(owner, prepared.id)).toEqual(declined);
+    expect(await snapshot()).toMatchObject({ activeDecisionCount: 0, rawCounts: { approvals: 0 } });
+    await expect(
+      service().applyBudgetStart(owner, {
+        previewId: prepared.id,
+        fingerprint: prepared.fingerprint,
+      }),
+    ).rejects.toMatchObject({ code: "conflict", details: { recovery: "new_preview" } });
+    expect(await service().getBudgetStart(owner.principal.userId)).toBeNull();
+    // An approved starting month is reversed with a new preview, never declined afterward.
+    const approved = await service().previewBudgetStart(owner, input());
+    await service().applyBudgetStart(owner, {
+      previewId: approved.id,
+      fingerprint: approved.fingerprint,
+    });
+    await expect(service().declineBudgetStartPreview(owner, approved.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
   it("requires an exact preview, records server-derived approval, and replays safely", async () => {
     const context = await fixture();
     const prepared = await service().previewBudgetStart(context, input());

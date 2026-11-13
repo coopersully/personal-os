@@ -84,6 +84,8 @@ export async function readFinanceAttentionSnapshot(
         FROM finance_budget_start_previews p
         WHERE p.user_id = ${userId}::uuid
           AND (${projection?.excludeBudgetStartPreviewId ?? null}::uuid IS NULL OR p.id <> ${projection?.excludeBudgetStartPreviewId ?? null}::uuid)
+          AND NOT EXISTS (SELECT 1 FROM finance_decision_declines declined WHERE declined.user_id = ${userId}::uuid
+            AND declined.target_kind = 'budget_start_preview' AND declined.target_id = p.id)
           AND p.expected_policy_revision >= COALESCE((SELECT MAX(revision) FROM finance_budget_start_policies WHERE user_id = ${userId}::uuid), 0)
           AND EXISTS (SELECT 1 FROM finance_conversation_messages m WHERE m.user_id = ${userId}::uuid
             AND m.author_kind = 'agent' AND m.record_refs @> jsonb_build_array(jsonb_build_object('kind','budget_start_preview','id',p.id::text)))
@@ -101,6 +103,8 @@ export async function readFinanceAttentionSnapshot(
         LEFT JOIN finance_review_batch_approvals a ON a.batch_id = b.id AND a.user_id = b.user_id
         WHERE b.user_id = ${userId}::uuid AND leg.id IS NOT NULL
           AND (a.id IS NULL OR a.state <> 'cancelled')
+          AND NOT EXISTS (SELECT 1 FROM finance_decision_declines declined WHERE declined.user_id = ${userId}::uuid
+            AND declined.target_kind = 'review_batch' AND declined.target_id = b.id)
           AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(b.outcomes) outcome
             WHERE (outcome->>'index')::integer = d.ordinal - 1 AND outcome->>'status' = 'applied')
           AND (t.id IS NULL OR (
@@ -122,6 +126,8 @@ export async function readFinanceAttentionSnapshot(
         LEFT JOIN LATERAL jsonb_array_elements(effect.before->'transactions') leg(value) ON true
         LEFT JOIN finance_transactions t ON t.user_id = c.user_id AND t.id = ${uuidFrom(sql`leg.value->>'id'`)}
         WHERE c.user_id = ${userId}::uuid
+          AND NOT EXISTS (SELECT 1 FROM finance_decision_declines declined WHERE declined.user_id = ${userId}::uuid
+            AND declined.target_kind = 'review_batch_undo' AND declined.target_id = c.id)
           AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(c.outcomes) outcome WHERE outcome->>'index' = idx.value)
           AND EXISTS (SELECT 1 FROM finance_conversation_messages m WHERE m.user_id = ${userId}::uuid
             AND m.author_kind = 'agent' AND m.record_refs @> jsonb_build_array(jsonb_build_object('kind','review_batch_undo','id',c.id::text)))

@@ -19,6 +19,11 @@ import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import { readFinanceAttentionSnapshot } from "./attention-read.js";
 import type { FinanceTransaction } from "./context.js";
+import {
+  assertFinanceDecisionNotDeclined,
+  recordFinanceDecisionDecline,
+  requireFinanceDeclineOwner,
+} from "./decision-decline.js";
 
 type Context = { principal: Principal; requestId: string };
 function policy(row: typeof financeBudgetStartPolicies.$inferSelect) {
@@ -166,6 +171,33 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
         { isolationLevel: "repeatable read" },
       );
     },
+    /** The owner's "no" to a starting-month preview; the current policy is untouched. */
+    async declineBudgetStartPreview(context: Context, rawId: string) {
+      requireFinanceDeclineOwner(context);
+      const id = idSchema.parse(rawId);
+      return db.transaction(async (tx) => {
+        const owner = await ownerLock(tx, context.principal.userId);
+        const prepared = await tx.query.financeBudgetStartPreviews.findFirst({
+          where: and(
+            eq(financeBudgetStartPreviews.id, id),
+            eq(financeBudgetStartPreviews.userId, owner.id),
+          ),
+        });
+        if (!prepared) throw new AppError("not_found", "Starting policy preview not found.");
+        const applied = await tx.query.financeBudgetStartPolicies.findFirst({
+          where: and(
+            eq(financeBudgetStartPolicies.userId, owner.id),
+            eq(financeBudgetStartPolicies.previewId, prepared.id),
+          ),
+        });
+        if (applied)
+          throw new AppError(
+            "conflict",
+            "This starting month was already approved. Preview a change to reverse it.",
+          );
+        return recordFinanceDecisionDecline(tx, context, "budget_start_preview", id, now());
+      });
+    },
     async applyBudgetStart(context: Context, rawInput: unknown) {
       const input = applyFinanceBudgetStartInputSchema.parse(rawInput);
       const { principal } = context;
@@ -203,6 +235,7 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
           ),
         });
         if (applied) return policy(applied);
+        await assertFinanceDecisionNotDeclined(tx, owner.id, "budget_start_preview", prepared.id);
         const attention = await readFinanceAttentionSnapshot(db, owner.id, now(), tx, {
           excludeBudgetStartPreviewId: prepared.id,
         });

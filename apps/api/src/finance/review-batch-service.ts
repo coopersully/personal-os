@@ -46,6 +46,7 @@ import {
 } from "./batch-approval-service.js";
 import { createFinanceBatchCorrectionService } from "./batch-correction-service.js";
 import { captureFinanceBatchEffect } from "./batch-effect-state.js";
+import { assertFinanceDecisionNotDeclined } from "./decision-decline.js";
 import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import {
   type FinanceMaintenanceWork,
@@ -944,6 +945,7 @@ export function createFinanceReviewBatchService({
       let latest = await bounded(async (tx) => {
         await authorize(tx, context, "execute", id);
         const row = await find(tx, id, context);
+        await assertFinanceDecisionNotDeclined(tx, row.userId, "review_batch", row.id);
         await assertPreparationAuthority(tx, row);
         await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
         if (row.fingerprint !== input.fingerprint)
@@ -959,6 +961,8 @@ export function createFinanceReviewBatchService({
           const progressed = await bounded(async (tx, preserve) => {
             await authorize(tx, context, "execute", id);
             const row = await find(tx, id, context);
+            // A decline may land between chunks; it stops every effect not yet committed.
+            await assertFinanceDecisionNotDeclined(tx, row.userId, "review_batch", row.id);
             await assertPreparationAuthority(tx, row);
             await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
             if (row.fingerprint !== input.fingerprint)
@@ -1113,6 +1117,8 @@ export function createFinanceReviewBatchService({
                       before: beforeEffect,
                       after: afterEffect,
                       createdAt: now(),
+                      appliedByActorType: context.principal.actorType,
+                      appliedByActorId: context.principal.actorId,
                     });
                   }
                   let appliedTransferRevision: string | undefined;

@@ -197,6 +197,8 @@ export const financeReviewBatchRunSchema = z.object({
   pendingCount: z.number().int().nonnegative(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
+  /** When the owner declined this exact item; null while it can still be approved. */
+  declinedAt: isoDateTimeSchema.nullable().optional(),
 });
 export type FinanceReviewBatchRun = z.infer<typeof financeReviewBatchRunSchema>;
 
@@ -251,6 +253,8 @@ export const financeReviewBatchUndoSchema = z.strictObject({
   status: z.enum(["previewed", "in_progress", "completed", "completed_with_exceptions"]),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
+  /** When the owner declined this exact item; null while it can still be approved. */
+  declinedAt: isoDateTimeSchema.nullable().optional(),
 });
 export type FinanceReviewBatchUndo = z.infer<typeof financeReviewBatchUndoSchema>;
 

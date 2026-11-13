@@ -22,6 +22,7 @@ import { captureFinanceBatchEffect, parseFinanceBatchEffect } from "./batch-effe
 import type { FinanceTransaction } from "./context.js";
 import {
   assertFinanceDecisionNotDeclined,
+  readFinanceDeclinedAt,
   recordFinanceDecisionDecline,
   requireFinanceDeclineOwner,
 } from "./decision-decline.js";
@@ -33,7 +34,11 @@ import {
 
 type Context = { principal: Principal; requestId: string; signal?: AbortSignal };
 type Row = typeof financeReviewBatchCorrections.$inferSelect;
-const present = (row: Row, effects: FinanceReviewBatchUndo["effects"]) => {
+const present = (
+  row: Row,
+  effects: FinanceReviewBatchUndo["effects"],
+  declinedAt: string | null,
+) => {
   const outcomes = row.outcomes.map((item) => financeReviewBatchOutcomeSchema.parse(item));
   const pendingCount = row.outcomeIndexes.length - outcomes.length;
   return financeReviewBatchUndoSchema.parse({
@@ -44,6 +49,7 @@ const present = (row: Row, effects: FinanceReviewBatchUndo["effects"]) => {
     outcomeIndexes: row.outcomeIndexes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    declinedAt,
     outcomes,
     pendingCount,
     status: pendingCount
@@ -119,9 +125,11 @@ export function createFinanceBatchCorrectionService({
         },
       ];
     });
+    const declined = await readFinanceDeclinedAt(tx, row.userId, "review_batch_undo", [row.id]);
     return present(
       row,
       effects.map((effect) => financeReviewBatchCorrectionEffectSchema.parse(effect)),
+      declined.get(row.id) ?? null,
     );
   }
   async function find(tx: FinanceTransaction, id: string, context: Context) {

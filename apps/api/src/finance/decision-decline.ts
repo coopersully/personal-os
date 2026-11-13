@@ -1,6 +1,6 @@
 import { auditEvents, type Database, financeDecisionDeclines } from "@personal-os/database";
 import { type FinanceDecisionDecline, financeDecisionDeclineSchema } from "@personal-os/domain";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
@@ -37,6 +37,30 @@ const declined = (tx: Transaction, userId: string, kind: FinanceDeclineKind, id:
       ),
     )
     .limit(1);
+
+/** Decline times for reads, keyed by target id; an absent id was never declined. */
+export async function readFinanceDeclinedAt(
+  tx: Pick<Database, "select">,
+  userId: string,
+  kind: FinanceDeclineKind,
+  ids: string[],
+) {
+  if (!ids.length) return new Map<string, string>();
+  const rows = await tx
+    .select({
+      id: financeDecisionDeclines.targetId,
+      declinedAt: financeDecisionDeclines.declinedAt,
+    })
+    .from(financeDecisionDeclines)
+    .where(
+      and(
+        eq(financeDecisionDeclines.userId, userId),
+        eq(financeDecisionDeclines.targetKind, kind),
+        inArray(financeDecisionDeclines.targetId, ids),
+      ),
+    );
+  return new Map(rows.map((row) => [row.id, row.declinedAt.toISOString()]));
+}
 
 /** Call under the target's row lock, before approving or applying any effect. */
 export async function assertFinanceDecisionNotDeclined(

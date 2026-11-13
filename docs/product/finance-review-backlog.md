@@ -144,7 +144,8 @@ Only the authenticated owner session can decline; an agent is refused whatever i
 there is no MCP tool. The decline is stored with its actor and time, is audited once, and
 repeating it returns the first result. A declined card leaves active attention immediately. It
 can never be approved, applied or executed afterward: those requests return a conflict with
-`recovery: new_preview`. Effects already applied before the decline remain and are corrected
+`recovery: new_preview`. Batch, starting-month preview and correction reads carry `declinedAt`,
+which is `null` until the owner declines, so a client can tell declined from not yet approved. Effects already applied before the decline remain and are corrected
 through a new correction preview. A batch that already has an approval is cancelled through the
 existing approval cancellation instead, and an approved starting month is changed with a new
 preview.

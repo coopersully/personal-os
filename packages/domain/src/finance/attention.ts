@@ -167,6 +167,8 @@ export const financeBudgetStartPreviewSchema = z.strictObject({
   expectedPolicyRevision: z.number().int().nonnegative(),
   attention: financeAttentionSnapshotSchema,
   projectedAttention: financeAttentionSnapshotSchema.nullable(),
+  /** When the owner declined this exact item; null while it can still be approved. */
+  declinedAt: z.iso.datetime().nullable().optional(),
 });
 export type FinanceBudgetStartPreview = z.infer<typeof financeBudgetStartPreviewSchema>;
 export type PreviewFinanceBudgetStartInput = z.infer<typeof previewFinanceBudgetStartInputSchema>;

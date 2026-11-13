@@ -503,6 +503,10 @@ describe.sequential("Finance budget starting policy", () => {
       recovery: "new_preview",
     });
     expect(await service().declineBudgetStartPreview(owner, prepared.id)).toEqual(declined);
+    expect(prepared.declinedAt).toBeNull();
+    expect(await service().getBudgetStartPreview(agent, prepared.id)).toMatchObject({
+      declinedAt: declined.declinedAt,
+    });
     expect(await snapshot()).toMatchObject({ activeDecisionCount: 0, rawCounts: { approvals: 0 } });
     await expect(
       service().applyBudgetStart(owner, {

@@ -21,6 +21,7 @@ import { readFinanceAttentionSnapshot } from "./attention-read.js";
 import type { FinanceTransaction } from "./context.js";
 import {
   assertFinanceDecisionNotDeclined,
+  readFinanceDeclinedAt,
   recordFinanceDecisionDecline,
   requireFinanceDeclineOwner,
 } from "./decision-decline.js";
@@ -35,7 +36,11 @@ function policy(row: typeof financeBudgetStartPolicies.$inferSelect) {
     approvalSource: "user_instruction",
   });
 }
-function preview(row: typeof financeBudgetStartPreviews.$inferSelect) {
+async function preview(
+  tx: Pick<Database, "select">,
+  row: typeof financeBudgetStartPreviews.$inferSelect,
+) {
+  const declined = await readFinanceDeclinedAt(tx, row.userId, "budget_start_preview", [row.id]);
   return financeBudgetStartPreviewSchema.parse({
     id: row.id,
     fingerprint: row.fingerprint,
@@ -44,6 +49,7 @@ function preview(row: typeof financeBudgetStartPreviews.$inferSelect) {
     expectedPolicyRevision: row.expectedPolicyRevision,
     attention: row.attention,
     projectedAttention: row.projectedAttention,
+    declinedAt: declined.get(row.id) ?? null,
   });
 }
 
@@ -98,7 +104,7 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
           "not_found",
           "The starting-policy preview was not found for this authorization.",
         );
-      return preview(row);
+      return preview(db, row);
     },
     async previewBudgetStart(context: Context, rawInput: unknown) {
       const input = previewFinanceBudgetStartInputSchema.parse(rawInput);
@@ -122,7 +128,7 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
               existing.timezone !== owner.timezone
             )
               throw new AppError("conflict", "This preview key belongs to a different request.");
-            return preview(existing);
+            return preview(tx, existing);
           }
           const current = await latest(tx, owner.id);
           if ((current?.revision ?? 0) !== input.expectedPolicyRevision)
@@ -166,7 +172,7 @@ export function createFinanceAttentionService({ db, now }: { db: Database; now: 
             .returning();
           if (!row)
             throw new AppError("internal_error", "The starting policy preview was not created.");
-          return preview(row);
+          return preview(tx, row);
         },
         { isolationLevel: "repeatable read" },
       );

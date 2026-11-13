@@ -797,6 +797,20 @@ describe.sequential("durable Finance review batches", () => {
       declined,
     );
     expect(await decisions(f.userId)).toBe(0);
+    // Reads distinguish a declined batch from one that is simply not approved yet.
+    expect(run.declinedAt).toBeNull();
+    expect(await f.service.get(run.id, f.context)).toMatchObject({
+      declinedAt: declined.declinedAt,
+    });
+    expect(await f.service.get(run.id, preparer)).toMatchObject({
+      declinedAt: declined.declinedAt,
+    });
+    expect((await f.service.list(preparer)).find((item) => item.id === run.id)).toMatchObject({
+      declinedAt: declined.declinedAt,
+    });
+    expect(await f.service.preview(f.input, preparer)).toMatchObject({
+      declinedAt: declined.declinedAt,
+    });
     const refused = { code: "conflict", details: { recovery: "new_preview" } };
     await expect(
       f.service.approveForContinuation(run.id, { fingerprint: run.fingerprint }, f.context),
@@ -864,6 +878,10 @@ describe.sequential("durable Finance review batches", () => {
     const declined = await f.service.declineUndo(correction.id, f.context);
     expect(declined).toMatchObject({ kind: "review_batch_undo", id: correction.id });
     expect(await f.service.declineUndo(correction.id, f.context)).toEqual(declined);
+    expect(correction.declinedAt).toBeNull();
+    expect(await f.service.getUndo(correction.id, f.agentContext)).toMatchObject({
+      declinedAt: declined.declinedAt,
+    });
     expect(await decisions(f.userId)).toBe(before);
     await expect(
       f.service.executeUndo(correction.id, { fingerprint: correction.fingerprint }, f.context),

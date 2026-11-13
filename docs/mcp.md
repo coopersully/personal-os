@@ -785,7 +785,9 @@ Declining a published batch, starting-month preview or correction preview is lik
 owner-only application API action with no MCP tool: a decline is the person's own answer and
 cannot be relayed by an agent grant. After a decline, approval, application and execution of
 that exact item return a conflict with `recovery: new_preview`; prepare a new preview only if
-the person asks for one.
+the person asks for one. `get_finance_review_batch`, `get_finance_budget_start_preview` and
+`get_finance_review_batch_undo` return `declinedAt` (`null` until declined); check it before
+asking the person about a card again.
 
 `get_finance_opening_position` identifies qualified opening balances and missing evidence.
 `prepare_finance_evidence_refresh` requires read, write and maintain grants, persists its

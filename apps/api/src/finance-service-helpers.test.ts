@@ -250,28 +250,41 @@ describe("Finance service deterministic helpers", () => {
     expect(budgetImpact(row("expense", "Dining"))).toBe(2500);
   });
 
-  it("counts neither leg of a credit card payment unless a decision overrides the provider", () => {
+  it("excludes a linked card's payment legs unless a decision names a real purchase", () => {
+    const cardPayment = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT";
     const row = (
       direction: "expense" | "income",
       providerCategoryDetailed: string | null,
       categorySource: string | null = "provider",
+      category = "LOAN_PAYMENTS",
     ) =>
       ({
         amount: 302_060,
-        category: "LOAN_PAYMENTS",
+        category,
         categorySource,
         direction,
         pending: false,
         providerCategoryDetailed,
       }) as never;
-    const cardPayment = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT";
-    expect(budgetImpact(row("expense", cardPayment))).toBe(0);
-    expect(budgetImpact(row("income", cardPayment))).toBe(0);
-    expect(budgetImpact(row("expense", "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT"))).toBe(302_060);
-    expect(budgetImpact(row("expense", null))).toBe(302_060);
-    for (const source of ["user", "agent", "rule"])
-      expect(budgetImpact(row("expense", cardPayment, source))).toBe(302_060);
-    expect(isCreditCardPaymentMovement(row("expense", cardPayment))).toBe(true);
-    expect(isCreditCardPaymentMovement(row("expense", cardPayment, "rule"))).toBe(false);
+    expect(budgetImpact(row("expense", cardPayment), false, true)).toBe(0);
+    expect(budgetImpact(row("income", cardPayment), false, true)).toBe(0);
+    // Without a linked card the purchases are unseen, so the payment still counts.
+    expect(budgetImpact(row("expense", cardPayment))).toBe(302_060);
+    expect(budgetImpact(row("expense", cardPayment), false, false)).toBe(302_060);
+    expect(budgetImpact(row("expense", "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT"), false, true)).toBe(
+      302_060,
+    );
+    expect(budgetImpact(row("expense", null), false, true)).toBe(302_060);
+    for (const source of ["user", "agent", "rule"]) {
+      // A decision that names a purchase overrides the provider label.
+      expect(budgetImpact(row("expense", cardPayment, source, "Therapy"), false, true)).toBe(
+        302_060,
+      );
+      // Confirming the payment or calling it a transfer keeps it out of spending.
+      expect(budgetImpact(row("expense", cardPayment, source), false, true)).toBe(0);
+      expect(budgetImpact(row("expense", cardPayment, source, "Transfers"), false, true)).toBe(0);
+    }
+    expect(isCreditCardPaymentMovement(row("expense", cardPayment), true)).toBe(true);
+    expect(isCreditCardPaymentMovement(row("expense", cardPayment), false)).toBe(false);
   });
 });

@@ -166,4 +166,59 @@ describe("Finance playbook rubric", () => {
       Object.fromEntries(unverified.rubric.map((item) => [item.id, item.status])),
     ).toMatchObject({ costly_debt: "not_assessed", protection: "not_assessed" });
   });
+
+  it("never scores an empty reserve healthy against a zero target", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: { ...profile, liquidReserves: 0, reserveTargetMonths: 0 },
+      evidence: {
+        plannedMonthlySpending: 5_000,
+        plannedSpendingBasis: "the approved 2026-10 plan",
+      },
+    });
+    const reserve = rubric.find((item) => item.id === "reserve_months");
+    expect(reserve).toMatchObject({ status: "gap" });
+    expect(reserve?.detail).toContain("default 3-month target");
+    expect(reserve?.detail).toContain("the approved 2026-10 plan");
+  });
+
+  it("reports a known costly debt as a gap even beside an unverified rate", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: {
+        ...profile,
+        debts: [
+          { balance: 4_000, interestRate: 24 },
+          { balance: 900, interestRate: null },
+        ],
+      },
+    });
+    expect(rubric.find((item) => item.id === "costly_debt")).toMatchObject({ status: "gap" });
+  });
+
+  it("covers the gap and watch bands for spending, housing, debt wording and protection", () => {
+    const { rubric } = assessFinancePlaybook({
+      now: "2026-11-13T12:00:00.000Z",
+      profile: {
+        ...profile,
+        debts: [{ balance: 4_000, interestRate: 3 }],
+        insurance: [{ kind: "property", status: "active" }],
+        liquidReserves: 30_000,
+      },
+      evidence: {
+        currentMonthPlanApproved: true,
+        grossAnnualIncome: 60_000,
+        monthlyHousingCost: 2_500,
+        plannedMonthlySpending: 6_600,
+      },
+    });
+    const byId = Object.fromEntries(rubric.map((item) => [item.id, item]));
+    expect(byId.spending_within_income).toMatchObject({ status: "gap" });
+    expect(byId.housing_share).toMatchObject({ status: "gap" });
+    expect(byId.plan_current).toMatchObject({ status: "healthy" });
+    expect(byId.protection).toMatchObject({ status: "watch" });
+    expect(byId.costly_debt).toMatchObject({ status: "healthy" });
+    expect(byId.costly_debt?.detail).toContain("No recorded debt is at or above");
+    expect(byId.reserve_months).toMatchObject({ status: "watch" });
+  });
 });

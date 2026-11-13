@@ -71,40 +71,52 @@ const link = (
 });
 
 describe("recognized Spending contributions", () => {
-  it("counts neither leg of a provider-labelled credit card payment as spending or refund", () => {
+  it("counts neither leg of a linked card's payment, but keeps it when no card is linked", () => {
     const cardPayment = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT";
-    const result = projectFinanceSpending(
-      input({
-        transactions: [
-          tx("purchase", { amount: 4000 }),
-          tx("bank-leg", {
-            amount: 302_060,
-            category: "LOAN_PAYMENTS",
-            categorySource: "provider",
-            providerCategoryDetailed: cardPayment,
-          }),
-          tx("card-leg", {
-            amount: 302_060,
-            category: "LOAN_PAYMENTS",
-            categorySource: "provider",
-            direction: "income",
-            providerCategoryDetailed: cardPayment,
-            providerDirection: "income",
-          }),
-          tx("rule-decided", {
-            amount: 45_000,
-            categorySource: "rule",
-            providerCategoryDetailed: cardPayment,
-          }),
-        ],
+    const card: SpendingEvidenceInput["accounts"][number] = {
+      ...account,
+      id: "card",
+      kind: "debt",
+    };
+    const transactions = [
+      tx("purchase", { amount: 4000 }),
+      tx("bank-leg", {
+        amount: 302_060,
+        category: "LOAN_PAYMENTS",
+        categorySource: "provider",
+        providerCategoryDetailed: cardPayment,
       }),
+      tx("confirmed-bank-leg", {
+        amount: 100_000,
+        category: "LOAN_PAYMENTS",
+        categorySource: "user",
+        providerCategoryDetailed: cardPayment,
+      }),
+      tx("rule-decided", {
+        amount: 45_000,
+        category: "Therapy",
+        categorySource: "rule",
+        providerCategoryDetailed: cardPayment,
+      }),
+    ];
+    const linked = projectFinanceSpending(
+      input({ accounts: [account, card], transactions }),
       scope,
     );
-    expect(result.contributions.map((item) => item.transactionId).sort()).toEqual([
+    expect(linked.contributions.map((item) => item.transactionId).sort()).toEqual([
       "purchase",
       "rule-decided",
     ]);
-    expect(result.netCents).toBe(49_000);
+    expect(linked.netCents).toBe(49_000);
+
+    const unlinked = projectFinanceSpending(input({ transactions }), scope);
+    expect(unlinked.netCents).toBe(451_060);
+
+    const excluded = projectFinanceSpending(
+      input({ accounts: [account, { ...card, includeInPlanning: false }], transactions }),
+      scope,
+    );
+    expect(excluded.netCents).toBe(451_060);
   });
 
   it("resolves pending replacements before bins or date selection", () => {

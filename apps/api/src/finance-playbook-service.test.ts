@@ -48,8 +48,8 @@ describe("Finance playbook service", () => {
         getFinanceBudgetStatus: vi.fn(async () => ({
           planContext: {
             current: null,
-            previous: { spendingTotal: 4_000 },
-            upcoming: { spendingTotal: 4_500 },
+            previous: { effectiveFrom: "2026-10", spendingTotal: 4_000, status: "active" },
+            upcoming: { effectiveFrom: "2026-11", spendingTotal: 9_500, status: "proposed" },
           },
         })),
         getFinancialProfile: vi.fn(async () => ({
@@ -98,5 +98,39 @@ describe("Finance playbook service", () => {
     expect(assessment.rubric.find((item) => item.id === "plan_current")?.status).toBe(
       "not_assessed",
     );
+  });
+
+  it.each([
+    ["proposed", "watch", "the unapproved 2026-11 proposal"],
+    ["incomplete", "not_assessed", null],
+  ] as const)("uses a %s upcoming plan only as a disclosed fallback", async (status, expected, basis) => {
+    const service = createFinancePlaybookService({
+      finances: {
+        getFinanceBudgetStatus: vi.fn(async () => ({
+          planContext: {
+            current: null,
+            previous: null,
+            upcoming: { effectiveFrom: "2026-11", spendingTotal: 4_800, status },
+          },
+        })),
+        getFinancialProfile: vi.fn(async () => ({
+          data: {
+            debts: [],
+            expectedMonthlyTakeHome: 5_000,
+            incomeStability: "stable",
+            insurance: [],
+            jurisdiction: "US",
+            liquidReserves: 1_000,
+            preferences: { emergencyReserveMonths: null },
+          },
+        })),
+        getProfile: vi.fn(async () => null),
+      } as never,
+      now: () => new Date("2026-11-13T12:00:00.000Z"),
+    });
+    const { assessment } = await service.get("11111111-1111-4111-8111-111111111111");
+    const spending = assessment.rubric.find((item) => item.id === "spending_within_income");
+    expect(spending?.status).toBe(expected);
+    if (basis) expect(spending?.detail).toContain(basis);
   });
 });

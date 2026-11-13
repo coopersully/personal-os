@@ -90,6 +90,9 @@ export function projectFinanceSpending(
     z.union([z.iso.date(), z.iso.datetime({ offset: true })]).parse(transaction.transactionDate);
   const accounts = input.accounts.filter((account) => account.userId === input.userId);
   const accountById = new Map(accounts.map((account) => [account.id, account]));
+  const cardLinked = accounts.some(
+    (account) => account.kind === "debt" && account.includeInPlanning,
+  );
   const transactions = input.transactions.filter(
     (transaction) => transaction.userId === input.userId && accountById.has(transaction.accountId),
   );
@@ -157,7 +160,7 @@ export function projectFinanceSpending(
       evidence.excludedTransactionIds.has(transaction.id) ||
       evidence.transferTransactionIds.has(transaction.id) ||
       transaction.direction === "transfer" ||
-      isCreditCardPaymentMovement(transaction)
+      isCreditCardPaymentMovement(transaction, cardLinked)
     )
       continue;
     if (

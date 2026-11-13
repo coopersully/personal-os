@@ -10,8 +10,9 @@
   preferences in addition to the six scalar facts. Storage and the HTTP route already accepted them.
 - Scheduled-run instructions (version 3) load the profile, goals and playbook before financial
   work and record durable stated facts.
-- A payment labelled by the provider as a credit card payment no longer counts toward spending,
-  refunds or budget pace on either leg. It is not linked or resolved by this rule.
+- When a planning-included card account exists, a payment the provider labels as a credit card
+  payment no longer counts toward spending, refunds or budget pace on either leg. It is not linked
+  or resolved by this rule.
 - Focused unit tests and typechecks pass. This is not yet merged, deployed or observed in
   production; the provider's detailed label on existing production rows is unverified because no
   read exposes it. User Knowledge (Memory) remains unimplemented.

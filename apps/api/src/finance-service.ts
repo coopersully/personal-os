@@ -542,9 +542,14 @@ export function isRefundOrReversal(row: typeof financeTransactions.$inferSelect)
   );
 }
 export { isCreditCardPaymentMovement };
-export function budgetImpact(row: typeof financeTransactions.$inferSelect, includePending = false) {
+export function budgetImpact(
+  row: typeof financeTransactions.$inferSelect,
+  includePending = false,
+  /** True when the person has a planning-included card account whose purchases are observed. */
+  cardLinked = false,
+) {
   if (row.pending && !includePending) return 0;
-  if (isCreditCardPaymentMovement(row)) return 0;
+  if (isCreditCardPaymentMovement(row, cardLinked)) return 0;
   if (row.direction === "expense") return row.amount;
   return isRefundOrReversal(row) ? -row.amount : 0;
 }
@@ -554,8 +559,9 @@ function personalBudgetImpact(
   includePending = false,
   excludedReimbursementByAllocation: ReadonlyMap<string, number> = new Map(),
   matchedReimbursementByCredit: ReadonlyMap<string, number> = new Map(),
+  cardLinked = false,
 ) {
-  const grossImpact = budgetImpact(row, includePending);
+  const grossImpact = budgetImpact(row, includePending, cardLinked);
   if (grossImpact === 0) return 0;
   const matchedCredit = matchedReimbursementByCredit.get(row.id) ?? 0;
   const personalAmount =
@@ -2312,6 +2318,21 @@ export function createFinanceService({
     }
     return plaid;
   }
+  /** Card purchases are only observed when a planning-included liability account exists. */
+  async function hasPlanningCardAccount(userId: string, executor: FinanceReadExecutor = db) {
+    const [row] = await executor
+      .select({ id: financeAccounts.id })
+      .from(financeAccounts)
+      .where(
+        and(
+          eq(financeAccounts.userId, userId),
+          eq(financeAccounts.kind, "debt"),
+          eq(financeAccounts.includeInPlanning, true),
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
   async function ownedAccount(userId: string, id: string, executor: FinanceReadExecutor = db) {
     const [row] = await executor
       .select()
@@ -2507,6 +2528,7 @@ export function createFinanceService({
   }
 
   async function budgetProjection(userId: string, month: string) {
+    const cardLinked = await hasPlanningCardAccount(userId);
     const [budgets, allocations, transactions] = await Promise.all([
       db
         .select()
@@ -2567,13 +2589,13 @@ export function createFinanceService({
                   0,
                   allocation.amount - (reimbursement.excludedByAllocation.get(allocation.id) ?? 0),
                 );
-          if (personalAmount > 0 && budgetImpact(transaction) !== 0)
+          if (personalAmount > 0 && budgetImpact(transaction, false, cardLinked) !== 0)
             transactionIds.add(transaction.id);
           return (
             sum +
-            (budgetImpact(transaction) < 0
+            (budgetImpact(transaction, false, cardLinked) < 0
               ? -personalAmount
-              : budgetImpact(transaction) > 0
+              : budgetImpact(transaction, false, cardLinked) > 0
                 ? personalAmount
                 : 0)
           );
@@ -2584,7 +2606,7 @@ export function createFinanceService({
             !allocationTransactionIds.has(transaction.id) && transaction.category === item.category,
         )
         .reduce((sum, transaction) => {
-          const impact = budgetImpact(transaction);
+          const impact = budgetImpact(transaction, false, cardLinked);
           if (impact !== 0) transactionIds.add(transaction.id);
           return sum + impact;
         }, 0);
@@ -8992,6 +9014,7 @@ export function createFinanceService({
       userId: string,
       period: FinanceBudgetPacePeriod,
     ): Promise<FinanceBudgetPace> {
+      const cardLinked = await hasPlanningCardAccount(userId);
       const today = now().toISOString().slice(0, 10);
       const dates = budgetPaceDates(period, today);
       const months = new Set(dates.map((date) => date.slice(0, 7)));
@@ -9041,6 +9064,7 @@ export function createFinanceService({
           false,
           reimbursement.excludedByAllocation,
           reimbursement.matchedByCredit,
+          cardLinked,
         );
         if (impact === 0) continue;
         spendingByDate.set(
@@ -9094,6 +9118,7 @@ export function createFinanceService({
       requestedMonth?: string,
       accountIds?: string[],
     ): Promise<FinanceOverview> {
+      const cardLinked = await hasPlanningCardAccount(userId);
       const month = requestedMonth ?? now().toISOString().slice(0, 7);
       const [accounts, budgets, transactions, monthlyTransactions] = await Promise.all([
         db
@@ -9160,6 +9185,7 @@ export function createFinanceService({
             false,
             reimbursement.excludedByAllocation,
             reimbursement.matchedByCredit,
+            cardLinked,
           ),
         0,
       );
@@ -9175,6 +9201,7 @@ export function createFinanceService({
                   true,
                   reimbursement.excludedByAllocation,
                   reimbursement.matchedByCredit,
+                  cardLinked,
                 ),
               )
             : sum,

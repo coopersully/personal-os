@@ -17,8 +17,17 @@ async function readEvidence(finances: Finances, userId: string): Promise<Finance
   const planContext = budget.status === "fulfilled" ? budget.value.planContext : undefined;
   if (planContext) {
     evidence.currentMonthPlanApproved = planContext.current !== null;
-    const plan = planContext.current ?? planContext.upcoming ?? planContext.previous;
-    evidence.plannedMonthlySpending = plan?.spendingTotal ?? null;
+    // Prefer what the person approved. An unapproved proposal is a fallback and is named
+    // as such; an incomplete draft's partial allocations are never a spending basis.
+    const proposal = planContext.upcoming?.status === "proposed" ? planContext.upcoming : null;
+    const plan = planContext.current ?? planContext.previous ?? proposal;
+    if (plan) {
+      evidence.plannedMonthlySpending = plan.spendingTotal;
+      evidence.plannedSpendingBasis =
+        plan === proposal
+          ? `the unapproved ${plan.effectiveFrom} proposal`
+          : `the approved ${plan.effectiveFrom} plan`;
+    }
   }
   if (income.status === "fulfilled" && income.value) {
     evidence.grossAnnualIncome = income.value.grossAnnualIncome ?? null;

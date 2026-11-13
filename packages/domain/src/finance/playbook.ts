@@ -535,8 +535,10 @@ export const PERSONAL_OS_FINANCE_PLAYBOOK: FinancePlaybook = {
 };
 
 export type FinancePlaybookEvidence = {
-  /** Spending allocations in the plan that applies to the current month. */
+  /** Spending allocations in the plan named by `plannedSpendingBasis`. */
   plannedMonthlySpending?: number | null;
+  /** Which plan supplied the spending figure, e.g. "the approved 2026-10 plan". */
+  plannedSpendingBasis?: string | null;
   currentMonthPlanApproved?: boolean | null;
   /** The person's own share of housing cost per month. */
   monthlyHousingCost?: number | null;
@@ -575,13 +577,14 @@ export function scoreFinancePlaybookRubric(
   ) => results.push({ id, status, detail });
   const takeHome = profile?.expectedMonthlyTakeHome;
   const spending = evidence.plannedMonthlySpending;
+  const planned = `Planned spending in ${evidence.plannedSpendingBasis ?? "the latest plan"}`;
 
   if (positive(takeHome) && positive(spending)) {
     const ratio = spending / takeHome;
     add(
       "spending_within_income",
       ratio <= 0.9 ? "healthy" : ratio <= 1 ? "watch" : "gap",
-      `Planned spending ${usd(spending)} is ${percent(ratio)} of expected take-home ${usd(takeHome)}.`,
+      `${planned}, ${usd(spending)}, is ${percent(ratio)} of expected take-home ${usd(takeHome)}.`,
     );
   } else {
     add(
@@ -605,16 +608,18 @@ export function scoreFinancePlaybookRubric(
 
   const reserves = profile?.liquidReserves;
   if (typeof reserves === "number" && positive(spending)) {
-    const target = profile?.reserveTargetMonths ?? DEFAULT_RESERVE_TARGET_MONTHS;
+    // A zero or missing target is not a target; an empty reserve must never score healthy.
+    const recorded = positive(profile?.reserveTargetMonths) ? profile.reserveTargetMonths : null;
+    const target = recorded ?? DEFAULT_RESERVE_TARGET_MONTHS;
     const months = reserves / spending;
     const basis =
-      profile?.reserveTargetMonths === null || profile?.reserveTargetMonths === undefined
+      recorded === null
         ? `the default ${DEFAULT_RESERVE_TARGET_MONTHS}-month target (none is recorded)`
         : `the recorded ${target}-month target`;
     add(
       "reserve_months",
       months >= target ? "healthy" : months >= target / 2 ? "watch" : "gap",
-      `Liquid reserves ${usd(reserves)} cover ${months.toFixed(1)} months of planned spending against ${basis}.`,
+      `Liquid reserves ${usd(reserves)} cover ${months.toFixed(1)} months of ${planned.toLowerCase()} against ${basis}.`,
     );
   } else {
     add(
@@ -626,18 +631,20 @@ export function scoreFinancePlaybookRubric(
 
   if (!profile) {
     add("costly_debt", "not_assessed", "No financial profile exists yet.");
-  } else if (profile.debts.some((debt) => debt.interestRate === null)) {
-    add("costly_debt", "not_assessed", "At least one recorded debt has no verified interest rate.");
   } else {
+    // A known costly debt is a gap even when another debt's rate is unverified.
     const costly = profile.debts.filter((debt) => (debt.interestRate ?? 0) >= COSTLY_DEBT_RATE);
+    const unverified = profile.debts.some((debt) => debt.interestRate === null);
     add(
       "costly_debt",
-      costly.length > 0 ? "gap" : "healthy",
+      costly.length > 0 ? "gap" : unverified ? "not_assessed" : "healthy",
       costly.length > 0
         ? `${costly.length} recorded debt(s) at or above ${COSTLY_DEBT_RATE}% APR.`
-        : profile.debts.length > 0
-          ? `No recorded debt is at or above ${COSTLY_DEBT_RATE}% APR.`
-          : "No debt is recorded in the profile.",
+        : unverified
+          ? "At least one recorded debt has no verified interest rate."
+          : profile.debts.length > 0
+            ? `No recorded debt is at or above ${COSTLY_DEBT_RATE}% APR.`
+            : "No debt is recorded in the profile.",
     );
   }
 

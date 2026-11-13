@@ -13,9 +13,12 @@ import {
   financeConversationEvidenceReadInputSchema,
   financeConversationProofOperationSchema,
   financeConversationReplyInputSchema,
+  financeDebtProfileSchema,
+  financeInsuranceProfileSchema,
   financeMaintenanceInputSchema,
   financeOnboardingCompleteInputSchema,
   financeOnboardingSaveInputSchema,
+  financePlanningPreferencesSchema,
   financeProviderTransactionEvidenceInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
@@ -714,15 +717,18 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Persist one confirmed profile answer immediately before asking the next question. Changes facts only, never permissions or bypass mode.",
+        "Persist one confirmed profile answer immediately before asking the next question. Records income, reserves, household, jurisdiction, debts, insurance policies and planning preferences (reserve target in months, buffer, debt priority, standing notes). debts, insurance and preferences replace the whole stored list or object, so read get_financial_profile first and send the complete value. Record only what the person stated or authenticated evidence shows. Changes facts only, never permissions or bypass mode.",
       inputSchema: {
         changes: z.object({
+          debts: z.array(financeDebtProfileSchema).max(100).optional(),
           dependents: z.number().int().nonnegative().nullable().optional(),
           expectedMonthlyTakeHome: z.number().nonnegative().nullable().optional(),
           householdSize: z.number().int().positive().nullable().optional(),
           incomeStability: z.enum(["stable", "variable", "seasonal", "unknown"]).optional(),
+          insurance: z.array(financeInsuranceProfileSchema).max(100).optional(),
           jurisdiction: z.string().max(120).nullable().optional(),
           liquidReserves: z.number().nonnegative().nullable().optional(),
+          preferences: financePlanningPreferencesSchema.optional(),
         }),
         expectedVersion: z.number().int().nonnegative(),
         idempotencyKey,

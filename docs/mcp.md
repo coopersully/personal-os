@@ -395,6 +395,12 @@ an independent financial model. Unknown amounts remain unavailable and API-owned
 classification, ownership, freshness, and totals govern financial interpretation.
 
 The Finance playbook uses the canonical `nohmi-finance` identity and owner.
+Version 1.1.0 also returns a scored stewardship rubric, ledger rules, alert tiers and dated
+reference limits; a check without its facts is `not_assessed`, never guessed.
+`update_financial_profile` records income, reserves, household, jurisdiction, debts, insurance
+policies and planning preferences (reserve target in months, buffer, debt priority and standing
+notes). Debts, insurance and preferences replace the stored value, so read
+`get_financial_profile` first and send the complete list or object.
 Start a financial interview with `get_finance_playbook` and `setup_finances` using
 `operation: start`. The API resumes an active session and returns one question. Persist each
 answer with its session ID, question ID, expected session version, and idempotency key. Optional planning questions support `operation: skip` with that same revision-bound identity;

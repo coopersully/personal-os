@@ -138,6 +138,7 @@ import {
   requireActiveBudgetAuthority,
 } from "./finance/budget-authority.js";
 import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
+import { isCreditCardPaymentMovement, settledCardPaymentIds } from "./finance/card-payment.js";
 import { readFinanceConfiguration } from "./finance/configuration-service.js";
 import { createFinanceConnectionHandoffService } from "./finance/connection-handoff-service.js";
 import {
@@ -540,8 +541,15 @@ export function isRefundOrReversal(row: typeof financeTransactions.$inferSelect)
     row.category !== transferCategory
   );
 }
-export function budgetImpact(row: typeof financeTransactions.$inferSelect, includePending = false) {
+export { isCreditCardPaymentMovement };
+export function budgetImpact(
+  row: typeof financeTransactions.$inferSelect,
+  includePending = false,
+  /** True when `settledCardPaymentIds` found this row pays a card whose purchases are observed. */
+  cardPaymentSettled = false,
+) {
   if (row.pending && !includePending) return 0;
+  if (isCreditCardPaymentMovement(row, cardPaymentSettled)) return 0;
   if (row.direction === "expense") return row.amount;
   return isRefundOrReversal(row) ? -row.amount : 0;
 }
@@ -551,8 +559,9 @@ function personalBudgetImpact(
   includePending = false,
   excludedReimbursementByAllocation: ReadonlyMap<string, number> = new Map(),
   matchedReimbursementByCredit: ReadonlyMap<string, number> = new Map(),
+  cardPaymentSettled = false,
 ) {
-  const grossImpact = budgetImpact(row, includePending);
+  const grossImpact = budgetImpact(row, includePending, cardPaymentSettled);
   if (grossImpact === 0) return 0;
   const matchedCredit = matchedReimbursementByCredit.get(row.id) ?? 0;
   const personalAmount =
@@ -2309,6 +2318,60 @@ export function createFinanceService({
     }
     return plaid;
   }
+  /**
+   * Card-payment rows dated in [from, to] that settle a card whose purchases are observed.
+   * The account filter mirrors `observesCardPurchases`; rows a few days outside the range
+   * are read so a payment and its receipt can pair across a month boundary.
+   */
+  async function settledCardPayments(
+    userId: string,
+    from: string,
+    to: string,
+    executor: FinanceReadExecutor = db,
+  ) {
+    const cards = await executor
+      .select({ id: financeAccounts.id })
+      .from(financeAccounts)
+      .where(
+        and(
+          eq(financeAccounts.userId, userId),
+          eq(financeAccounts.kind, "debt"),
+          eq(financeAccounts.includeInPlanning, true),
+          eq(financeAccounts.providerType, "credit"),
+          eq(financeAccounts.status, "connected"),
+        ),
+      );
+    if (cards.length === 0) return new Set<string>();
+    const cardIds = cards.map((card) => card.id);
+    const shift = (date: string, days: number) =>
+      new Date(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) + days * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+    const rows = await executor
+      .select({
+        accountId: financeTransactions.accountId,
+        amount: financeTransactions.amount,
+        category: financeTransactions.category,
+        categorySource: financeTransactions.categorySource,
+        direction: financeTransactions.direction,
+        id: financeTransactions.id,
+        providerCategoryDetailed: financeTransactions.providerCategoryDetailed,
+        transactionDate: financeTransactions.transactionDate,
+      })
+      .from(financeTransactions)
+      .where(
+        and(
+          eq(financeTransactions.userId, userId),
+          gte(financeTransactions.transactionDate, shift(from, -5)),
+          lte(financeTransactions.transactionDate, shift(to, 5)),
+          or(
+            eq(financeTransactions.providerCategoryDetailed, "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"),
+            inArray(financeTransactions.accountId, cardIds),
+          ),
+        ),
+      );
+    return settledCardPaymentIds(rows, new Set(cardIds));
+  }
   async function ownedAccount(userId: string, id: string, executor: FinanceReadExecutor = db) {
     const [row] = await executor
       .select()
@@ -2504,6 +2567,7 @@ export function createFinanceService({
   }
 
   async function budgetProjection(userId: string, month: string) {
+    const settled = await settledCardPayments(userId, `${month}-01`, `${nextMonth(month)}-01`);
     const [budgets, allocations, transactions] = await Promise.all([
       db
         .select()
@@ -2564,13 +2628,16 @@ export function createFinanceService({
                   0,
                   allocation.amount - (reimbursement.excludedByAllocation.get(allocation.id) ?? 0),
                 );
-          if (personalAmount > 0 && budgetImpact(transaction) !== 0)
+          if (
+            personalAmount > 0 &&
+            budgetImpact(transaction, false, settled.has(transaction.id)) !== 0
+          )
             transactionIds.add(transaction.id);
           return (
             sum +
-            (budgetImpact(transaction) < 0
+            (budgetImpact(transaction, false, settled.has(transaction.id)) < 0
               ? -personalAmount
-              : budgetImpact(transaction) > 0
+              : budgetImpact(transaction, false, settled.has(transaction.id)) > 0
                 ? personalAmount
                 : 0)
           );
@@ -2581,7 +2648,7 @@ export function createFinanceService({
             !allocationTransactionIds.has(transaction.id) && transaction.category === item.category,
         )
         .reduce((sum, transaction) => {
-          const impact = budgetImpact(transaction);
+          const impact = budgetImpact(transaction, false, settled.has(transaction.id));
           if (impact !== 0) transactionIds.add(transaction.id);
           return sum + impact;
         }, 0);
@@ -8993,6 +9060,7 @@ export function createFinanceService({
       const dates = budgetPaceDates(period, today);
       const months = new Set(dates.map((date) => date.slice(0, 7)));
       const startDate = `${[...months].toSorted()[0] ?? today.slice(0, 7)}-01`;
+      const settled = await settledCardPayments(userId, startDate, today);
       const [budgets, transactions] = await Promise.all([
         db.select().from(financeBudgets).where(eq(financeBudgets.userId, userId)),
         db
@@ -9038,6 +9106,7 @@ export function createFinanceService({
           false,
           reimbursement.excludedByAllocation,
           reimbursement.matchedByCredit,
+          settled.has(item.id),
         );
         if (impact === 0) continue;
         spendingByDate.set(
@@ -9092,6 +9161,7 @@ export function createFinanceService({
       accountIds?: string[],
     ): Promise<FinanceOverview> {
       const month = requestedMonth ?? now().toISOString().slice(0, 7);
+      const settled = await settledCardPayments(userId, `${month}-01`, `${nextMonth(month)}-01`);
       const [accounts, budgets, transactions, monthlyTransactions] = await Promise.all([
         db
           .select()
@@ -9157,6 +9227,7 @@ export function createFinanceService({
             false,
             reimbursement.excludedByAllocation,
             reimbursement.matchedByCredit,
+            settled.has(item.id),
           ),
         0,
       );
@@ -9172,6 +9243,7 @@ export function createFinanceService({
                   true,
                   reimbursement.excludedByAllocation,
                   reimbursement.matchedByCredit,
+                  settled.has(item.id),
                 ),
               )
             : sum,
@@ -9179,7 +9251,7 @@ export function createFinanceService({
       );
       const refunds = scopedTransactions.reduce(
         (sum, item) =>
-          isRefundOrReversal(item)
+          isRefundOrReversal(item) && !isCreditCardPaymentMovement(item, settled.has(item.id))
             ? sum - (reimbursement.matchedByCredit.get(item.id) ?? 0) + item.amount
             : sum,
         0,

@@ -199,9 +199,21 @@ export function createFinanceBatchApprovalService({
             "invalid_request",
             "Confirm that each displayed pair is the same movement between your own accounts.",
           );
+        // One approval exists per batch. A repeat of the same exact approval returns it
+        // unchanged; the same batch under another fingerprint is a different instruction.
+        const replay = (saved: Approval) => {
+          if (saved.fingerprint !== input.fingerprint)
+            throw new AppError(
+              "conflict",
+              "This batch already has an approval for a different fingerprint. Read its current state.",
+            );
+          return present(saved);
+        };
         const [existing] = await ownedApproval(tx, batchId, context.principal.userId);
-        if (existing) return present(existing);
+        if (existing) return replay(existing);
         const at = now();
+        // The unique index, not a caller's row lock, decides a race between duplicates:
+        // the loser waits for the winner's commit and then reads its approval.
         const [row] = await tx
           .insert(financeReviewBatchApprovals)
           .values({
@@ -214,8 +226,16 @@ export function createFinanceBatchApprovalService({
             nextAttemptAt: at,
             updatedAt: at,
           })
+          .onConflictDoNothing({
+            target: [financeReviewBatchApprovals.userId, financeReviewBatchApprovals.batchId],
+          })
           .returning();
-        if (!row) throw new AppError("internal_error", "The exact batch approval was not saved.");
+        if (!row) {
+          const [winner] = await ownedApproval(tx, batchId, context.principal.userId);
+          if (!winner)
+            throw new AppError("conflict", "This batch approval changed. Read its current state.");
+          return replay(winner);
+        }
         await tx.insert(auditEvents).values(
           auditValues({
             ...context,

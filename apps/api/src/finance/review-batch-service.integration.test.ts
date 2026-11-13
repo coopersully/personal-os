@@ -32,6 +32,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { PoolClient } from "pg";
 import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
+import { createFinanceBatchApprovalService } from "./batch-approval-service.js";
 import { validateFinanceCompletionBatch } from "./completion-service.js";
 import { createFinanceReviewBatchService } from "./review-batch-service.js";
 
@@ -2291,6 +2292,93 @@ describe.sequential("durable Finance review batches", () => {
         .from(nativePushEvents)
         .where(eq(nativePushEvents.userId, f.userId)),
     ).toHaveLength(1);
+  });
+  it("returns one approval idempotently when duplicate approvals race", async () => {
+    const f = await fixture(2);
+    const run = await f.service.preview(f.input, f.context);
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, (_, index) =>
+        f.service.approveForContinuation(
+          run.id,
+          { fingerprint: run.fingerprint },
+          { ...f.context, requestId: `race-${index}` },
+        ),
+      ),
+    );
+    expect(results.filter((result) => result.status === "rejected")).toEqual([]);
+    const approvals = results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    expect(new Set(approvals.map((approval) => approval.id)).size).toBe(1);
+    expect(approvals[0]).toMatchObject({ batchId: run.id, state: "pending" });
+    expect(
+      await database.db
+        .select()
+        .from(financeReviewBatchApprovals)
+        .where(eq(financeReviewBatchApprovals.batchId, run.id)),
+    ).toHaveLength(1);
+    // The worker claims approvals across owners; never leave this one for a later test.
+    await f.service.cancelContinuation(run.id, f.context);
+    // Only the request that created the approval records the owner's attestation.
+    expect(
+      (await database.db.select().from(auditEvents).where(eq(auditEvents.userId, f.userId))).filter(
+        (event) => event.action === "finance_review_batch.approved",
+      ),
+    ).toHaveLength(1);
+  });
+  it("keeps duplicate approvals idempotent without relying on a caller's row locks", async () => {
+    const f = await fixture(2);
+    const run = await f.service.preview(f.input, f.context);
+    const racers = 4;
+    let arrived = 0;
+    let release: () => void = () => {};
+    const everyoneArrived = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Unlike the composed service, these dependencies take no owner or batch lock, so
+    // every request reads "no approval yet" before any of them inserts.
+    const approvals = (fingerprint: string, gate: boolean) =>
+      createFinanceBatchApprovalService({
+        db: database.db,
+        now,
+        authorize: async () => {},
+        find: async () => {
+          if (gate && ++arrived === racers) release();
+          if (gate) await everyoneArrived;
+          return { id: run.id, fingerprint };
+        },
+        execute: async () => {
+          throw new Error("Approval never executes inline.");
+        },
+      });
+    const service = approvals(run.fingerprint, true);
+    const results = await Promise.allSettled(
+      Array.from({ length: racers }, (_, index) =>
+        service.approveForContinuation(
+          run.id,
+          { fingerprint: run.fingerprint },
+          { ...f.context, requestId: `unlocked-race-${index}` },
+        ),
+      ),
+    );
+    expect(results.filter((result) => result.status === "rejected")).toEqual([]);
+    const ids = results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value.id] : [],
+    );
+    expect(new Set(ids).size).toBe(1);
+    expect(
+      await database.db
+        .select()
+        .from(financeReviewBatchApprovals)
+        .where(eq(financeReviewBatchApprovals.batchId, run.id)),
+    ).toHaveLength(1);
+    // The same batch presented under a different fingerprint is a typed conflict.
+    const changed = `sha256:${"f".repeat(64)}`;
+    await expect(
+      approvals(changed, false).approveForContinuation(run.id, { fingerprint: changed }, f.context),
+    ).rejects.toMatchObject({ code: "conflict" });
+    // The worker claims approvals across owners; never leave this one for a later test.
+    await f.service.cancelContinuation(run.id, f.context);
   });
   it("stops remaining owner-approved effects when the originating preparation grant is revoked", async () => {
     const f = await fixture(12);

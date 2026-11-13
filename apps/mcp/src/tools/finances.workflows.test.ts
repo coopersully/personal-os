@@ -39,6 +39,65 @@ describe("Finance MCP workflows", () => {
     }
   });
 
+  it("records insurance, debts and planning preferences through the profile tool", async () => {
+    const updateFinancialProfile = vi.fn(async () => ({ ...base, data: {}, outcome: "completed" }));
+    const server = new McpServer({ name: "finance-profile-facts", version: "1" });
+    registerFinanceTools(server, {
+      updateFinancialProfile,
+    } as unknown as PersonalOsApiClient);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const input = {
+        changes: {
+          debts: [
+            {
+              accountId: null,
+              balance: 1_200,
+              interestRate: 24.99,
+              minimumMonthlyPayment: 40,
+              name: "Example card",
+            },
+          ],
+          insurance: [
+            {
+              annualPremium: null,
+              coverageAmount: null,
+              kind: "health",
+              name: "Example health plan",
+              status: "active",
+            },
+          ],
+          preferences: {
+            bufferTarget: null,
+            debtPriority: null,
+            emergencyReserveMonths: 6,
+            notes: ["Giving is protected; never propose reducing it."],
+          },
+        },
+        expectedVersion: 4,
+        idempotencyKey: "profile-facts-1",
+      };
+      const result = await client.callTool({ name: "update_financial_profile", arguments: input });
+      expect(result.isError).not.toBe(true);
+      expect(updateFinancialProfile).toHaveBeenCalledWith(input);
+
+      const rejected = await client.callTool({
+        name: "update_financial_profile",
+        arguments: {
+          ...input,
+          changes: { insurance: [{ kind: "pet", name: "Example", status: "active" }] },
+        },
+      });
+      expect(rejected.isError).toBe(true);
+      expect(updateFinancialProfile).toHaveBeenCalledOnce();
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("forwards exact approval profile evidence and setup skips without hiding agent denial", async () => {
     const approveFinanceBudget = vi.fn(async (): Promise<unknown> => {
       throw new ApiClientError({

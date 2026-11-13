@@ -1,5 +1,23 @@
 # nohmi — Implementation Log
 
+## 2026-11-13 — Finance playbook 1.1.0 and profile facts (source change)
+
+- The Finance playbook is version 1.1.0: it adds a scored stewardship rubric, ledger rules, alert
+  tiers and dated reference limits with primary sources. The assessment returns one result per
+  check with its arithmetic; checks without facts are `not_assessed`. Retirement saving rate and
+  employer match are not assessable because those facts have no storage yet.
+- `update_financial_profile` over MCP now accepts debts, insurance policies and planning
+  preferences in addition to the six scalar facts. Storage and the HTTP route already accepted them.
+- Scheduled-run instructions (version 3) load the profile, goals and playbook before financial
+  work and record durable stated facts.
+- A payment the provider labels as a credit card payment no longer counts toward spending,
+  refunds or budget pace when a connected, planning-included credit card received that amount
+  within five days; a payment to a card nohmi cannot see still counts. It is not linked
+  or resolved by this rule.
+- Focused unit tests and typechecks pass. This is not yet merged, deployed or observed in
+  production; the provider's detailed label on existing production rows is unverified because no
+  read exposes it. User Knowledge (Memory) remains unimplemented.
+
 ## 2026-11-06 — Native Tasks source acceptance
 
 - [Native Tasks iPhone workflows](https://github.com/coopersully/personal-os/pull/367) merged with
@@ -1299,3 +1317,16 @@ coarsened for weather requests, and never tracked in the background. Saved-locat
 honest time-only sky cover denied permissions, unavailable fixes, stale observations and outages.
 See `docs/engineering/mobile-today-sky.md` for lifecycle, privacy and verification boundaries.
 This is a local candidate, not a production or TestFlight release.
+
+## 2026-11-13 — Native Finance account management (local implementation)
+
+COO-221 — Manage Finance accounts on iPhone. Accounts opens a manual account form; account details
+offer Edit account, Sync account, Review duplicate and Stop tracking account, and duplicate review
+runs in the app instead of handing off to the browser. Every action uses existing Finance
+endpoints, one toast from loading to the confirmed result, and a native confirmation before
+tracking stops. Unknown outcomes never claim success: edits, stop tracking and duplicate
+resolution retry under the same idempotency key, and an unconfirmed add looks for the earlier
+attempt before writing again. Connecting a bank is not part of this change.
+
+Focused Finance tests, mobile types and lint passed. This is a local candidate: it was not run on
+a simulator or device, and it does not establish production or TestFlight acceptance.

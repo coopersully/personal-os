@@ -34,4 +34,15 @@ describe("Finance attention client", () => {
     for (const [, init] of fetch.mock.calls)
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture");
   });
+  it("declines a starting-month preview by encoded identity", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockImplementation(async () => Response.json({ kind: "budget_start_preview" }));
+    const api = createApiClient({ baseUrl: "https://example.test", token: "fixture", fetch });
+    await api.declineFinanceBudgetStartPreview("id/ ?");
+    expect(fetch.mock.calls[0]?.[0]).toBe(
+      "https://example.test/v1/finances/budget-start/previews/id%2F%20%3F/decline",
+    );
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: "POST", body: "{}" });
+  });
 });

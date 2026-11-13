@@ -11,6 +11,19 @@ function fixture() {
 }
 
 describe("Finance review backlog API client", () => {
+  it("declines a batch or a correction by encoded identity", async () => {
+    const { api, fetch } = fixture();
+    await api.declineFinanceReviewBatch("batch/ ?");
+    await api.declineFinanceReviewBatchUndo("undo/ ?");
+    expect(fetch.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
+      ["https://example.test/v1/finances/review-batches/batch%2F%20%3F/decline", "POST", "{}"],
+      [
+        "https://example.test/v1/finances/review-batch-corrections/undo%2F%20%3F/decline",
+        "POST",
+        "{}",
+      ],
+    ]);
+  });
   it("preserves correction identity, accepted fingerprint and cancellation without automatic retries", async () => {
     const { api, fetch } = fixture();
     const input = { batchId: "batch", outcomeIndexes: [0, 2], idempotencyKey: "undo" };

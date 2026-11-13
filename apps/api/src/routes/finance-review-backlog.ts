@@ -67,6 +67,19 @@ export function registerFinanceReviewBacklogRoutes({
         ),
       ),
   );
+  // Owner-only: the service refuses every agent principal regardless of scope.
+  app.post(
+    "/v1/finances/review-batch-corrections/:id/decline",
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    async (c) => c.json(await batches.declineUndo(idSchema.parse(c.req.param("id")), context(c))),
+  );
+  app.post(
+    "/v1/finances/review-batches/:id/decline",
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    async (c) => c.json(await batches.declineBatch(idSchema.parse(c.req.param("id")), context(c))),
+  );
   app.get("/v1/finances/review-backlog", requireScope("finances:read"), async (c) =>
     c.json(await backlog.assess(c.get("principal").userId)),
   );

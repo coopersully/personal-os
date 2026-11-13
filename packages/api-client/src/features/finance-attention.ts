@@ -4,6 +4,7 @@ import type {
   FinanceAttentionSnapshot,
   FinanceBudgetStartPolicy,
   FinanceBudgetStartPreview,
+  FinanceDecisionDecline,
   FinanceEvidenceRefresh,
   FinanceOpeningPosition,
   FinanceOpeningStatement,
@@ -29,6 +30,13 @@ export function createFinanceAttentionApi(request: FinanceRequest) {
       return request(`${path}/budget-start/previews`, {
         method: "POST",
         body: JSON.stringify(input),
+      });
+    },
+    /** Owner session only; an agent token is refused whatever its scopes. */
+    declineFinanceBudgetStartPreview(id: string): Promise<FinanceDecisionDecline> {
+      return request(`${path}/budget-start/previews/${encodeURIComponent(id)}/decline`, {
+        method: "POST",
+        body: JSON.stringify({}),
       });
     },
     applyFinanceBudgetStart(

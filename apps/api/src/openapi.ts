@@ -13,6 +13,7 @@ import {
   financeConversationAgentCardInputSchema,
   financeConversationHistoryPageSchema,
   financeConversationMessageSchema,
+  financeDecisionDeclineSchema,
   financeEvidenceRefreshSchema,
   financeMaintenanceInputSchema,
   financeMaintenancePayloadSchema,
@@ -131,6 +132,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         FinanceBatchContinuation: z.toJSONSchema(financeReviewBatchContinuationSchema.nullable(), {
           io: "input",
         }),
+        FinanceDecisionDecline: z.toJSONSchema(financeDecisionDeclineSchema, { io: "input" }),
         FinanceAgentCardInput: z.toJSONSchema(financeConversationAgentCardInputSchema, {
           io: "input",
         }),
@@ -406,6 +408,16 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           "ApplyFinanceBudgetStart",
         ),
       },
+      "/v1/finances/budget-start/previews/{id}/decline": {
+        post: financeOperation(
+          "Authenticated owner decline only; the preview can no longer be approved",
+          "FinanceDecisionDecline",
+          ["finances:read", "finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
       "/v1/finances/opening-position": {
         get: {
           ...financeOperation(
@@ -470,10 +482,30 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/finances/review-batch-corrections/{id}/execute": {
         post: financeOperation(
-          "Owner execution or original agent with execute permission; per-effect authority checks",
+          "Owner execution, or the agent whose own authority applied every targeted effect",
           "FinanceBatchUndo",
           ["finances:read", "finances:write"],
           "ExecuteFinanceReviewBatch",
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batch-corrections/{id}/decline": {
+        post: financeOperation(
+          "Authenticated owner decline only; the correction can no longer be applied",
+          "FinanceDecisionDecline",
+          ["finances:read", "finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batches/{id}/decline": {
+        post: financeOperation(
+          "Authenticated owner decline of an unapproved batch; approved batches are cancelled instead",
+          "FinanceDecisionDecline",
+          ["finances:read", "finances:write"],
+          undefined,
           200,
           true,
         ),

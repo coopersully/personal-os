@@ -1,5 +1,6 @@
 import type {
   ExecuteFinanceReviewBatchInput,
+  FinanceDecisionDecline,
   FinanceMaintenanceQualification,
   FinanceReviewBacklogAssessment,
   FinanceReviewBacklogPage,
@@ -34,6 +35,17 @@ export function createFinanceReviewBacklogApi(request: FinanceRequest) {
     },
     cancelFinanceBatchContinuation(id: string): Promise<FinanceReviewBatchContinuation> {
       return request(`${batch(id)}/approval/cancel`, { method: "POST", body: JSON.stringify({}) });
+    },
+    /** Owner session only; an agent token is refused whatever its scopes. */
+    declineFinanceReviewBatch(id: string): Promise<FinanceDecisionDecline> {
+      return request(`${batch(id)}/decline`, { method: "POST", body: JSON.stringify({}) });
+    },
+    /** Owner session only; an agent token is refused whatever its scopes. */
+    declineFinanceReviewBatchUndo(id: string): Promise<FinanceDecisionDecline> {
+      return request(`/v1/finances/review-batch-corrections/${encodeURIComponent(id)}/decline`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
     },
     previewFinanceReviewBatchUndo(
       input: PreviewFinanceReviewBatchUndoInput,

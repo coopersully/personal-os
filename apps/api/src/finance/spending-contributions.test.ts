@@ -71,6 +71,42 @@ const link = (
 });
 
 describe("recognized Spending contributions", () => {
+  it("counts neither leg of a provider-labelled credit card payment as spending or refund", () => {
+    const cardPayment = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT";
+    const result = projectFinanceSpending(
+      input({
+        transactions: [
+          tx("purchase", { amount: 4000 }),
+          tx("bank-leg", {
+            amount: 302_060,
+            category: "LOAN_PAYMENTS",
+            categorySource: "provider",
+            providerCategoryDetailed: cardPayment,
+          }),
+          tx("card-leg", {
+            amount: 302_060,
+            category: "LOAN_PAYMENTS",
+            categorySource: "provider",
+            direction: "income",
+            providerCategoryDetailed: cardPayment,
+            providerDirection: "income",
+          }),
+          tx("rule-decided", {
+            amount: 45_000,
+            categorySource: "rule",
+            providerCategoryDetailed: cardPayment,
+          }),
+        ],
+      }),
+      scope,
+    );
+    expect(result.contributions.map((item) => item.transactionId).sort()).toEqual([
+      "purchase",
+      "rule-decided",
+    ]);
+    expect(result.netCents).toBe(49_000);
+  });
+
   it("resolves pending replacements before bins or date selection", () => {
     const evidence = input({
       transactions: [

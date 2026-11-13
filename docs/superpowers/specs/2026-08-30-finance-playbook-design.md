@@ -1,7 +1,7 @@
 # Ilo Finance playbook
 
 - Status: Approved and implemented
-- Version: `1.0.0`
+- Version: `1.1.0` (rubric, ledger rules, alert tiers and dated limits added November 13, 2026)
 - Dependency: PR #157 (`cooper/finance-account-semantics`)
 
 ## Decision
@@ -46,3 +46,27 @@ limits remain time-sensitive facts and are not embedded as timeless policy.
 Unit tests cover hierarchy/version/source validation, missing-profile behavior,
 unknown debt-rate uncertainty, and high-cost debt prioritization. API/client,
 MCP, setup, maintenance, and UI seams retain their existing contract tests.
+
+## Version 1.1.0 (COO-243)
+
+Version 1.1.0 keeps the eight ordered steps and adds four server-owned sections:
+
+- `rubric`: eight stewardship checks with their measure, bands and sources. Six are assessable
+  from recorded facts. Retirement saving rate and employer match are published as not assessable
+  because nohmi does not yet record contributions or a match.
+- `ledgerRules`: how transfers, card payments, refunds, reimbursements, roundups, savings
+  contributions, pending rows, person-to-person payments, provider categories and protected
+  preferences are treated.
+- `alertTiers`: what interrupts the person, what waits for a digest and what stays silent.
+  "Unusual" is judged against the person's own history, not a fixed amount.
+- `referenceLimits`: dated contribution and coverage limits, each tied to a primary source.
+  They are time-sensitive; the web-research policy still requires a recheck before use.
+
+The assessment adds `rubric`: one result per check with `healthy`, `watch`, `gap` or
+`not_assessed`, and a detail line stating the arithmetic or the missing fact. A missing fact
+never produces a guessed score. The service reads the month's plan context and stated income as
+optional evidence; if either read fails, its checks are `not_assessed` and the profile-based
+readiness is unchanged. The wealth summary is still not required.
+
+Results are observations, not advice. Bands for housing share are lending convention, not a
+regulator rule, and the sources say so.

@@ -138,6 +138,7 @@ import {
   requireActiveBudgetAuthority,
 } from "./finance/budget-authority.js";
 import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
+import { isCreditCardPaymentMovement } from "./finance/card-payment.js";
 import { readFinanceConfiguration } from "./finance/configuration-service.js";
 import { createFinanceConnectionHandoffService } from "./finance/connection-handoff-service.js";
 import {
@@ -540,8 +541,10 @@ export function isRefundOrReversal(row: typeof financeTransactions.$inferSelect)
     row.category !== transferCategory
   );
 }
+export { isCreditCardPaymentMovement };
 export function budgetImpact(row: typeof financeTransactions.$inferSelect, includePending = false) {
   if (row.pending && !includePending) return 0;
+  if (isCreditCardPaymentMovement(row)) return 0;
   if (row.direction === "expense") return row.amount;
   return isRefundOrReversal(row) ? -row.amount : 0;
 }

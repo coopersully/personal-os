@@ -41,4 +41,62 @@ describe("Finance playbook service", () => {
       playbook: expect.objectContaining({ id: "nohmi-finance", owner: "nohmi-finance" }),
     });
   });
+
+  it("scores the rubric from the current plan and stated income", async () => {
+    const service = createFinancePlaybookService({
+      finances: {
+        getFinanceBudgetStatus: vi.fn(async () => ({
+          planContext: {
+            current: null,
+            previous: { spendingTotal: 4_000 },
+            upcoming: { spendingTotal: 4_500 },
+          },
+        })),
+        getFinancialProfile: vi.fn(async () => ({
+          data: {
+            debts: [],
+            expectedMonthlyTakeHome: 5_000,
+            incomeStability: "stable",
+            insurance: [{ kind: "health", status: "active" }],
+            jurisdiction: "US",
+            liquidReserves: 27_000,
+            preferences: { emergencyReserveMonths: 6 },
+          },
+        })),
+        getProfile: vi.fn(async () => ({ grossAnnualIncome: 90_000, monthlyHousingCost: 2_000 })),
+      } as never,
+      now: () => new Date("2026-11-13T12:00:00.000Z"),
+    });
+
+    const { assessment } = await service.get("11111111-1111-4111-8111-111111111111");
+    expect(
+      Object.fromEntries(assessment.rubric.map((item) => [item.id, item.status])),
+    ).toMatchObject({
+      housing_share: "healthy",
+      plan_current: "gap",
+      reserve_months: "healthy",
+      spending_within_income: "healthy",
+    });
+  });
+
+  it("keeps the profile assessment when plan and income reads fail", async () => {
+    const service = createFinancePlaybookService({
+      finances: {
+        getFinanceBudgetStatus: vi.fn(async () => {
+          throw new Error("budget unavailable");
+        }),
+        getFinancialProfile: vi.fn(async () => ({ data: null })),
+        getProfile: vi.fn(async () => {
+          throw new Error("profile unavailable");
+        }),
+      } as never,
+      now: () => new Date("2026-11-13T12:00:00.000Z"),
+    });
+
+    const { assessment } = await service.get("11111111-1111-4111-8111-111111111111");
+    expect(assessment.readiness).toBe("not_ready");
+    expect(assessment.rubric.find((item) => item.id === "plan_current")?.status).toBe(
+      "not_assessed",
+    );
+  });
 });

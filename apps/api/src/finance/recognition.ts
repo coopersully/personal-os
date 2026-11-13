@@ -19,11 +19,14 @@ type RecognitionTransaction = {
   accountId: string;
   amount: number;
   category: string | null;
+  /** Present on ledger rows; absent leaves provider-labelled card payments unrecognized. */
+  categorySource?: string | null;
   currencyCode: string | null;
   direction: "expense" | "income" | "transfer";
   id: string;
   pending: boolean;
   pendingTransactionId: string | null;
+  providerCategoryDetailed?: string | null;
   providerDirection: "expense" | "income" | null;
   providerTransactionId: string | null;
   reconciliationStatus: "candidate" | "confirmed" | "matched" | "not_applicable";

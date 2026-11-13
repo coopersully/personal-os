@@ -15,6 +15,7 @@ import {
   financeCsvImportErrorMessage,
   formatCurrency,
   isCardPayment,
+  isCreditCardPaymentMovement,
   isProviderTransfer,
   isRefundOrReversal,
   isRentMerchant,
@@ -247,5 +248,30 @@ describe("Finance service deterministic helpers", () => {
     expect(budgetImpact(row("income", "INCOME"))).toBe(0);
     expect(budgetImpact(row("income", "Transfers"))).toBe(0);
     expect(budgetImpact(row("expense", "Dining"))).toBe(2500);
+  });
+
+  it("counts neither leg of a credit card payment unless a decision overrides the provider", () => {
+    const row = (
+      direction: "expense" | "income",
+      providerCategoryDetailed: string | null,
+      categorySource: string | null = "provider",
+    ) =>
+      ({
+        amount: 302_060,
+        category: "LOAN_PAYMENTS",
+        categorySource,
+        direction,
+        pending: false,
+        providerCategoryDetailed,
+      }) as never;
+    const cardPayment = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT";
+    expect(budgetImpact(row("expense", cardPayment))).toBe(0);
+    expect(budgetImpact(row("income", cardPayment))).toBe(0);
+    expect(budgetImpact(row("expense", "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT"))).toBe(302_060);
+    expect(budgetImpact(row("expense", null))).toBe(302_060);
+    for (const source of ["user", "agent", "rule"])
+      expect(budgetImpact(row("expense", cardPayment, source))).toBe(302_060);
+    expect(isCreditCardPaymentMovement(row("expense", cardPayment))).toBe(true);
+    expect(isCreditCardPaymentMovement(row("expense", cardPayment, "rule"))).toBe(false);
   });
 });

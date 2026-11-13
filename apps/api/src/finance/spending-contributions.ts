@@ -10,6 +10,7 @@ import {
   activeAllocationsByTransaction,
   excludedReimbursementCentsByAllocation,
 } from "../finance-allocation-projections.js";
+import { isCreditCardPaymentMovement } from "./card-payment.js";
 import { type RecognitionInput, resolveFinanceSpendingEvidence } from "./recognition.js";
 import { type SpendingCoverageInterval, spendingDateCoverage } from "./spending-coverage.js";
 
@@ -155,7 +156,8 @@ export function projectFinanceSpending(
     if (
       evidence.excludedTransactionIds.has(transaction.id) ||
       evidence.transferTransactionIds.has(transaction.id) ||
-      transaction.direction === "transfer"
+      transaction.direction === "transfer" ||
+      isCreditCardPaymentMovement(transaction)
     )
       continue;
     if (

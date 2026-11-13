@@ -10,7 +10,7 @@ import {
   activeAllocationsByTransaction,
   excludedReimbursementCentsByAllocation,
 } from "../finance-allocation-projections.js";
-import { isCreditCardPaymentMovement, observesCardPurchases } from "./card-payment.js";
+import { observesCardPurchases, settledCardPaymentIds } from "./card-payment.js";
 import { type RecognitionInput, resolveFinanceSpendingEvidence } from "./recognition.js";
 import { type SpendingCoverageInterval, spendingDateCoverage } from "./spending-coverage.js";
 
@@ -90,9 +90,12 @@ export function projectFinanceSpending(
     z.union([z.iso.date(), z.iso.datetime({ offset: true })]).parse(transaction.transactionDate);
   const accounts = input.accounts.filter((account) => account.userId === input.userId);
   const accountById = new Map(accounts.map((account) => [account.id, account]));
-  const cardLinked = accounts.some(observesCardPurchases);
   const transactions = input.transactions.filter(
     (transaction) => transaction.userId === input.userId && accountById.has(transaction.accountId),
+  );
+  const settledCardPayments = settledCardPaymentIds(
+    transactions,
+    new Set(accounts.filter(observesCardPurchases).map((account) => account.id)),
   );
   const transactionIds = new Set(transactions.map((transaction) => transaction.id));
   const allocations = input.allocations.filter((allocation) =>
@@ -158,7 +161,7 @@ export function projectFinanceSpending(
       evidence.excludedTransactionIds.has(transaction.id) ||
       evidence.transferTransactionIds.has(transaction.id) ||
       transaction.direction === "transfer" ||
-      isCreditCardPaymentMovement(transaction, cardLinked)
+      settledCardPayments.has(transaction.id)
     )
       continue;
     if (

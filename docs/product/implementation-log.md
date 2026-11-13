@@ -10,8 +10,9 @@
   preferences in addition to the six scalar facts. Storage and the HTTP route already accepted them.
 - Scheduled-run instructions (version 3) load the profile, goals and playbook before financial
   work and record durable stated facts.
-- When a planning-included, currently connected credit card exists, a payment the provider labels as a credit card
-  payment no longer counts toward spending, refunds or budget pace on either leg. It is not linked
+- A payment the provider labels as a credit card payment no longer counts toward spending,
+  refunds or budget pace when a connected, planning-included credit card received that amount
+  within five days; a payment to a card nohmi cannot see still counts. It is not linked
   or resolved by this rule.
 - Focused unit tests and typechecks pass. This is not yet merged, deployed or observed in
   production; the provider's detailed label on existing production rows is unverified because no

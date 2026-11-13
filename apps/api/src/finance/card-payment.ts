@@ -6,15 +6,12 @@ const paymentCategories = new Set(["LOAN_PAYMENTS", "Transfers"]);
  * Either leg of a payment to a credit card whose purchases nohmi observes. Those
  * purchases were already spending, so the payment is neither spending nor a refund.
  *
- * `cardLinked` must be true: without a card whose purchases are observed (see
- * `observesCardPurchases`) the payment is the only spending signal. A category the
- * person, an agent or a merchant rule decided overrides the provider's label only when
- * it names something other than a payment or transfer; confirming the label, or
- * clearing the category, keeps the exclusion.
- *
- * Known limit: the funding-side leg does not identify which card it paid. A person with
- * one connected card and another unlinked card has payments to the unlinked card
- * excluded too.
+ * `settled` must be true: the caller has established, with `settledCardPaymentIds`,
+ * that this row pays a card whose purchases are observed. Otherwise the payment is the
+ * only spending signal and still counts. A category the person, an agent or a merchant
+ * rule decided overrides the provider's label only when it names something other than a
+ * payment or transfer; confirming the label, or clearing the category, keeps the
+ * exclusion.
  */
 export function isCreditCardPaymentMovement(
   row: {
@@ -22,9 +19,9 @@ export function isCreditCardPaymentMovement(
     categorySource?: string | null;
     providerCategoryDetailed?: string | null;
   },
-  cardLinked: boolean,
+  settled: boolean,
 ) {
-  if (!cardLinked || row.providerCategoryDetailed !== creditCardPaymentCategory) return false;
+  if (!settled || row.providerCategoryDetailed !== creditCardPaymentCategory) return false;
   const decided =
     row.categorySource === "user" ||
     row.categorySource === "agent" ||
@@ -49,4 +46,61 @@ export function observesCardPurchases(account: {
     account.providerType === "credit" &&
     account.status === "connected"
   );
+}
+
+type CardPaymentRow = {
+  accountId: string;
+  amount: number;
+  category?: string | null;
+  categorySource?: string | null;
+  direction: string;
+  id: string;
+  providerCategoryDetailed?: string | null;
+  transactionDate: string;
+};
+
+const day = (value: string) => Date.parse(`${value.slice(0, 10)}T00:00:00Z`) / 86_400_000;
+
+/**
+ * Ids of card-payment rows that settle purchases nohmi observes, per card rather than
+ * per person. The card-side leg on an observed card always qualifies. The funding-side
+ * leg does not name the card it paid, so it qualifies only when an observed card
+ * received the same amount within `windowDays`; each receipt settles one payment. A
+ * payment to an unlinked card finds no receipt and stays in spending.
+ */
+export function settledCardPaymentIds(
+  rows: readonly CardPaymentRow[],
+  cardAccountIds: ReadonlySet<string>,
+  windowDays = 5,
+) {
+  const settled = new Set<string>();
+  if (cardAccountIds.size === 0) return settled;
+  const receipts: CardPaymentRow[] = [];
+  const funding: CardPaymentRow[] = [];
+  for (const row of rows) {
+    const labelled = isCreditCardPaymentMovement(row, true);
+    if (cardAccountIds.has(row.accountId)) {
+      if (row.direction === "expense") continue;
+      if (labelled) settled.add(row.id);
+      if (labelled || paymentCategories.has(row.category ?? "")) receipts.push(row);
+    } else if (labelled && row.direction !== "income") funding.push(row);
+  }
+  funding.sort(
+    (a, b) => a.transactionDate.localeCompare(b.transactionDate) || a.id.localeCompare(b.id),
+  );
+  for (const payment of funding) {
+    let best = -1;
+    let bestGap = Number.POSITIVE_INFINITY;
+    for (const [index, receipt] of receipts.entries()) {
+      const gap = Math.abs(day(receipt.transactionDate) - day(payment.transactionDate));
+      if (receipt.amount === payment.amount && gap <= windowDays && gap < bestGap) {
+        best = index;
+        bestGap = gap;
+      }
+    }
+    if (best < 0) continue;
+    receipts.splice(best, 1);
+    settled.add(payment.id);
+  }
+  return settled;
 }

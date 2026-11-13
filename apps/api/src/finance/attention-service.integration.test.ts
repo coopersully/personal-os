@@ -3,16 +3,24 @@ import {
   createDatabaseClient,
   financeAccounts,
   financeConversationMessages,
+  financeEconomicEvents,
   financeOpeningStatements,
   financeReviewBatchRuns,
+  financeReviewCases,
+  financeTransactionRelationships,
   financeTransactions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { sql } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import { createFinanceAttentionService } from "./attention-service.js";
 
+function required<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("Missing test fixture");
+  return value;
+}
 describe.sequential("Finance budget starting policy", () => {
   let container: StartedPostgreSqlContainer;
   let database: ReturnType<typeof createDatabaseClient>;
@@ -299,6 +307,138 @@ describe.sequential("Finance budget starting policy", () => {
       readiness: { openingPositionQualified: true },
     });
   });
+  it("counts a flagged transaction and its own review case as one unit of processing work", async () => {
+    const { owner, account } = await qualifiedBoundary();
+    const [both, flagOnly] = await database.db
+      .insert(financeTransactions)
+      .values(
+        ["Flag and case", "Flag only"].map((merchant) => ({
+          userId: owner.principal.userId,
+          accountId: account.id,
+          merchant,
+          amount: 1000,
+          direction: "expense" as const,
+          transactionDate: "2026-11-10",
+          needsReview: true,
+        })),
+      )
+      .returning();
+    if (!both || !flagOnly) throw new Error("Missing transactions");
+    await database.db.insert(financeReviewCases).values({
+      userId: owner.principal.userId,
+      transactionId: both.id,
+      reasonCode: "category_ambiguity",
+    });
+    expect(await service().getAttentionSnapshot(owner.principal.userId)).toMatchObject({
+      activeTransactionCount: 2,
+      activeDecisionCount: 0,
+      processingCount: 2,
+      // Raw record counts stay separately labelled and are never summed into work.
+      rawCounts: { transactionFlags: 2, reviewCases: 1 },
+    });
+  });
+  it("reads a snapshot over about 3,000 outstanding records in well under a second", async () => {
+    const { owner, account } = await qualifiedBoundary();
+    const userId = owner.principal.userId;
+    const rows = <T>(count: number, build: (index: number) => T) =>
+      Array.from({ length: count }, (_, index) => build(index));
+    const insertTransactions = async (
+      count: number,
+      build: (index: number) => {
+        transactionDate: string;
+        needsReview: boolean;
+        providerCategory?: string;
+        providerDirection?: "expense" | "income";
+      },
+    ) => {
+      const saved: { id: string; transactionDate: string }[] = [];
+      for (let offset = 0; offset < count; offset += 500)
+        saved.push(
+          ...(await database.db
+            .insert(financeTransactions)
+            .values(
+              rows(Math.min(500, count - offset), (index) => ({
+                userId,
+                accountId: account.id,
+                merchant: "Synthetic purchase",
+                amount: 1000 + offset + index,
+                direction: "expense" as const,
+                ...build(offset + index),
+              })),
+            )
+            .returning({
+              id: financeTransactions.id,
+              transactionDate: financeTransactions.transactionDate,
+            })),
+        );
+      return saved;
+    };
+    // 1,500 flagged transactions, each with its own open case: 3,000 outstanding records.
+    const flagged = await insertTransactions(1500, (index) => ({
+      transactionDate: index % 3 === 0 ? "2026-11-05" : "2026-10-15",
+      needsReview: true,
+      // A third are transfer-shaped history that must be compared with later activity.
+      ...(index % 3 === 2
+        ? { providerCategory: "TRANSFER_OUT", providerDirection: "expense" as const }
+        : {}),
+    }));
+    const settled = await insertTransactions(2000, (index) => ({
+      transactionDate: index % 2 === 0 ? "2026-11-06" : "2026-10-16",
+      needsReview: false,
+      // Same-account, distant-date transfers: compared, but never a valid counterpart.
+      ...(index % 2 === 0
+        ? { providerCategory: "TRANSFER_IN", providerDirection: "income" as const }
+        : {}),
+    }));
+    for (let offset = 0; offset < flagged.length; offset += 500)
+      await database.db.insert(financeReviewCases).values(
+        flagged.slice(offset, offset + 500).map((item) => ({
+          userId,
+          transactionId: item.id,
+          reasonCode: "category_ambiguity" as const,
+        })),
+      );
+    // 200 historical flagged transactions are linked to settled November activity.
+    const historical = flagged.filter((item) => item.transactionDate < "2026-11").slice(0, 200);
+    const current = settled.filter((item) => item.transactionDate >= "2026-11");
+    const [event] = await database.db
+      .insert(financeEconomicEvents)
+      .values({ userId, kind: "transfer", stableKey: crypto.randomUUID() })
+      .returning();
+    if (!event) throw new Error("Missing event");
+    await database.db.insert(financeTransactionRelationships).values(
+      historical.map((item, index) => ({
+        userId,
+        economicEventId: event.id,
+        relationship: "transfer" as const,
+        transactionIds: [item.id, required(current[index]).id],
+        rationale: "Synthetic cross-boundary link",
+        provenance: { actorType: "user" },
+      })),
+    );
+    await database.db.execute(sql`ANALYZE`);
+    // Best of three reads, so a busy shared runner does not decide a wall-clock check.
+    let output = await service().getAttentionSnapshot(userId);
+    let elapsed = Number.POSITIVE_INFINITY;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const started = performance.now();
+      output = await service().getAttentionSnapshot(userId);
+      elapsed = Math.min(elapsed, performance.now() - started);
+    }
+    console.info(`Finance attention read over 3,000 outstanding records: ${elapsed.toFixed(0)}ms`);
+    expect(output).toMatchObject({
+      complete: true,
+      rawCounts: { transactionFlags: 1500, reviewCases: 1500 },
+      // 500 current transactions plus 200 promoted by a cross-boundary relationship.
+      activeTransactionCount: 700,
+      processingCount: 700,
+      historicalRecordCount: 1600,
+      triageRecordCount: 0,
+      activeDecisionCount: 0,
+    });
+    expect(output.dependencyRefs).toHaveLength(400);
+    expect(elapsed).toBeLessThan(1000);
+  }, 120_000);
   it("lets the owner inspect an agent preview without leaking it to another owner or agent", async () => {
     const owner = await fixture();
     const other = await fixture();

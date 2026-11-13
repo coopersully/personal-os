@@ -102,7 +102,9 @@ Moving work out of the active scope never resolves it or establishes historical 
 Unknown dates and uncertain dependencies require triage rather than automatic historical placement.
 
 The active inbox counts distinct human decisions, with transaction flags, review cases, processing
-work and technical blockers reported separately. Zero human decisions does not imply budget-ready:
+work and technical blockers reported separately. Processing work counts each transaction once,
+even when it carries both a flag and a review case; the raw flag and case counts stay separately
+labelled and are never summed. Zero human decisions does not imply budget-ready:
 material evidence dependencies must be resolved and the exact current plan approved. The opening
 position requires qualified balance anchors and interval coverage; missing information is not zero.
 

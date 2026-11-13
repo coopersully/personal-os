@@ -48,7 +48,8 @@ export function projectFinanceAttention(input: z.input<typeof projectionInputSch
   let historicalRecordCount = 0;
   let futureRecordCount = 0;
   let triageRecordCount = 0;
-  let processingCount = 0;
+  // A flag and a review case on one transaction are the same unit of machine work.
+  const processing = new Set<string>();
   let technicalBlockerCount = 0;
   for (const record of state.records) {
     if (record.source === "transaction_flag") rawCounts.transactionFlags++;
@@ -76,8 +77,12 @@ export function projectFinanceAttention(input: z.input<typeof projectionInputSch
       // Namespace explicit shared decisions apart from unrelated individual records.
       decisions.add(record.decisionKey ? `decision:${record.decisionKey}` : `record:${record.id}`);
     } else if (record.workState === "technical_blocker") technicalBlockerCount++;
-    else processingCount++;
+    else
+      processing.add(
+        record.transactionId ? `transaction:${record.transactionId}` : `record:${record.id}`,
+      );
   }
+  const processingCount = processing.size;
   return {
     period: state.period,
     complete: state.complete,

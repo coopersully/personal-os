@@ -60,6 +60,22 @@ describe("Finance active attention", () => {
       rawCounts: { transactionFlags: 1, reviewCases: 2 },
     });
   });
+  it("counts a transaction's flag and review case as one unit of processing work", () => {
+    expect(
+      project([
+        record(),
+        record({ id: "case:a", source: "review_case" }),
+        record({ id: "flag:b", transactionId: "b" }),
+        // Work with no transaction remains its own unit.
+        record({ id: "case:orphan", transactionId: null, source: "review_case" }),
+        record({ id: "case:orphan:2", transactionId: null, source: "review_case" }),
+      ]),
+    ).toMatchObject({
+      activeTransactionCount: 2,
+      processingCount: 4,
+      rawCounts: { transactionFlags: 2, reviewCases: 3 },
+    });
+  });
   it.each([
     "affects_current",
     "unknown",

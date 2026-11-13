@@ -2183,7 +2183,7 @@ it("keeps the accessible circular Send action inside the message field", async (
   expect(send).toBeEnabled();
 });
 
-it("opens the exact duplicate account comparison on the signed-in web origin", async () => {
+it("reviews a possible duplicate account in the app instead of the browser", async () => {
   const { FinanceAccountScreen } = await import("./details");
   h.params = { id: account.id };
   const existing = await h.api.listFinanceAccounts();
@@ -2195,84 +2195,12 @@ it("opens the exact duplicate account comparison on the signed-in web origin", a
     },
   });
   mount(<FinanceAccountScreen />);
-  fireEvent.click(await screen.findByRole("button", { name: /Compare duplicates in browser/ }));
-  await waitFor(() =>
-    expect(h.openURL).toHaveBeenCalledWith(
-      `https://nohmi.example/finances/accounts?accountId=${encodeURIComponent(account.id)}`,
-    ),
-  );
-});
-
-it.each([
-  "group changed",
-  "connection lost",
-] as const)("withholds the browser handoff when account comparison refresh finds %s", async (reason) => {
-  const { FinanceAccountScreen } = await import("./details");
-  h.params = { id: account.id };
-  const existing = await h.api.listFinanceAccounts();
-  h.api.listFinanceAccounts
-    .mockResolvedValue({
-      ...existing,
-      accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
-    })
-    .mockResolvedValueOnce({
-      ...existing,
-      accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
-    });
-  mount(<FinanceAccountScreen />);
-  const compare = await screen.findByRole("button", { name: /Compare duplicates in browser/ });
-  if (reason === "group changed")
-    h.api.listFinanceAccounts.mockResolvedValue({ ...existing, accountSemantics: undefined });
-  else h.api.listFinanceAccounts.mockRejectedValueOnce(new Error(reason));
-  fireEvent.click(compare);
-  await waitFor(() =>
-    expect(h.error).toHaveBeenCalledWith("Could not open this account comparison.", { id: "save" }),
-  );
-  expect(h.openURL).not.toHaveBeenCalled();
-  expect(screen.queryByText("Could not open this account comparison.")).toBeNull();
-});
-
-it("does not open a comparison after its owner leaves the screen", async () => {
-  const { FinanceAccountScreen } = await import("./details");
-  h.params = { id: account.id };
-  const existing = await h.api.listFinanceAccounts();
-  const comparison = {
-    ...existing,
-    accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
-  };
-  h.api.listFinanceAccounts.mockResolvedValue(comparison);
-  const view = mount(<FinanceAccountScreen />);
-  const compare = await screen.findByRole("button", { name: /Compare duplicates in browser/ });
-  const fresh = Promise.withResolvers<typeof comparison>();
-  h.api.listFinanceAccounts.mockReturnValueOnce(fresh.promise);
-  const priorReads = h.api.listFinanceAccounts.mock.calls.length;
-  fireEvent.click(compare);
-  fireEvent.click(compare);
-  expect(h.api.listFinanceAccounts).toHaveBeenCalledTimes(priorReads + 1);
-  view.unmount();
-  await act(async () => fresh.resolve(comparison));
-  await waitFor(() => expect(h.dismiss).toHaveBeenCalledWith("save"));
-  expect(h.openURL).not.toHaveBeenCalled();
-  expect(h.success).not.toHaveBeenCalled();
-});
-
-it("suppresses account comparison success when the browser opens after the screen closes", async () => {
-  const { FinanceAccountScreen } = await import("./details");
-  h.params = { id: account.id };
-  const existing = await h.api.listFinanceAccounts();
-  h.api.listFinanceAccounts.mockResolvedValue({
-    ...existing,
-    accountSemantics: { possibleDuplicateGroups: [{ accountIds: [account.id, "second"] }] },
+  fireEvent.click(await screen.findByRole("button", { name: /Review possible duplicate/ }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/finance-account-duplicate",
+    params: { id: account.id },
   });
-  const browser = Promise.withResolvers<void>();
-  h.openURL.mockReturnValueOnce(browser.promise);
-  const view = mount(<FinanceAccountScreen />);
-  fireEvent.click(await screen.findByRole("button", { name: /Compare duplicates in browser/ }));
-  await waitFor(() => expect(h.openURL).toHaveBeenCalledOnce());
-  view.unmount();
-  await act(async () => browser.resolve());
-  expect(h.dismiss).toHaveBeenCalledWith("save");
-  expect(h.success).not.toHaveBeenCalled();
+  expect(h.openURL).not.toHaveBeenCalled();
 });
 
 it("opens chat from a transaction with its record attached", async () => {

@@ -1,4 +1,4 @@
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { Icon } from "../../components/icons";
@@ -9,22 +9,28 @@ import { confirmMailRead, retryMailRead, useMailAccounts, useMailRevalidation } 
 import { inboxScope, type MailScope, mailboxIcon, mailboxLabel, sortMailboxes } from "./logic";
 import { MailThreadList } from "./thread-list";
 
-/** Every connected account's mailboxes. Choosing one shows its conversations in place. */
+/**
+ * Every connected account's mailboxes. Choosing one shows its conversations in place, and a
+ * search typed over the list shows matches from every inbox.
+ */
 export function MailboxesScreen() {
   const t = useTheme();
   const accounts = useMailAccounts();
   useMailRevalidation();
   const [scope, setScope] = useState<MailScope | null>(null);
+  const { mailSearch = "" } = useLocalSearchParams<{ mailSearch?: string }>();
   // A search belongs to the list it was typed over, so it never follows a mailbox switch.
   const show = (next: MailScope | null) => {
     router.setParams({ mailSearch: "" });
     setScope(next);
   };
-  if (scope)
+  // With no mailbox open, a search has no list of its own, so it runs across all inboxes.
+  const shown = scope ?? (mailSearch.trim() ? inboxScope : null);
+  if (shown)
     return (
       <MailThreadList
-        key={scope.kind === "inbox" ? "inbox" : scope.mailboxId}
-        scope={scope}
+        key={shown.kind === "inbox" ? "inbox" : shown.mailboxId}
+        scope={shown}
         onBack={() => show(null)}
       />
     );

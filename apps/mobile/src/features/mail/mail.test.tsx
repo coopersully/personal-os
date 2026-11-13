@@ -34,6 +34,10 @@ vi.mock("react-native", async () => {
   type ListProps = Parameters<typeof native.FlatList>[0] & { onEndReached?: () => void };
   return {
     ...native,
+    // The shared indicator double drops its label; keep it so tests can tell indicators apart.
+    ActivityIndicator: ({ accessibilityLabel }: { accessibilityLabel?: string }) => (
+      <span role="progressbar" aria-label={accessibilityLabel} />
+    ),
     // The shared list double never scrolls; expose the end-of-list callback to the tests.
     FlatList: ({ onEndReached, ...props }: ListProps) => {
       h.endReached = onEndReached;
@@ -292,6 +296,7 @@ it("searches on the server after a pause and keeps results apart from the inbox"
   h.summaries.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
   await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(2));
   expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+  expect(screen.getByRole("progressbar", { name: "Searching mail" })).toBeTruthy();
   expect(screen.queryByText("No matching messages")).toBeNull();
   finish([summary("match", { subject: "Venue contract" })]);
 
@@ -399,8 +404,34 @@ it("explains that message text needs a connection when a conversation cannot be 
   });
 });
 
+it("searches every inbox when typing over the mailbox list", async () => {
+  const view = render(wrap(<MailboxesRoute />));
+  await screen.findByRole("button", { name: "Inbox, 3 unread" });
+  expect(h.summaries).not.toHaveBeenCalled();
+
+  h.summaries.mockResolvedValue([summary("match", { subject: "Venue contract" })]);
+  h.params = { mailSearch: "venue" };
+  view.rerender(wrap(<MailboxesRoute />));
+
+  expect(await screen.findByText("Venue contract")).toBeTruthy();
+  expect(screen.getByText("Results for “venue”")).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Mailboxes" })).toBeNull();
+  expect(h.summaries).toHaveBeenCalledExactlyOnceWith({
+    mailboxRole: "inbox",
+    limit: MAIL_PAGE_SIZE,
+    query: "venue",
+  });
+
+  // Going back clears the search, and clearing the search returns to the mailbox list.
+  fireEvent.click(screen.getByRole("button", { name: "Back to mailboxes" }));
+  expect(h.setParams).toHaveBeenLastCalledWith({ mailSearch: "" });
+  h.params = {};
+  view.rerender(wrap(<MailboxesRoute />));
+  expect(screen.getByRole("heading", { name: "Mailboxes" })).toBeTruthy();
+  expect(screen.queryByText("Venue contract")).toBeNull();
+});
+
 it("lists each account's mailboxes and switches between them", async () => {
-  h.params = { mailSearch: "stale" };
   render(wrap(<MailboxesRoute />));
 
   expect(await screen.findByRole("heading", { name: "Personal · me@example.test" })).toBeTruthy();
@@ -414,7 +445,6 @@ it("lists each account's mailboxes and switches between them", async () => {
 
   h.summaries.mockResolvedValue([summary("sent", { subject: "Sent note" })]);
   fireEvent.click(screen.getByRole("button", { name: "Sent" }));
-  h.params = {};
 
   expect(h.setParams).toHaveBeenLastCalledWith({ mailSearch: "" });
   expect(screen.getByRole("heading", { name: "Sent" })).toBeTruthy();
@@ -423,7 +453,6 @@ it("lists each account's mailboxes and switches between them", async () => {
   expect(h.summaries).toHaveBeenLastCalledWith({
     mailboxId: "personal-sent",
     limit: MAIL_PAGE_SIZE,
-    query: "stale",
   });
 
   fireEvent.click(screen.getByRole("button", { name: "Back to mailboxes" }));

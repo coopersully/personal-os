@@ -1,5 +1,23 @@
 # nohmi — Implementation Log
 
+## 2026-11-13 — Finance playbook 1.1.0 and profile facts (source change)
+
+- The Finance playbook is version 1.1.0: it adds a scored stewardship rubric, ledger rules, alert
+  tiers and dated reference limits with primary sources. The assessment returns one result per
+  check with its arithmetic; checks without facts are `not_assessed`. Retirement saving rate and
+  employer match are not assessable because those facts have no storage yet.
+- `update_financial_profile` over MCP now accepts debts, insurance policies and planning
+  preferences in addition to the six scalar facts. Storage and the HTTP route already accepted them.
+- Scheduled-run instructions (version 3) load the profile, goals and playbook before financial
+  work and record durable stated facts.
+- A payment the provider labels as a credit card payment no longer counts toward spending,
+  refunds or budget pace when a connected, planning-included credit card received that amount
+  within five days; a payment to a card nohmi cannot see still counts. It is not linked
+  or resolved by this rule.
+- Focused unit tests and typechecks pass. This is not yet merged, deployed or observed in
+  production; the provider's detailed label on existing production rows is unverified because no
+  read exposes it. User Knowledge (Memory) remains unimplemented.
+
 ## 2026-11-06 — Native Tasks source acceptance
 
 - [Native Tasks iPhone workflows](https://github.com/coopersully/personal-os/pull/367) merged with

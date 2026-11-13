@@ -437,6 +437,63 @@ it("opens and edits active projects while keeping archived and deleted records s
     params: { kind: "project", id: "trip" },
   });
 });
+it("reaches completed and cancelled projects through status chips and opens their finished work", async () => {
+  h.projects = [
+    project("trip", "Trip"),
+    project("move", "Move", { lifecycle: "completed" }),
+    project("boat", "Boat", { lifecycle: "cancelled" }),
+    project("old", "Old", { lifecycle: "completed", availability: "archived" }),
+  ];
+  render(
+    <MobileDataProvider>
+      <TasksHub mode="projects" />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Open Trip" });
+  expect(screen.getByRole("button", { name: "Active · 1" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.queryByRole("button", { name: "Open Move" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Completed · 1" }));
+  expect(screen.queryByRole("button", { name: "Open Trip" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Open Old" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open Move" }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/task-browser",
+    params: {
+      title: "Move",
+      view: "all",
+      status: "all",
+      kind: "task",
+      projectId: "move",
+      listId: "inbox",
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Cancelled · 1" }));
+  expect(screen.getByRole("button", { name: "Open Boat" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "All · 3" }));
+  expect(screen.getByRole("button", { name: "Open Trip" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Open Move" })).toBeVisible();
+});
+it("explains an empty project status and keeps status chips off Lists", async () => {
+  h.projects = [project("trip", "Trip")];
+  const view = render(
+    <MobileDataProvider>
+      <TasksHub mode="projects" />
+    </MobileDataProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Cancelled · 0" }));
+  expect(await screen.findByText("No cancelled projects.")).toBeVisible();
+  view.unmount();
+  render(
+    <MobileDataProvider>
+      <TasksHub mode="lists" />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("button", { name: "Open Inbox" });
+  expect(screen.queryByRole("button", { name: /^Active/ })).not.toBeInTheDocument();
+});
 it("keeps Upcoming and History prominent and routes storage and type views independently", async () => {
   render(
     <MobileDataProvider>

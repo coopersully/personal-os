@@ -1,9 +1,17 @@
 import type { TaskList, TaskProject } from "@personal-os/domain";
 import { router } from "expo-router";
+import { useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
+import { FilterChip } from "../../components/filter-chip";
 import { Icon, type IconName } from "../../components/icons";
 import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { radius, spacing, useTheme, workspaceColor } from "../../theme";
+import {
+  containerDirectory,
+  type ProjectStatus,
+  projectStatusCounts,
+  projectStatuses,
+} from "./container-directory";
 import { ListRow, PinnedContainers, ProjectRow } from "./container-rows";
 import { useTaskAction, useTaskApi, useTaskResources, useTaskSearch } from "./data";
 import { partitionPinned } from "./presentation";
@@ -19,48 +27,19 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
   const lists = resources.lists.data ?? [];
   const projects = resources.projects.data ?? [];
   const preferences = resources.settings.data?.preferences;
-  const activeLists = lists.filter((row) => !row.deletedAt && row.availability === "active");
-  const activeProjects = projects.filter(
-    (row) =>
-      !row.deletedAt &&
-      row.availability === "active" &&
-      row.lifecycle === "open" &&
-      activeLists.some((list) => list.id === row.listId),
-  );
-  const records: Array<{ kind: "list" | "project"; record: TaskList | TaskProject }> =
-    mode === "lists"
-      ? activeLists.map((record) => ({ kind: "list", record }))
-      : mode === "projects"
-        ? activeProjects.map((record) => ({ kind: "project", record }))
-        : mode === "archive"
-          ? [
-              ...lists
-                .filter((row) => !row.deletedAt && row.availability === "archived")
-                .map((record) => ({ kind: "list" as const, record })),
-              ...projects
-                .filter(
-                  (row) =>
-                    !row.deletedAt &&
-                    (row.availability === "archived" ||
-                      lists.some(
-                        (list) => list.id === row.listId && list.availability === "archived",
-                      )),
-                )
-                .map((record) => ({ kind: "project" as const, record })),
-            ]
-          : [];
-  const filtered = records
-    .filter(({ record }) => record.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
-    .sort((a, b) => {
-      const sort = preferences?.taskContainerSort;
-      if (sort === "updated") return b.record.updatedAt.localeCompare(a.record.updatedAt);
-      if (sort === "newest") return b.record.createdAt.localeCompare(a.record.createdAt);
-      if (sort === "target")
-        return (("targetDate" in a.record ? a.record.targetDate : null) ?? "9999").localeCompare(
-          ("targetDate" in b.record ? b.record.targetDate : null) ?? "9999",
-        );
-      return a.record.name.localeCompare(b.record.name);
-    });
+  const [status, setStatus] = useState<ProjectStatus>("active");
+  const filtered =
+    mode === "views"
+      ? []
+      : containerDirectory({
+          mode,
+          status,
+          search,
+          sort: preferences?.taskContainerSort,
+          lists,
+          projects,
+        });
+  const statusCounts = projectStatusCounts(lists, projects);
   const { pinned: pinnedRows, directory: directoryRows } = partitionPinned(
     filtered,
     mode === "archive" ? undefined : preferences,
@@ -70,7 +49,9 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
   const openContainer = (kind: "list" | "project", record: TaskList | TaskProject) =>
     go(record.name, {
       view: "all",
-      ...(mode === "archive" ? { status: "all" } : {}),
+      ...(mode === "archive" || (kind === "project" && (record as TaskProject).lifecycle !== "open")
+        ? { status: "all" }
+        : {}),
       kind: "task",
       ...(kind === "list"
         ? { listId: record.id }
@@ -244,6 +225,23 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
                 </Group>
               </>
             )}
+            {mode === "projects" && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.lg }}
+              >
+                {projectStatuses.map(({ value, label }) => (
+                  <FilterChip
+                    key={value}
+                    label={`${label} · ${statusCounts[value]}`}
+                    selected={status === value}
+                    color={workspaceColor(t, "tasks")}
+                    onPress={() => setStatus(value)}
+                  />
+                ))}
+              </ScrollView>
+            )}
             {(mode === "lists" || mode === "projects") && (
               <PinnedContainers
                 kind={mode === "lists" ? "list" : "project"}
@@ -284,7 +282,7 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
               }
               empty={
                 mode === "projects"
-                  ? "No matching projects. Add a project to organize your tasks."
+                  ? (projectStatuses.find(({ value }) => value === status)?.empty ?? "")
                   : "No matching lists."
               }
             />

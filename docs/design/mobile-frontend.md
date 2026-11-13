@@ -257,6 +257,8 @@ next Save looks for the earlier attempt, under the name and institution it was s
 writing again; a corrected draft is not written as a second account. A rejected or unknown edit
 re-reads accounts so reopening the editor starts from the latest revision. An invalid Currency or
 Balance states the correction beside the field rather than relying on colour.
+The form names its required fields, uses Required/Optional as placeholders rather than sample
+values, and keeps one title: the page heading, with only dismissal in the navigation bar.
 
 Duplicate review happens in the app. The person chooses the account to keep from accounts that are
 connected and current, reads both identities, freshness and the overlapping and unique transaction

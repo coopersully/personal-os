@@ -69,7 +69,8 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
     }
   }
   return (
-    <>
+    // The shared choice rows pad themselves; cancel that so they line up with the card's rows.
+    <View style={{ marginHorizontal: -16 }}>
       <EnumChoice
         label="Ownership"
         icon="people"
@@ -125,7 +126,9 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
         </Pressable>
       )}
       {joint && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <View
+          style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16 }}
+        >
           <Text style={{ flex: 1, color: t.ink }}>Your share</Text>
           <TextInput
             accessibilityLabel="Ownership percentage"
@@ -184,6 +187,6 @@ export function AccountPreferences({ account }: { account: FinanceAccount }) {
             void save({ includeInPlanning: value === "included" });
         }}
       />
-    </>
+    </View>
   );
 }

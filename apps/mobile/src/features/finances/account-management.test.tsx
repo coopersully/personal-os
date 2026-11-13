@@ -239,6 +239,9 @@ it("adds a manual account only once its fields are valid", async () => {
   mount(<FinanceAccountEditor />);
   await screen.findByLabelText("Name");
   expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty("disabled", true);
+  // The form says why Save is unavailable, and the page heading names the screen once.
+  expect(screen.getByText(/Name and Institution are required\./)).toBeTruthy();
+  expect(screen.getAllByText("Add account").length).toBe(1);
   type("Name", "  Travel fund ");
   type("Institution", "Harbor Credit Union");
   type("Currency", "eu");

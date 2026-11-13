@@ -4,12 +4,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, Text, TextInput, type TextInputProps, View } from "react-native";
+import { Alert, Text, TextInput, type TextInputProps, View } from "react-native";
 import { toast } from "sonner-native";
+import { editorDismissOptions } from "../../components/editor-header";
 import { EnumChoice } from "../../components/forms/enum-choice";
 import { FormSave, useFormKeyboardOffset } from "../../components/forms/form-save";
 import { SettingLabel } from "../../components/settings-row-content";
-import { useTheme } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 import { useFinance, useFinanceRead } from "./data";
 import { confirmedRejection, parseBalance } from "./mutations";
 import { Card, Copy, FinanceScreen, ReadState } from "./ui";
@@ -58,7 +59,6 @@ function TextRow({
 function AccountForm({ record, known }: { record: FinanceAccount | null; known: string[] }) {
   const { api, owner } = useFinance();
   const client = useQueryClient();
-  const t = useTheme();
   const keyboardOffset = useFormKeyboardOffset();
   // Keep the reviewed revision with the draft; background refresh never overwrites edits.
   const [snapshot] = useState(record);
@@ -234,22 +234,18 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
     <View style={{ flex: 1 }}>
       <Stack.Screen
         options={{
-          title: snapshot ? "edit account" : "add account",
+          // The page heading below names the screen; the bar carries only dismissal.
+          title: "",
           gestureEnabled: false,
           headerBackVisible: false,
-          headerLeft: () => (
-            <Pressable
-              accessibilityRole="button"
-              disabled={pending}
-              onPress={close}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: t.ink, fontSize: 16 }}>{edited ? "Cancel" : "Close"}</Text>
-            </Pressable>
-          ),
+          ...editorDismissOptions({
+            label: edited ? "Cancel" : "Close",
+            onPress: close,
+            disabled: pending,
+          }),
         }}
       />
-      <FinanceScreen title={snapshot ? snapshot.name : "Add account"}>
+      <FinanceScreen title={snapshot ? "Edit account" : "Add account"}>
         <Card rows>
           <TextRow
             label="Name"
@@ -257,7 +253,7 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
             onChangeText={edit(setName)}
             editable={!pending}
             maxLength={160}
-            placeholder="Emergency savings"
+            placeholder="Required"
           />
           <TextRow
             label="Institution"
@@ -265,16 +261,18 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
             onChangeText={edit(setInstitution)}
             editable={!pending}
             maxLength={160}
-            placeholder="Harbor Credit Union"
+            placeholder="Required"
           />
-          <EnumChoice
-            label="Account type"
-            icon="finances"
-            value={kind}
-            disabled={pending}
-            options={kinds}
-            onChange={(value) => edit(setKind)(value as FinanceAccountKind)}
-          />
+          {/* The shared choice row pads itself; cancel that so it lines up with the fields. */}
+          <View style={{ marginHorizontal: -spacing.lg }}>
+            <EnumChoice
+              label="Account type"
+              value={kind}
+              disabled={pending}
+              options={kinds}
+              onChange={(value) => edit(setKind)(value as FinanceAccountKind)}
+            />
+          </View>
           {!snapshot && (
             <TextRow
               label="Currency"
@@ -285,7 +283,7 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
               maxLength={3}
               autoCapitalize="characters"
               autoCorrect={false}
-              placeholder="USD"
+              placeholder="Optional"
             />
           )}
           {manual && (
@@ -296,11 +294,12 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
               editable={!pending}
               correction={invalidBalance ? "Enter an amount such as 2400.00." : undefined}
               keyboardType="numbers-and-punctuation"
-              placeholder="2,400.00"
+              placeholder="Optional"
             />
           )}
         </Card>
         <Copy secondary>
+          Name and Institution are required.{" "}
           {!snapshot
             ? "A manual account holds a balance you maintain yourself. Leave Balance or Currency blank when unknown."
             : manual

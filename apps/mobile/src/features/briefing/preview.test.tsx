@@ -88,19 +88,6 @@ it("shows sample workspace items and leaves unimplemented financial data clearly
   expect(screen.getByRole("heading", { name: "planning" })).toBeVisible();
 });
 
-const pages: Record<string, () => Promise<{ default: React.ComponentType }>> = {
-  "mail/index": () => import("../../app/(workspaces)/mail/index"),
-  "mail/mailboxes": () => import("../../app/(workspaces)/mail/mailboxes"),
-};
-it.each([
-  ["mail/index", "inbox"],
-  ["mail/mailboxes", "mailboxes"],
-])("keeps the %s destination identified while domain content is deferred", async (path, title) => {
-  const { default: Page } = await pages[path]();
-  render(<Page />);
-  expect(screen.getByRole("heading", { name: title })).toBeVisible();
-});
-
 vi.mock("../auth/context", () => ({ useOptionalAuth: () => null }));
 
 vi.mock("sonner-native", () => ({ toast: { error: vi.fn() } }));

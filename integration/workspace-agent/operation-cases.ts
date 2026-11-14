@@ -150,6 +150,12 @@ export const workspaceApiExceptions = {
     reason:
       "Canonical ledger edit and classification operations replace the portal compatibility endpoint; category learning remains an explicit separate decision.",
   },
+  listMailThreadSummaries: {
+    kind: "equivalent",
+    tool: "list_mail",
+    reason:
+      "list_mail returns the same owner-scoped threads through the full thread contract; the body-free summary projection exists only so native lists can cache rows without message content.",
+  },
   deleteEvent: {
     kind: "equivalent",
     tool: "delete_event",

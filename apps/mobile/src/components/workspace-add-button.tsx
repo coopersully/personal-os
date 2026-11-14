@@ -4,7 +4,7 @@ import { useTheme, workspaceColor } from "../theme";
 import { GlassSurface } from "./glass-surface";
 import { Icon } from "./icons";
 
-/** Contextual capture for Tasks; other workspaces retain layout placeholders. */
+/** Contextual capture for Tasks. Calendar and Mail have no add button until they can create. */
 export function WorkspaceAddButton() {
   const [, owner, page] = usePathname().split("/");
   const container =
@@ -15,31 +15,13 @@ export function WorkspaceAddButton() {
       : null;
   const theme = useTheme();
   if (owner === "tasks" && page === "views") return null;
-  if (owner !== "tasks" && owner !== "mail" && owner !== "calendar") return null;
+  if (owner !== "tasks") return null;
   return (
-    <GlassSurface
-      style={[styles.floating, Platform.OS === "ios" && owner !== "calendar" && { bottom: 96 }]}
-    >
+    <GlassSurface style={[styles.floating, Platform.OS === "ios" && { bottom: 96 }]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={
-          container
-            ? `Add ${container}`
-            : owner === "mail"
-              ? "Compose mail"
-              : owner === "tasks"
-                ? "Add task"
-                : "Add event"
-        }
-        accessibilityHint={
-          container
-            ? `Create a ${container}`
-            : owner === "tasks"
-              ? "Create a task or reminder"
-              : "Layout preview; not available yet"
-        }
-        accessibilityState={{ disabled: owner !== "tasks" }}
-        disabled={owner !== "tasks"}
+        accessibilityLabel={container ? `Add ${container}` : "Add task"}
+        accessibilityHint={container ? `Create a ${container}` : "Create a task or reminder"}
         onPress={() =>
           router.push(
             container

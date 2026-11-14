@@ -6,6 +6,8 @@ import {
   createMailRuleInputSchema,
   mailListQuerySchema,
   mailSnoozeInputSchema,
+  mailSummaryQuerySchema,
+  mailThreadSummarySchema,
   previewMailRuleInputSchema,
   reconcileMailDraftInputSchema,
   sendMailDraftInputSchema,
@@ -158,6 +160,20 @@ export function registerMailRoutes({ app, db, mail, mutationContext }: MailRoute
       ),
     }),
   );
+  app.get("/v1/mail/thread-summaries", requireScope("mail:read"), async (context) => {
+    context.header("Cache-Control", "no-store");
+    const { beforeId, beforeReceivedAt, ...query } = mailSummaryQuerySchema.parse(
+      context.req.query(),
+    );
+    const threads = await mail.listThreads(context.get("principal").userId, query, {
+      beforeId,
+      beforeReceivedAt,
+    });
+    // Parsing strips body text, recipients and the provider thread identifier from each row.
+    return context.json({
+      threads: threads.map((thread) => mailThreadSummarySchema.parse(thread)),
+    });
+  });
   app.get("/v1/mail/threads", async (context) =>
     context.json({
       threads: await mail.listThreads(

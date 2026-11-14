@@ -82,9 +82,22 @@ section; omit an empty pinned row. Inbox remains the default list for unorganize
 Browse has no Add action. Upcoming and History share its top cards; below them group Task views
 (All, Tasks, Reminders, Scheduled), Storage (Archive, Trash), and Preferences.
 
+Projects has Active, Completed, Cancelled and All status chips with counts above its pinned row;
+Active is the default. A completed or cancelled project stays in Projects under its status until it
+is archived, and opening it shows all of its tasks, including finished ones. Rows and pinned cards
+for finished projects show the status and include it in the accessibility label ("Open Move,
+completed"). A project's metadata line (status, list, target date
+formatted as a short calendar date) sits directly under its name; a list description keeps the full
+width below the row actions. A finished or archived project, or one whose list is archived, offers no Add,
+because the server rejects new work there; Add also stays hidden until the project has loaded. Counts cover projects outside Archive and Trash and ignore the current search; chips show
+their bare label until lists and projects have loaded, never a zero from a pending or failed read.
+An empty status names itself, All with no projects says "No projects yet.", and a search that hides
+every project says no projects match. Lists have no completed or cancelled state and no status chips. Lists, Projects
+and Archive search matches names plus list descriptions and project why and notes.
+
 Upcoming means due/reserved after today; Scheduled means a task has reserved time, regardless of
 date. History contains completed/cancelled records outside archived containers. Archive contains
-archived containers, not merely closed projects. Trash contains deleted records and supports
+archived containers, not merely closed projects; those remain under Projects. Trash contains deleted records and supports
 Restore. Give Archive and Trash distinct icons. Trash does not offer capture or permanent deletion
 without an explicit product decision and confirmation. A failed restore keeps the item recoverable.
 
@@ -295,6 +308,31 @@ Category identity follows the record throughout transaction lists, detail rows, 
 
 Coming next and Cash flow show the scheduled date, saved recurring type and matching icon, signed amount, and expected status. Recurring types (Income, Bill, Subscription, Savings) are distinct from transaction-category assignments; never infer a transaction category from the merchant name. Upcoming previews sort chronologically and exclude matched or superseded occurrences.
 
+### Calendar day and agenda
+
+Calendar on iPhone is one screen with Day and Agenda segments; it does not reproduce the web week
+grid. The heading names the chosen day. Previous/next arrows step one day, a week strip that starts on
+the account's "Week starts on" setting jumps within the week and marks today and days that have
+events, and Today returns to the
+current day in the account planning timezone. Day shows all-day events as rows above an hour
+timeline that covers 8 AM–6 PM and widens to contain earlier or later events; overlapping events
+sit side by side and say so in their accessible label. Agenda lists the next 14 days from the
+chosen day, grouped by day, omitting empty days.
+
+Reads are bounded: Day loads the chosen week and Agenda its 14 days, both as instants derived from
+the account timezone. Provider all-day events stay on their calendar date; an event that crosses
+midnight appears on each day with From/Until wording. Rows carry time, tentative/cancelled state,
+location, a video-call marker and the calendar name; color comes from the calendar.
+
+Choose calendars opens a sheet of every calendar with its source account, read-only state and
+last-update freshness. Showing or hiding a calendar saves the same account-level choice web and
+Settings use, then re-reads events; success is silent and failure uses Sonner. Hidden or absent
+calendars and calendars that may be out of date are stated on the page rather than rendered as an
+empty day. Event details are read-only: date and time with the display timezone and the event's
+own timezone when different, repeat/tentative/cancelled state, location, the meeting link or its
+pending/failed state, calendar and source, freshness, reminders, guests and notes. Creating,
+editing, deleting and blocking time are separate work (COO-239, COO-242).
+
 ### Briefings and compact record rows
 
 Today is a short, cross-workspace briefing: Needs you, Coming up, and Handled for you. Bound each preview to three entries and link directly to the existing entity detail or workspace view. Use Tasks' authoritative Auto ordering for today's open work, including overdue tasks; combine upcoming tasks/reminders with expected Finance occurrences using the user's timezone. Label expected amounts rather than implying payment. Only confirmed applied agent actions belong under Handled for you; pending proposals and the user's actions do not. Distinguish partial/unavailable reads from an empty or all-clear state and make freshness and refresh accessible. The current native slice covers Tasks and Finance, not Mail/Calendar or complete connection monitoring.
@@ -308,6 +346,14 @@ and soft haze, with no dithering, rings, illustrated sun/moon, or particles. Sky
 conditions independently of app light/dark mode; keep the briefing canvas opaque and theme-standard.
 Use a small weather/location caption for opt-in and fallback clarity. See
 [the mobile sky boundary](../engineering/mobile-today-sky.md) for permission, freshness and lifecycle rules.
+
+### Mail reading
+
+Inbox is the unified inbox across connected accounts; Mailboxes lists each account's mailboxes with standard folders first (Inbox, Drafts, Sent, Archive, Spam, Trash), then the account's own folders by name, and the unread count as the trailing value. Choosing a mailbox shows its conversations in place with a back control to Mailboxes. A conversation row carries sender, time, subject, message count and a two-line preview; unread is a dot plus heavier weight, never colour alone.
+
+Thread lists read only the body-free summary contract (`GET /v1/mail/thread-summaries`): no body text, recipient lists or provider thread identifier. Only these summaries may be cached. Message bodies, recipients and attachment names load when a conversation opens, stay in memory while the reader is open and are discarded when it closes. When a conversation cannot be read, keep the subject visible and say that message text is never stored on the device and needs a connection.
+
+Search is typed in the workspace header and runs on the server against the current mailbox, debounced, through the `mailSearch` route parameter; the header shows no sample results on Mail, and the list keeps a visible indicator until the search read settles; results never mix with the unfiltered list, and switching mailbox clears the search. A search typed over the mailbox list, with no mailbox open, shows matches from every inbox. Distinguish an unavailable read from an empty mailbox, no connected account and no search matches. Pull-to-refresh follows the native refresh exception; an explicit Try again uses one Sonner toast from loading to outcome.
 
 ### Transparent sticky workspace search
 

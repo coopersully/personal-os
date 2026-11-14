@@ -1,9 +1,27 @@
 import type { TaskWorkspaceItem } from "@personal-os/domain";
 import { describe, expect, it } from "vitest";
-import { activeFilters, matchingOptions, partitionPinned, taskMetadata } from "./presentation";
+import {
+  activeFilters,
+  formatTargetDate,
+  matchingOptions,
+  partitionPinned,
+  taskMetadata,
+} from "./presentation";
 import { buildViewOptions } from "./view-options";
 
 describe("task presentation", () => {
+  it("formats a project target as a calendar date and leaves unreadable values alone", () => {
+    const expected = new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(Date.UTC(2026, 11, 1)));
+    expect(formatTargetDate("2026-12-01")).toBe(expected);
+    expect(formatTargetDate("2026-12-01T00:00:00.000Z")).toBe(expected);
+    expect(formatTargetDate("2026-12-01")).not.toContain("2026-12-01");
+    expect(formatTargetDate("soon")).toBe("soon");
+  });
   it("keeps routine metadata quiet while retaining urgency and read-only status", () => {
     const item = {
       kind: "task",

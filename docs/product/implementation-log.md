@@ -1,5 +1,18 @@
 # nohmi — Implementation Log
 
+## 2026-11-13 — Finished projects on the iPhone Projects tab (local implementation)
+
+- COO-217 — The native Projects tab has Active, Completed, Cancelled and All status chips with
+  counts. Completed and cancelled projects that are not archived are reachable there and open with
+  all of their tasks, including finished ones; their rows and pinned cards name the status, also
+  to assistive technology. Finished and archived projects, and projects in an archived list, offer no Add. Counts appear only once
+  lists and projects have loaded. Previously Projects
+  listed only open projects and Archive only archived ones, so these had no entry point.
+- Lists, Projects and Archive search also matches list descriptions and project why and notes.
+  Directory filtering, search and ordering live in a pure module with unit tests.
+- Focused Tasks tests, mobile type checking and changed-file lint passed; the chips were observed
+  in the iPhone simulator against the demo fixture. This is not a production or TestFlight release.
+
 ## 2026-11-13 — Finance playbook 1.1.0 and profile facts (source change)
 
 - The Finance playbook is version 1.1.0: it adds a scored stewardship rubric, ledger rules, alert
@@ -1330,3 +1343,21 @@ attempt before writing again. Connecting a bank is not part of this change.
 
 Focused Finance tests, mobile types and lint passed. This is a local candidate: it was not run on
 a simulator or device, and it does not establish production or TestFlight acceptance.
+
+## 2026-11-13 — Native Mail reading candidate
+
+COO-230 — Read and search Mail threads on iPhone replaces the title-only Inbox and Mailboxes
+screens with a unified inbox, a per-account mailbox list, an in-memory conversation reader and
+server search.
+
+- `GET /v1/mail/thread-summaries` returns thread rows without body text, recipient lists or the
+  provider thread identifier, is `no-store`, requires `mail:read`, and pages after the last row's
+  `(receivedAt, id)`. `GET /v1/mail/threads` and the web client are unchanged.
+- The native lists cache summaries only. Message bodies are detail reads held while the reader is
+  open and dropped when it closes.
+- Search is typed in the shared workspace header, which writes the `mailSearch` route parameter
+  on Mail and shows no sample results there; the list reads that parameter and searches the server.
+- Further pages load as the list reaches its end. "Load more messages" appears only after a page
+  fails to load.
+- Triage, compose, reply, attachments downloads and rules are not included. This is a local
+  candidate covered by focused tests; it is not a production or TestFlight release.

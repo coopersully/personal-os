@@ -126,7 +126,13 @@ Evidence so far:
   was compared with a single run on hosted run 43534437674: 1,000 files, none missing, 166
   differing; statements 97.4337% against 97.4209%, functions identical, branches 94.0094% against
   94.0057% (20 more branch entries, 21 more covered). That direction is what prompted the one-pass
-  merge. Its own whole-suite comparison must be recorded here before these figures are relied on.
+  merge.
+- On the whole suite, the one-pass merge was compared with a single run on hosted run
+  43538151441: 1,001 files, none missing, 179 differing, 97 counters moved. Statements 97.4424%
+  against 97.4439% (3 fewer covered), functions identical, branches 94.0111% against 94.0168% (22
+  fewer branch entries, 24 fewer covered). The merge was lower or equal on every metric, the
+  direction expected if the single run's fold leaves spurious covered ranges, and it met every
+  floor. One comparison does not prove the direction always holds; the workflow keeps checking.
 
 Branch coverage sits within a hundredth of a point of its 94% floor, so this matters. The
 `Coverage equivalence` workflow runs the suite once on one machine, runs the same six shards,
@@ -159,8 +165,16 @@ machines instead.
 `success()` condition. The required aggregate still uses the actual `Node quality` result.
 
 Historical single-job run 43508749100 reported 8,402 passing tests across 738 files in 987.69
-seconds on two workers, with 91 seconds of type checking and 53 seconds of builds in the same job.
-Those are the figures to compare against; they are not a measured result of this layout.
+seconds on two workers, with 91 seconds of type checking and 53 seconds of builds in the same job:
+1,158 seconds for `Node quality` in all.
+
+On run 43538151473 with this layout the six shards took 189 to 358 seconds, `Node build` 157
+seconds and the `Node quality` merge job 70 seconds. Browser jobs took 103 to 508 seconds, against
+291 to 696 with four shards. Desktop took 353 and 455 seconds without a warm Rust cache. The run
+finished in 14 minutes 39 seconds, but jobs started up to six minutes late: it shared the
+20-job limit with its own coverage comparison and other pull requests. Without queueing the
+longest chain is about nine minutes, set by the slowest browser shard. Shard 1 of the Node tests
+and two mobile browser shards are well above the others, so balancing them is the next gain.
 
 Attempt-bound diagnostics still record each phase. `Node quality` reports install and coverage from
 its own steps, and audit, type checking and builds from the `Node build` result it waited for; it

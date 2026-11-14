@@ -65,7 +65,13 @@ vi.mock("react-native", async () => ({
 vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}), workspaceColor: () => "#7928ff" }));
+vi.mock("../../theme", () => ({
+  useTheme: () => ({}),
+  workspaceColor: () => "#7928ff",
+  spacing: { xs: 4, sm: 8, md: 12, lg: 16, page: 20, xl: 24, xxl: 32 },
+  radius: { sm: 4, md: 6, control: 8, menu: 12, panel: 16 },
+  touchTarget: 44,
+}));
 vi.mock("../../components/icons", () => ({ Icon: () => null }));
 vi.mock("expo-router", () => ({ router: { back: h.back }, Stack: { Screen: () => null } }));
 vi.mock("../../components/editor-header", () => ({

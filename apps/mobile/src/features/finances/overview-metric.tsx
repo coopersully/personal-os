@@ -2,6 +2,7 @@ import { type ReactNode, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../../components/icons";
+import { SheetHeader } from "../../components/sheet-header";
 import { spacing, useTheme } from "../../theme";
 import { Card, Copy } from "./ui";
 
@@ -94,29 +95,7 @@ export function OverviewMetric({
               paddingBottom: Math.max(insets.bottom, spacing.page),
             }}
           >
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: spacing.sm,
-                marginBottom: spacing.lg,
-              }}
-            >
-              <Text
-                accessibilityRole="header"
-                style={{ flex: 1, color: t.ink, fontSize: 24, fontWeight: "600" }}
-              >
-                {label}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close information"
-                onPress={() => setOpen(false)}
-                style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
-              >
-                <Icon name="cancel" color={t.ink} />
-              </Pressable>
-            </View>
+            <SheetHeader title={label} onClose={() => setOpen(false)} inset={false} />
             <ScrollView contentContainerStyle={{ gap: spacing.lg, paddingBottom: spacing.lg }}>
               <Text
                 style={{

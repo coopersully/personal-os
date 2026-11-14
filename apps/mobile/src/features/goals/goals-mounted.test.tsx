@@ -183,7 +183,12 @@ beforeEach(() => {
 afterEach(cleanup);
 it("loads authoritative goals and motives, then refreshes cached records without empty-success fallback", async () => {
   render(wrap(<GoalsSettingsScreen />));
-  await screen.findByText(/Swim/);
+  const record = await screen.findByText(/Swim/);
+  // Records sit in one rounded group, each taking the group's side padding.
+  expect(
+    record.closest('[data-testid="section-item"]')?.closest('[data-testid="form-group"]'),
+  ).toBeTruthy();
+  expect(screen.getAllByTestId("form-group")).toHaveLength(1);
   expect(h.goals).toHaveBeenCalledOnce();
   expect(h.motivesRead).toHaveBeenCalledOnce();
   h.goals.mockResolvedValue([{ ...goal, title: "Updated on web" }]);
@@ -238,7 +243,9 @@ it("clears the mounted owner's read state when the authenticated account changes
   h.owner = "second-owner";
   h.goals.mockResolvedValue([]);
   view.rerender(wrap(<GoalsSettingsScreen />));
-  await screen.findByText("No goals yet.");
+  const empty = await screen.findByText("No goals yet.");
+  expect(empty.closest('[data-testid="form-group"]')).not.toBeNull();
+  expect(screen.queryByTestId("section-item")).toBeNull();
   expect(screen.queryByText(/Swim/)).toBeNull();
   expect(h.goals).toHaveBeenCalledTimes(2);
 });

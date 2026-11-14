@@ -1,11 +1,11 @@
 import DateTimePicker from "@expo/ui/community/datetime-picker";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
+import { Action, Actions, formRow } from "../../components/forms/form-rows";
 import { Icon } from "../../components/icons";
 import { useSettingsAccent } from "../../components/settings-accent";
 import { SettingLabel, SettingValue } from "../../components/settings-row-content";
-import { useTheme } from "../../theme";
-import { Action, styles } from "../tasks/ui";
+import { spacing, useTheme } from "../../theme";
 import type { ProfileTimeProps } from "./profile-time";
 export function ProfileTime({ label, value, onChange, end, disabled }: ProfileTimeProps) {
   const t = useTheme();
@@ -28,7 +28,7 @@ export function ProfileTime({ label, value, onChange, end, disabled }: ProfileTi
         accessibilityLabel={`${label}, ${display}`}
         accessibilityState={{ expanded: editing, disabled }}
         onPress={() => setEditing(!editing)}
-        style={styles.settingRow}
+        style={({ pressed }) => [formRow, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}
       >
         <Icon name="clock" size={22} color={t.secondary} />
         <SettingLabel>{label}</SettingLabel>
@@ -36,7 +36,7 @@ export function ProfileTime({ label, value, onChange, end, disabled }: ProfileTi
         <Icon name="chevron" size={16} color={t.secondary} />
       </Pressable>
       {editing && !disabled && (
-        <View>
+        <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.md, gap: spacing.sm }}>
           <DateTimePicker
             value={date}
             accentColor={accent}
@@ -50,7 +50,9 @@ export function ProfileTime({ label, value, onChange, end, disabled }: ProfileTi
               }
             }}
           />
-          <Action label="Done" onPress={() => setEditing(false)} />
+          <Actions inset={false}>
+            <Action label="Done" onPress={() => setEditing(false)} />
+          </Actions>
         </View>
       )}
     </View>

@@ -1,10 +1,12 @@
 import type { MailAddress, MailThreadSummary } from "@personal-os/domain";
-import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Modal, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Action, Actions } from "../../components/forms/form-rows";
 import { Icon } from "../../components/icons";
 import { PageRefreshControl } from "../../components/page-refresh";
+import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SheetHeader } from "../../components/sheet-header";
-import { spacing, touchTarget, useTheme } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 import { confirmMailRead, retryMailRead, useMailMessages } from "./data";
 import { senderName } from "./logic";
 
@@ -40,17 +42,17 @@ export function MailReader({ thread, close }: { thread: MailThreadSummary; close
               <Text style={{ color: t.secondary, fontSize: 15, lineHeight: 21 }}>
                 Message text is never stored on this iPhone, so reading it needs a connection.
               </Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void retryMailRead(() => messages.refetch())}
-                style={{
-                  minHeight: touchTarget,
-                  justifyContent: "center",
-                  alignSelf: "flex-start",
-                }}
-              >
-                <Text style={{ color: t.information, fontSize: 17 }}>Try again</Text>
-              </Pressable>
+              <SettingsAccentProvider workspace="mail">
+                {/* The row sizes the line to its label, so the label starts on the copy's edge. */}
+                <View style={{ flexDirection: "row" }}>
+                  <Actions inset={false}>
+                    <Action
+                      label="Try again"
+                      onPress={() => void retryMailRead(() => messages.refetch())}
+                    />
+                  </Actions>
+                </View>
+              </SettingsAccentProvider>
             </View>
           )}
           {messages.data?.length === 0 && (

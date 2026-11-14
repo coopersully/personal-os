@@ -85,7 +85,10 @@ vi.mock("@tanstack/react-query", () => ({
     setQueryData: h.publish,
   }),
 }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../theme", () => ({
+  spacing: { xs: 4, sm: 8, md: 12, lg: 16, page: 20 },
+  useTheme: () => ({}),
+}));
 vi.mock("./finance-settings", () => ({ FinanceConfigurationSettings: () => null }));
 vi.mock("../tasks/preferences", () => ({
   TaskPreferencesScreen: ({ relatedSettings }: { relatedSettings?: import("react").ReactNode }) => (

@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
+import { Action, Actions, formBlock } from "../../components/forms/form-rows";
 import { Icon } from "../../components/icons";
 import { spacing, useTheme } from "../../theme";
-import { Action } from "./ui";
 
 /** Tags are individual draft values, never comma-delimited text. */
 export function TagsField({
@@ -23,7 +23,7 @@ export function TagsField({
     setAdding(false);
   };
   return (
-    <View style={{ padding: spacing.lg, gap: spacing.sm }}>
+    <View style={formBlock}>
       <Text style={{ color: t.secondary, fontSize: 13 }}>Tags</Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
         {value.map((tag) => (
@@ -81,8 +81,7 @@ export function TagsField({
             returnKeyType="done"
             style={{ minHeight: 44, color: t.ink, fontSize: 17 }}
           />
-          <View style={{ flexDirection: "row" }}>
-            <Action label="Add" disabled={!draft.trim()} onPress={add} />
+          <Actions inset={false}>
             <Action
               label="Cancel"
               onPress={() => {
@@ -90,7 +89,8 @@ export function TagsField({
                 setAdding(false);
               }}
             />
-          </View>
+            <Action label="Add" disabled={!draft.trim()} onPress={add} />
+          </Actions>
         </View>
       )}
     </View>

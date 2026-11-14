@@ -1,7 +1,8 @@
 import { View } from "react-native";
-import { spacing, useTheme } from "../../theme";
+import { useTheme } from "../../theme";
 import { Icon, type IconName } from "../icons";
 import { SettingLabel, SettingValue } from "../settings-row-content";
+import { formRow } from "./form-row";
 
 export interface EnumChoiceProps {
   label: string;
@@ -58,15 +59,7 @@ export function EnumChoiceLabel({
   const t = useTheme();
   const glyph = icon ?? fieldIcons[label];
   return (
-    <View
-      style={{
-        minHeight: 56,
-        padding: spacing.lg,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: spacing.md,
-      }}
-    >
+    <View style={formRow}>
       {glyph && <Icon name={glyph} color={t.secondary} size={22} />}
       <SettingLabel>{label}</SettingLabel>
       <SettingValue style={{ color: valueColor ?? t.secondary }}>

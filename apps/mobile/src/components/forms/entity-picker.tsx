@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { radius, spacing, useTheme } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 import { Icon, type IconName } from "../icons";
+import { SettingLabel } from "../settings-row-content";
 import { SheetHeader } from "../sheet-header";
+import { formRow } from "./form-row";
+import { Group, SearchField, SectionNote } from "./form-rows";
 
 /** Large entity choices use a searchable sheet with leading identities and trailing selection. */
 export function EntityPicker({
@@ -39,55 +42,38 @@ export function EntityPicker({
         }}
       >
         <SheetHeader title={title} onClose={onClose} inset={false} />
-        <TextInput
+        <SearchField
           accessibilityLabel={`Search ${title.toLowerCase()}`}
           value={search}
           onChangeText={setSearch}
           placeholder={`Search ${title.toLowerCase()}`}
-          placeholderTextColor={t.secondary}
-          style={{
-            color: t.ink,
-            fontSize: 17,
-            padding: 16,
-            minHeight: 48,
-            backgroundColor: t.surface,
-            borderRadius: radius.menu,
-            marginVertical: 16,
-          }}
+          style={{ marginTop: spacing.md }}
         />
         <ScrollView
           automaticallyAdjustKeyboardInsets
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
         >
-          {matches.map((option) => (
-            <Pressable
-              key={option.value ?? "none"}
-              accessibilityRole="radio"
-              accessibilityLabel={option.label}
-              accessibilityState={{ checked: value === option.value }}
-              onPress={() => {
-                onChange(option.value);
-                onClose();
-              }}
-              style={{
-                minHeight: 56,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 12,
-                paddingVertical: 12,
-              }}
-            >
-              <Icon name={option.icon ?? icon} color={t.secondary} />
-              <Text style={{ flex: 1, color: t.ink, fontSize: 17 }}>{option.label}</Text>
-              {value === option.value && <Icon name="save" color={t.ink} />}
-            </Pressable>
-          ))}
-          {matches.length === 0 && (
-            <Text style={{ color: t.secondary, fontSize: 16, paddingVertical: 16 }}>
-              No matching {title.toLowerCase()}.
-            </Text>
-          )}
+          <Group>
+            {matches.map((option) => (
+              <Pressable
+                key={option.value ?? "none"}
+                accessibilityRole="radio"
+                accessibilityLabel={option.label}
+                accessibilityState={{ checked: value === option.value }}
+                onPress={() => {
+                  onChange(option.value);
+                  onClose();
+                }}
+                style={({ pressed }) => [formRow, { opacity: pressed ? 0.6 : 1 }]}
+              >
+                <Icon name={option.icon ?? icon} color={t.secondary} size={22} />
+                <SettingLabel>{option.label}</SettingLabel>
+                {value === option.value && <Icon name="save" color={t.ink} size={22} />}
+              </Pressable>
+            ))}
+            {matches.length === 0 && <SectionNote>No matching {title.toLowerCase()}.</SectionNote>}
+          </Group>
         </ScrollView>
       </View>
     </Modal>

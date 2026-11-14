@@ -66,7 +66,10 @@ vi.mock("expo-router", () => ({
   Stack: { Screen: () => null },
   useLocalSearchParams: () => h.params,
 }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../theme", () => ({
+  spacing: { xs: 4, sm: 8, md: 12, lg: 16, page: 20 },
+  useTheme: () => ({}),
+}));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
 vi.mock("../../components/forms/use-dirty-dismiss", () => ({ useDirtyDismiss: () => () => {} }));
 vi.mock("../../components/forms/form-save", () => ({

@@ -9,16 +9,17 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
+import { SectionItem, SectionNote } from "../../components/forms/form-rows";
 import { FloatingAdd, FormSave } from "../../components/forms/form-save";
 import { PlanningPicker } from "../../components/forms/planning-picker";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { Icon } from "../../components/icons";
 import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
-import { useTheme } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { useSettingsRefresh } from "../settings/data";
 import { SettingsViewSwitcher } from "../settings/view-switcher";
@@ -52,6 +53,12 @@ function GoalsHome() {
     "Goals and motives refreshed",
   );
   const [tab, setTab] = useState("goals");
+  const visibleGoals = (goals.data ?? []).filter((g) =>
+    tab === "completed" ? g.status === "completed" : g.status !== "completed",
+  );
+  // A failed read keeps its cached rows but never claims the list is empty.
+  const read = tab === "motives" ? motives : goals;
+  const count = tab === "motives" ? (motives.data?.length ?? 0) : visibleGoals.length;
   return (
     <View style={{ flex: 1 }}>
       <Screen onRefresh={refresh}>
@@ -65,58 +72,54 @@ function GoalsHome() {
           ]}
           onChange={setTab}
         />
+        <View style={{ height: spacing.lg }} />
 
         <ReadState
           pending={tab === "motives" ? motives.isPending : goals.isPending}
           error={tab === "motives" ? motives.isError : goals.isError}
           retry={() => void (tab === "motives" ? motives.refetch() : goals.refetch())}
         />
-        {tab === "motives"
-          ? motives.data?.map((record) => (
-              <RecordRow
-                leading={<Icon name="target" color={t.secondary} />}
-                key={record.id}
-                title={record.title}
-                subtitle={record.detail ?? undefined}
-                subtitleLines={2}
-                value={record.isActive ? "Active" : "Paused"}
-                onPress={() =>
-                  router.push({
-                    pathname: "/settings/goals/edit",
-                    params: { kind: "motive", id: record.id },
-                  })
-                }
-              />
-            ))
-          : goals.data
-              ?.filter((g) =>
-                tab === "completed" ? g.status === "completed" : g.status !== "completed",
-              )
-              .map((record) => (
-                <RecordRow
-                  leading={<Icon name="target" color={t.secondary} />}
-                  key={record.id}
-                  title={record.title}
-                  subtitle={record.description ?? undefined}
-                  subtitleLines={2}
-                  value={`${record.progress}%`}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/settings/goals/edit",
-                      params: { kind: "goal", id: record.id },
-                    })
-                  }
-                />
-              ))}
-        {(tab === "motives"
-          ? motives.isSuccess && motives.data.length === 0
-          : goals.isSuccess &&
-            goals.data.filter((g) =>
-              tab === "completed" ? g.status === "completed" : g.status !== "completed",
-            ).length === 0) && (
-          <Text style={{ color: t.ink }}>
-            No {tab === "completed" ? "completed outcomes" : tab} yet.
-          </Text>
+        {(count > 0 || read.isSuccess) && (
+          <Section>
+            {tab === "motives"
+              ? motives.data?.map((record) => (
+                  <SectionItem key={record.id}>
+                    <RecordRow
+                      leading={<Icon name="target" color={t.secondary} />}
+                      title={record.title}
+                      subtitle={record.detail ?? undefined}
+                      subtitleLines={2}
+                      value={record.isActive ? "Active" : "Paused"}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/settings/goals/edit",
+                          params: { kind: "motive", id: record.id },
+                        })
+                      }
+                    />
+                  </SectionItem>
+                ))
+              : visibleGoals.map((record) => (
+                  <SectionItem key={record.id}>
+                    <RecordRow
+                      leading={<Icon name="target" color={t.secondary} />}
+                      title={record.title}
+                      subtitle={record.description ?? undefined}
+                      subtitleLines={2}
+                      value={`${record.progress}%`}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/settings/goals/edit",
+                          params: { kind: "goal", id: record.id },
+                        })
+                      }
+                    />
+                  </SectionItem>
+                ))}
+            {count === 0 && (
+              <SectionNote>No {tab === "completed" ? "completed outcomes" : tab} yet.</SectionNote>
+            )}
+          </Section>
         )}
       </Screen>
       <FloatingAdd
@@ -157,7 +160,9 @@ export function GoalEditorScreen() {
   if (id && !record)
     return (
       <Screen>
-        <Text>Record unavailable.</Text>
+        <Section>
+          <SectionNote>Record unavailable.</SectionNote>
+        </Section>
       </Screen>
     );
   return (

@@ -13,7 +13,7 @@ import { OptionsMenu } from "../features/tasks/options-menu.ios";
 import { buildViewOptions } from "../features/tasks/view-options";
 import { workspaces } from "../theme";
 import { AppToaster } from "./app-toaster";
-import { EditorClose } from "./editor-close.ios";
+import { EditorClose } from "./editor-close";
 import { Icon } from "./icons";
 import { RowActions } from "./row-actions.ios";
 import { WorkspacePicker } from "./workspace-picker.ios";

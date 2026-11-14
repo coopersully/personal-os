@@ -82,7 +82,15 @@ it("searches entity choices, preserves selection on cancel, and resets search af
   );
   fireEvent.click(screen.getByRole("button", { name: "Project, Work" }));
   expect(screen.getByRole("button", { name: "Work" })).toHaveAttribute("aria-pressed", "true");
+  // Every option is a row of one rounded group, never a bare row on the sheet.
+  const groupRows = screen.getAllByTestId("choice-group-row");
+  expect(groupRows).toHaveLength(3);
+  for (const label of ["None", "Home repairs", "Work"])
+    expect(groupRows.some((row) => row.contains(screen.getByRole("button", { name: label })))).toBe(
+      true,
+    );
   fireEvent.change(screen.getByLabelText("Search project"), { target: { value: "missing" } });
+  expect(screen.queryByTestId("choice-group-row")).toBeNull();
   expect(screen.getByText("No matches. Try a different name.")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(change).not.toHaveBeenCalled();

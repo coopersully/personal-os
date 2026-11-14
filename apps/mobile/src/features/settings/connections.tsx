@@ -2,11 +2,14 @@ import type { CalendarAccount } from "@personal-os/api-client";
 import { connectICloudInputSchema } from "@personal-os/domain";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { AppState, Linking, Modal, Pressable, Text, View } from "react-native";
+import { AppState, Linking, Modal, Pressable, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toast } from "sonner-native";
+import { formRow } from "../../components/forms/form-row";
+import { SectionFootnote, SectionNote } from "../../components/forms/section-content";
 import { Icon } from "../../components/icons";
 import { Screen } from "../../components/screen";
+import { SettingDetail, SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { SheetHeader } from "../../components/sheet-header";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
@@ -105,7 +108,6 @@ function Connections({ detailId }: { detailId?: string } = {}) {
           {accounts.data?.length === 0 && <State empty="No connected accounts." />}
           {accounts.data?.map((account) => (
             <View key={account.id}>
-              {" "}
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Account ${account.label}, ${account.email ?? account.provider}`}
@@ -115,47 +117,44 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                     params: { id: account.id },
                   })
                 }
-                style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52 }}
+                style={({ pressed }) => [formRow, { opacity: pressed ? 0.6 : 1 }]}
               >
                 <AccountAvatar
                   url={account.avatarUrl}
                   name={account.label || account.email || account.provider}
                 />
                 <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={{ color: t.ink, fontSize: 17, fontWeight: "600" }}>
+                  <SettingLabel style={{ flex: 0, fontWeight: "600" }}>
                     {account.label || (account.provider === "google" ? "Google" : "iCloud")}
-                  </Text>
-                  <Text style={{ color: t.secondary, fontSize: 14 }}>
-                    {account.email ?? account.provider}
-                  </Text>
+                  </SettingLabel>
+                  <SettingDetail>{account.email ?? account.provider}</SettingDetail>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
                     {account.mailEnabled && (
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                         <Icon name="mail" color={t.secondary} size={14} />
-                        <Text style={{ color: t.secondary, fontSize: 13 }}>Mail</Text>
+                        <SettingDetail style={{ fontSize: 13 }}>Mail</SettingDetail>
                       </View>
                     )}
                     {account.calendarEnabled && (
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                         <Icon name="calendar" color={t.secondary} size={14} />
-                        <Text style={{ color: t.secondary, fontSize: 13 }}>Calendar</Text>
+                        <SettingDetail style={{ fontSize: 13 }}>Calendar</SettingDetail>
                       </View>
                     )}
                     {!account.mailEnabled && !account.calendarEnabled && (
-                      <Text style={{ color: t.secondary, fontSize: 13 }}>No services enabled</Text>
+                      <SettingDetail style={{ fontSize: 13 }}>No services enabled</SettingDetail>
                     )}
                   </View>
                 </View>
-                <Text
+                <SettingValue
                   style={{
-                    color: account.health.state === "ready" ? t.secondary : t.warning,
                     fontSize: 13,
                     maxWidth: "30%",
-                    textAlign: "right",
+                    ...(account.health.state === "ready" ? {} : { color: t.warning }),
                   }}
                 >
                   {account.health.state === "ready" ? "Connected" : "Needs attention"}
-                </Text>
+                </SettingValue>
                 <Icon name="chevron" color={t.secondary} size={16} />
               </Pressable>
             </View>
@@ -201,14 +200,9 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                   icon="clock"
                 />
                 {account.health.message && (
-                  <Text
-                    style={{
-                      color: account.health.state === "ready" ? t.secondary : t.warning,
-                      padding: 16,
-                    }}
-                  >
+                  <SectionNote warning={account.health.state !== "ready"}>
                     {account.health.message}
-                  </Text>
+                  </SectionNote>
                 )}
               </Section>
               <Section title="Services">
@@ -223,7 +217,7 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                   icon="calendar"
                 />
                 {!account.mailEnabled && !account.calendarEnabled && (
-                  <Text style={{ color: t.secondary, padding: 16 }}>No services enabled</Text>
+                  <SectionNote>No services enabled</SectionNote>
                 )}
                 {Object.entries(account.capabilities ?? {}).map(([service, capability]) => (
                   <SettingsDetailRow
@@ -322,12 +316,10 @@ function Connections({ detailId }: { detailId?: string } = {}) {
               <State retry={() => void x.refetch()} />
             ) : x.data ? (
               <>
-                <Text style={{ padding: 16, color: t.ink, fontSize: 17 }}>
+                <SectionNote ink>
                   @{x.data.username} · {x.data.syncStatus}
-                </Text>
-                {x.data.syncError && (
-                  <Text style={{ padding: 16, color: t.warning }}>{x.data.syncError}</Text>
-                )}
+                </SectionNote>
+                {x.data.syncError && <SectionNote warning>{x.data.syncError}</SectionNote>}
                 <SearchableChoice
                   label="Bookmark folder"
                   value={x.data.selectedFolderId ?? ""}
@@ -394,7 +386,7 @@ function Connections({ detailId }: { detailId?: string } = {}) {
                 />
               </>
             ) : (
-              <Text style={{ padding: 16, color: t.secondary }}>No X account connected.</Text>
+              <SectionNote>No X account connected.</SectionNote>
             )}
             <SettingsActionRow
               leading={<ProviderMark brand="x" decorative />}
@@ -588,10 +580,10 @@ function ICloudForm({
               }}
             />
           </Section>
-          <Text style={{ color: t.secondary }}>
+          <SectionFootnote>
             Use an app-specific password created in your Apple Account. Your password stays only in
             this form until submitted.
-          </Text>
+          </SectionFootnote>
         </FormBody>
       </SafeAreaView>
     </Modal>

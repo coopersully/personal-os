@@ -1,10 +1,11 @@
 import DateTimePicker from "@expo/ui/community/datetime-picker";
 import { localDateAt, localDateTimeToUtc } from "@personal-os/domain";
 import { useRef, useState } from "react";
-import { Pressable, Text, View } from "react-native";
-import { useTheme } from "../../theme";
+import { Pressable, View } from "react-native";
+import { spacing, useTheme } from "../../theme";
 import { useSettingsAccentColor } from "../settings-accent";
 import { SettingLabel, SettingValue } from "../settings-row-content";
+import { Action, Actions, formRow } from "./form-rows";
 import type { PlanningPickerProps } from "./planning-picker";
 export function PlanningPicker({
   label,
@@ -41,7 +42,7 @@ export function PlanningPicker({
       ).format(date)
     : "Not set";
   return (
-    <View style={{ paddingVertical: 8 }}>
+    <View>
       <Pressable
         disabled={disabled}
         accessibilityState={{ disabled }}
@@ -50,13 +51,13 @@ export function PlanningPicker({
         onPress={() => {
           if (!disabledRef.current) setEditing(!editing);
         }}
-        style={{ minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12 }}
+        style={({ pressed }) => [formRow, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}
       >
         <SettingLabel>{label}</SettingLabel>
         <SettingValue>{displayValue}</SettingValue>
       </Pressable>
       {editing && (
-        <>
+        <View style={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.md, gap: spacing.sm }}>
           <DateTimePicker
             value={date}
             disabled={disabled}
@@ -83,29 +84,21 @@ export function PlanningPicker({
               }
             }}
           />
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setEditing(false)}
-            style={{ minHeight: 44, justifyContent: "center" }}
-          >
-            <Text style={{ color: accent }}>Done</Text>
-          </Pressable>
-          {optional && (
-            <Pressable
-              accessibilityRole="button"
-              disabled={disabled}
-              accessibilityState={{ disabled }}
-              onPress={() => {
-                if (disabledRef.current) return;
-                onChange("");
-                setEditing(false);
-              }}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: accent }}>Clear {label.toLowerCase()}</Text>
-            </Pressable>
-          )}
-        </>
+          <Actions inset={false}>
+            {optional && (
+              <Action
+                label={`Clear ${label.toLowerCase()}`}
+                disabled={disabled}
+                onPress={() => {
+                  if (disabledRef.current) return;
+                  onChange("");
+                  setEditing(false);
+                }}
+              />
+            )}
+            <Action label="Done" onPress={() => setEditing(false)} />
+          </Actions>
+        </View>
       )}
     </View>
   );

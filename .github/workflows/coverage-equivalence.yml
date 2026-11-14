@@ -13,7 +13,9 @@ on:
       - scripts/coverage-shard-provider.mjs
       - scripts/merge-coverage-shards.mjs
       - scripts/compare-coverage.mjs
+      - package.json
       - pnpm-lock.yaml
+      - .github/workflows/ci.yml
       - .github/workflows/coverage-equivalence.yml
   schedule:
     - cron: "17 9 * * 1"
@@ -104,7 +106,13 @@ jobs:
         with:
           name: coverage-single-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/coverage-single
-      - env:
+      - id: merge
+        env:
           NOHMI_COVERAGE_SHARD_DIR: ${{ runner.temp }}/coverage-shards
         run: pnpm test:coverage:merge
-      - run: node scripts/compare-coverage.mjs "$RUNNER_TEMP/coverage-single/coverage-final.json" coverage/coverage-final.json | tee -a "$GITHUB_STEP_SUMMARY"
+      # A merge that misses the floors where the single run met them is the case
+      # this comparison exists for: still print it. The failed merge fails the job.
+      - if: ${{ always() && steps.merge.outcome != 'skipped' && hashFiles('coverage/coverage-final.json') != '' }}
+        # The explicit shell enables pipefail, so a failed comparison fails the step.
+        shell: bash
+        run: node scripts/compare-coverage.mjs "$RUNNER_TEMP/coverage-single/coverage-final.json" coverage/coverage-final.json | tee -a "$GITHUB_STEP_SUMMARY"

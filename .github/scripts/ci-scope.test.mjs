@@ -973,6 +973,11 @@ test("readiness full-source inventory matches workflow names and both complete m
     if (!match) continue;
     // Node tests and Node build are inputs that Node quality needs; the readiness
     // inventory names the canonical job that cannot succeed without them.
+    // The gate reports the protected context, which the evaluator tracks separately.
+    if (/^ {2}gate:\n/.test(block)) {
+      assert.equal(match[1], "CI required");
+      continue;
+    }
     if (/^ {2}(tests|build):\n/.test(block)) {
       assert.match(workflow, /^ {4}needs: \[changes, tests, build\]$/m);
       continue;
@@ -1073,7 +1078,7 @@ test("CLI emits the lane and its selection from the exact draft flag", (t) => {
   }
 });
 
-test("workflow defers draft matrices in the classifier and starts the gate last", () => {
+test("workflow defers draft matrices in the classifier and keeps read-only permissions", () => {
   const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
   const blocks = workflowJobBlocks(workflow);
   const block = (job) => blocks.find((candidate) => candidate.startsWith(`  ${job}:\n`));
@@ -1090,16 +1095,7 @@ test("workflow defers draft matrices in the classifier and starts the gate last"
     required,
     /^ {4}if: \$\{\{ !cancelled\(\) && needs.changes.outputs.lane != 'fast' \}\}$/m,
   );
-  assert.match(required, /permissions:\n {6}contents: read\n {6}actions: write\n/);
-  assert.match(required, /uses: actions\/checkout@v7\n {8}with:\n {10}persist-credentials: false/);
-  const gate = required.indexOf("Verify required CI results");
-  const start = required.indexOf("run: node .github/scripts/start-metadata-gate.mjs");
-  assert.ok(gate > 0 && start > gate);
-  assert.match(
-    required,
-    /if: \$\{\{ !cancelled\(\) && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository \}\}/,
-  );
-  // Only the aggregate job can start workflows; the workflow default stays read-only.
-  assert.equal(workflow.match(/actions: write/g).length, 1);
+  // No job can start workflows or write anything; the workflow default is read-only.
+  assert.doesNotMatch(workflow, /actions: write|statuses: write|checks: write/);
   assert.match(workflow, /^permissions:\n {2}contents: read\n\nconcurrency:/m);
 });

@@ -1,39 +1,46 @@
 import { pathToFileURL } from "node:url";
 import { classifyGitChanges, sourceLane } from "./ci-scope.mjs";
-import { SourceClient, SourceSettling, stableObservation } from "./source-observation.mjs";
+import {
+  ObservationChanged,
+  observeMetadata,
+  SourceClient,
+  SourceSettling,
+  stableObservation,
+} from "./source-observation.mjs";
 
 const shaPattern = /^[0-9a-f]{40}$/u;
 
-// Source CI starts a dispatched gate with the base it tested. A person starting
-// one by hand may omit it: the observation still binds the live base to the run.
-// Every other event must name both commits.
 export function candidateIdentity(env) {
   const number = Number(env.PR_NUMBER);
-  const dispatched = env.GITHUB_EVENT_NAME === "workflow_dispatch";
-  const base = env.PR_BASE_SHA ?? "";
   if (
     !Number.isSafeInteger(number) ||
     number < 1 ||
     !env.GH_REPO ||
     !shaPattern.test(env.PR_HEAD_SHA ?? "") ||
-    !(shaPattern.test(base) || (dispatched && base === ""))
+    !shaPattern.test(env.PR_BASE_SHA ?? "")
   )
     throw new Error("Missing candidate identity");
-  // The check lands on the commit this run was started for; never report on another.
-  if (dispatched && env.GITHUB_SHA !== env.PR_HEAD_SHA)
-    throw new Error("Dispatched metadata gate is not bound to its own commit");
-  if (dispatched && env.PR_DISPATCHED_HEAD_SHA && env.PR_DISPATCHED_HEAD_SHA !== env.GITHUB_SHA)
-    throw new Error("Branch moved after its source run; the newer candidate reports its own gate");
   return {
     repository: env.GH_REPO,
     number,
     expected: {
       headSha: env.PR_HEAD_SHA,
-      baseSha: base || undefined,
-      baseRef: env.PR_BASE_REF || undefined,
+      baseSha: env.PR_BASE_SHA,
+      baseRef: env.PR_BASE_REF,
       retargeted: env.PR_RETARGETED === "true",
     },
   };
+}
+
+// The gate job at the end of a source run. It must fail, never skip, whenever the
+// run did not verify the candidate: branch protection treats a skipped required
+// job as passing. The aggregate's result comes from the same run and attempt.
+export function gateDecision(env) {
+  if (env.SOURCE_LANE === "fast") return draftRemedy;
+  if (env.SOURCE_RESULT !== "success")
+    return "Source verification did not succeed in this run; inspect its jobs";
+  if (env.SOURCE_LANE !== "full") return "Source lane is unknown; the run cannot be accepted";
+  return undefined;
 }
 
 // A draft's fast-lane run never reports Source verification, so waiting on it
@@ -87,6 +94,19 @@ export async function readRuns(
 
 async function main() {
   const { repository, number, expected } = candidateIdentity(process.env);
+  if (process.argv.includes("--gate")) {
+    const rejection = gateDecision(process.env);
+    if (rejection) throw new Error(rejection);
+    if (!expected.baseRef) throw new Error("Missing candidate identity");
+    for (let attempt = 0; ; attempt++) {
+      try {
+        observeMetadata(new SourceClient(repository, number), expected);
+        return;
+      } catch (error) {
+        if (!(error instanceof ObservationChanged) || attempt === 1) throw error;
+      }
+    }
+  }
   // Collector snapshots use this same observer, without publishing a check or changing polling.
   if (process.argv.includes("--collect")) {
     process.stdout.write(

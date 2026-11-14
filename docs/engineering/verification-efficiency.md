@@ -103,32 +103,45 @@ every test file per transform mode and converts once. `scripts/coverage-shard-pr
 that order:
 
 - A shard exports each test file's raw V8 result untouched. It converts nothing and checks no floor.
-- The merge feeds every shard's raw results to the unmodified upstream `generateCoverage`. Merging,
-  conversion, untested files, reports and floors are the same code a single run executes.
+- The merge combines every shard's raw results per transform mode in one pass with the same V8
+  merge library the provider uses, then hands the result to the unmodified upstream
+  `generateCoverage`. Conversion, untested files, reports and floors are the same code a single
+  run executes.
 - The merge requests each source file's transform in the mode its tests used, because no test ran
   in that process to populate the cache a single run converts from.
 - The merge refuses a missing, repeated or mixed shard, another tool version or checkout, and any
   difference between the shards' test files and the suite's own test list.
 
-Upstream folds raw results together one test file at a time, and that fold is slightly
-order-sensitive. A single run uses test completion order; the merge uses test file path order, so
-the same suite yields the same report for any shard count. Local evidence on an 83-file subset
-covering both transform modes: the merged report was byte-identical to a single run's
-`coverage-final.json`, and identical between three and five shards. Feeding the same shard data in
-a different order moved one branch range in one file of 995, with the single run matching one of
-those orders exactly.
+A single run does not merge in one pass. It folds raw results together one test file at a time, in
+the order its tests happened to finish, re-merging its own output. That fold is order-sensitive
+and can leave a spurious covered range, so two single runs of the same source do not always agree.
+The one-pass merge has no order: the same suite yields the same report on any shard count.
 
-That is subset evidence. The `Coverage equivalence` workflow supplies the whole-suite comparison:
-it runs the suite once on one machine, runs the same six shards, merges them and fails if any file
-is missing from either report, more than five files differ, or any counter moves by more than ten.
-It runs on pull requests that change the coverage machinery, Vitest configuration or the lockfile,
-weekly, and on request. It is not part of `CI required`: treat a failure on a pull request that
-changes those files as blocking. Record its first whole-suite result before relying on these
-tolerances, and tighten them to what it shows.
+Evidence so far:
+
+- On an 83-file subset covering both transform modes, the one-pass merge was byte-identical to a
+  single run's `coverage-final.json`, identical between three and five shards, and identical when
+  the inputs were reversed. The fold over the same data added one covered branch in one order.
+- On the whole suite, an earlier version of the merge that still folded, in test file path order,
+  was compared with a single run on hosted run 43534437674: 1,000 files, none missing, 166
+  differing; statements 97.4337% against 97.4209%, functions identical, branches 94.0094% against
+  94.0057% (20 more branch entries, 21 more covered). That direction is what prompted the one-pass
+  merge. Its own whole-suite comparison must be recorded here before these figures are relied on.
+
+Branch coverage sits within a hundredth of a point of its 94% floor, so this matters. The
+`Coverage equivalence` workflow runs the suite once on one machine, runs the same six shards,
+merges them and fails if a file is missing from either report, if any metric is more than 0.01
+points higher or 0.05 points lower in the merge than in the single run, or if more than 0.2% of
+all counters change across the files that differ. The bounds are asymmetric on purpose: the merge
+must not make the gate easier to pass. It runs on pull requests that change the coverage
+machinery, Vitest configuration, `package.json`, the lockfile or the CI workflow, weekly, and on
+request. It is not part of `CI required`: treat a failure on a pull request that changes those
+files as blocking.
 
 The provider depends on Vitest internals: the base provider's `readCoverageFiles`,
 `coverageFiles`, `pendingPromises` and `cleanAfterRun`, the Vitest instance's
-`initCoverageProvider`, and vite-node's `fetchResult`. A Vitest upgrade that changes them fails
+`initCoverageProvider`, vite-node's `fetchResult`, and the `@bcoe/v8-coverage` package resolved
+through `@vitest/coverage-v8`. A Vitest upgrade that changes them fails
 the merge or the equivalence workflow rather than passing silently; repair the provider in that
 upgrade.
 

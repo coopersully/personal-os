@@ -263,37 +263,33 @@ runner while code is edited beneath it; stop only the owned run before edits.
 ## CI metadata isolation
 
 `ci.yml` runs source checks on opened, reopened, ready-for-review, synchronize, and supported pushes.
-Its aggregate is `Source verification`. `pr-metadata.yml` owns `CI required`, preserving the existing
-protection name/provider. It validates the live PR Work map and requires the latest applicable
-successful source workflow for that PR on its exact head and base. Missing, pending,
-failed, or canceled source runs cannot pass the gate. Each workflow has a separate concurrency group;
-editing a description cancels only a superseded metadata gate, never source tests.
+Its aggregate is `Source verification`. The protected context is `CI required`, preserving the
+existing protection name/provider. It requires both successful source verification of the exact
+head and base, and a valid live PR Work map. Missing, pending, failed, or canceled source runs
+cannot pass the gate.
 
-The gate starts in two ways. The last step of `Source verification` dispatches it on the PR branch
-once that run has a result, pass or fail, so no runner polls while tests execute. A description edit
-starts it through the `pull_request` `edited` event; if source CI is still running, that run polls as
-before. A dispatched gate reports on the commit it was started for and expects that commit to be the
-live PR head, so a green PR cannot vouch for another branch. The dispatch needs `actions: write`,
-granted to the aggregate job alone; its checkout does not persist the token, and the workflow default
-stays read-only. The gate still observes the completed source run through the API. The dispatch
-supplies no evidence, so a dispatch that cannot be sent never fails `Source verification`: it leaves
-an error annotation and an absent gate. Source CI also passes the head it verified; a gate that
-starts on a newer commit fails at once and that commit's own run reports for it.
+Two jobs report that context, and the most recent one decides:
 
-A dispatched gate reads the run seconds after it completes. If the run reads completed while a
-selected job of that same attempt does not yet, the gate waits up to two minutes for the inventory
-to agree. A skipped, failed, missing or foreign-attempt job is still an immediate failure.
+- The last job of the source run. It takes the aggregate's result from the same run and attempt,
+  then checks that the live PR is still the candidate the event named and validates the live Work
+  map. No runner waits for the run to finish, and no later lookup is needed to bind the result.
+- `pr-metadata.yml`, on a description edit. It observes the latest source run through the API as
+  before, so editing a description never reruns or cancels source tests. If that run is still in
+  progress it polls until the run ends.
 
-The `CI required` job has no job or step condition. Branch protection treats a skipped required job
-as passing, so every decision stays inside the script. These cases start no gate and leave
-`CI required` absent, which blocks the merge:
+The gate job uses `always()` and makes every decision inside its script. Branch protection treats
+a skipped required job as passing, so the job must fail, never skip, when the run was canceled,
+failed, or took the draft fast lane. It has no step conditions and no write permission.
 
-- A fork PR. Its token is read-only. Edit the description after source CI completes.
-- A run whose token cannot start workflows, such as a Dependabot event. A maintainer runs the
-  `PR metadata` workflow on the branch with the PR number, or edits the description.
-- A branch that predates the dispatch trigger. Catch up with the base and push.
-- A request GitHub rejects twice, or a branch name that cannot be passed safely. Run the
-  `PR metadata` workflow on the branch, or edit the description.
+A source run whose only failure is that gate job, because the Work map was invalid, is repaired by
+editing the description. The observer therefore judges a failed run by its selected source jobs: if
+every one succeeded in that attempt, with a valid receipt, the edit's gate passes. Any other
+unsuccessful job, a missing receipt, or a canceled or timed-out run is still rejected.
+
+A dispatched gate was tried and removed. GitHub does not evaluate job checks from
+`workflow_dispatch` or `workflow_run` runs for a pull request's required status checks, so such a
+gate reports success on the head commit without unblocking the merge. Only `pull_request`, `push`,
+`pull_request_review`, `pull_request_target`, `deployment` and `deployment_status` runs count.
 
 ## Draft fast lane
 
@@ -304,9 +300,10 @@ makes this decision from the PR event's draft flag and omits the two matrices fr
 `required_jobs`; no job carries its own draft condition. The canonical scope, its expected jobs and
 the source receipt are unchanged, so the deferred matrices remain required for acceptance.
 
-A fast-lane run does not report `Source verification` and does not start the metadata gate. It can
-therefore never satisfy `CI required`. A description edit on such a draft fails the gate at once
-with the remedy instead of waiting. To obtain complete verification, mark the PR ready for review,
+A fast-lane run does not report `Source verification`, and its `CI required` job fails with the
+remedy below. It can therefore never satisfy the protected gate. A red `CI required` on a draft
+means "not yet verified", not a defect: read the individual jobs for iteration feedback. A
+description edit on such a draft fails the gate at once with the same remedy instead of waiting. To obtain complete verification, mark the PR ready for review,
 which starts a full source run, or apply `ci:full` before the next push. A prose-only draft defers
 nothing and is verified as before. Pushes to `main` always run the full lane.
 

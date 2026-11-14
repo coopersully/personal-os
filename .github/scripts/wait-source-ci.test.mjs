@@ -5,6 +5,7 @@ import {
   candidateIdentity,
   deferredDraft,
   draftRemedy,
+  gateDecision,
   readRuns,
   sourceDecision,
 } from "./wait-source-ci.mjs";
@@ -61,20 +62,29 @@ test("metadata changes cannot cancel source CI, and protected gate requires both
   const source = readFileSync(new URL("../workflows/ci.yml", import.meta.url), "utf8");
   const metadata = readFileSync(new URL("../workflows/pr-metadata.yml", import.meta.url), "utf8");
   assert.match(source, /types: \[opened, ready_for_review, reopened, synchronize\]/);
-  assert.doesNotMatch(source, /name: CI required/);
   assert.match(source, /name: Source verification/);
-  // Source CI starts the gate when it has a result; an edit re-validates the Work map.
-  assert.match(metadata, /pull_request:\n {4}types: \[edited\]\n {2}workflow_dispatch:/);
-  assert.match(source, /run: node \.github\/scripts\/start-metadata-gate\.mjs/);
+  // An edit re-validates the Work map in its own workflow and never reruns source tests.
+  assert.match(metadata, /^on:\n {2}pull_request:\n {4}types: \[edited\]\n\npermissions:/m);
   assert.match(metadata, /group: pr-metadata-/);
   assert.match(metadata, /name: CI required/);
-  // A skipped required job passes branch protection: the gate has no job or step condition.
+  // Branch protection ignores job checks from dispatched runs and accepts a skipped
+  // required job, so neither workflow may dispatch the gate or let it skip.
+  for (const workflow of [source, metadata])
+    assert.doesNotMatch(workflow, /workflow_dispatch|workflow_run|gh workflow run/);
   assert.doesNotMatch(metadata, /^\s+if:/m);
-  assert.match(
-    metadata,
-    /PR_HEAD_SHA: \$\{\{ github.event.pull_request.head.sha \|\| github.sha \}\}/,
-  );
   assert.match(metadata, /permissions:\n {2}contents: read\n {2}actions: read\n/);
+  // The source run reports the same context from its last job, which always runs.
+  const gate = source.split("\n  gate:\n")[1];
+  assert.ok(gate);
+  assert.match(gate, /^ {4}name: CI required$/m);
+  assert.match(gate, /^ {4}needs: \[changes, required\]$/m);
+  assert.match(gate, /^ {4}if: \$\{\{ always\(\) && github.event_name == 'pull_request' \}\}$/m);
+  assert.equal((gate.match(/^\s+if:/gm) ?? []).length, 1, "No step may skip inside the gate.");
+  assert.match(gate, /SOURCE_RESULT: \$\{\{ needs.required.result \}\}/);
+  assert.match(gate, /SOURCE_LANE: \$\{\{ needs.changes.outputs.lane \}\}/);
+  assert.match(gate, /run: node \.github\/scripts\/wait-source-ci\.mjs --gate\n/);
+  assert.doesNotMatch(gate, /continue-on-error|permissions:/);
+  assert.equal((source.match(/name: CI required/g) ?? []).length, 1);
   assert.match(
     readFileSync(new URL("./source-observation.mjs", import.meta.url), "utf8"),
     /check-pr-body.sh/,
@@ -139,35 +149,24 @@ const head = "a".repeat(40);
 const base = "b".repeat(40);
 const identity = { GH_REPO: "owner/repo", PR_NUMBER: "42", PR_HEAD_SHA: head, PR_BASE_SHA: base };
 
-test("a dispatched gate reports only on the commit it was started for", () => {
-  const dispatched = { ...identity, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_SHA: head };
-  assert.deepEqual(candidateIdentity(dispatched).expected, {
-    headSha: head,
-    baseSha: base,
-    baseRef: undefined,
-    retargeted: false,
-  });
-  // A hand-started gate may omit the base; the observation still binds the live one.
-  assert.equal(candidateIdentity({ ...dispatched, PR_BASE_SHA: "" }).expected.baseSha, undefined);
-  // Source CI names the head it verified; a branch that moved since must not report.
-  assert.equal(
-    candidateIdentity({ ...dispatched, PR_DISPATCHED_HEAD_SHA: head }).expected.headSha,
-    head,
-  );
-  assert.throws(
-    () => candidateIdentity({ ...dispatched, PR_DISPATCHED_HEAD_SHA: base }),
-    /Branch moved after its source run/,
-  );
-  for (const foreign of [base, "", undefined])
-    assert.throws(
-      () => candidateIdentity({ ...dispatched, GITHUB_SHA: foreign }),
-      /not bound to its own commit/,
-    );
+test("the in-run gate accepts only a full-lane run whose aggregate succeeded", () => {
+  assert.equal(gateDecision({ SOURCE_RESULT: "success", SOURCE_LANE: "full" }), undefined);
+  assert.equal(gateDecision({ SOURCE_RESULT: "success", SOURCE_LANE: "fast" }), draftRemedy);
+  assert.equal(gateDecision({ SOURCE_RESULT: "skipped", SOURCE_LANE: "fast" }), draftRemedy);
+  for (const result of ["failure", "cancelled", "skipped", "", undefined, "SUCCESS"])
+    assert.match(gateDecision({ SOURCE_RESULT: result, SOURCE_LANE: "full" }), /did not succeed/);
+  // A classification that failed before choosing a lane can never be accepted.
+  for (const lane of ["", undefined, "FULL", "other"])
+    assert.ok(gateDecision({ SOURCE_RESULT: "success", SOURCE_LANE: lane }));
 });
 
-test("pull request events must still name both commits and a valid PR", () => {
-  const event = { ...identity, GITHUB_EVENT_NAME: "pull_request", GITHUB_SHA: "c".repeat(40) };
-  assert.equal(candidateIdentity(event).number, 42);
+test("every gate event must name both commits and a valid PR", () => {
+  const event = { ...identity, GITHUB_EVENT_NAME: "pull_request", PR_BASE_REF: "main" };
+  assert.deepEqual(candidateIdentity(event), {
+    repository: "owner/repo",
+    number: 42,
+    expected: { headSha: head, baseSha: base, baseRef: "main", retargeted: false },
+  });
   assert.equal(candidateIdentity({ ...event, PR_RETARGETED: "true" }).expected.retargeted, true);
   for (const invalid of [
     { PR_BASE_SHA: "" },
@@ -178,11 +177,6 @@ test("pull request events must still name both commits and a valid PR", () => {
     { GH_REPO: "" },
   ])
     assert.throws(() => candidateIdentity({ ...event, ...invalid }), /Missing candidate identity/);
-  assert.throws(
-    () =>
-      candidateIdentity({ ...identity, GITHUB_EVENT_NAME: "workflow_dispatch", PR_HEAD_SHA: "" }),
-    /Missing candidate identity/,
-  );
 });
 
 test("only a fast-lane draft stops waiting, with the remedy", () => {

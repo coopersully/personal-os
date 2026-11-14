@@ -281,16 +281,35 @@ export function validateJobs(jobs, run, scope) {
   });
 }
 
-export function observeSource(client, expected = {}) {
+// The live pull request must still be the candidate the event named, with a valid
+// Work map. Shared by the observer below and by the gate job inside the source run.
+function liveCandidate(client, expected) {
   if (expected.retargeted)
     fail("Retargeted metadata event is stale; catch up and push a genuine candidate");
-  const firstPr = client.pr();
-  const identity = tuple(firstPr, client.repository, client.number);
+  const pr = client.pr();
+  const identity = tuple(pr, client.repository, client.number);
   for (const field of ["headSha", "baseSha", "baseRef"]) {
     if (expected[field] && expected[field] !== identity[field])
       fail("PR integration context changed; catch up and push a genuine candidate");
   }
-  client.validateBody(firstPr.body);
+  client.validateBody(pr.body);
+  return identity;
+}
+
+// The gate job at the end of a source run cannot observe its own run as complete.
+// It takes the aggregate's result from that same run and attempt instead, which is
+// a stronger binding than any later lookup, and validates the live metadata here.
+export function observeMetadata(client, expected = {}) {
+  for (const field of ["headSha", "baseSha", "baseRef"])
+    if (!expected[field]) fail("Missing candidate identity");
+  const identity = liveCandidate(client, expected);
+  if (!isDeepStrictEqual(identity, tuple(client.pr(), client.repository, client.number)))
+    throw new ObservationChanged("PR/body changed during metadata observation");
+  return identity;
+}
+
+export function observeSource(client, expected = {}) {
+  const identity = liveCandidate(client, expected);
   const workflow = client.api("actions/workflows/ci.yml");
   if (
     !Number.isSafeInteger(workflow.id) ||
@@ -319,52 +338,22 @@ export function observeSource(client, expected = {}) {
       runAttempt: run.run_attempt,
       event: run.event,
     };
-    if (run.status === "completed" && run.conclusion !== "success")
+    // A run also fails when only its own gate job rejected the Work map. That is
+    // repaired by editing the description, so a failed run is judged by its selected
+    // source jobs below; any other conclusion is rejected outright.
+    const failed = run.status === "completed" && run.conclusion !== "success";
+    if (failed && run.conclusion !== "failure")
       fail("Latest source run failed/canceled; inspect that attempt");
     // GitHub may temporarily return null while calculating mergeability. Keep the
     // observation pending until a concrete merge identity can bind the receipt.
     if (run.status === "completed" && identity.mergeSha !== null) {
-      const artifacts = client.pages(`actions/runs/${run.id}/artifacts`, "artifacts");
-      const matching = artifacts.filter(
-        (artifact) => artifact.name === `source-candidate-${run.id}-${run.run_attempt}`,
-      );
-      if (matching.length !== 1)
-        fail("Current-attempt receipt missing; retry the full source run, then metadata");
-      const artifact = matching[0];
-      if (
-        artifact.workflow_run?.id !== run.id ||
-        artifact.workflow_run?.head_sha !== identity.headSha
-      )
-        fail("Artifact belongs to another source run");
-      const receipt = client.receipt(artifact);
-      if (typeof receipt?.forceFull !== "boolean") fail("Source event forceFull invalid");
-      const scope = client.scope(identity.baseSha, identity.headSha, receipt.forceFull);
-      // Keep the immutable source event identity; only separately verified Git objects may
-      // establish that a regenerated live synthetic commit contains the same integration.
-      validateReceipt(
-        receipt,
-        { ...identity, mergeSha: receipt.mergeSha },
-        run,
-        workflow,
-        client.digests(identity.headSha),
-        scope,
-      );
-      const integration = mergeCommitEvidence(client, receipt.mergeSha, identity);
-      const jobs = validateJobs(
-        client.pages(`actions/runs/${run.id}/attempts/${run.run_attempt}/jobs`, "jobs"),
-        run,
-        scope,
-      );
-      result = {
-        ...result,
-        state: "success",
-        forceFull: receipt.forceFull,
-        receipt,
-        ...(integration ? { mergeCommitEvidence: integration } : {}),
-        artifact: { id: artifact.id, digest: artifact.digest },
-        jobs,
-      };
-    }
+      try {
+        result = { ...result, ...sourceEvidence(client, identity, run, workflow) };
+      } catch (error) {
+        if (!failed || error instanceof SourceSettling) throw error;
+        fail("Latest source run failed/canceled; inspect that attempt");
+      }
+    } else if (failed) fail("Latest source run failed/canceled; inspect that attempt");
     const attempt = client.api(`actions/runs/${run.id}/attempts/${run.run_attempt}`);
     const latest = latestRun(client.runs(workflow.id, identity.headSha), identity, workflow.id);
     if (
@@ -376,6 +365,45 @@ export function observeSource(client, expected = {}) {
   if (!isDeepStrictEqual(identity, tuple(client.pr(), client.repository, client.number)))
     throw new ObservationChanged("PR/body changed during source observation");
   return result;
+}
+
+function sourceEvidence(client, identity, run, workflow) {
+  const artifacts = client.pages(`actions/runs/${run.id}/artifacts`, "artifacts");
+  const matching = artifacts.filter(
+    (artifact) => artifact.name === `source-candidate-${run.id}-${run.run_attempt}`,
+  );
+  if (matching.length !== 1)
+    fail("Current-attempt receipt missing; retry the full source run, then metadata");
+  const artifact = matching[0];
+  if (artifact.workflow_run?.id !== run.id || artifact.workflow_run?.head_sha !== identity.headSha)
+    fail("Artifact belongs to another source run");
+  const receipt = client.receipt(artifact);
+  if (typeof receipt?.forceFull !== "boolean") fail("Source event forceFull invalid");
+  const scope = client.scope(identity.baseSha, identity.headSha, receipt.forceFull);
+  // Keep the immutable source event identity; only separately verified Git objects may
+  // establish that a regenerated live synthetic commit contains the same integration.
+  validateReceipt(
+    receipt,
+    { ...identity, mergeSha: receipt.mergeSha },
+    run,
+    workflow,
+    client.digests(identity.headSha),
+    scope,
+  );
+  const integration = mergeCommitEvidence(client, receipt.mergeSha, identity);
+  const jobs = validateJobs(
+    client.pages(`actions/runs/${run.id}/attempts/${run.run_attempt}/jobs`, "jobs"),
+    run,
+    scope,
+  );
+  return {
+    state: "success",
+    forceFull: receipt.forceFull,
+    receipt,
+    ...(integration ? { mergeCommitEvidence: integration } : {}),
+    artifact: { id: artifact.id, digest: artifact.digest },
+    jobs,
+  };
 }
 
 export function stableObservation(client, expected) {

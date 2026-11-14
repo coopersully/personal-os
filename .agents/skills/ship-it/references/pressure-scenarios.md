@@ -36,9 +36,9 @@
 | Another worktree owns full verification | Exit 75, checkpoint queued, and wait; do not start a competing suite. |
 | Equivalent current-head CI passed after diagnosed local contention | Accept the documented equivalent stages and focused diagnosis; do not demand another duplicate full run. |
 | Review finds a defect while final verification runs | Stop only the owned verifier before edits; retire its candidate and reverify the new candidate. |
-| Description is edited during browser CI | Metadata gate refreshes and waits for source evidence; source workflow keeps running and starts a fresh gate when it finishes. |
+| Description is edited during browser CI | Metadata gate refreshes and waits for source evidence; source workflow keeps running and reports its own gate when it finishes. |
 | Active chat has an older policy version | Update/reload at a safe checkpoint and reconcile evidence before resuming. |
-| Source CI succeeds on a same-head retry but CI required is still failed | Await the gate that the retried source run starts; if none appears, rerun the failed metadata workflow once, record both attempts, and wait for the fresh result; do not edit unrelated metadata to trigger it. |
+| Source CI succeeds on a same-head retry but CI required is still failed | Await the gate that the complete source rerun reports; for a description-edit gate, rerun the failed metadata workflow once, record both attempts, and wait for the fresh result; do not edit unrelated metadata to trigger it. |
 
 | Merge is confirmed but production still serves the old revision | Keep ownership and WAIT; merged is not shipped. |
 | Deployed descendant contains the merge but reverted the behavior | BLOCK production acceptance; ancestry alone is insufficient. |

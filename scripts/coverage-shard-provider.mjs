@@ -3,14 +3,24 @@
 // Vitest's own `--merge-reports` merges shards after each has been converted to
 // Istanbul maps, which can credit an uncovered nested branch from another shard.
 // A single run instead merges the raw V8 results of every test file per transform
-// mode, then converts once. This provider keeps that order: a shard exports its
-// raw results untouched, and the merge feeds every shard's raw results to the
-// unmodified upstream `generateCoverage`, so merging, conversion, untested files,
-// reports and thresholds are the same code a single run executes.
+// mode, then converts once. This provider keeps that order: a shard exports its raw
+// results untouched, and the merge combines every shard's raw results in one pass
+// and hands the result to the unmodified upstream `generateCoverage`. Conversion,
+// untested files, reports and thresholds are the same code a single run executes.
 import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import v8 from "@vitest/coverage-v8";
+
+// The same library instance the provider itself merges with. It is a dependency of
+// @vitest/coverage-v8, not of this repository, so resolve it from there.
+async function loadMerge() {
+  const require = createRequire(createRequire(import.meta.url).resolve("@vitest/coverage-v8"));
+  const { mergeProcessCovs } = await import(require.resolve("@bcoe/v8-coverage"));
+  if (typeof mergeProcessCovs !== "function") throw new Error("V8 coverage merge is unavailable");
+  return mergeProcessCovs;
+}
 
 export const schemaVersion = 1;
 export const transformModes = ["web", "ssr", "browser"];
@@ -157,16 +167,31 @@ async function createProvider() {
         const project = this.ctx.getProjectByName(projectName ?? "");
         for (const transformMode of transformModes) {
           const urls = new Set();
-          // Upstream folds results in one at a time, and that fold is slightly
-          // order-sensitive. A single run uses test completion order; use a fixed
-          // order so the same suite always yields the same report on any shard count.
+          // Upstream folds results in one at a time, re-merging its own output. That
+          // fold is order-sensitive: some orders leave a spurious covered range, and a
+          // single run's order is whatever order its tests happened to finish in.
+          // Merging every result in one pass has no order, so the same suite yields
+          // the same report on any shard count. Sorting only fixes the read order.
           const ordered = modes[transformMode].sort((a, b) =>
             a.order < b.order ? -1 : a.order > b.order ? 1 : 0,
           );
+          const coverages = [];
+          const offsets = new Map();
           for (const { path } of ordered) {
             const coverage = JSON.parse(await readFile(path, "utf8"));
-            for (const result of coverage.result) urls.add(result.url);
-            onFileRead(coverage);
+            for (const result of coverage.result) {
+              urls.add(result.url);
+              if (result.startOffset && !offsets.has(result.url))
+                offsets.set(result.url, result.startOffset);
+            }
+            coverages.push(coverage);
+          }
+          if (coverages.length) {
+            const merged = (await loadMerge())(coverages);
+            // The merge can drop the wrapper offset, as upstream notes for its own fold.
+            for (const result of merged.result)
+              if (!result.startOffset) result.startOffset = offsets.get(result.url) || 0;
+            onFileRead(merged);
           }
           await this.warmTransforms(project, transformMode, urls);
           await onFinished(project, transformMode);

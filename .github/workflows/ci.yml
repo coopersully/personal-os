@@ -409,13 +409,8 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.lane != 'fast' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: write
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
       - name: Verify required CI results
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
@@ -452,17 +447,30 @@ jobs:
           }
           NODE
 
-      # The protected `CI required` gate lives in pr-metadata.yml. Starting it here,
-      # once this run has a result, replaces a job that held a runner while polling.
-      # The gate still observes this run through the API; nothing here vouches for it.
-      - name: Start the metadata gate for this candidate
-        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+  # The protected context. A pull request event is one whose job checks branch
+  # protection accepts, and reporting here means no runner waits for the run to end.
+  # `always()` is deliberate: this job must fail, never skip, when the run was
+  # cancelled, failed or took the draft fast lane, because a skipped required job
+  # counts as passing. Every decision is made inside the script.
+  gate:
+    name: CI required
+    needs: [changes, required]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Require source verification from this run and a valid live Work map
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
-        run: node .github/scripts/start-metadata-gate.mjs
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SOURCE_RESULT: ${{ needs.required.result }}
+          SOURCE_LANE: ${{ needs.changes.outputs.lane }}
+        run: node .github/scripts/wait-source-ci.mjs --gate

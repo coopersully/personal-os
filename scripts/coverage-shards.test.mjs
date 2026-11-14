@@ -86,34 +86,55 @@ test("manifests are read from each shard directory and remember where they came 
 });
 
 const file = (branches) => ({
-  s: { 0: 1, 1: 0 },
+  s: Object.fromEntries(Array.from({ length: 200 }, (_, index) => [index, index % 2])),
   f: { 0: 1 },
   b: Object.fromEntries(branches.map((hits, index) => [index, hits])),
 });
+const suite = (overrides = {}) => ({
+  ...Object.fromEntries(
+    Array.from({ length: 50 }, (_, index) => [
+      `/f${index}.ts`,
+      file(Array.from({ length: 100 }, (_, branch) => [branch % 10 ? 1 : 0])),
+    ]),
+  ),
+  ...overrides,
+});
+const branches = (covered) =>
+  file(Array.from({ length: 100 }, (_, branch) => [branch < covered ? 1 : 0]));
 
-test("identical reports and isolated merge-order noise are equivalent", () => {
-  const single = { "/a.ts": file([[1, 0]]), "/b.ts": file([[2]]) };
-  assert.deepEqual(compare(single, structuredClone(single)).differing, []);
-  const noisy = { ...structuredClone(single), "/b.ts": file([[2], [5]]) };
-  const result = compare(single, noisy);
-  assert.equal(result.equivalent, true);
-  assert.deepEqual(result.differing, ["/b.ts"]);
-  assert.deepEqual(result.drift.branches, { total: 1, covered: 1 });
+test("identical reports and a conservative merge are equivalent", () => {
+  const single = suite();
+  const same = compare(single, structuredClone(single));
+  assert.deepEqual([same.differing, same.counters, same.equivalent], [[], 0, true]);
+  // The merge dropped one spurious covered branch the single run's fold had left.
+  const lower = compare(single, suite({ "/f1.ts": branches(89) }));
+  assert.ok(lower.movement.branches < 0 && lower.movement.branches > -tolerance.lower);
+  assert.equal(lower.equivalent, true);
 });
 
-test("a missing file, widespread differences or large drift are not equivalent", () => {
-  const single = Object.fromEntries(
-    Array.from({ length: 20 }, (_, index) => [`/f${index}.ts`, file([[1, 0]])]),
-  );
-  const missing = structuredClone(single);
+test("a more lenient merge, a missing file or hidden offsetting movement is not equivalent", () => {
+  const single = suite();
+  // 5,000 branches: one extra covered branch is 0.02 points, above the lenient bound.
+  const higher = compare(single, suite({ "/f1.ts": branches(91) }));
+  assert.ok(higher.movement.branches > tolerance.higher);
+  assert.equal(higher.equivalent, false);
+  const far = compare(single, suite({ "/f1.ts": branches(80) }));
+  assert.ok(far.movement.branches < -tolerance.lower);
+  assert.equal(far.equivalent, false);
+  const missing = suite();
   delete missing["/f0.ts"];
   assert.equal(compare(single, missing).equivalent, false);
-  const widespread = structuredClone(single);
-  for (let index = 0; index <= tolerance.files; index++)
-    widespread[`/f${index}.ts`] = file([[1, 1]]);
-  assert.equal(compare(single, widespread).equivalent, false);
-  // The inflation an Istanbul-level merge produced: many uncovered branches credited.
-  const inflated = structuredClone(single);
-  inflated["/f1.ts"] = file(Array.from({ length: tolerance.counters + 2 }, () => [1, 1]));
-  assert.equal(compare(single, inflated).equivalent, false);
+  // A gain in one file must not cancel a loss in another.
+  const offsetting = compare(single, suite({ "/f1.ts": branches(100), "/f2.ts": branches(80) }));
+  assert.equal(offsetting.drift.branches.covered, 0);
+  assert.equal(offsetting.movement.branches, 0);
+  assert.equal(offsetting.counters, 20);
+  assert.equal(offsetting.equivalent, true, "20 of 15,050 counters is inside the bound");
+  const wide = compare(
+    single,
+    suite({ "/f1.ts": branches(100), "/f2.ts": branches(70), "/f3.ts": branches(100) }),
+  );
+  assert.equal(wide.movement.branches, 0);
+  assert.ok(wide.counters > 15050 * tolerance.counters);
+  assert.equal(wide.equivalent, false);
 });

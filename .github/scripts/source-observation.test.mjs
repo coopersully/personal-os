@@ -5,6 +5,7 @@ import test from "node:test";
 import { classifyChanges } from "./ci-scope.mjs";
 import {
   ObservationChanged,
+  observeMetadata,
   observeSource,
   SourceClient,
   SourceSettling,
@@ -710,4 +711,76 @@ test("a selected job still reporting is settling, not failed and never success",
     () => observeSource(foreign),
     (error) => !(error instanceof SourceSettling) && /Selected source job/.test(error.message),
   );
+});
+
+test("a run failed only by its own gate job is accepted once its source jobs are proven", () => {
+  const client = fixture();
+  // The in-run gate rejected the Work map: every selected source job still succeeded.
+  client.rows[0].conclusion = "failure";
+  client.jobs.push({ ...client.jobs[0], id: 99, name: "CI required", conclusion: "failure" });
+  assert.equal(observeSource(client).state, "success");
+});
+
+test("a failed run with any unsuccessful source job stays rejected with the original reason", () => {
+  for (const change of [
+    (c) => {
+      c.jobs[1].conclusion = "failure";
+    },
+    (c) => {
+      c.jobs[1].conclusion = "skipped";
+    },
+    (c) => {
+      c.jobs.pop();
+    },
+    (c) => {
+      const pages = c.pages;
+      c.pages = function (path) {
+        return path.endsWith("/artifacts") ? [] : pages.call(this, path);
+      };
+    },
+  ]) {
+    const client = fixture();
+    client.rows[0].conclusion = "failure";
+    change(client);
+    assert.throws(() => observeSource(client), /Latest source run failed\/canceled/);
+  }
+  for (const conclusion of ["cancelled", "timed_out", "skipped", "neutral", null]) {
+    const client = fixture();
+    client.rows[0].conclusion = conclusion;
+    assert.throws(() => observeSource(client), /Latest source run failed\/canceled/);
+    assert.equal(client.downloads, 0);
+  }
+});
+
+test("the in-run gate validates the live body and rejects a moved or retargeted candidate", () => {
+  const expected = { headSha: head, baseSha: base, baseRef: "main" };
+  const client = fixture();
+  assert.equal(observeMetadata(client, expected).headSha, head);
+  assert.deepEqual(client.validations, [client.live.body]);
+  for (const stale of [
+    { ...expected, headSha: base },
+    { ...expected, baseSha: head },
+    { ...expected, baseRef: "release" },
+    { ...expected, retargeted: true },
+  ])
+    assert.throws(() => observeMetadata(fixture(), stale), /catch up and push a genuine candidate/);
+  // Unlike the observer, the gate has no later evidence to bind a missing expectation.
+  for (const field of ["headSha", "baseSha", "baseRef"])
+    assert.throws(
+      () => observeMetadata(fixture(), { ...expected, [field]: undefined }),
+      /Missing candidate identity/,
+    );
+  const invalid = fixture();
+  invalid.validateBody = () => {
+    throw new Error("Current live Work map could not be validated");
+  };
+  assert.throws(() => observeMetadata(invalid, expected), /Work map/);
+  const edited = fixture();
+  const read = edited.pr;
+  let reads = 0;
+  edited.pr = function () {
+    if (++reads === 2) this.live.body = "edited during the gate";
+    return read.call(this);
+  };
+  assert.throws(() => observeMetadata(edited, expected), ObservationChanged);
 });

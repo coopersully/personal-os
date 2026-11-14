@@ -1,5 +1,18 @@
 # nohmi — Implementation Log
 
+## 2026-11-13 — Finished projects on the iPhone Projects tab (local implementation)
+
+- COO-217 — The native Projects tab has Active, Completed, Cancelled and All status chips with
+  counts. Completed and cancelled projects that are not archived are reachable there and open with
+  all of their tasks, including finished ones; their rows and pinned cards name the status, also
+  to assistive technology. Finished and archived projects, and projects in an archived list, offer no Add. Counts appear only once
+  lists and projects have loaded. Previously Projects
+  listed only open projects and Archive only archived ones, so these had no entry point.
+- Lists, Projects and Archive search also matches list descriptions and project why and notes.
+  Directory filtering, search and ordering live in a pure module with unit tests.
+- Focused Tasks tests, mobile type checking and changed-file lint passed; the chips were observed
+  in the iPhone simulator against the demo fixture. This is not a production or TestFlight release.
+
 ## 2026-11-13 — Finance playbook 1.1.0 and profile facts (source change)
 
 - The Finance playbook is version 1.1.0: it adds a scored stewardship rubric, ledger rules, alert
@@ -1317,3 +1330,16 @@ coarsened for weather requests, and never tracked in the background. Saved-locat
 honest time-only sky cover denied permissions, unavailable fixes, stale observations and outages.
 See `docs/engineering/mobile-today-sky.md` for lifecycle, privacy and verification boundaries.
 This is a local candidate, not a production or TestFlight release.
+
+## 2026-11-13 — Native Finance account management (local implementation)
+
+COO-221 — Manage Finance accounts on iPhone. Accounts opens a manual account form; account details
+offer Edit account, Sync account, Review duplicate and Stop tracking account, and duplicate review
+runs in the app instead of handing off to the browser. Every action uses existing Finance
+endpoints, one toast from loading to the confirmed result, and a native confirmation before
+tracking stops. Unknown outcomes never claim success: edits, stop tracking and duplicate
+resolution retry under the same idempotency key, and an unconfirmed add looks for the earlier
+attempt before writing again. Connecting a bank is not part of this change.
+
+Focused Finance tests, mobile types and lint passed. This is a local candidate: it was not run on
+a simulator or device, and it does not establish production or TestFlight acceptance.

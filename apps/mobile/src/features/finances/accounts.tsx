@@ -1,11 +1,14 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
+import { Platform, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { FormSave } from "../../components/forms/form-save";
 import { useFinanceRead } from "./data";
 import { InstitutionLogo } from "./institution-logo";
 import { formatMoney } from "./presentation";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Segments } from "./ui";
 
-export function FinanceAccountsScreen() {
+function AccountList() {
   const [tab, setTab] = useState<"Cash" | "Investments" | "Debt" | "Other">("Cash");
   const { accountSearch = "" } = useLocalSearchParams<{ accountSearch?: string }>();
   const search = accountSearch.trim();
@@ -64,6 +67,34 @@ export function FinanceAccountsScreen() {
           </Card>
         )}
       </ReadState>
+      <View style={{ height: 80 }} />
     </FinanceScreen>
+  );
+}
+export function FinanceAccountsScreen() {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={{ flex: 1 }}>
+      <AccountList />
+      {/* Clear the native tab bar, matching the shared workspace add button. */}
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: Platform.OS === "ios" ? 96 - Math.max(insets.bottom, 16) : 0,
+        }}
+      >
+        <FormSave
+          workspace="finances"
+          keyboardOffset={0}
+          label="Add account"
+          icon="add"
+          disabled={false}
+          onPress={() => router.push("/finance-account-edit")}
+        />
+      </View>
+    </View>
   );
 }

@@ -2,8 +2,8 @@
 
 Expo SDK 58 supplies a React Native application with iOS and web targets. The native
 shell uses authenticated API sessions, workspace-specific native tabs and Apple's Liquid Glass
-on supported iOS versions. Tasks includes tasks, reminders, lists, projects, filters, history,
-archive and trash. Finance includes Overview, Spending, Plan, Accounts and Assistant read workflows,
+on supported iOS versions. Tasks includes tasks, reminders, lists, projects (active, completed
+and cancelled), filters, history, archive and trash. Finance includes Overview, Spending, Plan, Accounts and Assistant read workflows,
 plus category/notes editing, category budget limits and conversation sending. Today combines live
 Tasks and Finance reads with a time/weather hero and optional foreground location. Other workspace experiences
 retain their existing preview boundaries. Full Finance web parity (creation, approvals, imports and automation configuration)

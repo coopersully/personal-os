@@ -74,6 +74,7 @@ function AuthenticatedLayout() {
           <Stack.Protected guard={state.status === "signedIn"}>
             <Stack.Screen name="(workspaces)" options={{ headerShown: false, title: "today" }} />
             <Stack.Screen name="settings" options={{ headerShown: false }} />
+            <Stack.Screen name="calendar-event" options={{ title: "" }} />
             <Stack.Screen name="finance-budget-category" options={{ title: "category budget" }} />
             <Stack.Screen
               name="finance-budget-edit"
@@ -82,6 +83,11 @@ function AuthenticatedLayout() {
             <Stack.Screen name="finance-notification" options={{ title: "Finance update" }} />
             <Stack.Screen name="finance-chat-reference" options={{ title: "Finance reference" }} />
             <Stack.Screen name="finance-account" options={{ title: "account" }} />
+            <Stack.Screen name="finance-account-edit" options={{ title: "edit account" }} />
+            <Stack.Screen
+              name="finance-account-duplicate"
+              options={{ title: "duplicate account" }}
+            />
             <Stack.Screen
               name="finance-transaction-edit"
               options={{ title: "edit transaction", presentation: "modal" }}

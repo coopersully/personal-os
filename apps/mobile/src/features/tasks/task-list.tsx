@@ -9,6 +9,7 @@ import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset
 import { entityDictionary } from "../../product/entities";
 import { spacing, useTheme } from "../../theme";
 import { ActiveFilters } from "./active-filters";
+import { projectAcceptsNewWork } from "./container-directory";
 import {
   actWithUndo,
   type ItemAction,
@@ -77,6 +78,12 @@ export function TaskListScreen({
     ...(debounced ? { query: debounced } : {}),
   };
   const menuChoices = buildViewOptions(query, scope);
+  const scopedProject = resources.projects.data?.find((row) => row.id === scope.projectId);
+  const scopedList = resources.lists.data?.find((row) => row.id === scopedProject?.listId);
+  // Until the project and its list are known, capture stays hidden rather than offered wrongly.
+  const closedProject =
+    !!scope.projectId &&
+    !(scopedProject && scopedList && projectAcceptsNewWork(scopedProject, scopedList));
   const identity = JSON.stringify(query);
   // biome-ignore lint/correctness/useExhaustiveDependencies: selection belongs to this exact query scope.
   useEffect(() => {
@@ -440,7 +447,7 @@ export function TaskListScreen({
           </FormBody>
         </SafeAreaView>
       </Modal>
-      {standalone && scope.view !== "history" && scope.view !== "trash" && (
+      {standalone && scope.view !== "history" && scope.view !== "trash" && !closedProject && (
         <FloatingAdd
           label={scope.kind === "reminder" ? "Add reminder" : "Add task"}
           onPress={() =>

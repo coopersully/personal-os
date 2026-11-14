@@ -1,11 +1,14 @@
 import type { MailThreadSummary } from "@personal-os/domain";
 import { useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Text, View } from "react-native";
+import { BackLink } from "../../components/back-link";
+import { Action } from "../../components/forms/form-rows";
 import { Icon } from "../../components/icons";
 import { PageRefreshControl } from "../../components/page-refresh";
+import { SettingsAccentProvider } from "../../components/settings-accent";
 import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
-import { spacing, touchTarget, useTheme } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 import {
   confirmMailRead,
   retryMailRead,
@@ -30,13 +33,11 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
   const title = scopeTitle(scope);
   const unconnected = scope.kind === "inbox" && accounts.data?.length === 0;
   const link = (label: string, onPress: () => void) => (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={{ minHeight: touchTarget, alignItems: "center", justifyContent: "center" }}
-    >
-      <Text style={{ color: t.information, fontSize: 17 }}>{label}</Text>
-    </Pressable>
+    <SettingsAccentProvider workspace="mail">
+      <View style={{ alignItems: "center" }}>
+        <Action label={label} onPress={onPress} />
+      </View>
+    </SettingsAccentProvider>
   );
   return (
     <View style={{ flex: 1, backgroundColor: t.canvas }}>
@@ -59,14 +60,7 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
         ListHeaderComponent={
           <View style={{ paddingHorizontal: spacing.page, paddingBottom: spacing.sm }}>
             {onBack && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Back to mailboxes"
-                onPress={onBack}
-                style={{ minHeight: touchTarget, justifyContent: "center" }}
-              >
-                <Text style={{ color: t.information, fontSize: 17 }}>‹ Mailboxes</Text>
-              </Pressable>
+              <BackLink label="Mailboxes" accessibilityLabel="Back to mailboxes" onPress={onBack} />
             )}
             <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
               <Text

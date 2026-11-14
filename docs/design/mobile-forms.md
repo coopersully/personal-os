@@ -70,6 +70,15 @@ These live in `apps/mobile/src/components` and are the only way to build form an
   style from the app theme; a stack without it draws light glass controls under the dark theme.
 - The `SheetHeader` title grows with large text no further than the glass controls (1.3 times)
   and shrinks to fit before it truncates.
+- `BackLink` is the in-page way back to a parent list shown in place rather than pushed on a
+  stack (a mailbox's conversations over the mailbox list). It draws the registry chevron
+  mirrored beside the parent's name; never type a "‹" character. A pushed screen uses the
+  native stack back button instead.
+- Retry and other text commands in a sheet or page (Try again, Retry loading) are the shared
+  `Action`, inside a `SettingsAccentProvider` for the workspace, not a hand-built pressable.
+- Rows in a workspace sheet or list page use the same groups as forms: `Group` or `Section`
+  owns the surface and seams, a `formRow` pressable or a `SectionItem` around a `RecordRow`
+  owns the padding (Calendars sheet, Mailboxes).
 - `GlassButton` is the one Liquid Glass button: a 44-point capsule for a text label, a 44-point
   circle for a bar icon and a 56-point circle for the floating Save/Add. Labels are primary ink in
   both appearances; callers may place it but cannot resize or recolor its label.

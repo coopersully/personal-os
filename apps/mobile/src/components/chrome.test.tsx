@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PropsWithChildren, ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { BackLink } from "./back-link";
 import { EditorClose } from "./editor-close";
 import { editorActionsOptions, editorDismissOptions, stackChromeOptions } from "./editor-header";
 import { GlassButton, glassButtonSize } from "./glass-button";
@@ -386,5 +387,21 @@ describe("stack header options", () => {
     expect(screen.getByRole("group", { name: "Record actions" })).toHaveTextContent(
       "Complete,Move to Trash",
     );
+  });
+});
+
+describe("BackLink", () => {
+  it("draws the registry chevron mirrored beside the parent's name, never a typed glyph", () => {
+    const back = vi.fn();
+    render(<BackLink label="Mailboxes" accessibilityLabel="Back to mailboxes" onPress={back} />);
+    const link = screen.getByRole("button", { name: "Back to mailboxes" });
+    expect(link.textContent).toBe("Mailboxes");
+    expect(styleOf(link)).toMatchObject({ minHeight: 44, flexDirection: "row", opacity: 1 });
+    const chevron = screen.getByTestId("back-link-chevron");
+    expect(styleOf(chevron)).toEqual({ transform: [{ rotate: "180deg" }] });
+    expect(chevron.querySelector('[data-icon="chevron"]')).not.toBeNull();
+    expect(h.icons).toEqual([expect.objectContaining({ name: "chevron", size: 16 })]);
+    fireEvent.click(link);
+    expect(back).toHaveBeenCalledOnce();
   });
 });

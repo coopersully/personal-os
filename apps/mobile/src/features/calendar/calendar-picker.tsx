@@ -1,11 +1,13 @@
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Action, formRow, Group } from "../../components/forms/form-rows";
 import { Icon } from "../../components/icons";
+import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SheetHeader } from "../../components/sheet-header";
 import { spacing, useTheme, workspaceColor } from "../../theme";
 import { useCalendarScope, useCalendarSelection, useCalendars } from "./data";
 import { calendarFreshness, calendarSourceLabel, fallbackEventColor } from "./logic";
-import { CalendarDot, Card, Copy } from "./ui";
+import { CalendarDot, Copy } from "./ui";
 
 /** Shown calendars are an account choice shared with web and Settings, not a local filter. */
 export function CalendarPicker({ onClose }: { onClose: () => void }) {
@@ -17,7 +19,7 @@ export function CalendarPicker({ onClose }: { onClose: () => void }) {
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: t.canvas }}>
-        <SheetHeader title="Calendars" label="Done" onClose={onClose} />
+        <SheetHeader title="Calendars" label="Done" dismiss="trailing" onClose={onClose} />
         <ScrollView
           contentContainerStyle={{
             gap: spacing.lg,
@@ -32,17 +34,16 @@ export function CalendarPicker({ onClose }: { onClose: () => void }) {
               style={{ padding: 24 }}
             />
           ) : !calendars.data ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => void calendars.refetch()}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: t.ink, fontSize: 16, fontWeight: "500" }}>Retry loading</Text>
-            </Pressable>
+            <SettingsAccentProvider workspace="calendar">
+              {/* The row sizes the action to its label, so the label starts on the page edge. */}
+              <View style={{ flexDirection: "row", marginLeft: -spacing.md }}>
+                <Action label="Retry loading" onPress={() => void calendars.refetch()} />
+              </View>
+            </SettingsAccentProvider>
           ) : !calendars.data.length ? (
             <Copy>No calendars yet. Connect or create one in Settings.</Copy>
           ) : (
-            <Card rows>
+            <Group>
               {calendars.data.map((calendar) => {
                 const freshness = calendarFreshness(calendar, timeZone ?? "UTC");
                 return (
@@ -63,13 +64,10 @@ export function CalendarPicker({ onClose }: { onClose: () => void }) {
                     }}
                     disabled={selection.pending}
                     onPress={() => void selection.select(calendar, !calendar.isSelected)}
-                    style={{
-                      minHeight: 60,
-                      paddingVertical: spacing.md,
-                      flexDirection: "row",
-                      gap: spacing.md,
-                      opacity: selection.pending ? 0.6 : 1,
-                    }}
+                    style={[
+                      formRow,
+                      { alignItems: "flex-start", opacity: selection.pending ? 0.6 : 1 },
+                    ]}
                   >
                     <CalendarDot color={calendar.color ?? fallbackEventColor} />
                     <View style={{ flex: 1, gap: 2 }}>
@@ -95,7 +93,7 @@ export function CalendarPicker({ onClose }: { onClose: () => void }) {
                   </Pressable>
                 );
               })}
-            </Card>
+            </Group>
           )}
         </ScrollView>
       </View>

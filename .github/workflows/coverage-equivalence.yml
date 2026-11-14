@@ -110,6 +110,11 @@ jobs:
         env:
           NOHMI_COVERAGE_SHARD_DIR: ${{ runner.temp }}/coverage-shards
         run: pnpm test:coverage:merge
+      - name: Require the merged report the comparison reads
+        if: ${{ steps.merge.outcome == 'success' && hashFiles('coverage/coverage-final.json') == '' }}
+        run: |
+          echo "::error::The merge succeeded without writing coverage/coverage-final.json; nothing was compared."
+          exit 1
       # A merge that misses the floors where the single run met them is the case
       # this comparison exists for: still print it. The failed merge fails the job.
       - if: ${{ always() && steps.merge.outcome != 'skipped' && hashFiles('coverage/coverage-final.json') != '' }}

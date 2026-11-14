@@ -74,6 +74,14 @@ jobs:
           path: ${{ runner.temp }}/source-candidate.json
           if-no-files-found: error
           retention-days: 7
+      # The gate at the end of this run rejects an invalid Work map, and only a complete
+      # rerun or a new push clears that. Say so now, without hiding source results.
+      - name: Warn early about an invalid Work map
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          bash .codex/scripts/check-pr-body.sh || echo "::warning title=Work map::CI required will fail for this run. Fix the pull request description, then rerun the whole workflow or push."
       - name: Explain the draft fast lane
         if: steps.scope.outputs.lane == 'fast'
         run: |

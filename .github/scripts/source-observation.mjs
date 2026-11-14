@@ -338,22 +338,15 @@ export function observeSource(client, expected = {}) {
       runAttempt: run.run_attempt,
       event: run.event,
     };
-    // A run also fails when only its own gate job rejected the Work map. That is
-    // repaired by editing the description, so a failed run is judged by its selected
-    // source jobs below; any other conclusion is rejected outright.
-    const failed = run.status === "completed" && run.conclusion !== "success";
-    if (failed && run.conclusion !== "failure")
+    // The source run reports its own gate from its last job, so a run that failed
+    // only because that job rejected the Work map is still a failed run here. Branch
+    // protection needs that job to pass as well; a description edit cannot repair it.
+    if (run.status === "completed" && run.conclusion !== "success")
       fail("Latest source run failed/canceled; inspect that attempt");
     // GitHub may temporarily return null while calculating mergeability. Keep the
     // observation pending until a concrete merge identity can bind the receipt.
-    if (run.status === "completed" && identity.mergeSha !== null) {
-      try {
-        result = { ...result, ...sourceEvidence(client, identity, run, workflow) };
-      } catch (error) {
-        if (!failed || error instanceof SourceSettling) throw error;
-        fail("Latest source run failed/canceled; inspect that attempt");
-      }
-    } else if (failed) fail("Latest source run failed/canceled; inspect that attempt");
+    if (run.status === "completed" && identity.mergeSha !== null)
+      result = { ...result, ...sourceEvidence(client, identity, run, workflow) };
     const attempt = client.api(`actions/runs/${run.id}/attempts/${run.run_attempt}`);
     const latest = latestRun(client.runs(workflow.id, identity.headSha), identity, workflow.id);
     if (

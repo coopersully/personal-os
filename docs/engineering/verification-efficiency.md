@@ -76,12 +76,11 @@ remain required; repository permissions remain read-only. Jobs retain their exis
 cancellation and retry policy. Missing, failed or canceled selected jobs block acceptance. Local
 discovery proves the test partition, not hosted scheduling, installation reliability or elapsed time.
 
-With four shards, run 43528151572 took 291 to 696 seconds per job, and the slowest job set the
-length of the whole run. Six shards split the heaviest file groups; the hosted list reporter now
-records each test's duration so a later change can balance shards from measurements. Each job
-carries about 90 seconds of setup and application start, so more shards cost more runner time: the
-account runs 20 jobs at once, and a full run now starts 24. Draft PRs defer both hosted matrices;
-see the draft fast lane in [delivery verification](delivery-verification.md).
+With four shards the slowest job set the length of the whole run. Six shards split the heaviest
+file groups; the hosted list reporter records each test's duration so a later change can balance
+shards from measurements. Each job carries about 90 seconds of setup and application start, so
+more shards cost more runner time. Draft PRs defer both hosted matrices; see the draft fast lane
+in [delivery verification](delivery-verification.md).
 
 Running two application stacks on one runner was tried locally and works, but was not adopted: a
 hosted Vitest trial showed a four-vCPU runner doing more total work with three workers than with
@@ -117,22 +116,18 @@ the order its tests happened to finish, re-merging its own output. That fold is 
 and can leave a spurious covered range, so two single runs of the same source do not always agree.
 The one-pass merge has no order: the same suite yields the same report on any shard count.
 
-Evidence so far:
+Acceptance evidence, in the form the earlier rejection required:
 
-- On an 83-file subset covering both transform modes, the one-pass merge was byte-identical to a
-  single run's `coverage-final.json`, identical between three and five shards, and identical when
-  the inputs were reversed. The fold over the same data added one covered branch in one order.
-- On the whole suite, an earlier version of the merge that still folded, in test file path order,
-  was compared with a single run on hosted run 43534437674: 1,000 files, none missing, 166
-  differing; statements 97.4337% against 97.4209%, functions identical, branches 94.0094% against
-  94.0057% (20 more branch entries, 21 more covered). That direction is what prompted the one-pass
-  merge.
-- On the whole suite, the one-pass merge was compared with a single run on hosted run
-  43538151441: 1,001 files, none missing, 179 differing, 97 counters moved. Statements 97.4424%
-  against 97.4439% (3 fewer covered), functions identical, branches 94.0111% against 94.0168% (22
-  fewer branch entries, 24 fewer covered). The merge was lower or equal on every metric, the
-  direction expected if the single run's fold leaves spurious covered ranges, and it met every
-  floor. One comparison does not prove the direction always holds; the workflow keeps checking.
+- On a subset covering both transform modes, the one-pass merge is byte-identical to a single
+  run's `coverage-final.json`, identical between shard counts, and identical with the inputs
+  reversed. The fold over the same data adds a covered branch in some orders.
+- On the whole suite, a version that still folded read slightly higher than a single run, which
+  is what prompted the one-pass merge. The one-pass merge read equal or lower on every metric and
+  met every floor.
+
+Reproduce the subset check by running `pnpm test:coverage` and then the shard and merge scripts
+with the same path filters, and comparing with `scripts/compare-coverage.mjs`. Exact figures for
+each whole-suite comparison are in that workflow run's summary.
 
 Branch coverage sits within a hundredth of a point of its 94% floor, so this matters. The
 `Coverage equivalence` workflow runs the suite once on one machine, runs the same six shards,
@@ -151,10 +146,14 @@ through `@vitest/coverage-v8`. A Vitest upgrade that changes them fails
 the merge or the equivalence workflow rather than passing silently; repair the provider in that
 upgrade.
 
-Vitest keeps two workers everywhere. On hosted run 43528151572 three workers took 1,179 seconds
-for the suite against 988 seconds with two on run 43508749100, with total per-worker time rising
-from about 1,816 to 3,267 seconds: the runner was oversubscribed, not underused. Shards add
-machines instead.
+Vitest keeps two workers everywhere. A hosted trial with three workers was about a fifth slower
+than two, with total per-worker time nearly doubling: the runner was oversubscribed, not
+underused. Shards add machines instead.
+
+Hosted DOM tests also get five seconds for Testing Library's asynchronous waits instead of one,
+set in `vitest.setup.ts` alongside the existing hosted test timeout. A wait still has to succeed;
+it is only allowed longer on a busy runner. A sharded run exposed a one-second wait that timed out
+in two of eight executions of the same shard.
 
 ## Node phase budgets
 
@@ -164,17 +163,10 @@ machines instead.
 15-minute job. A failed or canceled phase blocks its job and later source steps retain the default
 `success()` condition. The required aggregate still uses the actual `Node quality` result.
 
-Historical single-job run 43508749100 reported 8,402 passing tests across 738 files in 987.69
-seconds on two workers, with 91 seconds of type checking and 53 seconds of builds in the same job:
-1,158 seconds for `Node quality` in all.
-
-On run 43538151473 with this layout the six shards took 189 to 358 seconds, `Node build` 157
-seconds and the `Node quality` merge job 70 seconds. Browser jobs took 103 to 508 seconds, against
-291 to 696 with four shards. Desktop took 353 and 455 seconds without a warm Rust cache. The run
-finished in 14 minutes 39 seconds, but jobs started up to six minutes late: it shared the
-20-job limit with its own coverage comparison and other pull requests. Without queueing the
-longest chain is about nine minutes, set by the slowest browser shard. Shard 1 of the Node tests
-and two mobile browser shards are well above the others, so balancing them is the next gain.
+Before sharding, the single job spent roughly sixteen minutes in tests, a minute and a half in
+type checking and a minute in builds. With six shards each takes three to six minutes and the
+merge about a minute. The shards are uneven, so balancing them is the next gain. Elapsed time for
+a whole run also depends on the account's 20-job limit: a full run starts 24 jobs.
 
 Attempt-bound diagnostics still record each phase. `Node quality` reports install and coverage from
 its own steps, and audit, type checking and builds from the `Node build` result it waited for; it

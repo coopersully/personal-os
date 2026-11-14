@@ -270,8 +270,7 @@ cannot pass the gate.
 
 Two workflows report that context. Branch protection requires the latest result from each
 workflow that reported on the head commit to pass; a newer success from one does not override an
-older failure from the other. This was observed on PR 388: a description-edit failure blocked the
-merge after the source run's own gate passed, until that metadata run was rerun.
+older failure from the other.
 
 - The last job of the source run. It takes the aggregate's result from the same run and attempt,
   then checks that the live PR is still the candidate the event named and validates the live Work
@@ -280,19 +279,20 @@ merge after the source run's own gate passed, until that metadata run was rerun.
   source run through the API as before, so editing a description never reruns or cancels source
   tests. If that run is still in progress it polls until the run ends.
 
-A metadata result therefore goes stale when it failed for a reason that later clears on the same
-commit. Marking a draft ready reruns it automatically. After a complete source rerun on an
-unchanged head, rerun the failed metadata run with `gh run rerun <metadata-run-id> --failed`. A new
-push needs neither: checks belong to the commit.
-
 The gate job uses `always()` and makes every decision inside its script. Branch protection treats
 a skipped required job as passing, so the job must fail, never skip, when the run was canceled,
 failed, or took the draft fast lane. It has no step conditions and no write permission.
 
-A source run whose only failure is that gate job, because the Work map was invalid, is repaired by
-editing the description. The observer therefore judges a failed run by its selected source jobs: if
-every one succeeded in that attempt, with a valid receipt, the edit's gate passes. Any other
-unsuccessful job, a missing receipt, or a canceled or timed-out run is still rejected.
+Recovery depends on which result failed:
+
+- The metadata run failed for a reason that later cleared on the same commit, such as a source run
+  that was still failing when the description was edited. Rerun it with
+  `gh run rerun <metadata-run-id> --failed`. Marking a draft ready reruns it automatically.
+- The source run's own gate failed because the Work map was invalid when the run finished. That
+  run is a failed source run: a description edit alone cannot clear it. Fix the description, then
+  rerun the whole source workflow or push. The classification job warns about an invalid Work map
+  at the start of the run so this is visible before the tests are spent.
+- A new push needs neither: checks belong to the commit.
 
 A dispatched gate was tried and removed. GitHub does not evaluate job checks from
 `workflow_dispatch` or `workflow_run` runs for a pull request's required status checks, so such a
@@ -322,67 +322,9 @@ attempts of one run, so it reports those names as duplicated until the inventory
 supersession as its state reference describes. A final push after marking ready, or `ci:full`
 before the final draft push, leaves a single run and needs no supersession record.
 
-Measured on 2026-11-13, a full source run used about 95 runner-minutes across 15 jobs, of which the
-two deferred matrices used about 68. The account's 20-job limit was saturated (20 running, 52
-queued) mostly by draft pushes whose runs were cancelled by the next push, and the polling metadata
-job held a runner for 19.6 minutes on average when it passed. These are the reasons for both
-changes, not a measured result of them; record actual queue and elapsed times after rollout.
-
-Stage A metadata observation retains polling for edits made while source CI runs, and the single
-protected `CI required` context.
-It validates the live PR body, not the historical event body, and requires stable PR head/base,
-body hash and latest source run/attempt before accepting completed source evidence. Reads have a
-120-second observation budget, 15-second command timeouts, at most three 100-row pages per
-inventory and one bounded recollection for a changing PR/attempt. API read failure gets one retry
-within that same budget. A trusted retargeted metadata event fails immediately until a genuine new candidate event;
-run-association mismatches are negative stale hints, never positive provenance. The `ci:full`
-decision comes from the original receipt event; editing the live label affects future events only.
-The existing 55-minute polling deadline remains; pending source runs
-only use lightweight identity/status reads, without repeatedly downloading artifacts.
-
-The classification job uploads `source-candidate-<run-id>-<attempt>` under existing artifact runtime
-authority. Its single `source-candidate.json` entry records original event head/base, repository/PR,
-run/attempt, workflow/classifier digests and canonical scope; no PR body is retained. Metadata uses
-its existing Actions read permission to bind the exact run artifact/digest, independently recomputed
-scope and every selected job's actual current-attempt success. Archive input is capped at 64 KiB,
-the one decoded JSON entry at 16 KiB; content is never extracted or executed. Receipts expire after
-seven days. Missing, expired, malformed, foreign or stale receipts fail closed. Local fixtures do
-not prove hosted artifact access: actual unchanged-token upload/download and attempt binding remain
-explicit rollout evidence.
-
-GitHub can regenerate a synthetic merge commit after an original-base restoration even when
-its integrated content is unchanged. The immutable receipt retains its original merge/workflow SHA;
-the observation retains the current live synthetic SHA. A mismatch permits no boolean override:
-the observer performs two logical current-repository Git commit lookups (up to four requests with
-the existing bounded retry), verifies both response SHAs/provider URLs, requires exactly the ordered
-parents `[current base, current head]` in both objects and an identical valid tree SHA. Missing,
-malformed, denied, unreachable, different-parent or different-tree evidence fails closed. All other
-repository/PR/base/ref, original workflow/ref/digests, event/run/attempt, selected jobs and final
-PR/body/attempt fences remain mandatory. A trusted retarget event still rejects immediately.
-Normalized provider commit evidence accompanies the observation; readiness requires that complete
-structure, both original/live identities and current PR tuple, never an unsupported equivalence flag.
-It validates evidence bindings, not authenticity of caller-supplied JSON; inspect saved provider
-responses and the actual collector. No receipt is rewritten and no new permission is introduced.
-
-A failed-jobs-only retry that omits classification has no new-attempt receipt. Retry the complete
-source run under the bounded retry policy, then recover metadata; never reuse another attempt's
-artifact or start duplicate full suites automatically. The final evidence collector uses the same
-observer, retains body hashes rather than body text, and readiness requires that exact successful
-observation. Provider contexts alone do not establish PR or attempt identity. This strengthens
-observation; it does not establish server-side invalidation of an older green commit-scoped context
-on a same-head retry or isolate two PRs sharing a head. Separate-check protection migration and
-polling removal remain unaccepted pending that proof and separate authority.
-
-A failed/canceled source run fails its waiting metadata gate. A same-head source retry does not
-trigger a new PR event: after source recovery, the shipping controller must rerun the failed/canceled
-PR metadata workflow (`gh run rerun <metadata-run-id> --failed`) and wait for the new protected result.
-Record both source and metadata run/attempt IDs under the existing bounded retry policy. Do not
-edit the PR body to trigger recovery or reuse the failed metadata result. Ignored `.context` evidence
-is excluded from source lint so collecting provider records cannot create a formatting failure.
-
-Retargeting a PR changes its integration context: catch up to its actual base and push a new candidate
-before merging. Do not reuse a successful run from a different target base. Final ship-it collection
-still checks live metadata, head/base, source attempts, reviews, and protections before normal merge.
+The two deferred matrices are most of a full run's runner time, and draft pushes are frequent and
+often superseded by the next push. Measure queue length, runner-minutes per run and elapsed time
+before and after changing which jobs a draft runs.
 
 ## Rollout and external evidence
 

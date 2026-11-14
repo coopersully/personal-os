@@ -121,6 +121,7 @@ async function main() {
   // to register so the draft's fast-lane run is not mistaken for the latest one.
   if (process.env.PR_EVENT_ACTION === "ready_for_review") await pause(readySettle);
   const started = Date.now();
+  let settling;
   const deadline = started + 55 * 60 * 1000;
   while (Date.now() < deadline) {
     let observation;
@@ -132,7 +133,9 @@ async function main() {
     } catch (error) {
       // A dispatched gate reads the run seconds after it completes. Give the job
       // inventory a bounded time to agree before treating the gap as a failure.
-      if (!(error instanceof SourceSettling) || Date.now() - started >= settleBudget) {
+      // The window opens at the first disagreement, not when polling began.
+      settling ??= Date.now();
+      if (!(error instanceof SourceSettling) || Date.now() - settling >= settleBudget) {
         if (draft) console.error(draftRemedy);
         throw error;
       }

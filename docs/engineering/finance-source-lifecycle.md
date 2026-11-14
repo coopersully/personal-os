@@ -279,3 +279,29 @@ request authentication retains its own existing activity bookkeeping; that is no
 Reads may still fail for provider entitlement, retention, transport or partial coverage. They do
 not authorize repair. Runtime provider invocation and production-equivalent authority remain
 separate acceptance; authored tests alone establish neither.
+
+### Revision-bound source-fact admission
+
+The source slice adds `POST /v1/finances/provider-transaction-evidence/admit`, the typed
+`admitFinanceProviderSourceFacts` method and `admit_finance_provider_source_facts` MCP tool.
+Verification and deployment are separate. The request contains only a bounded unique native
+transaction selection, expected transaction/account revisions and an idempotency key. The public
+historical read remains read-only and its DTO is advisory, never admission authority.
+
+The existing transaction action pipeline admits only missing raw currency/provider direction, or
+already-identical values. Fresh private evidence is acquired outside database locks; complete,
+unique source identity, signed amount, explicit currency and native amount/date agreement are
+required. Owner, presenting session or token, scopes, connection, source topology and native
+content/revisions are revalidated under the canonical execution guard before all-target atomic
+CAS, transaction revision history, durable actor-bound receipt and same-transaction redacted audit.
+Economic direction, amounts, allocations, categories and notes remain unchanged. This is
+application append-only audit, not a claim of database-enforced immutability.
+
+Exact completed replay validates owner/actor/action/payload/source-hash and its audit before any
+provider read. A different actor, changed payload, missing/tampered audit or stale source fails
+closed. Humans must present their existing authenticated Session header; cookie-only calls fail
+closed. Agents need current `finances:read`, `finances:write`, `finances:execute` and persisted
+owner bypass. Pending-review execution cannot reuse advisory evidence or perform provider reads
+under locks; this initial source admission route requires current direct execution authority.
+No provider initialization, synchronization, reconciliation, economic repair or production call is
+authorized by source implementation or synthetic test evidence.

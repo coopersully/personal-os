@@ -15,6 +15,64 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("admits source facts only through the action pipeline with read/write authority and the private presenting session", async () => {
+    const app = new Hono<AppEnv>();
+    let scopes = new Set<AccessScope>(["finances:read", "finances:write"]);
+    let actorType: "user" | "agent" = "user";
+    const performDirect = vi.fn(async () => ({ status: "applied", result: { entries: [] } }));
+    app.use("*", async (c, next) => {
+      c.set("principal", { actorId: id, actorType, scopes, userId: id });
+      await next();
+    });
+    app.onError(errorResponse);
+    registerFinanceRoutes({
+      app,
+      actions: { performDirect } as unknown as ReturnType<typeof createFinanceActionService>,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: {} as FinanceStatusService,
+      mutationContext: (c) => ({ principal: c.get("principal"), requestId: "admit-source" }),
+    });
+    const body = {
+      idempotencyKey: "source-admission",
+      targets: [
+        { transactionId: id, expectedTransactionRevision: "1", expectedAccountRevision: "2" },
+      ],
+    };
+    const send = (session = true, input: unknown = body) =>
+      app.request("/v1/finances/provider-transaction-evidence/admit", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(session ? { authorization: "Session synthetic-session" } : {}),
+        },
+        body: JSON.stringify(input),
+      });
+    const response = await send();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(performDirect).toHaveBeenLastCalledWith(
+      "transaction",
+      { ...body, operation: "admit_source_facts" },
+      expect.objectContaining({ sourceFactsSessionHash: expect.stringMatching(/^[a-f0-9]{64}$/) }),
+    );
+    expect((await send(false)).status).toBe(403);
+    expect((await send(true, { ...body, currencyCode: "USD" })).status).toBe(400);
+    scopes = new Set(["finances:read"]);
+    expect((await send()).status).toBe(403);
+    scopes = new Set(["finances:write"]);
+    expect((await send()).status).toBe(403);
+    scopes = new Set(["finances:read", "finances:write", "finances:execute"]);
+    actorType = "agent";
+    expect((await send(false)).status).toBe(200);
+    expect(performDirect).toHaveBeenCalledTimes(2);
+    expect(performDirect).toHaveBeenLastCalledWith(
+      "transaction",
+      { ...body, operation: "admit_source_facts" },
+      expect.not.objectContaining({ sourceFactsSessionHash: expect.anything() }),
+    );
+  });
+
   it("reads historical evidence with read-only scope, exact presenting session and no-store", async () => {
     const app = new Hono<AppEnv>();
     let scopes = new Set<AccessScope>(["finances:read"]);

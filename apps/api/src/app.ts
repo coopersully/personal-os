@@ -53,6 +53,7 @@ import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { createFinanceActivityService } from "./finance/activity-service.js";
+import { createFinanceAttentionService } from "./finance/attention-service.js";
 import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { createFinanceBudgetPolicyService } from "./finance/budget-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
@@ -64,10 +65,13 @@ import {
 import { createFinanceConversationEvidenceService } from "./finance/conversation-evidence-service.js";
 import { createFinanceConversationService } from "./finance/conversation-persistence.js";
 import { createFinanceConversationUnreadService } from "./finance/conversation-unread-service.js";
+import { createFinanceEvidenceRefreshService } from "./finance/evidence-refresh-service.js";
 import { createFinanceMaintenanceExecutionService } from "./finance/maintenance-execution-service.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
+import { runFinanceMaintenanceTick } from "./finance/maintenance-tick.js";
 import { createFinanceOnboardingEvidenceLoader } from "./finance/onboarding-evidence.js";
 import { createFinanceOnboardingRepository } from "./finance/onboarding-repository.js";
+import { createFinanceOpeningPositionService } from "./finance/opening-position-service.js";
 import { createFinancePositionService } from "./finance/position-service.js";
 import { createFinanceReviewBacklogService } from "./finance/review-backlog-service.js";
 import { createFinanceReviewBatchService } from "./finance/review-batch-service.js";
@@ -113,6 +117,7 @@ import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceActivityRoutes } from "./routes/finance-activity.js";
+import { registerFinanceAttentionRoutes } from "./routes/finance-attention.js";
 import { registerFinanceConversationRoutes } from "./routes/finance-conversation.js";
 import { registerFinanceConversationEvidenceRoutes } from "./routes/finance-conversation-evidence.js";
 import { registerFinanceConversationUnreadRoutes } from "./routes/finance-conversation-unread.js";
@@ -505,6 +510,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const financeContextualQuestions = createFinanceContextualQuestionService({
     db: dependencies.db,
     now,
+  });
+  const financeEvidenceRefresh = createFinanceEvidenceRefreshService({ db: dependencies.db, now });
+  const financeReviewBatches = createFinanceReviewBatchService({
+    db: dependencies.db,
+    now,
+    finance: finances,
   });
   const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const financeSms = createFinanceSmsPort({
@@ -1574,9 +1585,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     mutationContext,
   });
 
+  registerFinanceAttentionRoutes({
+    app,
+    attention: createFinanceAttentionService({ db: dependencies.db, now }),
+    opening: createFinanceOpeningPositionService({ db: dependencies.db, now }),
+    refresh: financeEvidenceRefresh,
+  });
   registerFinanceRoutes({
     reviewBacklog: createFinanceReviewBacklogService(dependencies.db, { now }),
-    reviewBatches: createFinanceReviewBatchService({ db: dependencies.db, now, finance: finances }),
+    reviewBatches: financeReviewBatches,
     actions: financeActions,
     app,
     db: dependencies.db,
@@ -1798,7 +1815,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     async syncDueFinances() {
       const startedAt = Date.now();
       try {
-        return await finances.syncDuePlaidAccounts();
+        try {
+          return await finances.syncDuePlaidAccounts();
+        } finally {
+          await financeEvidenceRefresh.reconcilePending();
+        }
       } catch {
         dependencies.log?.({
           code: "finance_sync_scheduler_failed",
@@ -1814,10 +1835,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }
     },
     async dispatchDueFinanceMaintenance() {
-      const recovery = await canonicalFinanceMaintenance.recoverAcceptedWork();
-      await financeMaintenance.dispatchDue(5);
-      if (recovery.failedRecoveries)
-        throw new Error("Some Finance maintenance handoffs could not be recovered.");
+      await runFinanceMaintenanceTick({
+        recoverAcceptedWork: () => canonicalFinanceMaintenance.recoverAcceptedWork(),
+        dispatchDue: () => financeMaintenance.dispatchDue(5),
+        processApprovedBatches: () => financeReviewBatches.processApproved(),
+        log: dependencies.log,
+      });
     },
   });
 }

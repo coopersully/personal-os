@@ -77,6 +77,30 @@ it("issues a stable fail-closed bootstrap that fetches current API-owned instruc
   expect(text).not.toContain("maintain_finances");
 });
 
+it("keeps maintained-month triage separate from historical counts and uses exact approval cards", () => {
+  const text = renderFinanceHostInstructions({
+    id: "11111111-1111-4111-8111-111111111111",
+    hostSurface: "codex_desktop",
+  });
+  for (const required of [
+    "get_finance_attention",
+    "opening position",
+    "historical",
+    "budget_start_preview",
+    "publish_finance_chat_card",
+    "not owner approval",
+    "one coherent question",
+  ])
+    expect(text).toContain(required);
+});
+it("consumes independent monthly work even when the historical run stays blocked", () => {
+  const text = renderFinanceHostInstructions({
+    id: "schedule",
+    hostSurface: "claude_code_routine",
+  });
+  expect(text).toContain("monthlyWork");
+  expect(text).toContain("even if the retained run is blocked");
+});
 it("loads the profile, goals and playbook before financial work and records stated facts", () => {
   for (const hostSurface of ["codex_desktop", "claude_code_routine"] as const) {
     const text = renderFinanceHostInstructions({ id: "schedule", hostSurface });

@@ -15,6 +15,7 @@ import {
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
+import { readFinanceAttentionSnapshot } from "./attention-read.js";
 import { createFinanceReviewBacklogService } from "./review-backlog-service.js";
 
 describe.sequential("Finance review backlog complete owner reads", () => {
@@ -115,6 +116,10 @@ describe.sequential("Finance review backlog complete owner reads", () => {
     await review(foreign.id, { userId: otherId });
     const assessment = await service().assess(userId);
     expect(financeReviewBacklogAssessmentSchema.safeParse(assessment).success).toBe(true);
+    expect(assessment).toHaveProperty(
+      "attention",
+      await readFinanceAttentionSnapshot(database.db, userId, now()),
+    );
     expect(assessment.counts).toEqual({
       items: 5,
       needsReviewTransactions: 3,

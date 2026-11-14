@@ -38,6 +38,12 @@ import {
 } from "./connector-sync-health.js";
 import { AppError } from "./errors.js";
 import { financeAccountKindFromProviderType } from "./finance/account-semantics.js";
+import {
+  type FinanceRefreshDispatch,
+  pendingFinanceRefreshSql,
+  readFinanceRefreshDispatch,
+} from "./finance/evidence-refresh-dispatch.js";
+import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
 import { refreshInstitutionBranding } from "./finance/institution-branding.js";
 import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { decryptJson } from "./security.js";
@@ -45,6 +51,7 @@ import type { Principal, RequestLog } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 export type FinanceProviderItemSyncContext = {
+  evidenceRefreshRequestId?: string;
   maintenance?: {
     idempotencyKey: string;
     policy: "approved_rule";
@@ -322,6 +329,11 @@ export function createFinanceProviderItemSyncService(options: Options) {
     return accounts;
   }
 
+  type ScheduledItem = {
+    accountId: string;
+    item: typeof financeProviderItems.$inferSelect;
+    refresh?: FinanceRefreshDispatch;
+  };
   async function claimItem(
     itemId: string,
     context: FinanceProviderItemSyncContext,
@@ -334,6 +346,49 @@ export function createFinanceProviderItemSyncService(options: Options) {
     const claimId = randomUUID();
     return db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, context);
+      let refreshDispatch: FinanceRefreshDispatch | undefined;
+      let refreshAccounts: Array<typeof financeAccounts.$inferSelect> | undefined;
+      if (context.evidenceRefreshRequestId) {
+        await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+          actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+          connectionIds: context.principal.authorizationConnectionId
+            ? [context.principal.authorizationConnectionId]
+            : [],
+        });
+        // Lock the actual source before re-reading eligibility: an ordinary sync may
+        // have established backoff while this accelerated claim was waiting.
+        await tx
+          .select({ id: financeProviderItems.id })
+          .from(financeProviderItems)
+          .where(
+            and(
+              eq(financeProviderItems.id, itemId),
+              eq(financeProviderItems.userId, context.principal.userId),
+            ),
+          )
+          .for("update");
+        refreshAccounts = await lockLinkedAccounts(tx, itemId, context.principal.userId);
+        // Evaluate the request and token lifetime after all source-lock waits.
+        const request = await readFinanceRefreshDispatch(
+          tx,
+          context.principal.userId,
+          itemId,
+          now(),
+        );
+        if (
+          !request ||
+          request.id !== context.evidenceRefreshRequestId ||
+          request.actor_id !== context.principal.actorId ||
+          request.actor_type !== context.principal.actorType ||
+          (request.authorization_connection_id ?? null) !==
+            (context.principal.authorizationConnectionId ?? null)
+        )
+          throw new AppError(
+            "conflict",
+            "The requested refresh is no longer authorized or eligible.",
+          );
+        refreshDispatch = request;
+      }
       const [claimed] = await tx
         .update(financeProviderItems)
         .set({
@@ -400,7 +455,18 @@ export function createFinanceProviderItemSyncService(options: Options) {
           itemId,
         });
       }
-      const accounts = await lockLinkedAccounts(tx, itemId, context.principal.userId);
+      const accounts =
+        refreshAccounts ?? (await lockLinkedAccounts(tx, itemId, context.principal.userId));
+      if (
+        refreshDispatch &&
+        !accounts.some(
+          (account) =>
+            account.id === refreshDispatch.account_id &&
+            account.contextualRevision.toString() === refreshDispatch.account_revision &&
+            account.providerAccountId === refreshDispatch.provider_account_id,
+        )
+      )
+        throw new AppError("conflict", "The requested refresh source changed before dispatch.");
       if (accounts.length === 0) {
         throw new AppError(
           "conflict",
@@ -1354,7 +1420,11 @@ export function createFinanceProviderItemSyncService(options: Options) {
     }
   }
 
-  async function selectedDueItems(userId?: string, targetAccountId?: string) {
+  async function selectedDueItems(
+    userId?: string,
+    targetAccountId?: string,
+    includeRefresh = false,
+  ): Promise<ScheduledItem[]> {
     const selectedAt = now();
     if (targetAccountId) {
       return db
@@ -1388,7 +1458,12 @@ export function createFinanceProviderItemSyncService(options: Options) {
           userId ? eq(financeProviderItems.userId, userId) : undefined,
           eq(financeProviderItems.provider, "plaid"),
           claimableFailureState(),
-          lte(financeProviderItems.nextSyncAt, selectedAt),
+          includeRefresh
+            ? or(
+                lte(financeProviderItems.nextSyncAt, selectedAt),
+                sql`EXISTS (${pendingFinanceRefreshSql(selectedAt)})`,
+              )
+            : lte(financeProviderItems.nextSyncAt, selectedAt),
           exists(
             db
               .select({ id: financeAccounts.id })
@@ -1428,10 +1503,16 @@ export function createFinanceProviderItemSyncService(options: Options) {
     for (const row of representatives) {
       if (row.itemId && !accountByItem.has(row.itemId)) accountByItem.set(row.itemId, row.id);
     }
-    return items.flatMap((item) => {
+    const selected: ScheduledItem[] = [];
+    for (const item of items) {
       const accountId = accountByItem.get(item.id);
-      return accountId ? [{ accountId, item }] : [];
-    });
+      if (!accountId) continue;
+      if (includeRefresh && (!item.nextSyncAt || item.nextSyncAt > selectedAt)) {
+        const refresh = await readFinanceRefreshDispatch(db, item.userId, item.id, selectedAt);
+        if (refresh) selected.push({ accountId: refresh.account_id, item, refresh });
+      } else selected.push({ accountId, item });
+    }
+    return selected;
   }
 
   async function syncSelected(
@@ -1510,13 +1591,17 @@ export function createFinanceProviderItemSyncService(options: Options) {
     },
 
     async syncDueItems(): Promise<FinanceSyncBatchResult> {
-      const selected = await selectedDueItems();
+      const selected = await selectedDueItems(undefined, undefined, true);
       const selectedAt = now();
       const result = await syncSelected(selected, (entry) => ({
+        ...(entry.refresh ? { evidenceRefreshRequestId: entry.refresh.id } : {}),
         principal: {
-          actorId: entry.item.userId,
-          actorType: "user",
-          scopes: new Set(["finances:read", "finances:write"]),
+          actorId: entry.refresh?.actor_id ?? entry.item.userId,
+          actorType: entry.refresh?.actor_type ?? "user",
+          ...(entry.refresh?.authorization_connection_id
+            ? { authorizationConnectionId: entry.refresh.authorization_connection_id }
+            : {}),
+          scopes: new Set(["finances:read", "finances:write", "finances:maintain"]),
           userId: entry.item.userId,
         },
         requestId: `scheduler:finance:${entry.item.id}:${selectedAt.toISOString()}`,

@@ -1,11 +1,15 @@
 import type {
   ExecuteFinanceReviewBatchInput,
+  FinanceDecisionDecline,
   FinanceMaintenanceQualification,
   FinanceReviewBacklogAssessment,
   FinanceReviewBacklogPage,
   FinanceReviewBacklogQuery,
+  FinanceReviewBatchContinuation,
   FinanceReviewBatchRun,
+  FinanceReviewBatchUndo,
   PreviewFinanceReviewBatchInput,
+  PreviewFinanceReviewBatchUndoInput,
   QualifyFinanceMaintenanceWorkInput,
 } from "@personal-os/domain";
 import type { FinanceRequest } from "./finances.js";
@@ -16,6 +20,55 @@ export function createFinanceReviewBacklogApi(request: FinanceRequest) {
   const batches = "/v1/finances/review-batches";
   const batch = (id: string) => `${batches}/${encodeURIComponent(id)}`;
   return {
+    getFinanceBatchContinuation(id: string): Promise<FinanceReviewBatchContinuation | null> {
+      return request(`${batch(id)}/approval`);
+    },
+    approveFinanceBatchContinuation(
+      id: string,
+      fingerprint: string,
+      confirmTransferPairs?: boolean,
+    ): Promise<FinanceReviewBatchContinuation> {
+      return request(`${batch(id)}/approval`, {
+        method: "POST",
+        body: JSON.stringify({ fingerprint, confirmTransferPairs }),
+      });
+    },
+    cancelFinanceBatchContinuation(id: string): Promise<FinanceReviewBatchContinuation> {
+      return request(`${batch(id)}/approval/cancel`, { method: "POST", body: JSON.stringify({}) });
+    },
+    /** Owner session only; an agent token is refused whatever its scopes. */
+    declineFinanceReviewBatch(id: string): Promise<FinanceDecisionDecline> {
+      return request(`${batch(id)}/decline`, { method: "POST", body: JSON.stringify({}) });
+    },
+    /** Owner session only; an agent token is refused whatever its scopes. */
+    declineFinanceReviewBatchUndo(id: string): Promise<FinanceDecisionDecline> {
+      return request(`/v1/finances/review-batch-corrections/${encodeURIComponent(id)}/decline`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    },
+    previewFinanceReviewBatchUndo(
+      input: PreviewFinanceReviewBatchUndoInput,
+    ): Promise<FinanceReviewBatchUndo> {
+      return request("/v1/finances/review-batch-corrections", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+    },
+    getFinanceReviewBatchUndo(id: string): Promise<FinanceReviewBatchUndo> {
+      return request(`/v1/finances/review-batch-corrections/${encodeURIComponent(id)}`);
+    },
+    executeFinanceReviewBatchUndo(
+      id: string,
+      input: ExecuteFinanceReviewBatchInput,
+      signal?: AbortSignal,
+    ): Promise<FinanceReviewBatchUndo> {
+      return request(`/v1/finances/review-batch-corrections/${encodeURIComponent(id)}/execute`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        ...(signal ? { signal } : {}),
+      });
+    },
     getFinanceReviewBacklog(): Promise<FinanceReviewBacklogAssessment> {
       return request("/v1/finances/review-backlog");
     },
@@ -67,13 +120,22 @@ export function financeReviewBatchApprovalBlocker(batch: FinanceReviewBatchRun):
   if (
     batch.decisions.some(
       (item, index) =>
-        item.kind === "review" &&
-        item.action === "confirm_transfer" &&
+        (item.kind === "transfer_pair" ||
+          (item.kind === "review" && item.action === "confirm_transfer")) &&
         !finished.has(index) &&
         !paired.has(index),
     )
   )
     return "Ask for a fresh batch with both transfer records attached.";
+  if (
+    batch.decisions.some(
+      (item, index) =>
+        item.kind === "transfer_pair" &&
+        !finished.has(index) &&
+        !batch.transferCounterparts?.find((leg) => leg.index === index)?.summary,
+    )
+  )
+    return "Ask for a fresh batch showing the merchant, amount and date for both transfer records.";
   return null;
 }
 export async function applyReviewedFinanceBatch(

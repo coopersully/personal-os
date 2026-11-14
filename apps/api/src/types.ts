@@ -88,6 +88,7 @@ export type RequestLog = TransportDiagnostics & {
     | "desktop_release_unavailable"
     | "finance_sync_health_initialized"
     | "finance_host_handoff"
+    | "finance_approved_batch_failed"
     | "finance_receipt_mail_search_failed"
     | "mail_rule_work_dispatch_failed"
     | "finance_configuration_section_failed"

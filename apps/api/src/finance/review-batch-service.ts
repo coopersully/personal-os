@@ -8,6 +8,7 @@ import {
   financeAccounts,
   financeCategories,
   financeProviderItems,
+  financeReviewBatchEffects,
   financeReviewBatchRuns,
   financeReviewCases,
   financeTransactions,
@@ -22,6 +23,7 @@ import {
   financeReviewBatchCounterpartSchema,
   financeReviewBatchDecisionSchema,
   financeReviewBatchOutcomeSchema,
+  financeReviewBatchTransactionSummarySchema,
   idSchema,
   listFinanceReviewBatchesInputSchema,
   previewFinanceReviewBatchInputSchema,
@@ -31,41 +33,64 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool, PoolClient, QueryConfig, QueryResultRow } from "pg";
 import { z } from "zod";
-import { AppError } from "../errors.js";
+import { AppError, isUniqueViolation } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { type createFinanceService, isProviderTransfer } from "../finance-service.js";
 import { effectiveSynchronization } from "../finance-status-service.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
+import {
+  assertFinanceBatchContinuation,
+  createFinanceBatchApprovalService,
+  hasFinanceBatchTransferAttestation,
+} from "./batch-approval-service.js";
+import { createFinanceBatchCorrectionService } from "./batch-correction-service.js";
+import { captureFinanceBatchEffect } from "./batch-effect-state.js";
+import { assertFinanceDecisionNotDeclined, readFinanceDeclinedAt } from "./decision-decline.js";
 import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import {
   type FinanceMaintenanceWork,
   selectFinanceMaintenanceWork,
 } from "./maintenance-work-selection.js";
+import { readTransferPairEvidence } from "./transfer-pair-evidence.js";
 
 type Context = { principal: Principal; requestId: string; signal?: AbortSignal };
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Row = typeof financeReviewBatchRuns.$inferSelect;
 type Finance = Pick<
   ReturnType<typeof createFinanceService>,
-  "resolveReview" | "applyCategorizations"
+  | "resolveReview"
+  | "applyCategorizations"
+  | "applyVerifiedTransferPair"
+  | "restoreReviewBatchEffect"
+  | "qualifyBatchCategorization"
 >;
 
 const manifestItemSchema = z.strictObject({
   decision: financeReviewBatchDecisionSchema,
+  transactionSummary: financeReviewBatchTransactionSummarySchema.optional(),
   transferCounterpart: financeReviewBatchCounterpartSchema.optional(),
+  pairFingerprint: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
 });
 function manifest(row: Row) {
   return row.manifest.map((item) =>
     typeof item === "object" && item !== null && "decision" in item
       ? manifestItemSchema.parse(item)
-      : { decision: financeReviewBatchDecisionSchema.parse(item), transferCounterpart: undefined },
+      : {
+          decision: financeReviewBatchDecisionSchema.parse(item),
+          transactionSummary: undefined,
+          transferCounterpart: undefined,
+          pairFingerprint: undefined,
+        },
   );
 }
 function outcomes(row: Row) {
   return row.outcomes.map((item) => financeReviewBatchOutcomeSchema.parse(item));
 }
-function present(row: Row): FinanceReviewBatchRun {
+function present(row: Row, declinedAt: string | null = null): FinanceReviewBatchRun {
   const items = manifest(row);
   const decisions = items.map(({ decision }) => decision);
   const receipts = outcomes(row);
@@ -77,6 +102,9 @@ function present(row: Row): FinanceReviewBatchRun {
     decisions,
     transferCounterparts: items.flatMap(({ transferCounterpart }, index) =>
       transferCounterpart ? [{ index, ...transferCounterpart }] : [],
+    ),
+    transactionSummaries: items.flatMap(({ transactionSummary }, index) =>
+      transactionSummary ? [{ index, ...transactionSummary }] : [],
     ),
     outcomes: receipts,
     pendingCount,
@@ -90,7 +118,22 @@ function present(row: Row): FinanceReviewBatchRun {
           : "previewed",
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    declinedAt,
   };
+}
+/** Reads carry the owner's decline, so a declined batch is not shown as awaiting approval. */
+async function presentCurrent(tx: Transaction, userId: string, rows: Row[]) {
+  const declined = await readFinanceDeclinedAt(
+    tx,
+    userId,
+    "review_batch",
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => present(row, declined.get(row.id) ?? null));
+}
+async function presentOne(tx: Transaction, row: Row) {
+  const declined = await readFinanceDeclinedAt(tx, row.userId, "review_batch", [row.id]);
+  return present(row, declined.get(row.id) ?? null);
 }
 function binding(principal: Principal) {
   if (principal.actorType === "user") return eq(financeReviewBatchRuns.userId, principal.userId);
@@ -123,9 +166,15 @@ export function createFinanceReviewBatchService({
   executionBudgetMs?: number;
   transactionBudgetMs?: number;
 }) {
-  async function authorize(tx: Transaction, context: Context, mode: "read" | "write" | "execute") {
+  async function authorize(
+    tx: Transaction,
+    context: Context,
+    mode: "read" | "write" | "execute",
+    batchId?: string,
+  ) {
     const principal = context.principal;
     await guardFinanceExecutionTransaction(tx, principal.userId, {
+      batchIds: batchId ? [batchId] : [],
       actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
       connectionIds: principal.authorizationConnectionId
         ? [principal.authorizationConnectionId]
@@ -158,6 +207,26 @@ export function createFinanceReviewBatchService({
     }
     if (mode === "execute") await requireWorkspaceExecution(tx, principal, "finances", now());
   }
+  async function assertPreparationAuthority(tx: Transaction, row: Row) {
+    if (row.actorType !== "agent") return;
+    const [grant] = await tx
+      .select()
+      .from(accessTokens)
+      .where(and(eq(accessTokens.id, row.actorId), eq(accessTokens.userId, row.userId)))
+      .limit(1);
+    if (
+      !grant ||
+      grant.revokedAt ||
+      (grant.expiresAt && grant.expiresAt <= now()) ||
+      grant.authorizationConnectionId !== row.authorizationConnectionId ||
+      !grant.scopes.includes("finances:read") ||
+      !grant.scopes.includes("finances:write")
+    )
+      throw new AppError(
+        "forbidden",
+        "The original preparation grant is no longer active. Prepare a new owner-reviewed batch.",
+      );
+  }
   async function find(tx: Transaction, id: string, context: Context) {
     idSchema.parse(id);
     const [row] = await tx
@@ -180,7 +249,22 @@ export function createFinanceReviewBatchService({
     lock: boolean,
     agent = false,
     counterpartLimit?: number,
-  ) {
+  ): Promise<
+    | {
+        transferReview?: boolean;
+        transferCounterpart?: z.infer<typeof financeReviewBatchCounterpartSchema>;
+        pairFingerprint?: string;
+      }
+    | undefined
+  > {
+    if (decision.kind === "transfer_pair") {
+      const proof = await readTransferPairEvidence(tx, userId, decision, now(), lock);
+      return {
+        transferReview: true,
+        transferCounterpart: proof.transferCounterpart,
+        pairFingerprint: proof.fingerprint,
+      };
+    }
     // Reconciliation/provider sync lock accounts before their transaction evidence.
     if (lock && decision.kind === "review" && decision.action === "confirm_transfer")
       await tx
@@ -409,7 +493,14 @@ export function createFinanceReviewBatchService({
         );
     }
   }
-  return {
+  const service = {
+    ...createFinanceBatchCorrectionService({
+      db,
+      now,
+      authorize,
+      findBatch: find,
+      restore: finance.restoreReviewBatchEffect,
+    }),
     async qualify(raw: unknown, context: Context): Promise<FinanceMaintenanceQualification> {
       const input = qualifyFinanceMaintenanceWorkInputSchema.parse(raw);
       const deadline = elapsedNow() + 5_000;
@@ -546,6 +637,12 @@ export function createFinanceReviewBatchService({
                     evidenceReady =
                       counterpart?.ref.transactionRevision === checked.transferCounterpart.revision;
                 }
+                if (sourceReady && decision.kind === "categorization")
+                  evidenceReady = await finance.qualifyBatchCategorization(
+                    decision,
+                    principal.userId,
+                    tx,
+                  );
                 // Other action families need their owning evidence adapter; do not infer from confidence.
                 if (sourceReady && !evidenceReady)
                   item.reasons.push("decision_evidence_not_qualified");
@@ -567,7 +664,15 @@ export function createFinanceReviewBatchService({
           }
           if (executionDenied) item.reasons.push("execution_not_authorized");
           else if (!approvalReady) item.reasons.push("approval_required");
-          work.push({ id: String(index), sourceReady, evidenceReady, approvalReady });
+          if (decision.kind === "transfer_pair") {
+            item.reasons.push("approval_required");
+          }
+          work.push({
+            id: String(index),
+            sourceReady,
+            evidenceReady,
+            approvalReady: decision.kind === "transfer_pair" ? false : approvalReady,
+          });
           items.push(item);
         }
         const selected = selectFinanceMaintenanceWork(work);
@@ -586,64 +691,99 @@ export function createFinanceReviewBatchService({
     },
     async preview(raw: unknown, context: Context): Promise<FinanceReviewBatchRun> {
       const input = previewFinanceReviewBatchInputSchema.parse(raw);
-      return db.transaction(async (tx) => {
-        await authorize(tx, context, "write");
-        const [existing] = await tx
-          .select()
-          .from(financeReviewBatchRuns)
-          .where(
-            and(
-              eq(financeReviewBatchRuns.userId, context.principal.userId),
-              eq(financeReviewBatchRuns.idempotencyKey, input.idempotencyKey),
-            ),
-          )
-          .limit(1);
-        if (existing) {
-          const row = await find(tx, existing.id, context);
-          if (
-            JSON.stringify(manifest(row).map(({ decision }) => decision)) !==
-            JSON.stringify(input.decisions)
-          )
-            throw new AppError(
-              "conflict",
-              "That idempotency key already identifies a different manifest.",
+      const prepare = () =>
+        db.transaction(async (tx) => {
+          await tx.execute(sql`set transaction isolation level repeatable read`);
+          await authorize(tx, context, "write");
+          const [existing] = await tx
+            .select()
+            .from(financeReviewBatchRuns)
+            .where(
+              and(
+                eq(financeReviewBatchRuns.userId, context.principal.userId),
+                eq(financeReviewBatchRuns.idempotencyKey, input.idempotencyKey),
+              ),
+            )
+            .limit(1);
+          if (existing) {
+            const row = await find(tx, existing.id, context);
+            if (
+              JSON.stringify(manifest(row).map(({ decision }) => decision)) !==
+              JSON.stringify(input.decisions)
+            )
+              throw new AppError(
+                "conflict",
+                "That idempotency key already identifies a different manifest.",
+              );
+            return presentOne(tx, row);
+          }
+          const displayRows = await tx
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.userId, context.principal.userId),
+                inArray(
+                  financeTransactions.id,
+                  input.decisions.map((decision) => decision.transactionId),
+                ),
+              ),
             );
+          const items: z.infer<typeof manifestItemSchema>[] = [];
+          for (const decision of input.decisions) {
+            const checked = await validate(
+              tx,
+              decision,
+              context.principal.userId,
+              false,
+              context.principal.actorType === "agent",
+            );
+            const transaction = displayRows.find((row) => row.id === decision.transactionId);
+            if (!transaction)
+              throw new AppError("not_found", "The Finance transaction was not found.");
+            items.push({
+              decision,
+              transactionSummary: {
+                merchant: transaction.merchant,
+                amountCents: transaction.amount,
+                currencyCode: transaction.currencyCode,
+                date: transaction.transactionDate,
+              },
+              transferCounterpart: checked?.transferCounterpart,
+              pairFingerprint: checked?.pairFingerprint,
+            });
+          }
+          const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify(items)).digest("hex")}`;
+          const [row] = await tx
+            .insert(financeReviewBatchRuns)
+            .values({
+              userId: context.principal.userId,
+              actorId: context.principal.actorId,
+              actorType: context.principal.actorType,
+              authorizationConnectionId: context.principal.authorizationConnectionId ?? null,
+              idempotencyKey: input.idempotencyKey,
+              fingerprint,
+              manifest: items,
+              createdAt: now(),
+              updatedAt: now(),
+            })
+            .returning();
+          if (!row) throw new AppError("internal_error", "The Finance batch could not be saved.");
           return present(row);
-        }
-        const items: z.infer<typeof manifestItemSchema>[] = [];
-        for (const decision of input.decisions) {
-          const checked = await validate(
-            tx,
-            decision,
-            context.principal.userId,
-            false,
-            context.principal.actorType === "agent",
-          );
-          items.push({ decision, transferCounterpart: checked?.transferCounterpart });
-        }
-        const fingerprint = `sha256:${createHash("sha256").update(JSON.stringify(items)).digest("hex")}`;
-        const [row] = await tx
-          .insert(financeReviewBatchRuns)
-          .values({
-            userId: context.principal.userId,
-            actorId: context.principal.actorId,
-            actorType: context.principal.actorType,
-            authorizationConnectionId: context.principal.authorizationConnectionId ?? null,
-            idempotencyKey: input.idempotencyKey,
-            fingerprint,
-            manifest: items,
-            createdAt: now(),
-            updatedAt: now(),
-          })
-          .returning();
-        if (!row) throw new AppError("internal_error", "The Finance batch could not be saved.");
-        return present(row);
-      });
+        });
+      try {
+        return await prepare();
+      } catch (error) {
+        // A concurrent request may commit the same owner/key after our snapshot.
+        // Reopen once so replay sees that receipt and repeats all authority/input checks.
+        if (!isUniqueViolation(error, "finance_review_batch_runs_owner_key_unique")) throw error;
+        return prepare();
+      }
     },
     async get(id: string, context: Context): Promise<FinanceReviewBatchRun> {
       return db.transaction(async (tx) => {
         await authorize(tx, context, "read");
-        return present(await find(tx, id, context));
+        return presentOne(tx, await find(tx, id, context));
       });
     },
     async list(context: Context, raw: unknown = {}): Promise<FinanceReviewBatchRun[]> {
@@ -656,7 +796,7 @@ export function createFinanceReviewBatchService({
           .where(binding(context.principal))
           .orderBy(desc(financeReviewBatchRuns.createdAt), desc(financeReviewBatchRuns.id))
           .limit(limit);
-        return rows.map(present);
+        return presentCurrent(tx, context.principal.userId, rows);
       });
     },
     async execute(id: string, raw: unknown, context: Context): Promise<FinanceReviewBatchRun> {
@@ -818,8 +958,11 @@ export function createFinanceReviewBatchService({
         return "cause" in error && error.cause !== error && isInterrupted(error.cause);
       };
       let latest = await bounded(async (tx) => {
-        await authorize(tx, context, "execute");
+        await authorize(tx, context, "execute", id);
         const row = await find(tx, id, context);
+        await assertFinanceDecisionNotDeclined(tx, row.userId, "review_batch", row.id);
+        await assertPreparationAuthority(tx, row);
+        await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
         if (row.fingerprint !== input.fingerprint)
           throw new AppError("conflict", "Execution must accept the exact preview fingerprint.");
         return row;
@@ -831,8 +974,12 @@ export function createFinanceReviewBatchService({
         if (context.signal?.aborted || remaining() < Math.min(10_000, budget / 10)) break;
         try {
           const progressed = await bounded(async (tx, preserve) => {
-            await authorize(tx, context, "execute");
+            await authorize(tx, context, "execute", id);
             const row = await find(tx, id, context);
+            // A decline may land between chunks; it stops every effect not yet committed.
+            await assertFinanceDecisionNotDeclined(tx, row.userId, "review_batch", row.id);
+            await assertPreparationAuthority(tx, row);
+            await assertFinanceBatchContinuation(tx, context, id, input.fingerprint, now());
             if (row.fingerprint !== input.fingerprint)
               throw new AppError(
                 "conflict",
@@ -844,7 +991,7 @@ export function createFinanceReviewBatchService({
             const index = items.findIndex((_, index) => !completed.has(index));
             const item = items[index];
             if (!item) return { row, progressed: false };
-            const { decision, transferCounterpart } = item;
+            const { decision, transferCounterpart, pairFingerprint } = item;
             check();
             let outcome: FinanceReviewBatchOutcome;
             try {
@@ -858,6 +1005,14 @@ export function createFinanceReviewBatchService({
                     true,
                     row.actorType === "agent",
                   );
+                  if (
+                    decision.kind === "transfer_pair" &&
+                    (!pairFingerprint || transferReview?.pairFingerprint !== pairFingerprint)
+                  )
+                    throw new AppError(
+                      "conflict",
+                      "Transfer evidence changed; prepare a new preview.",
+                    );
                   const currentCounterpart = transferReview?.transferCounterpart;
                   if (currentCounterpart || transferCounterpart) {
                     const matchingId =
@@ -899,13 +1054,46 @@ export function createFinanceReviewBatchService({
                     requestId: context.requestId,
                     financeReviewBatchScope: {
                       transactionId: decision.transactionId,
+                      ownerConfirmedTransferPair:
+                        decision.kind === "transfer_pair" &&
+                        !!item.transactionSummary &&
+                        !!transferCounterpart?.summary &&
+                        context.principal.actorType === "user" &&
+                        context.principal.actorId === context.principal.userId &&
+                        (input.confirmTransferPairs === true ||
+                          (await hasFinanceBatchTransferAttestation(
+                            itemTx,
+                            context,
+                            row.id,
+                            row.fingerprint,
+                            index,
+                          ))),
                       transferReview: transferReview?.transferReview === true,
                       ...(currentCounterpart ? { transferCounterpart: currentCounterpart } : {}),
                       reviewId: decision.kind === "review" ? decision.reviewId : null,
                     },
                   };
+                  const effectIds =
+                    decision.kind === "transfer_pair"
+                      ? [decision.transactionId, decision.counterpartTransactionId]
+                      : [decision.transactionId];
+                  const beforeEffect = await captureFinanceBatchEffect(
+                    itemTx,
+                    context.principal.userId,
+                    effectIds,
+                  );
                   let status: FinanceReviewBatchOutcome["status"];
-                  if (decision.kind === "review") {
+                  if (decision.kind === "transfer_pair") {
+                    const results = await finance.applyVerifiedTransferPair(
+                      decision,
+                      writerContext,
+                      itemTx,
+                    );
+                    status =
+                      results.length === 2 && results.every((result) => result.applied)
+                        ? "applied"
+                        : "review_required";
+                  } else if (decision.kind === "review") {
                     const result = await finance.resolveReview(
                       decision.reviewId,
                       decision,
@@ -930,6 +1118,23 @@ export function createFinanceReviewBatchService({
                         "The categorization outcome is missing.",
                       );
                     status = result.applied ? "applied" : "review_required";
+                  }
+                  if (status === "applied") {
+                    const afterEffect = await captureFinanceBatchEffect(
+                      itemTx,
+                      context.principal.userId,
+                      effectIds,
+                    );
+                    await itemTx.insert(financeReviewBatchEffects).values({
+                      userId: context.principal.userId,
+                      batchId: row.id,
+                      outcomeIndex: index,
+                      before: beforeEffect,
+                      after: afterEffect,
+                      createdAt: now(),
+                      appliedByActorType: context.principal.actorType,
+                      appliedByActorId: context.principal.actorId,
+                    });
                   }
                   let appliedTransferRevision: string | undefined;
                   if (status === "applied" && currentCounterpart) {
@@ -956,6 +1161,7 @@ export function createFinanceReviewBatchService({
                     ...(appliedTransferRevision ? { appliedTransferRevision } : {}),
                     transactionId: decision.transactionId,
                     status,
+                    undoAvailable: status === "applied",
                     error: null,
                     recovery: status === "applied" ? ("none" as const) : ("new_preview" as const),
                     completedAt: now().toISOString(),
@@ -998,5 +1204,9 @@ export function createFinanceReviewBatchService({
       // remains recoverable via get/resume; no unbounded final database read is needed.
       return present(latest);
     },
+  };
+  return {
+    ...service,
+    ...createFinanceBatchApprovalService({ db, now, authorize, find, execute: service.execute }),
   };
 }

@@ -29,6 +29,7 @@ import {
 import { applyFinanceCategorizationsInputSchema, financeQuestionSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, inArray } from "drizzle-orm";
+import { readFinanceAttentionSnapshot } from "./finance/attention-read.js";
 import { readBudgetPlanContext } from "./finance/budget-plan-projection.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
@@ -53,6 +54,15 @@ describe.sequential("Finance status service", () => {
   afterAll(async () => {
     await database.close();
     await container.stop();
+  });
+
+  it("returns the canonical attention projection with the status snapshot", async () => {
+    const userId = await makeUser("Canonical attention");
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(status).toHaveProperty(
+      "attention",
+      await readFinanceAttentionSnapshot(database.db, userId, now),
+    );
   });
 
   async function makeUser(label: string) {

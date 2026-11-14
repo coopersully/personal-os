@@ -532,6 +532,13 @@ describe("database schema contracts", () => {
       "0136_finance_conversation_turns",
       "0137_native_push",
       "0138_finance_host_instruction_receipts",
+      "0139_finance_budget_start",
+      "0140_finance_evidence_refresh",
+      "0141_finance_opening_statements",
+      "0142_finance_batch_corrections",
+      "0143_finance_budget_start_impact",
+      "0144_finance_batch_approvals",
+      "0145_finance_decision_declines",
     ]);
   });
 

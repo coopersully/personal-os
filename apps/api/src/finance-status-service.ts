@@ -38,6 +38,7 @@ import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
 import { projectFinanceActionQuestion } from "./finance/action-question-projection.js";
+import { readFinanceAttentionSnapshot } from "./finance/attention-read.js";
 import { budgetPlanningDate, readBudgetPlanContext } from "./finance/budget-plan-projection.js";
 import { findUnverifiedLegacyFinanceEffects } from "./finance/legacy-maintenance-evidence.js";
 import {
@@ -1104,6 +1105,7 @@ export function createFinanceStatusService({ db, now }: Options) {
                   operation: "maintain_finances",
                 };
         return financeStatusSchema.parse({
+          attention: await readFinanceAttentionSnapshot(db, userId, asOfDate, tx),
           activeRun,
           asOf,
           details: {

@@ -145,6 +145,7 @@ import type {
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import {
+  type FinanceProviderSourceAdmissionInput,
   type FinanceProviderTransactionEvidenceInput,
   financeBudgetBaselineQualificationReadSchema,
   financeBudgetBaselineReviewSchema,
@@ -152,6 +153,8 @@ import {
   financeLedgerChallengeSchema,
   financeOnboardingSnapshotSchema,
   financePeriodReviewSchema,
+  financeProviderSourceAdmissionInputSchema,
+  financeProviderSourceAdmissionResultSchema,
   financeProviderTransactionEvidenceInputSchema,
   financeProviderTransactionEvidenceSchema,
   financeSpendingDashboardSchema,
@@ -205,6 +208,17 @@ export function createFinanceApi(request: FinanceRequest) {
     return params;
   }
   return {
+    async admitFinanceProviderSourceFacts(input: FinanceProviderSourceAdmissionInput) {
+      const response = await request<{ status: string; result: unknown }>(
+        "/v1/finances/provider-transaction-evidence/admit",
+        {
+          method: "POST",
+          body: JSON.stringify(financeProviderSourceAdmissionInputSchema.parse(input)),
+        },
+      );
+      if (response.status !== "applied") throw new Error("Source admission did not complete.");
+      return financeProviderSourceAdmissionResultSchema.parse(response.result);
+    },
     async readFinanceProviderTransactionEvidence(input: FinanceProviderTransactionEvidenceInput) {
       return financeProviderTransactionEvidenceSchema.parse(
         await request("/v1/finances/provider-transaction-evidence", {

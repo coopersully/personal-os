@@ -245,6 +245,9 @@ describe("SheetHeader", () => {
     );
     act(() => h.layouts[0]?.({ nativeEvent: { layout: { width: 60 } } }));
     expect(sides()).toEqual([96, 96]);
+    // A control that narrows gives its width back, so the title is not left short.
+    act(() => h.layouts[1]?.({ nativeEvent: { layout: { width: 40 } } }));
+    expect(sides()).toEqual([60, 60]);
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(done).toHaveBeenCalledOnce();
   });

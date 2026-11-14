@@ -33,13 +33,17 @@ export function SheetHeader({
   inset?: boolean;
 }) {
   const t = useTheme();
-  const [side, setSide] = useState(0);
-  const [measured, setMeasured] = useState({ leading: false, trailing: false });
+  // Each slot keeps its own latest width, so a control that narrows gives the title room back.
+  const [widths, setWidths] = useState<{ leading: number | null; trailing: number | null }>({
+    leading: null,
+    trailing: null,
+  });
   const measure = (slot: "leading" | "trailing") => (event: LayoutChangeEvent) => {
     const width = Math.ceil(event.nativeEvent.layout.width);
-    setSide((current) => Math.max(current, width));
-    setMeasured((current) => (current[slot] ? current : { ...current, [slot]: true }));
+    setWidths((current) => (current[slot] === width ? current : { ...current, [slot]: width }));
   };
+  const side = Math.max(widths.leading ?? 0, widths.trailing ?? 0);
+  const measured = widths.leading !== null && widths.trailing !== null;
   const close = <EditorClose label={label} onPress={onClose} disabled={disabled} />;
   return (
     <View
@@ -70,7 +74,7 @@ export function SheetHeader({
           fontSize: 17,
           fontWeight: "600",
           textAlign: "center",
-          opacity: measured.leading && measured.trailing ? 1 : 0,
+          opacity: measured ? 1 : 0,
         }}
       >
         {title}

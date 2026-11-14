@@ -288,7 +288,7 @@ it("announces one failed ritual-history refresh without dropping cached history 
   expect(screen.getByRole("heading", { name: "History" })).toBeVisible();
   expect(
     occurrence.closest('[data-testid="section-item"]')?.closest('[data-testid="form-group"]'),
-  ).not.toBeNull();
+  ).toBeTruthy();
   expect(screen.queryByText("No matching history.")).toBeNull();
   h.history.mockRejectedValueOnce(new Error("History offline"));
   fireEvent.click(screen.getByText("Refresh records"));

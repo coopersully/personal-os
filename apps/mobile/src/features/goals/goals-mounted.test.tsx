@@ -187,7 +187,7 @@ it("loads authoritative goals and motives, then refreshes cached records without
   // Records sit in one rounded group, each taking the group's side padding.
   expect(
     record.closest('[data-testid="section-item"]')?.closest('[data-testid="form-group"]'),
-  ).not.toBeNull();
+  ).toBeTruthy();
   expect(screen.getAllByTestId("form-group")).toHaveLength(1);
   expect(h.goals).toHaveBeenCalledOnce();
   expect(h.motivesRead).toHaveBeenCalledOnce();

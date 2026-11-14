@@ -261,8 +261,8 @@ class EvaluateReadinessTest(unittest.TestCase):
     def test_hosted_shards_require_all_browser_members_and_node_quality(self):
         coverage = {"repository": "Repository contracts", "lint": "Lint and format",
                     "types-tests-coverage-builds": "Node quality",
-                    "browser": [f"Browser acceptance ({project}, {i}/4)"
-                                for project in ("desktop-chromium", "mobile-chromium") for i in range(1, 5)]}
+                    "browser": [f"Browser acceptance ({project}, {i}/6)"
+                                for project in ("desktop-chromium", "mobile-chromium") for i in range(1, 7)]}
         state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",
             "equivalenceVerified": True, "localOnlyComplete": True, "equivalentChecks": coverage})
         names = FULL_SOURCE_JOBS

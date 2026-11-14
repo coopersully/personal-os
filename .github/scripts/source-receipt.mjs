@@ -19,7 +19,7 @@ export function selectedJobNames(scope) {
     "lint-and-format": ["Lint and format"],
     quality: ["Node quality"],
     browser: ["desktop-chromium", "mobile-chromium"].flatMap((project) =>
-      [1, 2, 3, 4].map((shard) => `Browser acceptance (${project}, ${shard}/4)`),
+      [1, 2, 3, 4, 5, 6].map((shard) => `Browser acceptance (${project}, ${shard}/6)`),
     ),
     desktop: ["Desktop (macos-15)", "Desktop (windows-latest)"],
   };

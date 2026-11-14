@@ -40,8 +40,8 @@ FULL_COVERAGE = {
     "repository": ["Repository contracts"],
     "lint": ["Lint and format"],
     "types-tests-coverage-builds": ["Node quality"],
-    "browser": [f"Browser acceptance ({project}, {shard}/4)"
-                for project in ("desktop-chromium", "mobile-chromium") for shard in range(1, 5)],
+    "browser": [f"Browser acceptance ({project}, {shard}/6)"
+                for project in ("desktop-chromium", "mobile-chromium") for shard in range(1, 7)],
 }
 FULL_SOURCE_JOBS = ["Classify changes", "Terraform", "Source verification",
                     "Desktop (macos-15)", "Desktop (windows-latest)",

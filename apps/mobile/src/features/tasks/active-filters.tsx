@@ -1,5 +1,6 @@
 import type { TaskWorkspaceQuery } from "@personal-os/domain";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { Icon } from "../../components/icons";
 import { spacing, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import type { OptionsMenuProps } from "./options-menu";
@@ -56,9 +57,7 @@ export function ActiveFilters({
       <Text numberOfLines={1} style={{ color: t.ink, maxWidth: 230, fontSize: 14 }}>
         {label}
       </Text>
-      <Text accessible={false} style={{ color: t.secondary, fontSize: 18 }}>
-        ×
-      </Text>
+      <Icon name="cancel" size={14} color={t.secondary} />
     </Pressable>
   );
   const entries = activeFilters(filters);

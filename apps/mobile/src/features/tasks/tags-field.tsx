@@ -44,9 +44,7 @@ export function TagsField({
             }}
           >
             <Text style={{ color: t.ink, fontSize: 16, flexShrink: 1 }}>{tag}</Text>
-            <Text accessible={false} style={{ color: t.secondary, fontSize: 20 }}>
-              ×
-            </Text>
+            <Icon name="cancel" size={14} color={t.secondary} />
           </Pressable>
         ))}
         {value.length < 20 && (

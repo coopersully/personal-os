@@ -4,6 +4,8 @@ import { Icon, type IconName } from "../../components/icons";
 import { RowActions } from "../../components/row-actions";
 import { entityDictionary } from "../../product/entities";
 import { radius, spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
+import { finishedProjectLabel } from "./container-directory";
+import { formatTargetDate } from "./presentation";
 import { Action, groupEdges, styles } from "./ui";
 
 type ContainerRowActions = {
@@ -21,10 +23,19 @@ function ContainerRow({
   icon,
   editable = true,
   permanent = false,
+  state,
+  subtitleBelowActions = true,
   ...actions
 }: ContainerRowActions & {
+  /**
+   * A long description reserves the action button's height so it can use the full width below
+   * it. A short metadata line sits directly under the name instead and stays clear of the button.
+   */
+  subtitleBelowActions?: boolean;
   name: string;
   subtitle?: string;
+  /** A status announced with the row, such as "Completed". */
+  state?: string | null;
   icon: IconName;
   editable?: boolean;
   permanent?: boolean;
@@ -40,7 +51,7 @@ function ContainerRow({
     >
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Open ${name}`}
+        accessibilityLabel={`Open ${name}${state ? `, ${state.toLocaleLowerCase()}` : ""}`}
         onPress={actions.onOpen}
         style={{
           flex: 1,
@@ -59,14 +70,21 @@ function ContainerRow({
               alignItems: "flex-start",
               gap: spacing.sm,
               paddingRight: touchTarget + spacing.sm,
-              minHeight: touchTarget,
+              minHeight: subtitleBelowActions ? touchTarget : undefined,
             }}
           >
             <Text style={{ color: t.ink, fontSize: 17 }}>{name}</Text>
             {permanent && <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>}
           </View>
           {!!subtitle && (
-            <Text numberOfLines={2} style={{ color: t.secondary, fontSize: 12 }}>
+            <Text
+              numberOfLines={2}
+              style={{
+                color: t.secondary,
+                fontSize: 12,
+                paddingRight: subtitleBelowActions ? 0 : touchTarget + spacing.sm,
+              }}
+            >
               {subtitle}
             </Text>
           )}
@@ -121,7 +139,13 @@ export function ProjectRow({
     <ContainerRow
       {...actions}
       name={record.name}
-      subtitle={[listName, record.targetDate ? `Target ${record.targetDate}` : null]
+      state={finishedProjectLabel(record)}
+      subtitleBelowActions={false}
+      subtitle={[
+        finishedProjectLabel(record),
+        listName,
+        record.targetDate ? `Target ${formatTargetDate(record.targetDate)}` : null,
+      ]
         .filter(Boolean)
         .join(" · ")}
       icon={entityDictionary.project.icon}
@@ -165,67 +189,71 @@ export function PinnedContainers({
           keyExtractor={(item) => item.id}
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: spacing.md }}
-          renderItem={({ item }) => (
-            <View
-              style={{
-                width: 180,
-                minHeight: 96,
-                padding: spacing.lg,
-                gap: spacing.sm,
-                borderRadius: radius.panel,
-                backgroundColor: t.surface,
-              }}
-            >
+          renderItem={({ item }) => {
+            const state = "lifecycle" in item ? finishedProjectLabel(item) : null;
+            return (
               <View
                 style={{
-                  flexDirection: "row",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
+                  width: 180,
+                  minHeight: 96,
+                  padding: spacing.lg,
+                  gap: spacing.sm,
+                  borderRadius: radius.panel,
+                  backgroundColor: t.surface,
                 }}
               >
-                <Icon
-                  name={entityDictionary[kind].icon}
-                  color={workspaceColor(t, "tasks")}
-                  size={22}
-                />
-                <RowActions
-                  label={`Actions for ${item.name}`}
-                  actions={[
-                    {
-                      id: "unpin",
-                      label: `Unpin ${item.name}`,
-                      icon: "pin",
-                      onPress: () => onPin(item),
-                      disabled,
-                    },
-                    ...("kind" in item && item.kind === "inbox"
-                      ? []
-                      : [
-                          {
-                            id: "edit",
-                            label: `Edit ${item.name}`,
-                            icon: "settings" as const,
-                            onPress: () => onEdit(item),
-                          },
-                        ]),
-                  ]}
-                />
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <Icon
+                    name={entityDictionary[kind].icon}
+                    color={workspaceColor(t, "tasks")}
+                    size={22}
+                  />
+                  <RowActions
+                    label={`Actions for ${item.name}`}
+                    actions={[
+                      {
+                        id: "unpin",
+                        label: `Unpin ${item.name}`,
+                        icon: "pin",
+                        onPress: () => onPin(item),
+                        disabled,
+                      },
+                      ...("kind" in item && item.kind === "inbox"
+                        ? []
+                        : [
+                            {
+                              id: "edit",
+                              label: `Edit ${item.name}`,
+                              icon: "settings" as const,
+                              onPress: () => onEdit(item),
+                            },
+                          ]),
+                    ]}
+                  />
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open pinned ${kind}: ${item.name}${state ? `, ${state.toLocaleLowerCase()}` : ""}`}
+                  onPress={() => onOpen(item)}
+                  style={{ minHeight: touchTarget, justifyContent: "center" }}
+                >
+                  <Text numberOfLines={2} style={{ fontSize: 16, fontWeight: "600", color: t.ink }}>
+                    {item.name}
+                  </Text>
+                  {"kind" in item && item.kind === "inbox" && (
+                    <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>
+                  )}
+                  {state && <Text style={{ color: t.secondary, fontSize: 12 }}>{state}</Text>}
+                </Pressable>
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Open pinned ${kind}: ${item.name}`}
-                onPress={() => onOpen(item)}
-                style={{ minHeight: touchTarget, justifyContent: "center" }}
-              >
-                <Text numberOfLines={2} style={{ fontSize: 16, fontWeight: "600", color: t.ink }}>
-                  {item.name}
-                </Text>
-                {"kind" in item && item.kind === "inbox" && (
-                  <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>
-                )}
-              </Pressable>
-            </View>
-          )}
+            );
+          }}
         />
       )}
     </View>

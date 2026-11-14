@@ -82,9 +82,22 @@ section; omit an empty pinned row. Inbox remains the default list for unorganize
 Browse has no Add action. Upcoming and History share its top cards; below them group Task views
 (All, Tasks, Reminders, Scheduled), Storage (Archive, Trash), and Preferences.
 
+Projects has Active, Completed, Cancelled and All status chips with counts above its pinned row;
+Active is the default. A completed or cancelled project stays in Projects under its status until it
+is archived, and opening it shows all of its tasks, including finished ones. Rows and pinned cards
+for finished projects show the status and include it in the accessibility label ("Open Move,
+completed"). A project's metadata line (status, list, target date
+formatted as a short calendar date) sits directly under its name; a list description keeps the full
+width below the row actions. A finished or archived project, or one whose list is archived, offers no Add,
+because the server rejects new work there; Add also stays hidden until the project has loaded. Counts cover projects outside Archive and Trash and ignore the current search; chips show
+their bare label until lists and projects have loaded, never a zero from a pending or failed read.
+An empty status names itself, All with no projects says "No projects yet.", and a search that hides
+every project says no projects match. Lists have no completed or cancelled state and no status chips. Lists, Projects
+and Archive search matches names plus list descriptions and project why and notes.
+
 Upcoming means due/reserved after today; Scheduled means a task has reserved time, regardless of
 date. History contains completed/cancelled records outside archived containers. Archive contains
-archived containers, not merely closed projects. Trash contains deleted records and supports
+archived containers, not merely closed projects; those remain under Projects. Trash contains deleted records and supports
 Restore. Give Archive and Trash distinct icons. Trash does not offer capture or permanent deletion
 without an explicit product decision and confirmation. A failed restore keeps the item recoverable.
 
@@ -240,6 +253,32 @@ Account identities use validated provider institution artwork without recoloring
 failed artwork falls back to institution initials, never a fabricated company logo. Reuse the same
 identity component in account rows and details.
 
+### Finance account management
+
+Accounts has a floating plus that opens the manual account form; connecting a bank is a separate
+flow. Account details keep ownership and planning as direct rows and put Edit account, Sync
+account, Review duplicate and the destructive Stop tracking account in the top-right action menu.
+Offer Sync only for a connected account, and neither Sync nor Stop tracking once tracking has
+stopped. A connected account's balance stays read-only; only a manual account edits its balance.
+
+Sync is a provider handoff: keep one toast from loading to the confirmed result, disable the
+account's actions while it runs, and refresh freshness afterwards whatever the result. Distinguish
+a definitive rejection from an unknown outcome (timeout, lost connection, server fault). An unknown
+outcome never claims success or failure, keeps the same idempotency key for the retry, and tells
+the person what to check. Adding a manual account has no retry key, so after an unknown outcome the
+next Save looks for the earlier attempt, under the name and institution it was sent with, before
+writing again; a corrected draft is not written as a second account. A rejected or unknown edit
+re-reads accounts so reopening the editor starts from the latest revision. An invalid Currency or
+Balance states the correction beside the field rather than relying on colour.
+The form names its required fields, uses Required/Optional as placeholders rather than sample
+values, and keeps one title: the page heading, with only dismissal in the navigation bar.
+
+Duplicate review happens in the app. The person chooses the account to keep from accounts that are
+connected and current, reads both identities, freshness and the overlapping and unique transaction
+counts, then confirms. Resolution is bound to the reviewed comparison revision; a changed
+comparison stops nothing and reloads. Stop tracking and duplicate resolution each keep a native
+confirmation that names the account and what is preserved.
+
 ### Transaction conversations and review
 
 - Needs your input cards show merchant, amount and category, and open the canonical transaction details page. Details place attention on the category row itself, with direct selection and approval. Do not duplicate the field with a separate Choose category banner/button. Notes remain optional and never count as a missing required field. This is record state, not action-result feedback.
@@ -268,6 +307,31 @@ Finance applies value-only attention styling to unknown ownership, reconnect/syn
 Category identity follows the record throughout transaction lists, detail rows, editor options, conversation attachments and spending/budget groups. Prefer the validated group icon supplied by the API, then the shared semantic category mapping; custom buckets use the bucket fallback. Never substitute a generic receipt/wallet for a known category, and never invent an identity for an unavailable category.
 
 Coming next and Cash flow show the scheduled date, saved recurring type and matching icon, signed amount, and expected status. Recurring types (Income, Bill, Subscription, Savings) are distinct from transaction-category assignments; never infer a transaction category from the merchant name. Upcoming previews sort chronologically and exclude matched or superseded occurrences.
+
+### Calendar day and agenda
+
+Calendar on iPhone is one screen with Day and Agenda segments; it does not reproduce the web week
+grid. The heading names the chosen day. Previous/next arrows step one day, a week strip that starts on
+the account's "Week starts on" setting jumps within the week and marks today and days that have
+events, and Today returns to the
+current day in the account planning timezone. Day shows all-day events as rows above an hour
+timeline that covers 8 AM–6 PM and widens to contain earlier or later events; overlapping events
+sit side by side and say so in their accessible label. Agenda lists the next 14 days from the
+chosen day, grouped by day, omitting empty days.
+
+Reads are bounded: Day loads the chosen week and Agenda its 14 days, both as instants derived from
+the account timezone. Provider all-day events stay on their calendar date; an event that crosses
+midnight appears on each day with From/Until wording. Rows carry time, tentative/cancelled state,
+location, a video-call marker and the calendar name; color comes from the calendar.
+
+Choose calendars opens a sheet of every calendar with its source account, read-only state and
+last-update freshness. Showing or hiding a calendar saves the same account-level choice web and
+Settings use, then re-reads events; success is silent and failure uses Sonner. Hidden or absent
+calendars and calendars that may be out of date are stated on the page rather than rendered as an
+empty day. Event details are read-only: date and time with the display timezone and the event's
+own timezone when different, repeat/tentative/cancelled state, location, the meeting link or its
+pending/failed state, calendar and source, freshness, reminders, guests and notes. Creating,
+editing, deleting and blocking time are separate work (COO-239, COO-242).
 
 ### Briefings and compact record rows
 

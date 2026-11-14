@@ -28,3 +28,46 @@ it("passes attachment cancellation through to fetch without requiring a signal f
   await rejected;
   expect(fetch.mock.calls[1]?.[1]?.signal).toBe(controller.signal);
 });
+
+it("requests body-free summaries with filters and the page cursor", async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockResolvedValue(new Response(JSON.stringify({ threads: [{ id: "summary" }] })));
+  const client = createApiClient({ baseUrl: "https://example.test", fetch });
+
+  await expect(
+    client.listMailThreadSummaries({
+      accountIds: ["one", "two"],
+      beforeId: "last",
+      beforeReceivedAt: "2026-11-09T12:00:00.000Z",
+      limit: 50,
+      mailboxRole: "inbox",
+      query: "board packet",
+    }),
+  ).resolves.toEqual([{ id: "summary" }]);
+  const url = new URL(String(fetch.mock.calls[0]?.[0]));
+  expect(url.pathname).toBe("/v1/mail/thread-summaries");
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    accountIds: "one,two",
+    beforeId: "last",
+    beforeReceivedAt: "2026-11-09T12:00:00.000Z",
+    limit: "50",
+    mailboxRole: "inbox",
+    query: "board packet",
+  });
+});
+
+it("keeps the web thread list on the full thread endpoint", async () => {
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockImplementation(async () => new Response(JSON.stringify({ threads: [] })));
+  const client = createApiClient({ baseUrl: "https://example.test", fetch });
+
+  await client.listMailThreads({ mailboxRole: "inbox" });
+  await client.listMailThreadSummaries();
+
+  expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+    "/v1/mail/threads",
+    "/v1/mail/thread-summaries",
+  ]);
+});

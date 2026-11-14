@@ -1,4 +1,5 @@
-import { WorkspacePage } from "../../../components/workspace-page";
+import { inboxScope } from "../../../features/mail/logic";
+import { MailThreadList } from "../../../features/mail/thread-list";
 export default function Page() {
-  return <WorkspacePage title="inbox" />;
+  return <MailThreadList scope={inboxScope} />;
 }

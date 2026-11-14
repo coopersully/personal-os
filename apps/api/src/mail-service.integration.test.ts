@@ -851,6 +851,46 @@ describe.sequential("mail service", () => {
     await database.db.delete(mailDrafts).where(eq(mailDrafts.id, uncertain.id));
   });
 
+  it("pages summaries past equal timestamps without skipping rows or crossing owners", async () => {
+    const original = await service.getThread(userId, secondThreadId);
+    const sharedDate = (await service.getThread(userId, threadId)).receivedAt;
+    await database.db
+      .update(mailThreads)
+      .set({ receivedAt: new Date(sharedDate) })
+      .where(eq(mailThreads.id, secondThreadId));
+    try {
+      const all = await service.listThreads(userId, { limit: 50 });
+      const first = await service.listThreads(userId, { limit: 1 });
+      const anchor = first[0];
+      if (!anchor) throw new Error("Missing first page");
+      const cursor = { beforeId: anchor.id, beforeReceivedAt: anchor.receivedAt };
+      const second = await service.listThreads(userId, { limit: 1 }, cursor);
+
+      expect(all).toHaveLength(2);
+      expect([...first, ...second].map((item) => item.id)).toEqual(all.map((item) => item.id));
+      const last = second[0];
+      if (!last) throw new Error("Missing second page");
+      await expect(
+        service.listThreads(
+          userId,
+          { limit: 1 },
+          { beforeId: last.id, beforeReceivedAt: last.receivedAt },
+        ),
+      ).resolves.toEqual([]);
+      await expect(
+        service.listThreads(userId, { limit: 50, mailboxRole: "sent" }, cursor),
+      ).resolves.toEqual(second.filter((item) => item.id === secondThreadId));
+      await expect(
+        service.listThreads("00000000-0000-4000-8000-000000000000", { limit: 50 }, cursor),
+      ).resolves.toEqual([]);
+    } finally {
+      await database.db
+        .update(mailThreads)
+        .set({ receivedAt: new Date(original.receivedAt) })
+        .where(eq(mailThreads.id, secondThreadId));
+    }
+  });
+
   it("filters conversations by account, unread state, mailbox, and search fields", async () => {
     await expect(service.listThreads(userId, { limit: 100 })).resolves.toHaveLength(2);
     await expect(

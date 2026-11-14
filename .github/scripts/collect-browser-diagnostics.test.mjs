@@ -289,7 +289,7 @@ test("identity, policy, matrix, marker and manifest bounds fail closed", () => {
   for (const [key, value] of [
     ["GITHUB_SHA", "f".repeat(40)],
     ["BROWSER_PROJECT", "unknown"],
-    ["BROWSER_SHARD", "5"],
+    ["BROWSER_SHARD", "7"],
     ["BROWSER_DIAGNOSTIC_CONTEXT", "production"],
   ])
     fixture(({ options }) => {
@@ -391,11 +391,11 @@ test("workflow retains retry-success evidence with unchanged source command and 
   const browser = workflow.split("  browser:\n")[1].split("\n  desktop:\n")[0];
   assert.match(browser, /timeout-minutes: 30/);
   assert.match(browser, /project: \[desktop-chromium, mobile-chromium\]/);
-  assert.match(browser, /shard: \[1, 2, 3, 4\]/);
+  assert.match(browser, /shard: \[1, 2, 3, 4, 5, 6\]/);
   assert.equal(
     (
       browser.match(
-        /run: pnpm test:e2e --project=\$\{\{ matrix.project \}\} --shard=\$\{\{ matrix.shard \}\}\/4/g,
+        /run: pnpm test:e2e --project=\$\{\{ matrix.project \}\} --shard=\$\{\{ matrix.shard \}\}\/6/g,
       ) ?? []
     ).length,
     1,

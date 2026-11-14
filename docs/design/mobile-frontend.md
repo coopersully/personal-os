@@ -347,6 +347,14 @@ conditions independently of app light/dark mode; keep the briefing canvas opaque
 Use a small weather/location caption for opt-in and fallback clarity. See
 [the mobile sky boundary](../engineering/mobile-today-sky.md) for permission, freshness and lifecycle rules.
 
+### Mail reading
+
+Inbox is the unified inbox across connected accounts; Mailboxes lists each account's mailboxes with standard folders first (Inbox, Drafts, Sent, Archive, Spam, Trash), then the account's own folders by name, and the unread count as the trailing value. Choosing a mailbox shows its conversations in place with a back control to Mailboxes. A conversation row carries sender, time, subject, message count and a two-line preview; unread is a dot plus heavier weight, never colour alone.
+
+Thread lists read only the body-free summary contract (`GET /v1/mail/thread-summaries`): no body text, recipient lists or provider thread identifier. Only these summaries may be cached. Message bodies, recipients and attachment names load when a conversation opens, stay in memory while the reader is open and are discarded when it closes. When a conversation cannot be read, keep the subject visible and say that message text is never stored on the device and needs a connection.
+
+Search is typed in the workspace header and runs on the server against the current mailbox, debounced, through the `mailSearch` route parameter; the header shows no sample results on Mail, and the list keeps a visible indicator until the search read settles; results never mix with the unfiltered list, and switching mailbox clears the search. A search typed over the mailbox list, with no mailbox open, shows matches from every inbox. Distinguish an unavailable read from an empty mailbox, no connected account and no search matches. Pull-to-refresh follows the native refresh exception; an explicit Try again uses one Sonner toast from loading to outcome.
+
 ### Transparent sticky workspace search
 
 The workspace search header floats above page content without an opaque full-width backing strip.

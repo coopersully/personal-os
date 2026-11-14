@@ -39,6 +39,8 @@
     "test:ci-scope": "node --test .github/scripts/ci-scope.test.mjs",
     "test:mac-production": "node --test deploy/mac-mini/*.test.mjs",
     "test:coverage": "vitest run --coverage",
+    "test:coverage:shard": "NOHMI_COVERAGE_MODE=shard vitest run --coverage",
+    "test:coverage:merge": "node scripts/merge-coverage-shards.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit -p integration/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && pnpm --filter './apps/**' --filter './packages/**' --if-present run typecheck",
     "verify": "bash ./.codex/scripts/environment.sh verify",

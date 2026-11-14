@@ -74,8 +74,8 @@ Compare the workflow against the candidate's verifier inputs; check names alone 
 | --- | --- |
 | `pnpm check:repo` | Repository contracts |
 | `pnpm lint` | Lint and format |
-| `pnpm check:node` (types, coverage, builds) | Node quality |
-| `pnpm test:e2e` | All four Browser acceptance shards for **each** of desktop-chromium and mobile-chromium |
+| `pnpm check:node` (types, coverage, builds) | Node quality, which cannot succeed unless all six Node tests shards and Node build did |
+| `pnpm test:e2e` | All six Browser acceptance shards for **each** of desktop-chromium and mobile-chromium |
 
 Every row must name distinct stage jobs, include every matrix member, and be successful for hosted full equivalence, even if scoped CI omitted
 an unaffected stage. Omission is not evidence: if any core hosted stage is missing, use the
@@ -122,7 +122,7 @@ source recovery needs the documented metadata rerun, not a PR-body edit.
 
 ## Bounded browser failure diagnostics
 
-The browser matrix preserves the original test command, both projects and four shards, one worker,
+The browser matrix preserves the original test command, both projects and six shards, one worker,
 configured single retry, 45-second case deadline and 30-minute test-step deadline. Existing Playwright
 `retain-on-failure` traces and `only-on-failure` screenshots can remain after a retry succeeds.
 Collection and upload therefore run independently of the terminal test-step result. No extra test,
@@ -192,9 +192,10 @@ its test/body/cleanup repairs; the consuming workstream retains its acceptance d
 
 ## Bounded Node coverage diagnostics
 
-Node quality prepares an attempt-owned marker before install/audit/checks, then always attempts
-collection without changing the original `pnpm check:node` command, exit handling, coverage floors,
-report-on-test-failure behavior or job deadline. The JSON reporter adds exact per-file Istanbul
+Node quality prepares an attempt-owned marker before install and the coverage merge, then always
+attempts collection without changing exit handling, coverage floors or report-on-test-failure
+behavior. Hosted tests run as shards whose raw coverage it merges; see
+[verification efficiency](verification-efficiency.md). The JSON reporter adds exact per-file Istanbul
 maps and counters alongside the existing reporters. Completed reporters run before threshold
 checking; failing tests with `reportOnFailure=false`, or earlier failures, can leave no reports.
 Absence produces a truthful manifest, never regenerated reports, rounded or zero-filled counters,
@@ -297,7 +298,8 @@ as passing, so every decision stays inside the script. These cases start no gate
 ## Draft fast lane
 
 A draft PR is still being iterated, so its source run defers the browser and desktop matrices.
-Classification, Terraform, repository contracts, lint and Node quality still run. The classifier
+Classification, Terraform, repository contracts, lint and Node quality with its test shards and
+build still run. The classifier
 makes this decision from the PR event's draft flag and omits the two matrices from
 `required_jobs`; no job carries its own draft condition. The canonical scope, its expected jobs and
 the source receipt are unchanged, so the deferred matrices remain required for acceptance.

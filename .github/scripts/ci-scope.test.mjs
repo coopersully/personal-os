@@ -329,18 +329,33 @@ test("full opt-in rejects a missing gate even when later jobs retain theirs", ()
   }
 });
 
-test("browser shards retain both complete matrices and unsharded coverage", () => {
+test("browser shards retain both complete matrices and coverage is merged before conversion", () => {
   const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
   const blocks = workflowJobBlocks(workflow);
   const quality = blocks.find((block) => block.startsWith("  quality:\n"));
+  const tests = blocks.find((block) => block.startsWith("  tests:\n"));
+  const build = blocks.find((block) => block.startsWith("  build:\n"));
   const browser = blocks.find((block) => block.startsWith("  browser:\n"));
   const required = blocks.find((block) => block.startsWith("  required:\n"));
-  assert.match(quality, /run: pnpm test:coverage\n/);
-  assert.match(quality, /pnpm audit --prod/);
-  assert.doesNotMatch(quality, /merge-reports|shard|thresholds|continue-on-error/);
+  assert.match(quality, /run: pnpm test:coverage:merge\n/);
+  assert.match(build, /pnpm audit --prod/);
+  // Vitest's own report merge runs after conversion and can credit uncovered
+  // branches. No job may use it, weaken thresholds or tolerate a failure.
+  for (const job of [quality, tests, build])
+    assert.doesNotMatch(job, /merge-reports|reporter=blob|thresholds|continue-on-error/);
+  assert.match(tests, /shard: \[1, 2, 3, 4, 5, 6\]/);
+  assert.match(tests, /run: pnpm test:coverage:shard --shard=\$\{\{ matrix.shard \}\}\/6\n/);
+  assert.match(tests, /fail-fast: false/);
+  const scripts = JSON.parse(
+    readFileSync(resolve(scriptDirectory, "../../package.json"), "utf8"),
+  ).scripts;
+  assert.equal(scripts["test:coverage"], "vitest run --coverage");
+  assert.equal(scripts["test:coverage:shard"], "NOHMI_COVERAGE_MODE=shard vitest run --coverage");
+  assert.equal(scripts["test:coverage:merge"], "node scripts/merge-coverage-shards.mjs");
   assert.match(browser, /project: \[desktop-chromium, mobile-chromium\]/);
-  assert.match(browser, /shard: \[1, 2, 3, 4\]/);
-  assert.match(browser, /--project=\$\{\{ matrix.project \}\} --shard=\$\{\{ matrix.shard \}\}\/4/);
+  assert.match(browser, /shard: \[1, 2, 3, 4, 5, 6\]/);
+  assert.match(browser, /--project=\$\{\{ matrix.project \}\} --shard=\$\{\{ matrix.shard \}\}\/6/);
+
   assert.match(
     browser,
     /name: browser-diagnostics-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}-\$\{\{ matrix.project \}\}-\$\{\{ matrix.shard \}\}/,
@@ -374,32 +389,76 @@ function workflowSteps(job) {
   });
 }
 
+// Node quality is the canonical result. Node tests and Node build are its inputs:
+// it needs both, so neither can fail, be cancelled or go missing without Node
+// quality being skipped, which the required gate rejects.
 function assertNodeFailureContract(workflow) {
   const jobs = workflowJobBlocks(workflow);
-  const quality = jobs.find((block) => block.startsWith("  quality:\n"));
-  assert.ok(quality);
-  // Neither the job nor any step may turn a failure into a successful job result.
-  assert.doesNotMatch(quality, /continue-on-error/);
-  const steps = workflowSteps(quality);
-  const source = steps.filter(({ fields }) =>
-    ["install", "audit", "typecheck", "node", "build"].includes(fields.id),
-  );
+  const job = (id) => jobs.find((block) => block.startsWith(`  ${id}:\n`));
+  const [quality, tests, build] = ["quality", "tests", "build"].map(job);
+  assert.ok(quality && tests && build);
+  const gate =
+    /^ {4}if: \$\{\{ contains\(fromJSON\(needs.changes.outputs.required_jobs \|\| '\[\]'\), 'quality'\) \}\}$/m;
+  const sourceSteps = (block, ids) =>
+    workflowSteps(block).filter(({ fields }) => ids.includes(fields.id));
+  for (const block of [quality, tests, build]) {
+    // Neither a job nor any step may turn a failure into a successful job result.
+    assert.doesNotMatch(block, /continue-on-error/);
+    assert.match(block, gate, "Inputs are selected exactly when Node quality is.");
+  }
+  assert.match(quality, /^ {4}needs: \[changes, tests, build\]$/m);
+  assert.match(tests, /^ {4}needs: changes$/m);
+  assert.match(build, /^ {4}needs: changes$/m);
+
+  const buildSource = sourceSteps(build, ["install", "audit", "typecheck", "build"]);
   assert.deepEqual(
-    source.map(({ fields }) => [fields.id, fields.run]),
+    buildSource.map(({ fields }) => [fields.id, fields.run, fields["timeout-minutes"]]),
     [
-      ["install", "pnpm install --frozen-lockfile"],
-      ["audit", "pnpm audit --prod"],
-      ["typecheck", "pnpm typecheck"],
-      ["node", "pnpm test:coverage"],
-      ["build", "pnpm build"],
+      ["install", "pnpm install --frozen-lockfile", undefined],
+      ["audit", "pnpm audit --prod", undefined],
+      ["typecheck", "pnpm typecheck", "5"],
+      ["build", "pnpm build", "10"],
     ],
   );
-  assert.match(quality, /^ {4}timeout-minutes: 50$/m);
+  assert.match(build, /^ {4}timeout-minutes: 20$/m);
+
+  const testSource = sourceSteps(tests, ["install", "node"]);
   assert.deepEqual(
-    source.slice(2).map(({ fields }) => fields["timeout-minutes"]),
-    ["5", "30", "10"],
-    "Types and builds must not consume the 30-minute test execution budget.",
+    testSource.map(({ fields }) => [fields.id, fields.run, fields["timeout-minutes"]]),
+    [
+      ["install", "pnpm install --frozen-lockfile", undefined],
+      ["node", "pnpm test:coverage:shard --shard=${{ matrix.shard }}/6", "15"],
+    ],
   );
+  assert.match(tests, /^ {4}timeout-minutes: 20$/m);
+  assert.match(tests, /^ {8}shard: \[1, 2, 3, 4, 5, 6\]$/m);
+  // A shard that exported nothing must fail rather than leave the merge short.
+  const shardUpload = workflowSteps(tests).filter(({ fields }) =>
+    fields.uses?.startsWith("actions/upload-artifact@"),
+  );
+  assert.equal(shardUpload.length, 1);
+  assert.match(shardUpload[0].block, /if-no-files-found: error/);
+  assert.match(
+    shardUpload[0].block,
+    /name: coverage-shard-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}-\$\{\{ matrix.shard \}\}/,
+  );
+
+  const steps = workflowSteps(quality);
+  const source = sourceSteps(quality, ["install", "shards", "node"]);
+  assert.deepEqual(
+    source.map(({ fields }) => [fields.id, fields.run, fields["timeout-minutes"]]),
+    [
+      ["install", "pnpm install --frozen-lockfile", undefined],
+      ["shards", undefined, undefined],
+      ["node", "pnpm test:coverage:merge", "10"],
+    ],
+  );
+  // Only this attempt's shards are merged; the merge itself checks all six are present.
+  assert.match(
+    source[1].block,
+    /pattern: coverage-shard-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}-\*/,
+  );
+  assert.match(quality, /^ {4}timeout-minutes: 15$/m);
   const packageJson = JSON.parse(
     readFileSync(resolve(scriptDirectory, "../../package.json"), "utf8"),
   );
@@ -407,10 +466,16 @@ function assertNodeFailureContract(workflow) {
     packageJson.scripts["check:node"],
     "pnpm typecheck && pnpm test:coverage && pnpm build",
   );
-  for (const { fields } of source) {
+  for (const { fields } of [...buildSource, ...testSource, ...source]) {
     // Omitted conditions retain GitHub's default success() blocking semantics.
     assert.equal(fields.if, undefined, `${fields.id} must stop after an earlier failure.`);
   }
+  for (const block of [tests, build])
+    assert.deepEqual(
+      workflowSteps(block).filter(({ fields }) => fields.if !== undefined),
+      [],
+      "Input jobs have no step that runs after a failure.",
+    );
   const collector = steps.filter(({ fields }) => fields.id === "coverage");
   const uploads = steps.filter(({ fields }) => fields.uses?.startsWith("actions/upload-artifact@"));
   assert.equal(collector.length, 1);
@@ -419,13 +484,11 @@ function assertNodeFailureContract(workflow) {
     collector[0].fields.run,
     /^node \.github\/scripts\/collect-node-coverage\.mjs collect /,
   );
-  for (const [name, id] of [
-    ["TYPECHECK", "typecheck"],
-    ["COVERAGE", "node"],
-    ["BUILD", "build"],
-  ]) {
-    assert.ok(collector[0].block.includes(`${name}_OUTCOME: \${{ steps.${id}.outcome }}`));
-  }
+  // Types, audit and builds are reported from the build job this job waited for.
+  for (const name of ["AUDIT", "TYPECHECK", "BUILD"])
+    assert.ok(collector[0].block.includes(`${name}_OUTCOME: \${{ needs.build.result }}`));
+  assert.ok(collector[0].block.includes("COVERAGE_OUTCOME: ${{ steps.node.outcome }}"));
+  assert.ok(collector[0].block.includes("INSTALL_OUTCOME: ${{ steps.install.outcome }}"));
   assert.equal(collector[0].fields.if, "always()");
   assert.equal(
     uploads[0].fields.if,
@@ -478,11 +541,27 @@ test("Node failure contract rejects source bypasses and diagnostic masking", () 
       (text) => text.replace("run: pnpm audit --prod", "run: pnpm audit --prod || true"),
     ],
     [
+      "merge command",
+      (text) =>
+        text.replace("run: pnpm test:coverage:merge", "run: pnpm test:coverage:merge || true"),
+    ],
+    [
+      "shard command",
+      (text) =>
+        text.replace(
+          "run: pnpm test:coverage:shard --shard=${{ matrix.shard }}/6",
+          "run: pnpm test:coverage:shard --shard=${{ matrix.shard }}/6 --passWithNoTests",
+        ),
+    ],
+    [
       "source order",
       (text) =>
         text
-          .replace("id: install", "id: audit")
-          .replace("id: audit\n        run: pnpm audit", "id: install\n        run: pnpm audit"),
+          .replace("id: audit\n        run: pnpm audit", "id: typecheck\n        run: pnpm audit")
+          .replace(
+            "id: typecheck\n        run: pnpm typecheck",
+            "id: audit\n        run: pnpm typecheck",
+          ),
     ],
     ...["install", "audit", "typecheck", "node", "build"].flatMap((id) => [
       [
@@ -512,35 +591,61 @@ test("Node failure contract rejects source bypasses and diagnostic masking", () 
       (text) =>
         text.replace("always() && steps.coverage.outputs.artifact_ready == 'true'", "always()"),
     ],
-    [
-      "job ignored failure",
-      (text) => text.replace("  quality:\n", "  quality:\n    continue-on-error: true\n"),
-    ],
+    ...["quality", "tests", "build"].map((id) => [
+      `${id} job ignored failure`,
+      (text) => text.replace(`  ${id}:\n`, `  ${id}:\n    continue-on-error: true\n`),
+    ]),
     ...[
-      ["typecheck", 5],
-      ["node", 30],
-      ["build", 10],
-    ].map(([id, minutes]) => [
+      ["typecheck", "pnpm typecheck", 5],
+      ["build", "pnpm build", 10],
+      ["node", "pnpm test:coverage:merge", 10],
+    ].map(([id, run, minutes]) => [
       `${id} execution budget`,
       (text) =>
         text.replace(
-          new RegExp(`(- id: ${id}\\n        run: [^\\n]+\\n        timeout-minutes: )${minutes}`),
-          (_, prefix) => `${prefix}99`,
+          `run: ${run}\n        timeout-minutes: ${minutes}`,
+          `run: ${run}\n        timeout-minutes: 99`,
         ),
     ]),
+    // Node quality must wait for, and so depend on, both of its inputs.
     [
-      "outer budget",
+      "merge without the build",
+      (text) => text.replace("needs: [changes, tests, build]", "needs: [changes, tests]"),
+    ],
+    [
+      "merge without the shards",
+      (text) => text.replace("needs: [changes, tests, build]", "needs: [changes, build]"),
+    ],
+    [
+      "input selected independently",
       (text) =>
         text.replace(
-          "# Account for setup, types and builds outside the bounded test execution.\n    timeout-minutes: 50",
-          "timeout-minutes: 30",
+          "  build:\n    name: Node build\n    needs: changes\n    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'quality') }}",
+          "  build:\n    name: Node build\n    needs: changes\n    if: ${{ false }}",
+        ),
+    ],
+    ["fewer shards", (text) => text.replace("shard: [1, 2, 3, 4, 5, 6]", "shard: [1, 2, 3, 4, 5]")],
+    [
+      "tolerated empty shard export",
+      (text) =>
+        text.replace(
+          "/coverage-shards/${{ matrix.shard }}/\n          if-no-files-found: error",
+          "/coverage-shards/${{ matrix.shard }}/\n          if-no-files-found: warn",
+        ),
+    ],
+    [
+      "shards from another attempt",
+      (text) =>
+        text.replace(
+          "pattern: coverage-shard-${{ github.run_id }}-${{ github.run_attempt }}-*",
+          "pattern: coverage-shard-${{ github.run_id }}-*",
         ),
     ],
     [
       "build diagnostic",
       (text) =>
         text.replace(
-          `BUILD_OUTCOME: \${{ steps.build.outcome }}`,
+          `BUILD_OUTCOME: \${{ needs.build.result }}`,
           `BUILD_OUTCOME: \${{ steps.node.outcome }}`,
         ),
     ],
@@ -866,9 +971,15 @@ test("readiness full-source inventory matches workflow names and both complete m
   for (const block of workflowJobBlocks(workflow)) {
     const match = block.match(/^ {4}name: (.+)$/m);
     if (!match) continue;
+    // Node tests and Node build are inputs that Node quality needs; the readiness
+    // inventory names the canonical job that cannot succeed without them.
+    if (/^ {2}(tests|build):\n/.test(block)) {
+      assert.match(workflow, /^ {4}needs: \[changes, tests, build\]$/m);
+      continue;
+    }
     if (block.startsWith("  browser:\n")) {
       for (const project of ["desktop-chromium", "mobile-chromium"])
-        for (const shard of [1, 2, 3, 4])
+        for (const shard of [1, 2, 3, 4, 5, 6])
           names.push(
             match[1]
               .replace(/\$\{\{ matrix\.project \}\}/u, project)

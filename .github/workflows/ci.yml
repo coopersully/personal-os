@@ -130,13 +130,77 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
 
-  quality:
-    name: Node quality
+  # Node quality is the canonical result for types, tests, coverage and builds. The
+  # two jobs below are its inputs: it needs both, so their failure, cancellation or
+  # absence skips it and fails the required gate.
+  tests:
+    name: Node tests (${{ matrix.shard }}/6)
     needs: changes
     if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'quality') }}
     runs-on: ubuntu-latest
-    # Account for setup, types and builds outside the bounded test execution.
-    timeout-minutes: 50
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          cache: pnpm
+          node-version: 22
+      - id: install
+        run: pnpm install --frozen-lockfile
+      # Each shard runs its share of the suite and exports raw V8 coverage without
+      # converting it or checking coverage floors; Node quality merges every shard.
+      - id: node
+        env:
+          NOHMI_COVERAGE_SHARD_DIR: ${{ runner.temp }}/coverage-shards/${{ matrix.shard }}
+        run: pnpm test:coverage:shard --shard=${{ matrix.shard }}/6
+        timeout-minutes: 15
+      - name: Retain raw shard coverage for the merge
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-shard-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/coverage-shards/${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: Node build
+    needs: changes
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'quality') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          cache: pnpm
+          node-version: 22
+      - id: install
+        run: pnpm install --frozen-lockfile
+      - id: audit
+        run: pnpm audit --prod
+      - id: typecheck
+        run: pnpm typecheck
+        timeout-minutes: 5
+      - id: build
+        run: pnpm build
+        timeout-minutes: 10
+
+  quality:
+    name: Node quality
+    needs: [changes, tests, build]
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'quality') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -155,16 +219,18 @@ jobs:
         run: node .github/scripts/collect-node-coverage.mjs prepare "$RUNNER_TEMP/node-coverage"
       - id: install
         run: pnpm install --frozen-lockfile
-      - id: audit
-        run: pnpm audit --prod
-      - id: typecheck
-        run: pnpm typecheck
-        timeout-minutes: 5
+      - id: shards
+        name: Collect raw coverage from every shard of this attempt
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-shard-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/coverage-shards
+      # Merges raw V8 results before conversion, as a single run does, then writes the
+      # reports and enforces the coverage floors for the whole suite.
       - id: node
-        run: pnpm test:coverage
-        timeout-minutes: 30
-      - id: build
-        run: pnpm build
+        env:
+          NOHMI_COVERAGE_SHARD_DIR: ${{ runner.temp }}/coverage-shards
+        run: pnpm test:coverage:merge
         timeout-minutes: 10
       - id: coverage
         name: Collect bounded coverage diagnostics
@@ -175,10 +241,11 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           INSTALL_OUTCOME: ${{ steps.install.outcome }}
-          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
-          TYPECHECK_OUTCOME: ${{ steps.typecheck.outcome }}
+          # This job runs only after Node build succeeded as a whole.
+          AUDIT_OUTCOME: ${{ needs.build.result }}
+          TYPECHECK_OUTCOME: ${{ needs.build.result }}
           COVERAGE_OUTCOME: ${{ steps.node.outcome }}
-          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          BUILD_OUTCOME: ${{ needs.build.result }}
         run: node .github/scripts/collect-node-coverage.mjs collect "$RUNNER_TEMP/node-coverage"
       - name: Retain attempt-bound Node coverage diagnostics
         if: ${{ always() && steps.coverage.outputs.artifact_ready == 'true' }}
@@ -193,7 +260,7 @@ jobs:
           retention-days: 7
 
   browser:
-    name: Browser acceptance (${{ matrix.project }}, ${{ matrix.shard }}/4)
+    name: Browser acceptance (${{ matrix.project }}, ${{ matrix.shard }}/6)
     needs: changes
     if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'browser') }}
     runs-on: ubuntu-latest
@@ -210,7 +277,7 @@ jobs:
       fail-fast: false
       matrix:
         project: [desktop-chromium, mobile-chromium]
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -229,7 +296,7 @@ jobs:
             | xargs -r sudo rm -f
           pnpm exec playwright install --with-deps chromium
       - id: browser_tests
-        run: pnpm test:e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/4
+        run: pnpm test:e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/6
         timeout-minutes: 30
       - id: browser_diagnostics
         name: Collect bounded browser diagnostics
@@ -282,7 +349,23 @@ jobs:
         with:
           cache: pnpm
           node-version: 22
-      - uses: dtolnay/rust-toolchain@stable
+      - id: rust
+        uses: dtolnay/rust-toolchain@stable
+      # Compiled dependencies come from the most recent main build with the same
+      # compiler and operating system. Only main writes this cache, so a pull request
+      # can read it but never change what another run restores.
+      - id: rust-cache
+        name: Restore Rust dependencies compiled on main
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            apps/desktop/src-tauri/target
+          key: rust-${{ matrix.os }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            rust-${{ matrix.os }}-${{ steps.rust.outputs.cachekey }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @personal-os/web build
       - name: Compile native overlay
@@ -300,6 +383,16 @@ jobs:
           swift test --package-path macos
           bash macos/scripts/build-widgets.sh
           python3 -m unittest discover -s macos/scripts -p 'test_*.py'
+      - name: Save Rust dependencies for later runs
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            apps/desktop/src-tauri/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
 
   required:
     name: Source verification

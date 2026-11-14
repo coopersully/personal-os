@@ -52,6 +52,40 @@ export async function runOwned(command, args, { env = process.env, timeout = 4 *
   }
 }
 
+const releaseRepository = /^ilo-local\/(api|mcp|web)$/;
+const revision = /^[a-f0-9]{40}$/;
+const imageId = /^sha256:[a-f0-9]{64}$/;
+// Bounded build cache keeps dependency layers warm without regrowing the disk.
+export const buildCacheKeep = "3GB";
+
+// Pure retention decision. Only exact `ilo-local/{api,mcp,web}:<sha>` tags are
+// candidates; kept revisions, configured images and any image referenced by a
+// container (running or stopped) are never removed. Removal is by tag, so an
+// image still carrying a kept tag is merely untagged, never deleted.
+export function retentionPlan({ images, protectedIds, keep }) {
+  const keepRevisions = new Set(keep.filter((sha) => revision.test(sha ?? "")));
+  if (!keepRevisions.size) throw new Error("Retention requires a kept release revision.");
+  const keepIds = new Set(protectedIds);
+  if ([...keepIds].some((id) => !imageId.test(id))) throw new Error("Invalid protected image.");
+  const remove = [];
+  for (const { repository, tag, id } of images) {
+    if (!releaseRepository.test(repository) || !revision.test(tag)) continue;
+    if (!imageId.test(id)) throw new Error("Invalid release image identity.");
+    if (keepRevisions.has(tag) || keepIds.has(id)) continue;
+    remove.push(`${repository}:${tag}`);
+  }
+  return remove;
+}
+
+// `df -Pk` output: header, then one row whose fourth field is available KiB.
+export function parseAvailableBytes(output) {
+  const lines = output.trim().split("\n");
+  const fields = lines.at(-1)?.trim().split(/\s+/) ?? [];
+  if (lines.length !== 2 || fields.length < 6 || !/^\d+$/.test(fields[3]))
+    throw new Error("Unrecognized disk usage report.");
+  return Number(fields[3]) * 1024;
+}
+
 function dockerEnvironment(socket) {
   const env = { ...process.env, DOCKER_HOST: socket };
   delete env.DOCKER_CONTEXT;
@@ -204,6 +238,77 @@ export function controllerIO(repository, overrides = {}) {
       if (ids.some((id) => !/^[a-f0-9]{64}$/.test(id)))
         throw new Error("Invalid container identity.");
       return ids.length ? JSON.parse(await runtime.docker(["inspect", ...ids])) : [];
+    },
+    // Measures the VM's Docker data disk through the dedicated socket, using the
+    // already-pinned local PostgreSQL image: no pull, network or host mount.
+    dockerFree: async (runtime) =>
+      parseAvailableBytes(
+        await runtime.docker(
+          [
+            "run",
+            "--rm",
+            "--pull",
+            "never",
+            "--network",
+            "none",
+            "--read-only",
+            "--entrypoint",
+            "df",
+            "--volume",
+            "/var/lib/docker:/probe:ro",
+            runtime.config.images.postgres,
+            "-Pk",
+            "/probe",
+          ],
+          { timeout: 120_000 },
+        ),
+      ),
+    reclaim: async (runtime, keep) => {
+      const images = (
+        await runtime.docker([
+          "image",
+          "ls",
+          "--no-trunc",
+          "--filter",
+          "reference=ilo-local/*",
+          "--format",
+          "{{.Repository}}\t{{.Tag}}\t{{.ID}}",
+        ])
+      )
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const [repository, tag, id] = line.split("\t");
+          return { repository, tag, id };
+        });
+      const containers = (
+        await runtime.docker(["container", "ls", "--all", "--quiet", "--no-trunc"])
+      )
+        .split("\n")
+        .filter(Boolean);
+      if (containers.some((id) => !/^[a-f0-9]{64}$/.test(id)))
+        throw new Error("Invalid container identity.");
+      const used = containers.length
+        ? (await runtime.docker(["container", "inspect", "--format", "{{.Image}}", ...containers]))
+            .split("\n")
+            .filter(Boolean)
+        : [];
+      const remove = retentionPlan({
+        images,
+        protectedIds: [...used, ...Object.values(runtime.config.images)],
+        keep,
+      });
+      // No --force: Docker independently refuses an image a container uses.
+      let failed = false;
+      for (const reference of remove)
+        await runtime.docker(["image", "rm", reference]).catch(() => {
+          failed = true;
+        });
+      // Build cache only; never volumes, containers or other images.
+      await runtime.docker(["builder", "prune", "--force", "--keep-storage", buildCacheKeep], {
+        timeout: 600_000,
+      });
+      if (failed) throw new Error("Some release images could not be removed.");
     },
     restart: (runtime, ids) =>
       runtime.docker(["restart", "--time", "120", ...ids], { timeout: 300_000 }),

@@ -159,6 +159,38 @@ the failed `continuous-state.json` outside its active path. The next controller
 start seeds its deployed revision from the repaired active configuration. Never
 clear a lock/state receipt merely to repeat a failed migration.
 
+## Docker disk headroom
+
+On 2026-11-14 the dedicated VM's 24 GiB Docker disk filled with about 208 old
+release images (roughly 820 MB per revision) and build cache. PostgreSQL failed
+with ENOSPC while a deploy was quiescing, blocking it for attended recovery. The
+controller now bounds that growth itself, under the same operation lock:
+
+- **Headroom preflight.** Before building, and again after building but before
+  quiescing, it measures available space on the VM's `/var/lib/docker` through
+  the dedicated socket. The probe runs `df` from the pinned local PostgreSQL image
+  with no network, a read-only root and a read-only mount, so it pulls nothing.
+  Below 4 GiB it first reclaims (below), then measures again. If still short,
+  the attempt ends `idle` with `error: insufficient-docker-disk` and the normal
+  fifteen-minute backoff; no writer is stopped and the live release keeps
+  serving. A failed probe is an ordinary `prepare-failed`.
+- **Retention after a successful switch.** It keeps the `ilo-local/{api,mcp,web}`
+  tags of the newly deployed revision and the previous one, then removes every
+  other `ilo-local/{api,mcp,web}:<40-hex SHA>` tag. A preflight reclaim keeps the
+  serving revision, the last transaction's previous revision (when recorded) and,
+  after a build, the candidate. It never removes an image referenced by any
+  container, running or stopped, nor any image in the active configuration.
+  Removal is by tag without `--force`, so Docker independently refuses an
+  in-use image. It then runs `docker builder prune --force --keep-storage 3GB`.
+  Volumes, containers, ancillary images and other repositories are never touched.
+- A retention failure after a switch records `retentionError:
+  image-retention-failed` in `status` and never blocks or rolls back the release;
+  the next successful switch retries it. Dangling untagged images are not pruned.
+
+If the preflight keeps failing, inspect `docker system df` through the dedicated
+socket. Space held by the kept revisions, PostgreSQL data or non-release images
+needs an attended decision; do not delete volumes to make room.
+
 ## Bounds and evidence
 
 - Health observations run at most once per minute. Only label-matching, running
@@ -180,8 +212,9 @@ clear a lock/state receipt merely to repeat a failed migration.
   bounded restart history, one latest transaction and redacted failure codes.
   `continuous-errors.log` retains at most 100 sanitized outer errors. Both are
   owner-only. This is local observability; there is no offsite alert or backup.
-  Encrypted backups and Docker build cache accumulate until attended cleanup;
-  no automatic pruning or deletion of production recovery material is performed.
+  Encrypted backups accumulate until attended cleanup; no production recovery
+  material is pruned or deleted automatically. Docker images and build cache are
+  bounded as described in **Docker disk headroom**.
 
 Run `pnpm test:mac-production` and `pnpm verify` before publishing. Behavior tests
 exercise release eligibility, real state-file switches, maintenance, restart

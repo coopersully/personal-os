@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { controllerIO, runOwned } from "./continuous-io.mjs";
+import { controllerIO, parseAvailableBytes, retentionPlan, runOwned } from "./continuous-io.mjs";
 import { withLock } from "./safety.mjs";
 
 test("public polling fixes the repository, CI workflow and no-credential request boundary", async () => {
@@ -118,4 +118,99 @@ await withLock(${JSON.stringify(root)}, async()=>{console.log('locked');await ne
     withLock(root, async () => {}),
     /locked/,
   );
+});
+
+const sha = (c) => c.repeat(40);
+const id = (c) => `sha256:${c.repeat(64)}`;
+
+test("retention keeps kept revisions, configured and in-use images, and ignores foreign tags", () => {
+  const images = [
+    { repository: "ilo-local/api", tag: sha("a"), id: id("1") }, // kept: deployed
+    { repository: "ilo-local/web", tag: sha("b"), id: id("2") }, // kept: previous
+    { repository: "ilo-local/mcp", tag: sha("c"), id: id("3") }, // used by a container
+    { repository: "ilo-local/api", tag: sha("d"), id: id("4") }, // configured image
+    { repository: "ilo-local/api", tag: sha("e"), id: id("5") }, // removable
+    { repository: "ilo-local/web", tag: sha("f"), id: id("6") }, // removable
+    { repository: "ilo-local/api", tag: "latest", id: id("7") }, // not a release tag
+    { repository: "ilo-local/other", tag: sha("e"), id: id("8") }, // not a release repository
+    { repository: "postgres", tag: sha("e"), id: id("9") }, // never touched
+  ];
+  assert.deepEqual(
+    retentionPlan({ images, protectedIds: [id("3"), id("4")], keep: [sha("a"), sha("b")] }),
+    [`ilo-local/api:${sha("e")}`, `ilo-local/web:${sha("f")}`],
+  );
+  assert.throws(() => retentionPlan({ images, protectedIds: [], keep: [undefined] }));
+  assert.throws(() => retentionPlan({ images, protectedIds: ["latest"], keep: [sha("a")] }));
+});
+
+function fakeRuntime(responses) {
+  const calls = [];
+  return {
+    calls,
+    runtime: {
+      config: { images: { api: id("1"), postgres: id("0") } },
+      docker: async (args, options) => {
+        calls.push({ args, options });
+        const key = args.slice(0, 2).join(" ");
+        if (key in responses) return responses[key](args);
+        return "";
+      },
+    },
+  };
+}
+
+test("reclaim never removes in-use images, forces removal, or prunes volumes", async () => {
+  const container = "f".repeat(64);
+  const { calls, runtime } = fakeRuntime({
+    "image ls": () =>
+      [
+        `ilo-local/api\t${sha("a")}\t${id("1")}`,
+        `ilo-local/web\t${sha("c")}\t${id("3")}`,
+        `ilo-local/mcp\t${sha("d")}\t${id("4")}`,
+      ].join("\n"),
+    "container ls": () => container,
+    "container inspect": () => id("3"),
+  });
+  await controllerIO("/private/nohmi-source.git").reclaim(runtime, [sha("a")]);
+  const removed = calls.filter((c) => c.args[0] === "image" && c.args[1] === "rm");
+  assert.deepEqual(
+    removed.map((c) => c.args),
+    [["image", "rm", `ilo-local/mcp:${sha("d")}`]],
+  );
+  assert.ok(calls.some((c) => c.args.includes(container)));
+  const prune = calls.at(-1).args;
+  assert.deepEqual(prune, ["builder", "prune", "--force", "--keep-storage", "3GB"]);
+  for (const { args } of calls) {
+    assert.ok(!args.includes("volume") && !args.includes("system"));
+    if (args[1] === "rm") assert.ok(!args.includes("--force") && !args.includes("-f"));
+  }
+});
+
+test("reclaim still prunes build cache but reports a failed image removal", async () => {
+  const { calls, runtime } = fakeRuntime({
+    "image ls": () => `ilo-local/api\t${sha("d")}\t${id("4")}`,
+    "image rm": () => {
+      throw new Error("conflict");
+    },
+  });
+  await assert.rejects(
+    controllerIO("/private/nohmi-source.git").reclaim(runtime, [sha("a")]),
+    /could not be removed/,
+  );
+  assert.equal(calls.at(-1).args[0], "builder");
+});
+
+test("Docker headroom is measured offline through the pinned local image", async () => {
+  const { calls, runtime } = fakeRuntime({
+    "run --rm": () =>
+      "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vdb1 25000000 20000000 4194304 83% /probe",
+  });
+  assert.equal(await controllerIO("/private/nohmi-source.git").dockerFree(runtime), 4 * 1024 ** 3);
+  const args = calls[0].args;
+  assert.ok(args.includes("none") && args.includes("--read-only"));
+  assert.equal(args[args.indexOf("--pull") + 1], "never");
+  assert.ok(args.includes("/var/lib/docker:/probe:ro"));
+  assert.ok(args.includes(id("0")));
+  for (const output of ["", "garbage", "Filesystem\n/dev/vdb1 1 2 lots 9% /probe"])
+    assert.throws(() => parseAvailableBytes(output));
 });

@@ -40,6 +40,7 @@ try {
           completedAt: state.completedAt,
           error: state.error,
           cleanupError: state.cleanupError,
+          retentionError: state.retentionError,
           health: state.health,
           ciOverride: state.ciOverride,
           releaseEligibility: state.releaseEligibility,

@@ -75,7 +75,9 @@ function fixture(t) {
   );
   for (const name of ["api.env", "mcp.env", "postgres.env", "gateway.conf", "tunnel-token"])
     writePrivate(join(root, name), `preserve-${name}`);
-  const calls = [];
+  const calls = [],
+    reclaims = [];
+  const disk = { free: [] };
   const io = {
     load: () => ({ root, config: JSON.parse(privateFile(configPath)) }),
     main: async () => candidate,
@@ -109,12 +111,19 @@ function fixture(t) {
     restart: async () => {
       calls.push("restart");
     },
+    // Each queued measurement is consumed in order; then the disk is roomy.
+    dockerFree: async () => disk.free.shift() ?? 10 * 1024 ** 3,
+    reclaim: async (_runtime, keep) => {
+      reclaims.push(keep);
+    },
   };
   return {
     root,
     configPath,
     config,
     calls,
+    reclaims,
+    disk,
     io,
     state: () => JSON.parse(privateFile(join(root, "continuous-state.json"))),
   };
@@ -545,4 +554,76 @@ test("normal CI wins and an override cannot retry a failed build or follow chang
         mode === "ci-now-green" ? "successful-main-ci" : "attended-ci-override",
       );
   }
+});
+
+const GiB = 1024 ** 3;
+
+test("a successful switch retains only the new and previous release images", async (t) => {
+  const f = fixture(t);
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.equal(f.state().deployed, candidate);
+  // Roomy disk: no preflight reclaim, then exactly one post-switch retention.
+  assert.deepEqual(f.reclaims, [[candidate, old]]);
+  assert.equal(f.state().retentionError, undefined);
+});
+
+test("retention failure after a switch is recorded without blocking the release", async (t) => {
+  const f = fixture(t);
+  f.io.reclaim = async () => {
+    throw new Error("image rm failed");
+  };
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.equal(f.state().phase, "idle");
+  assert.equal(f.state().deployed, candidate);
+  assert.equal(f.state().error, null);
+  assert.equal(f.state().retentionError, "image-retention-failed");
+  assert.deepEqual(f.calls, ["build", "stop", "drained", "backup", "start", "publish"]);
+});
+
+test("insufficient Docker disk before building defers the release without stopping it", async (t) => {
+  const f = fixture(t);
+  f.disk.free.push(1 * GiB, 3 * GiB);
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.reclaims, [[old, undefined]]);
+  const state = f.state();
+  assert.equal(state.phase, "idle");
+  assert.equal(state.error, "insufficient-docker-disk");
+  assert.equal(state.nextPollAt, 1_000_000 + 15 * 60_000);
+  assert.equal(JSON.parse(privateFile(f.configPath)).revision, old);
+});
+
+test("a build that exhausts headroom never quiesces the live release", async (t) => {
+  const f = fixture(t);
+  f.disk.free.push(10 * GiB, 2 * GiB, 2 * GiB);
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.deepEqual(f.calls, ["build"]);
+  // The built candidate is kept alongside the serving release while reclaiming.
+  assert.deepEqual(f.reclaims, [[old, undefined, candidate]]);
+  assert.equal(f.state().phase, "idle");
+  assert.equal(f.state().error, "insufficient-docker-disk");
+  assert.equal(f.state().previousConfig, undefined);
+  assert.equal(JSON.parse(privateFile(join(f.root, "activation.json"))).revision, old);
+});
+
+test("reclaiming enough space lets the release continue", async (t) => {
+  const f = fixture(t);
+  f.disk.free.push(1 * GiB, 8 * GiB);
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.equal(f.state().deployed, candidate);
+  assert.deepEqual(f.reclaims, [
+    [old, undefined],
+    [candidate, old],
+  ]);
+});
+
+test("an unmeasurable Docker disk fails preparation before any writer stops", async (t) => {
+  const f = fixture(t);
+  f.io.dockerFree = async () => {
+    throw new Error("probe failed");
+  };
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.deepEqual(f.calls, []);
+  assert.equal(f.state().phase, "idle");
+  assert.equal(f.state().error, "prepare-failed");
 });

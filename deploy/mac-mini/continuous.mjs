@@ -5,6 +5,20 @@ import { privateFile, withLock, writePrivate } from "./safety.mjs";
 
 const commit = /^[a-f0-9]{40}$/;
 const pollInterval = 5 * 60_000;
+// The 2026-11-14 outage: PostgreSQL hit ENOSPC on a full 24 GiB VM disk while
+// a deploy was quiescing. Builds and backups need this much room to be safe.
+export const minimumDockerFree = 4 * 1024 ** 3;
+
+class InsufficientDockerDisk extends Error {}
+
+// Reclaims only unused release images outside `keep`, then re-measures. The
+// live release is never stopped for space; a shortfall defers the release.
+async function ensureDockerHeadroom(io, runtime, keep) {
+  if ((await io.dockerFree(runtime)) >= minimumDockerFree) return;
+  await io.reclaim(runtime, keep);
+  if ((await io.dockerFree(runtime)) < minimumDockerFree)
+    throw new InsufficientDockerDisk("Docker disk headroom is below the release minimum.");
+}
 
 export function eligibleRelease({ candidate, deployed, descendant, runs }) {
   if (!commit.test(candidate) || !commit.test(deployed) || candidate === deployed || !descendant)
@@ -287,6 +301,8 @@ export async function tick(configPath, io, now = Date.now()) {
       }
       state.releaseEligibility = normalEligibility ? "successful-main-ci" : "attended-ci-override";
       await io.check(runtime);
+      const retained = [state.deployed, state.previousConfig?.revision];
+      await ensureDockerHeadroom(io, runtime, retained);
       state.phase = "building";
       state.candidate = candidate;
       save();
@@ -294,15 +310,18 @@ export async function tick(configPath, io, now = Date.now()) {
       // Validate the new image provenance before stopping anything. Keep all
       // existing runtime files; this check does not use a prepared next config.
       if (io.checkImages) await io.checkImages(next);
+      // The build consumed space; measure again before stopping any writer.
+      await ensureDockerHeadroom(io, runtime, [...retained, candidate]);
       if (maintenance() || (await io.main()) !== candidate) {
         state.phase = "idle";
         state.error = "candidate-superseded-or-maintenance";
         save();
         return;
       }
-    } catch {
+    } catch (error) {
       state.phase = "idle";
-      state.error = "prepare-failed";
+      state.error =
+        error instanceof InsufficientDockerDisk ? "insufficient-docker-disk" : "prepare-failed";
       state.nextPollAt = now + 15 * 60_000;
       save();
       return;
@@ -385,6 +404,16 @@ export async function tick(configPath, io, now = Date.now()) {
         state.cleanupError = "writers-stop-failed";
         save();
       }
+      return;
     }
+    // The release is complete. Retention failure is recorded, never a reason
+    // to block or roll back: the next successful switch retries it.
+    try {
+      await io.reclaim(runtime, [candidate, state.previousConfig.revision]);
+      delete state.retentionError;
+    } catch {
+      state.retentionError = "image-retention-failed";
+    }
+    save();
   });
 }

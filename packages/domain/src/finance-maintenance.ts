@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
+import { financeAttentionSnapshotSchema } from "./finance/attention.js";
 import { financeBudgetPlanContextSchema } from "./finance/budget-approval.js";
 import { financeConversationCausalClaimSchema } from "./finance/conversation.js";
 import { financePositionEvidenceCheckpointSchema } from "./finance/workflow-contracts.js";
@@ -206,6 +207,8 @@ export const financeStatusDetailsSchema = z.object({
 
 export const financeStatusSchema = workspaceStatusSchema(financeStatusDetailsSchema).extend({
   domain: z.literal("finances"),
+  // Older server receipts may lack this field; live API always emits it.
+  attention: financeAttentionSnapshotSchema.optional(),
   recommendedNextOperation: maintenanceOperationSchema.nullable(),
 });
 export type FinanceStatus = z.infer<typeof financeStatusSchema>;

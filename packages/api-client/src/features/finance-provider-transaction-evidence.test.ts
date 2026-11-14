@@ -31,3 +31,24 @@ describe("historical evidence typed client", () => {
     expect(request).not.toHaveBeenCalled();
   });
 });
+
+describe("typed source fact admission", () => {
+  it("sends the strict native selection and rejects incomplete or secret-bearing receipt output", async () => {
+    const send = vi.fn(async () => ({ status: "applied", result: { entries: [] } }));
+    const api = createFinanceApi(send as unknown as FinanceRequest);
+    const input = {
+      idempotencyKey: "exact-source",
+      targets: [
+        { transactionId: id, expectedTransactionRevision: "1", expectedAccountRevision: "2" },
+      ],
+    };
+    await expect(api.admitFinanceProviderSourceFacts(input)).rejects.toThrow();
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      "/v1/finances/provider-transaction-evidence/admit",
+      { method: "POST", body: JSON.stringify(input) },
+    );
+    send.mockClear();
+    await expect(api.admitFinanceProviderSourceFacts({ ...input, targets: [] })).rejects.toThrow();
+    expect(send).not.toHaveBeenCalled();
+  });
+});

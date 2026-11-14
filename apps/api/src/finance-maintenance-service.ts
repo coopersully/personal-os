@@ -594,7 +594,9 @@ export function createFinanceMaintenanceService({
           (questions === undefined
             ? (durableEffects?.questionStepCreations ?? durableEffects?.questions ?? 0)
             : (questions.created ?? 0)),
-        total: verificationStatus.details.review.total,
+        total:
+          verificationStatus.attention?.activeDecisionCount ??
+          verificationStatus.details.review.total,
       },
       verification: {
         duplicateActions: durableEffects.duplicateActions,

@@ -933,3 +933,31 @@ keep original image colors and a neutral readable corner glyph. Default desktop 
 field order puts Balance before Type; saved custom desktop column ordering remains user-owned.
 
 Accounts begins with Cards and the inventory; the frame owns the page title. Do not repeat an Accounts heading or aggregate balance-only notice in the body. The absence of recorded transactions does not establish provider history availability; retain account-specific transaction navigation and genuine connection recovery without inferring missing provider capability. Mobile account records put Balance across the row, followed by adjacent self-describing Type and Status badges whose field labels remain available to assistive technology. Icon actions retain their named footer.
+
+### Active inbox and starting-month review
+
+The active inbox consumes the API's canonical attention snapshot. Show owner decisions,
+processing work, and technical recovery separately; never add raw transaction flags and review
+cases to produce a question count. An incomplete read is not inbox zero. Budget qualification
+(starting evidence) and budget approval are independent states, and neither is implied by zero
+questions. Today, Finance overview, Assistant, and backlog summaries use that same projection.
+
+Historical cleanup is a separate, optional destination with preserved record counts. Explain
+that older dependencies can remain active; do not describe historical records as deleted,
+resolved, or harmless merely because they predate the selected month. A starting-month card
+shows its exact before/after impact and approves only that frozen policy preview. It does not
+approve a budget or change a transaction.
+
+Finance Chat owns the shared grouped-decision reviewer. Other entry points link to it rather
+than implementing another approval loop. Owner approval saves a bounded server continuation;
+closing the screen does not cancel accepted work. Display saved progress, offer explicit Stop
+remaining decisions, and reconcile uncertain responses before retry. Cancellation preserves
+already committed changes. Correction review shows the original decisions, requires a separate
+confirmation, and preserves subsequent edits. Action outcomes use Sonner; saved processing,
+exception, and correction records remain inspectable as durable domain state.
+
+Opening-statement editors start blank unless an actual statement exists for the selected month.
+Show USD with a dollar prefix, accept signed amounts, keep the account and statement revisions
+with the draft, and distinguish a statement from the current account balance. Missing evidence
+uses value-only attention styling. The mobile editor uses the shared floating checkmark action,
+Close before edits, Cancel with discard confirmation afterward, and an accessible keyboard.

@@ -61,6 +61,37 @@ it("renders both authors and navigates every supported record kind", () => {
     "/finances/chat?batch=b%20%261",
   );
 });
+it("omits record kinds this client cannot open instead of linking nowhere", () => {
+  vi.stubGlobal("IntersectionObserver", undefined);
+  render(
+    <MemoryRouter>
+      <FinanceConversationThread
+        messages={[
+          {
+            ...message,
+            authorKind: "agent",
+            text: "Start in November?",
+            recordRefs: [
+              { kind: "budget_start_preview", id: "start-1" },
+              { kind: "review_batch_undo", id: "undo-1" },
+              { kind: "transaction", id: "t-1" },
+            ],
+          },
+        ]}
+        onRendered={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+  // The message itself is still shown; only the unsupported references are left out.
+  expect(screen.getByRole("article", { name: "Agent message" })).toHaveTextContent(
+    "Start in November?",
+  );
+  expect(screen.getAllByRole("link")).toHaveLength(1);
+  expect(screen.getByRole("link", { name: "View transaction" })).toHaveAttribute(
+    "href",
+    "/finances/transactions?transactionId=t-1",
+  );
+});
 it("waits for a target, focuses it once, and allows refocusing after the target clears", () => {
   vi.stubGlobal("IntersectionObserver", undefined);
   const onRendered = vi.fn();

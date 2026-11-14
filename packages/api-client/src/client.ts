@@ -43,6 +43,7 @@ import { createAutomationHostApi } from "./features/automation-hosts.js";
 import { createCalendarApiClient } from "./features/calendar.js";
 import { createDesktopReleaseApiClient } from "./features/desktop-release.js";
 import { createFinanceActivityApi } from "./features/finance-activity.js";
+import { createFinanceAttentionApi } from "./features/finance-attention.js";
 import { createFinanceConversationApi } from "./features/finance-conversation.js";
 import { createFinanceConversationEvidenceApi } from "./features/finance-conversation-evidence.js";
 import { createFinanceConversationUnreadApi } from "./features/finance-conversation-unread.js";
@@ -221,6 +222,7 @@ export function createApiClient(options: ClientOptions) {
     },
     ...createFinanceApi(request),
     ...createFinanceReviewBacklogApi(request),
+    ...createFinanceAttentionApi(request),
     ...createFinanceConversationApi(request),
     ...createFinanceConversationUnreadApi(request),
     ...createNativePushApi(request),

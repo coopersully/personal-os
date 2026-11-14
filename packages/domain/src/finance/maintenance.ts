@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { idSchema } from "../common.js";
 import { maintenanceRunSchema, maintenanceScopeSchema } from "../maintenance.js";
+import { financeAttentionSnapshotSchema } from "./attention.js";
+import { financeBudgetPlanContextSchema } from "./budget-approval.js";
 import { financeInteractionQuestionSchema } from "./common.js";
 import { financeConversationBatchSchema } from "./conversation.js";
 import { financeWorkflowUnavailableSchema } from "./workflow-contracts.js";
@@ -52,7 +54,19 @@ export const financeMaintenanceNextActionSchema = z.discriminatedUnion("tool", [
     reason: z.string().min(1).max(1000),
   }),
 ]);
+export const financeMonthlyWorkSchema = z.object({
+  period: z.string(),
+  enabled: z.boolean(),
+  scope: maintenanceScopeSchema,
+  carryover: z.literal("none"),
+  attention: financeAttentionSnapshotSchema,
+  budget: financeBudgetPlanContextSchema,
+  guidance: z.array(z.string()),
+});
+export type FinanceMonthlyWork = z.infer<typeof financeMonthlyWorkSchema>;
+
 export const financeMaintenancePayloadSchema = z.object({
+  monthlyWork: financeMonthlyWorkSchema.nullable().optional(),
   conversationBatch: financeConversationBatchSchema.nullable().optional(),
   run: maintenanceRunSchema.nullable(),
   challengeId: idSchema.nullable(),

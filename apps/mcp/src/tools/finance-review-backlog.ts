@@ -37,7 +37,7 @@ export function registerFinanceReviewBacklogTools(server: McpServer, api: Person
     {
       title: "Qualify independent Finance maintenance work",
       description:
-        "Read current source, counterpart, revision and execution-qualification states for up to 25 explicit decisions. Keeps qualified and held items in order; currently only exact reciprocal transfer confirmations can qualify. Other decisions require their owning evidence adapter. Creates no run, claim, preview, question, approval or financial effect and makes no provider call. Qualification is advisory: strict preview and execution revalidation remain required. Requires finances:read.",
+        "Read current source, counterpart, revision and execution-qualification states for up to 25 explicit decisions. Keeps qualified and held items in order; exact reciprocal transfer pairs and supported categorizations use their canonical server evidence. Other decisions remain held until their owning evidence adapter qualifies them. Creates no run, claim, preview, question, approval or financial effect and makes no provider call. Qualification is advisory: strict preview and execution revalidation remain required. Requires finances:read.",
       inputSchema: qualifyFinanceMaintenanceWorkInputSchema,
     },
     async (input) => apiResult(() => api.qualifyFinanceMaintenanceWork(input)),

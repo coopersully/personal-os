@@ -30,3 +30,43 @@ describe("historical evidence MCP read", () => {
     }
   });
 });
+
+describe("source fact admission MCP", () => {
+  const name = "admit_finance_provider_source_facts";
+  it("requires every Finance read/write/execute scope and is unavailable in read-only mode", () => {
+    const all = ["finances:read", "finances:write", "finances:execute"] as const;
+    expect(availableToolNames(new Set(all), false)).toContain(name);
+    expect(availableToolNames(new Set(all), true)).not.toContain(name);
+    for (const missing of all)
+      expect(availableToolNames(new Set(all.filter((s) => s !== missing)), false)).not.toContain(
+        name,
+      );
+  });
+  it("delegates only exact native revisions and idempotency to the authenticated typed API", async () => {
+    const admit = vi.fn(async () => ({ entries: [] }));
+    const server = createPersonalOsMcpServer({
+      api: { admitFinanceProviderSourceFacts: admit } as unknown as PersonalOsApiClient,
+      scopes: new Set(["finances:read", "finances:write", "finances:execute"]),
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "source-admission-test", version: "1" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(st), client.connect(ct)]);
+      const input = {
+        idempotencyKey: "native-source",
+        targets: [
+          {
+            transactionId: "11111111-1111-4111-8111-111111111111",
+            expectedTransactionRevision: "1",
+            expectedAccountRevision: "2",
+          },
+        ],
+      };
+      await client.callTool({ name, arguments: input });
+      expect(admit).toHaveBeenCalledExactlyOnceWith(input);
+    } finally {
+      await Promise.allSettled([client.close(), server.close()]);
+    }
+  });
+});

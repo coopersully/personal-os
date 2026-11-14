@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { ConnectorError, createPlaidConnector, type PlaidConnector } from "@personal-os/connectors";
 import {
+  accessTokens,
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
@@ -15,6 +16,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
+import { createFinanceEvidenceRefreshService } from "./finance/evidence-refresh-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceProviderItemSyncService } from "./finance-provider-item-sync-service.js";
 import { createFinanceService } from "./finance-service.js";
@@ -2584,6 +2586,137 @@ describe.sequential("Finance Provider Item synchronization", () => {
     expect(pageAudit?.after).toMatchObject({ added: 0, changed: 0, modified: 0, removed: 0 });
   });
 
+  it.each([
+    "active",
+    "revoked",
+    "backoff",
+    "ordinary",
+    "claim_race",
+    "item_race",
+  ])("fences requested refresh dispatch without changing ordinary scheduling: %s", async (state) => {
+    await database.db.update(financeProviderItems).set({ nextSyncAt: null });
+    const future = new Date(now.getTime() + 3600000);
+    const f = await fixture({ accountCount: 1, nextSyncAt: future });
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.userId,
+        name: "Refresh fixture",
+        tokenHash: crypto.randomUUID(),
+        scopes: ["finances:read", "finances:write", "finances:maintain"],
+      })
+      .returning();
+    if (!token) throw new Error("Missing grant");
+    if (state === "backoff")
+      await database.db
+        .update(financeProviderItems)
+        .set({
+          syncState: "retrying",
+          syncRecovery: "automatic",
+          syncFailureCount: 1,
+          syncError: "Rate limited",
+          syncErrorCode: "RATE_LIMIT",
+          syncErrorCategory: "rate_limited",
+        })
+        .where(eq(financeProviderItems.id, f.item.id));
+    const [account] = await database.db
+      .update(financeAccounts)
+      .set({ providerItemId: f.item.providerItemId })
+      .where(eq(financeAccounts.id, f.accounts[0]?.id ?? ""))
+      .returning();
+    if (!account?.providerAccountId) throw new Error("Missing account");
+    const providerAccountId = account.providerAccountId;
+    await createFinanceEvidenceRefreshService({
+      db: database.db,
+      now: () => now,
+    }).prepareEvidenceRefresh(
+      {
+        principal: {
+          userId: f.userId,
+          actorId: token.id,
+          actorType: "agent",
+          authorizationConnectionId: token.authorizationConnectionId,
+          scopes: new Set(["finances:read", "finances:write", "finances:maintain"]),
+        },
+        requestId: crypto.randomUUID(),
+      },
+      {
+        period: "2026-08",
+        idempotencyKey: crypto.randomUUID(),
+        sourceRefs: [
+          { accountId: account.id, expectedAccountRevision: account.contextualRevision.toString() },
+        ],
+      },
+    );
+    if (state === "revoked" || state === "ordinary")
+      await database.db
+        .update(accessTokens)
+        .set({ revokedAt: now })
+        .where(eq(accessTokens.id, token.id));
+    if (state === "ordinary")
+      await database.db
+        .update(financeProviderItems)
+        .set({ nextSyncAt: now })
+        .where(eq(financeProviderItems.id, f.item.id));
+    const syncTransactions = vi.fn(async () => emptyPage("refreshed"));
+    const sync = () =>
+      service(
+        plaid({ syncTransactions, getAccounts: async () => [remoteAccount(providerAccountId)] }),
+      ).syncDueItems();
+    if (state === "item_race") {
+      const lock = await database.pool.connect();
+      await lock.query("BEGIN");
+      await lock.query("SELECT id FROM finance_provider_items WHERE id=$1 FOR UPDATE", [f.item.id]);
+      const pending = sync();
+      try {
+        await vi.waitFor(async () => {
+          const result = await database.pool.query<{ count: string }>(
+            "SELECT count(*)::text AS count FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%finance_provider_items%' AND query NOT LIKE '%pg_stat_activity%'",
+          );
+          expect(Number(result.rows[0]?.count)).toBeGreaterThan(0);
+        });
+        await lock.query(
+          "UPDATE finance_provider_items SET sync_state='retrying', sync_recovery='automatic', sync_failure_count=1, sync_error='Rate limited', sync_error_code='RATE_LIMIT', sync_error_category='rate_limited', last_sync_attempt_at=$2, next_sync_at=$3 WHERE id=$1",
+          [f.item.id, now, future],
+        );
+      } finally {
+        await lock.query("COMMIT");
+        lock.release();
+      }
+      await pending;
+    } else if (state === "claim_race") {
+      const lock = await database.pool.connect();
+      await lock.query("BEGIN");
+      await lock.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [f.userId]);
+      const pending = sync();
+      try {
+        await vi.waitFor(async () => {
+          const result = await database.pool.query<{ count: string }>(
+            "SELECT count(*)::text AS count FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%users%' AND query NOT LIKE '%pg_stat_activity%'",
+          );
+          expect(Number(result.rows[0]?.count)).toBeGreaterThan(0);
+        });
+        await database.db
+          .update(accessTokens)
+          .set({ revokedAt: now })
+          .where(eq(accessTokens.id, token.id));
+      } finally {
+        await lock.query("ROLLBACK");
+        lock.release();
+      }
+      await pending;
+    } else await sync();
+    const shouldSync = state === "active" || state === "ordinary";
+    expect(syncTransactions).toHaveBeenCalledTimes(shouldSync ? 1 : 0);
+    if (!shouldSync)
+      expect(
+        (
+          await database.db.query.financeProviderItems.findFirst({
+            where: eq(financeProviderItems.id, f.item.id),
+          })
+        )?.nextSyncAt,
+      ).toEqual(future);
+  });
   it("selects at most 25 due Items with at most three provider workers", async () => {
     await database.db.update(financeProviderItems).set({ nextSyncAt: null });
     const itemIds: string[] = [];

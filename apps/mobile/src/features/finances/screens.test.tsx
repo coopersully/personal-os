@@ -1656,6 +1656,36 @@ it("opens structured Finance chat references in native details", async () => {
   });
 });
 
+it("omits chat references this build cannot open while keeping the message and its other links", async () => {
+  h.params = { view: "Conversation" };
+  h.api.getFinanceConversationHistory.mockResolvedValue({
+    messages: [
+      {
+        id: "reply",
+        authorKind: "agent",
+        text: "Start budgeting in November?",
+        createdAt: "2026-11-09T12:00:00Z",
+        recordRefs: [
+          { kind: "budget_start_preview", id: "start-1" },
+          { kind: "review_batch_undo", id: "undo-1" },
+          { kind: "account", id: "account-1" },
+        ],
+      },
+    ],
+    nextCursor: null,
+  });
+  mount(<FinanceAssistantScreen />);
+  expect(await screen.findByText("Start budgeting in November?")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "View account" }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-account",
+    params: { id: "account-1" },
+  });
+  expect(h.push).toHaveBeenCalledTimes(1);
+  for (const label of ["Review starting month", "Review correction"])
+    expect(screen.queryByRole("button", { name: label })).toBeNull();
+});
+
 it("shows the review action before its evidence and links the saved counterpart", async () => {
   const evidence = "Two posted entries show equal and opposite movement between owned accounts.";
   h.params = { kind: "review_batch", id: "batch-1" };

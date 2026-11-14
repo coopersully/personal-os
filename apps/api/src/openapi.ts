@@ -3,16 +3,34 @@ import {
   agentAccountRegistrationSchema,
   agentAccountSchema,
   agentAccountUpdateSchema,
+  applyFinanceBudgetStartInputSchema,
+  approveFinanceReviewBatchInputSchema,
+  confirmFinanceOpeningStatementInputSchema,
   executeFinanceReviewBatchInputSchema,
+  financeAttentionSnapshotSchema,
+  financeBudgetStartPolicySchema,
+  financeBudgetStartPreviewSchema,
+  financeConversationAgentCardInputSchema,
+  financeConversationHistoryPageSchema,
+  financeConversationMessageSchema,
+  financeDecisionDeclineSchema,
+  financeEvidenceRefreshSchema,
   financeMaintenanceInputSchema,
   financeMaintenancePayloadSchema,
+  financeOpeningPositionSchema,
+  financeOpeningStatementSchema,
   financeReviewBacklogAssessmentSchema,
   financeReviewBacklogPageSchema,
+  financeReviewBatchContinuationSchema,
   financeReviewBatchRunSchema,
+  financeReviewBatchUndoSchema,
   financeToolResultSchema,
   idSchema,
   maintenanceRunStatusSchema,
+  prepareFinanceEvidenceRefreshInputSchema,
+  previewFinanceBudgetStartInputSchema,
   previewFinanceReviewBatchInputSchema,
+  previewFinanceReviewBatchUndoInputSchema,
   resetFinanceNotificationPreferencesSchema,
   ritualActionInputSchema,
   ritualDefinitionInputSchema,
@@ -58,10 +76,72 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     responses: { [status]: { description } },
     "x-required-scopes": taskWriteScope,
   });
+  const financeOperation = (
+    description: string,
+    response: string,
+    scopes: string[],
+    input?: string,
+    status = 200,
+    id = false,
+  ) => ({
+    description,
+    security,
+    "x-required-scopes": scopes,
+    ...(id ? { parameters: [taskIdParameter] } : {}),
+    ...(input ? { requestBody: jsonRequest(input) } : {}),
+    responses: {
+      [status]: {
+        description,
+        content: { "application/json": { schema: { $ref: `#/components/schemas/${response}` } } },
+      },
+      403: { description: "Authorization unavailable" },
+      409: {
+        description: "Current evidence or intent changed; inspect saved state before retrying",
+      },
+    },
+  });
   const financeMaintenanceResultSchema = z.toJSONSchema(financeToolResultSchema, { io: "input" });
   return {
     components: {
       schemas: {
+        FinanceAttention: z.toJSONSchema(financeAttentionSnapshotSchema, { io: "input" }),
+        FinanceBudgetStart: z.toJSONSchema(financeBudgetStartPolicySchema.nullable(), {
+          io: "input",
+        }),
+        FinanceBudgetStartPreview: z.toJSONSchema(financeBudgetStartPreviewSchema, { io: "input" }),
+        PreviewFinanceBudgetStart: z.toJSONSchema(previewFinanceBudgetStartInputSchema, {
+          io: "input",
+        }),
+        ApplyFinanceBudgetStart: z.toJSONSchema(applyFinanceBudgetStartInputSchema, {
+          io: "input",
+        }),
+        FinanceOpeningPosition: z.toJSONSchema(financeOpeningPositionSchema, { io: "input" }),
+        ConfirmFinanceOpeningStatement: z.toJSONSchema(confirmFinanceOpeningStatementInputSchema, {
+          io: "input",
+        }),
+        FinanceOpeningStatement: z.toJSONSchema(financeOpeningStatementSchema, { io: "input" }),
+        PrepareFinanceEvidenceRefresh: z.toJSONSchema(prepareFinanceEvidenceRefreshInputSchema, {
+          io: "input",
+        }),
+        FinanceEvidenceRefresh: z.toJSONSchema(financeEvidenceRefreshSchema, { io: "input" }),
+        PreviewFinanceBatchUndo: z.toJSONSchema(previewFinanceReviewBatchUndoInputSchema, {
+          io: "input",
+        }),
+        FinanceBatchUndo: z.toJSONSchema(financeReviewBatchUndoSchema, { io: "input" }),
+        ApproveFinanceBatch: z.toJSONSchema(approveFinanceReviewBatchInputSchema, { io: "input" }),
+        FinanceBatchContinuation: z.toJSONSchema(financeReviewBatchContinuationSchema.nullable(), {
+          io: "input",
+        }),
+        FinanceDecisionDecline: z.toJSONSchema(financeDecisionDeclineSchema, { io: "input" }),
+        FinanceAgentCardInput: z.toJSONSchema(financeConversationAgentCardInputSchema, {
+          io: "input",
+        }),
+        FinanceAgentCardResult: z.toJSONSchema(
+          z.object({ message: financeConversationMessageSchema }),
+          { io: "input" },
+        ),
+        FinanceChatHistory: z.toJSONSchema(financeConversationHistoryPageSchema, { io: "input" }),
+
         FinanceReviewBacklog: z.toJSONSchema(financeReviewBacklogAssessmentSchema, { io: "input" }),
         FinanceReviewBacklogPage: z.toJSONSchema(financeReviewBacklogPageSchema, { io: "input" }),
         FinanceReviewBatch: z.toJSONSchema(financeReviewBatchRunSchema, { io: "input" }),
@@ -289,6 +369,200 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     },
     openapi: "3.1.0",
     paths: {
+      "/v1/finances/attention": {
+        get: financeOperation(
+          "Canonical maintained-period attention and readiness",
+          "FinanceAttention",
+          ["finances:read"],
+        ),
+      },
+      "/v1/finances/budget-start": {
+        get: financeOperation("Approved first maintained month or null", "FinanceBudgetStart", [
+          "finances:read",
+        ]),
+      },
+      "/v1/finances/budget-start/previews": {
+        post: financeOperation(
+          "Exact before/after visibility preview without financial effects",
+          "FinanceBudgetStartPreview",
+          ["finances:read", "finances:write"],
+          "PreviewFinanceBudgetStart",
+          201,
+        ),
+      },
+      "/v1/finances/budget-start/previews/{id}": {
+        get: financeOperation(
+          "Owner or originating agent preview",
+          "FinanceBudgetStartPreview",
+          ["finances:read"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/budget-start/approve": {
+        post: financeOperation(
+          "Authenticated owner approval only; no agent self-approval",
+          "FinanceBudgetStart",
+          ["finances:write"],
+          "ApplyFinanceBudgetStart",
+        ),
+      },
+      "/v1/finances/budget-start/previews/{id}/decline": {
+        post: financeOperation(
+          "Authenticated owner decline only; the preview can no longer be approved",
+          "FinanceDecisionDecline",
+          ["finances:read", "finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/opening-position": {
+        get: {
+          ...financeOperation(
+            "Qualified opening balances and exact missing evidence",
+            "FinanceOpeningPosition",
+            ["finances:read"],
+          ),
+          parameters: [
+            {
+              ...queryParameter("month", { type: "string", pattern: "^[0-9]{4}-[0-9]{2}$" }),
+              required: true,
+            },
+          ],
+        },
+      },
+      "/v1/finances/opening-statements": {
+        post: financeOperation(
+          "Owner confirms explicit opening evidence; never rewrites current balance",
+          "FinanceOpeningStatement",
+          ["finances:write"],
+          "ConfirmFinanceOpeningStatement",
+          201,
+        ),
+      },
+      "/v1/finances/evidence-refresh": {
+        post: financeOperation(
+          "Persist exact-source refresh through existing provider scheduler",
+          "FinanceEvidenceRefresh",
+          ["finances:read", "finances:write", "finances:maintain"],
+          "PrepareFinanceEvidenceRefresh",
+          202,
+        ),
+      },
+      "/v1/finances/evidence-refresh/{id}": {
+        get: financeOperation(
+          "Timestamped refresh receipt; freshness is separate from coverage",
+          "FinanceEvidenceRefresh",
+          ["finances:read"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batch-corrections": {
+        post: financeOperation(
+          "Exact revision-safe compensating preview",
+          "FinanceBatchUndo",
+          ["finances:read", "finances:write"],
+          "PreviewFinanceBatchUndo",
+          201,
+        ),
+      },
+      "/v1/finances/review-batch-corrections/{id}": {
+        get: financeOperation(
+          "Saved correction outcomes",
+          "FinanceBatchUndo",
+          ["finances:read"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batch-corrections/{id}/execute": {
+        post: financeOperation(
+          "Owner execution, or the agent whose own authority applied every targeted effect",
+          "FinanceBatchUndo",
+          ["finances:read", "finances:write"],
+          "ExecuteFinanceReviewBatch",
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batch-corrections/{id}/decline": {
+        post: financeOperation(
+          "Authenticated owner decline only; the correction can no longer be applied",
+          "FinanceDecisionDecline",
+          ["finances:read", "finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batches/{id}/decline": {
+        post: financeOperation(
+          "Authenticated owner decline of an unapproved batch; approved batches are cancelled instead",
+          "FinanceDecisionDecline",
+          ["finances:read", "finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/review-batches/{id}/approval": {
+        get: financeOperation(
+          "Durable exact-batch continuation state or null",
+          "FinanceBatchContinuation",
+          ["finances:read"],
+          undefined,
+          200,
+          true,
+        ),
+        post: financeOperation(
+          "Owner-only bounded one-batch approval; accepted is not executed",
+          "FinanceBatchContinuation",
+          ["finances:read", "finances:write"],
+          "ApproveFinanceBatch",
+          202,
+          true,
+        ),
+      },
+      "/v1/finances/review-batches/{id}/approval/cancel": {
+        post: financeOperation(
+          "Owner cancellation stops uncommitted work; applied effects remain",
+          "FinanceBatchContinuation",
+          ["finances:write"],
+          undefined,
+          200,
+          true,
+        ),
+      },
+      "/v1/finances/conversation/agent/messages": {
+        get: {
+          ...financeOperation(
+            "Bounded shared chat history for an authorized agent; no read acknowledgment",
+            "FinanceChatHistory",
+            ["finances:read"],
+          ),
+          parameters: [
+            queryParameter("after", { type: "string" }),
+            queryParameter("before", { type: "string" }),
+            queryParameter("latest", { type: "string", enum: ["true"] }),
+            queryParameter("limit", { type: "integer", minimum: 1, maximum: 100 }),
+          ],
+        },
+      },
+      "/v1/finances/conversation/agent/cards": {
+        post: financeOperation(
+          "Attributed linked annotation; never a human message or financial authorization",
+          "FinanceAgentCardResult",
+          ["finances:read", "finances:write", "finances:maintain"],
+          "FinanceAgentCardInput",
+          201,
+        ),
+      },
+
       "/v1/finances/review-backlog": {
         get: {
           security,

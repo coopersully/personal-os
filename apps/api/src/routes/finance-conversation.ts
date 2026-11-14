@@ -1,5 +1,6 @@
 import {
   financeConversationAcknowledgmentInputSchema,
+  financeConversationAgentCardInputSchema,
   financeConversationHistoryQuerySchema,
   financeConversationProofOperationSchema,
   financeConversationRenderedInputSchema,
@@ -33,6 +34,30 @@ export function registerFinanceConversationRoutes({
     context.header("cache-control", "no-store");
     await next();
   });
+  app.get(`${root}/agent/messages`, requireScope("finances:read"), async (c) =>
+    c.json(
+      await conversation.getAgentHistory(
+        { principal: c.get("principal"), requestId: c.get("requestId") },
+        c.req.query(),
+      ),
+    ),
+  );
+  app.post(
+    `${root}/agent/cards`,
+    requireScope("finances:read"),
+    requireScope("finances:write"),
+    requireScope("finances:maintain"),
+    async (c) =>
+      c.json(
+        {
+          message: await conversation.publishAgentCard(
+            { principal: c.get("principal"), requestId: c.get("requestId") },
+            await parseBody(c, financeConversationAgentCardInputSchema),
+          ),
+        },
+        201,
+      ),
+  );
   app.post(
     `${root}/hosts/:scheduleId/turns`,
     requireScope("finances:maintain"),

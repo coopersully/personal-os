@@ -1,5 +1,6 @@
 import type {
   FinanceConversationAcknowledgmentInput,
+  FinanceConversationAgentCardInput,
   FinanceConversationBatchPage,
   FinanceConversationChallenge,
   FinanceConversationHistoryPage,
@@ -19,6 +20,26 @@ export function createFinanceConversationApi(request: FinanceRequest) {
   const root = "/v1/finances/conversation";
   const post = (body: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(body) });
   return {
+    getFinanceAgentChat(
+      query: {
+        after?: string | undefined;
+        before?: string | undefined;
+        latest?: "true" | undefined;
+        limit?: number | undefined;
+      } = {},
+    ) {
+      const params = new URLSearchParams();
+      for (const key of ["after", "before", "latest", "limit"] as const)
+        if (query[key] !== undefined) params.set(key, String(query[key]));
+      return request<FinanceConversationHistoryPage>(
+        `${root}/agent/messages${params.size ? `?${params}` : ""}`,
+      );
+    },
+    async publishFinanceAgentCard(input: FinanceConversationAgentCardInput) {
+      return (
+        await request<{ message: FinanceConversationMessage }>(`${root}/agent/cards`, post(input))
+      ).message;
+    },
     beginFinanceConversationTurn(scheduleId: string) {
       return request<FinanceConversationTurnPage>(
         `${root}/hosts/${encodeURIComponent(scheduleId)}/turns`,

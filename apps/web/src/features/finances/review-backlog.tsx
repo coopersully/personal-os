@@ -21,6 +21,9 @@ const assessmentKey = ["finance-review-backlog"];
 const batchesKey = ["finance-review-batches"];
 const runKey = (id: string) => ["finance-review-batch", id];
 const words = (value: string) => value.replaceAll("_", " ");
+/** Transfer-pair decisions carry no category; their dedicated review UI ships separately. */
+const categoryOf = (decision: FinanceReviewBatchRun["decisions"][number]) =>
+  decision.kind === "transfer_pair" ? undefined : decision.categoryId;
 
 function Counts({ counts }: { counts: FinanceReviewBacklogAssessment["counts"] }) {
   return (
@@ -274,12 +277,12 @@ function BatchPreview({ id }: { id: string }) {
   const categories = useQuery({
     queryKey: ["finance-categories"],
     queryFn: () => api.getFinanceCategories(),
-    enabled: Boolean(run.data?.decisions.some((decision) => decision.categoryId)),
+    enabled: Boolean(run.data?.decisions.some(categoryOf)),
   });
   const missingCategory = run.data?.decisions.some(
     (decision) =>
-      decision.categoryId &&
-      !categories.data?.some((category) => category.id === decision.categoryId),
+      categoryOf(decision) &&
+      !categories.data?.some((category) => category.id === categoryOf(decision)),
   );
   const execute = useFeedbackMutation({
     feedback: {
@@ -333,7 +336,7 @@ function BatchPreview({ id }: { id: string }) {
                       {index + 1}.{" "}
                       {decision.kind === "categorization"
                         ? "Categorize transaction"
-                        : words(decision.action)}
+                        : words(decision.kind === "review" ? decision.action : decision.kind)}
                     </ItemTitle>
                     <Link
                       className="text-sm underline underline-offset-4"
@@ -349,10 +352,10 @@ function BatchPreview({ id }: { id: string }) {
                         Open exact review
                       </Link>
                     ) : null}
-                    {decision.categoryId ? (
+                    {categoryOf(decision) ? (
                       <p className="text-sm">
                         Category:{" "}
-                        {categories.data?.find((category) => category.id === decision.categoryId)
+                        {categories.data?.find((category) => category.id === categoryOf(decision))
                           ?.name ??
                           (categories.isPending
                             ? "Loading category…"
@@ -378,7 +381,7 @@ function BatchPreview({ id }: { id: string }) {
                             {decision.expectedReviewUpdatedAt}
                           </p>
                         ) : null}
-                        {decision.categoryId ? <p>Category: {decision.categoryId}</p> : null}
+                        {categoryOf(decision) ? <p>Category: {categoryOf(decision)}</p> : null}
                         <p>Transaction revision: {decision.expectedTransactionUpdatedAt}</p>
                       </div>
                     </details>

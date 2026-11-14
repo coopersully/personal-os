@@ -119,3 +119,12 @@ the playbook's ledger rules and alert tiers govern treatment and messaging, and 
 person states is recorded with `update_financial_profile` at the current profile version.
 Recorded facts never grant permission. The bootstrap prompt is unchanged, so an adopted host
 picks this up on its next invocation; a host still running a pre-bootstrap issued prompt does not.
+
+## Host instruction version 4 (COO-153)
+
+Version 4 keeps every version 3 instruction and adds the inbox-zero guidance: follow the returned
+`monthlyWork` even when the retained run is blocked, read `get_finance_attention` and the opening
+position before cleanup, refresh exact stale evidence without manufacturing coverage, link exact
+previews for owner approval (agent write access is not owner approval), and ask one coherent
+question per group. Version 3 was already issued from main with different text, so the combined
+text is a new version rather than a second meaning for 3.

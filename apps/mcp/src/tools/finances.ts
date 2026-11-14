@@ -19,6 +19,7 @@ import {
   financeOnboardingCompleteInputSchema,
   financeOnboardingSaveInputSchema,
   financePlanningPreferencesSchema,
+  financeProviderSourceAdmissionInputSchema,
   financeProviderTransactionEvidenceInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
@@ -149,6 +150,26 @@ const answerFinanceReviewToolInputSchema = z
 
 /** Intent-first Finance MCP surface. Domain policy and accounting stay in the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
+  server.registerTool(
+    "admit_finance_provider_source_facts",
+    {
+      annotations: {
+        openWorldHint: true,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Admit missing raw currency and provider direction for up to 20 exact owned Finance transactions at their displayed transaction and account revisions. The API obtains fresh bounded provider evidence, validates every target and current execution authority, then commits source facts and a durable receipt atomically. Existing economic decisions and nonmissing facts are preserved. Reuse the exact idempotency key and input for replay; advisory read output is never write authority.",
+      inputSchema: financeProviderSourceAdmissionInputSchema,
+      title: "Admit missing Finance source facts",
+    },
+    async (input) =>
+      apiResult(() =>
+        api.admitFinanceProviderSourceFacts(financeProviderSourceAdmissionInputSchema.parse(input)),
+      ),
+  );
+
   server.registerTool(
     "read_finance_provider_transaction_evidence",
     {

@@ -86,17 +86,20 @@ export function FinanceConversationThread({
             <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
               {message.text}
             </p>
-            {message.recordRefs.map((ref) => (
-              <Link
-                className="text-sm underline underline-offset-4"
-                key={`${ref.kind}:${ref.id}${ref.kind === "budget_plan" ? `:${ref.budgetVersionId}` : ""}`}
-                to={`${referenceRoutes[ref.kind][1]}${encodeURIComponent(ref.id)}${ref.kind === "budget_plan" ? `&versionId=${encodeURIComponent(ref.budgetVersionId)}` : ""}`}
-              >
-                {ref.kind === "account" && ref.displayLabel
-                  ? ref.displayLabel
-                  : referenceRoutes[ref.kind][0]}
-              </Link>
-            ))}
+            {message.recordRefs.map((ref) => {
+              // Reference kinds this client cannot open yet are omitted, never linked nowhere.
+              if (!(ref.kind in referenceRoutes)) return null;
+              const [label, route] = referenceRoutes[ref.kind as keyof typeof referenceRoutes];
+              return (
+                <Link
+                  className="text-sm underline underline-offset-4"
+                  key={`${ref.kind}:${ref.id}${ref.kind === "budget_plan" ? `:${ref.budgetVersionId}` : ""}`}
+                  to={`${route}${encodeURIComponent(ref.id)}${ref.kind === "budget_plan" ? `&versionId=${encodeURIComponent(ref.budgetVersionId)}` : ""}`}
+                >
+                  {ref.kind === "account" && ref.displayLabel ? ref.displayLabel : label}
+                </Link>
+              );
+            })}
           </article>
         </li>
       ))}

@@ -52,6 +52,8 @@ export function deferredDraft(env, classify = classifyGitChanges) {
 }
 
 export const settleBudget = 120000;
+export const readySettle = 30000;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export const draftRemedy =
   "Draft candidates run the fast lane only. Mark the pull request ready for review, or add the ci:full label and push, to obtain source verification.";
 
@@ -115,6 +117,9 @@ async function main() {
     return;
   }
   const draft = deferredDraft(process.env);
+  // Marking a draft ready starts a full source run from the same event. Give it time
+  // to register so the draft's fast-lane run is not mistaken for the latest one.
+  if (process.env.PR_EVENT_ACTION === "ready_for_review") await pause(readySettle);
   const started = Date.now();
   const deadline = started + 55 * 60 * 1000;
   while (Date.now() < deadline) {

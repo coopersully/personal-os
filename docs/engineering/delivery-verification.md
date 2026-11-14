@@ -268,14 +268,22 @@ existing protection name/provider. It requires both successful source verificati
 head and base, and a valid live PR Work map. Missing, pending, failed, or canceled source runs
 cannot pass the gate.
 
-Two jobs report that context, and the most recent one decides:
+Two workflows report that context. Branch protection requires the latest result from each
+workflow that reported on the head commit to pass; a newer success from one does not override an
+older failure from the other. This was observed on PR 388: a description-edit failure blocked the
+merge after the source run's own gate passed, until that metadata run was rerun.
 
 - The last job of the source run. It takes the aggregate's result from the same run and attempt,
   then checks that the live PR is still the candidate the event named and validates the live Work
   map. No runner waits for the run to finish, and no later lookup is needed to bind the result.
-- `pr-metadata.yml`, on a description edit. It observes the latest source run through the API as
-  before, so editing a description never reruns or cancels source tests. If that run is still in
-  progress it polls until the run ends.
+- `pr-metadata.yml`, on a description edit or when a draft is marked ready. It observes the latest
+  source run through the API as before, so editing a description never reruns or cancels source
+  tests. If that run is still in progress it polls until the run ends.
+
+A metadata result therefore goes stale when it failed for a reason that later clears on the same
+commit. Marking a draft ready reruns it automatically. After a complete source rerun on an
+unchanged head, rerun the failed metadata run with `gh run rerun <metadata-run-id> --failed`. A new
+push needs neither: checks belong to the commit.
 
 The gate job uses `always()` and makes every decision inside its script. Branch protection treats
 a skipped required job as passing, so the job must fail, never skip, when the run was canceled,
@@ -303,7 +311,8 @@ the source receipt are unchanged, so the deferred matrices remain required for a
 A fast-lane run does not report `Source verification`, and its `CI required` job fails with the
 remedy below. It can therefore never satisfy the protected gate. A red `CI required` on a draft
 means "not yet verified", not a defect: read the individual jobs for iteration feedback. A
-description edit on such a draft fails the gate at once with the same remedy instead of waiting. To obtain complete verification, mark the PR ready for review,
+description edit on such a draft fails the gate at once with the same remedy instead of waiting;
+marking the PR ready reruns that metadata gate against the full source run. To obtain complete verification, mark the PR ready for review,
 which starts a full source run, or apply `ci:full` before the next push. A prose-only draft defers
 nothing and is verified as before. Pushes to `main` always run the full lane.
 

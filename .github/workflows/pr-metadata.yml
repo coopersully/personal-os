@@ -2,12 +2,18 @@ name: PR metadata
 
 # The source run reports `CI required` itself when it finishes (the last job of
 # ci.yml). This workflow re-validates the Work map when the description is edited,
-# without rerunning source tests. Both report the same protected context.
+# without rerunning source tests. Both report the same protected context, and
+# branch protection requires the latest result from each workflow to pass.
+#
+# A description edit on a draft fails here, because a draft is not verified yet.
+# Marking the pull request ready runs this again so that result does not stay
+# behind on the same commit and block an otherwise verified candidate.
+#
 # The job must never be skipped: branch protection treats a skipped required job as
 # passing. Keep every condition inside the script.
 on:
   pull_request:
-    types: [edited]
+    types: [edited, ready_for_review]
 
 permissions:
   contents: read
@@ -38,6 +44,7 @@ jobs:
           PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_EVENT_ACTION: ${{ github.event.action }}
           PR_DRAFT: ${{ github.event.pull_request.draft == true }}
           PR_FULL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
         run: node .github/scripts/wait-source-ci.mjs

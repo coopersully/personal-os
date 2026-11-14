@@ -64,7 +64,12 @@ test("metadata changes cannot cancel source CI, and protected gate requires both
   assert.match(source, /types: \[opened, ready_for_review, reopened, synchronize\]/);
   assert.match(source, /name: Source verification/);
   // An edit re-validates the Work map in its own workflow and never reruns source tests.
-  assert.match(metadata, /^on:\n {2}pull_request:\n {4}types: \[edited\]\n\npermissions:/m);
+  // Marking a draft ready reruns it, so a draft-era failure cannot outlive the draft.
+  assert.match(
+    metadata,
+    /^on:\n {2}pull_request:\n {4}types: \[edited, ready_for_review\]\n\npermissions:/m,
+  );
+  assert.match(metadata, /PR_EVENT_ACTION: \$\{\{ github.event.action \}\}/);
   assert.match(metadata, /group: pr-metadata-/);
   assert.match(metadata, /name: CI required/);
   // Branch protection ignores job checks from dispatched runs and accepts a skipped

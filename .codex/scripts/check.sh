@@ -60,7 +60,7 @@ grep -Eq '^## Work map$' .github/pull_request_template.md &&
   exit 1
 }
 
-grep -Fq 'types: [edited]' .github/workflows/pr-metadata.yml &&
+grep -Fq 'types: [edited, ready_for_review]' .github/workflows/pr-metadata.yml &&
   grep -Fq 'run: node .github/scripts/wait-source-ci.mjs --gate' .github/workflows/ci.yml || {
   echo "Metadata CI must revalidate the PR Work map when source CI completes and whenever pull request metadata changes" >&2
   exit 1

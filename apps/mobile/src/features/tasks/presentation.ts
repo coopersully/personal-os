@@ -10,6 +10,18 @@ export function taskMetadata(item: TaskWorkspaceItem, timezone = "UTC") {
       : null,
   ].filter((value): value is string => !!value);
 }
+/** A project target is a calendar date, so it reads the same in every timezone. */
+export function formatTargetDate(date: string) {
+  const parsed = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime())
+    ? date
+    : new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(parsed);
+}
 export function activeFilters(filters: Partial<TaskWorkspaceQuery>) {
   return Object.entries(filters).filter(
     ([, value]) => value !== undefined && value !== "" && value !== "any",

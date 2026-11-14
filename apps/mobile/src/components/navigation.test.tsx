@@ -379,7 +379,8 @@ it("offers workspace-specific tabs and contextual capture while leaving previews
   }
   h.path = "/calendar";
   rerender(<Shell />);
-  expect(screen.getByRole("button", { name: "Add event" })).toBeDisabled();
+  // Calendar is browse-only until event creation ships; an idle add button would overlay the day.
+  expect(screen.queryByRole("button", { name: /Add|Compose/ })).not.toBeInTheDocument();
 });
 it("routes dock dragging to a page and ignores a release outside its bounds", async () => {
   h.path = "/tasks";

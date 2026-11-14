@@ -15,9 +15,8 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { AppToaster } from "../../components/app-toaster";
-import { EditorClose } from "../../components/editor-close";
+import { editorActionsOptions, editorDismissOptions } from "../../components/editor-header";
 import { Icon } from "../../components/icons";
-import { RowActions } from "../../components/row-actions";
 import { useTheme } from "../../theme";
 import { useTaskAction, useTaskApi, useTaskResources } from "./data";
 import { DateField } from "./date-field";
@@ -26,12 +25,13 @@ import { useDraftField } from "./form-state";
 import { ListAppearance } from "./list-appearance";
 import { RecordIdentity } from "./record-identity";
 import { SearchableChoice } from "./searchable-choice";
-import { Action, confirm, Field, FormBody, Section, State, styles } from "./ui";
+import { Action, confirm, Field, FormBody, Section, State } from "./ui";
 export function ContainerEditorScreen() {
   const params = useLocalSearchParams<{ id?: string; kind?: string }>();
   return <ContainerEditorRecord key={`${params.kind}:${params.id}`} params={params} />;
 }
 function ContainerEditorRecord({ params }: { params: { id?: string; kind?: string } }) {
+  const t = useTheme();
   const api = useTaskApi();
   const kind = params.kind === "project" ? "project" : "list";
   const recordIdentity = `${kind}:${params.id ?? "new"}`;
@@ -55,8 +55,8 @@ function ContainerEditorRecord({ params }: { params: { id?: string; kind?: strin
         <Stack.Screen
           options={{
             title: `${kind} details`,
-            headerRight: () => null,
-            headerLeft: () => <EditorClose label="Close" onPress={() => router.back()} />,
+            ...editorActionsOptions("Record actions", [], t),
+            ...editorDismissOptions({ label: "Close", onPress: () => router.back() }),
           }}
         />
         <State
@@ -205,76 +205,69 @@ function ContainerForm({
         options={{
           title: `${initial ? "edit" : "new"} ${kind}`,
           gestureEnabled: false,
-          headerLeft: () => (
-            <EditorClose
-              label={edited ? "Cancel" : "Close"}
-              disabled={action.pending}
-              onPress={() =>
-                edited
-                  ? confirm(
-                      "Discard draft?",
-                      "Unsaved changes will be lost.",
-                      () => router.back(),
-                      true,
-                    )
-                  : router.back()
-              }
-            />
-          ),
-          headerRight: () => (
-            <View style={styles.toolbar}>
-              {initial && available && (
-                <RowActions
-                  label="Record actions"
-                  placement="header"
-                  actions={[
-                    ...(project
-                      ? [
-                          {
-                            id: "complete",
-                            label: "Complete project",
-                            icon: "check" as const,
-                            disabled: action.pending || stale,
-                            onPress: () => lifecycle("complete"),
-                          },
-                          {
-                            id: "cancel",
-                            label: "Cancel project",
-                            icon: "cancel" as const,
-                            destructive: true,
-                            disabled: action.pending || stale,
-                            onPress: () =>
-                              confirm(
-                                "Cancel project?",
-                                "This changes the project lifecycle. The server will check its contents.",
-                                () => lifecycle("cancel"),
-                                true,
-                              ),
-                          },
-                        ]
-                      : []),
-                    ...(list?.kind !== "inbox"
-                      ? [
-                          {
-                            id: "archive",
-                            label: "Archive",
-                            icon: "archive" as const,
-                            destructive: true,
-                            disabled: action.pending || stale,
-                            onPress: () =>
-                              confirm(
-                                "Archive this container?",
-                                "Its contents may become read-only. You’ll choose how to handle active contents next.",
-                                () => lifecycle("archive"),
-                                true,
-                              ),
-                          },
-                        ]
-                      : []),
-                  ]}
-                />
-              )}
-            </View>
+          ...editorDismissOptions({
+            label: edited ? "Cancel" : "Close",
+            disabled: action.pending,
+            onPress: () =>
+              edited
+                ? confirm(
+                    "Discard draft?",
+                    "Unsaved changes will be lost.",
+                    () => router.back(),
+                    true,
+                  )
+                : router.back(),
+          }),
+          ...editorActionsOptions(
+            "Record actions",
+            !(initial && available)
+              ? []
+              : [
+                  ...(project
+                    ? [
+                        {
+                          id: "complete",
+                          label: "Complete project",
+                          icon: "check" as const,
+                          disabled: action.pending || stale,
+                          onPress: () => lifecycle("complete"),
+                        },
+                        {
+                          id: "cancel",
+                          label: "Cancel project",
+                          icon: "cancel" as const,
+                          destructive: true,
+                          disabled: action.pending || stale,
+                          onPress: () =>
+                            confirm(
+                              "Cancel project?",
+                              "This changes the project lifecycle. The server will check its contents.",
+                              () => lifecycle("cancel"),
+                              true,
+                            ),
+                        },
+                      ]
+                    : []),
+                  ...(list?.kind !== "inbox"
+                    ? [
+                        {
+                          id: "archive",
+                          label: "Archive",
+                          icon: "archive" as const,
+                          destructive: true,
+                          disabled: action.pending || stale,
+                          onPress: () =>
+                            confirm(
+                              "Archive this container?",
+                              "Its contents may become read-only. You’ll choose how to handle active contents next.",
+                              () => lifecycle("archive"),
+                              true,
+                            ),
+                        },
+                      ]
+                    : []),
+                ],
+            t,
           ),
         }}
       />

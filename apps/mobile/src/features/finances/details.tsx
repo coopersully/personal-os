@@ -1,6 +1,7 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { View } from "react-native";
-import { RowActions } from "../../components/row-actions";
+import { editorActionsOptions } from "../../components/editor-header";
+import { useTheme } from "../../theme";
 import { AccountActions } from "./account-actions";
 import { AccountPreferences } from "./account-preferences";
 import { categoryIcon } from "./category-presentation";
@@ -91,6 +92,7 @@ export function FinanceAccountScreen() {
   );
 }
 export function FinanceTransactionScreen() {
+  const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const query = useFinanceRead(["transaction", id], (api) => api.getFinanceTransaction(id), !!id);
   const accounts = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
@@ -108,12 +110,10 @@ export function FinanceTransactionScreen() {
     <FinanceScreen title={item?.merchant ?? "Transaction"}>
       <Stack.Screen
         options={{
-          headerRight: () =>
-            item ? (
-              <RowActions
-                placement="header"
-                label="Transaction actions"
-                actions={[
+          ...editorActionsOptions(
+            "Transaction actions",
+            item
+              ? [
                   {
                     id: "edit",
                     label: "Edit transaction",
@@ -121,9 +121,10 @@ export function FinanceTransactionScreen() {
                     onPress: () =>
                       router.push({ pathname: "/finance-transaction-edit", params: { id } }),
                   },
-                ]}
-              />
-            ) : null,
+                ]
+              : [],
+            t,
+          ),
         }}
       />
       <ReadState query={query}>

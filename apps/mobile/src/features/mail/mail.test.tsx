@@ -455,8 +455,16 @@ it("lists each account's mailboxes and switches between them", async () => {
     limit: MAIL_PAGE_SIZE,
   });
 
-  fireEvent.click(screen.getByRole("button", { name: "Back to mailboxes" }));
+  // The way back is the shared link: the registry chevron and the parent's name, no typed glyph.
+  const back = screen.getByRole("button", { name: "Back to mailboxes" });
+  expect(back.textContent).toBe("Mailboxes");
+  expect(within(back).getByTestId("icon-chevron")).toBeTruthy();
+  fireEvent.click(back);
   expect(h.setParams).toHaveBeenCalledTimes(2);
+  // Mailbox rows sit in the shared group, which owns their surface, seams and side padding.
+  const row = screen.getByRole("button", { name: "Sent" });
+  expect(row.closest('[data-testid="section-item"]')).not.toBeNull();
+  expect(row.closest('[data-testid="form-group"]')).not.toBeNull();
   expect(screen.getByRole("heading", { name: "Mailboxes" })).toBeTruthy();
 
   h.summaries.mockResolvedValue([]);

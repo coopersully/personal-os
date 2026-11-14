@@ -5,7 +5,7 @@ import {
   Modal,
   Platform,
   Pressable,
-  Text,
+  StyleSheet,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -17,7 +17,7 @@ import { type EntityKind, entityDictionary } from "../../product/entities";
 import { spacing, useTheme } from "../../theme";
 import { listTint } from "./list-presentation";
 import { matchingOptions } from "./presentation";
-import { type Option, SearchField, State, styles } from "./ui";
+import { groupEdges, type Option, SearchField, State, styles } from "./ui";
 
 /** Shared searchable container selection. Cancel preserves the current value. */
 export function SearchableChoice({
@@ -46,6 +46,7 @@ export function SearchableChoice({
     setOpen(false);
     setSearch("");
   };
+  const matches = matchingOptions(options, search);
   return (
     <>
       <Pressable
@@ -87,32 +88,50 @@ export function SearchableChoice({
               />
             </View>
             <FlatList
-              data={matchingOptions(options, search)}
+              data={matches}
               keyExtractor={(option) => option.value}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"
               contentContainerStyle={{ paddingHorizontal: spacing.page, paddingBottom: spacing.xl }}
               ListEmptyComponent={<State empty="No matches. Try a different name." />}
-              renderItem={({ item }) => (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: item.value === value }}
-                  onPress={() => {
-                    onChange(item.value);
-                    close();
-                  }}
-                  style={({ pressed }) => [styles.settingRow, { opacity: pressed ? 0.6 : 1 }]}
+              renderItem={({ item, index }) => (
+                // The list stays virtualized; each row draws its share of one rounded group.
+                <View
+                  testID="choice-group-row"
+                  style={[
+                    { backgroundColor: t.surface },
+                    groupEdges(index === 0, index === matches.length - 1),
+                  ]}
                 >
-                  {entity && item.label !== "None" && (
-                    <Icon
-                      name={item.icon ?? entityDictionary[entity].icon}
-                      color={listTint(item.color, t.dark, t.secondary)}
-                      size={22}
+                  {index > 0 && (
+                    <View
+                      style={{
+                        height: StyleSheet.hairlineWidth,
+                        backgroundColor: t.line,
+                        marginLeft: spacing.lg,
+                      }}
                     />
                   )}
-                  <Text style={{ color: t.ink, fontSize: 17, flex: 1 }}>{item.label}</Text>
-                  {item.value === value && <Icon name="save" size={22} color={accent} />}
-                </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: item.value === value }}
+                    onPress={() => {
+                      onChange(item.value);
+                      close();
+                    }}
+                    style={({ pressed }) => [styles.settingRow, { opacity: pressed ? 0.6 : 1 }]}
+                  >
+                    {entity && item.label !== "None" && (
+                      <Icon
+                        name={item.icon ?? entityDictionary[entity].icon}
+                        color={listTint(item.color, t.dark, t.secondary)}
+                        size={22}
+                      />
+                    )}
+                    <SettingLabel>{item.label}</SettingLabel>
+                    {item.value === value && <Icon name="save" size={22} color={accent} />}
+                  </Pressable>
+                </View>
               )}
             />
           </KeyboardAvoidingView>

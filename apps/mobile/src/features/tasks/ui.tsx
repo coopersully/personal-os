@@ -1,63 +1,24 @@
 import type { PropsWithChildren } from "react";
-import { Children, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  type TextInputProps,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, Platform, Text, View } from "react-native";
+import { Action } from "../../components/forms/form-rows";
 import { Icon, type IconName } from "../../components/icons";
-import { useSettingsAccent, useSettingsAccentColor } from "../../components/settings-accent";
-import { SettingLabel, SettingValue } from "../../components/settings-row-content";
-import { radius, spacing, touchTarget, useTheme } from "../../theme";
+import { spacing, useTheme } from "../../theme";
 
-export function Action({
-  label,
-  onPress,
-  disabled = false,
-  destructive = false,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  destructive?: boolean;
-}) {
-  const t = useTheme();
-  const accent = useSettingsAccent();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => ({
-        minHeight: touchTarget,
-        minWidth: touchTarget,
-        borderRadius: radius.control,
-        justifyContent: "center",
-        paddingHorizontal: spacing.md,
-        opacity: disabled ? 0.4 : pressed ? 0.6 : 1,
-      })}
-    >
-      <Text
-        style={{
-          fontSize: 16,
-          fontWeight: "600",
-          color: destructive ? t.destructive : accent,
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
+// Form and settings rows are shared chrome; Tasks composes them rather than owning copies.
+export {
+  Action,
+  Field,
+  FormBody,
+  Group,
+  groupEdges,
+  NavigationRow,
+  SearchField,
+  Section,
+  styles,
+  TitleField,
+  ToggleRow,
+} from "../../components/forms/form-rows";
+
 export function Heading({
   children,
   icon,
@@ -87,267 +48,6 @@ export function Heading({
     </View>
   );
 }
-/** A single rounded group: children own row padding; the group owns its seams. */
-export function Group({ children }: PropsWithChildren) {
-  const t = useTheme();
-  return (
-    <View
-      style={{
-        backgroundColor: t.surface,
-        borderRadius: radius.panel,
-        borderCurve: "continuous",
-        overflow: "hidden",
-      }}
-    >
-      {Children.toArray(children).map((child, index) => (
-        <View key={(child as { key?: string }).key ?? index}>
-          {index > 0 && (
-            <View
-              style={{
-                height: StyleSheet.hairlineWidth,
-                backgroundColor: t.line,
-                marginLeft: spacing.lg,
-              }}
-            />
-          )}
-          {child}
-        </View>
-      ))}
-    </View>
-  );
-}
-export function Section({ title, children }: PropsWithChildren<{ title?: string }>) {
-  const t = useTheme();
-  return (
-    <View style={{ marginBottom: spacing.xl }}>
-      {title && (
-        <Text
-          accessibilityRole="header"
-          style={{
-            color: t.secondary,
-            fontSize: 13,
-            fontWeight: "500",
-            marginBottom: spacing.sm,
-            marginHorizontal: spacing.lg,
-          }}
-        >
-          {title}
-        </Text>
-      )}
-      <Group>{children}</Group>
-    </View>
-  );
-}
-export function NavigationRow({
-  label,
-  icon,
-  onPress,
-  disabled = false,
-}: {
-  label: string;
-  icon: IconName;
-  onPress: () => void;
-  disabled?: boolean;
-}) {
-  const t = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}
-    >
-      <Icon name={icon} color={t.secondary} size={22} />
-      <SettingLabel>{label}</SettingLabel>
-      <Icon name="chevron" color={t.secondary} size={16} />
-    </Pressable>
-  );
-}
-export function SearchField(props: TextInputProps & { accessibilityLabel: string }) {
-  const t = useTheme();
-  return (
-    <TextInput
-      placeholderTextColor={t.secondary}
-      returnKeyType="search"
-      autoCorrect={false}
-      {...props}
-      style={[
-        {
-          color: t.ink,
-          backgroundColor: t.surface,
-          borderRadius: radius.control,
-          minHeight: touchTarget,
-          paddingHorizontal: spacing.lg,
-          paddingVertical: spacing.md,
-          fontSize: 17,
-          marginBottom: spacing.md,
-        },
-        props.style,
-      ]}
-    />
-  );
-}
-export function ToggleRow({
-  label,
-  icon,
-  value,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  icon?: IconName;
-  value: boolean;
-  onChange: (value: boolean) => void;
-  disabled?: boolean;
-}) {
-  const t = useTheme();
-  const fallbackAccent = useSettingsAccent();
-  const accent = useSettingsAccentColor(fallbackAccent, t.secondary);
-  return (
-    <View style={styles.settingRow}>
-      {icon && <Icon name={icon} size={22} color={t.secondary} />}
-      <SettingLabel>{label}</SettingLabel>
-      <Switch
-        accessibilityLabel={label}
-        value={value}
-        onValueChange={onChange}
-        disabled={disabled}
-        trackColor={{ true: accent }}
-      />
-    </View>
-  );
-}
-/** Preserve FlatList virtualization while rounding only each group's outer corners. */
-export function groupEdges(first: boolean, last: boolean) {
-  return {
-    borderTopLeftRadius: first ? radius.panel : 0,
-    borderTopRightRadius: first ? radius.panel : 0,
-    borderBottomLeftRadius: last ? radius.panel : 0,
-    borderBottomRightRadius: last ? radius.panel : 0,
-    overflow: "hidden" as const,
-    borderCurve: "continuous" as const,
-  };
-}
-export function TitleField({ label, ...props }: TextInputProps & { label: string }) {
-  const t = useTheme();
-  return (
-    <View style={{ padding: spacing.lg }}>
-      <TextInput
-        accessibilityLabel={label}
-        placeholderTextColor={t.secondary}
-        multiline
-        scrollEnabled={false}
-        maxLength={240}
-        {...props}
-        style={[
-          {
-            color: t.ink,
-            fontSize: 24,
-            fontWeight: "600",
-            minHeight: 56,
-            padding: 0,
-            textAlignVertical: "top",
-          },
-          props.style,
-        ]}
-      />
-    </View>
-  );
-}
-export function Field({
-  label,
-  icon,
-  compact = true,
-  ...props
-}: TextInputProps & { label: string; compact?: boolean; icon?: IconName }) {
-  const [editing, setEditing] = useState(false);
-  const [inlineEditing, setInlineEditing] = useState(false);
-  const t = useTheme();
-  const expandedValue =
-    !props.secureTextEntry &&
-    (!!props.multiline ||
-      props.keyboardType === "email-address" ||
-      props.autoComplete === "email" ||
-      (props.value?.length ?? 0) > 24);
-  if (compact && !editing && (!expandedValue || inlineEditing))
-    return (
-      <View style={styles.settingRow}>
-        {icon && <Icon name={icon} size={22} color={t.secondary} />}
-        <SettingLabel>{label}</SettingLabel>
-        <TextInput
-          {...props}
-          accessibilityLabel={label}
-          placeholderTextColor={t.secondary}
-          onFocus={(event) => {
-            setInlineEditing(true);
-            props.onFocus?.(event);
-          }}
-          onBlur={(event) => {
-            setInlineEditing(false);
-            props.onBlur?.(event);
-          }}
-          style={{
-            color: t.ink,
-            fontSize: 17,
-            minHeight: 44,
-            width:
-              props.keyboardType === "number-pad" || props.keyboardType === "numeric"
-                ? "30%"
-                : "55%",
-            textAlign: "right",
-            padding: 0,
-          }}
-        />
-      </View>
-    );
-  if (compact && !editing)
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${label}, ${props.value || "Not set"}`}
-        disabled={props.editable === false}
-        accessibilityState={{ disabled: props.editable === false }}
-        onPress={() => setEditing(true)}
-        style={styles.settingRow}
-      >
-        {icon && <Icon name={icon} size={22} color={t.secondary} />}
-        <SettingLabel>{label}</SettingLabel>
-        <SettingValue style={{ color: props.value ? t.ink : t.secondary }}>
-          {props.value || props.placeholder || "Not set"}
-        </SettingValue>
-      </Pressable>
-    );
-  return (
-    <View style={{ padding: spacing.lg, gap: spacing.sm }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-        {icon && <Icon name={icon} size={22} color={t.secondary} />}
-        <SettingLabel>{label}</SettingLabel>
-        {compact && <Action label="Done" onPress={() => setEditing(false)} />}
-      </View>
-      <TextInput
-        accessibilityLabel={label}
-        placeholderTextColor={t.secondary}
-        {...props}
-        autoFocus={compact && editing}
-        onBlur={(event) => {
-          setEditing(false);
-          props.onBlur?.(event);
-        }}
-        style={[
-          {
-            color: t.ink,
-            fontSize: 17,
-            minHeight: touchTarget,
-            padding: 0,
-            textAlignVertical: props.multiline ? "top" : "center",
-          },
-          props.style,
-        ]}
-      />
-    </View>
-  );
-}
 export type Option = { value: string; label: string; icon?: IconName; color?: string };
 export { EnumChoice as Choice } from "../../components/forms/enum-choice";
 export function State({
@@ -374,21 +74,6 @@ export function State({
     </View>
   );
 }
-export function FormBody({ children }: PropsWithChildren) {
-  const t = useTheme();
-  return (
-    <ScrollView
-      automaticallyAdjustKeyboardInsets
-      keyboardDismissMode="interactive"
-      keyboardShouldPersistTaps="handled"
-      contentInsetAdjustmentBehavior="automatic"
-      style={{ flex: 1, backgroundColor: t.canvas }}
-      contentContainerStyle={{ padding: spacing.page, paddingBottom: 112 }}
-    >
-      {children}
-    </ScrollView>
-  );
-}
 export function confirm(title: string, message: string, accept: () => void, destructive = false) {
   if (Platform.OS === "web") {
     if (globalThis.confirm(`${title}\n\n${message}`)) accept();
@@ -398,22 +83,3 @@ export function confirm(title: string, message: string, accept: () => void, dest
       { text: "Continue", style: destructive ? "destructive" : "default", onPress: accept },
     ]);
 }
-export const styles = StyleSheet.create({
-  settingRow: {
-    minHeight: 56,
-    padding: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  row: {
-    minHeight: 56,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  toolbar: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs },
-  divider: { height: StyleSheet.hairlineWidth },
-});

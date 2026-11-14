@@ -9,6 +9,10 @@ vi.mock("react", async () => {
 });
 vi.mock("react-native", () => import("../../../test/native"));
 vi.mock("../../theme", () => ({
+  spacing: { xs: 4, sm: 8, md: 12, lg: 16, page: 20 },
+  radius: { control: 8, panel: 16 },
+  touchTarget: 44,
+  workspaceColor: () => "blue",
   useTheme: () => ({ ink: "black", secondary: "gray", information: "blue" }),
 }));
 const h = vi.hoisted(() => ({

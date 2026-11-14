@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { Pressable, Text, useWindowDimensions, View } from "react-native";
+import { formRow } from "../../components/forms/form-row";
 import { Icon, type IconName } from "../../components/icons";
 import { type SettingsWorkspace, useSettingsAccent } from "../../components/settings-accent";
-import { SettingLabel, SettingValue } from "../../components/settings-row-content";
+import { SettingDetail, SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { spacing, useTheme, workspaceColor } from "../../theme";
 export function SettingsRow({
   label,
@@ -23,15 +24,7 @@ export function SettingsRow({
       accessibilityRole="button"
       accessibilityLabel={value ? `${label}, ${value}` : label}
       onPress={onPress}
-      style={({ pressed }) => ({
-        minHeight: 52,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        opacity: pressed ? 0.6 : 1,
-      })}
+      style={({ pressed }) => ({ ...rowStyle, opacity: pressed ? 0.6 : 1 })}
     >
       {icon &&
         (workspace ? (
@@ -165,20 +158,9 @@ export function SettingsIdentity({
       {leading}
       <View style={{ flex: 1, minWidth: 0, gap: spacing.xs }}>
         <Text style={{ color: t.ink, fontSize: 20, fontWeight: "600" }}>{name}</Text>
-        {detail && (
-          <Text selectable style={{ color: t.secondary, fontSize: 15 }}>
-            {detail}
-          </Text>
-        )}
+        {detail && <SettingDetail selectable>{detail}</SettingDetail>}
       </View>
     </View>
   );
 }
-const rowStyle = {
-  minHeight: 56,
-  paddingHorizontal: spacing.lg,
-  paddingVertical: spacing.md,
-  flexDirection: "row" as const,
-  alignItems: "center" as const,
-  gap: spacing.md,
-};
+const rowStyle = formRow;

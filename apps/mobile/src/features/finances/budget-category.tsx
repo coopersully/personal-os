@@ -2,11 +2,15 @@ import type { FinanceBudget } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, Text, TextInput, View } from "react-native";
+import { Alert, Text, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { AppToaster } from "../../components/app-toaster";
+import { editorDismissOptions } from "../../components/editor-header";
+import { Action, Actions, insetRow } from "../../components/forms/form-rows";
 import { FormSave } from "../../components/forms/form-save";
 import { Icon } from "../../components/icons";
+import { SettingsAccentProvider } from "../../components/settings-accent";
+import { SettingLabel } from "../../components/settings-row-content";
 import { useTheme, workspaceColor } from "../../theme";
 import { categoryIcon } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
@@ -184,11 +188,15 @@ function LimitForm({ record, onDone }: { record: FinanceBudget; onDone?: () => v
       Number(limit) <= 0);
   if (onDone)
     return (
-      <View style={{ gap: 8 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <Icon name={categoryIcon(snapshot.category)} color={workspaceColor(t, "finances")} />
-          <Text style={{ color: t.ink, fontSize: 16, flex: 1 }}>Monthly limit</Text>
-          <Text style={{ color: invalid ? t.destructive : t.ink }}>$</Text>
+      <SettingsAccentProvider workspace="finances">
+        <View style={insetRow}>
+          <Icon
+            name={categoryIcon(snapshot.category)}
+            color={workspaceColor(t, "finances")}
+            size={22}
+          />
+          <SettingLabel>Monthly limit</SettingLabel>
+          <Text style={{ color: invalid ? t.destructive : t.ink, fontSize: 17 }}>$</Text>
           <TextInput
             accessibilityLabel="Monthly budget limit"
             value={limit}
@@ -202,55 +210,39 @@ function LimitForm({ record, onDone }: { record: FinanceBudget; onDone?: () => v
             placeholderTextColor={t.secondary}
             style={{
               color: invalid ? t.destructive : t.ink,
-              fontSize: 16,
-              minHeight: 44,
+              fontSize: 17,
+              minHeight: 32,
               minWidth: 72,
+              padding: 0,
               textAlign: "right",
             }}
           />
         </View>
-        <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 16 }}>
-          <Pressable
-            accessibilityRole="button"
+        <Actions inset={false}>
+          <Action
+            label={edited && !submitted ? "Cancel" : "Close"}
             disabled={pending}
             onPress={close}
-            style={{ minHeight: 44, justifyContent: "center" }}
-          >
-            <Text style={{ color: t.ink }}>{edited && !submitted ? "Cancel" : "Close"}</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
+          />
+          <Action
+            label="Save"
             accessibilityLabel="Save budget limit"
             disabled={!edited || pending || submitted || invalid}
             onPress={() => void save()}
-            style={{
-              minWidth: 44,
-              minHeight: 44,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: !edited || pending || submitted || invalid ? 0.5 : 1,
-            }}
-          >
-            <Icon name="save" color={workspaceColor(t, "finances")} />
-          </Pressable>
-        </View>
-      </View>
+          />
+        </Actions>
+      </SettingsAccentProvider>
     );
   return (
     <View style={{ flex: 1 }}>
       <Stack.Screen
         options={{
           gestureEnabled: false,
-          headerLeft: () => (
-            <Pressable
-              disabled={pending}
-              accessibilityRole="button"
-              onPress={close}
-              style={{ minHeight: 44, justifyContent: "center" }}
-            >
-              <Text style={{ color: t.ink }}>{edited && !submitted ? "Cancel" : "Close"}</Text>
-            </Pressable>
-          ),
+          ...editorDismissOptions({
+            label: edited && !submitted ? "Cancel" : "Close",
+            disabled: pending,
+            onPress: close,
+          }),
         }}
       />
       <FinanceScreen title={snapshot.category}>

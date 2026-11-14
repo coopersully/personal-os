@@ -12,6 +12,7 @@ vi.mock("react-native", () => import("../../../test/native"));
 vi.mock("../../theme", () => ({
   spacing: { sm: 8, md: 12, lg: 16, page: 20 },
   touchTarget: 44,
+  radius: { control: 8, panel: 16 },
   useTheme: () => ({ ink: "black", secondary: "gray", information: "blue", canvas: "white" }),
 }));
 vi.mock("../../components/icons", () => ({ Icon: () => null }));

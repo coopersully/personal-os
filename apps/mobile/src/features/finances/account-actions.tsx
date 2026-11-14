@@ -5,8 +5,9 @@ import { router, Stack } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Alert } from "react-native";
 import { toast } from "sonner-native";
+import { editorActionsOptions } from "../../components/editor-header";
 import type { RowAction } from "../../components/row-action-button";
-import { RowActions } from "../../components/row-actions";
+import { useTheme } from "../../theme";
 import { useFinance } from "./data";
 import { confirmedRejection, trackingStopped } from "./mutations";
 
@@ -18,6 +19,7 @@ export function AccountActions({
   account: FinanceAccount;
   duplicate: boolean;
 }) {
+  const t = useTheme();
   const { api, owner } = useFinance();
   const client = useQueryClient();
   const [pending, setPending] = useState(false);
@@ -134,13 +136,5 @@ export function AccountActions({
           ],
         ),
     });
-  return (
-    <Stack.Screen
-      options={{
-        headerRight: () => (
-          <RowActions placement="header" label="Account actions" actions={actions} />
-        ),
-      }}
-    />
-  );
+  return <Stack.Screen options={editorActionsOptions("Account actions", actions, t)} />;
 }

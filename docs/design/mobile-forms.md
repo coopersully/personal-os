@@ -29,9 +29,59 @@ therefore be top-aligned on a project card and vertically centered in a Project 
   the canonical entity icon, search, selection, cancellation, and a no-results state.
 - `ToggleRow` owns label/switch presentation. `DateField` owns the native date/time control.
 - `Section`/`Group` own rounded surfaces and inset seams. `FormBody` owns scroll and keyboard insets.
-- `styles.settingRow` defines the shared horizontal row geometry: minimum 56 points high,
-  16-point padding, 12-point gaps, vertically centered contents. Keep interactive targets at least
-  44 points. Use the theme's 4-point spacing scale and 16-point grouped-surface radius.
+- `formRow` (`components/forms/form-row.ts`) is the single row geometry: minimum 56 points high,
+  16-point side padding, 12-point vertical padding and gaps, vertically centered contents. Every
+  label/value, toggle, picker, navigation and action row uses it; `styles.settingRow` is an alias.
+  Keep interactive targets at least 44 points. Use the theme's 4-point spacing scale and 16-point
+  grouped-surface radius. Never give one screen's row its own padding.
+- Rows always sit inside a `Section`/`Group`. `SectionNote` owns explanatory or read-only copy in a
+  group (secondary, ink or warning), `SectionItem` gives a content row such as `RecordRow` the
+  group's side padding, and `SectionFootnote` sets copy under the group it explains.
+- `insetRow` is the same row for a surface that already pads its sides, such as a finance card.
+  When a shared row component (`EnumChoice`, `Field`, `ToggleRow`) sits in such a surface, wrap it
+  in `PaddedSurfaceRows` so it lines up with the surface's other rows instead of indenting twice.
+  `formBlock` is the padding of a stacked block: a label above its editor or chips.
+- An expanding row (date, time, tags, an inline finance editor) ends with `Actions`: one
+  right-aligned line of text `Action`s, dismissing command first and confirming command last.
+- `TitleField` owns the leading identity slot of a record title; do not position an icon beside it.
+
+### Shared chrome
+
+These live in `apps/mobile/src/components` and are the only way to build form and settings chrome:
+
+- `editorDismissOptions` declares a stack screen's leading Close, Cancel, Back or Done. On iOS it
+  is a native bar item, so UIKit owns the glass, label width and centered title. Do not pass a
+  custom view as `headerLeft`: the bar wraps it in a second, icon-sized glass capsule.
+- `editorActionsOptions` declares trailing record actions: none renders nothing (never an empty
+  glass circle), one is a native icon button, several use the shared ellipsis menu. It takes the
+  screen's theme so a destructive action stays red. Never set `headerRight: () => null`.
+- `SheetHeader` is the header of an in-content sheet. Both side slots reserve the wider side's
+  width, so the title is centered on the sheet and a long title truncates between the controls;
+  the title is hidden until both sides are measured. A sheet that can be abandoned keeps Close
+  or Cancel leading and passes its confirming control as `trailing`. A sheet that only confirms
+  puts Done on the trailing side with `dismiss="trailing"`.
+- Stack header titles are app-owned copy and follow the lowercase rule in
+  [Lowercase interface typography](system.md#lowercase-interface-typography): "account",
+  "edit transaction", "new project". A title that is user content (a rule, calendar or record
+  name) keeps its spelling. A screen has one title: the bar names the kind of screen and the
+  page heading, when there is one, shows the record's own name. Never repeat the bar title as
+  the page heading; set the bar title to `""` when the page heading already says it.
+- `stackChromeOptions` is the `screenOptions` of every native stack. It sets the bar's interface
+  style from the app theme; a stack without it draws light glass controls under the dark theme.
+- The `SheetHeader` title grows with large text no further than the glass controls (1.3 times)
+  and shrinks to fit before it truncates.
+- `BackLink` is the in-page way back to a parent list shown in place rather than pushed on a
+  stack (a mailbox's conversations over the mailbox list). It draws the registry chevron
+  mirrored beside the parent's name; never type a "‹" character. A pushed screen uses the
+  native stack back button instead.
+- Retry and other text commands in a sheet or page (Try again, Retry loading) are the shared
+  `Action`, inside a `SettingsAccentProvider` for the workspace, not a hand-built pressable.
+- Rows in a workspace sheet or list page use the same groups as forms: `Group` or `Section`
+  owns the surface and seams, a `formRow` pressable or a `SectionItem` around a `RecordRow`
+  owns the padding (Calendars sheet, Mailboxes).
+- `GlassButton` is the one Liquid Glass button: a 44-point capsule for a text label, a 44-point
+  circle for a bar icon and a 56-point circle for the floating Save/Add. Labels are primary ink in
+  both appearances; callers may place it but cannot resize or recolor its label.
 
 Icons identify meaningful concepts, not every primitive setting. Resolve entity identities from
 `src/product/entities.ts`; List and Project retain their glyph across pages, pickers and editors.

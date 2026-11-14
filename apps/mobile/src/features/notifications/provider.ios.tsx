@@ -9,9 +9,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { AppState, Linking, Text } from "react-native";
+import { AppState, Linking } from "react-native";
 import { toast } from "sonner-native";
-import { spacing, useTheme } from "../../theme";
+import { SectionNote } from "../../components/forms/section-content";
 import { useAuth } from "../auth/context";
 import { Action, Section, ToggleRow } from "../tasks/ui";
 import { onDueAlertsRefresh } from "./events";
@@ -279,7 +279,6 @@ export function NotificationProvider({ children }: PropsWithChildren) {
 }
 export function NotificationSettings() {
   const state = useContext(Context);
-  const t = useTheme();
   if (!state) return null;
   return (
     <>
@@ -291,10 +290,10 @@ export function NotificationSettings() {
           disabled={state.pending}
           onChange={state.setEnabled}
         />
-        <Text style={{ color: t.secondary, padding: spacing.lg, fontSize: 14 }}>
+        <SectionNote>
           {state.status}. Schedules the next 50 due alerts. Changes made elsewhere update when you
           reopen nohmi. Focus and Scheduled Summary may delay delivery.
-        </Text>
+        </SectionNote>
         {state.enabled && (
           <Action label="Send test notification" disabled={state.pending} onPress={state.test} />
         )}

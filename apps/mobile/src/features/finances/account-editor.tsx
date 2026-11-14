@@ -8,6 +8,7 @@ import { Alert, Text, TextInput, type TextInputProps, View } from "react-native"
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { EnumChoice } from "../../components/forms/enum-choice";
+import { formRow, PaddedSurfaceRows } from "../../components/forms/form-rows";
 import { FormSave, useFormKeyboardOffset } from "../../components/forms/form-save";
 import { SettingLabel } from "../../components/settings-row-content";
 import { spacing, useTheme } from "../../theme";
@@ -29,8 +30,8 @@ function TextRow({
 }: TextInputProps & { label: string; correction?: string }) {
   const t = useTheme();
   return (
-    <View style={{ minHeight: 56, justifyContent: "center" }}>
-      <View style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 12 }}>
+    <View>
+      <View style={formRow}>
         <SettingLabel style={{ flex: 0, flexShrink: 0 }}>{label}</SettingLabel>
         <TextInput
           accessibilityLabel={label}
@@ -39,7 +40,8 @@ function TextRow({
           {...input}
           style={{
             flex: 1,
-            minHeight: 44,
+            minHeight: 32,
+            padding: 0,
             textAlign: "right",
             fontSize: 17,
             color: correction ? t.destructive : t.ink,
@@ -48,7 +50,15 @@ function TextRow({
       </View>
       {correction ? (
         // The correction is written out so an invalid field is not signalled by colour alone.
-        <Text style={{ color: t.destructive, fontSize: 13, textAlign: "right", paddingBottom: 8 }}>
+        <Text
+          style={{
+            color: t.destructive,
+            fontSize: 13,
+            textAlign: "right",
+            paddingHorizontal: spacing.lg,
+            paddingBottom: spacing.sm,
+          }}
+        >
           {correction}
         </Text>
       ) : null}
@@ -247,24 +257,24 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
       />
       <FinanceScreen title={snapshot ? "Edit account" : "Add account"}>
         <Card rows>
-          <TextRow
-            label="Name"
-            value={name}
-            onChangeText={edit(setName)}
-            editable={!pending}
-            maxLength={160}
-            placeholder="Required"
-          />
-          <TextRow
-            label="Institution"
-            value={institution}
-            onChangeText={edit(setInstitution)}
-            editable={!pending}
-            maxLength={160}
-            placeholder="Required"
-          />
-          {/* The shared choice row pads itself; cancel that so it lines up with the fields. */}
-          <View style={{ marginHorizontal: -spacing.lg }}>
+          {/* Shared rows pad themselves; let them span the card so every row lines up. */}
+          <PaddedSurfaceRows>
+            <TextRow
+              label="Name"
+              value={name}
+              onChangeText={edit(setName)}
+              editable={!pending}
+              maxLength={160}
+              placeholder="Required"
+            />
+            <TextRow
+              label="Institution"
+              value={institution}
+              onChangeText={edit(setInstitution)}
+              editable={!pending}
+              maxLength={160}
+              placeholder="Required"
+            />
             <EnumChoice
               label="Account type"
               value={kind}
@@ -272,31 +282,31 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
               options={kinds}
               onChange={(value) => edit(setKind)(value as FinanceAccountKind)}
             />
-          </View>
-          {!snapshot && (
-            <TextRow
-              label="Currency"
-              value={currency}
-              onChangeText={(value) => edit(setCurrency)(value.toUpperCase())}
-              editable={!pending}
-              correction={invalidCurrency ? "Use a three-letter code such as USD." : undefined}
-              maxLength={3}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              placeholder="Optional"
-            />
-          )}
-          {manual && (
-            <TextRow
-              label="Balance"
-              value={balance}
-              onChangeText={edit(setBalance)}
-              editable={!pending}
-              correction={invalidBalance ? "Enter an amount such as 2400.00." : undefined}
-              keyboardType="numbers-and-punctuation"
-              placeholder="Optional"
-            />
-          )}
+            {!snapshot && (
+              <TextRow
+                label="Currency"
+                value={currency}
+                onChangeText={(value) => edit(setCurrency)(value.toUpperCase())}
+                editable={!pending}
+                correction={invalidCurrency ? "Use a three-letter code such as USD." : undefined}
+                maxLength={3}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                placeholder="Optional"
+              />
+            )}
+            {manual && (
+              <TextRow
+                label="Balance"
+                value={balance}
+                onChangeText={edit(setBalance)}
+                editable={!pending}
+                correction={invalidBalance ? "Enter an amount such as 2400.00." : undefined}
+                keyboardType="numbers-and-punctuation"
+                placeholder="Optional"
+              />
+            )}
+          </PaddedSurfaceRows>
         </Card>
         <Copy secondary>
           Name and Institution are required.{" "}

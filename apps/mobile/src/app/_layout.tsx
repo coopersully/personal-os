@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { toast } from "sonner-native";
 import { AppToaster } from "../components/app-toaster";
+import { stackChromeOptions } from "../components/editor-header";
 import { AuthProvider, useAuth } from "../features/auth/context";
 import { PreviewProvider } from "../features/briefing/context";
 import { NotificationProvider } from "../features/notifications/provider";
@@ -57,17 +58,7 @@ function AuthenticatedLayout() {
   return (
     <MobileDataProvider key={state.user?.id ?? "signed-out"}>
       <PreviewProvider>
-        <Stack
-          screenOptions={{
-            headerTintColor: t.ink,
-            statusBarStyle: t.dark ? "light" : "dark",
-            headerUserInterfaceStyle: t.dark ? "dark" : "light",
-            headerStyle: { backgroundColor: t.canvas },
-            contentStyle: { backgroundColor: t.canvas },
-            headerShadowVisible: false,
-            headerBackButtonDisplayMode: "minimal",
-          }}
-        >
+        <Stack screenOptions={stackChromeOptions(t)}>
           <Stack.Protected guard={state.status === "signedOut"}>
             <Stack.Screen name="sign-in" options={{ headerShown: false }} />
           </Stack.Protected>

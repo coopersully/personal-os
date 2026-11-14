@@ -336,6 +336,15 @@ it("saves which calendars are shown and re-reads events", async () => {
   expect(
     sheet.getByRole("checkbox", { name: "Show Holidays, work@example.test, Read only" }),
   ).not.toBeChecked();
+  // Shared chrome: a sheet that only confirms keeps Done trailing, and its rows share one group.
+  const done = sheet.getByRole("button", { name: "Done" });
+  expect(sheet.getByTestId("sheet-header-trailing").contains(done)).toBe(true);
+  expect(sheet.getByTestId("sheet-header-leading").contains(done)).toBe(false);
+  expect(
+    sheet
+      .getByRole("checkbox", { name: "Show Work, work@example.test" })
+      .closest('[data-testid="form-group"]'),
+  ).not.toBeNull();
   expect(sheet.getByText("work@example.test · Read only")).toBeVisible();
   expect(sheet.getByText("Stored in nohmi")).toBeVisible();
   expect(sheet.getAllByText("Updated Fri, Nov 13, 9:41 AM")).toHaveLength(2);

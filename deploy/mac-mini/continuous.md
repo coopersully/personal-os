@@ -180,8 +180,15 @@ clear a lock/state receipt merely to repeat a failed migration.
   bounded restart history, one latest transaction and redacted failure codes.
   `continuous-errors.log` retains at most 100 sanitized outer errors. Both are
   owner-only. This is local observability; there is no offsite alert or backup.
-  Encrypted backups and Docker build cache accumulate until attended cleanup;
-  no automatic pruning or deletion of production recovery material is performed.
+  Encrypted backups, release images (about 820 MB per deployed revision) and
+  Docker build cache accumulate until attended cleanup; no automatic pruning or
+  deletion of production recovery material is performed. The VM's 24 GiB Docker
+  disk filled on November 14, 2026, crashing PostgreSQL during quiescing and
+  blocking the transaction before backup or migration. Attended cleanup removes
+  only `ilo-local/*` tags other than the deployed, candidate and previous
+  revisions, plus build cache; never volumes. Clearing build cache re-verifies
+  pinned remote downloads such as the AWS RDS CA bundle, so a rotated upstream
+  file can then fail the build until its checksum pin is updated.
 
 Run `pnpm test:mac-production` and `pnpm verify` before publishing. Behavior tests
 exercise release eligibility, real state-file switches, maintenance, restart

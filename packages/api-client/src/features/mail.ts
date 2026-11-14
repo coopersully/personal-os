@@ -13,7 +13,9 @@ import type {
   MailRule,
   MailRulePreview,
   MailSetupContext,
+  MailSummaryQuery,
   MailThread,
+  MailThreadSummary,
   PreviewMailRuleInput,
   ReconcileMailDraftInput,
   SendMailDraftInput,
@@ -51,6 +53,8 @@ export type MailApiClient = {
   listMailRules(): Promise<MailRule[]>;
   getMailSetupContext(): Promise<MailSetupContext>;
   listMailboxes(): Promise<Mailbox[]>;
+  /** Body-free list rows; the only Mail thread read a client may cache. */
+  listMailThreadSummaries(query?: Partial<MailSummaryQuery>): Promise<MailThreadSummary[]>;
   listMailThreads(query?: Partial<MailListQuery>): Promise<MailThread[]>;
   snoozeMailThread(id: string, until: string): Promise<void>;
   previewMailRule(input: PreviewMailRuleInput): Promise<MailRulePreview>;
@@ -166,6 +170,12 @@ export function createMailApiClient(
         body: JSON.stringify(input),
         method: "POST",
       });
+    },
+    async listMailThreadSummaries(query = {}) {
+      const response = await request<{ threads: MailThreadSummary[] }>(
+        `/v1/mail/thread-summaries?${toQuery(query)}`,
+      );
+      return response.threads;
     },
     async listMailThreads(query = {}) {
       const response = await request<{ threads: MailThread[] }>(

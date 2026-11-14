@@ -1314,6 +1314,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           responses: { 204: { description: "Exact confirmed draft submitted once" } },
         },
       },
+      "/v1/mail/thread-summaries": {
+        get: {
+          security,
+          responses: { 200: { description: "Body-free mail conversation summaries" } },
+        },
+      },
       "/v1/mail/threads": {
         get: { security, responses: { 200: { description: "Unified mail conversations" } } },
       },

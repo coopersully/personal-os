@@ -1,7 +1,10 @@
 import {
+  type AttentionItem,
+  type CalendarEvent,
   localDateAt,
   localDateTimeToUtc,
   localDateToIso,
+  type MailThreadSummary,
   parseLocalDate,
   type TaskWorkspaceItem,
 } from "@personal-os/domain";
@@ -16,6 +19,7 @@ import {
   WorkspaceHeroVisibility,
 } from "../../components/workspace-header-inset";
 import { radius, spacing, useTheme, workspaceColor } from "../../theme";
+import { eventOccursOnDay, eventTimeLabel } from "../calendar/logic";
 import { budgetPace, categoryIcon } from "../finances/category-presentation";
 import {
   expectedAmount,
@@ -23,6 +27,7 @@ import {
   formatLocalDate,
   formatMoney,
 } from "../finances/presentation";
+import { MailReader } from "../mail/reader";
 import { useTodayData } from "./live-data";
 import { useTodaySky } from "./sky-context";
 import { TodayHeroBackdrop } from "./today-hero";
@@ -34,10 +39,46 @@ type Row = {
   value?: string;
   tone?: "attention" | "incorrect";
   icon: IconName;
-  workspace: "tasks" | "finances";
+  workspace: "tasks" | "finances" | "calendar" | "mail";
   href: Href;
+  /** Replaces navigation for rows whose detail is not a route, such as a conversation. */
+  onPress?: () => void;
   at?: string;
 };
+const clip = (text: string) => (text.length > 140 ? `${text.slice(0, 137).trimEnd()}…` : text);
+const importanceRank = { critical: 0, high: 1, normal: 2, low: 3 } as const;
+/** Open Mail attention that is still current, most important first, newest first within a level. */
+function mailAttention(items: AttentionItem[], now: Date) {
+  return items
+    .filter(
+      (item) =>
+        item.status === "open" &&
+        item.kind !== "run_summary" &&
+        (!item.expiresAt || Date.parse(item.expiresAt) > now.getTime()),
+    )
+    .sort(
+      (a, b) =>
+        importanceRank[a.importance] - importanceRank[b.importance] ||
+        b.updatedAt.localeCompare(a.updatedAt),
+    );
+}
+/** What is left of today: events still running or ahead by start time, then all-day events. */
+function remainingEvents(events: CalendarEvent[], timezone: string, now: Date) {
+  const today = localDateAt(now, timezone);
+  return events
+    .filter(
+      (event) =>
+        event.status !== "cancelled" &&
+        eventOccursOnDay(event, today, timezone) &&
+        (event.allDay || Date.parse(event.endsAt) > now.getTime()),
+    )
+    .sort(
+      (a, b) =>
+        Number(a.allDay) - Number(b.allDay) ||
+        Date.parse(a.startsAt) - Date.parse(b.startsAt) ||
+        a.title.localeCompare(b.title),
+    );
+}
 function taskRow(item: TaskWorkspaceItem, timezone: string, now: Date, upcoming = false): Row {
   const due = upcoming ? item.relevantAt : item.record.dueAt;
   const overdue = !!due && Date.parse(due) < now.getTime();
@@ -102,7 +143,7 @@ function BriefSection({
               value={row.value}
               valueTone={row.tone}
               leading={<Icon name={row.icon} color={workspaceColor(t, row.workspace)} />}
-              onPress={() => router.push(row.href)}
+              onPress={row.onPress ?? (() => router.push(row.href))}
             />
           ))
         ) : (
@@ -134,6 +175,7 @@ export default function TodayHome() {
   const [heroVisible, setLocalHeroVisible] = useState(true);
   const data = useTodayData();
   const { timezone, now } = data;
+  const [conversation, setConversation] = useState<MailThreadSummary | null>(null);
   if (!timezone)
     return (
       <Screen chrome>
@@ -236,10 +278,7 @@ export default function TodayHome() {
       return {
         id: entry.id,
         title: financeLabel(entry.action),
-        subtitle:
-          entry.explanation.length > 140
-            ? `${entry.explanation.slice(0, 137).trimEnd()}…`
-            : entry.explanation,
+        subtitle: clip(entry.explanation),
         icon: "check",
         workspace: "finances",
         href: transaction
@@ -247,6 +286,96 @@ export default function TodayHome() {
           : { pathname: "/finances/assistant", params: { view: "Activity" } },
       };
     });
+  const today = localDateAt(now, timezone);
+  const events = remainingEvents(data.events.data ?? [], timezone, now);
+  const calendars = data.calendars.data;
+  const noCalendars = calendars?.length === 0;
+  const calendarsHidden = !!calendars?.length && !calendars.some((calendar) => calendar.isSelected);
+  const schedule: Row[] = noCalendars
+    ? [
+        {
+          id: "calendar-setup",
+          title: "Add a calendar",
+          subtitle: "Connect or create a calendar in Settings to see today’s events here.",
+          icon: "calendar",
+          workspace: "calendar",
+          href: "/settings",
+        },
+      ]
+    : calendarsHidden
+      ? [
+          {
+            id: "calendar-hidden",
+            title: "Every calendar is hidden",
+            subtitle: "Choose calendars in Calendar to see their events here.",
+            icon: "calendar",
+            workspace: "calendar",
+            href: "/calendar",
+          },
+        ]
+      : events.slice(0, 3).map((event): Row => {
+          const ongoing = !event.allDay && Date.parse(event.startsAt) <= now.getTime();
+          return {
+            id: `event:${event.id}`,
+            title: event.title || "Untitled event",
+            subtitle: [
+              eventTimeLabel(event, today, timezone),
+              event.status === "tentative" ? "Tentative" : null,
+              event.location,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            value: ongoing ? "Now" : undefined,
+            icon: "calendar",
+            workspace: "calendar",
+            href: { pathname: "/calendar-event", params: { id: event.id } },
+          };
+        });
+  const mailItems = mailAttention(data.mail.data ?? [], now);
+  const noMailAccounts = data.mailAccounts.data?.length === 0;
+  const mail: Row[] =
+    noMailAccounts && !mailItems.length
+      ? [
+          {
+            id: "mail-setup",
+            title: "Connect a mail account",
+            subtitle: "Mail that needs you appears here once an account is connected in Settings.",
+            icon: "mail",
+            workspace: "mail",
+            href: "/settings",
+          },
+        ]
+      : mailItems.slice(0, 3).map((item): Row => {
+          const threadId = item.relatedEntityType === "mail_thread" ? item.relatedEntityId : null;
+          return {
+            id: `mail:${item.id}`,
+            title: item.title,
+            subtitle: clip(item.summary),
+            value:
+              item.importance === "critical"
+                ? "Critical"
+                : item.importance === "high"
+                  ? "High"
+                  : undefined,
+            tone: item.importance === "critical" ? "incorrect" : "attention",
+            icon: "mail",
+            workspace: "mail",
+            href: "/mail",
+            onPress: threadId
+              ? () =>
+                  void data.readMailThread(threadId).then((thread) => {
+                    if (thread) setConversation(thread);
+                  })
+              : undefined,
+          };
+        });
+  const unread = (data.mailAccounts.data ?? [])
+    .flatMap((account) => account.mailboxes)
+    .filter((mailbox) => mailbox.role === "inbox")
+    .reduce((total, mailbox) => total + mailbox.unreadCount, 0);
+  const coverage = ["Tasks", noCalendars ? null : "Calendar", noMailAccounts ? null : "Mail"]
+    .filter(Boolean)
+    .join(", ");
   const attentionUnavailable = data.tasks.isError || data.reviews.isError || data.budgets.isError;
   const attentionLoading = data.tasks.isPending || data.reviews.isPending || data.budgets.isPending;
   const upcomingUnavailable =
@@ -275,6 +404,15 @@ export default function TodayHome() {
           },
         ]
       : []),
+    {
+      label: data.events.data
+        ? `${events.length} ${events.length === 1 ? "event" : "events"} left${data.events.isError ? " · cached" : ""}`
+        : data.events.isPending
+          ? "Loading events…"
+          : "Events unavailable",
+      href: "/calendar",
+    },
+    ...(unread ? [{ label: `${unread} unread`, href: "/mail" as const }] : []),
     {
       label: data.upcoming.data?.unavailableSources.length
         ? "Payments incomplete"
@@ -400,10 +538,10 @@ export default function TodayHome() {
                 {data.failed
                   ? "Some data unavailable · showing available results"
                   : data.loading
-                    ? "Loading Tasks and Finances…"
+                    ? "Loading your day…"
                     : data.refreshing
                       ? "Refreshing…"
-                      : `Updated ${new Intl.DateTimeFormat("en-US", { timeZone: timezone, hour: "numeric", minute: "2-digit" }).format(data.updatedAt)} · Tasks & Finances`}
+                      : `Updated ${new Intl.DateTimeFormat("en-US", { timeZone: timezone, hour: "numeric", minute: "2-digit" }).format(data.updatedAt)} · ${coverage} & Finances`}
               </Text>
               <Text style={{ color: t.secondary, fontSize: 12 }}>Refresh</Text>
             </Pressable>
@@ -418,6 +556,44 @@ export default function TodayHome() {
                 : attentionLoading
                   ? "Loading priorities…"
                   : "Nothing needs your attention right now."
+            }
+          />
+          <BriefSection
+            title="Today’s events"
+            caption={
+              data.events.isError
+                ? "Partial"
+                : events.length > 3 && schedule.length === 3
+                  ? `3 of ${events.length}`
+                  : undefined
+            }
+            rows={data.events.data || noCalendars ? schedule : []}
+            empty={
+              data.events.isError
+                ? "Calendar is unavailable. Tap Refresh to try again."
+                : data.events.isPending
+                  ? "Loading today’s events…"
+                  : data.events.data?.length
+                    ? "Nothing else scheduled today."
+                    : "Nothing scheduled today."
+            }
+          />
+          <BriefSection
+            title="Mail"
+            caption={
+              data.mail.isError
+                ? "Needs you · Partial"
+                : mailItems.length > 3
+                  ? `Needs you · 3 of ${mailItems.length}`
+                  : "Needs you"
+            }
+            rows={data.mail.data ? mail : []}
+            empty={
+              data.mail.isError
+                ? "Mail is unavailable. Tap Refresh to try again."
+                : data.mail.isPending
+                  ? "Loading mail that needs you…"
+                  : "No mail needs you right now."
             }
           />
           <BriefSection
@@ -449,6 +625,7 @@ export default function TodayHome() {
           <View style={{ height: spacing.md }} />
         </View>
       </View>
+      {conversation && <MailReader thread={conversation} close={() => setConversation(null)} />}
     </Screen>
   );
 }

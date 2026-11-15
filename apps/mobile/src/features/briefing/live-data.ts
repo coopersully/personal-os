@@ -1,4 +1,10 @@
-import { localDateAt, localDateTimeToUtc } from "@personal-os/domain";
+import {
+  localDateAt,
+  localDateTimeToUtc,
+  localDayRange,
+  type MailThreadSummary,
+  mailThreadSummarySchema,
+} from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -21,6 +27,7 @@ export function useTodayData() {
   const start = timezone
     ? localDateTimeToUtc(localDateAt(now, timezone), 0, timezone).toISOString()
     : undefined;
+  const day = timezone ? localDayRange(now, timezone) : null;
   const common = {
     enabled: !!owner && !!timezone,
     staleTime: 30_000,
@@ -68,7 +75,42 @@ export function useTodayData() {
     queryFn: () =>
       api.listFinanceActivity({ actor: "agent", type: "financial_action", from: start, limit: 30 }),
   });
-  const reads = [tasks, overdue, nextTasks, reviews, budgets, upcoming, activity];
+  const events = useQuery({
+    ...common,
+    queryKey: ["today", owner, "events", day?.from],
+    queryFn: () => {
+      if (!day) throw new Error("Timezone missing");
+      return api.listEvents(day);
+    },
+  });
+  const calendars = useQuery({
+    ...common,
+    queryKey: ["today", owner, "calendars"],
+    queryFn: () => api.listCalendars(),
+  });
+  const mail = useQuery({
+    ...common,
+    queryKey: ["today", owner, "mail-attention"],
+    queryFn: () => api.listAttentionItems({ domain: "mail", status: "open", limit: 50 }),
+  });
+  const mailAccounts = useQuery({
+    ...common,
+    queryKey: ["today", owner, "mail-accounts"],
+    queryFn: async () => (await api.getMailSetupContext()).accounts,
+  });
+  const reads = [
+    tasks,
+    overdue,
+    nextTasks,
+    reviews,
+    budgets,
+    upcoming,
+    activity,
+    events,
+    calendars,
+    mail,
+    mailAccounts,
+  ];
   const latest = useRef(reads);
   latest.current = reads;
   const refetch = useCallback(async () => {
@@ -132,6 +174,27 @@ export function useTodayData() {
     },
     [feedbackId],
   );
+  /**
+   * Resolves an attention item's conversation for the reader. Only the body-free summary is
+   * kept; the reader loads message text itself and discards it when it closes.
+   */
+  const readMailThread = async (id: string): Promise<MailThreadSummary | null> => {
+    const openId = `today-mail-open-${owner}`;
+    toast.loading("Opening conversation…", { id: openId });
+    try {
+      const thread = mailThreadSummarySchema.parse(await api.getMailThread(id));
+      toast.dismiss(openId);
+      // A conversation that arrives after the account changed belongs to nobody on screen.
+      return feedbackOwner.current === owner ? thread : null;
+    } catch {
+      if (feedbackOwner.current === owner)
+        toast.error("Couldn’t open this conversation. Check your connection and try again.", {
+          id: openId,
+        });
+      else toast.dismiss(openId);
+      return null;
+    }
+  };
   return {
     owner,
     timezone,
@@ -145,6 +208,11 @@ export function useTodayData() {
     budgets,
     upcoming,
     activity,
+    events,
+    calendars,
+    mail,
+    mailAccounts,
+    readMailThread,
     failed,
     loading: reads.some((query) => query.isPending),
     refreshing: reads.some((query) => query.isFetching),

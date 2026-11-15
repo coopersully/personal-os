@@ -213,8 +213,9 @@ needs an attended decision; do not delete volumes to make room.
   `continuous-errors.log` retains at most 100 sanitized outer errors. Both are
   owner-only. This is local observability; there is no offsite alert or backup.
   Encrypted backups accumulate until attended cleanup; no production recovery
-  material is pruned or deleted automatically. Docker images and build cache are
-  bounded as described in **Docker disk headroom**.
+  material is pruned or deleted automatically. Release images (about 820 MB per
+  revision) and Docker build cache are bounded as described in **Docker disk
+  headroom**.
 
 Run `pnpm test:mac-production` and `pnpm verify` before publishing. Behavior tests
 exercise release eligibility, real state-file switches, maintenance, restart

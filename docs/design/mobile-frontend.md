@@ -384,10 +384,48 @@ Choose calendars opens a sheet of every calendar with its source account, read-o
 last-update freshness. Showing or hiding a calendar saves the same account-level choice web and
 Settings use, then re-reads events; success is silent and failure uses Sonner. Hidden or absent
 calendars and calendars that may be out of date are stated on the page rather than rendered as an
-empty day. Event details are read-only: date and time with the display timezone and the event's
+empty day. Event details show date and time with the display timezone and the event's
 own timezone when different, repeat/tentative/cancelled state, location, the meeting link or its
-pending/failed state, calendar and source, freshness, reminders, guests and notes. Creating,
-editing, deleting and blocking time are separate work (COO-239, COO-242).
+pending/failed state, calendar and source, freshness, reminders, guests and notes. Blocking time
+and conflict review are separate work (COO-242).
+
+### Calendar event create, edit and delete
+
+The agenda's floating plus opens a new event on the chosen day; it is absent when no calendar can
+be written to. Event details offer Edit and Delete in the top-right action control only when the
+event's calendar is writable and the event is not a busy block that mirrors another event. A
+read-only calendar offers neither.
+
+The event form follows [Mobile settings-style forms](mobile-forms.md): title, then When (All day,
+Starts, Start time, Ends, End time), Calendar, and Details (Location, Notes). A new event starts
+at the next whole hour today, or 9 AM on another chosen day, lasts the account's default event
+length, and goes to the approved default calendar, else the primary writable one. Moving the start
+keeps the event's length. An event stays on its calendar; the Calendar row is fixed when editing.
+Guests, reminders, repeat rules and meeting links are not edited on iPhone.
+
+Dates and times are entered in the account planning timezone and saved with it; there is no
+per-event timezone selector. An all-day event covers whole calendar days through its last day and
+is sent the way each calendar reads it back: nohmi and Google calendars take the date in the
+event's timezone, iCloud takes the UTC date. An edit sends only the fields the person changed plus
+the revision the form opened with, so a change made elsewhere is a conflict rather than an
+overwrite. A repeating event says that changes and deletion apply to every occurrence.
+
+These writes change the person's calendar at its provider, so the app reports only what the API
+confirms. Each write is one Sonner toast from pending to its outcome, and the page shows no result
+copy. An end that is not after the start is one Sonner error and sends nothing. A refusal from
+the API keeps the draft open. A conflict keeps the draft, disables Save and offers Reload event
+(discard changes). When a result cannot be confirmed (no response, or a server or provider
+failure) the app says so, re-reads the calendar, and never shows the change as saved:
+
+- An unconfirmed create freezes the draft and offers Review calendar before creating again or,
+  after a confirmation that warns of a duplicate, Create again anyway with exactly what was sent.
+  The API does not yet deduplicate event creation (COO-27), so the app never retries by itself.
+- An unconfirmed edit or delete can be tried again; it still carries the reviewed revision, so
+  the API refuses it if the first attempt did land.
+
+Delete asks for confirmation, then moves the event to the API's recoverable deleted state. Its
+confirmed toast offers Undo for ten seconds, which restores the event with the revision the delete
+returned and reports its own result. An unconfirmed delete offers no Undo.
 
 ### Briefings and compact record rows
 

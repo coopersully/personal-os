@@ -1,12 +1,26 @@
 import { ApiClientError } from "@personal-os/api-client";
-import type { Calendar, CalendarEvent, LocalDate } from "@personal-os/domain";
-import { localDateAt, localDateToIso, parseLocalDate } from "@personal-os/domain";
+import type {
+  Calendar,
+  CalendarEvent,
+  CreateEventInput,
+  LocalDate,
+  UpdateEventInput,
+} from "@personal-os/domain";
+import {
+  getDefaultWorkspacePreferences,
+  localDateAt,
+  localDateToIso,
+  parseLocalDate,
+} from "@personal-os/domain";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
+import { toast } from "sonner-native";
 import { holdReadFeedback } from "../../components/read-feedback-scope";
 import { useAuth } from "../auth/context";
-import { useSettingsAction, useSettingsResource } from "../settings/data";
+import { type SettingsApi, useSettingsAction, useSettingsResource } from "../settings/data";
+import { errorMessage } from "../tasks/data";
+import { eventRevision } from "./event-draft";
 import { calendarRange, type WeekStart } from "./logic";
 
 export function useCalendarScope() {
@@ -48,6 +62,26 @@ export function useWeekStart(): WeekStart | null {
   );
   if (settings.isPending) return null;
   return settings.data?.preferences.weekStartsOn ?? "sunday";
+}
+
+/** What a new event starts from: the account's event length and approved default calendar. */
+export function useEventDefaults() {
+  const settings = useSettingsResource("workspace-calendar", (api) =>
+    api.getWorkspaceSettings("calendar"),
+  );
+  const guidance = useSettingsResource("guidance-calendar", (api) =>
+    api.getDomainProfile("calendar"),
+  );
+  const preferred =
+    guidance.data?.status === "active" ? guidance.data.preferences.defaultCalendarId : undefined;
+  return {
+    // A failed read falls back to the product defaults after its own notice.
+    ready: !settings.isPending && !guidance.isPending,
+    durationMinutes:
+      settings.data?.preferences.defaultEventDurationMinutes ??
+      getDefaultWorkspacePreferences("calendar").defaultEventDurationMinutes,
+    calendarId: typeof preferred === "string" ? preferred : undefined,
+  };
 }
 
 /** One bounded read of `days` local days; the server returns only shown calendars. */
@@ -130,4 +164,152 @@ export function useCalendarSelection() {
       await cache.invalidateQueries({ queryKey: ["calendar"] });
     });
   return { pending: action.pending, select };
+}
+
+export type EventWriteFailure = "rejected" | "conflict" | "gone" | "uncertain";
+export type EventWriteResult<T> = { ok: true; value: T } | { ok: false; reason: EventWriteFailure };
+
+/**
+ * Whether a failed write is known not to have happened. A refusal from the API is certain; a
+ * lost connection or a server or provider failure may have changed the calendar anyway.
+ */
+export function eventWriteFailure(error: unknown): EventWriteFailure {
+  if (error instanceof Error && error.name === "ZodError") return "rejected";
+  if (!(error instanceof ApiClientError) || error.status >= 500) return "uncertain";
+  if (error.status === 409) return "conflict";
+  return error.status === 404 ? "gone" : "rejected";
+}
+
+type WriteCopy = { pending: string; done: string; unconfirmed: string };
+
+/**
+ * Event writes change the person's real calendar, so each one is a single Sonner toast that
+ * reports success only after the API confirms it. Anything short of a clear refusal re-reads
+ * the calendar, so the page shows what is actually there before anyone tries again.
+ */
+export function useEventWrites() {
+  const { state, session } = useAuth();
+  const cache = useQueryClient();
+  const scope = { owner: state.user?.id, epoch: session.epoch() };
+  const live = useRef(scope);
+  live.current = scope;
+  const busy = useRef(false);
+  const [pending, setPending] = useState(false);
+  type Scope = typeof scope;
+  const current = (captured: Scope) =>
+    captured.owner === live.current.owner && captured.epoch === session.epoch();
+  /** A settled event's own record is only marked stale, so a closing page does not re-read it. */
+  const refresh = async ({ owner, epoch }: Scope, settled?: string) => {
+    await cache.invalidateQueries({
+      queryKey: ["calendar", owner, epoch],
+      predicate: ({ queryKey }) => !settled || queryKey[3] !== "event" || queryKey[4] !== settled,
+    });
+    if (settled)
+      await cache.invalidateQueries({
+        queryKey: ["calendar", owner, epoch, "event", settled],
+        refetchType: "none",
+      });
+  };
+  async function run<T>(
+    copy: WriteCopy,
+    send: (api: SettingsApi) => Promise<T>,
+    settle: (value: T, captured: Scope) => string,
+    undo?: (value: T) => Promise<unknown>,
+  ): Promise<EventWriteResult<T>> {
+    if (busy.current || !scope.owner) return { ok: false, reason: "rejected" };
+    busy.current = true;
+    setPending(true);
+    const captured = scope;
+    const id = toast.loading(copy.pending);
+    try {
+      const value = await send(session.api());
+      if (!current(captured)) {
+        toast.dismiss(id);
+        return { ok: false, reason: "rejected" };
+      }
+      await refresh(captured, settle(value, captured));
+      let used = false;
+      toast.success(copy.done, {
+        id,
+        ...(undo && {
+          duration: 10_000,
+          action: {
+            label: "Undo",
+            onClick: () => {
+              if (used) return;
+              used = true;
+              void undo(value);
+            },
+          },
+        }),
+      });
+      return { ok: true, value };
+    } catch (error) {
+      if (!current(captured)) {
+        toast.dismiss(id);
+        return { ok: false, reason: "rejected" };
+      }
+      const reason = eventWriteFailure(error);
+      if (reason !== "rejected") await refresh(captured);
+      toast.error(reason === "uncertain" ? copy.unconfirmed : errorMessage(error), { id });
+      return { ok: false, reason };
+    } finally {
+      busy.current = false;
+      setPending(false);
+    }
+  }
+  const keep = (event: CalendarEvent, { owner, epoch }: Scope) => {
+    cache.setQueryData(["calendar", owner, epoch, "event", event.id], event);
+    return event.id;
+  };
+  const restore = (event: CalendarEvent, revision: ReturnType<typeof eventRevision>) =>
+    run(
+      {
+        pending: "Restoring event…",
+        done: "Event restored",
+        unconfirmed: "Couldn’t confirm the event was restored. Check your calendar.",
+      },
+      (api) => api.restoreEvent(event.id, revision),
+      keep,
+    );
+  return {
+    pending,
+    create: (input: CreateEventInput) =>
+      run(
+        {
+          pending: "Creating event…",
+          done: "Event created",
+          unconfirmed:
+            "Couldn’t confirm the event was created. Check your calendar before trying again.",
+        },
+        (api) => api.createEvent(input),
+        keep,
+      ),
+    update: (event: CalendarEvent, input: UpdateEventInput) =>
+      run(
+        {
+          pending: "Saving event…",
+          done: "Event saved",
+          unconfirmed: "Couldn’t confirm the event was saved. Check your calendar.",
+        },
+        (api) => api.updateEvent(event.id, input),
+        keep,
+      ),
+    /** Deleting is recoverable: the confirmed result offers Undo, which restores the event. */
+    remove: (event: CalendarEvent) =>
+      run(
+        {
+          pending: "Deleting event…",
+          done: "Event deleted",
+          unconfirmed: "Couldn’t confirm the event was deleted. Check your calendar.",
+        },
+        (api) => api.trashEvent(event.id, eventRevision(event)),
+        () => event.id,
+        (revision) =>
+          restore(event, {
+            expectedUpdatedAt: revision.updatedAt,
+            expectedBlockUpdatedAtById: revision.blockUpdatedAtById,
+          }),
+      ),
+  };
 }

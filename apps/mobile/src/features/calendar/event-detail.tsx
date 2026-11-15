@@ -1,11 +1,20 @@
-import { useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { ActivityIndicator, Linking, Text, View } from "react-native";
 import { toast } from "sonner-native";
+import { editorActionsOptions } from "../../components/editor-header";
 import { Icon, type IconName } from "../../components/icons";
 import { RecordRow } from "../../components/record-row";
 import { Screen } from "../../components/screen";
 import { spacing, useTheme, workspaceColor } from "../../theme";
-import { isNotFound, useCalendarEvent, useCalendarScope, useCalendars } from "./data";
+import { confirm } from "../tasks/ui";
+import {
+  isNotFound,
+  useCalendarEvent,
+  useCalendarScope,
+  useCalendars,
+  useEventWrites,
+} from "./data";
+import { canChangeEvent } from "./event-draft";
 import {
   attendeeLabel,
   calendarFreshness,
@@ -26,7 +35,7 @@ function open(url: string) {
   void Linking.openURL(url).catch(() => toast.error("Couldn’t open this link."));
 }
 
-/** Read-only event details; changing an event belongs to the event editor. */
+/** Event details. Edit and Delete are offered only where the person may change the event. */
 export function CalendarEventScreen() {
   const t = useTheme();
   const tint = workspaceColor(t, "calendar");
@@ -34,6 +43,7 @@ export function CalendarEventScreen() {
   const { timeZone = "UTC" } = useCalendarScope();
   const query = useCalendarEvent(typeof id === "string" ? id : undefined);
   const calendars = useCalendars();
+  const writes = useEventWrites();
   const event = query.data;
   if (!event) {
     const gone = !id || isNotFound(query.error);
@@ -64,8 +74,52 @@ export function CalendarEventScreen() {
       : null;
   const reminders = event.reminders ?? [];
   const attendees = event.attendees ?? [];
+  // The list's copy may be stale; actions wait for the record the API confirms.
+  const changeable = !query.isPlaceholderData && canChangeEvent(event, calendar);
+  const remove = () =>
+    confirm(
+      "Delete event?",
+      [
+        `“${event.title}” will be removed from ${calendar?.name}.`,
+        event.recurrence.length ? "Every occurrence of this repeating event is deleted." : null,
+        "You can undo this right after deleting.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      () =>
+        void writes.remove(event).then((result) => {
+          if (result.ok) router.back();
+        }),
+      true,
+    );
   return (
     <Screen>
+      <Stack.Screen
+        options={editorActionsOptions(
+          "Event actions",
+          changeable
+            ? [
+                {
+                  id: "edit",
+                  label: "Edit",
+                  icon: "edit",
+                  disabled: writes.pending,
+                  onPress: () =>
+                    router.push({ pathname: "/calendar-event-edit", params: { id: event.id } }),
+                },
+                {
+                  id: "delete",
+                  label: "Delete",
+                  icon: "trash",
+                  destructive: true,
+                  disabled: writes.pending,
+                  onPress: remove,
+                },
+              ]
+            : [],
+          t,
+        )}
+      />
       <View style={{ gap: spacing.lg }}>
         <Text accessibilityRole="header" style={{ color: t.ink, fontSize: 28, fontWeight: "700" }}>
           {event.title}

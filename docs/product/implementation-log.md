@@ -1361,3 +1361,19 @@ server search.
   fails to load.
 - Triage, compose, reply, attachments downloads and rules are not included. This is a local
   candidate covered by focused tests; it is not a production or TestFlight release.
+
+## 2026-11-14 — Native task filters by List, Project and due shortcuts (local candidate)
+
+COO-218 — The iPhone task filter sheet narrows global views (To-do, All, Upcoming, History,
+Trash and search) by List and by Project, and adds Today, Tomorrow and Next 7 days due shortcuts
+above the date pickers. Active choices show as removable chips with the list or project name; a
+shortcut range is one chip.
+
+- The query matches the web filters: a list or project sends `listId`/`projectId` with
+  `kind: "task"`, choosing a list drops a project, and a shortcut sends whole-day `dueAfter` and
+  `dueBefore` bounds in the planning timezone in place of a `due` state.
+- A list or project browser and the Reminders view do not offer List or Project.
+- No API, schema or shared-component change. The shortcut bounds are a mobile copy of the web
+  preset maths; moving both to the shared domain package is a follow-up.
+- This is a local candidate covered by focused tests and a simulator check; it is not a
+  production or TestFlight release.

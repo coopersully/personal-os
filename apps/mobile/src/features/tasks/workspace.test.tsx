@@ -198,6 +198,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 const show = (props: Partial<Parameters<typeof TaskListScreen>[0]> = {}) =>
   render(
@@ -1120,4 +1121,146 @@ it("reviews an unavailable saved capture list and explicitly empty row details w
     expect.stringContaining("saved On; your draft Off"),
   );
   await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
+});
+const lastQuery = () => h.listTaskWorkspace.mock.calls.at(-1)?.[0];
+it("narrows a global view by List and Project, shows removable chips and clears each", async () => {
+  h.lists.push(
+    list("home", "Home"),
+    list("work", "Work"),
+    list("old", "Old list", { availability: "archived" }),
+  );
+  h.projects = [project("garden", "Garden", { listId: "home" }), project("taxes", "Taxes")];
+  show({ initialFilters: { due: "today" } });
+  await loaded();
+  filters();
+  fireEvent.click(await screen.findByRole("button", { name: "List, Any list" }));
+  expect(screen.queryByRole("button", { name: "Old list" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  await waitFor(() =>
+    expect(lastQuery()).toMatchObject({ listId: "home", kind: "task", due: "today" }),
+  );
+  // Lists and projects only hold tasks, so the Type choice no longer applies.
+  expect(screen.queryByRole("button", { name: /^Type,/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Project, Any project" }));
+  expect(screen.queryByRole("button", { name: "Taxes" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Garden" }));
+  await waitFor(() => expect(lastQuery()).toMatchObject({ listId: "home", projectId: "garden" }));
+  expect(screen.getByRole("button", { name: "Remove List: Home" })).toBeVisible();
+  // Each later step lands on a query not seen before, so the request itself is asserted.
+  fireEvent.click(screen.getByRole("button", { name: "Priority, Any" }));
+  fireEvent.click(screen.getByRole("radio", { name: "High" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove Project: Garden" }));
+  await waitFor(() => expect(lastQuery()).not.toHaveProperty("projectId"));
+  expect(lastQuery()).toMatchObject({ listId: "home", priority: "high" });
+  fireEvent.click(screen.getByRole("button", { name: "Remove List: Home" }));
+  await waitFor(() => expect(lastQuery()).not.toHaveProperty("listId"));
+  expect(lastQuery()).not.toHaveProperty("kind");
+  expect(screen.queryByRole("button", { name: "Remove List: Home" })).not.toBeInTheDocument();
+  // A project can be chosen on its own; choosing another list drops it.
+  fireEvent.click(screen.getByRole("button", { name: "Project, Any project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Taxes" }));
+  await waitFor(() => expect(lastQuery()).toMatchObject({ projectId: "taxes", kind: "task" }));
+  expect(lastQuery()).not.toHaveProperty("listId");
+  fireEvent.click(screen.getByRole("button", { name: "List, Any list" }));
+  fireEvent.click(screen.getByRole("button", { name: "Work" }));
+  await waitFor(() => expect(lastQuery()).toMatchObject({ listId: "work" }));
+  expect(lastQuery()).not.toHaveProperty("projectId");
+  expect(screen.queryByRole("button", { name: "Remove Project: Taxes" })).not.toBeInTheDocument();
+  // Choosing Any list returns to a query already answered, so it is read from the screen.
+  fireEvent.click(screen.getByRole("button", { name: "List, Work" }));
+  fireEvent.click(screen.getByRole("button", { name: "Any list" }));
+  expect(await screen.findByRole("button", { name: "List, Any list" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Remove List: Work" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "List, Any list" }));
+  fireEvent.click(screen.getByRole("button", { name: "Work" }));
+  await screen.findByRole("button", { name: "Remove List: Work" });
+  // Reset filters drops every match, including the view's own due default.
+  fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+  await waitFor(() => expect(lastQuery()).not.toHaveProperty("priority"));
+  expect(lastQuery()).not.toHaveProperty("listId");
+  expect(lastQuery()).not.toHaveProperty("due");
+  // Reset view returns to the destination's defaults instead.
+  fireEvent.click(screen.getByRole("button", { name: "List, Any list" }));
+  fireEvent.click(screen.getByRole("button", { name: "Work" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  openOptions();
+  fireEvent.click(screen.getByRole("button", { name: "Reset view" }));
+  expect(await screen.findByRole("button", { name: "Remove Due: Today & overdue" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Remove List: Work" })).not.toBeInTheDocument();
+});
+it("keeps a list, project or reminder scope out of the List and Project filters", async () => {
+  h.projects = [project("garden", "Garden")];
+  for (const scope of [
+    { view: "all", listId: "inbox" },
+    { view: "all", projectId: "garden" },
+    { view: "all", kind: "reminder" },
+  ] as const) {
+    const view = show({ scope, standalone: true });
+    await loaded();
+    filters();
+    expect(screen.getByRole("button", { name: "Priority, Any" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^List,/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Project,/ })).not.toBeInTheDocument();
+    expect(lastQuery()).toMatchObject(scope);
+    view.unmount();
+  }
+});
+it("does not offer List or Project choices before they load or for reminders", async () => {
+  h.listTaskLists.mockImplementation(() => new Promise(() => {}));
+  h.projects = [project("garden", "Garden")];
+  show();
+  await loaded();
+  filters();
+  expect(screen.getByRole("button", { name: "List, Any list" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Project, Any project" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Type, Tasks & reminders" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Reminders" }));
+  await waitFor(() => expect(lastQuery()).toMatchObject({ kind: "reminder" }));
+  expect(screen.getByRole("button", { name: "List, Any list" })).toBeDisabled();
+});
+it("applies and clears the Today, Tomorrow and Next 7 days due shortcuts", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-14T15:00:00Z"));
+  show({ initialFilters: { due: "today" } });
+  await loaded();
+  filters();
+  let current = "Any time";
+  for (const [label, dueAfter, dueBefore] of [
+    ["Today", "2026-11-14T00:00:00.000Z", "2026-11-14T23:59:59.999Z"],
+    ["Tomorrow", "2026-11-15T00:00:00.000Z", "2026-11-15T23:59:59.999Z"],
+    ["Next 7 days", "2026-11-14T00:00:00.000Z", "2026-11-20T23:59:59.999Z"],
+  ]) {
+    fireEvent.click(screen.getByRole("button", { name: `Due within, ${current}` }));
+    fireEvent.click(screen.getByRole("radio", { name: label }));
+    await waitFor(() => expect(lastQuery()).toMatchObject({ dueAfter, dueBefore }));
+    // A shortcut replaces the view's "Today & overdue" default instead of contradicting it.
+    expect(lastQuery()).not.toHaveProperty("due");
+    expect(screen.getByRole("button", { name: `Remove Due within: ${label}` })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Remove Due (after|before)/ })).toBeNull();
+    current = label;
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Due within, Next 7 days" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Any time" }));
+  await waitFor(() => expect(lastQuery()).not.toHaveProperty("dueAfter"));
+  expect(lastQuery()).not.toHaveProperty("dueBefore");
+  fireEvent.click(screen.getByRole("button", { name: "Due within, Any time" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Tomorrow" }));
+  // Both of these queries were already answered, so the cleared state is read from the screen.
+  fireEvent.click(await screen.findByRole("button", { name: "Remove Due within: Tomorrow" }));
+  expect(await screen.findByRole("button", { name: "Due within, Any time" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /^Remove Due/ })).toBeNull();
+  // A hand-picked boundary is a custom range and keeps its own chips.
+  fireEvent.click(screen.getByRole("button", { name: "Due within, Any time" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Today" }));
+  fireEvent.change(screen.getByLabelText("Due before (ISO date/time)"), {
+    target: { value: "2026-11-16T12:00:00.000Z" },
+  });
+  expect(await screen.findByRole("button", { name: "Due within, Custom range" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Remove Due before: Nov 16" })).toBeVisible();
+  // A due state such as Overdue cannot also carry a date range.
+  fireEvent.click(screen.getByRole("button", { name: "Due, Any" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Overdue" }));
+  await waitFor(() => expect(lastQuery()).toMatchObject({ due: "overdue" }));
+  expect(lastQuery()).not.toHaveProperty("dueAfter");
+  expect(lastQuery()).not.toHaveProperty("dueBefore");
 });

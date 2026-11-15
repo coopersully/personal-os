@@ -9,6 +9,7 @@ import { SheetHeader } from "../../components/sheet-header";
 import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { entityDictionary } from "../../product/entities";
 import { spacing, useTheme } from "../../theme";
+import { useAuth } from "../auth/context";
 import { ActiveFilters } from "./active-filters";
 import { projectAcceptsNewWork } from "./container-directory";
 import {
@@ -23,7 +24,15 @@ import {
   useTaskSearch,
 } from "./data";
 import { DateField } from "./date-field";
+import {
+  type DateShortcut,
+  dateShortcuts,
+  identifyShortcut,
+  shortcutBounds,
+} from "./date-shortcuts";
+import { listOption } from "./list-presentation";
 import { OptionsMenu } from "./options-menu";
+import { SearchableChoice } from "./searchable-choice";
 import { TaskRow } from "./task-row";
 import {
   Action,
@@ -53,6 +62,8 @@ export function TaskListScreen({
   const t = useTheme();
   const headerInset = useWorkspaceHeaderInset();
   const api = useTaskApi();
+  const { state } = useAuth();
+  const timeZone = state.user?.planningTimezone ?? "UTC";
   const resources = useTaskResources();
   const { search, setSearch } = useTaskSearch();
   const [debounced, setDebounced] = useState(search);
@@ -76,8 +87,28 @@ export function TaskListScreen({
         ? "open_and_completed"
         : undefined),
     ...filters,
+    // Lists and projects only hold tasks; narrowing by one never returns reminders.
+    ...(filters.listId || filters.projectId ? { kind: "task" as const } : {}),
     ...(debounced ? { query: debounced } : {}),
   };
+  // A list or project browser keeps its own scope, and reminders have no container.
+  const containerFilters = !scope.listId && !scope.projectId && scope.kind !== "reminder";
+  const listChoices = (resources.lists.data ?? []).filter(
+    (row) => !row.deletedAt && row.availability === "active",
+  );
+  const projectChoices = (resources.projects.data ?? []).filter(
+    (row) =>
+      !row.deletedAt &&
+      row.availability === "active" &&
+      listChoices.some((list) => list.id === row.listId) &&
+      (!filters.listId || row.listId === filters.listId),
+  );
+  // Choices are offered only once both reads have answered, never from a partial directory.
+  const containersReady = !!resources.lists.data && !!resources.projects.data;
+  const dueShortcut = identifyShortcut(
+    { after: filters.dueAfter, before: filters.dueBefore },
+    timeZone,
+  );
   const menuChoices = buildViewOptions(query, scope);
   const scopedProject = resources.projects.data?.find((row) => row.id === scope.projectId);
   const scopedList = resources.lists.data?.find((row) => row.id === scopedProject?.listId);
@@ -98,8 +129,41 @@ export function TaskListScreen({
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const items = uniqueItems(page.data?.pages.flatMap((result) => result.items) ?? []);
+  const without = (current: Partial<TaskWorkspaceQuery>, keys: (keyof TaskWorkspaceQuery)[]) => {
+    const next = { ...current };
+    for (const key of keys) delete next[key];
+    return next;
+  };
   const updateFilter = (key: keyof TaskWorkspaceQuery, value: string) =>
-    setFilters((current) => ({ ...current, [key]: value || undefined }));
+    setFilters((current) => ({
+      // A due state such as Overdue or No due date replaces a due-date range, as on the web.
+      ...(key === "due" && value && value !== "any"
+        ? without(current, ["dueAfter", "dueBefore"])
+        : current),
+      [key]: value || undefined,
+    }));
+  const chooseContainer = (key: "listId" | "projectId", value: string) =>
+    setFilters((current) => ({
+      // Another list invalidates the chosen project; a container makes the Type filter moot.
+      ...without(current, [
+        key,
+        ...(key === "listId" ? (["projectId"] as const) : []),
+        ...(value ? (["kind"] as const) : []),
+      ]),
+      ...(value ? { [key]: value } : {}),
+    }));
+  const chooseDueShortcut = (shortcut: DateShortcut) => {
+    const { after, before } = shortcutBounds(shortcut, timeZone);
+    setFilters((current) => ({
+      // A shortcut is a whole-day range; it replaces a due state it would contradict.
+      ...without(current, [
+        "dueAfter",
+        "dueBefore",
+        ...(shortcut === "any" ? [] : (["due"] as const)),
+      ]),
+      ...(after && before ? { dueAfter: after, dueBefore: before } : {}),
+    }));
+  };
   const edit = (item: TaskWorkspaceItem) =>
     router.push({
       pathname: "/task-editor",
@@ -220,13 +284,12 @@ export function TaskListScreen({
               filters={filters}
               choices={menuChoices}
               search={search}
-              onRemove={(key) =>
-                setFilters((current) => {
-                  const next = { ...current };
-                  delete next[key];
-                  return next;
-                })
-              }
+              names={{
+                listId: resources.lists.data?.find((row) => row.id === filters.listId)?.name,
+                projectId: resources.projects.data?.find((row) => row.id === filters.projectId)
+                  ?.name,
+              }}
+              onRemove={(keys) => setFilters((current) => without(current, keys))}
               onClearSearch={() => setSearch("")}
               onClear={() => {
                 setFilters({});
@@ -388,6 +451,29 @@ export function TaskListScreen({
                     onChange={(value) => updateFilter(choice.key, value)}
                   />
                 ))}
+              {containerFilters && (
+                <>
+                  <SearchableChoice
+                    entity="list"
+                    label="List"
+                    disabled={!containersReady || query.kind === "reminder"}
+                    value={filters.listId ?? ""}
+                    options={[{ value: "", label: "Any list" }, ...listChoices.map(listOption)]}
+                    onChange={(value) => chooseContainer("listId", value)}
+                  />
+                  <SearchableChoice
+                    entity="project"
+                    label="Project"
+                    disabled={!containersReady || query.kind === "reminder"}
+                    value={filters.projectId ?? ""}
+                    options={[
+                      { value: "", label: "Any project" },
+                      ...projectChoices.map((row) => ({ value: row.id, label: row.name })),
+                    ]}
+                    onChange={(value) => chooseContainer("projectId", value)}
+                  />
+                </>
+              )}
             </Section>
             <Section title="Dates & tags">
               <Field
@@ -396,6 +482,17 @@ export function TaskListScreen({
                 value={filters.tag ?? ""}
                 onChangeText={(value) => updateFilter("tag", value.trim())}
                 autoCapitalize="none"
+              />
+              <Choice
+                label="Due within"
+                value={dueShortcut}
+                options={[
+                  ...dateShortcuts,
+                  ...(dueShortcut === "custom" ? [{ value: "custom", label: "Custom range" }] : []),
+                ]}
+                onChange={(value) => {
+                  if (value !== "custom") chooseDueShortcut(value as DateShortcut);
+                }}
               />
               <DateField
                 label="Due after"

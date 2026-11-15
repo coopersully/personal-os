@@ -583,6 +583,61 @@ it("disables the goal's actions while a change is pending and ignores a second p
   await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
 });
 
+it("keeps the actions disabled until the changed goal is on screen", async () => {
+  h.params = { id: "goal-1" };
+  h.api.manageFinanceGoal.mockResolvedValue(completed({ ...reserve, status: "paused" }));
+  mount(<FinanceGoalScreen />);
+  await screen.findByText("Confirmed progress");
+  const reload = deferred<unknown>();
+  h.api.listFinanceGoals.mockReturnValue(reload.promise);
+  press("Pause goal");
+  await waitFor(() => expect(h.api.manageFinanceGoal).toHaveBeenCalledOnce());
+  // The write is confirmed but the old version is still shown: nothing can be sent against it.
+  await waitFor(() => expect(h.api.listFinanceGoals.mock.calls.length).toBeGreaterThan(1));
+  expect(save0()).toBe(true);
+  expect(h.success).not.toHaveBeenCalled();
+  press("Pause goal");
+  expect(h.api.manageFinanceGoal).toHaveBeenCalledOnce();
+  await act(async () =>
+    reload.resolve(
+      goals([{ ...reserve, status: "paused", version: 4, planningEvidence: evidence }]),
+    ),
+  );
+  await waitFor(() => expect(h.success).toHaveBeenCalledWith("Goal paused", { id: "feedback" }));
+  expect(screen.getByRole("button", { name: "Resume goal" })).toHaveProperty("disabled", false);
+  // The statement was for version 3; the target keeps its currency all the same.
+  expect(screen.getByText("Progress not confirmed")).toBeTruthy();
+  expect(screen.getByText("$10,000.00")).toBeTruthy();
+});
+
+it("says nothing about a change once the goal page has been left", async () => {
+  h.params = { id: "goal-1" };
+  for (const settle of ["resolve", "decline", "reject"] as const) {
+    const request = deferred<unknown>();
+    h.api.manageFinanceGoal.mockReturnValue(request.promise);
+    const view = mount(<FinanceGoalScreen />);
+    await screen.findByText("Confirmed progress");
+    press("Pause goal");
+    view.unmount();
+    await act(async () => {
+      if (settle === "resolve") request.resolve(completed(reserve));
+      else if (settle === "decline")
+        request.resolve({ outcome: "failed", data: reserve, communication: { headline: "No." } });
+      else request.reject(new Error("connection lost"));
+    });
+    await waitFor(() => expect(h.dismiss).toHaveBeenCalledWith("feedback"));
+    h.dismiss.mockClear();
+  }
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
+});
+
+it("keeps the target in the currency of the goal's last statement", () => {
+  const euro = { ...reserve, version: 4, planningEvidence: { ...evidence, currencyCode: "EUR" } };
+  expect(confirmedProgress(euro as never, "owner-a", "2026-11-15")).toBeNull();
+  expect(goalSummary(euro as never, null)).toContain(`Target ${formatMoney(10_000, "EUR")}`);
+});
+
 it("drops the result of a change when the signed-in owner changed meanwhile", async () => {
   h.params = { id: "goal-1" };
   for (const settle of ["resolve", "reject"] as const) {

@@ -57,9 +57,15 @@ export function goalStatusLabel(status: FinanceGoal["status"]): string {
   return { active: "Active", paused: "Paused", completed: "Completed", removed: "Removed" }[status];
 }
 
-/** A goal has no currency of its own: its target reads in the currency of confirmed progress. */
+/**
+ * A goal has no currency of its own: its target reads in the currency of its latest progress
+ * statement, even one that no longer applies, so a pause or edit does not change the symbol.
+ */
 export function goalTarget(goal: FinanceGoal, progress: ConfirmedGoalProgress | null): string {
-  return formatMoney(goal.targetAmount, progress?.currency ?? "USD");
+  return formatMoney(
+    goal.targetAmount,
+    progress?.currency ?? goal.planningEvidence?.currencyCode ?? "USD",
+  );
 }
 
 /** One line for a goal row: status when not active, then confirmed progress or its absence. */

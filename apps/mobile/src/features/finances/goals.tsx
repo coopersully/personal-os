@@ -114,16 +114,30 @@ function GoalActions({ goal }: { goal: FinanceGoal }) {
       if (active.current !== owner) return void toast.dismiss(id);
       attempt.current = null;
       if (result.outcome !== "completed") {
+        // The shown goal may be stale: the next attempt needs its latest version.
+        await refresh();
+        if (active.current !== owner) return void toast.dismiss(id);
         if (result.outcome === "failed") toast.error(result.communication.headline, { id });
         else toast.info(result.communication.headline, { id });
         return;
       }
-      toast.success(copy.done, { id });
-      // A removed goal has no page to stay on.
-      if (operation === "remove") router.back();
-    } catch (error) {
+      if (operation === "remove") {
+        toast.success(copy.done, { id });
+        // A removed goal has no page to stay on.
+        router.back();
+        void refresh();
+        return;
+      }
+      // The actions stay disabled until the new version is on screen, so a second press
+      // cannot send the version this change just replaced.
+      await refresh();
       if (active.current !== owner) return void toast.dismiss(id);
+      toast.success(copy.done, { id });
+    } catch (error) {
       if (confirmedRejection(error)) attempt.current = null;
+      // Rejected or unknown, the shown goal may be stale: re-read it before the next attempt.
+      await refresh();
+      if (active.current !== owner) return void toast.dismiss(id);
       toast.error(
         error instanceof ApiClientError && error.status === 409
           ? "This goal changed elsewhere. Review the latest version before trying again."
@@ -135,8 +149,6 @@ function GoalActions({ goal }: { goal: FinanceGoal }) {
     } finally {
       busy.current = false;
       if (active.current === owner) setPending(false);
-      // Rejected or unknown, the shown goal may be stale: the next attempt needs its version.
-      void refresh();
     }
   }
 

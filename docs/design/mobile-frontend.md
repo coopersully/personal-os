@@ -353,22 +353,27 @@ the app applies the same rule as the domain's planning-evidence check, whose cur
 unavailable in the app runtime. Otherwise the goal reads "progress not confirmed" and its recorded
 amount is not shown as progress. Every change to a goal starts a new version, so an edit, pause,
 resume or completion returns the goal to "progress not confirmed"; the edit form and the
-completion prompt say so. A goal has no currency of its own: its target reads in the currency of
-its confirmed progress, or the product's USD default without one.
+completion prompt say so; Pause and Resume do not warn. A goal has no currency of its own: its
+target reads in the currency of its latest progress statement, even one that no longer applies,
+or the product's USD default when it has none.
 
-The add and edit form holds Name, Target, Deadline and Priority with Required and Optional
-placeholders and a floating Save; Name and Target are required and the target is at most
-100,000,000. Confirm progress is its own form: Amount (zero is valid), Currency and As of, which
+The add and edit form holds Name, Target, Deadline and Priority and a floating Save. Name and
+Target are required, with Required as their placeholder, and the target is at most 100,000,000;
+an empty Deadline reads as not set. Confirm progress is its own form: Amount (zero is valid), Currency and As of, which
 defaults to today in the account planning timezone and cannot be later. Currency starts from the
-goal's last statement. Each form names its required fields and states a correction beside an
-invalid field.
+goal's last statement. Each form names its required fields. An invalid Target, Amount or Currency
+states its correction beside the field; a future As of date is corrected in a line under the
+fields, and a cleared one only disables Save.
 
 Every goal write carries the version that was on screen and an idempotency key. The key is kept
 while the outcome is unknown and replaced only after a definitive rejection, so repeating the same
 change cannot act twice. A changed goal is a conflict: the toast says to review the latest version
 and nothing is overwritten. After an add whose outcome is unknown, saving the same draft repeats
 it under the same key; saving a corrected draft first looks for a new goal under the earlier name
-and adds nothing when it finds one. One toast runs from loading to the confirmed result; a failed
+and adds nothing when it finds one. An earlier attempt that reaches the server only after that
+look can still leave two goals; closing that gap needs a server-side key shared by both drafts.
+A goal's actions stay disabled until the changed goal is on screen, so a second press cannot send
+the version the first one replaced. One toast runs from loading to the confirmed result; a failed
 or unknown save keeps the draft and the form open and never reads as saved.
 
 ### Transaction conversations and review

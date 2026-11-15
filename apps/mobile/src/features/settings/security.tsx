@@ -84,11 +84,12 @@ export function sessionLastActive(lastSeenAt: string, now = Date.now()) {
   if (minutes < 5) return "Active now";
   if (minutes < 60) return `Active ${minutes} minutes ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `Active ${hours} ${hours === 1 ? "hour" : "hours"} ago`;
   // Calendar days in the device's timezone: 30 hours ago can be the day before yesterday.
   const startOfDay = (date: Date) =>
     new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const days = Math.round((startOfDay(new Date(now)) - startOfDay(seen)) / 86_400_000);
+  // A 25-hour fall-back day can hold 24 elapsed hours on one date, so hours also cover day 0.
+  if (hours < 24 || days < 1) return `Active ${hours} ${hours === 1 ? "hour" : "hours"} ago`;
   if (days === 1) return "Active yesterday";
   if (days < 7) return `Active ${days} days ago`;
   return `Last active ${seen.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;

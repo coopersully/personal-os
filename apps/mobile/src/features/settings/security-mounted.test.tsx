@@ -504,7 +504,7 @@ it("names several devices apart, this device first and the rest by most recent a
     device("old-app", NOHMI_APP, "2026-10-19T12:00:00Z"),
     device("browser", CHROME_MAC, "2026-11-14T09:00:00Z"),
     device("fixture-session", NOHMI_APP, NOW, true),
-    device("unknown", null, "2026-11-12T12:00:00Z"),
+    device("unknown", null, localDaysBeforeNow(2)),
   ]);
   show();
   await screen.findByRole("region", { name: "Other devices" });
@@ -523,7 +523,7 @@ it("keeps a long device name on one line above its activity and shows it in full
   freezeClock();
   const name = "PersonalAutomationBridgeForHomeServer-nightly";
   h.sessions.mockResolvedValue([
-    device("fixture-session", `${name}/2026.11.3 (linux-arm64)`, "2026-11-13T12:00:00Z"),
+    device("fixture-session", `${name}/2026.11.3 (linux-arm64)`, localDaysBeforeNow(1)),
   ]);
   const view = show();
   const row = await screen.findByRole("button", { name: `${name}, Active yesterday` });
@@ -572,12 +572,23 @@ it("keeps sign out a separate confirmed destructive action", async () => {
   );
 });
 
+// Day wording counts local calendar days, so day fixtures are built from local fields of NOW.
+const localDaysBeforeNow = (days: number) => {
+  const now = new Date(NOW);
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - days,
+    now.getHours(),
+    now.getMinutes(),
+  ).toISOString();
+};
 it.each([
   ["2026-11-14T11:58:00Z", "Active now"],
   ["2026-11-14T11:20:00Z", "Active 40 minutes ago"],
   ["2026-11-14T10:30:00Z", "Active 1 hour ago"],
-  ["2026-11-13T11:00:00Z", "Active yesterday"],
-  ["2026-11-09T12:00:00Z", "Active 5 days ago"],
+  [localDaysBeforeNow(1), "Active yesterday"],
+  [localDaysBeforeNow(5), "Active 5 days ago"],
   ["not a date", "Last active time unavailable"],
 ])("describes last activity at %s as %s", (lastSeenAt, summary) => {
   expect(sessionLastActive(lastSeenAt, new Date(NOW).getTime())).toBe(summary);
@@ -617,4 +628,19 @@ it.each([
   expect(sessionLastActive(seen.toISOString(), new Date(2026, 10, 14, 1, 0).getTime())).toBe(
     summary,
   );
+});
+
+it("keeps hour wording for 24 elapsed hours on the same date of a 25-hour fall-back day", () => {
+  const zone = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  try {
+    // 00:15 EDT to 23:30 EST on 1 Nov 2026: 24 hours 15 minutes, one local date.
+    const seen = "2026-11-01T04:15:00Z";
+    const now = new Date("2026-11-02T04:30:00Z");
+    expect(new Date(seen).getDate()).toBe(now.getDate());
+    expect(sessionLastActive(seen, now.getTime())).toBe("Active 24 hours ago");
+  } finally {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  }
 });

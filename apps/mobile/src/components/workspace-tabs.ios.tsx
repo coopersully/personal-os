@@ -16,8 +16,8 @@ export function WorkspaceTabs({ workspace }: { workspace: WorkspaceWithPages }) 
           key={page.name}
           name={page.name}
           accessibilityLabel={page.label}
-          // Pages reserve the fixed search header themselves. UIKit's automatic insets on top of
-          // that shift a list by the safe area, hiding its title or leaving a gap above it.
+          // Pages reserve the fixed search header themselves. Otherwise the tabs switch a tab's
+          // first scroll view to UIKit's automatic insets, which pushes the list low.
           disableAutomaticContentInsets
         >
           <NativeTabs.Trigger.Label>{page.label}</NativeTabs.Trigger.Label>

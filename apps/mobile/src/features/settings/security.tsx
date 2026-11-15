@@ -247,12 +247,17 @@ function Security({
                   `Revoke ${device.name}?`,
                   device.isCurrent === true
                     ? "This is your current session. You will need to sign in again on this device."
-                    : `${device.name} will need to sign in again. This may be your current session.`,
+                    : device.isCurrent === false
+                      ? `${device.name} will need to sign in again.`
+                      : `${device.name} will need to sign in again. This may be your current session.`,
                   () =>
                     void action.run(async (api) => {
                       await api.revokeSession(device.id);
                       await session.revalidate();
                       await sessions.refetch();
+                      // The revoked session's page has nothing left to show. Revoking this
+                      // device signs the app out instead, which replaces the whole stack.
+                      if (device.isCurrent !== true && router.canGoBack()) router.back();
                     }, "Session revoked"),
                   true,
                 )

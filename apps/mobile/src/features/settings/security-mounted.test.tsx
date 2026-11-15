@@ -23,6 +23,8 @@ vi.mock("@tanstack/react-query", async () => {
 const h = vi.hoisted(() => ({
   params: { id: "fixture-session" },
   push: vi.fn(),
+  back: vi.fn(),
+  canGoBack: vi.fn(() => true),
   signedIn: true,
   fontScale: 1,
   owner: true,
@@ -60,7 +62,7 @@ vi.mock("../../theme", () => ({
 }));
 vi.mock("../../components/forms/use-dirty-dismiss", () => ({ useDirtyDismiss: () => {} }));
 vi.mock("expo-router", () => ({
-  router: { push: h.push },
+  router: { push: h.push, back: h.back, canGoBack: h.canGoBack },
   useLocalSearchParams: () => h.params,
   Stack: { Screen: () => null },
 }));
@@ -266,6 +268,34 @@ it("revokes only the confirmed synthetic session and revalidates identity before
   expect(h.revalidate).toHaveBeenCalledOnce();
   expect(h.sessions).toHaveBeenCalledTimes(2);
   expect(h.success).toHaveBeenCalledWith("Session revoked", { id: "security-toast" });
+  expect(h.back).toHaveBeenCalledOnce();
+});
+
+it("stays on the device page when a revoke fails, and never navigates back after revoking this device", async () => {
+  h.sessions.mockResolvedValue([device("fixture-session", CHROME_MAC, NOW)]);
+  h.revoke.mockRejectedValueOnce(new Error("Revoke denied"));
+  const view = show(<SecurityDeviceScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: "Revoke session" }));
+  await confirmLast();
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(expect.any(String), { id: "security-toast" }),
+  );
+  expect(h.back).not.toHaveBeenCalled();
+  expect(screen.queryByText("Revoke denied")).toBeNull();
+  h.sessions.mockResolvedValue([device("fixture-session", NOHMI_APP, NOW, true)]);
+  h.epoch = 2;
+  view.rerender(
+    <MobileDataProvider>
+      <SecurityDeviceScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByText("This iPhone");
+  fireEvent.click(screen.getByRole("button", { name: "Revoke session" }));
+  await confirmLast();
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Session revoked", { id: "security-toast" }),
+  );
+  expect(h.back).not.toHaveBeenCalled();
 });
 
 it("retains invitation corrections on validation and denied creation, then displays only the returned code", async () => {
@@ -401,7 +431,11 @@ it.each([
   expect(screen.queryByText(/This iPhone/) !== null).toBe(isCurrent === true);
   fireEvent.click(screen.getByRole("button", { name: "Revoke session" }));
   expect(h.confirm.mock.calls.at(-1)?.[1]).toContain(
-    isCurrent === true ? "This is your current session" : "This may be your current session",
+    isCurrent === true ? "This is your current session" : "will need to sign in again",
+  );
+  // Only an absent isCurrent leaves the question open; a known other device is not "maybe".
+  expect(String(h.confirm.mock.calls.at(-1)?.[1]).includes("may be your current session")).toBe(
+    isCurrent === undefined,
   );
   expect(h.revoke).not.toHaveBeenCalled();
 });

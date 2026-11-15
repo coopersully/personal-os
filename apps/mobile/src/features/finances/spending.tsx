@@ -392,7 +392,7 @@ export function FinanceSpendingScreen() {
     </SettingsAccentProvider>
   );
   return (
-    <FinanceScreen title="Spending">
+    <FinanceScreen title="Spending" tabBar>
       <Segments
         value={mode}
         options={["Summary", "Transactions"]}

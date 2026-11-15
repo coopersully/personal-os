@@ -95,11 +95,10 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   // Screen instances remain mounted in native tabs; dismiss transient state when leaving one.
   // biome-ignore lint/correctness/useExhaustiveDependencies: route changes dismiss transient header UI.
   useEffect(() => {
-    setOpen(false);
-    setAccountOpen(false);
+    close();
+    holding.current = false;
     setQuery("");
     taskSearch.setSearch("");
-    setHovered(null);
   }, [path]);
   const color = (workspace: Workspace) => workspaceColor(t, workspace.id);
   const choose = (workspace: Workspace) => {
@@ -128,6 +127,8 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   const pan = useStablePan({
     onStartShouldSetPanResponderCapture: () => true,
     onPanResponderGrant: () => {
+      // Only one hold timer may be pending; an earlier one left running could open the menu later.
+      clearTimer();
       setAccountOpen(false);
       holding.current = false;
       candidate.current = null;

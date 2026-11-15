@@ -235,7 +235,9 @@ vi.mock("react-native", () => {
   };
 });
 vi.mock("../../components/screen", () => ({
-  Screen: ({ children }: PropsWithChildren) => <main>{children}</main>,
+  Screen: ({ children, tabBar }: PropsWithChildren<{ tabBar?: boolean }>) => (
+    <main data-tab-bar={String(!!tabBar)}>{children}</main>
+  ),
 }));
 vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-icon={name} />,
@@ -357,9 +359,12 @@ beforeEach(() => {
   h.api.resolveFinanceReview.mockResolvedValue({ applied: true, transaction });
 });
 afterEach(cleanup);
+// Only the five Finances tab pages ask the shared screen to clear the native tab bar.
+const tabBar = () => screen.getByRole("main").getAttribute("data-tab-bar");
 it("shows real amounts and source qualifications without a duplicate review read", async () => {
   mount(<FinanceOverviewScreen />);
   expect(await screen.findByText("$42.00")).toBeTruthy();
+  expect(tabBar()).toBe("true");
   expect(screen.getByText("Partial total")).toBeTruthy();
   expect(screen.queryByText(/Your share of spending/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "About spent this month" }));
@@ -388,6 +393,7 @@ it("keeps mixed currency totals out of overview", async () => {
 it("opens accounts and keeps search in the shared header", async () => {
   const view = mount(<FinanceAccountsScreen />);
   fireEvent.click(await screen.findByRole("button", { name: /Everyday checking/ }));
+  expect(tabBar()).toBe("true");
   expect(h.push).toHaveBeenCalledWith({ pathname: "/finance-account", params: { id: account.id } });
   expect(screen.queryByLabelText("Search accounts")).toBeNull();
   h.params = { accountSearch: "missing" };
@@ -402,6 +408,7 @@ it("preserves the exact spending reference for category drill-down", async () =>
   mount(<FinanceSpendingScreen />);
   fireEvent.click(await screen.findByRole("button", { name: /Groceries/ }));
   await screen.findByText("Corner market");
+  expect(tabBar()).toBe("true");
   expect(h.api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
     expect.objectContaining({
       referenceRevision: revision,
@@ -432,6 +439,7 @@ it("loads subsequent transaction pages only on request", async () => {
 it("uses canonical budget, cash flow and wealth reads", async () => {
   mount(<FinancePlanScreen />);
   await screen.findByText("No budget proposal yet.");
+  expect(tabBar()).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Cash flow" }));
   await screen.findByText("No scheduled income or bills in the next 30 days.");
   fireEvent.click(screen.getByRole("button", { name: "Wealth" }));
@@ -440,8 +448,10 @@ it("uses canonical budget, cash flow and wealth reads", async () => {
 it("shows the existing conversation and recorded activity without creating new records", async () => {
   mount(<FinanceAssistantScreen />);
   await screen.findByText("No transaction reviews waiting.");
+  expect(tabBar()).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
   await screen.findByText("Your Finance conversation will appear here.");
+  expect(tabBar()).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Activity" }));
   await screen.findByText("No recorded activity yet.");
 });
@@ -638,6 +648,8 @@ it("shows transaction notes, splits, and provenance with the USD default", async
   });
   mount(<FinanceTransactionScreen />);
   await screen.findByText("Shared lunch");
+  // A detail route opens above the tabs, so it must not reserve tab-bar space.
+  expect(tabBar()).toBe("false");
   expect(screen.getByText("Pending")).toBeTruthy();
   expect(screen.getByText("Confirmed by owner")).toBeTruthy();
   expect(screen.getByText("Personal")).toBeTruthy();

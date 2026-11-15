@@ -9,6 +9,7 @@ import { useFinanceRead } from "./data";
 import { InstitutionLogo } from "./institution-logo";
 import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
 import { Transactions } from "./spending";
+import { TransactionActions } from "./transaction-actions";
 import { TransactionCategory } from "./transaction-category";
 import { TransactionNotes } from "./transaction-notes";
 import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Section } from "./ui";
@@ -106,27 +107,15 @@ export function FinanceTransactionScreen() {
   const review = reviews.data?.find(
     (entry) => entry.transaction.id === id && entry.status !== "resolved",
   );
+  const account = accounts.data?.accounts.find((entry) => entry.id === item?.accountId);
   return (
     <FinanceScreen title={item?.merchant ?? "Transaction"}>
-      <Stack.Screen
-        options={{
-          ...editorActionsOptions(
-            "Transaction actions",
-            item
-              ? [
-                  {
-                    id: "edit",
-                    label: "Edit transaction",
-                    icon: "edit",
-                    onPress: () =>
-                      router.push({ pathname: "/finance-transaction-edit", params: { id } }),
-                  },
-                ]
-              : [],
-            t,
-          ),
-        }}
-      />
+      {/* Without a loaded record the bar offers nothing rather than an empty control. */}
+      {item ? (
+        <TransactionActions item={item} manualAccount={account?.provider === "manual"} />
+      ) : (
+        <Stack.Screen options={editorActionsOptions("Transaction actions", [], t)} />
+      )}
       <ReadState query={query}>
         {item ? (
           <>
@@ -147,10 +136,7 @@ export function FinanceTransactionScreen() {
                 <FinanceRow
                   centered
                   title="Account"
-                  value={
-                    accounts.data?.accounts.find((account) => account.id === item.accountId)
-                      ?.name ?? "Unavailable"
-                  }
+                  value={account?.name ?? "Unavailable"}
                   icon="finances"
                 />
               </ReadState>

@@ -599,7 +599,15 @@ it("tells an empty day and a clear inbox apart from Calendar and Mail that are n
   expect(screen.getByRole("button", { name: /Approve the fare/ })).toBeVisible();
   expect(screen.queryByText("Connect a mail account")).toBeNull();
   view.rerender(<TodayHome />);
-  h.data = { ...data(), events: query([]) };
+  // A day whose only event was cancelled has nothing behind it either.
+  h.data = {
+    ...data(),
+    events: query([
+      event("off", "Cancelled sync", "2026-11-09T08:00:00Z", "2026-11-09T09:00:00Z", {
+        status: "cancelled",
+      }),
+    ]),
+  };
   view.rerender(<TodayHome />);
   expect(screen.getByText("Nothing scheduled today.")).toBeVisible();
 });

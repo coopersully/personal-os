@@ -573,7 +573,7 @@ export default function TodayHome() {
                 ? "Calendar is unavailable. Tap Refresh to try again."
                 : data.events.isPending
                   ? "Loading today’s events…"
-                  : data.events.data?.length
+                  : data.events.data?.some((event) => event.status !== "cancelled")
                     ? "Nothing else scheduled today."
                     : "Nothing scheduled today."
             }

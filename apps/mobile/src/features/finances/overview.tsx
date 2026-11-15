@@ -61,7 +61,7 @@ export function FinanceOverviewScreen() {
     </>
   );
   return (
-    <FinanceScreen title="Overview">
+    <FinanceScreen title="Overview" tabBar>
       <ReadState query={spending}>
         {spending.data && (
           <OverviewMetric

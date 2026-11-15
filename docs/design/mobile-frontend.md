@@ -416,6 +416,11 @@ The workspace search header floats above page content without an opaque full-wid
 Keep its native Liquid Glass capsule and reserve its safe-area-plus-header height inside page content
 so initial headings never sit under the controls. Shared Screen and virtualized Tasks lists use the
 same header inset; scrolling content and decorative backgrounds can pass behind the fixed header.
+Because pages own that spacing, native tab pages turn off UIKit's automatic content insets, so a
+list is never inset twice. A tab page therefore also clears the floating tab bar itself: lists pad
+their end by 100 points and the five Finances tab pages pass `tabBar` to the shared `Screen`, which
+applies the same clearance whether or not the page scrolls. Routes that open above the tabs, such
+as Finances details and editors, do not.
 Keep the glass material's system appearance stable during scrolling; adapt foreground contrast
 without changing the navigator or scroll surface's identity.
 

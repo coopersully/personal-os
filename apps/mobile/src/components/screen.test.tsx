@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { Screen } from "./screen";
+import { Screen, tabBarClearance } from "./screen";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   motion: true,
   region: vi.fn(),
   scroll: {} as Record<string, unknown>,
+  fixed: undefined as number | undefined,
 }));
 vi.mock("react-native", async () => {
   const native = await import("../../test/native");
@@ -21,6 +22,14 @@ vi.mock("react-native", async () => {
     ...native,
     Platform: h.platform,
     Animated: { View: native.View },
+    View: ({ children, style }: PropsWithChildren<{ style?: unknown }>) => {
+      const bottom = [style]
+        .flat(3)
+        .map((entry) => (entry as { paddingBottom?: number } | undefined)?.paddingBottom)
+        .findLast((value) => value !== undefined);
+      if (bottom !== undefined) h.fixed = bottom;
+      return <div>{children}</div>;
+    },
     ScrollView: ({ children, ...props }: PropsWithChildren<Record<string, unknown>>) => {
       h.scroll = props;
       return <div data-testid="scroll">{children}</div>;
@@ -65,6 +74,49 @@ it("keeps hero bounds fixed and delegates native iOS horizontal motion to native
   expect(h.scroll.contentContainerStyle).toEqual(
     expect.arrayContaining([expect.objectContaining({ paddingTop: 0, paddingBottom: 34 })]),
   );
+});
+it("clears the floating native tab bar on iPhone tab pages and nowhere else", () => {
+  const bottom = () =>
+    (h.scroll.contentContainerStyle as { paddingBottom?: number }[]).at(-1)?.paddingBottom;
+  h.platform.OS = "ios";
+  const view = render(
+    <Screen chrome tabBar>
+      Overview
+    </Screen>,
+  );
+  expect(bottom()).toBe(tabBarClearance);
+  expect(tabBarClearance).toBeGreaterThan(34 + 60);
+  view.rerender(<Screen chrome>Calendar</Screen>);
+  expect(bottom()).toBe(34);
+  // Web keeps its dock outside the page, so a tab page needs no extra room there.
+  h.platform.OS = "web";
+  view.rerender(
+    <Screen chrome tabBar>
+      Overview
+    </Screen>,
+  );
+  expect(bottom()).toBe(34);
+  // A fixed page, such as a pinned composer, gets the same clearance on iPhone only.
+  const fixed = () => h.fixed;
+  view.rerender(
+    <Screen chrome scroll={false} tabBar>
+      Conversation
+    </Screen>,
+  );
+  expect(fixed()).toBe(34);
+  h.platform.OS = "ios";
+  view.rerender(
+    <Screen chrome scroll={false} tabBar>
+      Conversation
+    </Screen>,
+  );
+  expect(fixed()).toBe(tabBarClearance);
+  view.rerender(
+    <Screen chrome scroll={false}>
+      Editor
+    </Screen>,
+  );
+  expect(fixed()).toBe(34);
 });
 it("uses safe-area adjustment without shared chrome and preserves compact non-scrolling forms", () => {
   h.inset = 0;

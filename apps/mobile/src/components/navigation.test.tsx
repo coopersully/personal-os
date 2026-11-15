@@ -292,6 +292,34 @@ it("selects a workspace after hold-and-drag and tolerates unavailable haptic har
   expect(screen.queryByTestId("native-picker")).not.toBeInTheDocument();
   expect(pan.onPanResponderTerminationRequest?.(event(), gesture())).toBe(false);
 });
+it("does not reopen the picker from a hold timer orphaned by a second grant", async () => {
+  h.platform.OS = "ios";
+  render(<Shell />);
+  await act(async () => {});
+  vi.useFakeTimers();
+  const pan = h.responders[0];
+  act(() => pan.onPanResponderGrant?.(event(), gesture()));
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  // A second grant before the first hold elapsed must replace its timer, not add another.
+  act(() => pan.onPanResponderGrant?.(event(), gesture()));
+  act(() => pan.onPanResponderMove?.(event(), gesture(20, 144, 20)));
+  await act(async () => pan.onPanResponderRelease?.(event(), gesture()));
+  expect(h.navigate).toHaveBeenCalledWith("/tasks");
+  expect(screen.queryByTestId("native-picker")).not.toBeInTheDocument();
+  await act(async () => vi.advanceTimersByTimeAsync(300));
+  expect(screen.queryByTestId("native-picker")).not.toBeInTheDocument();
+});
+it("drops a pending hold timer when the route changes", async () => {
+  h.platform.OS = "ios";
+  const view = render(<Shell />);
+  await act(async () => {});
+  vi.useFakeTimers();
+  act(() => h.responders[0].onPanResponderGrant?.(event(), gesture()));
+  h.path = "/tasks";
+  view.rerender(<Shell />);
+  await act(async () => vi.advanceTimersByTimeAsync(300));
+  expect(screen.queryByTestId("native-picker")).not.toBeInTheDocument();
+});
 it("supports quick slide, tap-open selection and cancellation without unintended navigation", async () => {
   render(<Shell />);
   await act(async () => {});

@@ -30,11 +30,17 @@ export function FinanceScreen({
   title,
   children,
   scroll = true,
-}: PropsWithChildren<{ title: string; scroll?: boolean }>) {
+  tabBar = false,
+}: PropsWithChildren<{
+  title: string;
+  scroll?: boolean;
+  /** Set on the five Finances tab pages; detail and editor routes open above the tabs. */
+  tabBar?: boolean;
+}>) {
   useFinanceRefresh(refreshKeys[title] ?? noKeys);
   const t = useTheme();
   return (
-    <Screen chrome scroll={scroll}>
+    <Screen chrome scroll={scroll} tabBar={tabBar}>
       <View
         style={{ gap: spacing.lg, paddingTop: 8, ...(!scroll ? { flex: 1, minHeight: 0 } : {}) }}
       >

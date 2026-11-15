@@ -34,8 +34,10 @@ import {
   draftFromEvent,
   draftProblem,
   type EventDraft,
+  matchesDraft,
   newEventDraft,
   updateInput,
+  withAllDay,
   withStart,
 } from "./event-draft";
 import { calendarSourceLabel, timeZoneName } from "./logic";
@@ -121,8 +123,12 @@ function NewEvent({ day, calendars, timeZone }: FormScope & { day?: string }) {
         None of your calendars can take new events. Connect or create one in Settings.
       </Unavailable>
     );
+  // The approved default first; otherwise prefer a calendar the agenda shows, primary first.
+  const shown = writable.filter((candidate) => candidate.isSelected);
   const calendar =
     writable.find((candidate) => candidate.id === defaults.calendarId) ??
+    shown.find((candidate) => candidate.isPrimary) ??
+    shown[0] ??
     writable.find((candidate) => candidate.isPrimary) ??
     writable[0];
   return (
@@ -189,7 +195,7 @@ function EventForm({
   const [event] = useState(latest);
   const [draft, setDraft] = useState(initial);
   const [edited, setEdited] = useState(false);
-  const [blocked, setBlocked] = useState<"conflict" | "uncertain" | null>(null);
+  const [blocked, setBlocked] = useState<"conflict" | "uncertain" | "landed" | null>(null);
   // An unconfirmed create is retried with exactly what was sent, never a changed draft.
   const sent = useRef<CreateEventInput | null>(null);
   const permitDismiss = useDirtyDismiss(edited, writes.pending);
@@ -213,15 +219,22 @@ function EventForm({
       toast.error(problem ?? "Choose a calendar before saving.");
       return;
     }
-    if (!event) sent.current ??= createInput(draft, calendar, timeZone);
-    const result = event
-      ? await writes.update(event, updateInput(draft, event, timeZone))
-      : await writes.create(sent.current as CreateEventInput);
-    if (result.ok) return leave();
     if (event) {
+      const result = await writes.update(event, updateInput(draft, event, timeZone));
+      if (result.ok) return leave();
       if (result.reason === "conflict") setBlocked("conflict");
       return;
     }
+    const again = !!sent.current;
+    sent.current ??= createInput(draft, calendar, timeZone);
+    // A repeat reads the calendar first and sends nothing if the first attempt is there.
+    const result = again
+      ? await writes.createAfterCheck(sent.current, (found) => matchesDraft(found, draft, timeZone))
+      : await writes.create(sent.current);
+    if (result.ok) return leave();
+    if (result.reason === "landed") return setBlocked("landed");
+    // The calendar could not be read, so the choice stays as it was.
+    if (result.reason === "unchecked") return;
     if (result.reason === "uncertain") return setBlocked("uncertain");
     // A refused create changed nothing, so the draft opens up again for correction.
     sent.current = null;
@@ -263,7 +276,10 @@ function EventForm({
               <ToggleRow
                 label="All day"
                 value={draft.allDay}
-                onChange={(allDay) => edit({ allDay })}
+                onChange={(allDay) => {
+                  setEdited(true);
+                  setDraft((current) => withAllDay(current, allDay, timeZone));
+                }}
                 disabled={locked}
               />
               <PlanningPicker
@@ -341,16 +357,21 @@ function EventForm({
               />
             </Section>
           </View>
+          {blocked === "landed" && (
+            <Section title="Recovery">
+              <Action label="Close and review calendar" onPress={leave} />
+            </Section>
+          )}
           {blocked === "uncertain" && (
             <Section title="Recovery">
               <Action label="Review calendar before creating again" onPress={leave} />
               <Action
-                label="Create again anyway"
+                label="Check calendar and create again"
                 disabled={writes.pending}
                 onPress={() =>
                   confirm(
                     "Create this event again?",
-                    "If the first attempt went through, your calendar will have it twice.",
+                    "nohmi checks your calendar first and sends nothing if the event is already there. If your provider has it but nohmi doesn’t yet, you’ll get it twice.",
                     () => void save(),
                   )
                 }

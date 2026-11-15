@@ -58,7 +58,12 @@ export function newEventDraft(
   durationMinutes: number,
 ): EventDraft {
   const current = wallClock(now, timeZone);
-  const date = day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : current.date;
+  // Only a real calendar date is taken from the link; "2026-02-31" is not one.
+  const real =
+    !!day &&
+    /^\d{4}-\d{2}-\d{2}$/.test(day) &&
+    localDateToIso(addLocalDays(parseLocalDate(day), 0)) === day;
+  const date = real ? (day as string) : current.date;
   const nextHour = (Math.floor(minuteOf(current.time) / 60) + 1) * 60;
   const start =
     date !== current.date
@@ -136,6 +141,28 @@ export function withStart(
     timeZone,
   );
   return { ...next, endDate: end.date, endTime: end.time };
+}
+
+/** Turning All day on for an event shorter than a day makes it that one day, not two. */
+export function withAllDay(draft: EventDraft, allDay: boolean, timeZone: string): EventDraft {
+  const length =
+    instantOf(draft.endDate, draft.endTime, timeZone).getTime() -
+    instantOf(draft.startDate, draft.startTime, timeZone).getTime();
+  const short = allDay && !draft.allDay && length > 0 && length < 86_400_000;
+  return { ...draft, allDay, endDate: short ? draft.startDate : draft.endDate };
+}
+
+/** Whether an event on the calendar is the one this draft describes: same calendar, title and span. */
+export function matchesDraft(event: CalendarEvent, draft: EventDraft, timeZone: string) {
+  const found = draftFromEvent(event, timeZone);
+  return (
+    found.calendarId === draft.calendarId &&
+    found.title.trim() === draft.title.trim() &&
+    found.allDay === draft.allDay &&
+    found.startDate === draft.startDate &&
+    found.endDate === draft.endDate &&
+    (draft.allDay || (found.startTime === draft.startTime && found.endTime === draft.endTime))
+  );
 }
 
 /** What stops this draft from being saved, in the words the person sees; null when it can be. */

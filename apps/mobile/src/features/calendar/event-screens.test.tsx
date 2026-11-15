@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import CalendarRoute from "../../app/(workspaces)/calendar";
 import CalendarEventRoute from "../../app/calendar-event";
 import CalendarEventEditRoute from "../../app/calendar-event-edit";
+import { eventWriteFailure } from "./data";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -280,6 +281,39 @@ it("creates an all-day event on a chosen calendar as whole calendar days", async
   );
 });
 
+it("makes a short event one day when All day is turned on, and keeps a longer span", async () => {
+  await openNewEvent();
+  type("Start time", "23:30"); // ends 12:00 AM the next day
+  expect(field("Ends").value).toBe("2026-11-14");
+  fireEvent.click(screen.getByRole("switch", { name: "All day" }));
+  expect(field("Ends").value).toBe("2026-11-13");
+  fireEvent.click(screen.getByRole("switch", { name: "All day" }));
+  type("Ends", "2026-11-16");
+  fireEvent.click(screen.getByRole("switch", { name: "All day" }));
+  expect(field("Ends").value).toBe("2026-11-16");
+});
+
+it("starts on today for a day that is not a real date, on a calendar the agenda shows", async () => {
+  h.api.getDomainProfile.mockResolvedValue({ status: "draft", preferences: {} });
+  h.api.listCalendars.mockResolvedValue([
+    calendar("hidden", "Hidden", { isSelected: false, isPrimary: true }),
+    work,
+    calendar("main", "Main", { isPrimary: true }),
+  ]);
+  await openNewEvent("2026-02-31");
+  expect(field("Starts").value).toBe("2026-11-13");
+  expect(button("Calendar, Main")).toBeEnabled();
+  cleanup();
+
+  // With nothing shown, the primary writable calendar is still offered.
+  h.api.listCalendars.mockResolvedValue([
+    calendar("other", "Other", { isSelected: false }),
+    calendar("hidden", "Hidden", { isSelected: false, isPrimary: true }),
+  ]);
+  await openNewEvent();
+  expect(button("Calendar, Hidden")).toBeEnabled();
+});
+
 it("reports an end before the start through Sonner without sending anything", async () => {
   await openNewEvent();
   type("Event title", "Dentist appointment");
@@ -336,14 +370,106 @@ it("never shows an unconfirmed create as saved, and re-reads the calendar before
   expect(button("Create event")).toBeDisabled();
   expectNoInlineResult();
 
-  press("Create again anyway");
+  press("Check calendar and create again");
   expect(globalThis.confirm).toHaveBeenCalledWith(
-    expect.stringContaining("your calendar will have it twice"),
+    expect.stringContaining("checks your calendar first"),
   );
   await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+  // The calendar was read first, on the event's own calendar, and did not have the event.
+  expect(h.api.listEvents).toHaveBeenCalledExactlyOnceWith({
+    from: "2026-11-12T16:00:00.000Z",
+    to: "2026-11-14T16:30:00.000Z",
+    calendarIds: ["personal"],
+  });
   expect(h.api.createEvent).toHaveBeenCalledTimes(2);
   expect(h.api.createEvent.mock.calls[1]).toEqual(h.api.createEvent.mock.calls[0]);
   expect(h.success).toHaveBeenCalledExactlyOnceWith("Event created", { id: "toast-1" });
+});
+
+it("sends no second create when the calendar already has the event or cannot be read", async () => {
+  h.api.createEvent.mockRejectedValue(offline());
+  await openNewEvent();
+  type("Event title", "Dentist appointment");
+  press("Create event");
+  await screen.findByRole("button", { name: "Check calendar and create again" });
+  h.error.mockClear();
+
+  // The calendar cannot be read: nothing is sent and the choice stays.
+  h.api.listEvents.mockRejectedValueOnce(offline());
+  press("Check calendar and create again");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t check your calendar, so nothing was sent. Try again in a moment.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(h.api.createEvent).toHaveBeenCalledOnce();
+  expect(button("Check calendar and create again")).toBeEnabled();
+  expect(h.back).not.toHaveBeenCalled();
+
+  // The first attempt did land: the read finds it, so it is reported created and not sent again.
+  h.api.listEvents.mockResolvedValueOnce([
+    standup,
+    {
+      ...standup,
+      id: "landed-1",
+      title: "Dentist appointment",
+      calendarId: "personal",
+      provider: "local",
+      startsAt: "2026-11-13T16:00:00.000Z",
+      endsAt: "2026-11-13T16:30:00.000Z",
+    },
+  ]);
+  press("Check calendar and create again");
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+  expect(h.api.createEvent).toHaveBeenCalledOnce();
+  expect(h.success).toHaveBeenCalledExactlyOnceWith("Event created", { id: "toast-1" });
+  expectNoInlineResult();
+});
+
+it("offers no second create when the provider already has the event", async () => {
+  h.api.createEvent.mockRejectedValue(
+    new ApiClientError({
+      code: "service_unavailable",
+      message: "Calendar providers were changed, but nohmi could not commit.",
+      status: 503,
+      details: { partialEffect: "provider_event_created" },
+    }),
+  );
+  await openNewEvent();
+  type("Event title", "Dentist appointment");
+  press("Create event");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith(
+      "Your calendar provider has this event, but nohmi couldn’t record it yet. It will appear after the next sync.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(screen.queryByRole("button", { name: "Check calendar and create again" })).toBeNull();
+  expect(button("Create event")).toBeDisabled();
+  expect(field("Event title")).toBeDisabled();
+  expectNoInlineResult();
+  press("Close and review calendar");
+  expect(h.back).toHaveBeenCalledOnce();
+  expect(h.api.createEvent).toHaveBeenCalledOnce();
+});
+
+it("classifies failures by whether the calendar may have changed", () => {
+  const partial = (details: unknown) =>
+    new ApiClientError({ code: "forbidden", message: "Refused", status: 403, details });
+  expect(eventWriteFailure(refused(403, "Refused"))).toBe("rejected");
+  expect(eventWriteFailure(refused(404, "Gone"))).toBe("gone");
+  expect(eventWriteFailure(refused(409, "Changed"))).toBe("conflict");
+  expect(eventWriteFailure(refused(503, "Down"))).toBe("uncertain");
+  expect(eventWriteFailure(offline())).toBe("uncertain");
+  expect(eventWriteFailure(partial({ completedEffects: [] }))).toBe("rejected");
+  expect(eventWriteFailure(partial({ completedEffects: [{ action: "update" }] }))).toBe(
+    "uncertain",
+  );
+  expect(eventWriteFailure(partial({ indeterminateEffects: [{ action: "delete" }] }))).toBe(
+    "uncertain",
+  );
+  expect(eventWriteFailure(partial({ partialEffect: "provider_event_updated" }))).toBe("uncertain");
 });
 
 it("lets the person leave an unconfirmed create to review the calendar instead", async () => {
@@ -354,12 +480,12 @@ it("lets the person leave an unconfirmed create to review the calendar instead",
   await screen.findByRole("button", { name: "Review calendar before creating again" });
   // Declining the second attempt sends nothing.
   vi.mocked(globalThis.confirm).mockReturnValueOnce(false);
-  press("Create again anyway");
+  press("Check calendar and create again");
   expect(h.api.createEvent).toHaveBeenCalledOnce();
 
   // A retry the API refuses outright reopens the draft.
   h.api.createEvent.mockRejectedValueOnce(refused(400, "Event end must be after its start."));
-  press("Create again anyway");
+  press("Check calendar and create again");
   await waitFor(() => expect(field("Event title")).toBeEnabled());
   expect(screen.queryByText("Recovery")).toBeNull();
 
@@ -713,9 +839,28 @@ it("stays on the event and offers no Undo when a delete or restore is not confir
   await waitFor(() =>
     expect(h.error).toHaveBeenLastCalledWith("The deleted calendar event was not found.", {
       id: "toast-1",
+      action: { label: "Try again", onClick: expect.any(Function) },
     }),
   );
   expect(h.success).toHaveBeenCalledOnce();
+
+  // A refused restore changed nothing, so it can be asked for again, once per toast.
+  const again = (
+    h.error.mock.calls.at(-1) as unknown as [string, { action: { onClick: () => void } }]
+  )[1].action;
+  h.api.restoreEvent.mockRejectedValueOnce(offline());
+  await act(async () => {
+    again.onClick();
+    again.onClick();
+  });
+  await waitFor(() => expect(h.api.restoreEvent).toHaveBeenCalledTimes(2));
+  // An unconfirmed restore may have re-created the event, so it offers no further attempt.
+  await waitFor(() =>
+    expect(h.error).toHaveBeenLastCalledWith(
+      "Couldn’t confirm the event was restored. Check your calendar.",
+      { id: "toast-1" },
+    ),
+  );
 });
 
 it("reports nothing for a write that finishes after the account session changed", async () => {

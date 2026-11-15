@@ -400,7 +400,8 @@ The event form follows [Mobile settings-style forms](mobile-forms.md): title, th
 Starts, Start time, Ends, End time), Calendar, and Details (Location, Notes). A new event starts
 at the next whole hour today, or 9 AM on another chosen day, lasts the account's default event
 length, and goes to the approved default calendar, else the primary writable one. Moving the start
-keeps the event's length. An event stays on its calendar; the Calendar row is fixed when editing.
+keeps the event's length, and turning All day on for an event shorter than a day makes it that
+one day. Without an approved default, a calendar the agenda shows is preferred. An event stays on its calendar; the Calendar row is fixed when editing.
 Guests, reminders, repeat rules and meeting links are not edited on iPhone.
 
 Dates and times are entered in the account planning timezone and saved with it; there is no
@@ -417,9 +418,16 @@ the API keeps the draft open. A conflict keeps the draft, disables Save and offe
 (discard changes). When a result cannot be confirmed (no response, or a server or provider
 failure) the app says so, re-reads the calendar, and never shows the change as saved:
 
-- An unconfirmed create freezes the draft and offers Review calendar before creating again or,
-  after a confirmation that warns of a duplicate, Create again anyway with exactly what was sent.
-  The API does not yet deduplicate event creation (COO-27), so the app never retries by itself.
+- An unconfirmed create freezes the draft and offers Review calendar before creating again or
+  Check calendar and create again. The second, after a confirmation, first reads that calendar
+  over the event's days. If an event with the same calendar, title and span is there, the first
+  attempt worked: it is reported as created and nothing more is sent. If the read fails, nothing
+  is sent and the choice stays. Only when the read succeeds and finds no such event is exactly
+  the first payload sent again. The API does not yet deduplicate event creation (COO-27), so
+  the app never retries by itself.
+- When the failure says the provider did create the event but nohmi could not record it, no
+  second create is offered: the toast says the event will appear after the next sync and the
+  form offers only Close and review calendar.
 - An unconfirmed edit or delete can be tried again; it still carries the reviewed revision, so
   the API refuses it if the first attempt did land.
 
@@ -430,7 +438,8 @@ never delays that write's result and raises no notice of its own.
 Delete asks for confirmation, then moves the event to the API's recoverable deleted state. Its
 confirmed toast offers Undo for ten seconds, which restores the event with the revision the delete
 returned and reports its own result, inside the session that deleted it. An unconfirmed delete
-offers no Undo. Undo is offered only when restoring returns the same event: always for nohmi's
+offers no Undo. A restore the API refuses changed nothing, so its error toast offers Try again
+once; an unconfirmed restore is never repeated. Undo is offered only when restoring returns the same event: always for nohmi's
 own calendars, and for a provider event only when it has no guests, repeat rule or meeting link
 (the API re-creates a provider event from its title, time, location and notes) and is not an
 all-day event that nohmi changed since its last sync. Otherwise the confirmation says the delete

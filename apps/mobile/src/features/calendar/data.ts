@@ -166,7 +166,17 @@ export function useCalendarSelection() {
   return { pending: action.pending, select };
 }
 
-export type EventWriteFailure = "rejected" | "conflict" | "gone" | "uncertain";
+/**
+ * Why a write did not report success. "unchecked" means the calendar could not be read first, so
+ * nothing was sent; "landed" means the provider has the new event although nohmi does not yet.
+ */
+export type EventWriteFailure =
+  | "rejected"
+  | "conflict"
+  | "gone"
+  | "uncertain"
+  | "unchecked"
+  | "landed";
 export type EventWriteResult<T> = { ok: true; value: T } | { ok: false; reason: EventWriteFailure };
 
 /**
@@ -188,6 +198,22 @@ export function eventWriteFailure(error: unknown): EventWriteFailure {
   if (error.status === 409) return "conflict";
   return error.status === 404 ? "gone" : "rejected";
 }
+
+/** A failed create whose event the provider did accept; a second create would duplicate it. */
+function createdAtProvider(error: unknown) {
+  if (!(error instanceof ApiClientError)) return false;
+  const details = (error.details ?? {}) as Record<string, unknown>;
+  return (
+    details.partialEffect === "provider_event_created" ||
+    (Array.isArray(details.completedEffects) &&
+      details.completedEffects.some(
+        (effect) => (effect as { action?: unknown } | null)?.action === "create",
+      ))
+  );
+}
+
+/** The calendar could not be read before a repeat create, so the create was not sent. */
+class CalendarCheckFailed extends Error {}
 
 type WriteCopy = { pending: string; done: string; unconfirmed: string };
 
@@ -232,9 +258,17 @@ export function useEventWrites() {
     copy: WriteCopy,
     send: (api: SettingsApi) => Promise<T>,
     settle: (value: T, captured: Scope) => string,
-    undo?: (value: T, captured: Scope) => Promise<unknown>,
-    // Undo stays inside the session that made the change it reverses.
-    captured: Scope = scope,
+    {
+      undo,
+      retry,
+      // Undo stays inside the session that made the change it reverses.
+      captured = scope,
+    }: {
+      undo?: (value: T, captured: Scope) => Promise<unknown>;
+      /** Offered on the error toast after a clear refusal; never after an unconfirmed result. */
+      retry?: (captured: Scope) => Promise<unknown>;
+      captured?: Scope;
+    } = {},
   ): Promise<EventWriteResult<T>> {
     if (busy.current || !captured.owner || !current(captured))
       return { ok: false, reason: "rejected" };
@@ -269,9 +303,36 @@ export function useEventWrites() {
         toast.dismiss(id);
         return { ok: false, reason: "rejected" };
       }
+      if (error instanceof CalendarCheckFailed) {
+        toast.error("Couldn’t check your calendar, so nothing was sent. Try again in a moment.", {
+          id,
+        });
+        return { ok: false, reason: "unchecked" };
+      }
       const reason = eventWriteFailure(error);
       if (reason !== "rejected") refresh(captured);
-      toast.error(reason === "uncertain" ? copy.unconfirmed : errorMessage(error), { id });
+      if (createdAtProvider(error)) {
+        toast.error(
+          "Your calendar provider has this event, but nohmi couldn’t record it yet. It will appear after the next sync.",
+          { id },
+        );
+        return { ok: false, reason: "landed" };
+      }
+      let used = false;
+      toast.error(reason === "uncertain" ? copy.unconfirmed : errorMessage(error), {
+        id,
+        ...(retry &&
+          reason !== "uncertain" && {
+            action: {
+              label: "Try again",
+              onClick: () => {
+                if (used) return;
+                used = true;
+                void retry(captured);
+              },
+            },
+          }),
+      });
       return { ok: false, reason };
     } finally {
       busy.current = false;
@@ -286,7 +347,7 @@ export function useEventWrites() {
     event: CalendarEvent,
     revision: ReturnType<typeof eventRevision>,
     captured: Scope,
-  ) =>
+  ): Promise<unknown> =>
     run(
       {
         pending: "Restoring event…",
@@ -295,20 +356,40 @@ export function useEventWrites() {
       },
       (api) => api.restoreEvent(event.id, revision),
       keep,
-      undefined,
-      captured,
+      // A refused restore changed nothing, so the person can ask again; an unconfirmed one
+      // may have re-created the event and is never repeated from here.
+      { captured, retry: (within) => restore(event, revision, within) },
     );
+  const createCopy = {
+    pending: "Creating event…",
+    done: "Event created",
+    unconfirmed: "Couldn’t confirm the event was created. Check your calendar before trying again.",
+  };
   return {
     pending,
-    create: (input: CreateEventInput) =>
+    create: (input: CreateEventInput) => run(createCopy, (api) => api.createEvent(input), keep),
+    /**
+     * A second attempt after an unconfirmed create. The calendar is read first: if the event is
+     * already there the first attempt worked and nothing more is sent, and if the calendar
+     * cannot be read nothing is sent either.
+     */
+    createAfterCheck: (input: CreateEventInput, isSame: (event: CalendarEvent) => boolean) =>
       run(
-        {
-          pending: "Creating event…",
-          done: "Event created",
-          unconfirmed:
-            "Couldn’t confirm the event was created. Check your calendar before trying again.",
+        createCopy,
+        async (api) => {
+          const day = 86_400_000;
+          const existing = await api
+            .listEvents({
+              // A day either side covers all-day events, which providers date in UTC.
+              from: new Date(new Date(input.startsAt).getTime() - day).toISOString(),
+              to: new Date(new Date(input.endsAt).getTime() + day).toISOString(),
+              calendarIds: [input.calendarId],
+            })
+            .catch(() => {
+              throw new CalendarCheckFailed();
+            });
+          return existing.find(isSame) ?? api.createEvent(input);
         },
-        (api) => api.createEvent(input),
         keep,
       ),
     update: (event: CalendarEvent, input: UpdateEventInput) =>
@@ -334,17 +415,19 @@ export function useEventWrites() {
         },
         (api) => api.trashEvent(event.id, eventRevision(event)),
         () => event.id,
-        canRestoreFaithfully(event)
-          ? (revision, captured) =>
-              restore(
-                event,
-                {
-                  expectedUpdatedAt: revision.updatedAt,
-                  expectedBlockUpdatedAtById: revision.blockUpdatedAtById,
-                },
-                captured,
-              )
-          : undefined,
+        {
+          undo: canRestoreFaithfully(event)
+            ? (revision, captured) =>
+                restore(
+                  event,
+                  {
+                    expectedUpdatedAt: revision.updatedAt,
+                    expectedBlockUpdatedAtById: revision.blockUpdatedAtById,
+                  },
+                  captured,
+                )
+            : undefined,
+        },
       ),
   };
 }

@@ -1362,6 +1362,24 @@ server search.
 - Triage, compose, reply, attachments downloads and rules are not included. This is a local
   candidate covered by focused tests; it is not a production or TestFlight release.
 
+## 2026-11-15 — Native Mail read state and archive (local candidate)
+
+COO-236 — Mark read or unread and archive Mail on iPhone adds those actions to each conversation
+row and to the open conversation, through the existing `PATCH /v1/mail/threads/:id`. No route or
+server code changed.
+
+- Archive sends the conversation's mailboxes without its inboxes, as web does, and is offered only
+  for a conversation in an inbox. Each write sends the displayed `updatedAt` as
+  `expectedUpdatedAt`, which web does not.
+- The change shows at once as an overlay and reaches cached summaries only after the API confirms
+  it. A rejection or an unconfirmed outcome drops the overlay, raises one Sonner error and re-reads
+  Mail. A response carrying `partialEffect`, a timeout, a lost connection and a 5xx are all
+  unconfirmed.
+- A confirmed Archive offers a ten-second Undo that restores the previous mailboxes.
+- Snooze, bulk triage, deletion, drafts and sending are not included. This is a local candidate
+  covered by focused tests; it was not run on a simulator or device or against a live Gmail or
+  iCloud mailbox, and it is not a production or TestFlight release.
+
 ## 2026-11-14 — Native task filters by List, Project and due shortcuts (local candidate)
 
 COO-218 — The iPhone task filter sheet narrows global views (To-do, All, Upcoming, History,

@@ -288,8 +288,10 @@ only, chooses a lone one, and explains what is missing when there is none. Merch
 Account and Date are required; the date defaults to today in the account planning timezone. A
 blank Category leaves the choice to nohmi. Adding has no retry key, so after an unknown outcome the
 next Save first looks on that account and date for the record the earlier attempt would have left,
-and adds nothing when it finds one. If the draft was changed since, the form stays open, says the
-earlier version is recorded and offers Add anyway. Leaving after an unknown outcome never says the
+and adds nothing when it finds one. If any field of the draft was changed since, category and notes
+included, the form stays open, says the earlier version is recorded and offers Add anyway. That
+action hands its toast to the save, and writes nothing once the add is confirmed or the form has
+been left. Leaving after an unknown outcome never says the
 transaction was not added, and re-reads Finance data. An amount takes a comma only as thousands
 grouping; `12,50` is corrected beside the field, never read as 1250.
 

@@ -60,6 +60,13 @@ it("never reads a comma decimal as a hundred times its value", () => {
   expect(parseAmount("1,250")).toBe(1250);
   expect(parseAmount("12,345,678.9")).toBe(12345678.9);
 });
+it("rejects a negative amount in every spelling; direction carries the sign", () => {
+  expect(parseAmount("-12.50")).toBeUndefined();
+  expect(parseAmount("−12.50")).toBeUndefined();
+  expect(parseAmount("- 1,250")).toBeUndefined();
+  expect(parseAmount("(12.50)")).toBeUndefined();
+  expect(parseAmount("-0")).toBeUndefined();
+});
 it("uses the planning timezone's calendar date, not the device's or UTC's", () => {
   const lateEvening = new Date("2026-11-04T03:30:00Z");
   expect(localToday("America/New_York", lateEvening)).toBe("2026-11-03");

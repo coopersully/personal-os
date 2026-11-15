@@ -26,6 +26,13 @@ import {
 } from "./mutations";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
 
+/** Everything an add sends; any difference from it is an edit the person made afterwards. */
+type SentTransaction = TransactionAttempt & {
+  direction: "expense" | "income";
+  category: string | null;
+  notes: string | null;
+};
+
 const directions = [
   { value: "expense", label: "Expense" },
   { value: "income", label: "Income" },
@@ -53,8 +60,9 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const lock = useRef(false);
-  const unconfirmed = useRef<TransactionAttempt | null>(null);
-  const latestSave = useRef<() => Promise<void>>(async () => undefined);
+  const unconfirmed = useRef<SentTransaction | null>(null);
+  const added = useRef(false);
+  const latestSave = useRef<(replaces?: string | number) => Promise<void>>(async () => undefined);
   const active = useRef(true);
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
@@ -123,13 +131,27 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
     return false;
   }
 
-  async function save() {
+  /** `replaces` is the toast whose action asked for this save; the progress takes its place. */
+  async function save(replaces?: string | number) {
+    // A toast action can outlive the form or a confirmed add; neither may write again.
+    if (!active.current || added.current) return void toast.dismiss(replaces);
     if (lock.current || !edited || submitted || amount === undefined || !date || !accountId) return;
     if (!merchant.trim()) return;
-    const attempt = { accountId, amount, date, direction, merchant: merchant.trim() };
+    const attempt: SentTransaction = {
+      accountId,
+      amount,
+      date,
+      direction,
+      merchant: merchant.trim(),
+      category,
+      notes: notes.trim() || null,
+    };
     lock.current = true;
     setPending(true);
-    const id = toast.loading("Adding transaction…");
+    const id = toast.loading(
+      "Adding transaction…",
+      replaces === undefined ? undefined : { id: replaces },
+    );
     try {
       const earlier = unconfirmed.current;
       if (earlier) {
@@ -151,11 +173,12 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
           unconfirmed.current = null;
           await refresh();
           if (!current()) return void toast.dismiss(id);
-          if (!matchesAttempt(attempt, earlier)) {
-            // The draft was changed since: closing would silently drop that edit.
+          if (JSON.stringify(attempt) !== JSON.stringify(earlier)) {
+            // Any field changed since, category and notes included: closing would drop that edit.
             toast.info(
               `Your earlier attempt already added “${earlier.merchant}”. This changed draft has not been added.`,
-              { id, action: { label: "Add anyway", onClick: () => void latestSave.current() } },
+              // The action hands its own toast to the save, so it cannot be pressed twice.
+              { id, action: { label: "Add anyway", onClick: () => void latestSave.current(id) } },
             );
             return;
           }
@@ -170,12 +193,7 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
       }
       let result: Awaited<ReturnType<typeof api.createFinanceTransaction>>;
       try {
-        result = await api.createFinanceTransaction({
-          ...attempt,
-          category,
-          categoryConfidence: null,
-          notes: notes.trim() || null,
-        });
+        result = await api.createFinanceTransaction({ ...attempt, categoryConfidence: null });
       } catch (error) {
         if (!current()) return void toast.dismiss(id);
         unconfirmed.current = confirmedRejection(error) ? null : attempt;
@@ -198,6 +216,8 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
         );
         return;
       }
+      // Confirmed: nothing on this form may add it a second time.
+      added.current = true;
       await refresh();
       if (!current()) return void toast.dismiss(id);
       toast.success("Transaction added", { id });

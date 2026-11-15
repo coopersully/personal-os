@@ -1415,3 +1415,80 @@ it("reports a removal the server did not complete without leaving the transactio
   );
   expect(h.back).not.toHaveBeenCalled();
 });
+
+/** Times out an add, records it in the ledger, then changes the draft and saves again. */
+async function recordedThenEdited(change: () => void) {
+  h.api.createFinanceTransaction.mockRejectedValueOnce(new Error("timeout"));
+  await fillNewTransaction();
+  type("Date (ISO date/time)", "2026-11-03");
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
+  h.api.listFinanceTransactions.mockResolvedValue({
+    items: [
+      { ...transaction, id: "t-new", merchant: "Corner bakery", amount: 8.4, date: "2026-11-03" },
+    ],
+    nextCursor: null,
+  });
+  change();
+  fireEvent.click(save());
+  type Offer = { id: string; action: { label: string; onClick: () => void } };
+  // The edit itself may raise an info toast; the offer is the one that carries an action.
+  const offer = () =>
+    h.info.mock.calls.find(([, options]) => (options as Offer | undefined)?.action) as
+      | [string, Offer]
+      | undefined;
+  await waitFor(() => expect(offer()).toBeTruthy());
+  const [message, options] = offer() as [string, Offer];
+  expect(message).toContain("This changed draft has not been added.");
+  expect(options.action.label).toBe("Add anyway");
+  return options.action;
+}
+
+it("adds once when Add anyway is pressed twice", async () => {
+  const action = await recordedThenEdited(() => type("Amount", "9.40"));
+  h.api.createFinanceTransaction.mockResolvedValue(transaction);
+  await act(async () => action.onClick());
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Transaction added", expect.anything()),
+  );
+  // The progress took the action's own toast, and a second press writes nothing.
+  expect(h.loading).toHaveBeenLastCalledWith("Adding transaction…", { id: "feedback" });
+  await act(async () => action.onClick());
+  await act(async () => action.onClick());
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledTimes(2); // the timeout and the one add
+  expect(h.success).toHaveBeenCalledOnce();
+  expect(h.back).toHaveBeenCalledOnce();
+});
+
+it("adds nothing when Add anyway is pressed after the form was left", async () => {
+  const action = await recordedThenEdited(() => type("Amount", "9.40"));
+  cleanup();
+  h.api.createFinanceTransaction.mockResolvedValue(transaction);
+  const loads = h.loading.mock.calls.length;
+  await act(async () => action.onClick());
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledOnce(); // only the timed-out attempt
+  expect(h.loading).toHaveBeenCalledTimes(loads);
+  // The orphaned toast is cleared rather than left offering a write.
+  expect(h.dismiss).toHaveBeenCalledWith("feedback");
+  expect(h.success).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["notes", () => type("Notes", "For the team breakfast")],
+  [
+    "category",
+    () => {
+      press("New category");
+      type("New category name", "travel");
+      press("Add category");
+    },
+  ],
+] as [
+  string,
+  () => void,
+][])("keeps a %s edit made after an unconfirmed add that was recorded", async (_field, change) => {
+  await recordedThenEdited(change);
+  // The form is still open with the edit; nothing was written again and nothing closed.
+  expect(h.back).not.toHaveBeenCalled();
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledOnce();
+});

@@ -43,11 +43,12 @@ Issue comments record material progress or decisions; they are not a second know
 - Default to read-only. Do not create a new GitHub issue for repository delivery work; use
   `linear-work-sync` to resolve or create the Nohmi Linear issue instead.
 - Prefer a confident existing issue over a duplicate. Report ambiguity instead of guessing.
-- The rules below apply only when the user explicitly asks for a new GitHub issue that is not
-  repository delivery work. Search open and recently closed issues before creating.
-- Create one issue per independently shippable concern, not per file, log line, or review comment.
-- Skip issue creation for tiny self-contained chores, routine dependency PRs, and docs-only edits
-  unless follow-up, coordination, or durable acceptance criteria make tracking useful.
+- Create a GitHub issue only when the user explicitly asks for one that is not repository delivery
+  work. Then search open and recently closed issues first, create one issue per independently
+  shippable concern (not per file, log line, or review comment), and skip tiny self-contained
+  chores, routine dependency PRs, and docs-only edits unless follow-up, coordination, or durable
+  acceptance criteria make tracking useful.
+- The rules below apply to every issue write, including updates and closure.
 - Use only live configured labels. Prefer one best-supported type label:
   `bug`, `enhancement`, `documentation`, `dependencies`, or `github_actions`.
 - Do not automatically apply `invalid`, `duplicate`, `wontfix`, `help wanted`, or

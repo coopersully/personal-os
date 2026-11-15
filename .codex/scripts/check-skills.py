@@ -30,7 +30,7 @@ def frontmatter(text):
             value = match.group(2).strip()
             # Block scalars and nested values would hide their real content from this
             # line parser; require single-line values so the length checks stay honest.
-            if value in {"", ">", "|", ">-", "|-"} and match.group(1) != "metadata":
+            if (value == "" or value[0] in ">|") and match.group(1) != "metadata":
                 value = None
             fields[match.group(1)] = value if value is None else value.strip('"').strip("'")
     return fields
@@ -61,7 +61,8 @@ def check_skill(folder):
     meta = agents / "openai.yaml"
     if meta.exists():
         short = re.search(r"^\s*short_description:\s*(.*)$", meta.read_text(encoding="utf-8"), re.M)
-        value = short.group(1).strip().strip('"').strip("'") if short else ""
+        raw = short.group(1).strip() if short else ""
+        value = "" if raw[:1] in ">|" else raw.strip('"').strip("'")
         if not value or len(value) > 64:
             errors.append(f"{meta}: short_description must be 1-64 characters")
     for path in [skill, *sorted((folder / "references").glob("*.md"))]:

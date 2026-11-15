@@ -102,7 +102,7 @@ acceptance, settled PRs, stopped execution, preserved dirty/unpushed work and fi
 obligations. Oversight handles children; PM verifies completed oversight cleanup without racing it.
 Archive the chat/session with the host's archive tool and verify the result. Pause only the completed owner's dedicated heartbeat,
 never an ongoing shared monitor. Preserve the ongoing PM, unfinished/paused/shared work and uncertain
-recovery. Archival does not delete branches/worktrees. Idle or merged alone is not completion.
+recovery. Archival never deletes branches. Codex archival keeps worktrees; Claude Code `archive_session` removes the session's worktree by default, so confirm its contents, including ignored local files, are preserved or accepted as disposable first ([host tools](references/host-tools.md)). Idle or merged alone is not completion.
 
 ## Scheduled operation
 

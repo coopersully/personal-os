@@ -66,14 +66,14 @@ function Identity({
         <Section title={account.displayName}>
           <Stack.Screen
             options={{
-              title: "Agent identity",
+              title: "Agent details",
               gestureEnabled: !dirty,
               ...editorDismissOptions({
                 label: dirty ? "Cancel" : "Back",
                 onPress: () =>
                   dirty
                     ? confirm(
-                        "Discard identity changes?",
+                        "Discard agent details?",
                         "Your unsaved changes will be lost.",
                         onDone,
                         true,
@@ -123,7 +123,7 @@ function Identity({
             await api.updateAgentAccount(account.id, agentIdentityInput(name, label, platform));
             await refresh();
             onDone();
-          }, "Agent identity saved")
+          }, "Agent details saved")
         }
       />
     </View>
@@ -161,15 +161,19 @@ function Connection({
         ]}
         onChange={(id) =>
           confirm(
-            "Change connection identity?",
-            `Associate ${connection.label} with ${id === "none" ? "no agent identity" : directory.accounts.find((account) => account.id === id)?.displayName}. This does not add scopes.`,
+            "Change this connection’s agent?",
+            `${connection.label} will ${
+              id === "none"
+                ? "no longer be linked to an agent"
+                : `appear as ${directory.accounts.find((account) => account.id === id)?.displayName}`
+            }. This does not change its permissions.`,
             () =>
               void action.run(async (api) => {
                 await api.linkAgentAccountConnection(connection.id, {
                   agentAccountId: id === "none" ? null : id,
                 });
                 await refresh();
-              }, "Connection identity updated"),
+              }, "Connection agent updated"),
           )
         }
       />
@@ -242,7 +246,7 @@ export function AgentsSettingsScreen() {
           onPress={() => router.push("/settings/agents/access")}
         />
         <SettingsRow
-          label="Execution policy"
+          label="Review policy"
           icon="attention"
           onPress={() => router.push("/settings/agents/policy")}
         />
@@ -301,7 +305,7 @@ function AgentSettings({ page }: { page: AgentPage }) {
                   setup: "Agent setup",
                   reviews: "Reviews",
                   access: "Access",
-                  policy: "Execution policy",
+                  policy: "Review policy",
                 }[page],
                 headerLeft: undefined,
                 gestureEnabled: true,

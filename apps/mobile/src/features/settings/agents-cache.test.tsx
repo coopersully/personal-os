@@ -103,7 +103,7 @@ it("uses exactly one loading-to-error toast for a cached policy refresh with the
   show();
   await screen.findByLabelText("Apply eligible work without waiting in Review");
   await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" })),
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" })),
   );
   await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
   expect(h.loading).toHaveBeenCalledOnce();
@@ -121,7 +121,7 @@ it("keeps initial policy read failures visible through one local Sonner without 
   expect(screen.queryByText(h.error.mock.calls[0]?.[0])).not.toBeInTheDocument();
   h.error.mockClear();
   await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" })),
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" })),
   );
   await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
   expect(h.error).toHaveBeenCalledWith(expect.any(String), { id: "policy-toast" });
@@ -134,13 +134,13 @@ it("updates one loading toast on a successful cached policy refresh", async () =
   show();
   await screen.findByLabelText("Apply eligible work without waiting in Review");
   await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" })),
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" })),
   );
   await waitFor(() =>
-    expect(h.success).toHaveBeenCalledWith("Execution policy refreshed", { id: "policy-toast" }),
+    expect(h.success).toHaveBeenCalledWith("Review policy refreshed", { id: "policy-toast" }),
   );
   expect(h.loading).toHaveBeenCalledOnce();
   expect(h.error).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Apply eligible work without waiting in Review")).toBeChecked();
-  expect(screen.queryByText("Execution policy refreshed")).not.toBeInTheDocument();
+  expect(screen.queryByText("Review policy refreshed")).not.toBeInTheDocument();
 });

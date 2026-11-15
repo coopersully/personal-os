@@ -17,15 +17,25 @@ export function DetailBlock({
   selectable?: boolean;
 }) {
   return (
-    <View style={formBlock}>
+    <View testID="detail-block" style={formBlock}>
       <SettingDetail>{label}</SettingDetail>
-      {lines.map((line) => (
-        <SettingLabel key={line} selectable={selectable} style={{ flex: 0 }}>
+      {keyed(lines).map(({ key, line }) => (
+        <SettingLabel key={key} selectable={selectable} style={{ flex: 0 }}>
           {line}
         </SettingLabel>
       ))}
     </View>
   );
+}
+
+/** Identical lines are legitimate content, so each key counts the earlier copies of its line. */
+function keyed(lines: string[]) {
+  const seen = new Map<string, number>();
+  return lines.map((line) => {
+    const copy = seen.get(line) ?? 0;
+    seen.set(line, copy + 1);
+    return { key: `${line}#${copy}`, line };
+  });
 }
 
 /** What a connection, token or app may do, one short line for each part of nohmi. */

@@ -206,7 +206,7 @@ it("navigates the concise native agent tree without fetching or granting authori
     ["Setup", "setup"],
     ["Reviews", "reviews"],
     ["Access", "access"],
-    ["Execution policy", "policy"],
+    ["Review policy", "policy"],
   ]) {
     fireEvent.click(screen.getByRole("button", { name: label }));
     expect(h.push).toHaveBeenLastCalledWith(`/settings/agents/${path}`);
@@ -253,7 +253,7 @@ it("retries the policy API through its single action feedback owner", async () =
   fireEvent.click(screen.getByText("Retry"));
   await screen.findByLabelText("Apply eligible work without waiting in Review");
   expect(h.api.listAccessTokens).not.toHaveBeenCalled();
-  expect(h.success).toHaveBeenCalledWith("Execution policy refreshed", { id: "toast" });
+  expect(h.success).toHaveBeenCalledWith("Review policy refreshed", { id: "toast" });
 });
 it("loads review work only on Reviews", async () => {
   show(<AgentReviewsScreen />);
@@ -300,14 +300,14 @@ it("suppresses prior-owner directory results after a native child survives sessi
 it("announces explicit cached policy refresh once and preserves policy on denied reads", async () => {
   show(<AgentPolicyScreen />);
   await screen.findByLabelText("Apply eligible work without waiting in Review");
-  fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" }));
   await waitFor(() =>
-    expect(h.success).toHaveBeenCalledWith("Execution policy refreshed", { id: "toast" }),
+    expect(h.success).toHaveBeenCalledWith("Review policy refreshed", { id: "toast" }),
   );
   expect(h.loading).toHaveBeenCalledWith("Refreshing…");
   expect(h.success).toHaveBeenCalledOnce();
   h.api.getExecutionPolicySettings.mockRejectedValueOnce(new Error("Cached refresh denied"));
-  fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" }));
   await waitFor(() =>
     expect(h.error).toHaveBeenCalledWith(
       "Couldn’t confirm the result. Check your connection and refresh before retrying.",

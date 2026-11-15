@@ -16,7 +16,7 @@ import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { useAuth } from "../auth/context";
 import { errorMessage } from "../tasks/data";
 import { Choice, confirm, State } from "../tasks/ui";
-import { dateTime, scopeGroups, scopeLabels } from "./agent-copy";
+import { dateTime, scopeDetails, scopeGroups, scopeLabels } from "./agent-copy";
 import { DetailBlock, PermissionBlock } from "./agent-rows";
 import {
   type SettingsApi,
@@ -86,7 +86,7 @@ const selectableScopes = accessScopeSchema.options.filter(
 );
 const selectableGroups = scopeGroups(selectableScopes);
 
-/** Execution policy: whether eligible agent work may skip the review queue. */
+/** Review policy: whether eligible agent work may skip the review queue. */
 export function AgentExecutionPolicy() {
   const action = useSettingsAction();
   const policy = useSettingsResource(
@@ -99,7 +99,7 @@ export function AgentExecutionPolicy() {
   const policyRefresh = useSettingsRefresh(
     [["settings", state.user?.id, session.epoch(), "agent-execution-policy"]],
     [policy.refetch],
-    "Execution policy refreshed",
+    "Review policy refreshed",
     "action",
   );
   const initialPolicyFeedback = useRef(true);
@@ -118,7 +118,7 @@ export function AgentExecutionPolicy() {
   useDirtyDismiss(false, action.pending);
   return (
     <>
-      <Section title="Agent review policy">
+      <Section title="Eligible agent work">
         {policy.data ? (
           <ToggleRow
             label="Apply eligible work without waiting in Review"
@@ -129,10 +129,12 @@ export function AgentExecutionPolicy() {
               const current = policy.data;
               if (!current) return;
               confirm(
-                reviewBypassEnabled ? "Enable review bypass?" : "Require review?",
                 reviewBypassEnabled
-                  ? "Eligible registered reversible Finance actions may execute without the review queue. This does not grant scopes or bypass explicit approval requirements."
-                  : "Eligible actions will return to the review queue.",
+                  ? "Apply eligible work without review?"
+                  : "Send eligible work to Reviews?",
+                reviewBypassEnabled
+                  ? "Eligible work will be applied without waiting in Reviews. This currently applies only to reversible Finance changes that your rules allow. Permissions, questions and required approvals still apply."
+                  : "Eligible work will wait in Reviews until you decide.",
                 () =>
                   void action.run(async (api) => {
                     await api.updateExecutionPolicySettings({
@@ -140,7 +142,7 @@ export function AgentExecutionPolicy() {
                       reviewBypassEnabled,
                     });
                     await policy.refetch();
-                  }, "Execution policy saved"),
+                  }, "Review policy saved"),
               );
             }}
           />
@@ -155,7 +157,7 @@ export function AgentExecutionPolicy() {
       </SectionFootnote>
       <Section>
         <SettingsActionRow
-          label="Refresh execution policy"
+          label="Refresh review policy"
           icon="refresh"
           disabled={action.pending || policyRefresh.pending}
           onPress={refreshPolicy}
@@ -312,6 +314,7 @@ export function AgentAccess() {
                 <ToggleRow
                   key={scope}
                   label={scopeLabels[scope]}
+                  detail={scopeDetails[scope]}
                   value={scopes.includes(scope)}
                   disabled={locked}
                   onChange={(selected) =>

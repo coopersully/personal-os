@@ -318,8 +318,10 @@ never grants access before the existing authorization flow completes.
 Security lists readable device summaries and opens technical metadata/revocation on a native
 child page. Mark a session current only when the authenticated server response says `isCurrent`
 is true; user-agent, IP and missing metadata cannot establish identity. Invitations have separate
-list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Execution
-policy pages; setup material, token scopes and one-time secrets do not become a root-page wall.
+list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Review
+policy pages; setup material, token permissions and one-time secrets do not become a root-page wall.
+Agents copy says "permissions", never "scopes", and names permissions in plain language; a
+confirmation states what will happen in the same words as the screen it belongs to.
 All existing human authority, role checks, scope confirmations and secret-clearing guards remain.
 
 Notifications leads with device controls and links to separate Global and Finances text-policy

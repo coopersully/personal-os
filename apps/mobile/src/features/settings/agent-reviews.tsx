@@ -5,7 +5,7 @@ import { Linking } from "react-native";
 import { Section, SectionNote } from "../../components/forms/form-rows";
 import { confirm, State } from "../tasks/ui";
 import { areaLabel, workItemKindLabels, workItemPriorityLabels } from "./agent-copy";
-import { RecordSummary } from "./agent-rows";
+import { DetailBlock, RecordSummary } from "./agent-rows";
 import { useSettingsAction, useSettingsResource } from "./data";
 import { SettingsActionRow, SettingsDetailRow } from "./settings-row";
 
@@ -136,7 +136,7 @@ export function AgentWorkItems() {
             attention={item.priority === "blocked" || item.priority === "critical"}
           />
           {item.preview?.map((field) => (
-            <SettingsDetailRow key={field.label} label={field.label} value={field.value} />
+            <DetailBlock key={field.label} label={field.label} lines={[field.value]} />
           ))}
           {item.action && context.data && (
             <SettingsActionRow

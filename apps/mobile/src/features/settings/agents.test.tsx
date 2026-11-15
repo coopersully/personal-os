@@ -239,8 +239,8 @@ it("requires confirmation before policy broadening and sends the reviewed versio
   expect(h.updatePolicy).not.toHaveBeenCalled();
   expect(h.run).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenCalledWith(
-    "Enable review bypass?",
-    expect.stringContaining("does not grant scopes"),
+    "Apply eligible work without review?",
+    "Eligible work will be applied without waiting in Reviews. This currently applies only to reversible Finance changes that your rules allow. Permissions, questions and required approvals still apply.",
     expect.any(Function),
   );
   await act(async () => {
@@ -357,15 +357,15 @@ it("routes refresh success and cached refresh failure through shared Sonner acti
   });
   render(<AgentPolicyScreen />);
   await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" })),
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" })),
   );
-  expect(h.success).toHaveBeenCalledWith("Execution policy refreshed");
+  expect(h.success).toHaveBeenCalledWith("Review policy refreshed");
   h.refresh.mockResolvedValueOnce({
     data: { version: 9, reviewBypassEnabled: false },
     error: new Error("Refresh unavailable"),
   });
   await act(async () =>
-    fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" })),
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" })),
   );
   expect(h.error).toHaveBeenCalledWith(expect.objectContaining({ message: "Refresh unavailable" }));
   expect(screen.queryByText("Refresh unavailable")).not.toBeInTheDocument();
@@ -398,7 +398,7 @@ it("edits an agent identity explicitly and refreshes authoritative directory sta
   );
   await waitFor(() => expect(screen.queryByLabelText("Name")).not.toBeInTheDocument());
   expect(h.refresh).toHaveBeenCalledWith("agent-directory");
-  expect(h.success).toHaveBeenCalledWith("Agent identity saved");
+  expect(h.success).toHaveBeenCalledWith("Agent details saved");
 });
 it("retains rejected identity edits and confirms local cancellation before returning", async () => {
   h.resources["agent-directory"] = { accounts: [account], connections: [] };
@@ -415,7 +415,7 @@ it("retains rejected identity edits and confirms local cancellation before retur
   act(() => h.dismiss?.());
   expect(screen.getByLabelText("Name")).toBeVisible();
   expect(h.confirm).toHaveBeenLastCalledWith(
-    "Discard identity changes?",
+    "Discard agent details?",
     expect.any(String),
     expect.any(Function),
     true,
@@ -444,8 +444,8 @@ it("requires confirmation to link or unlink existing connections while displayin
   fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "agent" } });
   expect(link).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenLastCalledWith(
-    "Change connection identity?",
-    expect.stringContaining("does not add scopes"),
+    "Change this connection’s agent?",
+    "My client will appear as Helper. This does not change its permissions.",
     expect.any(Function),
   );
   await approve();
@@ -465,6 +465,11 @@ it("requires confirmation to link or unlink existing connections while displayin
   };
   rerender(<ConnectedAgentsScreen />);
   fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "none" } });
+  expect(h.confirm).toHaveBeenLastCalledWith(
+    "Change this connection’s agent?",
+    "My client will no longer be linked to an agent. This does not change its permissions.",
+    expect.any(Function),
+  );
   await approve();
   expect(link).toHaveBeenLastCalledWith("connection", { agentAccountId: null });
   expect(screen.getByText("None")).toBeVisible();
@@ -519,7 +524,7 @@ it("revokes named token and OAuth grants through confirmed endpoints without exp
   await approve();
   expect(revokeOAuth).toHaveBeenCalledWith("oauth");
   expect(h.refresh).toHaveBeenCalledWith("agent-oauth-clients");
-  expect(screen.queryByLabelText("New access token")).not.toBeInTheDocument();
+  expect(screen.queryByText("New access token")).not.toBeInTheDocument();
 });
 it("shows actual setup readiness and changes workspace instructions without changing permissions", async () => {
   h.resources["agent-setup-status"] = {
@@ -706,8 +711,8 @@ it("requires named confirmation before narrowing review bypass using the reviewe
   render(<AgentPolicyScreen />);
   fireEvent.click(screen.getByLabelText("Apply eligible work without waiting in Review"));
   expect(h.confirm).toHaveBeenCalledWith(
-    "Require review?",
-    "Eligible actions will return to the review queue.",
+    "Send eligible work to Reviews?",
+    "Eligible work will wait in Reviews until you decide.",
     expect.any(Function),
   );
   await approve();

@@ -15,7 +15,7 @@ import { useSettingsResource } from "./data";
 import { SettingsActionRow, SettingsDetailRow } from "./settings-row";
 
 const scopeName = (scope: string) => (scopeLabels as Record<string, string>)[scope] ?? scope;
-const version = (value: number | null) => (value ? `Version ${value}` : "None");
+const version = (value: number | null) => (value === null ? "None" : `Version ${value}`);
 
 /** How to connect an agent, and what agents can do in each workspace on this deployment. */
 export function AgentConnectionGuide() {
@@ -51,7 +51,7 @@ export function AgentConnectionGuide() {
       </Section>
       <Section title="What agents can help with">
         {guide.data.domains.length === 0 && (
-          <SectionNote ink>This deployment has not published agent support.</SectionNote>
+          <SectionNote ink>Agents can’t help in any workspace yet.</SectionNote>
         )}
         {guide.data.domains.map((domain) => (
           <DetailBlock

@@ -151,7 +151,7 @@ describe("Agents root", () => {
       "Setup",
       "Reviews",
       "Access",
-      "Execution policy",
+      "Review policy",
     ]);
     fireEvent.click(screen.getByRole("button", { name: "Reviews" }));
     expect(h.push).toHaveBeenCalledWith("/settings/agents/reviews");
@@ -258,7 +258,7 @@ describe("Agent setup", () => {
     inGroup("https://nohmi.example/mcp");
     inGroup("Install the nohmi skill.");
     inGroup("Run nohmi setup.");
-    inGroup("This deployment has not published agent support.");
+    inGroup("Agents can’t help in any workspace yet.");
     expect(screen.queryByText("Agent can read")).toBeNull();
   });
   it("describes one supported workspace and its setup in plain language", () => {
@@ -275,7 +275,7 @@ describe("Agent setup", () => {
       ],
     };
     expectStandardLayout(<AgentSetupScreen />);
-    expect(screen.queryByText("This deployment has not published agent support.")).toBeNull();
+    expect(screen.queryByText("Agents can’t help in any workspace yet.")).toBeNull();
     inGroup("Preferences and actions");
     inGroup("Reading needs “Read tasks”. Changing needs “Manage tasks”.");
     const setup = within(groups()[2] as HTMLElement);
@@ -321,6 +321,28 @@ describe("Agent setup", () => {
     ]);
     expect(screen.getAllByText("Waiting on an earlier step")).toHaveLength(2);
     expect(screen.getAllByText("Your agent")).toHaveLength(2);
+  });
+  it("shows guidance version 0 as a version and keeps identical instruction lines", () => {
+    h.resources["agent-setup-status"] = {
+      domains: [
+        {
+          domain: "tasks",
+          canRead: true,
+          canWrite: true,
+          approvedProfileVersion: 0,
+          pendingDraftVersion: null,
+        },
+      ],
+    };
+    const repeated = plan(1);
+    (repeated.steps[0] as { instructions: string[] }).instructions = ["Wait", "Wait"];
+    h.resources["agent-setup-tasks"] = repeated;
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<AgentSetupScreen />);
+    expect(screen.getByText("Version 0")).toBeVisible();
+    expect(screen.getAllByText("Wait")).toHaveLength(2);
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
   });
   it("offers a retry instead of setup details while the guide or plan is unavailable", () => {
     h.errors.add("agent-guide");
@@ -389,6 +411,10 @@ describe("Agent reviews", () => {
       "Set category to Groceries",
     ])
       expect(review.getByText(text)).toBeVisible();
+    // Preview values get the full row width under their label, not a narrow trailing column.
+    for (const label of ["Condition", "Proposed action"])
+      expect(review.getByText(label).parentElement).toHaveAttribute("data-testid", "detail-block");
+    expect(review.getByText("Priority").parentElement).not.toHaveAttribute("data-testid");
     fireEvent.click(review.getByRole("button", { name: "Review on the web" }));
     expect(h.confirm).toHaveBeenCalledWith(
       "Continue on the web?",
@@ -505,6 +531,16 @@ describe("Agent access", () => {
     expect(within(groups()[3] as HTMLElement).getByText(/^Expires /)).toBeVisible();
     expect(screen.getAllByRole("button", { name: /^Revoke / })).toHaveLength(4);
   });
+  it("shows a legacy token as inactive access and keeps repeated instruction lines", () => {
+    h.resources["agent-tokens"] = [
+      token("t", "Old automation", { scopes: ["automations:write", "automations:read"] }),
+    ];
+    render(<AgentAccessScreen />);
+    expect(
+      within(groups()[1] as HTMLElement).getByText("Daily brief: read, legacy access (inactive)"),
+    ).toBeVisible();
+    expect(screen.queryByText(/Daily brief: .*manage/)).toBeNull();
+  });
   it("names every permission switch in plain language, grouped by the part of nohmi", () => {
     render(<AgentAccessScreen />);
     expect(headings()).toEqual(
@@ -514,20 +550,27 @@ describe("Agent access", () => {
     expect(switches).toHaveLength(24);
     expect(switches).toEqual(expect.arrayContaining(["Read mail", "Manage mail", "Read tasks"]));
     expect(switches.filter((label) => label?.includes(":read"))).toEqual([]);
+    // No switch name runs to a paragraph; conditions sit under the name instead.
+    expect(Math.max(...switches.map((label) => label?.length ?? 0))).toBeLessThan(60);
+    expect(switches).toContain("Change Calendar settings");
+    inGroup(
+      "Only when your review policy lets eligible work skip Reviews. With Mail and Tasks execution, it can also sync or disconnect shared sources.",
+    );
+    expect(screen.getByText(/^Sync providers, reconcile and categorize/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Create token" })).toBeDisabled();
   });
 });
 
-describe("Execution policy", () => {
+describe("Review policy", () => {
   it("shows the review policy as one switch with an explanation under its group", () => {
     expectStandardLayout(<AgentPolicyScreen />, [/Off by default: eligible work waits in Reviews/]);
-    expect(headings()).toEqual(["Agent review policy"]);
+    expect(headings()).toEqual(["Eligible agent work"]);
     const policy = screen.getByRole("switch", {
       name: "Apply eligible work without waiting in Review",
     });
     expect(policy).not.toBeChecked();
     expect(policy.closest('[data-testid="form-group"]')).not.toBeNull();
-    const refresh = screen.getByRole("button", { name: "Refresh execution policy" });
+    const refresh = screen.getByRole("button", { name: "Refresh review policy" });
     expect(refresh.closest('[data-testid="form-group"]')).not.toBeNull();
   });
   it("reflects an enabled policy and offers no switch before the policy has loaded", () => {

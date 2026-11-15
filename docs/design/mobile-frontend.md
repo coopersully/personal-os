@@ -425,6 +425,8 @@ failure) the app says so, re-reads the calendar, and never shows the change as s
   is sent and the choice stays. Only when the read succeeds and finds no such event is exactly
   the first payload sent again. The API does not yet deduplicate event creation (COO-27), so
   the app never retries by itself.
+  Events are read from shown calendars only, so on a hidden calendar the second create is not
+  offered at all; the person reviews the calendar instead.
 - When the failure says the provider did create the event but nohmi could not record it, no
   second create is offered: the toast says the event will appear after the next sync and the
   form offers only Close and review calendar.
@@ -438,8 +440,8 @@ never delays that write's result and raises no notice of its own.
 Delete asks for confirmation, then moves the event to the API's recoverable deleted state. Its
 confirmed toast offers Undo for ten seconds, which restores the event with the revision the delete
 returned and reports its own result, inside the session that deleted it. An unconfirmed delete
-offers no Undo. A restore the API refuses changed nothing, so its error toast offers Try again
-once; an unconfirmed restore is never repeated. Undo is offered only when restoring returns the same event: always for nohmi's
+offers no Undo. A restore the API plainly refuses changed nothing, so its error toast offers Try again
+once (not after a conflict or a missing record); an unconfirmed restore is never repeated. Undo is offered only when restoring returns the same event: always for nohmi's
 own calendars, and for a provider event only when it has no guests, repeat rule or meeting link
 (the API re-creates a provider event from its title, time, location and notes) and is not an
 all-day event that nohmi changed since its last sync. Otherwise the confirmation says the delete

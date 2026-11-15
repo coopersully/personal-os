@@ -365,17 +365,21 @@ function EventForm({
           {blocked === "uncertain" && (
             <Section title="Recovery">
               <Action label="Review calendar before creating again" onPress={leave} />
-              <Action
-                label="Check calendar and create again"
-                disabled={writes.pending}
-                onPress={() =>
-                  confirm(
-                    "Create this event again?",
-                    "nohmi checks your calendar first and sends nothing if the event is already there. If your provider has it but nohmi doesn’t yet, you’ll get it twice.",
-                    () => void save(),
-                  )
-                }
-              />
+              {/* Events are read from shown calendars only, so a hidden calendar cannot be
+                  checked and offers no second create. */}
+              {!!calendar?.isSelected && (
+                <Action
+                  label="Check calendar and create again"
+                  disabled={writes.pending}
+                  onPress={() =>
+                    confirm(
+                      "Create this event again?",
+                      "nohmi checks your calendar first and sends nothing if the event is already there. If your provider has it but nohmi doesn’t yet, you’ll get it twice.",
+                      () => void save(),
+                    )
+                  }
+                />
+              )}
             </Section>
           )}
           {blocked === "conflict" && (

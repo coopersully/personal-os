@@ -265,7 +265,8 @@ export function useEventWrites() {
       captured = scope,
     }: {
       undo?: (value: T, captured: Scope) => Promise<unknown>;
-      /** Offered on the error toast after a clear refusal; never after an unconfirmed result. */
+      /** Offered on the error toast after a plain refusal; never after a conflict, a missing
+       * record or an unconfirmed result. */
       retry?: (captured: Scope) => Promise<unknown>;
       captured?: Scope;
     } = {},
@@ -322,7 +323,7 @@ export function useEventWrites() {
       toast.error(reason === "uncertain" ? copy.unconfirmed : errorMessage(error), {
         id,
         ...(retry &&
-          reason !== "uncertain" && {
+          reason === "rejected" && {
             action: {
               label: "Try again",
               onClick: () => {

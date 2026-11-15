@@ -427,6 +427,52 @@ it("sends no second create when the calendar already has the event or cannot be 
   expectNoInlineResult();
 });
 
+it("offers no second create on a hidden calendar, whose events cannot be read back", async () => {
+  h.api.listCalendars.mockResolvedValue([calendar("hidden", "Hidden", { isSelected: false })]);
+  h.api.createEvent.mockRejectedValue(offline());
+  await openNewEvent();
+  expect(button("Calendar, Hidden")).toBeEnabled();
+  type("Event title", "Dentist appointment");
+  press("Create event");
+  await screen.findByRole("button", { name: "Review calendar before creating again" });
+  expect(screen.queryByRole("button", { name: "Check calendar and create again" })).toBeNull();
+  expect(button("Create event")).toBeDisabled();
+  expect(h.api.createEvent).toHaveBeenCalledOnce();
+  expect(h.api.listEvents).not.toHaveBeenCalled();
+});
+
+it("recognises a provider all-day event as the one first sent", async () => {
+  h.api.createEvent.mockRejectedValue(offline());
+  await openNewEvent("2026-11-20");
+  type("Event title", "Conference");
+  fireEvent.click(screen.getByRole("switch", { name: "All day" }));
+  type("Ends", "2026-11-21");
+  press("Calendar, Personal");
+  fireEvent.click(screen.getByRole("radio", { name: "Work" }));
+  press("Create event");
+  await screen.findByRole("button", { name: "Check calendar and create again" });
+  // Google returns all-day events as UTC-dated days, not the local midnights that were sent.
+  h.api.listEvents.mockResolvedValueOnce([
+    {
+      ...standup,
+      id: "landed-2",
+      title: "Conference",
+      allDay: true,
+      startsAt: "2026-11-20T00:00:00.000Z",
+      endsAt: "2026-11-22T00:00:00.000Z",
+    },
+  ]);
+  press("Check calendar and create again");
+  await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+  expect(h.api.listEvents).toHaveBeenCalledExactlyOnceWith({
+    from: "2026-11-19T05:00:00.000Z",
+    to: "2026-11-23T05:00:00.000Z",
+    calendarIds: ["work"],
+  });
+  expect(h.api.createEvent).toHaveBeenCalledOnce();
+  expect(h.success).toHaveBeenCalledExactlyOnceWith("Event created", { id: "toast-1" });
+});
+
 it("offers no second create when the provider already has the event", async () => {
   h.api.createEvent.mockRejectedValue(
     new ApiClientError({
@@ -777,6 +823,20 @@ it("does not close another page when a delete settles after the person left", as
   expect(h.api.restoreEvent).toHaveBeenCalledOnce();
 });
 
+it("offers no second restore after a conflict or a missing record", async () => {
+  h.api.restoreEvent.mockRejectedValue(refused(404, "The deleted calendar event was not found."));
+  await openDetails();
+  press("Event actions");
+  press("Delete");
+  await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
+  await act(async () => undoAction().onClick());
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith("The deleted calendar event was not found.", {
+      id: "toast-1",
+    }),
+  );
+});
+
 it("sends no restore once the account session has changed", async () => {
   await openDetails();
   press("Event actions");
@@ -830,14 +890,14 @@ it("stays on the event and offers no Undo when a delete or restore is not confir
   await waitFor(() => expect(h.api.getEvent).toHaveBeenCalledTimes(2));
   expectNoInlineResult();
 
-  h.api.restoreEvent.mockRejectedValue(refused(404, "The deleted calendar event was not found."));
+  h.api.restoreEvent.mockRejectedValue(refused(403, "This calendar is read-only."));
   press("Event actions");
   press("Delete");
   await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
   const undo = undoAction();
   await act(async () => undo.onClick());
   await waitFor(() =>
-    expect(h.error).toHaveBeenLastCalledWith("The deleted calendar event was not found.", {
+    expect(h.error).toHaveBeenLastCalledWith("This calendar is read-only.", {
       id: "toast-1",
       action: { label: "Try again", onClick: expect.any(Function) },
     }),

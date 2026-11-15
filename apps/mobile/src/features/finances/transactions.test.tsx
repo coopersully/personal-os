@@ -93,15 +93,18 @@ vi.mock("react-native", () => {
       accessibilityLabel,
       value,
       onChangeText,
+      placeholder,
       editable = true,
     }: {
       accessibilityLabel?: string;
       value: string;
       onChangeText: (value: string) => void;
+      placeholder?: string;
       editable?: boolean;
     }) => (
       <input
         aria-label={accessibilityLabel}
+        placeholder={placeholder}
         disabled={!editable}
         value={value}
         onChange={(event) => onChangeText(event.target.value)}
@@ -297,9 +300,20 @@ afterEach(cleanup);
 
 // Adding a manual transaction
 
-it("opens the new transaction form from Spending and from a manual account", async () => {
+it("opens the new transaction form from the Transactions action row and from a manual account", async () => {
+  // Summary has no add control: nothing floats over a row's amount in either mode.
+  const summary = mount(<FinanceSpendingScreen />);
+  expect(screen.queryByRole("button", { name: "Add transaction" })).toBeNull();
+  summary.unmount();
+  h.params = { mode: "Transactions" };
   const view = mount(<FinanceSpendingScreen />);
-  press("Add transaction");
+  const add = await screen.findByRole("button", { name: "Add transaction" });
+  // Add sits in the same line of commands as Select and Filters, not over the list.
+  expect(add.parentElement).toBe(
+    screen.getByRole("button", { name: "Select transactions" }).parentElement,
+  );
+  expect(add.querySelector('[data-icon="add"]')).toBeNull();
+  fireEvent.click(add);
   expect(h.push).toHaveBeenCalledWith("/finance-transaction-edit");
   view.unmount();
   h.params = { id: account.id };
@@ -1491,4 +1505,26 @@ it.each([
   // The form is still open with the edit; nothing was written again and nothing closed.
   expect(h.back).not.toHaveBeenCalled();
   expect(h.api.createFinanceTransaction).toHaveBeenCalledOnce();
+});
+
+it("marks empty fields Required or Optional instead of showing values that look filled in", async () => {
+  mount(<FinanceTransactionEditor />);
+  expect(await screen.findByLabelText("Merchant")).toHaveProperty("placeholder", "Required");
+  expect(screen.getByLabelText("Amount")).toHaveProperty("placeholder", "Required");
+  expect(screen.getByLabelText("Notes")).toHaveProperty("placeholder", "Optional");
+});
+
+it("offers Add only where a list is given somewhere to add to", async () => {
+  mount(<Transactions accountId={account.id} />);
+  await screen.findByRole("button", { name: /Corner market/ });
+  expect(screen.queryByRole("button", { name: "Add transaction" })).toBeNull();
+  // Entering selection replaces the browsing commands, Add included.
+  cleanup();
+  const onAdd = vi.fn();
+  mount(<Transactions onAdd={onAdd} />);
+  await screen.findByRole("button", { name: /Corner market/ });
+  press("Add transaction");
+  expect(onAdd).toHaveBeenCalledOnce();
+  press("Select transactions");
+  expect(screen.queryByRole("button", { name: "Add transaction" })).toBeNull();
 });

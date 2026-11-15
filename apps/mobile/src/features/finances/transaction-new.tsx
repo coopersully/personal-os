@@ -264,7 +264,7 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
                     onChangeText={edit(setMerchant)}
                     editable={!locked}
                     maxLength={240}
-                    placeholder="Corner bakery"
+                    placeholder="Required"
                   />
                   <TextRow
                     label="Amount"
@@ -275,7 +275,7 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
                       invalidAmount ? "Enter an amount above zero, such as 12.50." : undefined
                     }
                     keyboardType="decimal-pad"
-                    placeholder="12.50"
+                    placeholder="Required"
                   />
                   <EnumChoice
                     label="Type"
@@ -348,7 +348,7 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
                     editable={!locked}
                     multiline
                     maxLength={4000}
-                    placeholder="Bread and coffee for the team breakfast."
+                    placeholder="Optional"
                     placeholderTextColor={t.secondary}
                     value={notes}
                     onChangeText={edit(setNotes)}

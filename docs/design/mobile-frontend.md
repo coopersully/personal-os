@@ -281,8 +281,10 @@ confirmation that names the account and what is preserved.
 
 ### Finance transaction management
 
-Spending has a floating plus that opens the new transaction form; a manual account's action menu
-opens the same form with that account chosen. A transaction a person adds belongs to a manual
+Transactions in Spending has Add beside Select and Filters, which opens the new transaction form; a
+manual account's action menu opens the same form with that account chosen. Spending has no
+floating plus, because it would sit over row amounts. The form uses Required and Optional as
+placeholders, like the account form, rather than sample values. A transaction a person adds belongs to a manual
 account, because the server removes a transaction only from one: the form offers manual accounts
 only, chooses a lone one, and explains what is missing when there is none. Merchant, Amount,
 Account and Date are required; the date defaults to today in the account planning timezone. A

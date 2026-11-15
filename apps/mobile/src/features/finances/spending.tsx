@@ -26,16 +26,7 @@ import {
   TransactionFilters,
   transactionViewQuery,
 } from "./transaction-filters";
-import {
-  Card,
-  Copy,
-  FinanceFloatingAdd,
-  FinanceRow,
-  FinanceScreen,
-  Metric,
-  ReadState,
-  Segments,
-} from "./ui";
+import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Segments } from "./ui";
 
 export function Transactions({
   budgetId,
@@ -43,7 +34,10 @@ export function Transactions({
   reference,
   from,
   through,
+  onAdd,
 }: {
+  /** Shown as Add beside Select and Filters, so no floating control sits over row amounts. */
+  onAdd?: () => void;
   budgetId?: string;
   from?: string;
   through?: string;
@@ -235,6 +229,9 @@ export function Transactions({
               </>
             ) : (
               <>
+                {onAdd && (
+                  <Action label="Add" accessibilityLabel="Add transaction" onPress={onAdd} />
+                )}
                 <Action
                   label="Select"
                   accessibilityLabel="Select transactions"
@@ -386,112 +383,101 @@ export function FinanceSpendingScreen() {
   }, [routePeriod, routeMode]);
   const query = useSpending(period === "This week" ? "week" : "month");
   return (
-    <View style={{ flex: 1 }}>
-      <FinanceScreen title="Spending">
-        <Segments
-          value={mode}
-          options={["Summary", "Transactions"]}
-          onChange={(next) => {
-            setMode(next);
-            router.setParams({ mode: next });
-          }}
-        />
-        <Segments
-          value={period}
-          options={["This week", "This month"]}
-          onChange={(next) => {
-            setPeriod(next);
-            router.setParams({ period: next === "This month" ? "month" : "week" });
-            setGroup(null);
-          }}
-        />
-
-        {mode === "Transactions" ? (
-          query.scope ? (
-            <Transactions from={query.scope.from} through={query.scope.through} />
-          ) : (
-            <ReadState query={query}>{null}</ReadState>
-          )
-        ) : (
-          <ReadState query={query}>
-            {query.data && query.scope && (
-              <>
-                <Metric
-                  accent
-                  label={`${formatLocalDate(query.scope.from)} – ${formatLocalDate(query.scope.through)}`}
-                  value={formatMoney(query.data.snapshot.netCents / 100, "USD")}
-                  hint="Your share · pending included · refunds subtracted"
-                >
-                  <SpendingChart bins={query.data.snapshot.bins} />
-                </Metric>
-                <Copy secondary>
-                  {financeLabel(query.data.snapshot.coverage)} coverage ·{" "}
-                  {query.data.source.freshness === "unknown"
-                    ? "freshness not confirmed"
-                    : financeLabel(query.data.source.freshness)}
-                  {query.data.currency.unsupported.length ? " · other currencies excluded" : ""}
-                </Copy>
-                {group ? (
-                  <>
-                    <FinanceRow
-                      title="All categories"
-                      icon="views"
-                      onPress={() => setGroup(null)}
-                    />
-                    <Copy>{group.title}</Copy>
-                    <Transactions reference={group.reference} />
-                  </>
-                ) : (
-                  <Card rows={query.data.groups.length > 0}>
-                    {query.data.groups.length ? (
-                      query.data.groups.map((item) => (
-                        <FinanceRow
-                          key={item.id}
-                          title={item.label}
-                          icon={categoryIcon(
-                            item.label,
-                            item.visual?.icon,
-                            item.kind ?? "category",
-                          )}
-                          value={formatMoney(item.netCents / 100, "USD")}
-                          onPress={
-                            query.data?.referenceRevision
-                              ? () => {
-                                  if (!query.scope || !query.data?.referenceRevision) return;
-                                  setGroup({
-                                    title: item.label,
-                                    reference: {
-                                      query: {
-                                        scope: query.scope,
-                                        grouping: "auto",
-                                        includeUncategorized: true,
-                                      },
-                                      referenceRevision: query.data.referenceRevision,
-                                      groupId: item.id,
-                                      from: query.scope.from,
-                                      through: query.scope.through,
-                                    },
-                                  });
-                                }
-                              : undefined
-                          }
-                        />
-                      ))
-                    ) : (
-                      <Copy secondary>No spending in this period.</Copy>
-                    )}
-                  </Card>
-                )}
-              </>
-            )}
-          </ReadState>
-        )}
-        <View style={{ height: 80 }} />
-      </FinanceScreen>
-      <FinanceFloatingAdd
-        label="Add transaction"
-        onPress={() => router.push("/finance-transaction-edit")}
+    <FinanceScreen title="Spending">
+      <Segments
+        value={mode}
+        options={["Summary", "Transactions"]}
+        onChange={(next) => {
+          setMode(next);
+          router.setParams({ mode: next });
+        }}
       />
-    </View>
+      <Segments
+        value={period}
+        options={["This week", "This month"]}
+        onChange={(next) => {
+          setPeriod(next);
+          router.setParams({ period: next === "This month" ? "month" : "week" });
+          setGroup(null);
+        }}
+      />
+
+      {mode === "Transactions" ? (
+        query.scope ? (
+          <Transactions
+            from={query.scope.from}
+            through={query.scope.through}
+            onAdd={() => router.push("/finance-transaction-edit")}
+          />
+        ) : (
+          <ReadState query={query}>{null}</ReadState>
+        )
+      ) : (
+        <ReadState query={query}>
+          {query.data && query.scope && (
+            <>
+              <Metric
+                accent
+                label={`${formatLocalDate(query.scope.from)} – ${formatLocalDate(query.scope.through)}`}
+                value={formatMoney(query.data.snapshot.netCents / 100, "USD")}
+                hint="Your share · pending included · refunds subtracted"
+              >
+                <SpendingChart bins={query.data.snapshot.bins} />
+              </Metric>
+              <Copy secondary>
+                {financeLabel(query.data.snapshot.coverage)} coverage ·{" "}
+                {query.data.source.freshness === "unknown"
+                  ? "freshness not confirmed"
+                  : financeLabel(query.data.source.freshness)}
+                {query.data.currency.unsupported.length ? " · other currencies excluded" : ""}
+              </Copy>
+              {group ? (
+                <>
+                  <FinanceRow title="All categories" icon="views" onPress={() => setGroup(null)} />
+                  <Copy>{group.title}</Copy>
+                  <Transactions reference={group.reference} />
+                </>
+              ) : (
+                <Card rows={query.data.groups.length > 0}>
+                  {query.data.groups.length ? (
+                    query.data.groups.map((item) => (
+                      <FinanceRow
+                        key={item.id}
+                        title={item.label}
+                        icon={categoryIcon(item.label, item.visual?.icon, item.kind ?? "category")}
+                        value={formatMoney(item.netCents / 100, "USD")}
+                        onPress={
+                          query.data?.referenceRevision
+                            ? () => {
+                                if (!query.scope || !query.data?.referenceRevision) return;
+                                setGroup({
+                                  title: item.label,
+                                  reference: {
+                                    query: {
+                                      scope: query.scope,
+                                      grouping: "auto",
+                                      includeUncategorized: true,
+                                    },
+                                    referenceRevision: query.data.referenceRevision,
+                                    groupId: item.id,
+                                    from: query.scope.from,
+                                    through: query.scope.through,
+                                  },
+                                });
+                              }
+                            : undefined
+                        }
+                      />
+                    ))
+                  ) : (
+                    <Copy secondary>No spending in this period.</Copy>
+                  )}
+                </Card>
+              )}
+            </>
+          )}
+        </ReadState>
+      )}
+    </FinanceScreen>
   );
 }

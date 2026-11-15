@@ -33,7 +33,9 @@ import {
   shortcutBounds,
 } from "./date-shortcuts";
 import { listOption } from "./list-presentation";
+import { viewStatus } from "./navigation-counts";
 import { OptionsMenu } from "./options-menu";
+import { formatTargetDate } from "./presentation";
 import { SearchableChoice } from "./searchable-choice";
 import { TaskRow } from "./task-row";
 import {
@@ -93,11 +95,7 @@ export function TaskListScreen({
     group: scope.group ?? preferences?.taskGroup ?? "none",
     status:
       scope.status ??
-      (widenSearch
-        ? ("all" as const)
-        : preferences?.showCompletedTasks && !lifecycleView
-          ? "open_and_completed"
-          : undefined),
+      (widenSearch ? ("all" as const) : viewStatus(scope, preferences?.showCompletedTasks)),
     ...filters,
     // Lists and projects only hold tasks; narrowing by one never returns reminders.
     ...(filters.listId || filters.projectId ? { kind: "task" as const } : {}),
@@ -314,6 +312,14 @@ export function TaskListScreen({
     else execute();
   };
   const selectedItems = items.filter((item) => selected.includes(itemKey(item)));
+  // Select all takes the loaded items that can change, up to the selection limit of 100; a
+  // read-only item would block each action.
+  const selectable = items
+    .filter((item) => !item.readOnly)
+    .slice(0, 100)
+    .map(itemKey);
+  const allSelected =
+    selected.length === selectable.length && selectable.every((key) => selected.includes(key));
   const canAct = selectedItems.length > 0 && selectedItems.every((item) => !item.readOnly);
   return (
     <View style={{ flex: 1, backgroundColor: t.canvas }}>
@@ -375,6 +381,20 @@ export function TaskListScreen({
                 />
               </View>
             </View>
+            {scopedProject && (scopedProject.why || scopedProject.targetDate) && (
+              <View style={{ gap: spacing.xs, marginBottom: spacing.md }}>
+                {!!scopedProject.why && (
+                  <Text numberOfLines={3} style={{ color: t.secondary, fontSize: 15 }}>
+                    {scopedProject.why}
+                  </Text>
+                )}
+                {!!scopedProject.targetDate && (
+                  <Text style={{ color: t.secondary, fontSize: 13 }}>
+                    Target {formatTargetDate(scopedProject.targetDate)}
+                  </Text>
+                )}
+              </View>
+            )}
             <ActiveFilters
               filters={filters}
               choices={menuChoices}
@@ -408,6 +428,13 @@ export function TaskListScreen({
                 <View style={styles.toolbar}>
                   <Text style={{ color: t.ink, padding: 12 }}>{selected.length} selected</Text>
                   <Action label="Cancel" onPress={() => setSelected([])} />
+                  {selectable.length > 0 && !allSelected && (
+                    <Action
+                      label="Select all"
+                      disabled={action.pending}
+                      onPress={() => setSelected(selectable)}
+                    />
+                  )}
                   {canAct && (
                     <>
                       {selectedItems.every((item) => !item.deletedAt && isOpen(item)) && (

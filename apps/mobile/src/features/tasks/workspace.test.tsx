@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { TaskWorkspaceItem } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import TaskPreferencesScreen from "../../app/task-preferences";
@@ -1721,4 +1721,217 @@ it("keeps Load more for ordinary matches when the archived read fails", async ()
   );
   expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Retry loading archived matches" })).toBeVisible();
+});
+it("selects every visible item that can change from a mixed selection, then acts on all of them", async () => {
+  h.items = [task("one"), task("two"), { ...task("three"), readOnly: true }, task("four")];
+  show();
+  fireEvent.contextMenu(await loaded());
+  fireEvent.click(screen.getByRole("button", { name: "Open task: Task three" }));
+  expect(screen.getByText("2 selected")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Complete" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  // The read-only pick is dropped, so the selection can be acted on.
+  expect(screen.getByText("3 selected")).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: "Select Task three" })).not.toBeChecked();
+  for (const id of ["one", "two", "four"])
+    expect(screen.getByRole("checkbox", { name: `Select Task ${id}` })).toBeChecked();
+  expect(screen.queryByRole("button", { name: "Select all" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open task: Task two" }));
+  expect(screen.getByText("2 selected")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(screen.getByText("3 selected")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Complete" }));
+  await waitFor(() => expect(h.completeTask).toHaveBeenCalledTimes(3));
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith(
+      "3 completed",
+      expect.objectContaining({ id: "task-toast" }),
+    ),
+  );
+  expect(screen.queryByText("3 completed")).not.toBeInTheDocument();
+});
+it("offers no Select all when nothing visible can change, and trashes a full selection after confirming", async () => {
+  h.items = [{ ...task("one"), readOnly: true }];
+  const view = show();
+  fireEvent.contextMenu(await loaded());
+  expect(screen.getByText("1 selected")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Select all" })).not.toBeInTheDocument();
+  view.unmount();
+  h.items = [task("one"), task("two")];
+  show();
+  fireEvent.contextMenu(await loaded());
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  fireEvent.click(screen.getByRole("button", { name: "Trash" }));
+  await waitFor(() => expect(h.trashTask).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith(
+      "2 moved to Trash",
+      expect.objectContaining({ id: "task-toast" }),
+    ),
+  );
+  expect(screen.queryByText("2 moved to Trash")).not.toBeInTheDocument();
+});
+const totals = (pick: (query: Record<string, unknown>) => number) =>
+  h.listTaskWorkspace.mockImplementation(async (query) => ({
+    items: [],
+    total: pick(query),
+    nextCursor: null,
+  }));
+const hub = (mode: Parameters<typeof TasksHub>[0]["mode"]) =>
+  render(
+    <MobileDataProvider>
+      <TasksHub mode={mode} />
+    </MobileDataProvider>,
+  );
+it("shows each Browse destination's item count from the API total", async () => {
+  h.lists = [
+    list("inbox", "Inbox", { kind: "inbox" }),
+    list("old", "Old", { availability: "archived" }),
+  ];
+  totals((query) =>
+    query.view === "upcoming"
+      ? 4
+      : query.view === "history"
+        ? 12
+        : query.view === "trash"
+          ? 2
+          : query.kind === "task"
+            ? 7
+            : query.kind === "reminder"
+              ? 1
+              : query.reserved === "scheduled"
+                ? 5
+                : 1234,
+  );
+  hub("views");
+  for (const [label, count] of [
+    ["Upcoming", "4"],
+    ["History", "12"],
+    ["Trash", "2"],
+    ["Tasks", "7"],
+    ["Reminders", "1"],
+    ["Scheduled", "5"],
+    ["All tasks & reminders", "1,234"],
+    ["Archive", "1"],
+  ] as const)
+    expect(
+      await within(screen.getByRole("button", { name: label })).findByText(count),
+    ).toBeVisible();
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith({ view: "upcoming", limit: 1 });
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith({
+    view: "all",
+    reserved: "scheduled",
+    limit: 1,
+  });
+  expect(h.listTaskWorkspace).toHaveBeenCalledTimes(7);
+});
+it("counts what a destination will list when completed tasks are shown", async () => {
+  h.preferences.showCompletedTasks = true;
+  totals(() => 3);
+  hub("views");
+  await within(screen.getByRole("button", { name: "Tasks" })).findByText("3");
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith({
+    view: "all",
+    kind: "task",
+    status: "open_and_completed",
+    limit: 1,
+  });
+  // History and Trash keep their own status.
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith({ view: "history", limit: 1 });
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith({ view: "trash", limit: 1 });
+});
+it("shows no count, never a zero, when the totals cannot be read, and reports it once through Sonner", async () => {
+  h.listTaskWorkspace.mockRejectedValue(new Error("offline"));
+  hub("views");
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
+  expect(screen.getByRole("button", { name: "Trash" })).toHaveTextContent(/^Trash$/);
+  for (const label of ["Upcoming", "History", "Tasks", "Reminders", "Scheduled"])
+    expect(screen.getByRole("button", { name: label })).not.toHaveTextContent(/\d/);
+  expect(screen.queryByText(/Couldn’t confirm/)).not.toBeInTheDocument();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  expect(h.error).toHaveBeenCalledTimes(1);
+});
+it("shows item counts on list rows and pinned cards, matching the list each one opens", async () => {
+  h.lists = [list("inbox", "Inbox", { kind: "inbox" }), list("home", "Home"), list("work", "Work")];
+  h.preferences.pinnedListIds = ["work"];
+  totals((query) => (query.listId === "home" ? 1 : query.listId === "work" ? 8 : 0));
+  hub("lists");
+  expect(
+    await within(await screen.findByRole("button", { name: "Open Home" })).findByText("1 item"),
+  ).toBeVisible();
+  expect(
+    within(screen.getByRole("button", { name: "Open Inbox" })).getByText("0 items"),
+  ).toBeVisible();
+  expect(
+    within(screen.getByRole("button", { name: "Open pinned list: Work" })).getByText("8 items"),
+  ).toBeVisible();
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith({
+    view: "all",
+    kind: "task",
+    listId: "home",
+    limit: 1,
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Open Home" }));
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/task-browser",
+    params: { title: "Home", view: "all", kind: "task", listId: "home" },
+  });
+});
+it("counts a finished project's tasks in every status, as its page lists them", async () => {
+  h.projects = [
+    project("open", "Open project"),
+    project("done", "Done project", { lifecycle: "completed" }),
+  ];
+  totals((query) => (query.projectId === "done" ? 6 : 2));
+  hub("projects");
+  expect(
+    await within(await screen.findByRole("button", { name: "Open Open project" })).findByText(
+      "2 items",
+    ),
+  ).toBeVisible();
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith({
+    view: "all",
+    kind: "task",
+    projectId: "open",
+    listId: "inbox",
+    limit: 1,
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Completed · 1" }));
+  expect(
+    await within(screen.getByRole("button", { name: "Open Done project, completed" })).findByText(
+      "6 items",
+    ),
+  ).toBeVisible();
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith({
+    view: "all",
+    status: "all",
+    kind: "task",
+    projectId: "done",
+    listId: "inbox",
+    limit: 1,
+  });
+});
+it("shows a project's why and target date above its tasks, and nothing for a project without them", async () => {
+  h.projects = [
+    project("trip", "Trip", { why: "See the coast before winter", targetDate: "2026-12-05" }),
+    project("bare", "Bare"),
+  ];
+  const view = show({
+    title: "Trip",
+    scope: { view: "all", kind: "task", projectId: "trip", listId: "inbox" },
+  });
+  await loaded();
+  const why = await screen.findByText("See the coast before winter");
+  expect(screen.getByText("Target Dec 5, 2026")).toBeVisible();
+  expect(
+    why.compareDocumentPosition(screen.getByRole("button", { name: "Open task: Task one" })) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  view.unmount();
+  show({ title: "Bare", scope: { view: "all", kind: "task", projectId: "bare", listId: "inbox" } });
+  await loaded();
+  expect(screen.queryByText(/^Target /)).not.toBeInTheDocument();
+  expect(screen.queryByText("See the coast before winter")).not.toBeInTheDocument();
 });

@@ -107,6 +107,29 @@ active chips and effective sorting/grouping beside results. Preserve fixed desti
 distinguish filter reset from view reset, and make saved defaults explicit. See the detailed form
 contract for geometry, state and reset behavior. Do not scatter configuration through result lists.
 
+### Task selection, counts and project header
+
+Long-pressing a task row starts a selection; its bar shows the number selected, Cancel, Select
+all and the actions every selected item allows. Select all selects the loaded items that can
+change, up to the selection limit of 100, and replaces the current selection, so a read-only
+pick that was blocking the actions is dropped. It is not offered when nothing loaded can change
+or everything that can is already selected. It never reaches items that have not been loaded:
+Load more first.
+
+Browse, Lists, Projects and Archive show how many items each destination lists. A count is the
+`total` of the same query the destination opens, read with a one-item page, so it equals the
+"N items" line on the opened list, including the Show completed tasks preference and the
+every-status view of an archived container or finished project. Archive counts its containers,
+from the loaded lists and projects. Browse rows and the Upcoming and History cards show the
+bare number; list and project rows and pinned cards say "3 items" beside the name. The count is
+the control's accessibility value, so the label stays the destination's name. A count that is
+unread or could not be read is absent, never a zero; failed totals raise one Sonner error for
+the screen, not one per row. Counts read after the Tasks preferences answer and refresh with
+every Tasks action.
+
+A project's page shows its why (three lines at most) and "Target" with the short calendar date
+under the title and above the filters and tasks. A project with neither shows nothing there.
+
 ### Task row details
 
 A task row keeps its full title, wrapping rather than truncating, then quieter lines below it.

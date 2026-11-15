@@ -4,6 +4,7 @@ import {
   activeFilters,
   formatEstimate,
   formatTargetDate,
+  itemCount,
   matchingOptions,
   partitionPinned,
   taskMetadata,
@@ -177,4 +178,7 @@ describe("task row details", () => {
     );
     expect(taskRowSummary([], taskRowDetails({ ...item, kind: "reminder" } as never))).toBe("");
   });
+});
+it("words an item count in the singular and plural", () => {
+  expect([0, 1, 2, 1234].map(itemCount)).toEqual(["0 items", "1 item", "2 items", "1,234 items"]);
 });

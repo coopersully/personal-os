@@ -5,13 +5,15 @@ import { RowActions } from "../../components/row-actions";
 import { entityDictionary } from "../../product/entities";
 import { radius, spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
 import { finishedProjectLabel } from "./container-directory";
-import { formatTargetDate } from "./presentation";
+import { formatTargetDate, itemCount } from "./presentation";
 import { Action, groupEdges, styles } from "./ui";
 
 type ContainerRowActions = {
   first: boolean;
   last: boolean;
   pinned: boolean;
+  /** Items the row opens; absent while the total is unread. */
+  count?: number;
   disabled: boolean;
   onOpen: () => void;
   onPin: () => void;
@@ -52,6 +54,9 @@ function ContainerRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Open ${name}${state ? `, ${state.toLocaleLowerCase()}` : ""}`}
+        accessibilityValue={
+          actions.count === undefined ? undefined : { text: itemCount(actions.count) }
+        }
         onPress={actions.onOpen}
         style={{
           flex: 1,
@@ -75,6 +80,9 @@ function ContainerRow({
           >
             <Text style={{ color: t.ink, fontSize: 17 }}>{name}</Text>
             {permanent && <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>}
+            {actions.count !== undefined && (
+              <Text style={{ color: t.secondary, fontSize: 12 }}>{itemCount(actions.count)}</Text>
+            )}
           </View>
           {!!subtitle && (
             <Text
@@ -156,6 +164,7 @@ export function PinnedContainers({
   items,
   kind,
   onOpen,
+  countOf,
   loading = false,
   onRetry,
   onPin,
@@ -165,6 +174,8 @@ export function PinnedContainers({
   items: Array<TaskList | TaskProject>;
   kind: "list" | "project";
   onOpen: (record: TaskList | TaskProject) => void;
+  /** Items a card opens; undefined while the total is unread. */
+  countOf: (record: TaskList | TaskProject) => number | undefined;
   loading?: boolean;
   onRetry?: () => void;
   onPin: (record: TaskList | TaskProject) => void;
@@ -191,6 +202,7 @@ export function PinnedContainers({
           contentContainerStyle={{ gap: spacing.md }}
           renderItem={({ item }) => {
             const state = "lifecycle" in item ? finishedProjectLabel(item) : null;
+            const count = countOf(item);
             return (
               <View
                 style={{
@@ -240,6 +252,7 @@ export function PinnedContainers({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Open pinned ${kind}: ${item.name}${state ? `, ${state.toLocaleLowerCase()}` : ""}`}
+                  accessibilityValue={count === undefined ? undefined : { text: itemCount(count) }}
                   onPress={() => onOpen(item)}
                   style={{ minHeight: touchTarget, justifyContent: "center" }}
                 >
@@ -250,6 +263,9 @@ export function PinnedContainers({
                     <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>
                   )}
                   {state && <Text style={{ color: t.secondary, fontSize: 12 }}>{state}</Text>}
+                  {count !== undefined && (
+                    <Text style={{ color: t.secondary, fontSize: 12 }}>{itemCount(count)}</Text>
+                  )}
                 </Pressable>
               </View>
             );

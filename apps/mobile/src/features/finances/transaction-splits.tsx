@@ -85,7 +85,13 @@ export function TransactionSplitForm({ record }: { record: FinanceTransaction })
   };
   const remove = (key: string) => {
     if (lock.current || submitted || parts.length < 2) return;
-    setParts((rows) => rows.filter((row) => row.key !== key));
+    setParts((rows) => {
+      const kept = rows.filter((row) => row.key !== key);
+      // One part alone is the whole transaction, so it takes the whole amount.
+      return kept.length === 1
+        ? kept.map((row) => ({ ...row, amount: snapshot.amount.toFixed(2) }))
+        : kept;
+    });
     if (choosing === key) setChoosing(null);
     setEdited(true);
   };
@@ -155,7 +161,9 @@ export function TransactionSplitForm({ record }: { record: FinanceTransaction })
       if (!current()) return void toast.dismiss(id);
       if (error instanceof ApiClientError && error.status === 409) {
         toast.error(
-          "Nothing was saved. This transaction changed, or a reimbursement depends on its splits. Close and reopen it to see the latest; your draft is still here.",
+          unconfirmed
+            ? "This transaction has changed, and your earlier save may be why. Close and reopen it to check its splits; your draft is still here."
+            : "Nothing was saved. This transaction changed, or a reimbursement depends on its splits. Close and reopen it to see the latest; your draft is still here.",
           { id },
         );
       } else if (confirmedRejection(error)) {
@@ -214,7 +222,7 @@ export function TransactionSplitForm({ record }: { record: FinanceTransaction })
             label={balance.remainingCents < 0 ? "Over-assigned" : "Left to assign"}
             value={money(balance.remainingCents)}
             hint={
-              balance.remainingCents === 0
+              balance.balanced
                 ? "Every cent is assigned."
                 : `Of ${money(Math.round(snapshot.amount * 100))}`
             }
@@ -271,7 +279,7 @@ export function TransactionSplitForm({ record }: { record: FinanceTransaction })
                             : undefined
                         }
                         keyboardType="decimal-pad"
-                        placeholder="Required"
+                        placeholder="12.50"
                       />
                       <EnumChoice
                         label="Treatment"

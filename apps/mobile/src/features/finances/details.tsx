@@ -9,7 +9,7 @@ import { useFinanceRead } from "./data";
 import { InstitutionLogo } from "./institution-logo";
 import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
 import { Transactions } from "./spending";
-import { activeAllocations } from "./splits";
+import { activeAllocations, isSplit } from "./splits";
 import { TransactionActions } from "./transaction-actions";
 import { TransactionCategory } from "./transaction-category";
 import { TransactionNotes } from "./transaction-notes";
@@ -100,7 +100,8 @@ export function FinanceTransactionScreen() {
   const accounts = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
   const reviews = useFinanceRead(["reviews"], (api) => api.getFinanceReviewQueue());
   const item = query.data?.data;
-  const splits = item ? activeAllocations(item) : [];
+  // One part is an ordinary categorized transaction, not a split.
+  const splits = item && isSplit(item) ? activeAllocations(item) : [];
   const categories = useFinanceRead(
     ["categories"],
     (api) => api.getFinanceCategories(),

@@ -299,7 +299,10 @@ it("starts an unsplit transaction with its whole amount and an empty second part
     "Groceries",
   );
   expect(screen.getByText("Left to assign")).toBeTruthy();
-  expect(screen.getByText("Every cent is assigned.")).toBeTruthy();
+  // Nothing is left over, but an empty part is not "every cent assigned".
+  expect(screen.getByText("$0.00")).toBeTruthy();
+  expect(screen.queryByText("Every cent is assigned.")).toBeNull();
+  expect(screen.getByLabelText("Part 2 amount")).toHaveProperty("placeholder", "12.50");
   // Nothing was edited, so there is nothing to save and Close needs no confirmation.
   expect(save()).toHaveProperty("disabled", true);
   press("Close");
@@ -435,11 +438,10 @@ it("removes a part, and a lone remaining part saves the transaction as one categ
   await openSplits(split);
   press("Remove part 2");
   expect(screen.queryByLabelText("Part 2 amount")).toBeNull();
-  // The last part cannot be removed, and its amount no longer covers the transaction.
+  // The last part cannot be removed, and takes the whole transaction amount.
   expect(screen.queryByRole("button", { name: /^Remove part/ })).toBeNull();
-  expect(screen.getByText("$20.00")).toBeTruthy();
-  expect(save()).toHaveProperty("disabled", true);
-  type("Part 1 amount", "60");
+  expect(amount(1)).toBe("60.00");
+  expect(screen.getByText("Every cent is assigned.")).toBeTruthy();
   press("Save splits");
   await waitFor(() =>
     expect(h.success).toHaveBeenCalledWith("Saved as one category", { id: "feedback" }),
@@ -742,4 +744,71 @@ it.each([
   expect(h.success).not.toHaveBeenCalled();
   expect(h.error).not.toHaveBeenCalled();
   expect(h.back).not.toHaveBeenCalled();
+});
+
+it("says an earlier save may have applied when a retry after an unconfirmed save conflicts", async () => {
+  h.api.setFinanceTransactionBreakdown.mockRejectedValueOnce(new Error("timeout"));
+  await editedSplit();
+  press("Save splits");
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
+  h.api.setFinanceTransactionBreakdown.mockRejectedValueOnce(rejection(409));
+  await waitFor(() => expect(save()).toHaveProperty("disabled", false));
+  press("Save splits");
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
+  const message = String(h.error.mock.calls[1]?.[0]);
+  expect(message).toContain("your earlier save may be why");
+  expect(message).not.toContain("Nothing was saved");
+  expect(h.back).not.toHaveBeenCalled();
+  expectNoInlineResult();
+});
+
+it("does not list a single part as a split on transaction details", async () => {
+  h.params = { id: transaction.id };
+  h.api.getFinanceTransaction.mockResolvedValue({
+    data: { ...transaction, allocations: [allocation("a-1", "c-groceries", 60, 0)] },
+  });
+  mount(<FinanceTransactionScreen />);
+  expect(await screen.findByRole("button", { name: /Category.*Groceries/ })).toBeTruthy();
+  expect(screen.queryByText("Splits")).toBeNull();
+});
+
+// The category and notes form must not collapse a split
+
+it("offers no category picker for a split transaction and routes to its splits", async () => {
+  h.params = { id: transaction.id, field: "category" };
+  h.api.getFinanceTransaction.mockResolvedValue({ data: split });
+  mount(<FinanceTransactionEditor />);
+  const row = await screen.findByRole("button", { name: /Category.*Split in 2 parts/ });
+  // Arriving from a review's Change category does not open the picker either.
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByText("Uncategorized")).toBeNull();
+  expect(screen.queryByRole("button", { name: "New category" })).toBeNull();
+  fireEvent.click(row);
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/finance-transaction-edit",
+    params: { id: transaction.id, field: "splits" },
+  });
+});
+
+it("saves a note on a split transaction without sending a category", async () => {
+  h.params = { id: transaction.id };
+  h.api.getFinanceTransaction.mockResolvedValue({ data: split });
+  h.api.updateFinanceTransaction.mockResolvedValue({ ...split, notes: "Shared with Sam" });
+  mount(<FinanceTransactionEditor />);
+  await screen.findByRole("button", { name: /Category.*Split in 2 parts/ });
+  type("Notes", "Shared with Sam");
+  press("Save changes");
+  await waitFor(() => expect(h.success).toHaveBeenCalled());
+  expect(h.api.updateFinanceTransaction).toHaveBeenCalledWith(transaction.id, {
+    notes: "Shared with Sam",
+    expectedTransactionUpdatedAt: split.updatedAt,
+  });
+});
+
+it("keeps a pending split transaction's Category row read-only in the edit form", async () => {
+  h.params = { id: transaction.id };
+  h.api.getFinanceTransaction.mockResolvedValue({ data: { ...split, pending: true } });
+  mount(<FinanceTransactionEditor />);
+  expect(await screen.findByText("Split in 2 parts")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Category/ })).toBeNull();
 });

@@ -676,7 +676,7 @@ it("matches web permission presets, changes only draft scopes, and keeps custom 
   expect(h.createToken).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenLastCalledWith(
     "Grant agent access?",
-    expect.stringContaining("Read mail; Manage mail; Read tasks"),
+    "Preset helper will receive these permissions:\n• Read mail\n• Manage mail\n• Read tasks\nKeep its token private.",
     expect.any(Function),
   );
   await act(async () => h.confirm.mock.calls.at(-1)?.[2]());
@@ -686,6 +686,31 @@ it("matches web permission presets, changes only draft scopes, and keeps custom 
   });
 });
 
+it("states the full reach of every permission in the grant confirmation", () => {
+  render(<AgentAccessScreen />);
+  fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "Wide helper" } });
+  for (const label of [
+    "Read tasks",
+    "Change notification preferences",
+    "Execute Mail approvals, sending and settings",
+    "Change Calendar settings",
+    "Change Tasks settings",
+    "Maintain Finances",
+  ])
+    fireEvent.click(screen.getByLabelText(label));
+  fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+  const message = h.confirm.mock.calls.at(-1)?.[1] as string;
+  expect(h.confirm.mock.calls.at(-1)?.[0]).toBe("Grant agent access?");
+  expect(message).toContain("• Read tasks\n");
+  expect(message).toContain(
+    "• Change notification preferences. Only when your review policy lets eligible work skip Reviews. It can also disconnect the verified Texting destination.",
+  );
+  // Each of the three execute permissions states that it can sync or disconnect shared sources.
+  expect(message.match(/it can also sync or disconnect shared sources/g)).toHaveLength(3);
+  expect(message).toContain("• Maintain Finances. Sync providers, reconcile and categorize");
+  expect(message).not.toMatch(/\b[a-z]+:(read|write|execute|maintain)\b/);
+  expect(h.createToken).not.toHaveBeenCalled();
+});
 it("retries failed workspace setup status and authoritative web review links without granting scopes", async () => {
   h.errors.add("agent-setup-status");
   h.errors.add("agent-context");

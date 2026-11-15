@@ -45,10 +45,23 @@ export const scopeDetails: Partial<Record<AccessScope, string>> = {
   "finances:execute": whenPolicyAllows,
   "calendar:execute": `${whenPolicyAllows} With Mail and Tasks execution, it can also sync or disconnect shared sources.`,
   "tasks:execute": `${whenPolicyAllows} With Mail and Calendar execution, it can also sync or disconnect shared sources.`,
-  "texting:execute": `Or disconnect the verified Texting destination. ${whenPolicyAllows}`,
+  "texting:execute": `${whenPolicyAllows} It can also disconnect the verified Texting destination.`,
   "finances:maintain":
     "Sync providers, reconcile and categorize under approved rules, and create durable runs. Questions and approvals stay pending.",
 };
+
+/**
+ * The full reach of each permission, one per line, for a consent step. A short name alone
+ * would understate a permission that has a condition or a wider effect.
+ */
+export function permissionRecap(scopes: readonly AccessScope[]) {
+  return scopes
+    .map((scope) => {
+      const detail = scopeDetails[scope];
+      return `• ${scopeLabels[scope]}${detail ? `. ${detail}` : ""}`;
+    })
+    .join("\n");
+}
 
 const areaLabels: Record<string, string> = {
   audit: "Activity",

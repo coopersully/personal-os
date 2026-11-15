@@ -16,7 +16,7 @@ import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { useAuth } from "../auth/context";
 import { errorMessage } from "../tasks/data";
 import { Choice, confirm, State } from "../tasks/ui";
-import { dateTime, scopeDetails, scopeGroups, scopeLabels } from "./agent-copy";
+import { dateTime, permissionRecap, scopeDetails, scopeGroups, scopeLabels } from "./agent-copy";
 import { DetailBlock, PermissionBlock } from "./agent-rows";
 import {
   type SettingsApi,
@@ -334,9 +334,9 @@ export function AgentAccess() {
               onPress={() =>
                 confirm(
                   "Grant agent access?",
-                  `${name.trim()} will receive these permissions: ${scopes
-                    .map((scope) => scopeLabels[scope])
-                    .join("; ")}. Keep its token private.`,
+                  `${name.trim()} will receive these permissions:\n${permissionRecap(
+                    scopes,
+                  )}\nKeep its token private.`,
                   () =>
                     void action.run(async (api) => {
                       const created = await api.createAccessToken(tokenInput(name, scopes));

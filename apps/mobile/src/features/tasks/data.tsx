@@ -96,8 +96,11 @@ export function useTaskAction() {
     await client.refetchQueries({
       queryKey: ["tasks"],
       type: "active",
-      predicate: ({ queryKey }) => queryKey[1] !== "detail" && queryKey[1] !== "container",
+      predicate: ({ queryKey }) =>
+        queryKey[1] !== "detail" && queryKey[1] !== "container" && queryKey[1] !== "count",
     });
+    // Navigation counts are one read per row; they catch up without holding the action open.
+    void client.refetchQueries({ queryKey: ["tasks", "count"], type: "active" });
   };
   const lock = useRef(false);
   const [pending, setPending] = useState(false);

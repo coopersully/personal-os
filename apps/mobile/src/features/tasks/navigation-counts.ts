@@ -42,7 +42,7 @@ export const viewStatus = (scope: TaskScope, showCompletedTasks: boolean | undef
 
 /**
  * The number of items each scope lists, read as the `total` of a one-item page so it is the
- * same number the opened list shows. Undefined while a total is unread or could not be read: a
+ * same number the opened list shows when no search narrows it. Undefined while a total is unread or could not be read: a
  * destination then shows no count rather than a zero. Failed totals raise one Sonner error.
  */
 export function useItemCounts(scopes: TaskScope[]): (number | undefined)[] {
@@ -73,7 +73,8 @@ export function useItemCounts(scopes: TaskScope[]): (number | undefined)[] {
   useEffect(() => {
     if (!settled || !failure || failedAt <= reported.current) return;
     reported.current = failedAt;
-    toast.error(errorMessage(failure.error));
+    // Tab screens stay mounted, so one id keeps several directories to a single toast.
+    toast.error(errorMessage(failure.error), { id: "task-counts" });
   }, [settled, failure, failedAt]);
   return results.map((result) => (result.isError ? undefined : result.data?.total));
 }

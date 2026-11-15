@@ -1683,7 +1683,7 @@ it("offers a retry for archived matches beside the matches that did load", async
   search("garden");
   const retry = await screen.findByRole("button", { name: "Retry loading archived matches" });
   await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
-  expect(screen.getByText(/^1 items/)).toBeVisible();
+  expect(screen.getByText(/^1 item ·/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Open task: Task one" })).toBeVisible();
   fail = false;
   fireEvent.click(retry);
@@ -1934,4 +1934,124 @@ it("shows a project's why and target date above its tasks, and nothing for a pro
   await loaded();
   expect(screen.queryByText(/^Target /)).not.toBeInTheDocument();
   expect(screen.queryByText("See the coast before winter")).not.toBeInTheDocument();
+});
+it("reads the count with the same filters the opened list sends", async () => {
+  h.preferences.showCompletedTasks = true;
+  h.lists = [list("inbox", "Inbox", { kind: "inbox" }), list("home", "Home")];
+  totals(() => 2);
+  const directory = hub("lists");
+  fireEvent.click(await screen.findByRole("button", { name: "Open Home" }));
+  const { title: _title, ...scope } = h.push.mock.calls.slice(-1)[0][0].params;
+  const counted = h.listTaskWorkspace.mock.calls
+    .map(([query]) => query)
+    .find((query) => query.listId === "home");
+  directory.unmount();
+  h.listTaskWorkspace.mockClear();
+  h.items = [task("one"), task("two")];
+  h.listTaskWorkspace.mockImplementation(async () => ({
+    items: h.items,
+    total: 2,
+    nextCursor: null,
+  }));
+  show({ title: "Home", scope, standalone: true });
+  await loaded();
+  const {
+    sort: _sort,
+    group: _group,
+    cursor: _cursor,
+    limit: _limit,
+    ...opened
+  } = h.listTaskWorkspace.mock.calls.slice(-1)[0][0];
+  const { limit, ...count } = counted;
+  expect(limit).toBe(1);
+  expect(count).toEqual(opened);
+  expect(screen.getByText(/^2 items/)).toBeVisible();
+});
+it("counts archived containers in every status and pinned projects, and words one item in the singular", async () => {
+  h.lists = [
+    list("inbox", "Inbox", { kind: "inbox" }),
+    list("old", "Old", { availability: "archived" }),
+  ];
+  h.projects = [project("move", "Move")];
+  h.preferences.pinnedProjectIds = ["move"];
+  totals((query) => (query.listId === "old" ? 9 : 1));
+  const archive = hub("archive");
+  expect(
+    await within(await screen.findByRole("button", { name: "Open Old" })).findByText("9 items"),
+  ).toBeVisible();
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith({
+    view: "all",
+    status: "all",
+    kind: "task",
+    listId: "old",
+    limit: 1,
+  });
+  archive.unmount();
+  hub("projects");
+  expect(
+    await within(
+      await screen.findByRole("button", { name: "Open pinned project: Move" }),
+    ).findByText("1 item"),
+  ).toBeVisible();
+  archive.unmount();
+  cleanup();
+  h.items = [task("one")];
+  h.listTaskWorkspace.mockImplementation(async () => ({
+    items: h.items,
+    total: 1,
+    nextCursor: null,
+  }));
+  show();
+  await loaded();
+  expect(screen.getByText(/^1 item ·/)).toBeVisible();
+});
+it("shows list rows without counts when their totals fail, with one Sonner error across directories", async () => {
+  h.lists = [list("inbox", "Inbox", { kind: "inbox" }), list("home", "Home")];
+  h.listTaskWorkspace.mockRejectedValue(new Error("offline"));
+  render(
+    <MobileDataProvider>
+      <TasksHub mode="lists" />
+      <TasksHub mode="views" />
+    </MobileDataProvider>,
+  );
+  expect(await screen.findByRole("button", { name: "Open Home" })).not.toHaveTextContent(/item/);
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  // Each mounted directory reports under one toast id, so Sonner shows a single error.
+  expect(new Set(h.error.mock.calls.map(([, options]) => options?.id))).toEqual(
+    new Set(["task-counts"]),
+  );
+  expect(screen.queryByText(/Couldn’t confirm/)).not.toBeInTheDocument();
+});
+it("selects at most 100 items with Select all", async () => {
+  h.items = Array.from({ length: 103 }, (_, index) => task(`t${index}`));
+  show();
+  fireEvent.contextMenu(await screen.findByRole("button", { name: "Open task: Task t102" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(screen.getByText("100 selected")).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: "Select Task t102" })).not.toBeChecked();
+  expect(screen.queryByRole("button", { name: "Select all" })).not.toBeInTheDocument();
+});
+it("finishes an action without waiting for the navigation counts to refresh", async () => {
+  h.lists = [list("inbox", "Inbox", { kind: "inbox" })];
+  let slow = false;
+  h.listTaskWorkspace.mockImplementation(async (query) => {
+    if (slow && query.limit === 1) await new Promise(() => {});
+    return { items: h.items, total: h.items.length, nextCursor: null };
+  });
+  render(
+    <MobileDataProvider>
+      <TasksHub mode="lists" />
+      <TaskListScreen title="to-do" scope={{ view: "all" }} />
+    </MobileDataProvider>,
+  );
+  await within(await screen.findByRole("button", { name: "Open Inbox" })).findByText("1 item");
+  slow = true;
+  fireEvent.click(screen.getByRole("checkbox", { name: "Complete Task one" }));
+  await waitFor(() => expect(h.success).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(screen.getByRole("checkbox", { name: "Complete Task one" })).toBeEnabled(),
+  );
 });

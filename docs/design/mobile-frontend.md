@@ -118,14 +118,16 @@ Load more first.
 
 Browse, Lists, Projects and Archive show how many items each destination lists. A count is the
 `total` of the same query the destination opens, read with a one-item page, so it equals the
-"N items" line on the opened list, including the Show completed tasks preference and the
+"N items" line on the opened list while no search is active, including the Show completed tasks preference and the
 every-status view of an archived container or finished project. Archive counts its containers,
 from the loaded lists and projects. Browse rows and the Upcoming and History cards show the
 bare number; list and project rows and pinned cards say "3 items" beside the name. The count is
 the control's accessibility value, so the label stays the destination's name. A count that is
-unread or could not be read is absent, never a zero; failed totals raise one Sonner error for
-the screen, not one per row. Counts read after the Tasks preferences answer and refresh with
-every Tasks action.
+unread or could not be read is absent, never a zero; failed totals raise one Sonner error, not
+one per row or per screen. Counts ignore the search, which finds containers rather than
+narrowing what they hold. Counts read after the Tasks preferences answer. A Tasks action
+refreshes them in the background: the action finishes, and its controls unlock, without waiting
+for one read per row.
 
 A project's page shows its why (three lines at most) and "Target" with the short calendar date
 under the title and above the filters and tasks. A project with neither shows nothing there.

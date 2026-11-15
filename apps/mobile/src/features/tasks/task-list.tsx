@@ -35,7 +35,7 @@ import {
 import { listOption } from "./list-presentation";
 import { viewStatus } from "./navigation-counts";
 import { OptionsMenu } from "./options-menu";
-import { formatTargetDate } from "./presentation";
+import { formatTargetDate, itemCount } from "./presentation";
 import { SearchableChoice } from "./searchable-choice";
 import { TaskRow } from "./task-row";
 import {
@@ -418,7 +418,7 @@ export function TaskListScreen({
             )}
             <View style={[styles.toolbar, { marginBottom: spacing.md }]}>
               <Text style={{ color: t.secondary, marginRight: "auto" }}>
-                {total === null ? "" : `${total} items`}
+                {total === null ? "" : itemCount(total)}
                 {` · ${menuChoices.find((choice) => choice.key === "sort")?.options.find((option) => option.value === query.sort)?.label ?? "Recommended"}`}
                 {query.group && query.group !== "none" ? ` · Grouped by ${query.group}` : ""}
               </Text>

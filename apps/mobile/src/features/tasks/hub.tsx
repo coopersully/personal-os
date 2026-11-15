@@ -52,7 +52,8 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
   );
   const go = (title: string, scope: TaskScope) =>
     router.push({ pathname: "/task-browser", params: { title, ...scope } });
-  // A row opens and counts one scope, so its count is the total of the list it opens.
+  // A row opens and counts one scope, so its count is the total of the list it opens (before
+  // any search narrows that list).
   const scopeOf = (row: ContainerRow) => containerScope(row, mode === "archive");
   const openContainer = (kind: "list" | "project", record: TaskList | TaskProject) =>
     go(record.name, scopeOf({ kind, record } as ContainerRow));

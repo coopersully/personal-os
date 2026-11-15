@@ -91,7 +91,14 @@ vi.mock("../auth/context", () => ({
   useAuth: () => ({ state: { user: { id: "fixture" } }, session: { epoch: () => 1 } }),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({
+    invalidateQueries: vi.fn(),
+    cancelQueries: vi.fn(),
+    getQueryData: () => undefined,
+    setQueryData: vi.fn(),
+    setQueryDefaults: vi.fn(),
+    removeQueries: vi.fn(),
+  }),
 }));
 vi.mock("../tasks/data", () => ({ errorMessage: (error: Error) => error.message }));
 vi.mock("../tasks/ui", async (original) => ({

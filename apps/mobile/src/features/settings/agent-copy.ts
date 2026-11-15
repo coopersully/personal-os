@@ -39,13 +39,15 @@ export const scopeLabels: Record<AccessScope, string> = {
 };
 
 const whenPolicyAllows = "Only when your review policy lets eligible work skip Reviews.";
+const sharedSources = "it can also sync or disconnect shared sources";
 /** The condition or reach of a permission whose short name alone would mislead. */
 export const scopeDetails: Partial<Record<AccessScope, string>> = {
-  "mail:execute": `${whenPolicyAllows} With Calendar and Tasks execution, it can also sync or disconnect shared sources.`,
-  "finances:execute": whenPolicyAllows,
-  "calendar:execute": `${whenPolicyAllows} With Mail and Tasks execution, it can also sync or disconnect shared sources.`,
-  "tasks:execute": `${whenPolicyAllows} With Mail and Calendar execution, it can also sync or disconnect shared sources.`,
-  "texting:execute": `${whenPolicyAllows} It can also disconnect the verified Texting destination.`,
+  "mail:execute": `${whenPolicyAllows} It can send mail, which cannot be undone, and activate mail rules. With Calendar and Tasks execution, ${sharedSources}.`,
+  "finances:execute": `${whenPolicyAllows} With “Manage financial records, plans, and reviews”, it can disconnect or delete financial accounts, resolve duplicate accounts, change budget policies and automation schedules, and sync banks.`,
+  "calendar:execute": `${whenPolicyAllows} With Mail and Tasks execution, ${sharedSources}.`,
+  "tasks:execute": `${whenPolicyAllows} With Mail and Calendar execution, ${sharedSources}.`,
+  "texting:execute":
+    "Only when your review policy lets eligible work skip Reviews, it can change notification preferences or disconnect the verified Texting destination.",
   "finances:maintain":
     "Sync providers, reconcile and categorize under approved rules, and create durable runs. Questions and approvals stay pending.",
 };

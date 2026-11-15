@@ -15,6 +15,7 @@ import {
 } from "../../components/forms/form-rows";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { useAuth } from "../auth/context";
+import { confirmedRejection } from "../finances/mutations";
 import { errorMessage } from "../tasks/data";
 import { Choice, confirm, State } from "../tasks/ui";
 import { dateTime, permissionRecap, scopeDetails, scopeGroups, scopeLabels } from "./agent-copy";
@@ -124,14 +125,54 @@ export function AgentExecutionPolicy() {
     reportedError.current = failedAt;
     toast.error(errorMessage(policy.error));
   }, [policy.error, policy.errorUpdatedAt]);
-  // A rejected or uncertain save keeps the attempted value on screen and blocks further
-  // changes until an explicit refresh shows what the server holds.
-  const [unconfirmed, setUnconfirmed] = useState<boolean | null>(null);
+  // A save whose outcome is unknown (timeout, lost connection, server fault) keeps the
+  // attempted value on screen and blocks further changes until an explicit refresh shows what
+  // the server holds. The marker lives in the cache beside the policy, so leaving and
+  // reopening the screen cannot present the cached value as the saved one.
+  const unconfirmedKey = [...policyKey, "unconfirmed"];
+  const [unconfirmed, setUnconfirmed] = useState<boolean | null>(
+    () => client.getQueryData<boolean>(unconfirmedKey) ?? null,
+  );
+  const markUnconfirmed = async (attempted: boolean) => {
+    client.setQueryDefaults(unconfirmedKey, { gcTime: Number.POSITIVE_INFINITY });
+    client.setQueryData(unconfirmedKey, attempted);
+    setUnconfirmed(attempted);
+    await client.invalidateQueries({ queryKey: policyKey, exact: true, refetchType: "none" });
+  };
   const refreshPolicy = async () => {
     const result = await policyRefresh.refresh();
-    if (result?.ok) setUnconfirmed(null);
+    if (!result?.ok) return;
+    client.removeQueries({ queryKey: unconfirmedKey, exact: true });
+    setUnconfirmed(null);
+  };
+  const save = async (expectedVersion: number, reviewBypassEnabled: boolean) => {
+    let attempted = false;
+    let failure: unknown;
+    const result = await action.run(async (api) => {
+      attempted = true;
+      try {
+        const saved = await api.updateExecutionPolicySettings({
+          expectedVersion,
+          reviewBypassEnabled,
+        });
+        // The accepted policy is the server's answer. A read that started before the save
+        // must not land after it and restore the old value and version.
+        await client.cancelQueries({ queryKey: policyKey, exact: true });
+        client.setQueryData(policyKey, saved);
+      } catch (error) {
+        failure = error;
+        throw error;
+      }
+    }, "Review policy saved");
+    // Not sent at all (another action was running, or the session changed): nothing to recover.
+    if (result?.ok || !attempted) return;
+    if (!confirmedRejection(failure)) return markUnconfirmed(reviewBypassEnabled);
+    // A definite rejection wrote nothing, so the switch stays on the saved policy. A conflict
+    // means that policy is out of date, so read it again.
+    if (failure.status === 409) await policy.refetch();
   };
   useDirtyDismiss(false, action.pending);
+  const busy = action.pending || policyRefresh.pending || policy.isFetching;
   return (
     <>
       <Section title="Eligible agent work">
@@ -145,7 +186,7 @@ export function AgentExecutionPolicy() {
             }
             icon="check"
             value={unconfirmed ?? policy.data.reviewBypassEnabled}
-            disabled={action.pending || unconfirmed !== null}
+            disabled={busy || unconfirmed !== null}
             onChange={(reviewBypassEnabled) => {
               const current = policy.data;
               if (!current) return;
@@ -154,20 +195,9 @@ export function AgentExecutionPolicy() {
                   ? "Apply eligible work without review?"
                   : "Send eligible work to Reviews?",
                 reviewBypassEnabled
-                  ? "Eligible work will be applied without waiting in Reviews. This currently applies only to reversible Finance changes that your rules allow. Permissions, questions and required approvals still apply."
+                  ? "Agents that hold an execute permission will act without waiting in Reviews. That includes Finance approvals and account changes, sending mail, and syncing or disconnecting sources. Questions and required approvals still apply."
                   : "Eligible work will wait in Reviews until you decide.",
-                async () => {
-                  const result = await action.run(async (api) => {
-                    // The accepted policy is the server's answer, so the switch does not
-                    // depend on a second read that could fail after a successful save.
-                    const saved = await api.updateExecutionPolicySettings({
-                      expectedVersion: current.version,
-                      reviewBypassEnabled,
-                    });
-                    client.setQueryData(policyKey, saved);
-                  }, "Review policy saved");
-                  if (!result?.ok) setUnconfirmed(reviewBypassEnabled);
-                },
+                () => save(current.version, reviewBypassEnabled),
               );
             }}
           />
@@ -179,9 +209,11 @@ export function AgentExecutionPolicy() {
         )}
       </Section>
       <SectionFootnote>
-        Off by default: eligible work waits in Reviews until you decide. When on, this currently
-        applies only to reversible Finance changes that your rules allow. Permissions, questions and
-        required approvals still apply.
+        Off by default: eligible work waits in Reviews until you decide. When on, an agent that also
+        holds an execute permission can act without review: Finance approvals, account changes and
+        settings, sending mail and activating mail rules, changing workspace and notification
+        settings, and syncing or disconnecting sources. Questions and required approvals still
+        apply.
       </SectionFootnote>
       <Section>
         <SettingsActionRow

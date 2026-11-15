@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ApiClientError } from "@personal-os/api-client";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -21,6 +22,9 @@ vi.mock("react", async () => {
 });
 const h = vi.hoisted(() => ({
   setQueryData: vi.fn(),
+  invalidate: vi.fn(),
+  cancelQueries: vi.fn(),
+  removeQueries: vi.fn(),
   confirm: vi.fn(),
   updatePolicy: vi.fn(),
   refresh: vi.fn(),
@@ -64,7 +68,14 @@ vi.mock("../auth/context", () => ({
   useAuth: () => ({ state: { user: { id: "fixture" } }, session: { epoch: () => 1 } }),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: h.setQueryData }),
+  useQueryClient: () => ({
+    invalidateQueries: h.invalidate,
+    cancelQueries: h.cancelQueries,
+    getQueryData: () => undefined,
+    setQueryData: h.setQueryData,
+    setQueryDefaults: vi.fn(),
+    removeQueries: h.removeQueries,
+  }),
 }));
 type Row = { label: string; value?: string; disabled?: boolean; onPress?: () => void };
 vi.mock("./settings-row", () => ({
@@ -254,7 +265,7 @@ it("requires confirmation before policy broadening and sends the reviewed versio
   expect(h.run).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenCalledWith(
     "Apply eligible work without review?",
-    "Eligible work will be applied without waiting in Reviews. This currently applies only to reversible Finance changes that your rules allow. Permissions, questions and required approvals still apply.",
+    "Agents that hold an execute permission will act without waiting in Reviews. That includes Finance approvals and account changes, sending mail, and syncing or disconnecting sources. Questions and required approvals still apply.",
     expect.any(Function),
   );
   await act(async () => {
@@ -706,6 +717,7 @@ it("states the full reach of every permission in the grant confirmation", () => 
   for (const label of [
     "Read tasks",
     "Change notification preferences",
+    "Execute Finance approvals, account changes and settings",
     "Execute Mail approvals, sending and settings",
     "Change Calendar settings",
     "Change Tasks settings",
@@ -717,8 +729,12 @@ it("states the full reach of every permission in the grant confirmation", () => 
   expect(h.confirm.mock.calls.at(-1)?.[0]).toBe("Grant agent access?");
   expect(message).toContain("• Read tasks\n");
   expect(message).toContain(
-    "• Change notification preferences. Only when your review policy lets eligible work skip Reviews. It can also disconnect the verified Texting destination.",
+    "• Change notification preferences. Only when your review policy lets eligible work skip Reviews, it can change notification preferences or disconnect the verified Texting destination.",
   );
+  expect(message).toContain(
+    "it can disconnect or delete financial accounts, resolve duplicate accounts, change budget policies and automation schedules, and sync banks.",
+  );
+  expect(message).toContain("It can send mail, which cannot be undone, and activate mail rules.");
   // Each of the three execute permissions states that it can sync or disconnect shared sources.
   expect(message.match(/it can also sync or disconnect shared sources/g)).toHaveLength(3);
   expect(message).toContain("• Maintain Finances. Sync providers, reconcile and categorize");
@@ -769,26 +785,68 @@ it("shows the policy the server accepted without depending on a second read", as
     saved,
   );
   expect(h.refresh).not.toHaveBeenCalledWith("agent-execution-policy");
+  // Any read already in flight is cancelled before the accepted policy is stored.
+  expect(h.cancelQueries).toHaveBeenCalledWith({
+    queryKey: ["settings", "fixture", 1, "agent-execution-policy"],
+    exact: true,
+  });
+  expect(h.cancelQueries.mock.invocationCallOrder[0]).toBeLessThan(
+    h.setQueryData.mock.invocationCallOrder[0] ?? 0,
+  );
   expect(h.success).toHaveBeenCalledWith("Review policy saved");
   expect(policySwitch()).toBeEnabled();
 });
-it("keeps a rejected policy change visible and blocks further changes until a refresh succeeds", async () => {
-  h.updatePolicy.mockRejectedValue(new Error("Version conflict"));
+const rejection = (status: number) =>
+  new ApiClientError({ code: "rejected", status, message: `Rejected ${status}` });
+it.each([
+  [409, true],
+  [403, false],
+  [422, false],
+])("keeps the saved policy on the switch after a definite %i rejection", async (status, rereads) => {
+  h.updatePolicy.mockRejectedValue(rejection(status));
   render(<AgentPolicyScreen />);
   fireEvent.click(policySwitch());
   await approve();
-  expect(h.error).toHaveBeenCalledWith(expect.objectContaining({ message: "Version conflict" }));
+  expect(h.error).toHaveBeenCalledWith(expect.objectContaining({ status }));
+  // Nothing was written, so the switch stays on what the server holds and stays usable.
+  expect(policySwitch()).not.toBeChecked();
+  expect(policySwitch()).toBeEnabled();
+  expect(screen.queryByText(/^Not confirmed/)).not.toBeInTheDocument();
   expect(h.setQueryData).not.toHaveBeenCalled();
+  expect(h.invalidate).not.toHaveBeenCalled();
+  // Only a conflict means the policy on screen is out of date.
+  expect(h.refresh.mock.calls.filter(([key]) => key === "agent-execution-policy")).toHaveLength(
+    rereads ? 1 : 0,
+  );
+});
+it("keeps an uncertain policy change visible and blocks further changes until a refresh succeeds", async () => {
+  h.updatePolicy.mockRejectedValue(new Error("Network request timed out"));
+  render(<AgentPolicyScreen />);
+  fireEvent.click(policySwitch());
+  await approve();
+  expect(h.error).toHaveBeenCalledWith(
+    expect.objectContaining({ message: "Network request timed out" }),
+  );
   expect(policySwitch()).toBeChecked();
   expect(policySwitch()).toBeDisabled();
   expect(screen.getByText(/^Not confirmed\. Refresh the review policy/)).toBeVisible();
-  expect(screen.queryByText("Version conflict")).not.toBeInTheDocument();
+  expect(screen.queryByText("Network request timed out")).not.toBeInTheDocument();
+  // The cached policy is marked stale and the attempt is remembered beside it.
+  const policyKey = ["settings", "fixture", 1, "agent-execution-policy"];
+  expect(h.setQueryData).toHaveBeenCalledWith([...policyKey, "unconfirmed"], true);
+  expect(h.setQueryData).not.toHaveBeenCalledWith(policyKey, expect.anything());
+  expect(h.invalidate).toHaveBeenCalledWith({
+    queryKey: policyKey,
+    exact: true,
+    refetchType: "none",
+  });
   // A failed refresh does not unblock it.
   h.refresh.mockResolvedValueOnce({ data: undefined, error: new Error("Offline") });
   await act(async () =>
     fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" })),
   );
   expect(policySwitch()).toBeDisabled();
+  expect(h.removeQueries).not.toHaveBeenCalled();
   h.refresh.mockResolvedValueOnce({
     data: { version: 9, reviewBypassEnabled: false },
     error: null,
@@ -796,6 +854,35 @@ it("keeps a rejected policy change visible and blocks further changes until a re
   await act(async () =>
     fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" })),
   );
+  expect(policySwitch()).toBeEnabled();
+  expect(policySwitch()).not.toBeChecked();
+  expect(screen.queryByText(/^Not confirmed/)).not.toBeInTheDocument();
+  expect(h.removeQueries).toHaveBeenCalledWith({
+    queryKey: [...policyKey, "unconfirmed"],
+    exact: true,
+  });
+});
+it("treats a 5xx or 408 as uncertain, and a save that was never sent as nothing to recover", async () => {
+  h.updatePolicy.mockRejectedValue(rejection(503));
+  const view = render(<AgentPolicyScreen />);
+  fireEvent.click(policySwitch());
+  await approve();
+  expect(policySwitch()).toBeDisabled();
+  expect(screen.getByText(/^Not confirmed/)).toBeVisible();
+  view.unmount();
+  h.updatePolicy.mockRejectedValue(rejection(408));
+  render(<AgentPolicyScreen />);
+  fireEvent.click(policySwitch());
+  await approve();
+  expect(policySwitch()).toBeDisabled();
+  cleanup();
+  // Another action is running or the session changed: the save is refused before transport.
+  h.run.mockResolvedValue({ ok: false });
+  h.updatePolicy.mockClear();
+  render(<AgentPolicyScreen />);
+  fireEvent.click(policySwitch());
+  await approve();
+  expect(h.updatePolicy).not.toHaveBeenCalled();
   expect(policySwitch()).toBeEnabled();
   expect(policySwitch()).not.toBeChecked();
   expect(screen.queryByText(/^Not confirmed/)).not.toBeInTheDocument();

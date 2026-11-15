@@ -43,6 +43,9 @@ const h = vi.hoisted(() => ({
   loading: vi.fn(() => "session-toast"),
   dismiss: vi.fn(),
   error: vi.fn(),
+  success: vi.fn(),
+  searchWorkspace: vi.fn(),
+  getWorkspaceSettings: vi.fn(),
   keyboard: vi.fn(),
   remove: vi.fn(),
   responders: [] as PanResponderCallbacks[],
@@ -65,7 +68,13 @@ vi.mock("../features/auth/context", () => ({
   useOptionalAuth: () => null,
   useAuth: () => ({
     state: { user: { id: "owner", displayName: "Test Person", email: "person@example.test" } },
-    session: { logout: h.logout },
+    session: {
+      logout: h.logout,
+      api: () => ({
+        searchWorkspace: h.searchWorkspace,
+        getWorkspaceSettings: h.getWorkspaceSettings,
+      }),
+    },
   }),
 }));
 vi.mock("./icons", () => ({
@@ -179,11 +188,38 @@ beforeEach(() => {
   h.animations = [];
   h.selection.mockReset().mockResolvedValue(undefined);
   h.logout.mockReset().mockResolvedValue(undefined);
+  h.getWorkspaceSettings
+    .mockReset()
+    .mockResolvedValue({ revision: 1, preferences: { includeArchivedInSearch: true } });
+  h.searchWorkspace.mockReset().mockImplementation(async (workspace: string) => page(workspace));
 });
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
+const result = (id: string, kind: string, title: string, preview: string, state?: string) => ({
+  id,
+  kind,
+  title,
+  preview,
+  href: "/web-only",
+  state: state ?? null,
+});
+function page(workspace: string) {
+  const items = {
+    tasks: [
+      result("t1", "Task", "Book dentist", "Task · Home ·  · Due Nov 20, 2026"),
+      result("l1", "List", "Old chores", "Task list", "Archived"),
+    ],
+    mail: [
+      result("m1", "Conversation", "Dentist invoice", "Dr. Lee billing@example.test · Attached"),
+      result("m2", "Conversation", " ", "Someone · Dentist follow-up"),
+    ],
+    finances: [result("f1", "Transaction", "Dental Group", "USD -120.00 · 2026-11-02 · Checking")],
+    calendar: [result("e1", "Event", "Dentist appointment", "Nov 20, 2026 09:00 · Personal · ")],
+  }[workspace];
+  return { items, nextOffset: workspace === "mail" ? 5 : null, coverage: "synced" };
+}
 function Shell() {
   return (
     <MobileDataProvider>
@@ -202,9 +238,9 @@ const gesture = (x = 20, y = 144, dx = 0) =>
 it("keeps search mounted while selecting a workspace and shows account/settings destinations", async () => {
   render(<Shell />);
   await act(async () => {});
-  const search = screen.getByLabelText("Search today sample data");
+  const search = screen.getByLabelText("Search today");
   fireEvent.click(screen.getByRole("button", { name: "Switch workspace, today" }));
-  expect(screen.getByLabelText("Search today sample data")).toBe(search);
+  expect(screen.getByLabelText("Search today")).toBe(search);
   fireEvent.click(screen.getByRole("button", { name: "Open tasks" }));
   expect(h.navigate).toHaveBeenCalledWith("/tasks");
   expect(screen.queryByRole("button", { name: "Open mail" })).not.toBeInTheDocument();
@@ -219,38 +255,174 @@ it("keeps search mounted while selecting a workspace and shows account/settings 
     expect(h.navigate).toHaveBeenLastCalledWith(path);
   }
 });
-it("limits sample search by workspace and opens the matching detail", async () => {
-  h.path = "/calendar";
-  const { rerender } = render(<Shell />);
-  await act(async () => {});
-  fireEvent.change(screen.getByLabelText("Search calendar sample data"), {
-    target: { value: "Maya" },
-  });
-  expect(screen.getByText("No sample matches. Try another search.")).toBeVisible();
-  h.path = "/";
-  rerender(<Shell />);
-  fireEvent.change(screen.getByLabelText("Search today sample data"), {
-    target: { value: "Maya" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Maya needs a reply" }));
-  expect(h.push).toHaveBeenCalledWith("/detail/reply");
-  fireEvent.change(screen.getByLabelText("Search today sample data"), {
-    target: { value: "no such item" },
-  });
-  expect(screen.getByText("No sample matches. Try another search.")).toBeVisible();
+it("keeps Tasks search in its live list without a results overlay", async () => {
   h.path = "/tasks";
-  rerender(<Shell />);
+  render(<Shell />);
+  await act(async () => {});
   fireEvent.change(screen.getByLabelText("Search tasks"), { target: { value: "groceries" } });
   expect(screen.getByLabelText("Search tasks")).toHaveValue("groceries");
-  expect(screen.queryByText(/sample results/)).not.toBeInTheDocument();
-  h.path = "/settings";
-  rerender(<Shell />);
-  fireEvent.change(screen.getByLabelText("Search settings sample data"), {
-    target: { value: "Maya" },
+  expect(screen.queryByRole("button", { name: "Include archive" })).not.toBeInTheDocument();
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 300)));
+  expect(h.searchWorkspace).not.toHaveBeenCalled();
+});
+it("searches every workspace from Today one at a time and groups real results by workspace", async () => {
+  let running = 0;
+  let most = 0;
+  h.searchWorkspace.mockImplementation(async (workspace: string) => {
+    most = Math.max(most, ++running);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    running -= 1;
+    return page(workspace);
   });
-  expect(screen.getByText("No sample matches. Try another search.")).toBeVisible();
+  render(<Shell />);
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText("Search today"), { target: { value: " dentist " } });
+  expect(screen.getByRole("progressbar")).toBeVisible();
+  await screen.findByRole("heading", { name: "calendar" });
+  expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
+    "tasks",
+    "mail",
+    "finances",
+    "calendar",
+  ]);
+  expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  // The API replaces an account's queued search with a newer one, so requests never overlap.
+  expect(most).toBe(1);
+  expect(h.searchWorkspace.mock.calls.map(([workspace, query]) => [workspace, query])).toEqual(
+    ["tasks", "mail", "finances", "calendar"].map((workspace) => [
+      workspace,
+      { q: "dentist", kind: "content", limit: 5, includeArchived: true },
+    ]),
+  );
+  expect(
+    screen.getByRole("button", { name: /Book dentist.*Task · Home · Due Nov 20, 2026/ }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: /Old chores.*Archived/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: /Untitled conversation/ })).toBeVisible();
+  expect(screen.getByText("Showing the first 2 in mail. Keep typing to narrow.")).toBeVisible();
+  expect(screen.queryByText(/sample/i)).not.toBeInTheDocument();
+  expect(h.error).not.toHaveBeenCalled();
+});
+it("opens the existing screen for a result and closes the search", async () => {
+  render(<Shell />);
+  await act(async () => {});
+  const open = async (name: RegExp) => {
+    fireEvent.change(screen.getByLabelText("Search today"), { target: { value: "dentist" } });
+    fireEvent.click(await screen.findByRole("button", { name }));
+    expect(screen.getByLabelText("Search today")).toHaveValue("");
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+  };
+  await open(/Dentist appointment/);
+  expect(h.push).toHaveBeenLastCalledWith({ pathname: "/calendar-event", params: { id: "e1" } });
+  await open(/Book dentist/);
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/task-editor",
+    params: { id: "t1", kind: "task" },
+  });
+  await open(/Dentist invoice/);
+  expect(h.navigate).toHaveBeenLastCalledWith({
+    pathname: "/mail",
+    params: { mailSearch: "Dentist invoice" },
+  });
+  await open(/Dental Group/);
+  expect(h.push).toHaveBeenLastCalledWith({
+    pathname: "/finance-transaction",
+    params: { id: "f1" },
+  });
+  expect(h.keyboard).toHaveBeenCalled();
+});
+it("searches only the current workspace elsewhere and honors the archive preference and toggle", async () => {
+  h.path = "/calendar";
+  h.getWorkspaceSettings.mockResolvedValue({
+    revision: 1,
+    preferences: { includeArchivedInSearch: false },
+  });
+  render(<Shell />);
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText("Search calendar"), { target: { value: "dentist" } });
+  await screen.findByRole("heading", { name: "calendar" });
+  expect(h.getWorkspaceSettings).toHaveBeenCalledWith("calendar");
+  expect(h.searchWorkspace.mock.calls.map(([workspace, query]) => [workspace, query])).toEqual([
+    ["calendar", { q: "dentist", kind: "content", limit: 20, includeArchived: false }],
+  ]);
+  const archive = screen.getByRole("button", { name: "Include archive" });
+  expect(archive).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(archive);
+  await waitFor(() =>
+    expect(h.searchWorkspace).toHaveBeenLastCalledWith(
+      "calendar",
+      { q: "dentist", kind: "content", limit: 20, includeArchived: true },
+      expect.anything(),
+    ),
+  );
+  expect(screen.getByRole("button", { name: "Include archive" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   fireEvent.click(screen.getByRole("button", { name: "Dismiss navigation menu or search" }));
-  expect(screen.queryByText(/sample results/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "calendar" })).not.toBeInTheDocument();
+});
+it("says which workspaces have no matches", async () => {
+  h.searchWorkspace.mockResolvedValue({ items: [], nextOffset: null, coverage: "synced" });
+  render(<Shell />);
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText("Search today"), { target: { value: "zzz" } });
+  expect(
+    await screen.findByText("No matches in tasks, mail, finances and calendar."),
+  ).toBeVisible();
+  expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /again/ })).not.toBeInTheDocument();
+  expect(h.error).not.toHaveBeenCalled();
+});
+it("reports a failed workspace through Sonner alone, keeps the other results and retries", async () => {
+  h.searchWorkspace.mockImplementation(async (workspace: string) => {
+    if (workspace === "mail") throw new Error("offline");
+    return page(workspace);
+  });
+  render(<Shell />);
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText("Search today"), { target: { value: "dentist" } });
+  await screen.findByRole("heading", { name: "calendar" });
+  expect(h.error).toHaveBeenCalledTimes(1);
+  expect(h.error).toHaveBeenCalledWith(
+    "Couldn’t search mail. Check your connection and try again.",
+    { id: "workspace-search-mail" },
+  );
+  expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
+    "tasks",
+    "finances",
+    "calendar",
+  ]);
+  // The surface offers the retry but carries no failure or empty copy of its own.
+  expect(screen.queryByText(/couldn|unavailable|failed|error|no matches/i)).not.toBeInTheDocument();
+  const retry = screen.getByRole("button", { name: "Search mail again" });
+  fireEvent.click(retry);
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
+  expect(h.loading).toHaveBeenLastCalledWith("Searching again…", { id: "workspace-search-retry" });
+  expect(h.dismiss).toHaveBeenCalledWith("workspace-search-retry");
+  expect(h.success).not.toHaveBeenCalled();
+  h.searchWorkspace.mockImplementation(async (workspace: string) => page(workspace));
+  fireEvent.click(screen.getByRole("button", { name: "Search mail again" }));
+  await screen.findByRole("heading", { name: "mail" });
+  expect(h.success).toHaveBeenCalledWith("Search updated", { id: "workspace-search-retry" });
+  expect(screen.queryByRole("button", { name: "Search mail again" })).not.toBeInTheDocument();
+});
+it("offers only the retry when every workspace fails", async () => {
+  h.path = "/finances";
+  h.getWorkspaceSettings.mockRejectedValue(new Error("offline"));
+  h.searchWorkspace.mockRejectedValue(new Error("offline"));
+  render(<Shell />);
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText("Search finances"), { target: { value: "rent" } });
+  expect(await screen.findByRole("button", { name: "Search finances again" })).toBeVisible();
+  // An unreadable archive preference falls back to the server default rather than blocking search.
+  expect(h.searchWorkspace).toHaveBeenCalledWith(
+    "finances",
+    { q: "rent", kind: "content", limit: 20, includeArchived: true },
+    expect.anything(),
+  );
+  expect(h.error).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/no matches|couldn/i)).not.toBeInTheDocument();
 });
 it("holds logout pending, reports a failure without claiming success, and allows retry", async () => {
   let reject!: (error: Error) => void;
@@ -283,7 +455,7 @@ it("selects a workspace after hold-and-drag and tolerates unavailable haptic har
   act(() => pan.onPanResponderGrant?.(event(), gesture()));
   await act(async () => vi.advanceTimersByTimeAsync(230));
   expect(screen.getByTestId("native-picker")).toBeVisible();
-  expect(screen.getByLabelText("Search today sample data")).toBeVisible();
+  expect(screen.getByLabelText("Search today")).toBeVisible();
   act(() => pan.onPanResponderMove?.(event(), gesture()));
   expect(screen.getByTestId("native-picker")).toHaveAttribute("data-selected", "tasks");
   await act(async () => pan.onPanResponderRelease?.(event(), gesture()));
@@ -490,7 +662,7 @@ it("routes Mail search to the server-backed list without sample results", () => 
 it("supports accessibility activation, pointer preview and focus dismissal without replacing search", async () => {
   render(<Shell />);
   await act(async () => {});
-  const search = screen.getByLabelText("Search today sample data");
+  const search = screen.getByLabelText("Search today");
   act(() => h.accessibilityTap?.());
   const mail = screen.getByRole("button", { name: "Open mail" });
   fireEvent.mouseEnter(mail);
@@ -499,7 +671,7 @@ it("supports accessibility activation, pointer preview and focus dismissal witho
   expect(mail.querySelector('[data-icon="mail"]')).toHaveAttribute("data-filled", "false");
   fireEvent.focus(search);
   expect(screen.queryByRole("button", { name: "Open mail" })).toBeNull();
-  expect(screen.getByLabelText("Search today sample data")).toBe(search);
+  expect(screen.getByLabelText("Search today")).toBe(search);
   expect(h.responders[0].onPanResponderTerminationRequest?.(event(), gesture())).toBe(false);
 });
 it("keeps workspace glyph contrast aligned with dark and light Today hero chrome", () => {

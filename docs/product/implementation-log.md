@@ -1382,3 +1382,23 @@ shortcut range is one chip.
 - This is a local candidate covered by focused tests. The simulator check on To-do and All is
   outstanding, so the List and Project pickers opening over the filter sheet have not been seen
   on a device or simulator. It is not a production or TestFlight release.
+
+## 2026-11-15 — Native header search across workspaces (local candidate)
+
+COO-232 — The iPhone header search no longer shows sample results. Outside the pages that filter
+their own list (Tasks, Mail, Finances Accounts), it lists real matches from the workspace search
+route: Today searches Tasks, Mail, Finances and Calendar, grouped by workspace; Calendar and
+Finances pages search their own workspace.
+
+- No API, schema or client change. The mobile app calls `GET /v1/workspaces/:workspace/search`
+  with `kind: "content"`, one workspace after another because the API admits one search per
+  account and replaces a queued one.
+- A failed workspace reports through one Sonner error and the other groups stay; the list offers
+  a retry and carries no failure copy. Empty results name the workspaces that answered.
+- Include archive starts from each workspace's search preference and can be overridden per search.
+- Results open existing screens. Mail has no conversation route, so a conversation opens Mail
+  searched for its subject; a mailbox opens the mailbox list, not that mailbox.
+- The sample detail route (`/detail/[id]`), the sample briefing and sample workspace screens and
+  their fixtures are removed. The unlinked preview settings and monitoring screens remain.
+- This is a local candidate covered by focused tests. It has not been run on a simulator or
+  device against a live API, and it is not a production or TestFlight release.

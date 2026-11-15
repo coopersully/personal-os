@@ -1398,6 +1398,8 @@ details, and restore a deleted event from the delete toast's Undo.
 - A write is reported as done only after the API confirms it. An unconfirmed result re-reads the
   calendar and is never shown as saved; an unconfirmed create is not retried without the person's
   confirmation because event creation is not yet idempotent on the server (COO-27).
+- Undo after delete is offered only when restoring returns the same event; provider events with
+  guests, a repeat rule or a meeting link are deleted without Undo and the confirmation says so.
 - Guests, reminders, repeat rules, meeting links, blocking time and conflict review (COO-242) are
   not included. This is a local candidate covered by focused tests; the simulator check and a
   write against a real Google or iCloud calendar are outstanding. It is not a production or

@@ -423,9 +423,18 @@ failure) the app says so, re-reads the calendar, and never shows the change as s
 - An unconfirmed edit or delete can be tried again; it still carries the reviewed revision, so
   the API refuses it if the first attempt did land.
 
+A refusal that arrives after part of a write already reached a provider (an event with busy
+blocks on other calendars) counts as unconfirmed, not as a refusal. The re-read after a write
+never delays that write's result and raises no notice of its own.
+
 Delete asks for confirmation, then moves the event to the API's recoverable deleted state. Its
 confirmed toast offers Undo for ten seconds, which restores the event with the revision the delete
-returned and reports its own result. An unconfirmed delete offers no Undo.
+returned and reports its own result, inside the session that deleted it. An unconfirmed delete
+offers no Undo. Undo is offered only when restoring returns the same event: always for nohmi's
+own calendars, and for a provider event only when it has no guests, repeat rule or meeting link
+(the API re-creates a provider event from its title, time, location and notes) and is not an
+all-day event that nohmi changed since its last sync. Otherwise the confirmation says the delete
+cannot be undone from nohmi.
 
 ### Briefings and compact record rows
 

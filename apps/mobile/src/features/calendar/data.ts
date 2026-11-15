@@ -20,7 +20,7 @@ import { holdReadFeedback } from "../../components/read-feedback-scope";
 import { useAuth } from "../auth/context";
 import { type SettingsApi, useSettingsAction, useSettingsResource } from "../settings/data";
 import { errorMessage } from "../tasks/data";
-import { eventRevision } from "./event-draft";
+import { canRestoreFaithfully, eventRevision } from "./event-draft";
 import { calendarRange, type WeekStart } from "./logic";
 
 export function useCalendarScope() {
@@ -176,6 +176,15 @@ export type EventWriteResult<T> = { ok: true; value: T } | { ok: false; reason: 
 export function eventWriteFailure(error: unknown): EventWriteFailure {
   if (error instanceof Error && error.name === "ZodError") return "rejected";
   if (!(error instanceof ApiClientError) || error.status >= 500) return "uncertain";
+  // A write that touches several calendars can be refused after part of it reached a provider.
+  const details = (error.details ?? {}) as Record<string, unknown>;
+  const reached = (key: string) => Array.isArray(details[key]) && details[key].length > 0;
+  if (
+    reached("completedEffects") ||
+    reached("indeterminateEffects") ||
+    typeof details.partialEffect === "string"
+  )
+    return "uncertain";
   if (error.status === 409) return "conflict";
   return error.status === 404 ? "gone" : "rejected";
 }
@@ -198,28 +207,39 @@ export function useEventWrites() {
   type Scope = typeof scope;
   const current = (captured: Scope) =>
     captured.owner === live.current.owner && captured.epoch === session.epoch();
-  /** A settled event's own record is only marked stale, so a closing page does not re-read it. */
-  const refresh = async ({ owner, epoch }: Scope, settled?: string) => {
-    await cache.invalidateQueries({
-      queryKey: ["calendar", owner, epoch],
-      predicate: ({ queryKey }) => !settled || queryKey[3] !== "event" || queryKey[4] !== settled,
-    });
+  /**
+   * Re-reads the calendar without holding up the write's own result. A settled event's record
+   * is only marked stale, so a closing page does not re-read it. The write's toast is the one
+   * notice; a re-read that fails raises none of its own.
+   */
+  const refresh = ({ owner, epoch }: Scope, settled?: string) => {
+    const queryKey = ["calendar", owner, epoch];
+    const release = holdReadFeedback(cache.getQueryCache().findAll({ queryKey }));
     if (settled)
-      await cache.invalidateQueries({
-        queryKey: ["calendar", owner, epoch, "event", settled],
+      void cache.invalidateQueries({
+        queryKey: [...queryKey, "event", settled],
         refetchType: "none",
       });
+    void cache
+      .invalidateQueries({
+        queryKey,
+        predicate: (query) =>
+          !settled || query.queryKey[3] !== "event" || query.queryKey[4] !== settled,
+      })
+      .finally(release);
   };
   async function run<T>(
     copy: WriteCopy,
     send: (api: SettingsApi) => Promise<T>,
     settle: (value: T, captured: Scope) => string,
-    undo?: (value: T) => Promise<unknown>,
+    undo?: (value: T, captured: Scope) => Promise<unknown>,
+    // Undo stays inside the session that made the change it reverses.
+    captured: Scope = scope,
   ): Promise<EventWriteResult<T>> {
-    if (busy.current || !scope.owner) return { ok: false, reason: "rejected" };
+    if (busy.current || !captured.owner || !current(captured))
+      return { ok: false, reason: "rejected" };
     busy.current = true;
     setPending(true);
-    const captured = scope;
     const id = toast.loading(copy.pending);
     try {
       const value = await send(session.api());
@@ -227,7 +247,7 @@ export function useEventWrites() {
         toast.dismiss(id);
         return { ok: false, reason: "rejected" };
       }
-      await refresh(captured, settle(value, captured));
+      refresh(captured, settle(value, captured));
       let used = false;
       toast.success(copy.done, {
         id,
@@ -238,7 +258,7 @@ export function useEventWrites() {
             onClick: () => {
               if (used) return;
               used = true;
-              void undo(value);
+              void undo(value, captured);
             },
           },
         }),
@@ -250,7 +270,7 @@ export function useEventWrites() {
         return { ok: false, reason: "rejected" };
       }
       const reason = eventWriteFailure(error);
-      if (reason !== "rejected") await refresh(captured);
+      if (reason !== "rejected") refresh(captured);
       toast.error(reason === "uncertain" ? copy.unconfirmed : errorMessage(error), { id });
       return { ok: false, reason };
     } finally {
@@ -262,7 +282,11 @@ export function useEventWrites() {
     cache.setQueryData(["calendar", owner, epoch, "event", event.id], event);
     return event.id;
   };
-  const restore = (event: CalendarEvent, revision: ReturnType<typeof eventRevision>) =>
+  const restore = (
+    event: CalendarEvent,
+    revision: ReturnType<typeof eventRevision>,
+    captured: Scope,
+  ) =>
     run(
       {
         pending: "Restoring event…",
@@ -271,6 +295,8 @@ export function useEventWrites() {
       },
       (api) => api.restoreEvent(event.id, revision),
       keep,
+      undefined,
+      captured,
     );
   return {
     pending,
@@ -295,7 +321,10 @@ export function useEventWrites() {
         (api) => api.updateEvent(event.id, input),
         keep,
       ),
-    /** Deleting is recoverable: the confirmed result offers Undo, which restores the event. */
+    /**
+     * Deleting is recoverable: the confirmed result offers Undo, which restores the event,
+     * unless restoring would bring back something different from what was deleted.
+     */
     remove: (event: CalendarEvent) =>
       run(
         {
@@ -305,11 +334,17 @@ export function useEventWrites() {
         },
         (api) => api.trashEvent(event.id, eventRevision(event)),
         () => event.id,
-        (revision) =>
-          restore(event, {
-            expectedUpdatedAt: revision.updatedAt,
-            expectedBlockUpdatedAtById: revision.blockUpdatedAtById,
-          }),
+        canRestoreFaithfully(event)
+          ? (revision, captured) =>
+              restore(
+                event,
+                {
+                  expectedUpdatedAt: revision.updatedAt,
+                  expectedBlockUpdatedAtById: revision.blockUpdatedAtById,
+                },
+                captured,
+              )
+          : undefined,
       ),
   };
 }

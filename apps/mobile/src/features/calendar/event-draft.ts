@@ -165,7 +165,7 @@ export function eventTimes(draft: EventDraft, provider: Calendar["provider"], ti
   const midnight = (day: LocalDate) =>
     provider === "icloud"
       ? new Date(Date.UTC(day.year, day.month - 1, day.day))
-      : localDateTimeToUtc(day, 0, timeZone);
+      : startOfLocalDay(day, timeZone);
   return {
     allDay: true,
     startsAt: midnight(parseLocalDate(draft.startDate)).toISOString(),
@@ -173,6 +173,18 @@ export function eventTimes(draft: EventDraft, provider: Calendar["provider"], ti
     endsAt: midnight(addLocalDays(parseLocalDate(draft.endDate), 1)).toISOString(),
     timezone: timeZone,
   };
+}
+
+/**
+ * The first instant of a local day. Where clocks skip midnight (Cairo, Beirut), the wall-clock
+ * conversion lands on the evening before, so step forward until the day has begun.
+ */
+function startOfLocalDay(day: LocalDate, timeZone: string) {
+  const date = localDateToIso(day);
+  let instant = localDateTimeToUtc(day, 0, timeZone);
+  for (let step = 0; step < 4 && localDateToIso(localDateAt(instant, timeZone)) < date; step += 1)
+    instant = new Date(instant.getTime() + 30 * 60_000);
+  return instant;
 }
 
 const optional = (value: string) => value.trim() || null;
@@ -229,4 +241,20 @@ export function eventRevision(event: CalendarEvent) {
 /** A person may change an event on a calendar they can write to, unless it mirrors another event. */
 export function canChangeEvent(event: CalendarEvent, calendar: Calendar | undefined) {
   return !!calendar?.isWritable && !event.blockSourceEventId;
+}
+
+/**
+ * Restoring re-creates a provider event from its title, time, location and notes only, so
+ * guests, a repeat rule or a meeting link would not come back. A provider all-day event that
+ * nohmi has changed since its last sync also keeps a timezone that restoring would read its
+ * date in, moving it a day. Undo is offered only when restoring returns the same event.
+ */
+export function canRestoreFaithfully(event: CalendarEvent) {
+  if (event.provider === "local") return true;
+  return (
+    !event.attendees?.length &&
+    !event.recurrence.length &&
+    !event.conferenceUrl &&
+    !(event.allDay && event.timezone !== "UTC")
+  );
 }

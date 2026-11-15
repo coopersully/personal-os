@@ -163,7 +163,11 @@ function ExistingEvent({ id, calendars, timeZone }: FormScope & { id: string }) 
       calendars={calendar ? [calendar] : []}
       timeZone={timeZone}
       initial={() => draftFromEvent(event, timeZone)}
-      reload={() => setSession((current) => current + 1)}
+      reload={() =>
+        void query.refetch().then((read) => {
+          if (read.isSuccess) setSession((current) => current + 1);
+        })
+      }
     />
   );
 }

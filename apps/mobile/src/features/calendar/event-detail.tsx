@@ -1,4 +1,5 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
+import { useEffect, useRef } from "react";
 import { ActivityIndicator, Linking, Text, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorActionsOptions } from "../../components/editor-header";
@@ -14,7 +15,7 @@ import {
   useCalendars,
   useEventWrites,
 } from "./data";
-import { canChangeEvent } from "./event-draft";
+import { canChangeEvent, canRestoreFaithfully } from "./event-draft";
 import {
   attendeeLabel,
   calendarFreshness,
@@ -44,6 +45,14 @@ export function CalendarEventScreen() {
   const query = useCalendarEvent(typeof id === "string" ? id : undefined);
   const calendars = useCalendars();
   const writes = useEventWrites();
+  // A delete that settles after the person left this page must not close whatever is open now.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
   const event = query.data;
   if (!event) {
     const gone = !id || isNotFound(query.error);
@@ -82,13 +91,15 @@ export function CalendarEventScreen() {
       [
         `“${event.title}” will be removed from ${calendar?.name}.`,
         event.recurrence.length ? "Every occurrence of this repeating event is deleted." : null,
-        "You can undo this right after deleting.",
+        canRestoreFaithfully(event)
+          ? "You can undo this right after deleting."
+          : "This can’t be undone from nohmi.",
       ]
         .filter(Boolean)
         .join(" "),
       () =>
         void writes.remove(event).then((result) => {
-          if (result.ok) router.back();
+          if (result.ok && shown.current) router.back();
         }),
       true,
     );

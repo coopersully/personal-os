@@ -542,6 +542,7 @@ it("explains why a new event cannot be started", async () => {
 it("offers Edit and Delete only for an event on a calendar the person can write to", async () => {
   await openDetails();
   press("Event actions");
+  expect(button("Delete")).toBeEnabled();
   press("Edit");
   expect(h.push).toHaveBeenCalledWith({
     pathname: "/calendar-event-edit",
@@ -553,6 +554,14 @@ it("offers Edit and Delete only for an event on a calendar the person can write 
   h.params = { id: "Standup" };
   mount(<CalendarEventRoute />);
   expect(await screen.findByText(/Read only/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Event actions" })).toBeNull();
+  cleanup();
+
+  // A busy block mirrors another event, which is the one to change.
+  h.api.getEvent.mockResolvedValue({ ...standup, blockSourceEventId: "source-1" });
+  mount(<CalendarEventRoute />);
+  expect(await screen.findByText("Room 4")).toBeVisible();
+  await waitFor(() => expect(h.api.getEvent).toHaveBeenCalledTimes(3));
   expect(screen.queryByRole("button", { name: "Event actions" })).toBeNull();
 });
 
@@ -607,7 +616,75 @@ it("warns that deleting a repeating event removes every occurrence", async () =>
   expect(globalThis.confirm).toHaveBeenCalledWith(
     expect.stringContaining("Every occurrence of this repeating event is deleted."),
   );
+  // Restoring would bring back a single event, not the series, so no Undo is offered.
+  expect(globalThis.confirm).toHaveBeenCalledWith(
+    expect.stringContaining("This can’t be undone from nohmi."),
+  );
   await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
+  expect(h.success).toHaveBeenCalledExactlyOnceWith("Event deleted", { id: "toast-1" });
+});
+
+it("does not close another page when a delete settles after the person left", async () => {
+  let finish: (value: unknown) => void = () => {};
+  h.api.trashEvent.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await openDetails();
+  press("Event actions");
+  press("Delete");
+  await waitFor(() => expect(h.api.trashEvent).toHaveBeenCalledOnce());
+  cleanup();
+  await act(async () =>
+    finish({ eventId: "Standup", updatedAt: "2026-11-13T15:00:01.000Z", blockUpdatedAtById: {} }),
+  );
+  await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
+  expect(h.back).not.toHaveBeenCalled();
+
+  // Undo still works from the toast after the page is gone, within the same session.
+  h.loading.mockReturnValueOnce("toast-2");
+  await act(async () => undoAction().onClick());
+  await waitFor(() =>
+    expect(h.success).toHaveBeenLastCalledWith("Event restored", { id: "toast-2" }),
+  );
+  expect(h.api.restoreEvent).toHaveBeenCalledOnce();
+});
+
+it("sends no restore once the account session has changed", async () => {
+  await openDetails();
+  press("Event actions");
+  press("Delete");
+  await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
+  h.epoch = 2;
+  await act(async () => undoAction().onClick());
+  expect(h.api.restoreEvent).not.toHaveBeenCalled();
+  expect(h.loading).toHaveBeenCalledOnce();
+});
+
+it("treats a refusal after part of a write reached a provider as unconfirmed", async () => {
+  h.api.updateEvent.mockRejectedValue(
+    new ApiClientError({
+      code: "forbidden",
+      message: "This calendar is read-only.",
+      status: 403,
+      details: { completedEffects: [{ action: "update", role: "source" }] },
+    }),
+  );
+  await openStandup();
+  type("Location", "Room 9");
+  const refresh = vi.spyOn(client, "invalidateQueries");
+  press("Save changes");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t confirm the event was saved. Check your calendar.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(refresh).toHaveBeenCalledWith(
+    expect.objectContaining({ queryKey: ["calendar", "owner-a", 1] }),
+  );
+  expect(h.back).not.toHaveBeenCalled();
 });
 
 it("stays on the event and offers no Undo when a delete or restore is not confirmed", async () => {
@@ -660,13 +737,17 @@ it("reports nothing for a write that finishes after the account session changed"
   expect(h.success).not.toHaveBeenCalled();
   expect(h.error).not.toHaveBeenCalled();
   expect(h.back).not.toHaveBeenCalled();
+});
 
-  h.epoch = 1;
+it("reports nothing for a failure that arrives after the account session changed", async () => {
   h.api.createEvent.mockImplementationOnce(async () => {
     h.epoch = 3;
     throw offline();
   });
+  await openNewEvent();
+  type("Event title", "Dentist appointment");
   press("Create event");
-  await waitFor(() => expect(h.dismiss).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(h.dismiss).toHaveBeenCalledExactlyOnceWith("toast-1"));
   expect(h.error).not.toHaveBeenCalled();
+  expect(h.api.createEvent).toHaveBeenCalledOnce();
 });

@@ -2,6 +2,7 @@ import type { Calendar, CalendarEvent } from "@personal-os/domain";
 import { expect, it } from "vitest";
 import {
   canChangeEvent,
+  canRestoreFaithfully,
   createInput,
   draftFromEvent,
   draftProblem,
@@ -12,6 +13,7 @@ import {
   updateInput,
   withStart,
 } from "./event-draft";
+import { allDaySpan } from "./logic";
 
 const zone = "America/New_York";
 const tokyo = "Asia/Tokyo";
@@ -278,4 +280,53 @@ it("allows changes only on a writable calendar and never on a mirrored busy bloc
   expect(canChangeEvent(event(), { isWritable: false } as Calendar)).toBe(false);
   expect(canChangeEvent(event(), undefined)).toBe(false);
   expect(canChangeEvent(event({ blockSourceEventId: "source-1" }), writable)).toBe(false);
+});
+
+it("keeps all-day dates where clocks skip midnight", () => {
+  // Cairo's clocks jump from midnight to 1 AM on April 24, 2026.
+  const cairo = "Africa/Cairo";
+  for (const [startDate, endDate] of [
+    ["2026-04-24", "2026-04-24"],
+    ["2026-04-23", "2026-04-23"],
+    ["2026-04-22", "2026-04-25"],
+  ] as const) {
+    const times = eventTimes(draft({ allDay: true, startDate, endDate }), "local", cairo);
+    expect(new Date(times.endsAt).getTime()).toBeGreaterThan(new Date(times.startsAt).getTime());
+    // nohmi reads its own all-day events back as these instants in the account timezone.
+    const span = allDaySpan(event({ provider: "local", ...times }), cairo);
+    expect([span.first.day, span.last.day]).toEqual([
+      Number(startDate.slice(8)),
+      Number(endDate.slice(8)),
+    ]);
+    // Google reads the calendar date of each instant in the event's timezone.
+    const googleDate = (instant: string) =>
+      new Intl.DateTimeFormat("en-CA", { timeZone: cairo }).format(new Date(instant));
+    const google = eventTimes(draft({ allDay: true, startDate, endDate }), "google", cairo);
+    expect(googleDate(google.startsAt)).toBe(startDate);
+    expect(googleDate(google.endsAt) > endDate).toBe(true);
+  }
+});
+
+it("offers to restore only events that would come back as they were", () => {
+  expect(canRestoreFaithfully(event())).toBe(true);
+  expect(canRestoreFaithfully(event({ recurrence: ["RRULE:FREQ=WEEKLY"] }))).toBe(false);
+  expect(canRestoreFaithfully(event({ conferenceUrl: "https://meet.example.test/a" }))).toBe(false);
+  expect(
+    canRestoreFaithfully(
+      event({
+        attendees: [
+          { email: "a@example.test", name: null, response: "accepted", isOrganizer: false },
+        ],
+      }),
+    ),
+  ).toBe(false);
+  // A synced provider all-day event keeps UTC; one nohmi changed since keeps the account zone.
+  expect(canRestoreFaithfully(event({ allDay: true, timezone: "UTC" }))).toBe(true);
+  expect(canRestoreFaithfully(event({ allDay: true }))).toBe(false);
+  // nohmi's own events are restored from the stored record.
+  expect(
+    canRestoreFaithfully(
+      event({ provider: "local", allDay: true, recurrence: ["RRULE:FREQ=WEEKLY"] }),
+    ),
+  ).toBe(true);
 });

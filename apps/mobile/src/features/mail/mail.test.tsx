@@ -871,3 +871,32 @@ it.each([
   expect(h.toast.success).not.toHaveBeenCalled();
   expect(h.toast.error).not.toHaveBeenCalled();
 });
+
+it("reports the outcome of a change that settles after its list has closed", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  let confirm: (thread: MailThread) => void = () => {};
+  h.update.mockReturnValueOnce(new Promise((resolve) => (confirm = resolve)));
+  const view = render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  choose("Actions for Board packet", "Archive");
+
+  view.unmount();
+  await act(async () => confirm(confirmedThread("one", { mailboxIds: [] })));
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.toast.success.mock.calls[0][0]).toBe("Conversation archived");
+  expect(h.toast.dismiss).not.toHaveBeenCalled();
+});
+
+it("does not undo an archive for a different signed-in owner", async () => {
+  h.update.mockResolvedValueOnce(confirmedThread("one", { mailboxIds: [] }));
+  const view = render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  choose("Actions for Board packet", "Archive");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+
+  h.owner = "someone-else";
+  view.rerender(wrap(<InboxRoute />));
+  await act(async () => h.toast.success.mock.calls[0][1].action.onClick());
+  expect(h.update).toHaveBeenCalledTimes(1);
+  expect(h.toast.loading).toHaveBeenCalledTimes(1);
+});

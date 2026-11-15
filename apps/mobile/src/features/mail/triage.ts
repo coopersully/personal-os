@@ -1,5 +1,5 @@
 import type { ApiClientError } from "@personal-os/api-client";
-import type { MailThreadSummary } from "@personal-os/domain";
+import type { MailThread, MailThreadSummary } from "@personal-os/domain";
 import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner-native";
@@ -59,16 +59,15 @@ export function useMailTriage() {
   const mailboxes = useMailAccounts().data?.flatMap((account) => account.mailboxes);
   const [changes, setChanges] = useState<ReadonlyMap<string, MailChange>>(new Map());
   const busy = useRef(new Set<string>());
+  // Follows the signed-in owner and outlives the list, so a change that settles after the list
+  // closed still reports its outcome, while one that settles for another owner does not.
   const active = useRef(owner);
   useEffect(() => {
     active.current = owner;
-    return () => {
-      active.current = undefined;
-    };
   }, [owner]);
 
   async function send(action: Action, thread: MailThreadSummary, change: MailChange) {
-    if (!owner || busy.current.has(thread.id)) return;
+    if (!owner || active.current !== owner || busy.current.has(thread.id)) return;
     busy.current.add(thread.id);
     setChanges((current) => new Map(current).set(thread.id, change));
     const settle = () => {
@@ -85,71 +84,80 @@ export function useMailTriage() {
       void client.invalidateQueries({ queryKey: ["mail", owner, "accounts"] });
     };
     const id = toast.loading(copy[action].loading);
+    let confirmed: MailThread;
     try {
-      const confirmed = await api.updateMailThread(thread.id, {
+      confirmed = await api.updateMailThread(thread.id, {
         ...change,
         expectedUpdatedAt: thread.updatedAt,
       });
-      if (active.current !== owner) return void toast.dismiss(id);
-      // A read that began before the write must not land over the confirmed state.
-      await client.cancelQueries({ queryKey: summaries });
-      for (const query of client.getQueryCache().findAll({ queryKey: summaries })) {
-        const target = String(query.queryKey[3]);
-        const left = leftMailTarget(target, thread.mailboxIds, confirmed.mailboxIds);
-        client.setQueryData<InfiniteData<MailThreadSummary[]>>(
-          query.queryKey,
-          (data) =>
-            data && {
-              ...data,
-              pages: data.pages.map((page) =>
-                page.flatMap((row) =>
-                  row.id !== thread.id
-                    ? [row]
-                    : left
-                      ? []
-                      : // Summaries stay body-free: copy only the fields a summary carries.
-                        [
-                          {
-                            ...row,
-                            mailboxIds: confirmed.mailboxIds,
-                            starred: confirmed.starred,
-                            unread: confirmed.unread,
-                            updatedAt: confirmed.updatedAt,
-                          },
-                        ],
-                ),
-              ),
-            },
-        );
-      }
-      settle();
-      let undone = false;
-      toast.success(
-        copy[action].done,
-        action === "archive"
-          ? {
-              id,
-              duration: 10_000,
-              action: {
-                label: "Undo",
-                onClick: () => {
-                  if (undone) return;
-                  undone = true;
-                  void send(
-                    "restore",
-                    { ...thread, mailboxIds: confirmed.mailboxIds, updatedAt: confirmed.updatedAt },
-                    { mailboxIds: thread.mailboxIds },
-                  );
-                },
-              },
-            }
-          : { id },
-      );
     } catch (error) {
       settle();
       if (active.current !== owner) return void toast.dismiss(id);
       toast.error(failure(action, error), { id });
+      return refresh();
     }
+    if (active.current !== owner) {
+      settle();
+      return void toast.dismiss(id);
+    }
+    // From here the write is confirmed, and nothing below may report it as failed.
+    // A read that began before the write must not land over the confirmed state.
+    await client.cancelQueries({ queryKey: summaries }).catch(() => undefined);
+    for (const query of client.getQueryCache().findAll({ queryKey: summaries })) {
+      const left = leftMailTarget(
+        String(query.queryKey[3]),
+        thread.mailboxIds,
+        confirmed.mailboxIds,
+      );
+      client.setQueryData<InfiniteData<MailThreadSummary[]>>(
+        query.queryKey,
+        (data) =>
+          data && {
+            ...data,
+            pages: data.pages.map((page) =>
+              page.flatMap((row) =>
+                row.id !== thread.id
+                  ? [row]
+                  : left
+                    ? []
+                    : // Summaries stay body-free: copy only the fields a summary carries.
+                      [
+                        {
+                          ...row,
+                          mailboxIds: confirmed.mailboxIds,
+                          starred: confirmed.starred,
+                          unread: confirmed.unread,
+                          updatedAt: confirmed.updatedAt,
+                        },
+                      ],
+              ),
+            ),
+          },
+      );
+    }
+    settle();
+    let undone = false;
+    toast.success(
+      copy[action].done,
+      action === "archive"
+        ? {
+            id,
+            duration: 10_000,
+            action: {
+              label: "Undo",
+              onClick: () => {
+                if (undone) return;
+                undone = true;
+                void send(
+                  "restore",
+                  { ...thread, mailboxIds: confirmed.mailboxIds, updatedAt: confirmed.updatedAt },
+                  { mailboxIds: thread.mailboxIds },
+                );
+              },
+            },
+          }
+        : { id },
+    );
     // Unread counts, other mailboxes and anything unconfirmed come from a fresh read.
     refresh();
   }

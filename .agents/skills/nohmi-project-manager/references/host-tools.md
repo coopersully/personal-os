@@ -35,4 +35,7 @@ it to one copy under the existing single-writer claim before continuing.
   call outside auto/bypass modes. Archive only after dirty and unpushed work is proven preserved.
   If preservation is uncertain, do not archive. A host approval prompt is a platform approval; the
   standing cleanup authority does not bypass it.
+- `archive_session` also archives that session's finished side sessions and any sessions sharing its
+  worktree, and it refuses a session that is working, pinned or open on screen. Check those
+  sessions' dirty and unpushed work too before archiving; a refusal is a lifecycle gap.
 - Read back `list_sessions` after every title, section or archive write.

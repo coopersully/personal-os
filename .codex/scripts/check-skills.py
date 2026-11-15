@@ -27,7 +27,12 @@ def frontmatter(text):
     for line in text[4:end].splitlines():
         match = re.match(r"^([A-Za-z][\w-]*):\s*(.*)$", line)
         if match:
-            fields[match.group(1)] = match.group(2).strip().strip('"').strip("'")
+            value = match.group(2).strip()
+            # Block scalars and nested values would hide their real content from this
+            # line parser; require single-line values so the length checks stay honest.
+            if value in {"", ">", "|", ">-", "|-"} and match.group(1) != "metadata":
+                value = None
+            fields[match.group(1)] = value if value is None else value.strip('"').strip("'")
     return fields
 
 
@@ -42,7 +47,9 @@ def check_skill(folder):
         errors.append(f"{skill}: name {fields.get('name')!r} must equal folder {folder.name!r}")
     if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", folder.name):
         errors.append(f"{skill}: folder name must be lowercase kebab-case")
-    description = fields.get("description", "")
+    if any(value is None for value in fields.values()):
+        errors.append(f"{skill}: frontmatter values must be single-line scalars")
+    description = fields.get("description") or ""
     if not description or len(description) > 1024:
         errors.append(f"{skill}: description must be 1-1024 characters")
     unknown = set(fields) - ALLOWED_KEYS
@@ -53,9 +60,10 @@ def check_skill(folder):
         errors.append(f"{agents}/openai.yml: Codex reads agents/openai.yaml")
     meta = agents / "openai.yaml"
     if meta.exists():
-        short = re.search(r'short_description:\s*"([^"]*)"', meta.read_text(encoding="utf-8"))
-        if short and len(short.group(1)) > 64:
-            errors.append(f"{meta}: short_description exceeds 64 characters")
+        short = re.search(r"^\s*short_description:\s*(.*)$", meta.read_text(encoding="utf-8"), re.M)
+        value = short.group(1).strip().strip('"').strip("'") if short else ""
+        if not value or len(value) > 64:
+            errors.append(f"{meta}: short_description must be 1-64 characters")
     for path in [skill, *sorted((folder / "references").glob("*.md"))]:
         body = path.read_text(encoding="utf-8")
         body = re.sub(r"```.*?```", "", body, flags=re.S)  # examples and templates

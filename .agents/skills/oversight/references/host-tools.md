@@ -28,6 +28,9 @@ every grant, limit, platform approval and verification rule in this skill still 
   call outside auto/bypass modes. Archive only after the completion procedure has proven dirty and
   unpushed work preserved. If preservation is uncertain, do not archive. A host approval prompt is a
   platform approval; the standing cleanup grant does not bypass it.
+- `archive_session` also archives that session's finished side sessions and any sessions sharing its
+  worktree, and it refuses a session that is working, pinned or open on screen. Check those
+  sessions' dirty and unpushed work too before archiving; a refusal is a lifecycle gap.
 - Moving a session other than the current one asks the user first in default mode. A declined move
   is a setup gap, not a completed step.
 - Sections are custom sidebar groups. Read back `list_sections` and `list_sessions` (`group`)

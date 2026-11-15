@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderWithFeedback as render } from "@/test-utils/feedback";
@@ -15,11 +15,12 @@ vi.mock("react-plaid-link", () => ({
     return { open: vi.fn(), ready: false };
   },
 }));
-afterEach(() => {
-  // Unmount the Toaster first: dismissing while mounted schedules Sonner's removal
-  // timer, which can fire after jsdom teardown and throw `window is not defined`.
-  cleanup();
-  toast.dismiss();
+afterEach(async () => {
+  // Sonner removes a dismissed toast on a 200ms timer that it never cancels, and a retry
+  // dismisses the previous attempt's toast moments before a test ends. Let every removal
+  // finish while jsdom still exists; a timer firing after teardown fails the whole run.
+  for (const { id } of toast.getToasts()) toast.dismiss(id);
+  await waitFor(() => expect(document.querySelector("[data-sonner-toast]")).toBeNull());
   vi.restoreAllMocks();
 });
 const reconnectSuccess = "Bank authorization verified; synchronization scheduled.";

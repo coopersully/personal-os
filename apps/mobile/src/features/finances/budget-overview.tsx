@@ -4,7 +4,7 @@ import { Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { Icon } from "../../components/icons";
 import { spacing, useTheme, workspaceColor } from "../../theme";
-import { budgetPace, categoryIcon } from "./category-presentation";
+import { budgetPace, categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead, useSpending } from "./data";
 import { financeLabel, formatMoney, periodScope } from "./presentation";
 import { Card, Copy, ReadState } from "./ui";
@@ -22,7 +22,7 @@ function CategoryProgress({ item }: { item: FinanceBudgetStatus }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${item.budget.category}, ${formatMoney(item.spent, "USD")} spent. View transactions and edit limit`}
+      accessibilityLabel={`${categoryLabel(item.budget.category)}, ${formatMoney(item.spent, "USD")} spent. View transactions and edit limit`}
       onPress={() =>
         router.push({
           pathname: "/finance-budget-category",
@@ -44,7 +44,7 @@ function CategoryProgress({ item }: { item: FinanceBudgetStatus }) {
         >
           <Icon name={categoryIcon(item.budget.category)} color={t.secondary} size={18} />
           <Text style={{ color: t.ink, fontSize: 16, fontWeight: "600", flexShrink: 1 }}>
-            {item.budget.category}
+            {categoryLabel(item.budget.category)}
           </Text>
         </View>
         <Text
@@ -59,7 +59,7 @@ function CategoryProgress({ item }: { item: FinanceBudgetStatus }) {
       </View>
       <View
         accessibilityRole="progressbar"
-        accessibilityLabel={`${item.budget.category} spending`}
+        accessibilityLabel={`${categoryLabel(item.budget.category)} spending`}
         accessibilityValue={{
           min: 0,
           max: 100,

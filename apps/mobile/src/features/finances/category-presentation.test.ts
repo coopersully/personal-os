@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { budgetPace, categoryIcon } from "./category-presentation";
+import { budgetPace, categoryIcon, categoryLabel } from "./category-presentation";
 
 describe("budget pacing", () => {
   const midmonth = new Date("2026-11-15T20:00:00Z");
@@ -30,4 +30,29 @@ it("reuses semantic category identities for rows and allocations", () => {
 it("honors authoritative group icons and custom bucket fallback", () => {
   expect(categoryIcon("Custom group", "travel")).toBe("categoryTravel");
   expect(categoryIcon("Custom group", undefined, "bucket")).toBe("categoryLayers");
+});
+
+describe("category labels", () => {
+  it("reads a provider-coded name as words, matching web", () => {
+    expect(categoryLabel("RENT_AND_UTILITIES")).toBe("Rent And Utilities");
+    expect(categoryLabel("FOOD_AND_DRINK")).toBe("Food & Drink");
+    expect(categoryLabel("TRANSFER_OUT")).toBe("Transfers");
+    // One-word provider codes are codes too.
+    expect(categoryLabel("ENTERTAINMENT")).toBe("Entertainment");
+    expect(categoryLabel("MEDICAL")).toBe("Medical");
+    expect(categoryLabel("TRANSPORTATION")).toBe("Transportation");
+    expect(categoryLabel("TRAVEL")).toBe("Travel");
+    expect(categoryLabel("INCOME")).toBe("Income");
+    expect(categoryLabel("OTHER")).toBe("Other");
+    expect(categoryLabel("GOVERNMENT_AND_NON_PROFIT")).toBe("Government And Non Profit");
+  });
+  it("leaves names a person wrote untouched and names a missing category", () => {
+    expect(categoryLabel("Pet care")).toBe("Pet care");
+    expect(categoryLabel("HSA")).toBe("HSA");
+    expect(categoryLabel("401k_rollover")).toBe("401k_rollover");
+    // Capitals alone do not make a name a provider code.
+    expect(categoryLabel("IRA")).toBe("IRA");
+    expect(categoryLabel("KIDS_SCHOOL")).toBe("KIDS_SCHOOL");
+    expect(categoryLabel(null)).toBe("Uncategorized");
+  });
 });

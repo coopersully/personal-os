@@ -102,6 +102,15 @@ export function AccountActions({
       onPress: () => router.push({ pathname: "/finance-account-edit", params: { id: account.id } }),
     },
   ];
+  if (account.provider === "manual")
+    actions.push({
+      id: "add-transaction",
+      label: "Add transaction",
+      icon: "add",
+      disabled: pending,
+      onPress: () =>
+        router.push({ pathname: "/finance-transaction-edit", params: { accountId: account.id } }),
+    });
   if (tracked && account.status === "connected")
     actions.push({
       id: "sync",

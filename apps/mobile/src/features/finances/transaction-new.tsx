@@ -54,6 +54,7 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
   const [submitted, setSubmitted] = useState(false);
   const lock = useRef(false);
   const unconfirmed = useRef<TransactionAttempt | null>(null);
+  const latestSave = useRef<() => Promise<void>>(async () => undefined);
   const active = useRef(true);
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
@@ -78,14 +79,31 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
   const invalidAmount = !!amountText.trim() && amount === undefined;
   const invalid = !merchant.trim() || amount === undefined || !date || !accountId;
   const locked = pending || submitted;
-  const close = () =>
-    edited && !submitted
-      ? Alert.alert("Discard this transaction?", "It has not been added.", [
-          { text: "Keep editing", style: "cancel" },
-          { text: "Discard", style: "destructive", onPress: () => router.back() },
-        ])
-      : router.back();
   const refresh = () => client.invalidateQueries({ queryKey: ["finances", owner] });
+  const close = () => {
+    if (!edited || submitted) return router.back();
+    // An unconfirmed add may be in the ledger: never say it was not added, and re-read on the way out.
+    if (unconfirmed.current)
+      return Alert.alert(
+        "Leave this transaction?",
+        "The last attempt may already have added it. Check Transactions before adding it again.",
+        [
+          { text: "Keep editing", style: "cancel" },
+          {
+            text: "Leave",
+            style: "destructive",
+            onPress: () => {
+              void refresh();
+              router.back();
+            },
+          },
+        ],
+      );
+    Alert.alert("Discard this transaction?", "It has not been added.", [
+      { text: "Keep editing", style: "cancel" },
+      { text: "Discard", style: "destructive", onPress: () => router.back() },
+    ]);
+  };
 
   /** Looks for the record an earlier, unconfirmed add would have left on that account and day. */
   async function alreadyRecorded(attempt: TransactionAttempt) {
@@ -129,8 +147,18 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
         }
         if (!current()) return void toast.dismiss(id);
         if (recorded) {
+          // The earlier attempt's outcome is now known, whatever happens to this draft.
+          unconfirmed.current = null;
           await refresh();
           if (!current()) return void toast.dismiss(id);
+          if (!matchesAttempt(attempt, earlier)) {
+            // The draft was changed since: closing would silently drop that edit.
+            toast.info(
+              `Your earlier attempt already added “${earlier.merchant}”. This changed draft has not been added.`,
+              { id, action: { label: "Add anyway", onClick: () => void latestSave.current() } },
+            );
+            return;
+          }
           toast.info(
             "A matching transaction is already recorded on that account and date, so nothing was added again.",
             { id },
@@ -179,6 +207,9 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
       if (active.current) setPending(false);
     }
   }
+
+  // The toast's action outlives this render; it must add the draft as it is when pressed.
+  latestSave.current = save;
 
   return (
     <View style={{ flex: 1 }}>

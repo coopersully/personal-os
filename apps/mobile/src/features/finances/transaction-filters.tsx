@@ -1,9 +1,8 @@
 import type { FinanceCategory, FinanceTransactionQuery } from "@personal-os/domain";
-import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Modal, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EnumChoice } from "../../components/forms/enum-choice";
 import { Action, Actions, Group } from "../../components/forms/form-rows";
-import { Icon } from "../../components/icons";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SheetHeader } from "../../components/sheet-header";
 import { spacing, useTheme } from "../../theme";
@@ -26,7 +25,7 @@ export const defaultTransactionView: TransactionView = {
 const reviewOptions = [
   { value: "all", label: "Any review state" },
   { value: "needs_review", label: "Needs review" },
-  { value: "resolved", label: "Reviewed" },
+  { value: "resolved", label: "No review needed" },
 ] as const;
 const sortOptions = [
   { value: "date", label: "Date" },
@@ -45,13 +44,22 @@ const naturalOrder: Record<TransactionView["sortBy"], "asc" | "desc"> = {
   merchant: "asc",
 };
 
+const reviewLabels: Record<TransactionView["review"], string> = {
+  all: "Any review state",
+  needs_review: "Needs review",
+  resolved: "No review needed",
+};
+const sortLabels: Record<TransactionView["sortBy"], string> = {
+  date: "Date",
+  amount: "Amount",
+  merchant: "Merchant",
+};
 export function reviewLabel(review: TransactionView["review"]) {
-  return reviewOptions.find((option) => option.value === review)?.label ?? "Any review state";
+  return reviewLabels[review];
 }
 /** "Amount, highest first": the effective order in a person's words. */
 export function sortSummary(view: TransactionView) {
-  const field = sortOptions.find((option) => option.value === view.sortBy)?.label ?? "Date";
-  return `${field}, ${orderLabels[view.sortBy][view.sortDirection].toLowerCase()}`;
+  return `${sortLabels[view.sortBy]}, ${orderLabels[view.sortBy][view.sortDirection].toLowerCase()}`;
 }
 /** Only what differs from the default is sent, so an untouched list keeps its original request. */
 export function transactionViewQuery(view: TransactionView, withCategory: boolean) {
@@ -62,32 +70,6 @@ export function transactionViewQuery(view: TransactionView, withCategory: boolea
     sortBy: sorted ? view.sortBy : undefined,
     sortDirection: sorted ? view.sortDirection : undefined,
   };
-}
-
-/** A removable active filter: the whole chip removes it, and says so to a screen reader. */
-export function ActiveFilter({ label, onRemove }: { label: string; onRemove: () => void }) {
-  const t = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Remove filter ${label}`}
-      onPress={onRemove}
-      style={{
-        minHeight: 44,
-        borderRadius: 22,
-        paddingHorizontal: 14,
-        backgroundColor: t.surface,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: spacing.sm,
-      }}
-    >
-      <Text numberOfLines={1} style={{ color: t.ink, maxWidth: 230, fontSize: 14 }}>
-        {label}
-      </Text>
-      <Icon name="cancel" size={14} color={t.secondary} />
-    </Pressable>
-  );
 }
 
 /** Matching filters and presentation order for a transaction list; changes apply at once. */
@@ -111,7 +93,7 @@ export function TransactionFilters({
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View accessibilityViewIsModal style={{ flex: 1, backgroundColor: t.canvas }}>
-        <SheetHeader title="filters" label="Done" dismiss="trailing" onClose={onClose} />
+        <SheetHeader title="Filters" label="Done" dismiss="trailing" onClose={onClose} />
         <SettingsAccentProvider workspace="finances">
           <ScrollView
             contentContainerStyle={{

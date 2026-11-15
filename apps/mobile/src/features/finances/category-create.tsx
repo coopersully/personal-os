@@ -6,6 +6,7 @@ import { toast } from "sonner-native";
 import { Action, Actions } from "../../components/forms/form-rows";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { useTheme } from "../../theme";
+import { categoryLabel } from "./category-presentation";
 import { useFinance } from "./data";
 import { confirmedRejection } from "./mutations";
 import { FinanceRow } from "./ui";
@@ -41,11 +42,12 @@ export function CategoryCreate({
 
   async function add() {
     if (!owner || busy.current || !trimmed) return;
+    // Compared as displayed: a second category that reads the same is a duplicate to a person.
     const existing = categories.find(
-      (item) => item.name.trim().toLowerCase() === trimmed.toLowerCase(),
+      (item) => categoryLabel(item.name).trim().toLowerCase() === trimmed.toLowerCase(),
     );
     if (existing) {
-      toast.info(`“${existing.name}” already exists. It is now selected.`);
+      toast.info(`“${categoryLabel(existing.name)}” already exists. It is now selected.`);
       setName(null);
       onCreated(existing);
       return;
@@ -60,7 +62,7 @@ export function CategoryCreate({
         rows && !rows.some((item) => item.id === category.id) ? [...rows, category] : rows,
       );
       void client.invalidateQueries({ queryKey: ["finances", owner, "categories"] });
-      toast.success(`Category “${category.name}” added`, { id });
+      toast.success(`Category “${categoryLabel(category.name)}” added`, { id });
       setName(null);
       onCreated(category);
     } catch (error) {

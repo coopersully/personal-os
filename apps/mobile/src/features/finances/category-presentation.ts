@@ -56,6 +56,26 @@ const providerCategoryLabels: Record<string, string> = {
   TRANSFER_IN: "Transfers",
   TRANSFER_OUT: "Transfers",
 };
+/** The provider's category codes. Only these are reworded; `HSA` stays a name a person chose. */
+const providerCategoryCodes = new Set([
+  "BANK_FEES",
+  "ENTERTAINMENT",
+  "FOOD_AND_DRINK",
+  "GENERAL_MERCHANDISE",
+  "GENERAL_SERVICES",
+  "GOVERNMENT_AND_NON_PROFIT",
+  "HOME_IMPROVEMENT",
+  "INCOME",
+  "LOAN_PAYMENTS",
+  "MEDICAL",
+  "OTHER",
+  "PERSONAL_CARE",
+  "RENT_AND_UTILITIES",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+  "TRANSPORTATION",
+  "TRAVEL",
+]);
 /**
  * A category stored under a provider's raw code (`RENT_AND_UTILITIES`) reads as words, using the
  * same wording as web. Names a person typed are left exactly as written; the stored name is
@@ -64,7 +84,7 @@ const providerCategoryLabels: Record<string, string> = {
 export function categoryLabel(name: string | null | undefined): string {
   if (!name) return "Uncategorized";
   if (providerCategoryLabels[name]) return providerCategoryLabels[name];
-  if (!/^[A-Z0-9]+(_[A-Z0-9]+)+$/.test(name)) return name;
+  if (!providerCategoryCodes.has(name)) return name;
   return name
     .toLowerCase()
     .split("_")

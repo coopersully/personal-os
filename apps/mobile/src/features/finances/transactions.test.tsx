@@ -787,20 +787,20 @@ it("filters by category and review state and sorts on the server", async () => {
       name: "Filters and sort, 2 filters active, sorted by amount, lowest first",
     }),
   ).toBeTruthy();
-  press("Remove filter Category: Rent And Utilities");
+  press("Category: Rent And Utilities");
   await waitFor(() =>
     expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
       expect.objectContaining({ categoryId: undefined, review: "needs_review" }),
     ),
   );
-  press("Remove filter Needs review");
-  press("Remove filter Sorted by amount, lowest first");
+  press("Needs review");
+  press("Sorted by amount, lowest first");
   await waitFor(() =>
     expect(h.api.listFinanceTransactions).toHaveBeenLastCalledWith(
       expect.objectContaining({ review: undefined, sortBy: undefined, sortDirection: undefined }),
     ),
   );
-  expect(screen.queryByRole("button", { name: /^Remove filter/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Sorted by|^Category:/ })).toBeNull();
 });
 
 it("sorts merchants A to Z by default and resets filters without changing the order", async () => {
@@ -809,7 +809,7 @@ it("sorts merchants A to Z by default and resets filters without changing the or
   press(/^Filters and sort/);
   expect(screen.getByRole("button", { name: "Reset filters" })).toHaveProperty("disabled", true);
   press("Review, Any review state");
-  choose("Reviewed");
+  choose("No review needed");
   press("Sort by, Date");
   choose("Merchant");
   await waitFor(() =>
@@ -1153,3 +1153,265 @@ it("stops selecting at the server's limit of 100 and says so", async () => {
   expect(h.info).toHaveBeenCalledWith("Select up to 100 transactions at a time.");
   expect(screen.getByRole("button", { name: /Shop 100/ }).textContent).toContain("Not selected");
 }, 30_000);
+
+it("corrects a comma-decimal amount instead of saving a hundred times its value", async () => {
+  await fillNewTransaction();
+  for (const text of ["12,50", "1,2"]) {
+    type("Amount", text);
+    expect(screen.getByText("Enter an amount above zero, such as 12.50.")).toBeTruthy();
+    expect(save()).toHaveProperty("disabled", true);
+  }
+  fireEvent.click(save());
+  expect(h.api.createFinanceTransaction).not.toHaveBeenCalled();
+  h.api.createFinanceTransaction.mockResolvedValue(transaction);
+  type("Amount", "1,250.50");
+  fireEvent.click(save());
+  await waitFor(() => expect(h.success).toHaveBeenCalled());
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledWith(
+    expect.objectContaining({ amount: 1250.5 }),
+  );
+});
+
+it("does not claim nothing was added when leaving after an unconfirmed add, and re-reads", async () => {
+  h.api.createFinanceTransaction.mockRejectedValue(new Error("timeout"));
+  await fillNewTransaction();
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
+  const reads = h.api.listFinanceAccounts.mock.calls.length;
+  press("Cancel");
+  const [title, message] = h.alert.mock.calls.at(-1) as [string, string];
+  expect(title).toBe("Leave this transaction?");
+  expect(message).toContain("may already have added it");
+  expect(message).not.toContain("has not been added");
+  confirm("Keep editing");
+  expect(h.back).not.toHaveBeenCalled();
+  press("Cancel");
+  confirm("Leave");
+  expect(h.back).toHaveBeenCalledOnce();
+  // Finance data is re-read, so a recorded attempt shows up without a manual refresh.
+  await waitFor(() => expect(h.api.listFinanceAccounts.mock.calls.length).toBeGreaterThan(reads));
+});
+
+it("keeps an edit made after an unconfirmed add that was recorded, and offers to add it anyway", async () => {
+  h.api.createFinanceTransaction.mockRejectedValueOnce(new Error("timeout"));
+  await fillNewTransaction();
+  type("Date (ISO date/time)", "2026-11-03");
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
+  // The first attempt reached the ledger; the person then corrects the amount.
+  h.api.listFinanceTransactions.mockResolvedValue({
+    items: [
+      { ...transaction, id: "t-new", merchant: "Corner bakery", amount: 8.4, date: "2026-11-03" },
+    ],
+    nextCursor: null,
+  });
+  type("Amount", "9.40");
+  fireEvent.click(save());
+  await waitFor(() => expect(h.info).toHaveBeenCalledOnce());
+  const [message, options] = h.info.mock.calls[0] as [
+    string,
+    { id: string; action: { label: string; onClick: () => void } },
+  ];
+  expect(message).toContain("already added “Corner bakery”");
+  expect(message).toContain("has not been added");
+  expect(options.action.label).toBe("Add anyway");
+  // The form stays open with the corrected draft, and nothing was written a second time.
+  expect(h.back).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Amount")).toHaveProperty("value", "9.40");
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledOnce();
+  // Add anyway writes the draft as it is when pressed, not as it was when the toast appeared.
+  h.api.createFinanceTransaction.mockResolvedValue(transaction);
+  type("Amount", "9.45");
+  await act(async () => options.action.onClick());
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Transaction added", expect.anything()),
+  );
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledTimes(2);
+  expect(h.api.createFinanceTransaction).toHaveBeenLastCalledWith(
+    expect.objectContaining({ amount: 9.45, merchant: "Corner bakery" }),
+  );
+  expect(h.back).toHaveBeenCalledOnce();
+  expectNoInlineResult();
+});
+
+it("selects a category that already reads the same instead of creating its twin", async () => {
+  await fillNewTransaction();
+  press("New category");
+  type("New category name", "rent and utilities");
+  press("Add category");
+  expect(h.api.createFinanceCategory).not.toHaveBeenCalled();
+  expect(h.info).toHaveBeenCalledWith("“Rent And Utilities” already exists. It is now selected.");
+  expect(screen.getByRole("button", { name: /Category.*Rent And Utilities/ })).toBeTruthy();
+});
+
+it("words the removal for any transaction in a manual account, added or imported", async () => {
+  h.params = { id: transaction.id };
+  mount(<FinanceTransactionScreen />);
+  await removeAction();
+  const [, message] = h.alert.mock.calls.at(-1) as [string, string];
+  expect(message).toBe("This deletes the transaction from your records. It cannot be undone.");
+});
+
+it("raises one error when the automatic reload after a categorization fails", async () => {
+  h.api.applyFinanceCategorizations.mockResolvedValue([applied(transaction), applied(other)]);
+  await selectBoth();
+  h.api.listFinanceTransactions.mockRejectedValue(new Error("offline"));
+  await categorizeAs("Travel");
+  await screen.findByRole("button", { name: /Reload transactions/ });
+  const reloadErrors = h.error.mock.calls.filter(([message]) =>
+    String(message).startsWith("Transactions could not reload."),
+  );
+  expect(reloadErrors).toHaveLength(1);
+  // The categorization itself still reports its own confirmed result.
+  expect(h.success).toHaveBeenCalledWith("2 transactions categorized as Travel", {
+    id: "feedback",
+  });
+});
+
+it("stays silent when the automatic reload succeeds", async () => {
+  h.api.applyFinanceCategorizations.mockResolvedValue([applied(transaction), applied(other)]);
+  await selectBoth();
+  await categorizeAs("Travel");
+  await waitFor(() => expect(h.api.listFinanceTransactions).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Select transactions" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  expect(h.error).not.toHaveBeenCalled();
+  expect(h.success).toHaveBeenCalledOnce();
+});
+
+// Signing in as someone else mid-request: the old account's result is neither shown nor applied.
+
+/** Mounts so the tree can be rendered again as a different signed-in person. */
+function mountAs(node: () => ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const tree = () => <QueryClientProvider client={client}>{node()}</QueryClientProvider>;
+  const view = render(tree());
+  return () => {
+    h.owner = "owner-b";
+    view.rerender(tree());
+  };
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+const settle = async (request: ReturnType<typeof deferred<unknown>>, value: unknown | Error) =>
+  act(async () => {
+    if (value instanceof Error) request.reject(value);
+    else request.resolve(value);
+    await request.promise.catch(() => undefined);
+  });
+const outcomes: [string, unknown][] = [
+  ["answer", { ...transaction, id: "t-late" }],
+  ["failure", new Error("timeout")],
+];
+
+it.each(outcomes)("drops a late add %s after the account changes", async (_name, value) => {
+  const request = deferred<unknown>();
+  h.api.createFinanceTransaction.mockReturnValue(request.promise);
+  const switchOwner = mountAs(() => <FinanceTransactionEditor />);
+  await screen.findByLabelText("Merchant");
+  type("Merchant", "Corner bakery");
+  type("Amount", "8.40");
+  fireEvent.click(save());
+  await waitFor(() => expect(h.api.createFinanceTransaction).toHaveBeenCalled());
+  switchOwner();
+  await settle(request, value);
+  expect(h.dismiss).toHaveBeenCalledWith("feedback");
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
+  expect(h.back).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["answer", { outcome: "completed", data: {}, communication: { headline: "" } }],
+  ["failure", new Error("timeout")],
+] as [
+  string,
+  unknown,
+][])("drops a late removal %s after the account changes", async (_name, value) => {
+  const request = deferred<unknown>();
+  h.api.removeFinanceTransaction.mockReturnValue(request.promise);
+  h.params = { id: transaction.id };
+  const switchOwner = mountAs(() => <FinanceTransactionScreen />);
+  await removeAction();
+  confirm("Remove");
+  await waitFor(() => expect(h.api.removeFinanceTransaction).toHaveBeenCalled());
+  switchOwner();
+  await settle(request, value);
+  expect(h.dismiss).toHaveBeenCalledWith("feedback");
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
+  expect(h.back).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["answer", category("c-pets", "Pet care")],
+  ["failure", new Error("timeout")],
+] as [
+  string,
+  unknown,
+][])("drops a late category %s after the account changes", async (_name, value) => {
+  const request = deferred<unknown>();
+  h.api.createFinanceCategory.mockReturnValue(request.promise);
+  const switchOwner = mountAs(() => <FinanceTransactionEditor />);
+  await screen.findByLabelText("Merchant");
+  press("New category");
+  type("New category name", "Pet care");
+  press("Add category");
+  await waitFor(() => expect(h.api.createFinanceCategory).toHaveBeenCalled());
+  switchOwner();
+  await settle(request, value);
+  expect(h.dismiss).toHaveBeenCalledWith("feedback");
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["answer", [applied(transaction), applied(other)]],
+  ["failure", new Error("timeout")],
+] as [
+  string,
+  unknown,
+][])("drops a late categorization %s after the account changes", async (_name, value) => {
+  const request = deferred<unknown>();
+  h.api.applyFinanceCategorizations.mockReturnValue(request.promise);
+  const switchOwner = mountAs(() => <Transactions />);
+  await screen.findByRole("button", { name: /Corner market/ });
+  press("Select transactions");
+  press(/Corner market/);
+  press(/Harbor cafe/);
+  await categorizeAs("Travel");
+  await waitFor(() => expect(h.api.applyFinanceCategorizations).toHaveBeenCalled());
+  switchOwner();
+  await settle(request, value);
+  expect(h.dismiss).toHaveBeenCalledWith("feedback");
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
+});
+
+it("reports a removal the server did not complete without leaving the transaction", async () => {
+  h.api.removeFinanceTransaction.mockResolvedValue({
+    outcome: "needs_input",
+    communication: { headline: "Confirm this removal in nohmi on the web." },
+  });
+  h.params = { id: transaction.id };
+  mount(<FinanceTransactionScreen />);
+  await removeAction();
+  confirm("Remove");
+  await waitFor(() =>
+    expect(h.info).toHaveBeenCalledWith("Confirm this removal in nohmi on the web.", {
+      id: "feedback",
+    }),
+  );
+  expect(h.back).not.toHaveBeenCalled();
+});

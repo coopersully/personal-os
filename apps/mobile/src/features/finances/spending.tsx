@@ -7,28 +7,35 @@ import {
 } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Platform, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ActivityIndicator, Alert, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
+import { FilterChip } from "../../components/filter-chip";
 import { EntityPicker } from "../../components/forms/entity-picker";
 import { Action, Actions } from "../../components/forms/form-rows";
-import { FormSave } from "../../components/forms/form-save";
 import { SettingsAccentProvider } from "../../components/settings-accent";
-import { radius, spacing, useTheme } from "../../theme";
+import { radius, spacing, useTheme, workspaceColor } from "../../theme";
 import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead, useSpending } from "./data";
 import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
 import { SpendingChart } from "./spending-chart";
 import { selectionLimit, useBulkCategorize } from "./transaction-bulk";
 import {
-  ActiveFilter,
   defaultTransactionView,
   reviewLabel,
   sortSummary,
   TransactionFilters,
   transactionViewQuery,
 } from "./transaction-filters";
-import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Segments } from "./ui";
+import {
+  Card,
+  Copy,
+  FinanceFloatingAdd,
+  FinanceRow,
+  FinanceScreen,
+  Metric,
+  ReadState,
+  Segments,
+} from "./ui";
 
 export function Transactions({
   budgetId,
@@ -135,10 +142,13 @@ export function Transactions({
     });
     const result = await query.refetch();
     setReload(result.isError ? "failed" : "current");
-    if (id === undefined) return;
+    // The automatic reload is silent when it works and raises one error when it does not.
     if (result.isError)
-      toast.error("Transactions could not reload. Reload again before selecting.", { id });
-    else toast.success("Transactions reloaded", { id });
+      toast.error(
+        "Transactions could not reload. Reload again before selecting.",
+        id === undefined ? undefined : { id },
+      );
+    else if (id !== undefined) toast.success("Transactions reloaded", { id });
   }
   const bulk = useBulkCategorize(() => {
     setSelection(null);
@@ -157,6 +167,7 @@ export function Transactions({
   const activeCategory = categories.data?.find((item) => item.id === view.categoryId);
   const activeCount = (view.categoryId && !budgetId ? 1 : 0) + (view.review === "all" ? 0 : 1);
   const sorted = view.sortBy !== "date" || view.sortDirection !== "desc";
+  const accent = workspaceColor(t, "finances");
   return (
     <>
       {!reference && (
@@ -181,21 +192,27 @@ export function Transactions({
           {(activeCount > 0 || sorted) && (
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
               {view.categoryId && !budgetId && (
-                <ActiveFilter
+                <FilterChip
+                  selected
+                  color={accent}
                   label={`Category: ${activeCategory ? categoryLabel(activeCategory.name) : "selected"}`}
-                  onRemove={() => setView({ ...view, categoryId: null })}
+                  onPress={() => setView({ ...view, categoryId: null })}
                 />
               )}
               {view.review !== "all" && (
-                <ActiveFilter
+                <FilterChip
+                  selected
+                  color={accent}
                   label={reviewLabel(view.review)}
-                  onRemove={() => setView({ ...view, review: "all" })}
+                  onPress={() => setView({ ...view, review: "all" })}
                 />
               )}
               {sorted && (
-                <ActiveFilter
+                <FilterChip
+                  selected
+                  color={accent}
                   label={`Sorted by ${sortSummary(view).toLowerCase()}`}
-                  onRemove={() => setView({ ...view, sortBy: "date", sortDirection: "desc" })}
+                  onPress={() => setView({ ...view, sortBy: "date", sortDirection: "desc" })}
                 />
               )}
             </View>
@@ -368,7 +385,6 @@ export function FinanceSpendingScreen() {
     if (routeMode === "Summary" || routeMode === "Transactions") setMode(routeMode);
   }, [routePeriod, routeMode]);
   const query = useSpending(period === "This week" ? "week" : "month");
-  const insets = useSafeAreaInsets();
   return (
     <View style={{ flex: 1 }}>
       <FinanceScreen title="Spending">
@@ -472,25 +488,10 @@ export function FinanceSpendingScreen() {
         )}
         <View style={{ height: 80 }} />
       </FinanceScreen>
-      {/* Clear the native tab bar, matching the Accounts add button. */}
-      <View
-        pointerEvents="box-none"
-        style={{
-          position: "absolute",
-          left: 0,
-          right: 0,
-          bottom: Platform.OS === "ios" ? 96 - Math.max(insets.bottom, 16) : 0,
-        }}
-      >
-        <FormSave
-          workspace="finances"
-          keyboardOffset={0}
-          label="Add transaction"
-          icon="add"
-          disabled={false}
-          onPress={() => router.push("/finance-transaction-edit")}
-        />
-      </View>
+      <FinanceFloatingAdd
+        label="Add transaction"
+        onPress={() => router.push("/finance-transaction-edit")}
+      />
     </View>
   );
 }

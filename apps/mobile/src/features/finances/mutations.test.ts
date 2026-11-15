@@ -50,6 +50,16 @@ it("reads only exact amounts above zero", () => {
   expect(parseAmount("4.999")).toBeUndefined();
   expect(parseAmount("")).toBeUndefined();
 });
+it("never reads a comma decimal as a hundred times its value", () => {
+  // A comma is only thousands grouping; anything else is corrected, not guessed.
+  expect(parseAmount("12,50")).toBeUndefined();
+  expect(parseAmount("1,2")).toBeUndefined();
+  expect(parseAmount("1,25")).toBeUndefined();
+  expect(parseAmount(",50")).toBeUndefined();
+  expect(parseAmount("12,345,6")).toBeUndefined();
+  expect(parseAmount("1,250")).toBe(1250);
+  expect(parseAmount("12,345,678.9")).toBe(12345678.9);
+});
 it("uses the planning timezone's calendar date, not the device's or UTC's", () => {
   const lateEvening = new Date("2026-11-04T03:30:00Z");
   expect(localToday("America/New_York", lateEvening)).toBe("2026-11-03");

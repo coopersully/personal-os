@@ -110,7 +110,7 @@ export function TransactionActions({
       onPress: () =>
         Alert.alert(
           `Remove ${item.merchant}?`,
-          "This deletes the transaction you added. It cannot be undone.",
+          "This deletes the transaction from your records. It cannot be undone.",
           [
             { text: "Keep transaction", style: "cancel" },
             { text: "Remove", style: "destructive", onPress: () => void remove() },

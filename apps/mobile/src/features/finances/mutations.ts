@@ -43,9 +43,10 @@ export function trackingStopped(account: {
 
 /** An exact amount above zero with at most two decimals; `undefined` when the text is not one. */
 export function parseAmount(text: string): number | undefined {
-  const value = text.trim().replaceAll(",", "");
-  if (!/^\d+(\.\d{1,2})?$/.test(value)) return undefined;
-  const amount = Number(value);
+  const value = text.trim();
+  // A comma is only ever thousands grouping: "12,50" is a correction, never 1250.
+  if (!/^(\d+|\d{1,3}(,\d{3})+)(\.\d{1,2})?$/.test(value)) return undefined;
+  const amount = Number(value.replaceAll(",", ""));
   return amount > 0 ? amount : undefined;
 }
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import TodayHome from "../../app/(workspaces)/index";
@@ -560,6 +560,48 @@ it("keeps the other sources when Calendar or Mail fails and says which part is m
   expect(screen.getByText("Partial")).toBeVisible();
   expect(screen.getByRole("button", { name: /Standup/ })).toBeVisible();
   expect(screen.getByRole("button", { name: /Approve the fare/ })).toBeVisible();
+});
+it("names a failed calendar or mail-account read instead of an empty day or a clear inbox", () => {
+  const failedRead = { ...query(), isError: true };
+  h.data = { ...data(), failed: true, calendars: failedRead, mailAccounts: failedRead };
+  const view = render(<TodayHome />);
+  expect(screen.getByText("Calendar is unavailable. Tap Refresh to try again.")).toBeVisible();
+  expect(screen.getByText("Mail is unavailable. Tap Refresh to try again.")).toBeVisible();
+  expect(screen.queryByText("Nothing scheduled today.")).toBeNull();
+  expect(screen.queryByText("No mail needs you right now.")).toBeNull();
+
+  // Rows that did arrive stay on screen, marked as a partial read.
+  h.data = {
+    ...h.data,
+    events: query([event("now", "Standup", "2026-11-09T11:30:00Z", "2026-11-09T12:30:00Z")]),
+    mail: query([attention("travel", "Approve the fare")]),
+  };
+  view.rerender(<TodayHome />);
+  expect(screen.getByRole("button", { name: /Standup/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: /Approve the fare/ })).toBeVisible();
+  expect(screen.getByText("Partial")).toBeVisible();
+  expect(screen.getByText("Needs you · Partial")).toBeVisible();
+});
+it("opens only the latest conversation and none after the reader is closed", async () => {
+  const pending: Array<(thread: { subject: string }) => void> = [];
+  h.readMailThread.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+  h.data = {
+    ...data(),
+    mail: query([attention("travel", "Approve the fare"), attention("maya", "Reply to Maya")]),
+  };
+  render(<TodayHome />);
+  fireEvent.click(screen.getByRole("button", { name: /Approve the fare/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Reply to Maya/ }));
+  await act(async () => pending[1]?.({ subject: "Maya" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("Maya");
+  await act(async () => pending[0]?.({ subject: "Fare approval" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("Maya");
+
+  // Closing the reader also drops a read that is still on its way.
+  fireEvent.click(screen.getByRole("button", { name: /Approve the fare/ }));
+  fireEvent.click(screen.getByText("Close conversation"));
+  await act(async () => pending[2]?.({ subject: "Fare approval" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 it("tells an empty day and a clear inbox apart from Calendar and Mail that are not set up", () => {
   h.data = {

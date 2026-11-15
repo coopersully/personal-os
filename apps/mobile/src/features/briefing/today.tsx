@@ -167,6 +167,8 @@ export default function TodayHome() {
   const atmosphere = useTodaySky();
   const headerInset = useWorkspaceHeaderInset();
   const heroHeight = useRef(400);
+  // Counts conversation opens so a slower, superseded or closed read cannot open the reader.
+  const conversationRequest = useRef(0);
   const reportHero = useContext(WorkspaceHeroVisibility);
   useEffect(() => {
     reportHero.current(true);
@@ -333,6 +335,10 @@ export default function TodayHome() {
         });
   const mailItems = mailAttention(data.mail.data ?? [], now);
   const noMailAccounts = data.mailAccounts.data?.length === 0;
+  // Without the calendar or account list the screen cannot tell an empty day or a clear inbox
+  // from a workspace that is not set up, so the section says the read failed instead.
+  const calendarUnknown = data.events.isError || (data.calendars.isError && !calendars);
+  const mailUnknown = data.mail.isError || (data.mailAccounts.isError && !data.mailAccounts.data);
   const mail: Row[] =
     noMailAccounts && !mailItems.length
       ? [
@@ -362,10 +368,13 @@ export default function TodayHome() {
             workspace: "mail",
             href: "/mail",
             onPress: threadId
-              ? () =>
+              ? () => {
+                  conversationRequest.current += 1;
+                  const request = conversationRequest.current;
                   void data.readMailThread(threadId).then((thread) => {
-                    if (thread) setConversation(thread);
-                  })
+                    if (thread && request === conversationRequest.current) setConversation(thread);
+                  });
+                }
               : undefined,
           };
         });
@@ -561,7 +570,7 @@ export default function TodayHome() {
           <BriefSection
             title="Today’s events"
             caption={
-              data.events.isError
+              data.events.isError || data.calendars.isError
                 ? "Partial"
                 : events.length > 3 && schedule.length === 3
                   ? `3 of ${events.length}`
@@ -569,7 +578,7 @@ export default function TodayHome() {
             }
             rows={data.events.data || noCalendars ? schedule : []}
             empty={
-              data.events.isError
+              calendarUnknown
                 ? "Calendar is unavailable. Tap Refresh to try again."
                 : data.events.isPending
                   ? "Loading today’s events…"
@@ -584,7 +593,7 @@ export default function TodayHome() {
           <BriefSection
             title="Mail"
             caption={
-              data.mail.isError
+              data.mail.isError || data.mailAccounts.isError
                 ? "Needs you · Partial"
                 : mailItems.length > 3
                   ? `Needs you · 3 of ${mailItems.length}`
@@ -592,7 +601,7 @@ export default function TodayHome() {
             }
             rows={data.mail.data ? mail : []}
             empty={
-              data.mail.isError
+              mailUnknown
                 ? "Mail is unavailable. Tap Refresh to try again."
                 : data.mail.isPending
                   ? "Loading mail that needs you…"
@@ -628,7 +637,15 @@ export default function TodayHome() {
           <View style={{ height: spacing.md }} />
         </View>
       </View>
-      {conversation && <MailReader thread={conversation} close={() => setConversation(null)} />}
+      {conversation && (
+        <MailReader
+          thread={conversation}
+          close={() => {
+            conversationRequest.current += 1;
+            setConversation(null);
+          }}
+        />
+      )}
     </Screen>
   );
 }

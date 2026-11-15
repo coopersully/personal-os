@@ -1382,3 +1382,20 @@ shortcut range is one chip.
 - This is a local candidate covered by focused tests. The simulator check on To-do and All is
   outstanding, so the List and Project pickers opening over the filter sheet have not been seen
   on a device or simulator. It is not a production or TestFlight release.
+
+## 2026-11-15 — Native task row details and archived search (local candidate)
+
+COO-219 — iPhone task rows show reserved time and the owning List / Project, and honor the saved
+row-detail preference for estimate, notes and tags. A task search honors "Include archived in
+search".
+
+- Row lines: title, urgency scan line (unchanged), a context line (reserved time,
+  estimate), the List / Project on its own line, up to two lines of notes, then tag chips (five, then a count). Absent values render
+  nothing. A row does not repeat a container its screen is scoped or filtered to.
+- Search: with the preference on, a search without a fixed or chosen status sends `status: "all"`
+  and, outside a list or project, a second read with `status: "archived"` whose matches are
+  listed last under their own heading. A failed search raises one Sonner error; a failed
+  archived read beside other matches offers its own retry. Cancelled tasks say Cancelled. To-do (fixed open status), History and Trash are unchanged.
+- The preference notes no longer say the row-detail toggles configure only the web app.
+- No API, schema or shared-component change.
+- Verified by presentation and screen tests only. Not checked on a simulator or device.

@@ -346,7 +346,8 @@ complete until the goal is completed. Mark complete and Remove goal each keep a 
 confirmation that names the goal; Pause and Resume act at once. A removed goal leaves the list and
 its page closes.
 
-Progress is the person's own statement, never an inference. A goal shows an amount and a
+Progress is a recorded statement, never an inference: the person's own, or one their agent
+recorded for them, which the goal page labels as such. A goal shows an amount and a
 percentage only when the server returns a statement recorded for exactly the goal version on
 screen, owned by the signed-in person, matching the recorded amount and not dated in the future;
 the app applies the same rule as the domain's planning-evidence check, whose currency lookup is
@@ -358,7 +359,8 @@ target reads in the currency of its latest progress statement, even one that no 
 or the product's USD default when it has none.
 
 The add and edit form holds Name, Target, Deadline and Priority and a floating Save. Name and
-Target are required, with Required as their placeholder, and the target is at most 100,000,000;
+Target are required, with Required as their placeholder. The target is at most 21,474,836.47,
+the largest the stored record holds, although the API accepts more;
 an empty Deadline reads as not set. Confirm progress is its own form: Amount (zero is valid), Currency and As of, which
 defaults to today in the account planning timezone and cannot be later. Currency starts from the
 goal's last statement. Each form names its required fields. An invalid Target, Amount or Currency

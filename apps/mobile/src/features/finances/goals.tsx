@@ -236,7 +236,7 @@ export function FinanceGoalScreen() {
               <Metric
                 label="Confirmed progress"
                 value={formatMoney(progress.amount, progress.currency)}
-                hint={`${progress.percent == null ? "" : `${progress.percent}% of ${goalTarget(goal, progress)} · `}Your statement as of ${goalDate(progress.asOf)}`}
+                hint={`${progress.percent == null ? "" : `${progress.percent}% of ${goalTarget(goal, progress)} · `}${progress.byAgent ? "Recorded by your agent" : "Your statement"} as of ${goalDate(progress.asOf)}`}
               />
             ) : (
               <Card>

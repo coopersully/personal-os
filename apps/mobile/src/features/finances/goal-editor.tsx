@@ -225,7 +225,7 @@ function GoalForm({ record, known }: { record: FinanceGoal | null; known: string
               onChangeText={edit(setTarget)}
               editable={!pending}
               correction={
-                invalidTarget ? "Enter an amount such as 5000.00, up to 100,000,000." : undefined
+                invalidTarget ? "Enter an amount such as 5000.00, up to 21,474,836.47." : undefined
               }
               keyboardType="decimal-pad"
               placeholder="Required"

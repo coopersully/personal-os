@@ -249,6 +249,7 @@ it("shows progress only for a statement that matches this version of the goal", 
     currency: "USD",
     asOf: "2026-01-05",
     percent: 25,
+    byAgent: false,
   });
   const not = (change: object, owner: string | undefined = "owner-a", today = "2026-11-15") =>
     expect(confirmedProgress({ ...reserve, ...change } as never, owner, today)).toBeNull();
@@ -275,7 +276,7 @@ it("shows progress only for a statement that matches this version of the goal", 
       "owner-a",
       "2026-11-15",
     ),
-  ).toMatchObject({ percent: null });
+  ).toMatchObject({ percent: null, byAgent: false });
 });
 
 it("reads exact amounts and rejects anything else", () => {
@@ -285,8 +286,8 @@ it("reads exact amounts and rejects anything else", () => {
   for (const text of ["", "12,50", "1.234", "-5", "abc", "21474836.48"])
     expect(parseProgressCents(text)).toBeUndefined();
   expect(parseTarget("0")).toBe(0);
-  expect(parseTarget("100,000,000")).toBe(100_000_000);
-  for (const text of ["", "100000000.01", "5.999", "-1", "1,00"])
+  expect(parseTarget("21,474,836.47")).toBe(21_474_836.47);
+  for (const text of ["", "21474836.48", "100000000", "5.999", "-1", "1,00"])
     expect(parseTarget(text)).toBeUndefined();
 });
 
@@ -300,6 +301,7 @@ it("summarizes a goal without inventing progress", () => {
       currency: "EUR",
       asOf: "2026-01-05",
       percent: 25,
+      byAgent: false,
     }),
   ).toBe(
     `${formatMoney(2500, "EUR")} confirmed of ${formatMoney(10_000, "EUR")} · by ${goalDate("2027-06-30")}`,
@@ -382,6 +384,28 @@ it("shows a goal's confirmed progress, target, deadline, priority and status", a
     pathname: "/finance-goal-progress",
     params: { id: "goal-1" },
   });
+});
+
+it("does not call a statement an agent recorded the person's own", async () => {
+  h.params = { id: "goal-1" };
+  h.api.listFinanceGoals.mockResolvedValue(
+    goals([
+      {
+        ...reserve,
+        planningEvidence: {
+          ...evidence,
+          provenance: "agent_self_approval",
+          actor: { type: "agent", userId: "owner-a", id: "agent-1" },
+        },
+      },
+    ]),
+  );
+  mount(<FinanceGoalScreen />);
+  await screen.findByText("Confirmed progress");
+  expect(
+    screen.getByText(`25% of $10,000.00 · Recorded by your agent as of ${goalDate("2026-01-05")}`),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Your statement/)).toBeNull();
 });
 
 it("says progress is not confirmed, and offers only the actions a status allows", async () => {
@@ -677,10 +701,10 @@ it("adds a goal only once its fields are valid", async () => {
   expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   expect(save()).toHaveProperty("disabled", true);
   type("Target", "12,50");
-  expect(screen.getByText("Enter an amount such as 5000.00, up to 100,000,000.")).toBeTruthy();
+  expect(screen.getByText("Enter an amount such as 5000.00, up to 21,474,836.47.")).toBeTruthy();
   expect(save()).toHaveProperty("disabled", true);
   type("Target", "40,000.50");
-  expect(screen.queryByText("Enter an amount such as 5000.00, up to 100,000,000.")).toBeNull();
+  expect(screen.queryByText("Enter an amount such as 5000.00, up to 21,474,836.47.")).toBeNull();
   type("Deadline (ISO date/time)", "2028-03-01");
   const rows = screen.getByTestId("padded-surface-rows");
   expect(rows.contains(screen.getByLabelText("Name"))).toBe(true);

@@ -7,6 +7,8 @@ export interface ConfirmedGoalProgress {
   asOf: string;
   /** Whole percent of the target; `null` when the target is zero. */
   percent: number | null;
+  /** Recorded by an agent acting for the person, not typed by the person. */
+  byAgent: boolean;
 }
 
 /**
@@ -34,6 +36,7 @@ export function confirmedProgress(
     currency: evidence.currencyCode,
     asOf: evidence.asOf,
     percent: goal.targetAmount > 0 ? Math.round((amount / goal.targetAmount) * 100) : null,
+    byAgent: evidence.provenance === "agent_self_approval",
   };
 }
 
@@ -91,10 +94,14 @@ export function parseProgressCents(text: string): number | undefined {
   return cents <= 2_147_483_647 ? cents : undefined;
 }
 
-/** A goal target: zero to 100,000,000 with at most two decimals; `undefined` when it is not one. */
+/**
+ * A goal target with at most two decimals; `undefined` when it is not one. The API accepts up
+ * to 100,000,000, but the stored cents are a 32-bit integer, so a larger target could never be
+ * saved and would read as an unconfirmed save every time.
+ */
 export function parseTarget(text: string): number | undefined {
   const value = text.trim();
   if (!/^(\d+|\d{1,3}(,\d{3})+)(\.\d{1,2})?$/.test(value)) return undefined;
   const amount = Number(value.replaceAll(",", ""));
-  return amount <= 100_000_000 ? amount : undefined;
+  return amount <= 21_474_836.47 ? amount : undefined;
 }

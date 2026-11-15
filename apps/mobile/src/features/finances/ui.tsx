@@ -32,7 +32,7 @@ export function FinanceScreen({
   useFinanceRefresh(refreshKeys[title] ?? noKeys);
   const t = useTheme();
   return (
-    <Screen chrome scroll={scroll}>
+    <Screen chrome scroll={scroll} tabBar>
       <View
         style={{ gap: spacing.lg, paddingTop: 8, ...(!scroll ? { flex: 1, minHeight: 0 } : {}) }}
       >

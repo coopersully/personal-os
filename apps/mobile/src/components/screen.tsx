@@ -20,6 +20,7 @@ export function Screen({
   edgeToEdge = false,
   backgroundColor,
   bounces = true,
+  tabBar = false,
   onScroll,
   onRefresh,
 }: PropsWithChildren<{
@@ -28,6 +29,8 @@ export function Screen({
   edgeToEdge?: boolean;
   backgroundColor?: string;
   bounces?: boolean;
+  /** The page sits inside native tabs, whose floating bar covers the bottom of the scroll area. */
+  tabBar?: boolean;
   onScroll?: ScrollViewProps["onScroll"];
   onRefresh?: () => Promise<unknown>;
 }>) {
@@ -76,7 +79,11 @@ export function Screen({
                   edgeToEdge && { paddingHorizontal: 0, maxWidth: undefined, flexGrow: 1 },
                   {
                     paddingTop: edgeToEdge ? 0 : headerInset + (chrome ? 4 : 16),
-                    paddingBottom: Math.max(insets.bottom, 20),
+                    // Tabs no longer add UIKit insets, so the page clears the floating bar itself.
+                    paddingBottom:
+                      tabBar && Platform.OS === "ios"
+                        ? tabBarClearance
+                        : Math.max(insets.bottom, 20),
                   },
                 ]}
               >
@@ -98,6 +105,8 @@ export function Screen({
     </View>
   );
 }
+/** Bottom space that keeps a page's last row above the floating native tab bar; lists use the same. */
+export const tabBarClearance = 100;
 const styles = StyleSheet.create({
   content: { width: "100%", maxWidth: 620, alignSelf: "center", paddingHorizontal: 20 },
 });

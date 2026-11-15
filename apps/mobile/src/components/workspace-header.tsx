@@ -74,6 +74,8 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   const geometry = useRef({ x: 0, y: 0, width: 0, rows: [] as { y: number; height: number }[] });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holding = useRef(false);
+  // The touch that ended the last icon gesture; the icon's own press for that touch is ignored.
+  const releasedTouch = useRef<number | null>(null);
   const candidate = useRef<Workspace | null>(null);
   const clearTimer = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -128,6 +130,8 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
   const pan = useStablePan({
     onStartShouldSetPanResponderCapture: () => true,
     onPanResponderGrant: () => {
+      // A second grant must not orphan the first hold timer, which would reopen the menu later.
+      clearTimer();
       setAccountOpen(false);
       holding.current = false;
       candidate.current = null;
@@ -151,6 +155,7 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
     },
     onPanResponderRelease: (event, gesture) => {
       clearTimer();
+      releasedTouch.current = event.nativeEvent.timestamp ?? null;
       if (holding.current) {
         pickAt(gesture.moveX || event.nativeEvent.pageX, gesture.moveY || event.nativeEvent.pageY);
         const selected = candidate.current;
@@ -215,7 +220,10 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
               accessibilityLabel={`Switch workspace, ${isSettings ? "settings" : current.label}`}
               accessibilityHint="Tap for workspaces, or hold and slide to a workspace."
               accessibilityState={{ expanded: open }}
-              onPress={() => {
+              onPress={(event) => {
+                // The gesture above already handled this touch; toggling again would reopen the menu.
+                const touch = event?.nativeEvent?.timestamp;
+                if (touch != null && touch === releasedTouch.current) return;
                 setAccountOpen(false);
                 setOpen((value) => !value);
                 setQuery("");

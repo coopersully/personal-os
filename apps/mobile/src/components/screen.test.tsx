@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { Screen } from "./screen";
+import { Screen, tabBarClearance } from "./screen";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -65,6 +65,28 @@ it("keeps hero bounds fixed and delegates native iOS horizontal motion to native
   expect(h.scroll.contentContainerStyle).toEqual(
     expect.arrayContaining([expect.objectContaining({ paddingTop: 0, paddingBottom: 34 })]),
   );
+});
+it("clears the floating native tab bar on iPhone tab pages and nowhere else", () => {
+  const bottom = () =>
+    (h.scroll.contentContainerStyle as { paddingBottom?: number }[]).at(-1)?.paddingBottom;
+  h.platform.OS = "ios";
+  const view = render(
+    <Screen chrome tabBar>
+      Overview
+    </Screen>,
+  );
+  expect(bottom()).toBe(tabBarClearance);
+  expect(tabBarClearance).toBeGreaterThan(34 + 60);
+  view.rerender(<Screen chrome>Calendar</Screen>);
+  expect(bottom()).toBe(34);
+  // Web keeps its dock outside the page, so a tab page needs no extra room there.
+  h.platform.OS = "web";
+  view.rerender(
+    <Screen chrome tabBar>
+      Overview
+    </Screen>,
+  );
+  expect(bottom()).toBe(34);
 });
 it("uses safe-area adjustment without shared chrome and preserves compact non-scrolling forms", () => {
   h.inset = 0;

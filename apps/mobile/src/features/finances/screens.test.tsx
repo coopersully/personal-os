@@ -235,7 +235,9 @@ vi.mock("react-native", () => {
   };
 });
 vi.mock("../../components/screen", () => ({
-  Screen: ({ children }: PropsWithChildren) => <main>{children}</main>,
+  Screen: ({ children, tabBar }: PropsWithChildren<{ tabBar?: boolean }>) => (
+    <main data-tab-bar={String(!!tabBar)}>{children}</main>
+  ),
 }));
 vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <span data-icon={name} />,
@@ -360,6 +362,8 @@ afterEach(cleanup);
 it("shows real amounts and source qualifications without a duplicate review read", async () => {
   mount(<FinanceOverviewScreen />);
   expect(await screen.findByText("$42.00")).toBeTruthy();
+  // Finances pages sit inside native tabs, so they ask the shared screen to clear the tab bar.
+  expect(screen.getByRole("main").getAttribute("data-tab-bar")).toBe("true");
   expect(screen.getByText("Partial total")).toBeTruthy();
   expect(screen.queryByText(/Your share of spending/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "About spent this month" }));

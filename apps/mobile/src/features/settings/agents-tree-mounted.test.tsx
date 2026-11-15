@@ -61,24 +61,34 @@ vi.mock("react-native", () => ({
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Linking: { openURL: h.open },
 }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../theme", () => ({ useTheme: () => ({}), spacing: {} }));
 vi.mock("../../components/forms/form-save", () => ({ FormSave: () => null }));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
+type Row = { label: string; value?: string; disabled?: boolean; onPress?: () => void };
 vi.mock("./settings-row", () => ({
-  SettingsRow: ({ label, onPress }: { label: string; onPress: () => void }) => (
+  SettingsRow: ({ label, onPress }: Row) => (
     <button type="button" onClick={onPress}>
       {label}
     </button>
+  ),
+  SettingsActionRow: ({ label, disabled, onPress }: Row) => {
+    if (onPress) h.callbacks.set(label, onPress);
+    return (
+      <button type="button" disabled={disabled} onClick={onPress}>
+        {label}
+      </button>
+    );
+  },
+  SettingsDetailRow: ({ label, value }: Row) => (
+    <span>
+      {label}: {value}
+    </span>
   ),
 }));
 vi.mock("sonner-native", () => ({
   toast: { error: h.error, success: h.success, loading: h.loading, dismiss: vi.fn() },
 }));
 vi.mock("../tasks/ui", () => ({
-  FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,
-  Section: ({ children, title }: PropsWithChildren<{ title?: string }>) => (
-    <section aria-label={title}>{children}</section>
-  ),
   State: ({ loading, retry, empty }: { loading?: boolean; retry?: () => void; empty?: string }) =>
     loading ? (
       <span>Loading</span>
@@ -89,31 +99,6 @@ vi.mock("../tasks/ui", () => ({
     ) : (
       <span>{empty}</span>
     ),
-  Field: ({
-    label,
-    value,
-    onChangeText,
-  }: {
-    label: string;
-    value: string;
-    onChangeText: (value: string) => void;
-  }) => <input aria-label={label} value={value} onChange={(e) => onChangeText(e.target.value)} />,
-  Action: ({
-    label,
-    onPress,
-    disabled,
-  }: {
-    label: string;
-    onPress: () => void;
-    disabled?: boolean;
-  }) => {
-    h.callbacks.set(label, onPress);
-    return (
-      <button type="button" disabled={disabled} onClick={onPress}>
-        {label}
-      </button>
-    );
-  },
   Choice: ({
     label,
     value,
@@ -133,6 +118,34 @@ vi.mock("../tasks/ui", () => ({
       ))}
     </select>
   ),
+  confirm: h.confirm,
+}));
+vi.mock("../../components/forms/form-rows", () => ({
+  formBlock: {},
+  Section: ({ children, title }: PropsWithChildren<{ title?: string }>) => (
+    <section aria-label={title}>{children}</section>
+  ),
+  SectionNote: ({ children }: PropsWithChildren) => <p>{children}</p>,
+  SectionFootnote: ({ children }: PropsWithChildren) => <p>{children}</p>,
+  FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,
+  Field: ({
+    label,
+    value,
+    onChangeText,
+    editable,
+  }: {
+    label: string;
+    value: string;
+    onChangeText: (value: string) => void;
+    editable?: boolean;
+  }) => (
+    <input
+      aria-label={label}
+      value={value}
+      disabled={editable === false}
+      onChange={(event) => onChangeText(event.target.value)}
+    />
+  ),
   ToggleRow: ({
     label,
     value,
@@ -141,18 +154,17 @@ vi.mock("../tasks/ui", () => ({
   }: {
     label: string;
     value: boolean;
-    onChange: (value: boolean) => void;
+    onChange: (next: boolean) => void;
     disabled?: boolean;
   }) => (
     <input
-      type="checkbox"
       aria-label={label}
+      type="checkbox"
       checked={value}
       disabled={disabled}
       onChange={() => onChange(!value)}
     />
   ),
-  confirm: h.confirm,
 }));
 beforeEach(() => {
   vi.clearAllMocks();
@@ -219,7 +231,7 @@ it("keeps setup prompts and workspace instructions on setup only and retries fai
   await screen.findByText("Install fixture skill");
   await screen.findByText("Retry");
   fireEvent.click(screen.getByText("Retry"));
-  await screen.findByText(/0 of 0 steps/);
+  await screen.findByText("Steps done: 0 of 0");
   expect(h.api.getPersonalOsSetup).toHaveBeenCalledTimes(2);
   expect(h.api.listAccessTokens).not.toHaveBeenCalled();
 });
@@ -239,7 +251,7 @@ it("retries the policy API through its single action feedback owner", async () =
   await screen.findByText("Retry");
   expect(h.error).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByText("Retry"));
-  await screen.findByLabelText("Allow eligible actions without review");
+  await screen.findByLabelText("Apply eligible work without waiting in Review");
   expect(h.api.listAccessTokens).not.toHaveBeenCalled();
   expect(h.success).toHaveBeenCalledWith("Execution policy refreshed", { id: "toast" });
 });
@@ -287,7 +299,7 @@ it("suppresses prior-owner directory results after a native child survives sessi
 
 it("announces explicit cached policy refresh once and preserves policy on denied reads", async () => {
   show(<AgentPolicyScreen />);
-  await screen.findByLabelText("Allow eligible actions without review");
+  await screen.findByLabelText("Apply eligible work without waiting in Review");
   fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" }));
   await waitFor(() =>
     expect(h.success).toHaveBeenCalledWith("Execution policy refreshed", { id: "toast" }),
@@ -305,7 +317,7 @@ it("announces explicit cached policy refresh once and preserves policy on denied
   expect(h.error).toHaveBeenCalledOnce();
   expect(h.loading).toHaveBeenCalledTimes(2);
   expect(h.success).toHaveBeenCalledOnce();
-  expect(screen.getByLabelText("Allow eligible actions without review")).not.toBeChecked();
+  expect(screen.getByLabelText("Apply eligible work without waiting in Review")).not.toBeChecked();
   expect(
     screen.queryByText(
       "Couldn’t confirm the result. Check your connection and refresh before retrying.",

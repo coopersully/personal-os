@@ -45,13 +45,22 @@ vi.mock("../../theme", () => ({
   spacing: { xs: 4, md: 12, lg: 16 },
   workspaceColor: () => "#123456",
 }));
-vi.mock("../tasks/ui", () => ({
+vi.mock("../tasks/ui", () => ({ Choice: () => null, State: () => null, confirm: vi.fn() }));
+vi.mock("../../components/forms/form-rows", () => ({
+  formBlock: {},
   Section: ({ children }: PropsWithChildren) => <div>{children}</div>,
+  SectionNote: () => null,
+  SectionFootnote: () => null,
   FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,
   Field: () => null,
-  Choice: () => null,
-  State: () => null,
-  Action: ({
+  ToggleRow: ({ label, value }: { label: string; value: boolean }) => (
+    <input type="checkbox" aria-label={label} checked={value} readOnly />
+  ),
+}));
+vi.mock("./settings-row", () => ({
+  SettingsRow: () => null,
+  SettingsDetailRow: () => null,
+  SettingsActionRow: ({
     label,
     onPress,
     disabled,
@@ -64,10 +73,6 @@ vi.mock("../tasks/ui", () => ({
       {label}
     </button>
   ),
-  ToggleRow: ({ label, value }: { label: string; value: boolean }) => (
-    <input type="checkbox" aria-label={label} checked={value} readOnly />
-  ),
-  confirm: vi.fn(),
 }));
 afterEach(cleanup);
 beforeEach(() => {
@@ -96,7 +101,7 @@ it("uses exactly one loading-to-error toast for a cached policy refresh with the
     .mockResolvedValueOnce({ version: 9, reviewBypassEnabled: false })
     .mockRejectedValueOnce(new Error("Offline"));
   show();
-  await screen.findByLabelText("Allow eligible actions without review");
+  await screen.findByLabelText("Apply eligible work without waiting in Review");
   await act(async () =>
     fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" })),
   );
@@ -104,7 +109,7 @@ it("uses exactly one loading-to-error toast for a cached policy refresh with the
   expect(h.loading).toHaveBeenCalledOnce();
   expect(h.error).toHaveBeenCalledWith(expect.any(String), { id: "policy-toast" });
   expect(h.success).not.toHaveBeenCalled();
-  expect(screen.getByLabelText("Allow eligible actions without review")).not.toBeChecked();
+  expect(screen.getByLabelText("Apply eligible work without waiting in Review")).not.toBeChecked();
   expect(screen.queryByText(h.error.mock.calls[0]?.[0])).not.toBeInTheDocument();
 });
 it("keeps initial policy read failures visible through one local Sonner without the global duplicate", async () => {
@@ -127,7 +132,7 @@ it("updates one loading toast on a successful cached policy refresh", async () =
     .mockResolvedValueOnce({ version: 9, reviewBypassEnabled: false })
     .mockResolvedValueOnce({ version: 10, reviewBypassEnabled: true });
   show();
-  await screen.findByLabelText("Allow eligible actions without review");
+  await screen.findByLabelText("Apply eligible work without waiting in Review");
   await act(async () =>
     fireEvent.click(screen.getByRole("button", { name: "Refresh execution policy" })),
   );
@@ -136,6 +141,6 @@ it("updates one loading toast on a successful cached policy refresh", async () =
   );
   expect(h.loading).toHaveBeenCalledOnce();
   expect(h.error).not.toHaveBeenCalled();
-  expect(screen.getByLabelText("Allow eligible actions without review")).toBeChecked();
+  expect(screen.getByLabelText("Apply eligible work without waiting in Review")).toBeChecked();
   expect(screen.queryByText("Execution policy refreshed")).not.toBeInTheDocument();
 });

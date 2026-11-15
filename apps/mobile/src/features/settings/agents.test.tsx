@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { scopeLabels } from "./agent-copy";
 import {
   AgentAccessScreen,
   AgentPolicyScreen,
@@ -56,14 +57,25 @@ vi.mock("../auth/context", () => ({
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
+type Row = { label: string; value?: string; disabled?: boolean; onPress?: () => void };
 vi.mock("./settings-row", () => ({
-  SettingsRow: ({ label, onPress }: { label: string; onPress: () => void }) => (
+  SettingsRow: ({ label, onPress }: Row) => (
     <button type="button" onClick={onPress}>
       {label}
     </button>
   ),
+  SettingsActionRow: ({ label, disabled, onPress }: Row) => (
+    <button type="button" disabled={disabled} onClick={onPress}>
+      {label}
+    </button>
+  ),
+  SettingsDetailRow: ({ label, value }: Row) => (
+    <span>
+      {label}: {value}
+    </span>
+  ),
 }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../theme", () => ({ useTheme: () => ({}), spacing: {} }));
 vi.mock("./data", async () => {
   const { useState } = await import("react");
   return {
@@ -112,10 +124,6 @@ vi.mock("./data", async () => {
   };
 });
 vi.mock("../tasks/ui", () => ({
-  Section: ({ children, title }: PropsWithChildren<{ title?: string }>) => (
-    <section aria-label={title}>{children}</section>
-  ),
-  FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,
   State: ({ loading, retry, empty }: { loading?: boolean; retry?: () => void; empty?: string }) =>
     loading ? (
       <span role="progressbar" />
@@ -126,24 +134,6 @@ vi.mock("../tasks/ui", () => ({
     ) : (
       <span>{empty}</span>
     ),
-  Field: ({
-    label,
-    value,
-    onChangeText,
-    editable,
-  }: {
-    label: string;
-    value: string;
-    onChangeText: (value: string) => void;
-    editable: boolean;
-  }) => (
-    <input
-      aria-label={label}
-      value={value}
-      disabled={!editable}
-      onChange={(event) => onChangeText(event.target.value)}
-    />
-  ),
   Choice: ({
     label,
     value,
@@ -171,29 +161,51 @@ vi.mock("../tasks/ui", () => ({
     </select>
   ),
   confirm: h.confirm,
-  Action: ({
+}));
+vi.mock("../../components/forms/form-rows", () => ({
+  formBlock: {},
+  Section: ({ children, title }: PropsWithChildren<{ title?: string }>) => (
+    <section aria-label={title}>{children}</section>
+  ),
+  SectionNote: ({ children }: PropsWithChildren) => <p>{children}</p>,
+  SectionFootnote: ({ children }: PropsWithChildren) => <p>{children}</p>,
+  FormBody: ({ children }: PropsWithChildren) => <div>{children}</div>,
+  Field: ({
     label,
-    onPress,
-    disabled,
+    value,
+    onChangeText,
+    editable,
   }: {
     label: string;
-    onPress: () => void;
-    disabled?: boolean;
+    value: string;
+    onChangeText: (value: string) => void;
+    editable?: boolean;
   }) => (
-    <button type="button" disabled={disabled} onClick={onPress}>
-      {label}
-    </button>
+    <input
+      aria-label={label}
+      value={value}
+      disabled={editable === false}
+      onChange={(event) => onChangeText(event.target.value)}
+    />
   ),
   ToggleRow: ({
     label,
     value,
     onChange,
+    disabled,
   }: {
     label: string;
     value: boolean;
     onChange: (next: boolean) => void;
+    disabled?: boolean;
   }) => (
-    <input aria-label={label} type="checkbox" checked={value} onChange={() => onChange(!value)} />
+    <input
+      aria-label={label}
+      type="checkbox"
+      checked={value}
+      disabled={disabled}
+      onChange={() => onChange(!value)}
+    />
   ),
 }));
 afterEach(cleanup);
@@ -223,7 +235,7 @@ beforeEach(() => {
 });
 it("requires confirmation before policy broadening and sends the reviewed version", async () => {
   render(<AgentPolicyScreen />);
-  fireEvent.click(screen.getByLabelText("Allow eligible actions without review"));
+  fireEvent.click(screen.getByLabelText("Apply eligible work without waiting in Review"));
   expect(h.updatePolicy).not.toHaveBeenCalled();
   expect(h.run).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenCalledWith(
@@ -306,13 +318,13 @@ function tokenDraft() {
   h.resources["agent-directory"] = { accounts: [account], connections: [] };
   render(<AgentAccessScreen />);
   fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "Limited helper" } });
-  fireEvent.click(screen.getByLabelText("tasks:read"));
+  fireEvent.click(screen.getByLabelText("Read tasks"));
 }
 it("retains token draft across access rerenders and guards native dismissal", () => {
   tokenDraft();
   expect(h.dirtyGuard).toHaveBeenLastCalledWith(true, false);
   expect(screen.getByLabelText("Token name")).toHaveValue("Limited helper");
-  expect(screen.getByLabelText("tasks:read")).toBeChecked();
+  expect(screen.getByLabelText("Read tasks")).toBeChecked();
 });
 it("retains the one-time secret until explicit acknowledgement and guards native dismissal", async () => {
   h.createToken.mockResolvedValue({ token: "synthetic-token" });
@@ -371,7 +383,7 @@ it("edits an agent identity explicitly and refreshes authoritative directory sta
   const update = vi.fn().mockResolvedValue({});
   h.api = { ...h.api, updateAgentAccount: update };
   render(<ConnectedAgentsScreen />);
-  fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
+  fireEvent.click(screen.getByRole("button", { name: "Helper" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Updated helper" } });
   fireEvent.change(screen.getByLabelText("Account label"), { target: { value: "Work account" } });
   fireEvent.change(screen.getByLabelText("Platform"), { target: { value: "claude" } });
@@ -393,7 +405,7 @@ it("retains rejected identity edits and confirms local cancellation before retur
   const update = vi.fn().mockRejectedValue(new Error("Denied"));
   h.api = { ...h.api, updateAgentAccount: update };
   render(<ConnectedAgentsScreen />);
-  fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
+  fireEvent.click(screen.getByRole("button", { name: "Helper" }));
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft helper" } });
   fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() =>
@@ -428,8 +440,8 @@ it("requires confirmation to link or unlink existing connections while displayin
   const link = vi.fn().mockResolvedValue({});
   h.api = { ...h.api, linkAgentAccountConnection: link };
   const { rerender } = render(<ConnectedAgentsScreen />);
-  expect(screen.getByText("Granted scopes: tasks:read")).toBeVisible();
-  fireEvent.change(screen.getByLabelText("Agent identity"), { target: { value: "agent" } });
+  expect(screen.getByText("Tasks: read")).toBeVisible();
+  fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "agent" } });
   expect(link).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenLastCalledWith(
     "Change connection identity?",
@@ -452,10 +464,10 @@ it("requires confirmation to link or unlink existing connections while displayin
     ],
   };
   rerender(<ConnectedAgentsScreen />);
-  fireEvent.change(screen.getByLabelText("Agent identity"), { target: { value: "none" } });
+  fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "none" } });
   await approve();
   expect(link).toHaveBeenLastCalledWith("connection", { agentAccountId: null });
-  expect(screen.getByText("Granted scopes: none")).toBeVisible();
+  expect(screen.getByText("None")).toBeVisible();
 });
 it("retains a rejected scope grant draft and validates dependent scopes before transport", async () => {
   h.createToken.mockRejectedValue(new Error("Grant rejected"));
@@ -463,15 +475,15 @@ it("retains a rejected scope grant draft and validates dependent scopes before t
   fireEvent.click(screen.getByRole("button", { name: "Create token" }));
   await approve();
   expect(screen.getByLabelText("Token name")).toHaveValue("Limited helper");
-  expect(screen.getByLabelText("tasks:read")).toBeChecked();
+  expect(screen.getByLabelText("Read tasks")).toBeChecked();
   expect(h.error).toHaveBeenCalledWith(expect.objectContaining({ message: "Grant rejected" }));
   expect(screen.queryByText("New access token")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText("tasks:read"));
-  fireEvent.click(screen.getByLabelText("texting:write"));
+  fireEvent.click(screen.getByLabelText("Read tasks"));
+  fireEvent.click(screen.getByLabelText("Send text messages"));
   fireEvent.click(screen.getByRole("button", { name: "Create token" }));
   await approve();
   expect(h.createToken).toHaveBeenCalledOnce();
-  expect(screen.getByLabelText("texting:write")).toBeChecked();
+  expect(screen.getByLabelText("Send text messages")).toBeChecked();
 });
 it("revokes named token and OAuth grants through confirmed endpoints without exposing a stored secret", async () => {
   h.resources["agent-tokens"] = [
@@ -547,11 +559,13 @@ it("shows actual setup readiness and changes workspace instructions without chan
   h.resources["agent-setup-tasks"] = setup("in_progress");
   h.resources["agent-setup-mail"] = setup("blocked");
   render(<AgentSetupScreen />);
-  expect(screen.getByText(/Approved guidance version 3/)).toBeVisible();
+  expect(screen.getByText("Approved guidance: Version 3")).toBeVisible();
   expect(screen.getByText("Inspect current scopes")).toBeVisible();
   fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "mail" } });
-  expect(screen.getByText(/Agent access: no read.*write/)).toBeVisible();
-  expect(screen.getByText(/blocked.*1 of 3/)).toBeVisible();
+  expect(screen.getByText("Agent can read: No")).toBeVisible();
+  expect(screen.getByText("Agent can make changes: Yes")).toBeVisible();
+  expect(screen.getByText("Status: Blocked")).toBeVisible();
+  expect(screen.getByText("Steps done: 1 of 3")).toBeVisible();
   expect(h.updatePolicy).not.toHaveBeenCalled();
 });
 it("retains earlier work pages across a later read failure and only hands confirmed reviews to the authoritative web origin", async () => {
@@ -594,7 +608,7 @@ it("retains earlier work pages across a later read failure and only hands confir
   });
   h.openURL.mockResolvedValue(undefined);
   render(<AgentReviewsScreen />);
-  expect(screen.getByText(/Could not load: mail/)).toBeVisible();
+  expect(screen.getByText(/Could not load Mail\./)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Load more agent work" }));
   expect(screen.getByText("First summary")).toBeVisible();
   await act(async () =>
@@ -641,14 +655,15 @@ it("matches web permission presets, changes only draft scopes, and keeps custom 
     fireEvent.change(screen.getByLabelText("Permission preset"), {
       target: { value: preset.name },
     });
-    for (const scope of preset.scopes) expect(screen.getByLabelText(scope)).toBeChecked();
+    for (const scope of preset.scopes)
+      expect(screen.getByLabelText(scopeLabels[scope])).toBeChecked();
     expect(h.createToken).not.toHaveBeenCalled();
   }
   fireEvent.change(screen.getByLabelText("Permission preset"), { target: { value: "Mail setup" } });
-  expect(screen.getByLabelText("mail:read")).toBeChecked();
-  expect(screen.getByLabelText("mail:write")).toBeChecked();
-  expect(screen.getByLabelText("tasks:read")).not.toBeChecked();
-  fireEvent.click(screen.getByLabelText("tasks:read"));
+  expect(screen.getByLabelText("Read mail")).toBeChecked();
+  expect(screen.getByLabelText("Manage mail")).toBeChecked();
+  expect(screen.getByLabelText("Read tasks")).not.toBeChecked();
+  fireEvent.click(screen.getByLabelText("Read tasks"));
   expect(screen.getByLabelText("Permission preset")).toHaveValue("custom");
   expect(h.createToken).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "Preset helper" } });
@@ -656,7 +671,7 @@ it("matches web permission presets, changes only draft scopes, and keeps custom 
   expect(h.createToken).not.toHaveBeenCalled();
   expect(h.confirm).toHaveBeenLastCalledWith(
     "Grant agent access?",
-    expect.stringContaining("mail:read, mail:write, tasks:read"),
+    expect.stringContaining("Read mail; Manage mail; Read tasks"),
     expect.any(Function),
   );
   await act(async () => h.confirm.mock.calls.at(-1)?.[2]());
@@ -681,7 +696,7 @@ it("retries failed workspace setup status and authoritative web review links wit
 it("closes pristine identity edits without unnecessary confirmation", () => {
   h.resources["agent-directory"] = { accounts: [account], connections: [] };
   render(<ConnectedAgentsScreen />);
-  fireEvent.click(screen.getByRole("button", { name: "Edit Helper" }));
+  fireEvent.click(screen.getByRole("button", { name: "Helper" }));
   act(() => h.dismiss?.());
   expect(screen.queryByLabelText("Name")).toBeNull();
   expect(h.confirm).not.toHaveBeenCalled();
@@ -689,7 +704,7 @@ it("closes pristine identity edits without unnecessary confirmation", () => {
 it("requires named confirmation before narrowing review bypass using the reviewed version", async () => {
   h.resources["agent-execution-policy"] = { version: 12, reviewBypassEnabled: true };
   render(<AgentPolicyScreen />);
-  fireEvent.click(screen.getByLabelText("Allow eligible actions without review"));
+  fireEvent.click(screen.getByLabelText("Apply eligible work without waiting in Review"));
   expect(h.confirm).toHaveBeenCalledWith(
     "Require review?",
     "Eligible actions will return to the review queue.",
@@ -703,7 +718,7 @@ it("labels returned OAuth clients with no scopes without inventing authority", (
     { id: "empty-client", name: "No authority client", scopes: [] },
   ];
   render(<AgentAccessScreen />);
-  expect(screen.getByText("No scopes")).toBeTruthy();
+  expect(screen.getByText("None")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Revoke No authority client" }));
   expect(h.confirm).toHaveBeenCalledWith(
     "Revoke No authority client?",
@@ -737,6 +752,6 @@ it("identifies account-level agent work without assigning a workspace or fabrica
     nextCursor: null,
   };
   render(<AgentReviewsScreen />);
-  expect(screen.getByText(/Account · normal · review/)).toBeTruthy();
+  expect(screen.getByLabelText("Account · Review")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Review on the web" })).toBeNull();
 });

@@ -173,13 +173,16 @@ describe("purpose-bound memory retrieval", () => {
       fact("unused", { content: meeting("weekly team meeting on Tuesdays") }),
     );
     const secondary = await f.save(fact("meeting preparation"));
-    await f.save(
-      fact("unused", {
-        content: meeting("weekly weekly weekly team meeting private"),
-        sensitivity: "sensitive",
-      }),
+    const blocked = await f.save(
+      fact("unused", { content: meeting("weekly weekly weekly team meeting private") }),
     );
-    await f.save(fact("weekly team meeting restricted", { purposes: ["review"] }));
+    await f.lifecycle.mutate(f.owner, {
+      action: "set_access",
+      recordId: blocked.id,
+      expectedRevision: 1,
+      mutationKey: randomUUID(),
+      agentAccess: "blocked",
+    });
     await f.save(fact("weekly team meeting finance", { scope: { workspace: "finances" } }));
     const otherOwner = await foreign.save(fact("weekly team meeting another owner"));
     await f.lifecycle.mutate(f.owner, {
@@ -207,7 +210,7 @@ describe("purpose-bound memory retrieval", () => {
     expect(page.state).toBe("available");
     expect(page.items.find(({ id }) => id === entry.id)?.conflictRecordIds).toEqual([]);
     expect(JSON.stringify(page)).toContain("Thursdays");
-    expect(JSON.stringify(page)).not.toMatch(/Tuesdays|private|restricted|finance|another owner/);
+    expect(JSON.stringify(page)).not.toMatch(/Tuesdays|private|finance|another owner/);
     const history = await f.search.history(f.owner, { ...planning, recordId: entry.id });
     expect(history.items.map((record) => record.revision)).toEqual([2, 1]);
     expect(JSON.stringify(history)).toContain("Tuesdays");
@@ -251,14 +254,14 @@ describe("purpose-bound memory retrieval", () => {
       recordId: restricted.id,
       expectedRevision: 1,
       mutationKey: randomUUID(),
-      restrictions: { purposes: ["review"] },
+      workspace: "finances",
     });
     await expect(
       f.context.context(f.agent, { ...planning, text: "river", limit: 1, cursor: next.nextCursor }),
     ).rejects.toMatchObject({ status: 409 });
     await expect(
       f.search.history(f.agent, { ...planning, recordId: restricted.id }),
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({ status: 404 });
     const deleted = await f.lifecycle.mutate(f.owner, {
       action: "delete_now",
       recordId: forgotten.id,
@@ -319,20 +322,38 @@ describe("purpose-bound memory retrieval", () => {
       expectedRevision: 1,
       mutationKey: randomUUID(),
     });
-    const proposed = await f.save(fact("concise", { evidence: [] }), f.agent);
+    // An agent's change to memory the person holds waits as a linked proposal.
+    const held = await f.save(fact("concise"));
+    const proposed = knowledgeReceiptSchema.parse(
+      await f.lifecycle.mutate(f.agent, {
+        action: "revise",
+        recordId: held.id,
+        expectedRevision: 1,
+        mutationKey: randomUUID(),
+        content: {
+          ...held.content,
+          value: { ...held.content.value, value: { type: "string", value: "concise rewrite" } },
+        } as typeof held.content,
+      }),
+    ).record;
+    expect(proposed.status).toBe("proposed");
     f.advance(91 * day);
     const inactive = await f.context.context(f.agent, {
       ...planning,
       text: "obsolete OR contested OR concise",
     });
     expect([...inactive.stated, ...inactive.inferred]).toEqual([]);
-    expect(inactive.tentative.map(({ id }) => id).sort()).toEqual([expired.id, proposed.id].sort());
-    expect(inactive.conflicts.map(({ id }) => id)).toEqual([disputed.id]);
+    expect(inactive.tentative.map(({ id }) => id)).toEqual([expired.id]);
+    expect(inactive.conflicts.map(({ id }) => id).sort()).toEqual(
+      [disputed.id, held.id, proposed.id].sort(),
+    );
     expect(inactive.missingInputs).toContain("no_current_memory");
     const search = { ...planning, text: "obsolete OR contested OR concise", limit: 1 } as const;
-    expect((await f.search.search(f.owner, { ...search, reviewView: "accepted" })).items).toEqual(
-      [],
-    );
+    expect(
+      (await f.search.search(f.owner, { ...search, reviewView: "accepted" })).items.map(
+        ({ id }) => id,
+      ),
+    ).toEqual([held.id]);
     const review = { ...search, reviewView: "needs_review" } as const;
     const firstReview = await f.search.search(f.owner, review);
     if (!firstReview.nextCursor) throw new Error("Expected another review candidate");
@@ -492,7 +513,7 @@ describe("purpose-bound memory retrieval", () => {
       recordId: source.id,
       expectedRevision: 1,
       mutationKey: randomUUID(),
-      restrictions: { purposes: ["review"] },
+      workspace: "finances",
     });
     expect(await f.search.search(f.agent, query)).toMatchObject({ state: "available", items: [] });
     expect(await f.context.context(f.owner, query)).toMatchObject({
@@ -541,11 +562,13 @@ describe("purpose-bound memory retrieval", () => {
     });
   });
 
-  it("retains the inferred origin of a tentative context reference", async () => {
+  it("places an active inferred record in the inferred section and explains it", async () => {
     const f = await fixture();
-    const record = await f.save(fact("tentative orchard", { evidence: [] }), f.agent);
+    const record = await f.save(fact("inferred orchard", { evidence: [] }), f.agent);
+    expect(record).toMatchObject({ status: "active", origin: "inferred" });
     const pack = await f.context.context(f.agent, planning);
-    expect(pack.tentative.map(({ id }) => id)).toEqual([record.id]);
+    expect(pack.inferred.map(({ id }) => id)).toEqual([record.id]);
+    expect(pack.tentative).toEqual([]);
     expect(
       knowledgeContextExplanationSchema.parse(
         await f.context.explain(f.agent, {
@@ -554,7 +577,7 @@ describe("purpose-bound memory retrieval", () => {
       ),
     ).toMatchObject({
       state: "available",
-      references: [{ recordId: record.id, reason: "tentative", origin: "inferred" }],
+      references: [{ recordId: record.id, reason: "inferred", origin: "inferred" }],
     });
   });
 
@@ -600,7 +623,7 @@ describe("purpose-bound memory retrieval", () => {
       recordId: source.id,
       expectedRevision: 1,
       mutationKey: randomUUID(),
-      restrictions: { purposes: ["review"] },
+      workspace: "finances",
     });
     for (const principal of [f.agent, f.owner]) {
       const page = await f.search.search(principal, { ...planning, text: "orchard" });
@@ -747,7 +770,7 @@ describe("purpose-bound memory retrieval", () => {
       recordId: source.id,
       expectedRevision: 1,
       mutationKey: randomUUID(),
-      restrictions: { purposes: ["recovery"] },
+      workspace: "finances",
     });
     const page = await f.exporter.exportPage(f.owner, {});
     expect(page.nextCursor).toBeNull();
@@ -782,7 +805,7 @@ describe("purpose-bound memory retrieval", () => {
       recordId: source.id,
       expectedRevision: 1,
       mutationKey: randomUUID(),
-      restrictions: { purposes: ["recovery"] },
+      workspace: "finances",
     });
     const baseline = await f.exporter.exportPage(f.owner, {});
     expect(baseline.items.map(({ id, revision }) => ({ id, revision }))).toEqual([

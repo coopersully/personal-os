@@ -79,6 +79,6 @@ export function memoryAcceptance(record: KnowledgeRecord) {
 }
 
 export function memoryState(record: KnowledgeRecord) {
-  if (record.status === "active") return record.stale ? "Review due" : "Accepted";
+  if (record.status === "active") return "Accepted";
   return memoryLabel(record.status);
 }

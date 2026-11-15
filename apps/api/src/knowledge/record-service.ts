@@ -14,6 +14,7 @@ import {
 import {
   type AccessScope,
   type KnowledgeForgottenRecord,
+  type KnowledgeMutation,
   type KnowledgeMutationInput,
   type KnowledgeReadInput,
   type KnowledgeRecord,
@@ -24,6 +25,7 @@ import {
   knowledgeClaimContent,
   knowledgeClaimKey,
   knowledgeMutationInputSchema,
+  knowledgePurposeSchema,
   knowledgeReadInputSchema,
   knowledgeRecordSnapshotSchema,
   knowledgeValiditySchema,
@@ -37,7 +39,9 @@ import {
   createKnowledgeAccess,
   emptyKnowledgeMetadata,
   findOwnedKnowledgeRevision,
+  isKnowledgeVisibleToAgent,
   type KnowledgeDerivation,
+  type KnowledgeRecordState,
   type KnowledgeRevision,
   type KnowledgeTransaction,
   knowledgeReferences,
@@ -49,12 +53,16 @@ import {
 
 type KnowledgeAccess = ReturnType<typeof createKnowledgeAccess>;
 type StoredReceipt = typeof knowledgeReceipts.$inferSelect;
-type RevisionWrite = {
+/** Record-level columns a revision write sets alongside the new revision. */
+export type KnowledgeRecordWriteState = Pick<KnowledgeRecordState, "ownerHeld" | "core"> &
+  Partial<Pick<KnowledgeRecordState, "agentAccess" | "lastConfirmedAt">>;
+export type RevisionWrite = {
   snapshot: KnowledgeRecordSnapshot;
   metadata: KnowledgeRevisionMetadata;
   claimKey: string | null;
   derivations: KnowledgeDerivation[];
   newSources: KnowledgeSource[];
+  record: KnowledgeRecordWriteState;
 };
 
 export const knowledgeWriteScopes: AccessScope[] = ["knowledge:read", "knowledge:write"];
@@ -105,7 +113,6 @@ export async function presentKnowledgeReceipt(
   access: KnowledgeAccess,
   principal: Principal,
   receipt: StoredReceipt,
-  purposes?: KnowledgeReadInput["purpose"][],
 ): Promise<KnowledgeSaveResult> {
   const presence = await knowledgeRecordPresence(tx, principal.userId, receipt.recordId);
   if (presence !== "live") {
@@ -116,21 +123,15 @@ export async function presentKnowledgeReceipt(
     return { receiptId: receipt.id, recordId: receipt.recordId, outcome };
   }
   const revision = await ownedKnowledgeRevision(tx, principal, receipt.recordId);
-  const allowedPurposes = purposes ?? revision.snapshot.purposes;
-  const purpose = allowedPurposes[0];
-  if (!purpose) throw new AppError("forbidden", "The knowledge record has no permitted purpose.");
-  if (receipt.privateProposal) {
-    for (const currentPurpose of allowedPurposes)
-      await access.disclose(tx, principal, revision, currentPurpose, { pendingReceipt: true });
-    return { receiptId: receipt.id, recordId: receipt.recordId, outcome: "pending_owner_review" };
-  }
-  for (const currentPurpose of allowedPurposes.slice(1))
-    await access.disclose(tx, principal, revision, currentPurpose);
+  // A record hidden from this agent (blocked by the person, or restricted to a workspace the
+  // agent cannot read) replays like one that is gone, so the agent learns nothing about it.
+  if (principal.actorType === "agent" && !isKnowledgeVisibleToAgent(revision, principal.scopes))
+    return { receiptId: receipt.id, recordId: receipt.recordId, outcome: "forgotten" };
   return {
     receiptId: receipt.id,
     recordId: receipt.recordId,
     outcome: "readable",
-    record: await access.present(tx, principal, revision, purpose),
+    record: await access.present(tx, principal, revision),
   };
 }
 
@@ -153,7 +154,7 @@ function uniqueDerivations(derivations: KnowledgeDerivation[]) {
   return [...new Map(derivations.map((edge) => [key(edge), edge])).values()];
 }
 
-async function assertReferenceAcyclic(
+export async function assertReferenceAcyclic(
   tx: KnowledgeTransaction,
   userId: string,
   source: KnowledgeRevision,
@@ -192,7 +193,7 @@ export async function prepareKnowledgeRevision({
   tx: KnowledgeTransaction;
   access: KnowledgeAccess;
   principal: Principal;
-  input: KnowledgeMutationInput;
+  input: KnowledgeMutation;
   at: Date;
   current?: KnowledgeRevision;
   replaceEvidence?: boolean;
@@ -220,7 +221,7 @@ export async function prepareKnowledgeRevision({
       source = await ownedKnowledgeRevision(tx, principal, id);
       if (snapshot) await assertReferenceAcyclic(tx, principal.userId, source, snapshot.id);
       preserveKnowledgeDisclosure(input, source.snapshot);
-      for (const purpose of input.purposes) await access.disclose(tx, principal, source, purpose);
+      await access.disclose(tx, principal, source);
       references.set(id, source);
     }
     if (exactRevision !== undefined && source.snapshot.revision !== exactRevision)
@@ -288,11 +289,8 @@ export async function prepareKnowledgeRevision({
       throw new AppError("not_found", "The canonical goal was not found.");
     requiredReadScopes.add("goals:read");
   }
-  if (submitted.kind === "entity_meaning") {
-    const { recordId, purpose } = submitted.value;
-    const source = await reference(recordId, "entity_meaning");
-    await access.disclose(tx, principal, source, purpose);
-  }
+  if (submitted.kind === "entity_meaning")
+    await reference(submitted.value.recordId, "entity_meaning");
   if (submitted.kind === "decision" || submitted.kind === "inference") {
     for (const id of submitted.value.evidenceIds) {
       if (sources.some((source) => source.id === id)) continue;
@@ -344,22 +342,18 @@ export async function prepareKnowledgeRevision({
           },
         }
       : submitted);
-  const privateProposal = principal.actorType === "agent" && input.sensitivity === "sensitive";
+  // Saves are active at once, inferences included. Only an agent's change to memory the person
+  // holds waits for the person, as a separate proposal. Revising content never unarchives it.
   const status =
     retainedInference?.snapshot.status ??
-    (privateProposal ||
-    origin === "inferred" ||
-    asProposal ||
-    (snapshot !== undefined && principal.actorType === "agent")
-      ? "proposed"
-      : "active");
+    (asProposal ? "proposed" : snapshot?.status === "archived" ? "archived" : "active");
   const metadata: KnowledgeRevisionMetadata = {
     ...emptyKnowledgeMetadata,
     origin,
     generatedInference,
     acceptance: retainedInference
       ? retainedInference.metadata.acceptance
-      : status === "active" && principal.actorType === "user"
+      : principal.actorType === "user"
         ? ownerKnowledgeAcceptance(principal, sources, at)
         : null,
     disputedBy: retainedInference?.metadata.disputedBy ?? null,
@@ -402,7 +396,7 @@ export async function prepareKnowledgeRevision({
     content,
     scope: input.scope,
     sensitivity: input.sensitivity,
-    purposes: input.purposes,
+    purposes: input.purposes ?? [...knowledgePurposeSchema.options],
     confidence: retainedInference?.snapshot.confidence ?? (stated ? 1 : 0),
     status,
     revision: asProposal ? 1 : (snapshot?.revision ?? 0) + 1,
@@ -416,6 +410,9 @@ export async function prepareKnowledgeRevision({
     claimKey: knowledgeClaimKey(input.scope.workspace, submitted),
     derivations: uniqueDerivations(derivations),
     newSources,
+    // Content the person writes in the app is theirs; an agent's write never is, even when it
+    // records something the person said, because the API cannot verify the chat message.
+    record: { ownerHeld: principal.actorType === "user", core: input.core },
   };
 }
 
@@ -458,15 +455,17 @@ export async function writeKnowledgeRevision(
   write: RevisionWrite,
   at: Date,
 ) {
-  const { snapshot, metadata, claimKey, derivations, newSources } = write;
+  const { snapshot, metadata, claimKey, derivations, newSources, record } = write;
   const { userId } = principal;
   const { id: recordId, revision } = snapshot;
   if (revision === 1) {
-    await tx.insert(knowledgeRecords).values({ id: recordId, userId, revision, createdAt: at });
+    await tx
+      .insert(knowledgeRecords)
+      .values({ id: recordId, userId, revision, createdAt: at, ...record });
   } else {
     await tx
       .update(knowledgeRecords)
-      .set({ revision })
+      .set({ revision, ...record })
       .where(and(eq(knowledgeRecords.userId, userId), eq(knowledgeRecords.id, recordId)));
     await tx
       .delete(knowledgeRelationships)
@@ -494,7 +493,7 @@ export async function writeKnowledgeRevision(
 export async function writeKnowledgeReceipt(
   tx: KnowledgeTransaction,
   principal: Principal,
-  input: { mutationKey: string; requestHash: string; action: string; privateProposal?: boolean },
+  input: { mutationKey: string; requestHash: string; action: string },
   record: KnowledgeRecordSnapshot,
 ) {
   const receipt = {
@@ -504,9 +503,20 @@ export async function writeKnowledgeReceipt(
     mutationKey: input.mutationKey,
     requestHash: input.requestHash,
     actorId: principal.actorId,
-    privateProposal: input.privateProposal ?? false,
   };
   await tx.insert(knowledgeReceipts).values(receipt);
+  await writeKnowledgeAudit(tx, principal, input, record, receipt.id);
+  return receipt;
+}
+
+/** Audit carries revision, status and source IDs only, never knowledge values. */
+export async function writeKnowledgeAudit(
+  tx: KnowledgeTransaction,
+  principal: Principal,
+  input: { mutationKey: string; action: string },
+  record: KnowledgeRecordSnapshot,
+  receiptId: string,
+) {
   await tx.insert(auditEvents).values(
     auditValues({
       action: `knowledge.${input.action}`,
@@ -518,13 +528,12 @@ export async function writeKnowledgeReceipt(
       after: {
         revision: record.revision,
         status: record.status,
-        receiptId: receipt.id,
+        receiptId,
         policy: "approved_rule",
         sourceIds: record.sources.map((source) => source.id),
       },
     }),
   );
-  return receipt;
 }
 
 /** Storage and disclosure authority stay in the API, including exact retries. */
@@ -543,7 +552,7 @@ export function createKnowledgeRecordService({ db, now }: { db: Database; now: (
         const record = await findOwnedKnowledgeRevision(tx, principal.userId, input.id, false, {
           includeTrashed: owner,
         });
-        if (record) return access.present(tx, principal, record, input.purpose);
+        if (record) return access.present(tx, principal, record);
         const [tombstone] = owner
           ? await tx
               .select()
@@ -572,28 +581,17 @@ export function createKnowledgeRecordService({ db, now }: { db: Database; now: (
         if (input.scope.workspace) scopes.push(`${input.scope.workspace}:read`);
         await access.admit(tx, principal, scopes);
         const prior = await findKnowledgeReceipt(tx, principal, input.mutationKey, requestHash);
-        if (prior) return presentKnowledgeReceipt(tx, access, principal, prior, input.purposes);
+        if (prior) return presentKnowledgeReceipt(tx, access, principal, prior);
         const at = now();
         const write = await prepareKnowledgeRevision({ tx, access, principal, input, at });
         await writeKnowledgeRevision(tx, principal, write, at);
         const receipt = await writeKnowledgeReceipt(
           tx,
           principal,
-          {
-            action: "created",
-            mutationKey: input.mutationKey,
-            requestHash,
-            privateProposal: principal.actorType === "agent" && input.sensitivity === "sensitive",
-          },
+          { action: "created", mutationKey: input.mutationKey, requestHash },
           write.snapshot,
         );
-        const result = await presentKnowledgeReceipt(
-          tx,
-          access,
-          principal,
-          receipt,
-          input.purposes,
-        );
+        const result = await presentKnowledgeReceipt(tx, access, principal, receipt);
         await bumpKnowledgeEpoch(tx, principal.userId);
         return result;
       });

@@ -7054,9 +7054,20 @@ export const knowledgeRecords = pgTable(
     trashedAt: timestamp("trashed_at", { withTimezone: true }),
     trashGroupId: uuid("trash_group_id"),
     statusBeforeTrash: text("status_before_trash"),
+    /** The latest content revision was written by the person, or the person confirmed it. */
+    ownerHeld: boolean("owner_held").notNull().default(false),
+    /** Person-only override; `blocked` hides the record from every agent read. */
+    agentAccess: text("agent_access").$type<"allowed" | "blocked">().notNull().default("allowed"),
+    core: boolean("core").notNull().default(false),
+    lastConfirmedAt: timestamp("last_confirmed_at", { withTimezone: true }),
   },
   (table) => [
     uniqueIndex("knowledge_records_owner_id_idx").on(table.userId, table.id),
+    check("knowledge_records_agent_access", sql`${table.agentAccess} IN ('allowed', 'blocked')`),
+    check(
+      "knowledge_records_status_before_trash",
+      sql`${table.statusBeforeTrash} IN ('proposed', 'active', 'disputed', 'superseded', 'archived', 'expired')`,
+    ),
     index("knowledge_records_trashed_idx")
       .on(table.trashedAt)
       .where(sql`${table.trashedAt} IS NOT NULL`),
@@ -7140,7 +7151,6 @@ export const knowledgeReceipts = pgTable(
     mutationKey: uuid("mutation_key").notNull(),
     requestHash: text("request_hash").notNull(),
     actorId: uuid("actor_id").notNull(),
-    privateProposal: boolean("private_proposal").notNull().default(false),
   },
   (table) => [uniqueIndex("knowledge_receipts_owner_key_idx").on(table.userId, table.mutationKey)],
 );
@@ -7259,7 +7269,7 @@ export const knowledgeContextUses = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     actorId: uuid("actor_id").notNull(),
     actorType: text("actor_type").$type<"user" | "agent">().notNull(),
-    purpose: text("purpose").$type<KnowledgeQuery["purpose"]>().notNull(),
+    purpose: text("purpose").$type<NonNullable<KnowledgeQuery["purpose"]>>(),
     workspace: text("workspace").$type<NonNullable<KnowledgeQuery["workspace"]>>(),
     epoch: bigint("epoch", { mode: "number" }).notNull(),
     references: jsonb("references").$type<KnowledgeContextReference[]>().notNull(),

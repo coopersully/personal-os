@@ -201,7 +201,7 @@ describe("knowledge lifecycle", () => {
     expect(overlapping.record.conflictRecordIds).toEqual([first.record.id]);
     expect(later.record.conflictRecordIds).toEqual([]);
   });
-  it("keeps sensitive agent proposals private across confirmation and receipt replay", async () => {
+  it("keeps sensitive agent saves readable while only the owner confirms them", async () => {
     const { human, agent } = await fixture();
     const request = input("Allow automatic purchases", {
       sensitivity: "sensitive",
@@ -214,29 +214,21 @@ describe("knowledge lifecycle", () => {
         },
       ],
     });
-    const saved = await records().create(agent, request);
-    expect(saved).toEqual({
-      outcome: "pending_owner_review",
-      receiptId: expect.any(String),
-      recordId: expect.any(String),
+    const saved = knowledgeReceiptSchema.parse(await records().create(agent, request));
+    expect(saved.record).toMatchObject({
+      status: "active",
+      origin: "stated",
+      sensitivity: "sensitive",
+      ownerHeld: false,
+      acceptance: null,
     });
-    const ownerRecord = await records().get(human, { id: saved.recordId, purpose: "planning" });
-    expect(ownerRecord).toMatchObject({ status: "proposed", origin: "stated", acceptance: null });
-    if ("state" in ownerRecord) throw new Error("Expected a readable record.");
     const confirm = {
       action: "confirm" as const,
       recordId: saved.recordId,
       expectedRevision: 1,
       mutationKey: randomUUID(),
     };
-    for (const operation of [
-      confirm,
-      {
-        ...confirm,
-        action: "restrict" as const,
-        restrictions: { purposes: ["planning"] as ["planning"] },
-      },
-    ]) {
+    for (const operation of [confirm, { ...confirm, action: "widen" as const, workspace: null }]) {
       await expect(lifecycle().mutate(agent, operation)).rejects.toMatchObject({ status: 403 });
     }
     expect(() => requireKnowledgeOwner(agent)).toThrow(expect.objectContaining({ status: 403 }));
@@ -248,17 +240,19 @@ describe("knowledge lifecycle", () => {
       record: {
         revision: 2,
         status: "active",
+        ownerHeld: true,
         acceptance: { kind: "owner" },
-        author: ownerRecord.author,
+        author: saved.record.author,
       },
     });
     expect(
       await database.db.select().from(accessTokens).where(eq(accessTokens.userId, human.userId)),
     ).toEqual(tokens);
-    expect(await records().create(agent, request)).toEqual(saved);
-    await expect(
-      records().get(agent, { id: saved.recordId, purpose: "planning" }),
-    ).rejects.toMatchObject({ status: 403 });
+    expect(await records().create(agent, request)).toMatchObject({
+      receiptId: saved.receiptId,
+      outcome: "readable",
+      record: { revision: 2, sensitivity: "sensitive" },
+    });
   });
 
   it("handles missing source evidence separately from contributor revocation", async () => {
@@ -406,13 +400,11 @@ describe("knowledge lifecycle", () => {
       recordId: related.recordId,
       expectedRevision: 1,
       mutationKey: randomUUID(),
-      restrictions: { purposes: ["planning"] },
+      workspace: "tasks",
     });
-    await expect(
-      records().get(agent, { id: record.recordId, purpose: "review" }),
-    ).rejects.toMatchObject({ status: 403 });
-    expect(await records().get(agent, { id: record.recordId, purpose: "planning" })).toMatchObject({
-      revision: 2,
+    // The corrected record still copied the restricted record once, so it cannot be wider.
+    await expect(records().get(agent, { id: record.recordId })).rejects.toMatchObject({
+      status: 403,
     });
   });
 
@@ -431,7 +423,8 @@ describe("knowledge lifecycle", () => {
     expect(await revise(1)).toMatchObject({
       record: {
         origin: "inferred",
-        status: "proposed",
+        status: "active",
+        ownerHeld: true,
         acceptance: null,
         content: { kind: "inference" },
       },
@@ -613,22 +606,26 @@ describe("knowledge lifecycle", () => {
     );
     expect(second.record.claimKey).toEqual(first.record.claimKey);
     expect(second.record.conflictRecordIds).toEqual([first.recordId]);
+    // Sensitive memory is readable by agents, so its conflict is visible to them too.
     expect(await records().get(agent, { id: first.recordId, purpose: "planning" })).toMatchObject({
-      conflictRecordIds: [],
+      conflictRecordIds: [second.recordId],
     });
   });
-  it("denies readable receipt replay when the owner makes the record sensitive", async () => {
+  it("keeps readable receipt replay when the owner makes the record sensitive", async () => {
     const { human, agent } = await fixture();
     const request = input("Tuesday", { evidence: [] });
     const saved = await save(agent, request);
     await lifecycle().mutate(human, {
-      action: "restrict",
+      action: "set_sensitivity",
       recordId: saved.recordId,
       expectedRevision: 1,
       mutationKey: randomUUID(),
-      restrictions: { sensitivity: "sensitive" },
+      sensitivity: "sensitive",
     });
-    await expect(records().create(agent, request)).rejects.toMatchObject({ status: 403 });
+    expect(await records().create(agent, request)).toMatchObject({
+      outcome: "readable",
+      record: { revision: 2, sensitivity: "sensitive" },
+    });
     expect(await records().get(human, { id: saved.recordId, purpose: "planning" })).toMatchObject({
       revision: 2,
       sensitivity: "sensitive",
@@ -712,7 +709,7 @@ describe("knowledge lifecycle", () => {
     expect(revised).toMatchObject({
       record: {
         revision: 2,
-        status: "proposed",
+        status: "active",
         evidenceAvailable: true,
         sources: [{ evidence: evidence(2) }],
       },
@@ -733,11 +730,11 @@ describe("knowledge lifecycle", () => {
       recordId: source.recordId,
       expectedRevision: 2,
       mutationKey: randomUUID(),
-      restrictions: { purposes: ["planning"] },
+      workspace: "tasks",
     });
-    await expect(
-      records().get(agent, { id: derived.recordId, purpose: "review" }),
-    ).rejects.toMatchObject({ status: 403 });
+    await expect(records().get(agent, { id: derived.recordId })).rejects.toMatchObject({
+      status: 403,
+    });
   });
 
   it("keeps a claim with remaining support eligible and disputes it after the last support is removed", async () => {
@@ -756,7 +753,7 @@ describe("knowledge lifecycle", () => {
     await database.db.delete(knowledgeRecords).where(eq(knowledgeRecords.id, first.recordId));
     expect(await records().get(agent, { id: derived.recordId, purpose: "planning" })).toMatchObject(
       {
-        status: "proposed",
+        status: "active",
         evidenceAvailable: true,
         sources: [{ availability: "unavailable" }, { evidence: { id: second.recordId } }],
       },
@@ -806,7 +803,7 @@ describe("knowledge lifecycle", () => {
       recordId: source.recordId,
       expectedRevision: 1,
       mutationKey: randomUUID(),
-      restrictions: { sensitivity: "sensitive" },
+      workspace: "tasks",
     });
     for (const request of requests)
       await expect(records().create(agent, request)).rejects.toMatchObject({ status: 403 });

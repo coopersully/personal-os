@@ -19,6 +19,7 @@ import {
   admitHumanKnowledgeContent,
   bumpKnowledgeEpoch,
   createKnowledgeAccess,
+  detachedKnowledgeRecordState,
   type KnowledgeRevision,
   type KnowledgeTransaction,
   ownedKnowledgeRevision,
@@ -105,7 +106,7 @@ async function restoreBlockers(tx: KnowledgeTransaction, userId: string, groupId
   const members = new Set(rows.map(({ recordId }) => recordId.toLowerCase()));
   const named = new Set<string>();
   for (const row of rows) {
-    const revision = projectKnowledgeRevision({ ...row, trashedAt: null, trashGroupId: null });
+    const revision = projectKnowledgeRevision({ ...row, ...detachedKnowledgeRecordState });
     for (const source of knowledgeRevisionSources(revision))
       if (!members.has(source)) named.add(source);
   }

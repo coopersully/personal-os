@@ -28,8 +28,7 @@ import { selectKnowledgeCandidates } from "./search-service.js";
 
 function contextReason(record: KnowledgeRecord, at: Date): KnowledgeContextReason {
   if (record.status === "disputed" || record.conflictRecordIds.length > 0) return "conflicts";
-  if (record.status !== "active" || record.stale || !revisionIsCurrent(record, at))
-    return "tentative";
+  if (record.status !== "active" || !revisionIsCurrent(record, at)) return "tentative";
   return record.origin === "inferred" ? "inferred" : "stated";
 }
 
@@ -123,7 +122,7 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
             userId: principal.userId,
             actorId: principal.actorId,
             actorType: principal.actorType,
-            purpose: input.purpose,
+            purpose: input.purpose ?? null,
             workspace: input.workspace ?? null,
             epoch: session.epoch,
             references,
@@ -175,12 +174,7 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
             changed = true;
             continue;
           }
-          const projection = await access.projectForRetrieval(
-            tx,
-            principal,
-            revision,
-            receipt.purpose,
-          );
+          const projection = await access.projectForRetrieval(tx, principal, revision);
           if (projection.state !== "available") {
             changed = true;
             continue;

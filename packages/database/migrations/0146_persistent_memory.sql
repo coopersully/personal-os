@@ -3,7 +3,13 @@ CREATE TABLE knowledge_records (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  revision integer NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now(),
  trashed_at timestamptz NULL, trash_group_id uuid NULL, status_before_trash text NULL,
+ owner_held boolean NOT NULL DEFAULT false, agent_access text NOT NULL DEFAULT 'allowed',
+ core boolean NOT NULL DEFAULT false, last_confirmed_at timestamptz NULL,
  CONSTRAINT knowledge_records_owner_id_idx UNIQUE(user_id,id),
+ CONSTRAINT knowledge_records_agent_access CHECK (agent_access IN ('allowed', 'blocked')),
+ CONSTRAINT knowledge_records_status_before_trash CHECK (
+  status_before_trash IN ('proposed', 'active', 'disputed', 'superseded', 'archived', 'expired')
+ ),
  CONSTRAINT knowledge_records_trash_state CHECK (
   (trashed_at IS NULL) = (trash_group_id IS NULL) AND (trashed_at IS NULL) = (status_before_trash IS NULL)
  )
@@ -44,8 +50,6 @@ CREATE TABLE knowledge_tombstones (
 );
 --> statement-breakpoint
 -- from branch 0140_knowledge_lifecycle.sql
-ALTER TABLE "knowledge_receipts" ADD COLUMN "private_proposal" boolean NOT NULL DEFAULT false;
---> statement-breakpoint
 CREATE TABLE "knowledge_revision_metadata" (
   "user_id" uuid NOT NULL,
   "record_id" uuid NOT NULL,
@@ -107,7 +111,7 @@ CREATE TABLE "knowledge_context_uses" (
   "user_id" uuid NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
   "actor_id" uuid NOT NULL,
   "actor_type" text NOT NULL,
-  "purpose" text NOT NULL,
+  "purpose" text,
   "workspace" text,
   "epoch" integer NOT NULL,
   "references" jsonb NOT NULL,

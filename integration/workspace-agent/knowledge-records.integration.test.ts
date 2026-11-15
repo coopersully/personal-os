@@ -19,7 +19,6 @@ import {
 import {
   type AccessScope,
   type KnowledgeMutationInput,
-  knowledgePendingReviewReceiptSchema,
   knowledgeReceiptSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -363,7 +362,7 @@ describe.sequential("persistent scoped knowledge", () => {
     });
     const saved = knowledgeReceiptSchema.parse(await api.saveKnowledge(request));
     expect(saved.record.content).toEqual(request.content);
-    expect(saved.record.sources[0]?.evidence).toEqual(request.evidence[0]);
+    expect(saved.record.sources[0]?.evidence).toEqual(request.evidence?.[0]);
   });
 
   it.each([
@@ -414,7 +413,7 @@ describe.sequential("persistent scoped knowledge", () => {
       );
       expect(receipt.record).toMatchObject({
         content: { kind: "inference", value: { proposition: expectedProposition } },
-        status: "proposed",
+        status: "active",
       });
       if (receipt.record.content.kind !== "inference") throw new Error("Expected inference");
       expect(JSON.parse(receipt.record.content.value.proposition)).toEqual(request.content);
@@ -527,7 +526,7 @@ describe.sequential("persistent scoped knowledge", () => {
       await server.close();
     }
   }, 20_000);
-  it("returns a private pending receipt through registered MCP and the typed client", async () => {
+  it("returns a readable sensitive receipt through registered MCP and the typed client", async () => {
     const f = await fixture();
     const apiApp = app();
     const api = createApiClient({
@@ -536,21 +535,27 @@ describe.sequential("persistent scoped knowledge", () => {
       fetch: (url, init) => Promise.resolve(apiApp.request(String(url), init)),
     });
     const server = createPersonalOsMcpServer({ api, scopes: f.agent.scopes, timeZone: "UTC" });
-    const client = new Client({ name: "knowledge-private-proposal", version: "1" });
+    const client = new Client({ name: "knowledge-sensitive-save", version: "1" });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     await Promise.all([server.connect(st), client.connect(ct)]);
     try {
       const request = input({ sensitivity: "sensitive", evidence: [] });
       const saved = await client.callTool({ name: "save_knowledge", arguments: request });
       expect(saved.isError, JSON.stringify(saved)).not.toBe(true);
-      const receipt = knowledgePendingReviewReceiptSchema.parse(
+      const receipt = knowledgeReceiptSchema.parse(
         (saved.structuredContent as { result: unknown })?.result,
       );
-      expect(JSON.stringify(saved)).not.toContain("Tuesday");
+      expect(receipt.record).toMatchObject({
+        sensitivity: "sensitive",
+        status: "active",
+        origin: "inferred",
+        ownerHeld: false,
+      });
       expect(await api.saveKnowledge(request)).toEqual(receipt);
-      await expect(
-        api.getKnowledge({ id: receipt.recordId, purpose: "planning" }),
-      ).rejects.toMatchObject({ status: 403 });
+      expect(await api.getKnowledge({ id: receipt.recordId })).toMatchObject({
+        id: receipt.recordId,
+        sensitivity: "sensitive",
+      });
     } finally {
       await client.close();
       await server.close();

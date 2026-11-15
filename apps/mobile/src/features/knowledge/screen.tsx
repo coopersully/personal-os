@@ -137,7 +137,7 @@ type PrivateProps = {
 };
 function PrivateMemory({ api, access, initial, revalidate, retain }: PrivateProps) {
   const [destination, setDestination] = useState<Destination | { kind: "add" }>(initial);
-  const [purpose, setPurpose] = useState<KnowledgeQuery["purpose"]>(
+  const [purpose, setPurpose] = useState<NonNullable<KnowledgeQuery["purpose"]>>(
     initial.kind === "detail" ? initial.selection.purpose : "planning",
   );
   const [dirty, setDirty] = useState(false);
@@ -200,17 +200,13 @@ function PrivateMemory({ api, access, initial, revalidate, retain }: PrivateProp
               request: () => api.saveKnowledge({ ...input, mutationKey: mutationKey(body) }),
               complete: (value) => {
                 revalidate(
-                  value.outcome === "readable" && value.record.purposes.includes(purpose)
+                  value.outcome === "readable"
                     ? { kind: "detail", selection: { id: value.record.id, purpose } }
                     : listDestination,
                 );
                 return {
                   message:
-                    value.outcome === "pending_owner_review"
-                      ? "Memory saved for review."
-                      : value.outcome === "readable"
-                        ? "Memory saved."
-                        : "This memory is unavailable.",
+                    value.outcome === "readable" ? "Memory saved." : "This memory is unavailable.",
                 };
               },
               retain,
@@ -236,10 +232,10 @@ function PrivateMemory({ api, access, initial, revalidate, retain }: PrivateProp
 
 const views = ["accepted", "review", "conflicts", "all"] as const;
 type ViewMode = (typeof views)[number];
-type Status = NonNullable<KnowledgeQuery["status"]> | "stale";
-const reviewStatuses: Status[] = ["proposed", "disputed", "stale"];
+type Status = NonNullable<KnowledgeQuery["status"]>;
+const reviewStatuses: Status[] = ["proposed", "disputed"];
 const allStatuses: Status[] = ["active", ...reviewStatuses, "expired", "superseded"];
-const statusLabels = { active: "Accepted", stale: "Review due", "": "Any status" };
+const statusLabels = { active: "Accepted", "": "Any status" };
 const viewLabels = {
   accepted: "Accepted",
   review: "Needs review",
@@ -249,8 +245,8 @@ const viewLabels = {
 type ListProps = {
   api: MemoryApi;
   access: MemoryAccess;
-  purpose: KnowledgeQuery["purpose"];
-  setPurpose: (purpose: KnowledgeQuery["purpose"]) => void;
+  purpose: NonNullable<KnowledgeQuery["purpose"]>;
+  setPurpose: (purpose: NonNullable<KnowledgeQuery["purpose"]>) => void;
   open: (id: string) => void;
   onAdd: () => void;
 };
@@ -277,15 +273,13 @@ function MemoryList({ api, access, purpose, setPurpose, open, onAdd }: ListProps
       workspace,
       kind,
       text: text || undefined,
-      ...(status && status !== "stale" ? { status } : {}),
+      ...(status ? { status } : {}),
       ...(view === "conflicts" ? { hasConflict: true } : {}),
       ...(view === "accepted"
         ? { reviewView: "accepted" }
-        : status === "stale"
-          ? { reviewView: "review_due" }
-          : view === "review"
-            ? { reviewView: "needs_review" }
-            : {}),
+        : view === "review"
+          ? { reviewView: "needs_review" }
+          : {}),
     }),
     [purpose, workspace, kind, text, status, view],
   );

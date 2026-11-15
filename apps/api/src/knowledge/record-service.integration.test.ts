@@ -206,12 +206,14 @@ describe.sequential("persistent scoped knowledge", () => {
       status: 409,
     });
   });
-  it("keeps agent interpretations proposed and external statements explicitly attributed", async () => {
+  it("keeps agent interpretations active but inferred and external statements explicitly attributed", async () => {
     const f = await fixture();
     const inferred = await save(f.agent, input({ evidence: [] }));
     expect(inferred.record).toMatchObject({
       content: { kind: "inference" },
-      status: "proposed",
+      origin: "inferred",
+      status: "active",
+      ownerHeld: false,
       confidence: 0,
     });
     const stated = await save(
@@ -240,7 +242,7 @@ describe.sequential("persistent scoped knowledge", () => {
           sensitivity: "sensitive",
         }),
       ),
-    ).resolves.toMatchObject({ outcome: "pending_owner_review" });
+    ).resolves.toMatchObject({ outcome: "readable", record: { sensitivity: "sensitive" } });
   });
   it.each<AccessScope[]>([
     ["knowledge:read"],
@@ -252,13 +254,14 @@ describe.sequential("persistent scoped knowledge", () => {
       status: 403,
     });
   });
-  it("checks purpose, workspace, live scope narrowing and revoked credentials before retries", async () => {
+  it("checks workspace, live scope narrowing and revoked credentials before retries", async () => {
     const f = await fixture(["knowledge:read", "knowledge:write", "finances:read"]),
       request = input({ scope: { workspace: "finances" }, evidence: [] });
     const saved = await save(f.agent, request);
-    await expect(
-      service().get(f.agent, { id: saved.record.id, purpose: "communication" }),
-    ).rejects.toMatchObject({ status: 403 });
+    // Purpose is a relevance hint: a read for another purpose still succeeds.
+    expect(
+      await service().get(f.agent, { id: saved.record.id, purpose: "communication" }),
+    ).toMatchObject({ id: saved.record.id });
     await database.db
       .update(accessTokens)
       .set({ scopes: ["knowledge:read", "knowledge:write"] })
@@ -336,6 +339,18 @@ describe.sequential("persistent scoped knowledge", () => {
       save(
         f.human,
         input({
+          scope: { workspace: null },
+          evidence: [
+            { type: "domain_record", domain: "knowledge", id: source.record.id, revision: 1 },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    // Purposes no longer limit disclosure, so a derived record may name others.
+    expect(
+      await save(
+        f.human,
+        input({
           scope: { workspace: "finances" },
           purposes: ["review"],
           evidence: [
@@ -343,7 +358,7 @@ describe.sequential("persistent scoped knowledge", () => {
           ],
         }),
       ),
-    ).rejects.toMatchObject({ status: 403 });
+    ).toMatchObject({ outcome: "readable", record: { purposes: ["review"] } });
   });
   it("persists owned relationship endpoints and rejects foreign or broader disclosure", async () => {
     const f = await fixture();
@@ -378,7 +393,7 @@ describe.sequential("persistent scoped knowledge", () => {
       .where(eq(knowledgeRelationships.recordId, saved.record.id));
     expect(relationships).toHaveLength(2);
     expect(relationships.map((row) => row.relatedRecordId).sort()).toEqual(
-      [...request.relatedRecordIds].sort(),
+      [...(request.relatedRecordIds ?? [])].sort(),
     );
     const before = await persistedKnowledge();
     // Omit relatedRecordIds so content endpoints must enforce ownership themselves.
@@ -398,7 +413,7 @@ describe.sequential("persistent scoped knowledge", () => {
     });
     expect(await persistedKnowledge()).toEqual(before);
   });
-  it("inherits entity-meaning source purpose and scopes without changing canonical goals", async () => {
+  it("inherits entity-meaning source scopes without changing canonical goals", async () => {
     const f = await fixture();
     const other = await fixture();
     const [goal] = await database.db
@@ -439,18 +454,10 @@ describe.sequential("persistent scoped knowledge", () => {
     await expect(
       service().get(authorized, { id: saved.record.id, purpose: "planning" }),
     ).rejects.toMatchObject({ status: 403 });
-    await expect(
-      service().get(f.human, { id: saved.record.id, purpose: "review" }),
-    ).rejects.toMatchObject({ status: 403 });
-    await expect(
-      save(
-        f.human,
-        input({ content: { ...content, value: { ...content.value, purpose: "review" } } }),
-      ),
-    ).rejects.toMatchObject({ status: 403 });
-    await expect(
-      save(f.human, input({ content, purposes: ["planning", "review"] })),
-    ).rejects.toMatchObject({ status: 403 });
+    // A purpose never hides memory from the person.
+    expect(await service().get(f.human, { id: saved.record.id, purpose: "review" })).toMatchObject({
+      id: saved.record.id,
+    });
     await expect(
       save(
         f.human,

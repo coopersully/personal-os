@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -221,17 +220,9 @@ export function MemoryRestrictions({
 }) {
   const id = useId();
   const [draftWorkspace, setWorkspace] = useState(record.scope.workspace ?? "");
-  const [draftPurposes, setPurposes] = useState(record.purposes);
-  const [draftSensitivity, setSensitivity] = useState(record.sensitivity);
-  // A reviewed concurrent restriction can narrow the options available to this draft.
+  // Restricting only narrows. A reviewed concurrent restriction fixes the workspace.
   const workspace = record.scope.workspace ?? draftWorkspace;
-  const purposes = draftPurposes.filter((purpose) => record.purposes.includes(purpose));
-  const sensitivity = record.sensitivity === "sensitive" ? "sensitive" : draftSensitivity;
-  const [invalid, setInvalid] = useState(false);
-  const unchanged =
-    workspace === (record.scope.workspace ?? "") &&
-    purposes.length === record.purposes.length &&
-    sensitivity === record.sensitivity;
+  const unchanged = workspace === (record.scope.workspace ?? "");
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -241,10 +232,9 @@ export function MemoryRestrictions({
       recordId: record.id,
       expectedRevision: record.revision,
       mutationKey: crypto.randomUUID(),
-      restrictions: { scope: { workspace: workspace || null }, purposes, sensitivity },
+      workspace,
     });
     if (!parsed.success) {
-      setInvalid(true);
       onInvalid();
       return;
     }
@@ -269,24 +259,6 @@ export function MemoryRestrictions({
             disabled={disabled}
           />
         </Field>
-        <Field>
-          <FieldLabel htmlFor={`${id}-sensitivity`}>Visibility</FieldLabel>
-          <MemorySelect
-            id={`${id}-sensitivity`}
-            value={sensitivity}
-            choices={record.sensitivity === "sensitive" ? ["sensitive"] : ["standard", "sensitive"]}
-            label={(entry) => (entry === "sensitive" ? "Only me" : "Authorized agents")}
-            change={(entry) => setSensitivity(entry === "sensitive" ? "sensitive" : "standard")}
-            disabled={disabled}
-          />
-        </Field>
-        <PurposeFields
-          available={record.purposes}
-          selected={purposes}
-          change={setPurposes}
-          disabled={disabled}
-          invalid={invalid && !purposes.length}
-        />
       </FieldGroup>
       <div className="grid gap-2 sm:grid-cols-2">
         {footer}
@@ -508,11 +480,8 @@ export function RecordEditor({
                 disabled={disabled}
                 onCheckedChange={(value) => setSensitive(value === true)}
               />
-              <FieldLabel htmlFor={`${id}-private`}>Only me</FieldLabel>
+              <FieldLabel htmlFor={`${id}-private`}>Sensitive</FieldLabel>
             </Field>
-            {kind === "inference" ? (
-              <FieldDescription>Inferences begin as proposals for review.</FieldDescription>
-            ) : null}
           </>
         ) : null}
       </FieldGroup>

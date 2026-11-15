@@ -28,37 +28,29 @@ import { memoryContent, memoryLabel, memorySummary } from "./presentation";
 import { MemoryBadges, MemoryRecordDetail, NewMemory } from "./record-detail";
 
 type View = "accepted" | "review" | "conflicts" | "all";
-type FilterStatus = NonNullable<KnowledgeQuery["status"]> | "stale";
-type Filters = Pick<KnowledgeQuery, "purpose" | "workspace" | "kind" | "text">;
-const statuses: FilterStatus[] = [
-  "active",
-  "proposed",
-  "disputed",
-  "stale",
-  "expired",
-  "superseded",
-];
-const reviewStatuses: FilterStatus[] = ["proposed", "disputed", "stale"];
+type FilterStatus = NonNullable<KnowledgeQuery["status"]>;
+type Filters = Pick<KnowledgeQuery, "workspace" | "kind" | "text"> & {
+  purpose: NonNullable<KnowledgeQuery["purpose"]>;
+};
+const statuses: FilterStatus[] = ["active", "proposed", "disputed", "expired", "superseded"];
+const reviewStatuses: FilterStatus[] = ["proposed", "disputed"];
 const conflictStatuses: FilterStatus[] = ["active", ...reviewStatuses];
 
 function statusLabel(status: FilterStatus) {
   if (status === "active") return "Accepted";
-  if (status === "stale") return "Review due";
   return memoryLabel(status);
 }
 
 function listScope(view: View, status: FilterStatus | "", filters: Filters): KnowledgeQuery {
   return {
     ...filters,
-    ...(status && status !== "stale" ? { status } : {}),
+    ...(status ? { status } : {}),
     ...(view === "conflicts" ? { hasConflict: true } : {}),
     ...(view === "accepted"
       ? { reviewView: "accepted" }
-      : status === "stale"
-        ? { reviewView: "review_due" }
-        : view === "review"
-          ? { reviewView: "needs_review" }
-          : {}),
+      : view === "review"
+        ? { reviewView: "needs_review" }
+        : {}),
   };
 }
 

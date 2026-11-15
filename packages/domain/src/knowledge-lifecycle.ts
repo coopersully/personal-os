@@ -2,14 +2,14 @@ import { z } from "zod";
 import { idSchema } from "./common.js";
 import {
   type KnowledgeRecordSnapshot,
+  knowledgeAgentAccessSchema,
   knowledgeContentSchema,
   knowledgeEvidenceListSchema,
-  knowledgePurposesSchema,
   knowledgeReceiptSchema,
   knowledgeRelatedIdsSchema,
-  knowledgeScopeSchema,
   knowledgeSensitivitySchema,
   knowledgeValiditySchema,
+  knowledgeWorkspaceSchema,
   knowledgeWriteContentSchema,
 } from "./knowledge.js";
 import { unicodeCaseFold } from "./unicode-case-folding.js";
@@ -29,18 +29,33 @@ const agentKnowledgeActions = [
       evidence: knowledgeEvidenceListSchema.optional(),
       relatedRecordIds: knowledgeRelatedIdsSchema.optional(),
       validity: knowledgeValiditySchema.optional(),
+      core: z.boolean().optional(),
     })
     .strict(),
   z.object({ ...mutationIdentity, action: z.literal("dispute") }).strict(),
   z
     .object({ ...mutationIdentity, action: z.literal("supersede"), replacementId: idSchema })
     .strict(),
+  z.object({ ...mutationIdentity, action: z.literal("archive") }).strict(),
+  z.object({ ...mutationIdentity, action: z.literal("unarchive") }).strict(),
+  /** Narrows the record to one workspace. Only the person may widen it again. */
+  z
+    .object({
+      ...mutationIdentity,
+      action: z.literal("restrict"),
+      workspace: knowledgeWorkspaceSchema,
+    })
+    .strict(),
+  /** Marks the record sensitive. Only the person may lower it. */
+  z.object({ ...mutationIdentity, action: z.literal("raise_sensitivity") }).strict(),
 ] as const;
 
+/** What an agent with `knowledge:write` may do. Everything else is the person's override. */
 export const knowledgeAgentLifecycleInputSchema = z.discriminatedUnion(
   "action",
   agentKnowledgeActions,
 );
+export type KnowledgeAgentLifecycleInput = z.infer<typeof knowledgeAgentLifecycleInputSchema>;
 /** Trash, restore and delete now are person-only record states; they never create a revision. */
 export const knowledgeTrashActionSchema = z.enum(["trash", "restore", "delete_now"]);
 export type KnowledgeTrashAction = z.infer<typeof knowledgeTrashActionSchema>;
@@ -50,21 +65,41 @@ export const knowledgeTrashRetentionMs = 30 * 24 * 60 * 60 * 1000;
 export const knowledgeTrashInputSchema = z.object(mutationIdentity).strict();
 export type KnowledgeTrashInput = z.infer<typeof knowledgeTrashInputSchema>;
 
+/** Every agent action plus the person-only actions. */
 export const knowledgeLifecycleInputSchema = z.discriminatedUnion("action", [
   ...agentKnowledgeActions,
   z.object({ ...mutationIdentity, action: z.literal("confirm") }).strict(),
   z
     .object({
       ...mutationIdentity,
-      action: z.literal("restrict"),
-      restrictions: z
-        .object({
-          scope: knowledgeScopeSchema.optional(),
-          purposes: knowledgePurposesSchema.optional(),
-          sensitivity: knowledgeSensitivitySchema.optional(),
-        })
-        .strict()
-        .refine((restriction) => Object.keys(restriction).length > 0),
+      action: z.literal("set_access"),
+      agentAccess: knowledgeAgentAccessSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...mutationIdentity,
+      action: z.literal("set_sensitivity"),
+      sensitivity: knowledgeSensitivitySchema,
+    })
+    .strict(),
+  /** Sets the workspace restriction to any value, including none. */
+  z
+    .object({
+      ...mutationIdentity,
+      action: z.literal("widen"),
+      workspace: knowledgeWorkspaceSchema.nullable(),
+    })
+    .strict(),
+  /**
+   * Called on a pending proposal. `proposed` activates it and supersedes the record it
+   * proposes to change; `current` retires the proposal and leaves that record as it is.
+   */
+  z
+    .object({
+      ...mutationIdentity,
+      action: z.literal("resolve_conflict"),
+      keep: z.enum(["current", "proposed"]),
     })
     .strict(),
   knowledgeTrashInputSchema.extend({ action: z.literal("trash") }),
@@ -73,13 +108,6 @@ export const knowledgeLifecycleInputSchema = z.discriminatedUnion("action", [
 ]);
 export type KnowledgeLifecycleInput = z.infer<typeof knowledgeLifecycleInputSchema>;
 
-export const knowledgePendingReviewReceiptSchema = z
-  .object({
-    receiptId: idSchema,
-    recordId: idSchema,
-    outcome: z.literal("pending_owner_review"),
-  })
-  .strict();
 /** Content-free receipt for a record in the owner's Trash. Agents receive `forgotten` instead. */
 export const knowledgeTrashedReceiptSchema = z
   .object({ receiptId: idSchema, recordId: idSchema, outcome: z.literal("trashed") })
@@ -89,7 +117,6 @@ export const knowledgeForgottenReceiptSchema = z
   .strict();
 export const knowledgeSaveResultSchema = z.discriminatedUnion("outcome", [
   knowledgeReceiptSchema,
-  knowledgePendingReviewReceiptSchema,
   knowledgeTrashedReceiptSchema,
   knowledgeForgottenReceiptSchema,
 ]);

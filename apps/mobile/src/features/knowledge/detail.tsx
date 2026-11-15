@@ -55,10 +55,7 @@ function permissionFields(record: KnowledgeRecord) {
       label: "Workspace",
       value: record.scope.workspace ? memoryLabel(record.scope.workspace) : "All workspaces",
     },
-    {
-      label: "Visibility",
-      value: record.sensitivity === "sensitive" ? "Only me" : "Authorized agents",
-    },
+    { label: "Sensitivity", value: record.sensitivity === "sensitive" ? "Sensitive" : "Standard" },
     { label: "Allowed uses", value: record.purposes.map(memoryLabel).join(", ") },
   ];
 }
@@ -174,12 +171,19 @@ export function MemoryDetail({ api, access, selection, close, open, changed, ret
   );
 }
 
-const saveMessages = {
+const saveMessages: Record<KnowledgeLifecycleInput["action"], string> = {
   revise: "Memory saved.",
   confirm: "Memory confirmed.",
   dispute: "Memory disputed.",
   restrict: "Memory use restricted.",
+  widen: "Memory use widened.",
   supersede: "Memory superseded.",
+  archive: "Memory archived.",
+  unarchive: "Memory unarchived.",
+  raise_sensitivity: "Memory marked sensitive.",
+  set_sensitivity: "Memory sensitivity updated.",
+  set_access: "Agent access updated.",
+  resolve_conflict: "Conflict resolved.",
   trash: "Memory moved to Trash.",
   restore: "Memory restored.",
   delete_now: "Memory deleted.",
@@ -223,15 +227,10 @@ function RecordSession({
       failure: "Couldn’t confirm this update. You can retry the same changes.",
       request: () => api.updateKnowledge({ ...input, mutationKey: mutationKey(body) }),
       complete: (result) => {
-        const readable = result.outcome === "readable" && result.record.purposes.includes(purpose);
+        const readable = result.outcome === "readable";
         changed(readable ? selection : undefined);
         return {
-          message:
-            result.outcome === "pending_owner_review"
-              ? "Memory saved for review."
-              : result.outcome === "readable"
-                ? saveMessages[input.action]
-                : "This memory is unavailable.",
+          message: readable ? saveMessages[input.action] : "This memory is unavailable.",
         };
       },
       rejected: (error) => {
@@ -365,7 +364,7 @@ function RecordSession({
               onPress={() => setMode("edit")}
               disabled={disabled}
             />
-            {baseline.status !== "active" || baseline.stale ? (
+            {baseline.status !== "active" ? (
               <SettingsActionRow
                 label="Confirm memory"
                 icon="check"
@@ -409,15 +408,11 @@ function submittedFields(input: KnowledgeLifecycleInput, record: KnowledgeRecord
   const fields = memoryClaimFields(
     input.action === "revise" ? input.content : memoryContent(record),
   ).map(([label, value]) => ({ label, value }));
-  const restricted = input.action === "restrict" ? input.restrictions : undefined;
-  fields.push(
-    ...permissionFields({
-      ...record,
-      scope: restricted?.scope ?? record.scope,
-      sensitivity: restricted?.sensitivity ?? record.sensitivity,
-      purposes: restricted?.purposes ?? record.purposes,
-    }),
-  );
+  const scope =
+    input.action === "restrict" || input.action === "widen"
+      ? { workspace: input.workspace }
+      : record.scope;
+  fields.push(...permissionFields({ ...record, scope }));
   if (input.action === "supersede")
     fields.push({ label: "Replacement memory ID", value: input.replacementId });
   return fields;

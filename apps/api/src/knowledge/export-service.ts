@@ -1,7 +1,6 @@
 import {
   type KnowledgeExportInput,
   type KnowledgePage,
-  type KnowledgeRecord,
   knowledgeExportInputSchema,
 } from "@personal-os/domain";
 import type { Principal } from "../types.js";
@@ -25,29 +24,10 @@ export function createKnowledgeExportService(dependencies: KnowledgeRetrievalDep
           return pageKnowledgeHistory(session, principal.userId, undefined, async (recordId) => {
             const current = await findOwnedKnowledgeRevision(tx, principal.userId, recordId);
             if (!current) return null;
-            const allowed: KnowledgeRecord["purposes"] = [];
-            for (const purpose of current.snapshot.purposes) {
-              const disclosure = await access.retrievalDisclosure(tx, principal, current, purpose);
-              if (disclosure.state !== "denied") allowed.push(purpose);
-            }
-            if (!allowed.length) return null;
-
-            return async (row) => {
-              const revision = projectKnowledgeRevision(row);
-              let missingSource = false;
-              for (const purpose of allowed) {
-                if (!revision.snapshot.purposes.includes(purpose)) continue;
-                const projection = await access.projectForRetrieval(
-                  tx,
-                  principal,
-                  revision,
-                  purpose,
-                );
-                if (projection.state === "available") return projection;
-                if (projection.state === "unavailable") missingSource = true;
-              }
-              return { state: missingSource ? "unavailable" : "denied" };
-            };
+            const disclosure = await access.retrievalDisclosure(tx, principal, current);
+            if (disclosure.state === "denied") return null;
+            return (row) =>
+              access.projectForRetrieval(tx, principal, projectKnowledgeRevision(row));
           });
         },
       );

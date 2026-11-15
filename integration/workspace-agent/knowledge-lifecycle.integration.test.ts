@@ -16,7 +16,6 @@ import {
   knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
   knowledgePageSchema,
-  knowledgePendingReviewReceiptSchema,
   knowledgeReceiptSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -188,31 +187,40 @@ describe.sequential("registered memory lifecycle", () => {
       expect(replay.headers.get("X-Knowledge-Receipt-Version")).toBe("1");
       expect(replay.headers.get("Cache-Control")).toBe("no-store");
       expect(await replay.json()).toEqual(saved);
-      const privateSave = await first.client.callTool({
-        name: "save_knowledge",
-        arguments: privateInput,
-      });
-      expect(privateSave.isError).not.toBe(true);
-      expect(JSON.stringify(privateSave)).not.toContain("private appointment detail");
-      const privateReceipt = knowledgePendingReviewReceiptSchema.parse(
-        personalOsToolOutputSchema.parse(privateSave.structuredContent).result,
+      // Sensitive memory is readable by agents; only the person's block hides it.
+      const privateReceipt = knowledgeReceiptSchema.parse(
+        await tool(first.client, "save_knowledge", privateInput),
       );
+      expect(privateReceipt.record).toMatchObject({
+        sensitivity: "sensitive",
+        content: privateInput.content,
+      });
+      await f.owner.updateKnowledge({
+        recordId: privateReceipt.recordId,
+        action: "set_access",
+        expectedRevision: 1,
+        mutationKey: randomUUID(),
+        agentAccess: "blocked",
+      });
       const privateReplay = await first.client.callTool({
         name: "save_knowledge",
         arguments: privateInput,
       });
       expect(JSON.stringify(privateReplay)).not.toContain("private appointment detail");
-      expect(personalOsToolOutputSchema.parse(privateReplay.structuredContent).result).toEqual(
-        privateReceipt,
-      );
+      expect(personalOsToolOutputSchema.parse(privateReplay.structuredContent).result).toEqual({
+        receiptId: privateReceipt.receiptId,
+        recordId: privateReceipt.recordId,
+        outcome: "forgotten",
+      });
       expect(
         await f.owner.getKnowledge({ id: privateReceipt.recordId, ...planning }),
       ).toMatchObject({
         content: privateInput.content,
+        agentAccess: "blocked",
       });
       await expect(
         a.api.getKnowledge({ id: privateReceipt.recordId, ...planning }),
-      ).rejects.toMatchObject({ status: 403 });
+      ).rejects.toMatchObject({ status: 404 });
     } finally {
       await first.close();
     }

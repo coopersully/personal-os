@@ -21,7 +21,7 @@ const json = (method: "POST", value: unknown): RequestInit => ({
   body: JSON.stringify(value),
 });
 
-/** Thin authenticated transport for purpose-bound account knowledge. */
+/** Thin authenticated transport for account knowledge. */
 export function createKnowledgeApiClient(
   request: <T>(path: string, init?: RequestInit) => Promise<T>,
 ) {
@@ -31,9 +31,8 @@ export function createKnowledgeApiClient(
     },
     /** Returns the record, or a content-free tombstone when the owner reads a purged ID. */
     async getKnowledge({ id, purpose }: KnowledgeReadInput) {
-      const response = knowledgeReadResultSchema.parse(
-        await request(`${recordPath(id)}?${new URLSearchParams({ purpose })}`),
-      );
+      const query = purpose === undefined ? "" : `?${new URLSearchParams({ purpose })}`;
+      const response = knowledgeReadResultSchema.parse(await request(`${recordPath(id)}${query}`));
       return "state" in response ? response : response.record;
     },
     async updateKnowledge({ recordId, ...action }: KnowledgeLifecycleInput) {
@@ -47,9 +46,11 @@ export function createKnowledgeApiClient(
       );
     },
     async getKnowledgeHistory({ recordId, purpose, cursor }: KnowledgeHistoryInput) {
-      const params = new URLSearchParams({ purpose });
+      const params = new URLSearchParams();
+      if (purpose !== undefined) params.set("purpose", purpose);
       if (cursor !== undefined) params.set("cursor", cursor);
-      return knowledgePageSchema.parse(await request(`${recordPath(recordId)}/history?${params}`));
+      const query = params.toString() ? `?${params}` : "";
+      return knowledgePageSchema.parse(await request(`${recordPath(recordId)}/history${query}`));
     },
     async getKnowledgeContext(input: KnowledgeQuery) {
       return knowledgeContextPackSchema.parse(

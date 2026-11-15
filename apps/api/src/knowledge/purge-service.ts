@@ -1,7 +1,6 @@
 import {
   type Database,
   knowledgeDerivations,
-  knowledgeReceipts,
   knowledgeRecords,
   knowledgeRelationships,
   knowledgeRevisionMetadata,
@@ -89,11 +88,7 @@ export async function purgeTrashedKnowledge(
     )
     .onConflictDoNothing();
   // Receipts stay so a retry is still recognized; replay then finds the tombstone and answers
-  // without content. The private-proposal flag is the only receipt detail cleared here.
-  await tx
-    .update(knowledgeReceipts)
-    .set({ privateProposal: false })
-    .where(and(eq(knowledgeReceipts.userId, userId), inArray(knowledgeReceipts.recordId, ids)));
+  // without content.
   await tx
     .delete(knowledgeRelationships)
     .where(

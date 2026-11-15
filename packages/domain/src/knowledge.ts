@@ -188,31 +188,37 @@ export const knowledgeRelatedIdsSchema = z
   .max(20)
   .refine((ids) => new Set(ids).size === ids.length, { message: "Relationships must be unique." });
 export const knowledgeSensitivitySchema = z.enum(["standard", "sensitive"]);
+export const knowledgeAgentAccessSchema = z.enum(["allowed", "blocked"]);
+export type KnowledgeAgentAccess = z.infer<typeof knowledgeAgentAccessSchema>;
 export const knowledgePurposesSchema = z.array(knowledgePurposeSchema).min(1).max(6);
 export const knowledgeMutationInputSchema = z
   .object({
     content: knowledgeWriteContentSchema,
     scope: knowledgeScopeSchema,
     sensitivity: knowledgeSensitivitySchema.default("standard"),
-    purposes: knowledgePurposesSchema,
+    /** A relevance hint, never an access check. Omitted means every purpose. */
+    purposes: knowledgePurposesSchema.optional(),
+    /** Lasting preferences, standing constraints and identity-level facts load at session start. */
+    core: z.boolean().default(false),
     evidence: knowledgeEvidenceListSchema.default([]),
     relatedRecordIds: knowledgeRelatedIdsSchema.default([]),
     validity: knowledgeValiditySchema.optional(),
     mutationKey: z.uuid(),
   })
   .strict();
-export type KnowledgeMutationInput = z.infer<typeof knowledgeMutationInputSchema>;
+/** What a caller sends; defaults apply when the API parses it. */
+export type KnowledgeMutationInput = z.input<typeof knowledgeMutationInputSchema>;
+export type KnowledgeMutation = z.output<typeof knowledgeMutationInputSchema>;
 
-export const knowledgeAcceptanceSchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("owner"),
-      actorId: idSchema,
-      acceptedAt: isoDateTimeSchema,
-      evidenceIds: z.array(idSchema).max(20),
-    })
-    .strict(),
-]);
+/** Stored revisions keep the `kind` tag so earlier acceptance records still parse. */
+export const knowledgeAcceptanceSchema = z
+  .object({
+    kind: z.literal("owner"),
+    actorId: idSchema,
+    acceptedAt: isoDateTimeSchema,
+    evidenceIds: z.array(idSchema).max(20),
+  })
+  .strict();
 export const knowledgeOriginSchema = z.enum(["stated", "inferred"]);
 export const knowledgeRevisionMetadataSchema = z
   .object({
@@ -228,6 +234,16 @@ export const knowledgeRevisionMetadataSchema = z
   .strict();
 export type KnowledgeRevisionMetadata = z.infer<typeof knowledgeRevisionMetadataSchema>;
 
+export const knowledgeStatusSchema = z.enum([
+  "proposed",
+  "active",
+  "disputed",
+  "superseded",
+  "archived",
+  "expired",
+]);
+export type KnowledgeStatus = z.infer<typeof knowledgeStatusSchema>;
+
 export const knowledgeRecordSnapshotSchema = z
   .object({
     id: idSchema,
@@ -242,7 +258,7 @@ export const knowledgeRecordSnapshotSchema = z
     sensitivity: z.enum(["standard", "sensitive"]),
     purposes: z.array(knowledgePurposeSchema),
     confidence: z.number().min(0).max(1),
-    status: z.enum(["proposed", "active", "disputed", "superseded", "expired"]),
+    status: knowledgeStatusSchema,
     revision: z.int().positive(),
     sources: z.array(knowledgeSourceSchema).max(20),
     relatedRecordIds: z.array(idSchema).max(20),
@@ -256,7 +272,12 @@ export const knowledgeRecordSchema = knowledgeRecordSnapshotSchema.extend({
   claimKey: z.string().nullable(),
   conflictRecordIds: z.array(idSchema),
   evidenceAvailable: z.boolean(),
-  stale: z.boolean(),
+  /** The latest content was written by the person in the app, or the person confirmed it. */
+  ownerHeld: z.boolean(),
+  /** `blocked` hides the record from every agent read; only the person may change it. */
+  agentAccess: knowledgeAgentAccessSchema,
+  core: z.boolean(),
+  lastConfirmedAt: isoDateTimeSchema.nullable(),
   supersededBy: idSchema.nullable(),
   /** Set only on records in the owner's Trash; agents never receive a trashed record. */
   trashedAt: isoDateTimeSchema.nullable(),
@@ -275,7 +296,7 @@ export const knowledgeForgottenRecordSchema = z
   .strict();
 export type KnowledgeForgottenRecord = z.infer<typeof knowledgeForgottenRecordSchema>;
 export const knowledgeReadInputSchema = z
-  .object({ id: idSchema, purpose: knowledgePurposeSchema })
+  .object({ id: idSchema, purpose: knowledgePurposeSchema.optional() })
   .strict();
 export type KnowledgeReadInput = z.infer<typeof knowledgeReadInputSchema>;
 export const knowledgeReadResultSchema = z.union([

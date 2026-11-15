@@ -28,7 +28,7 @@ type Purpose = KnowledgeRecord["purposes"][number];
 type Scope = KnowledgeRecord["scope"]["workspace"];
 type Sensitivity = KnowledgeRecord["sensitivity"];
 export type EditMode = "edit" | "restrict" | "supersede";
-const visibilityLabels = { standard: "Authorized agents", sensitive: "Only me" };
+const visibilityLabels = { standard: "Standard", sensitive: "Sensitive" };
 
 type PermissionDraft = {
   workspace: Scope;
@@ -73,7 +73,7 @@ function Permissions({
           disabled={disabled || Boolean(record?.scope.workspace)}
         />
         <MemoryChoice
-          label="Visibility"
+          label="Sensitivity"
           value={value.sensitivity}
           choices={["standard", "sensitive"]}
           labels={visibilityLabels}
@@ -130,7 +130,7 @@ export function MemoryEditor({
   const [dirty, setDirty] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const parsed = contentDraft(kind, draft, original);
-  // Reapplying a restriction can only narrow the just-reviewed revision.
+  // Restricting only narrows the workspace of the just-reviewed revision.
   const restricted = {
     workspace: record?.scope.workspace ?? permissions.workspace,
     purposes: record
@@ -143,7 +143,7 @@ export function MemoryEditor({
     mode === "edit"
       ? parsed.success && JSON.stringify(parsed.data) === JSON.stringify(original)
       : mode === "restrict"
-        ? JSON.stringify(restricted) === JSON.stringify(permissionDraft(record))
+        ? restricted.workspace === (record?.scope.workspace ?? null)
         : false;
 
   function change(apply: () => void) {
@@ -170,11 +170,7 @@ export function MemoryEditor({
           ? knowledgeLifecycleInputSchema.safeParse({
               ...identity,
               action: "restrict",
-              restrictions: {
-                scope: { workspace: restricted.workspace },
-                purposes: restricted.purposes,
-                sensitivity: restricted.sensitivity,
-              },
+              workspace: restricted.workspace,
             })
           : parsed.success
             ? claimInput(parsed.data, permissions, mutationKey, identity)

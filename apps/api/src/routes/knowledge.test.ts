@@ -1,3 +1,4 @@
+import type { KnowledgeSaveResult } from "@personal-os/domain";
 import { Hono } from "hono";
 import { errorResponse } from "../errors.js";
 import type { AppEnv } from "../types.js";
@@ -12,12 +13,16 @@ it("redacts invalid service output and preserves request validation errors", asy
     await next();
   });
   app.onError(errorResponse);
-  const create = vi.fn(async () => ({
-    outcome: "pending_owner_review" as const,
-    receiptId: id,
-    recordId: id,
-    privateContent: "synthetic private value",
-  }));
+  // A readable receipt without its record is invalid output that carries private content.
+  const create = vi.fn(
+    async () =>
+      ({
+        outcome: "readable",
+        receiptId: id,
+        recordId: id,
+        privateContent: "synthetic private value",
+      }) as unknown as KnowledgeSaveResult,
+  );
   const search = vi.fn(async () => ({
     schemaVersion: 1 as const,
     items: [],

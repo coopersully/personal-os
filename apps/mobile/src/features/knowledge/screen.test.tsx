@@ -98,7 +98,10 @@ const inferred: KnowledgeRecord = {
   origin: "inferred",
   revision: 1,
   status: "active",
-  stale: false,
+  ownerHeld: true,
+  agentAccess: "allowed",
+  core: false,
+  lastConfirmedAt: null,
   schemaVersion: 1,
   claimKey: '[null,"preference","owner","communication_style"]',
   content: {

@@ -6065,6 +6065,7 @@ Fetch bounded, purpose-specific memory for the current intent. Cite supporting s
         "active",
         "disputed",
         "superseded",
+        "archived",
         "expired"
       ]
     },
@@ -6082,6 +6083,13 @@ Fetch bounded, purpose-specific memory for the current intent. Cite supporting s
         "inference"
       ]
     },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "stated",
+        "inferred"
+      ]
+    },
     "hasConflict": {
       "type": "boolean"
     },
@@ -6089,8 +6097,7 @@ Fetch bounded, purpose-specific memory for the current intent. Cite supporting s
       "type": "string",
       "enum": [
         "accepted",
-        "needs_review",
-        "review_due"
+        "needs_review"
       ]
     },
     "limit": {
@@ -6104,9 +6111,6 @@ Fetch bounded, purpose-specific memory for the current intent. Cite supporting s
       "maxLength": 2048
     }
   },
-  "required": [
-    "purpose"
-  ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false
 }
@@ -7816,7 +7820,7 @@ Start or continue nohmi setup. Call this immediately after connecting and again 
 
 ## get_knowledge
 
-Read one knowledge record for an explicit eligible purpose. Workspace and source read scopes remain required. Sensitive disclosure awaits owner settings.
+Read one knowledge record. Workspace and source read scopes remain required. Check origin, ownerHeld, sensitivity and conflicts before acting on it.
 
 - Domain: knowledge; stage: inspect; policy: read_only.
 - Grants (all): knowledge:read.
@@ -7845,8 +7849,7 @@ Read one knowledge record for an explicit eligible purpose. Workspace and source
     }
   },
   "required": [
-    "id",
-    "purpose"
+    "id"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false
@@ -16193,7 +16196,7 @@ Save reviewed Finance setup dispositions using exact question IDs and the curren
 
 ## save_knowledge
 
-Search for existing knowledge before saving. Save typed account knowledge with original evidence and a stable mutation UUID. Agent statements require original wording plus session/message references; unsourced assertions remain proposed inference. Read the receipt outcome before using record content: pending owner review and forgotten receipts contain IDs only.
+Search for existing knowledge before saving. Save typed account knowledge with original evidence and a stable mutation UUID; it is active at once. Agent statements require original wording plus session/message references; unsourced assertions are saved as inferred. Purposes are optional relevance hints. Read the receipt outcome before using record content: a forgotten receipt contains IDs only.
 
 - Domain: knowledge; stage: commit; policy: approved_rule.
 - Grants (all): knowledge:read, knowledge:write.
@@ -16847,6 +16850,10 @@ Search for existing knowledge before saving. Save typed account knowledge with o
         ]
       }
     },
+    "core": {
+      "default": false,
+      "type": "boolean"
+    },
     "evidence": {
       "default": [],
       "maxItems": 20,
@@ -17025,7 +17032,6 @@ Search for existing knowledge before saving. Save typed account knowledge with o
   "required": [
     "content",
     "scope",
-    "purposes",
     "mutationKey"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -17231,7 +17237,7 @@ Search owned tasks content and reviews. Follow returned pagination metadata; ret
 
 ## search_user_knowledge
 
-Find permitted memory for one declared purpose. Search before creating a duplicate, follow any returned cursor with the same filters, and cite the record and supporting sources you use.
+Find permitted memory; an optional purpose ranks matching records first. Search before creating a duplicate, follow any returned cursor with the same filters, and cite the record and supporting sources you use.
 
 - Domain: knowledge; stage: inspect; policy: read_only.
 - Grants (all): knowledge:read.
@@ -17319,6 +17325,7 @@ Find permitted memory for one declared purpose. Search before creating a duplica
         "active",
         "disputed",
         "superseded",
+        "archived",
         "expired"
       ]
     },
@@ -17336,6 +17343,13 @@ Find permitted memory for one declared purpose. Search before creating a duplica
         "inference"
       ]
     },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "stated",
+        "inferred"
+      ]
+    },
     "hasConflict": {
       "type": "boolean"
     },
@@ -17343,8 +17357,7 @@ Find permitted memory for one declared purpose. Search before creating a duplica
       "type": "string",
       "enum": [
         "accepted",
-        "needs_review",
-        "review_due"
+        "needs_review"
       ]
     },
     "limit": {
@@ -17358,9 +17371,6 @@ Find permitted memory for one declared purpose. Search before creating a duplica
       "maxLength": 2048
     }
   },
-  "required": [
-    "purpose"
-  ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false
 }
@@ -20240,7 +20250,7 @@ Update a goal's title, context, progress, target date, or lifecycle status.
 
 ## update_knowledge
 
-Revise, dispute, or supersede a knowledge record using its current revision and a stable mutation UUID. The API may create a proposal when the owner has accepted the current value. Fetch fresh context after the mutation.
+Revise, dispute, supersede, archive, unarchive, restrict to a workspace, or mark sensitive a knowledge record using its current revision and a stable mutation UUID. Revising or superseding memory the owner holds creates a proposal for the owner instead. Fetch fresh context after the mutation.
 
 - Domain: knowledge; stage: commit; policy: approved_rule.
 - Grants (all): knowledge:read, knowledge:write.
@@ -21036,6 +21046,9 @@ Revise, dispute, or supersede a knowledge record using its current revision and 
             "validUntil"
           ],
           "additionalProperties": false
+        },
+        "core": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -21112,6 +21125,140 @@ Revise, dispute, or supersede a knowledge record using its current revision and 
         "mutationKey",
         "action",
         "replacementId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "mutationKey": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "action": {
+          "type": "string",
+          "const": "archive"
+        }
+      },
+      "required": [
+        "recordId",
+        "expectedRevision",
+        "mutationKey",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "mutationKey": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "action": {
+          "type": "string",
+          "const": "unarchive"
+        }
+      },
+      "required": [
+        "recordId",
+        "expectedRevision",
+        "mutationKey",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "mutationKey": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "action": {
+          "type": "string",
+          "const": "restrict"
+        },
+        "workspace": {
+          "type": "string",
+          "enum": [
+            "tasks",
+            "calendar",
+            "mail",
+            "finances"
+          ]
+        }
+      },
+      "required": [
+        "recordId",
+        "expectedRevision",
+        "mutationKey",
+        "action",
+        "workspace"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "mutationKey": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "action": {
+          "type": "string",
+          "const": "raise_sensitivity"
+        }
+      },
+      "required": [
+        "recordId",
+        "expectedRevision",
+        "mutationKey",
+        "action"
       ],
       "additionalProperties": false
     }

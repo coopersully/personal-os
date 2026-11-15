@@ -177,7 +177,6 @@ export function knowledgeRecordVisibility(record: KnowledgeRecord) {
     record.id,
     record.revision,
     record.status,
-    record.stale,
     record.conflictRecordIds,
     record.relatedRecordIds,
     record.supersededBy,
@@ -206,13 +205,14 @@ export function pageRecords(
 
 export function knowledgeQueryFilter(input: KnowledgeQuery) {
   return [
-    input.purpose,
+    input.purpose ?? null,
     input.workspace ?? null,
     [...(input.entityRefs ?? [])].sort(),
     input.timeWindow ? [Date.parse(input.timeWindow.from), Date.parse(input.timeWindow.to)] : null,
     input.text ?? null,
     input.status ?? null,
     input.kind ?? null,
+    input.origin ?? null,
     input.hasConflict ?? null,
     input.limit ?? 20,
     ...(input.reviewView ? [input.reviewView] : []),

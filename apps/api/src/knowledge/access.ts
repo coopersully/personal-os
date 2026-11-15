@@ -14,9 +14,9 @@ import {
 } from "@personal-os/database";
 import {
   type AccessScope,
+  type KnowledgeAgentAccess,
   type KnowledgeDerivationKind,
   type KnowledgeQuery,
-  type KnowledgeReadInput,
   type KnowledgeRecord,
   type KnowledgeRecordSnapshot,
   type KnowledgeRevisionMetadata,
@@ -33,16 +33,22 @@ import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 
 export type KnowledgeTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-type Purpose = KnowledgeReadInput["purpose"];
-type Disclosure = Pick<KnowledgeRecordSnapshot, "scope" | "sensitivity" | "purposes">;
-export type KnowledgeRevision = {
+type Disclosure = Pick<KnowledgeRecordSnapshot, "scope" | "sensitivity">;
+/** Record-level state that is not part of an immutable revision. */
+export type KnowledgeRecordState = {
+  /** Trash state; a trashed record is never disclosed to an agent. */
+  trashedAt: Date | null;
+  trashGroupId: string | null;
+  ownerHeld: boolean;
+  agentAccess: KnowledgeAgentAccess;
+  core: boolean;
+  lastConfirmedAt: Date | null;
+};
+export type KnowledgeRevision = KnowledgeRecordState & {
   snapshot: KnowledgeRecordSnapshot;
   metadata: KnowledgeRevisionMetadata;
   claimKey: string | null;
   hasSidecar: boolean;
-  /** Record-level trash state; a trashed record is never disclosed to an agent. */
-  trashedAt: Date | null;
-  trashGroupId: string | null;
 };
 /** Default reads exclude Trash. Only the owner may opt in, by ID or the Trash view. */
 export type KnowledgeTrashVisibility = { includeTrashed?: boolean };
@@ -161,8 +167,7 @@ export async function bumpKnowledgeEpoch(tx: KnowledgeTransaction, userId: strin
 export function preserveKnowledgeDisclosure(input: Disclosure, source: Disclosure) {
   if (
     (source.scope.workspace && input.scope.workspace !== source.scope.workspace) ||
-    (source.sensitivity === "sensitive" && input.sensitivity !== "sensitive") ||
-    input.purposes.some((purpose) => !source.purposes.includes(purpose))
+    (source.sensitivity === "sensitive" && input.sensitivity !== "sensitive")
   ) {
     throw new AppError("forbidden", "A derived record cannot broaden source disclosure.");
   }
@@ -240,13 +245,47 @@ const revisionSelection = {
   claimKey: knowledgeRevisionMetadata.claimKey,
   trashedAt: knowledgeRecords.trashedAt,
   trashGroupId: knowledgeRecords.trashGroupId,
+  ownerHeld: knowledgeRecords.ownerHeld,
+  agentAccess: knowledgeRecords.agentAccess,
+  core: knowledgeRecords.core,
+  lastConfirmedAt: knowledgeRecords.lastConfirmedAt,
 };
 
-/** The one trash predicate for agent reads; SQL readers use `knowledgeNotTrashed`. */
-export function isKnowledgeVisibleToAgent(record: Pick<KnowledgeRevision, "trashedAt">) {
-  return record.trashedAt === null;
+/**
+ * The one agent visibility rule: not in Trash, not blocked by the person, and not restricted to
+ * a workspace the caller cannot read. Sensitivity and purpose never hide a record from an agent.
+ * SQL readers use `knowledgeVisibleToAgent`.
+ */
+export function isKnowledgeVisibleToAgent(
+  record: Pick<KnowledgeRevision, "trashedAt" | "agentAccess" | "snapshot">,
+  scopes: ReadonlySet<AccessScope>,
+) {
+  const { workspace } = record.snapshot.scope;
+  return (
+    record.trashedAt === null &&
+    record.agentAccess === "allowed" &&
+    (workspace === null || scopes.has(`${workspace}:read`))
+  );
 }
 export const knowledgeNotTrashed = isNull(knowledgeRecords.trashedAt);
+/** Record state for a revision read on its own, where only its content matters. */
+export const detachedKnowledgeRecordState: KnowledgeRecordState = {
+  trashedAt: null,
+  trashGroupId: null,
+  ownerHeld: false,
+  agentAccess: "allowed",
+  core: false,
+  lastConfirmedAt: null,
+};
+/** SQL twin of `isKnowledgeVisibleToAgent`; requires the current revision to be joined. */
+export function knowledgeVisibleToAgent(scopes: readonly AccessScope[]) {
+  const workspace = sql`(${knowledgeRevisions.snapshot}->'scope'->>'workspace')`;
+  return and(
+    knowledgeNotTrashed,
+    eq(knowledgeRecords.agentAccess, "allowed"),
+    sql`(${workspace} IS NULL OR ${JSON.stringify(scopes)}::jsonb ? (${workspace} || ':read'))`,
+  );
+}
 
 function currentRevisions(tx: KnowledgeTransaction) {
   return tx
@@ -274,7 +313,7 @@ function currentRevisions(tx: KnowledgeTransaction) {
 export function currentKnowledgeForRetrieval(
   tx: KnowledgeTransaction,
   principal: Principal,
-  query: Pick<KnowledgeQuery, "purpose" | "workspace" | "kind" | "status">,
+  query: Pick<KnowledgeQuery, "workspace" | "kind" | "status">,
   authorizedScopes: AccessScope[],
 ) {
   const snapshot = knowledgeRevisions.snapshot;
@@ -287,16 +326,14 @@ export function currentKnowledgeForRetrieval(
     and(
       eq(knowledgeRecords.userId, principal.userId),
       query.status === "trashed" ? isNotNull(knowledgeRecords.trashedAt) : knowledgeNotTrashed,
-      sql`${snapshot}->'purposes' @> ${JSON.stringify([query.purpose])}::jsonb`,
       query.workspace
         ? or(sql`${workspace} IS NULL`, sql`${workspace} = ${query.workspace}`)
         : undefined,
       query.kind ? sql`${kind} = ${query.kind}` : undefined,
       principal.actorType === "agent"
         ? and(
-            sql`${snapshot}->>'sensitivity' = 'standard'`,
+            knowledgeVisibleToAgent(authorizedScopes),
             sql`(${snapshot}->'requiredReadScopes') <@ ${scopes}`,
-            sql`(${workspace} IS NULL OR ${scopes} ? (${workspace} || ':read'))`,
             authorizedScopes.includes("goals:read") ? undefined : sql`${kind} <> 'goal'`,
           )
         : undefined,
@@ -428,13 +465,13 @@ export async function knowledgeClaimRevisions(
     .filter((candidate) => candidate.claimKey === claimKey);
 }
 
-export function projectKnowledgeRevision(row: {
-  snapshot: KnowledgeRecordSnapshot;
-  metadata: KnowledgeRevisionMetadata | null;
-  claimKey: string | null;
-  trashedAt: Date | null;
-  trashGroupId: string | null;
-}): KnowledgeRevision {
+export function projectKnowledgeRevision(
+  row: KnowledgeRecordState & {
+    snapshot: KnowledgeRecordSnapshot;
+    metadata: KnowledgeRevisionMetadata | null;
+    claimKey: string | null;
+  },
+): KnowledgeRevision {
   const snapshot = knowledgeRecordSnapshotSchema.parse(row.snapshot);
   const metadata = row.metadata
     ? knowledgeRevisionMetadataSchema.parse(row.metadata)
@@ -445,6 +482,10 @@ export function projectKnowledgeRevision(row: {
     hasSidecar: row.metadata !== null,
     trashedAt: row.trashedAt,
     trashGroupId: row.trashGroupId,
+    ownerHeld: row.ownerHeld,
+    agentAccess: row.agentAccess,
+    core: row.core,
+    lastConfirmedAt: row.lastConfirmedAt,
     claimKey: knowledgeClaimKey(
       snapshot.scope.workspace,
       knowledgeClaimContent(snapshot, metadata.generatedInference),
@@ -550,13 +591,12 @@ async function historicalCopyReferences(
     );
   if (legacy) {
     const possible = new Set(unresolved);
-    const old = {
+    const old: KnowledgeRevision = {
+      ...detachedKnowledgeRecordState,
       snapshot: legacy.snapshot,
       metadata: legacyMetadata(legacy.snapshot),
       claimKey: null,
       hasSidecar: false,
-      trashedAt: null,
-      trashGroupId: null,
     };
     for (const reference of directSourceReferences(old)) {
       const key = reference.toLowerCase();
@@ -623,7 +663,6 @@ type DisclosureProjection = {
   structuralAvailable: boolean;
   evidenceAvailable: boolean;
   supportStale: boolean;
-  stale: boolean;
 };
 type ReferenceState = { revision: KnowledgeRevision; projection: DisclosureProjection };
 
@@ -634,7 +673,6 @@ function supportsClaim(
 ) {
   return (
     reference?.projection.evidenceAvailable === true &&
-    !reference.projection.stale &&
     (!at || revisionIsCurrent(reference.revision.snapshot, at)) &&
     (expectedRevision === undefined || reference.revision.snapshot.revision === expectedRevision) &&
     !["disputed", "expired", "superseded"].includes(reference.revision.snapshot.status)
@@ -647,6 +685,52 @@ function supportChanged(reference: ReferenceState | undefined, expectedRevision?
     (reference.projection.supportStale ||
       (expectedRevision !== undefined && reference.revision.snapshot.revision !== expectedRevision))
   );
+}
+
+/**
+ * The other side of a pending agent proposal: for a proposal, the record it proposes to change;
+ * for any other record, the pending proposals that name it. Trashed records are left out.
+ */
+export async function linkedProposalIds(
+  tx: KnowledgeTransaction,
+  userId: string,
+  { snapshot }: KnowledgeRevision,
+) {
+  const status = sql`(${knowledgeRevisions.snapshot}->>'status')`;
+  if (snapshot.status === "proposed") {
+    const rows = await tx
+      .selectDistinct({ id: knowledgeDerivations.sourceRecordId })
+      .from(knowledgeDerivations)
+      .where(
+        and(
+          eq(knowledgeDerivations.userId, userId),
+          eq(knowledgeDerivations.recordId, snapshot.id),
+          eq(knowledgeDerivations.revision, snapshot.revision),
+          eq(knowledgeDerivations.kind, "revision_proposal"),
+        ),
+      );
+    return rows.map(({ id }) => id);
+  }
+  if (snapshot.status === "superseded") return [];
+  const rows = await currentRevisions(tx)
+    .innerJoin(
+      knowledgeDerivations,
+      and(
+        eq(knowledgeDerivations.userId, knowledgeRecords.userId),
+        eq(knowledgeDerivations.recordId, knowledgeRecords.id),
+        eq(knowledgeDerivations.revision, knowledgeRecords.revision),
+      ),
+    )
+    .where(
+      and(
+        eq(knowledgeRecords.userId, userId),
+        knowledgeNotTrashed,
+        eq(knowledgeDerivations.sourceRecordId, snapshot.id),
+        eq(knowledgeDerivations.kind, "revision_proposal"),
+        sql`${status} = 'proposed'`,
+      ),
+    );
+  return [...new Set(rows.map(({ snapshot: proposal }) => proposal.id))];
 }
 
 export function createKnowledgeAccess(now: () => Date) {
@@ -731,9 +815,7 @@ export function createKnowledgeAccess(now: () => Date) {
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
-    purpose: Purpose,
     options: {
-      pendingReceipt?: boolean;
       retrieval?: boolean;
       includeOrdinaryLinks?: boolean;
       ancestors?: ReadonlySet<string>;
@@ -741,7 +823,7 @@ export function createKnowledgeAccess(now: () => Date) {
     } = {},
   ): Promise<DisclosureProjection> {
     const { snapshot, metadata } = revision;
-    if (principal.actorType === "agent" && !isKnowledgeVisibleToAgent(revision))
+    if (principal.actorType === "agent" && !isKnowledgeVisibleToAgent(revision, principal.scopes))
       throw new AppError("not_found", "The knowledge record was not found.");
     // A trashed record shown in the owner's Trash may still cite records trashed with it.
     const trashVisibility = trashReferenceVisibility(principal, revision);
@@ -756,14 +838,6 @@ export function createKnowledgeAccess(now: () => Date) {
     if (content.kind === "goal") scopes.push("goals:read");
     if (snapshot.scope.workspace) scopes.push(`${snapshot.scope.workspace}:read`);
     await authorize(tx, principal, scopes);
-    if (!snapshot.purposes.includes(purpose))
-      throw new AppError("forbidden", "This record is unavailable for that purpose.");
-    if (
-      principal.actorType === "agent" &&
-      snapshot.sensitivity === "sensitive" &&
-      !options.pendingReceipt
-    )
-      throw new AppError("forbidden", "Sensitive knowledge is available to the owner.");
 
     const inherited = metadata.inheritedSourceIds.length
       ? await tx
@@ -813,14 +887,8 @@ export function createKnowledgeAccess(now: () => Date) {
         continue;
       }
       try {
-        preserveKnowledgeDisclosure({ ...snapshot, purposes: [purpose] }, source.snapshot);
-        if (
-          content.kind === "entity_meaning" &&
-          content.value.recordId.toLowerCase() === id &&
-          !source.snapshot.purposes.includes(content.value.purpose)
-        )
-          throw new AppError("forbidden", "The entity source is unavailable for that purpose.");
-        const projection = await disclose(tx, principal, source, purpose, {
+        preserveKnowledgeDisclosure(snapshot, source.snapshot);
+        const projection = await disclose(tx, principal, source, {
           ancestors,
           checked,
           includeOrdinaryLinks: false,
@@ -908,7 +976,6 @@ export function createKnowledgeAccess(now: () => Date) {
         structuralAvailable &&
         (independentlyStated || (!supportStale && (!needsSupport || availableSupport))),
       supportStale: !independentlyStated && supportStale,
-      stale: false,
     };
     checked.set(snapshot.id, result);
     return result;
@@ -918,27 +985,19 @@ export function createKnowledgeAccess(now: () => Date) {
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
-    purpose: Purpose,
   ): Promise<KnowledgeRecord> {
-    return presentProjection(
-      tx,
-      principal,
-      revision,
-      purpose,
-      await disclose(tx, principal, revision, purpose),
-    );
+    return presentProjection(tx, principal, revision, await disclose(tx, principal, revision));
   }
 
   async function presentProjection(
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
-    purpose: Purpose,
-    { sources, relatedRecordIds, evidenceAvailable, stale }: DisclosureProjection,
+    { sources, relatedRecordIds, evidenceAvailable }: DisclosureProjection,
     retrieval = false,
   ): Promise<KnowledgeRecord> {
     const { snapshot, metadata, claimKey } = revision;
-    const conflictRecordIds: string[] = [];
+    const conflictRecordIds = new Set<string>();
     if (claimKey && snapshot.status !== "superseded" && snapshot.status !== "expired") {
       const candidates = await knowledgeClaimRevisions(tx, principal.userId, claimKey, snapshot.id);
       const value = JSON.stringify(
@@ -956,9 +1015,14 @@ export function createKnowledgeAccess(now: () => Date) {
           ) === value
         )
           continue;
-        if (await isDisclosable(tx, principal, other, purpose, retrieval))
-          conflictRecordIds.push(other.snapshot.id);
+        if (await isDisclosable(tx, principal, other, retrieval))
+          conflictRecordIds.add(other.snapshot.id);
       }
+    }
+    for (const id of await linkedProposalIds(tx, principal.userId, revision)) {
+      const linked = await findOwnedKnowledgeRevision(tx, principal.userId, id);
+      if (linked && (await isDisclosable(tx, principal, linked, retrieval)))
+        conflictRecordIds.add(linked.snapshot.id);
     }
     const replacement = metadata.supersededBy
       ? await findOwnedKnowledgeRevision(
@@ -970,7 +1034,7 @@ export function createKnowledgeAccess(now: () => Date) {
         )
       : null;
     const supersededBy =
-      replacement && (await isDisclosable(tx, principal, replacement, purpose, retrieval))
+      replacement && (await isDisclosable(tx, principal, replacement, retrieval))
         ? replacement.snapshot.id
         : null;
     return {
@@ -982,12 +1046,15 @@ export function createKnowledgeAccess(now: () => Date) {
       sources,
       relatedRecordIds,
       evidenceAvailable,
-      stale,
       origin: metadata.origin,
       acceptance: metadata.acceptance,
       claimKey,
       supersededBy,
-      conflictRecordIds: conflictRecordIds.sort(),
+      conflictRecordIds: [...conflictRecordIds].sort(),
+      ownerHeld: revision.ownerHeld,
+      agentAccess: revision.agentAccess,
+      core: revision.core,
+      lastConfirmedAt: revision.lastConfirmedAt?.toISOString() ?? null,
       trashedAt: revision.trashedAt?.toISOString() ?? null,
       trashGroupId: revision.trashGroupId,
     };
@@ -997,16 +1064,12 @@ export function createKnowledgeAccess(now: () => Date) {
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
-    purpose: Purpose,
     retrieval = false,
   ) {
     try {
-      const projection = await disclose(tx, principal, revision, purpose, { retrieval });
+      const projection = await disclose(tx, principal, revision, { retrieval });
       return (
-        !retrieval ||
-        (projection.evidenceAvailable &&
-          !projection.stale &&
-          revisionIsCurrent(revision.snapshot, now()))
+        !retrieval || (projection.evidenceAvailable && revisionIsCurrent(revision.snapshot, now()))
       );
     } catch (error) {
       if (isKnowledgeDisclosureError(error)) return false;
@@ -1018,10 +1081,9 @@ export function createKnowledgeAccess(now: () => Date) {
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
-    purpose: Purpose,
   ) {
     try {
-      const projection = await disclose(tx, principal, revision, purpose, { retrieval: true });
+      const projection = await disclose(tx, principal, revision, { retrieval: true });
       return projection.evidenceAvailable
         ? { state: "available" as const, projection }
         : { state: "unavailable" as const };
@@ -1035,20 +1097,12 @@ export function createKnowledgeAccess(now: () => Date) {
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
-    purpose: Purpose,
   ): Promise<
     { state: "denied" | "unavailable" } | { state: "available"; record: KnowledgeRecord }
   > {
-    const disclosure = await retrievalDisclosure(tx, principal, revision, purpose);
+    const disclosure = await retrievalDisclosure(tx, principal, revision);
     if (disclosure.state !== "available") return disclosure;
-    const record = await presentProjection(
-      tx,
-      principal,
-      revision,
-      purpose,
-      disclosure.projection,
-      true,
-    );
+    const record = await presentProjection(tx, principal, revision, disclosure.projection, true);
     if (
       record.validUntil &&
       Date.parse(record.validUntil) <= now().getTime() &&

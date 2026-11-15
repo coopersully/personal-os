@@ -28,7 +28,8 @@ const timeWindow = z
 
 export const knowledgeQuerySchema = z
   .object({
-    purpose: knowledgePurposeSchema,
+    /** Ranks records saved for this purpose first; it never hides a record. */
+    purpose: knowledgePurposeSchema.optional(),
     workspace: knowledgeWorkspaceSchema.optional(),
     entityRefs: entityRefs.optional(),
     timeWindow: timeWindow.optional(),
@@ -44,8 +45,9 @@ export const knowledgeQuerySchema = z
     kind: z
       .enum(knowledgeContentSchema.options.map((schema) => schema.shape.kind.value))
       .optional(),
+    origin: knowledgeOriginSchema.optional(),
     hasConflict: z.boolean().optional(),
-    reviewView: z.enum(["accepted", "needs_review", "review_due"]).optional(),
+    reviewView: z.enum(["accepted", "needs_review"]).optional(),
     limit: z.int().min(1).max(knowledgeRetrievalMaxRecords).optional(),
     cursor: cursor.optional(),
   })
@@ -59,7 +61,7 @@ export const knowledgeAgentQuerySchema = knowledgeQuerySchema.extend({
 export const knowledgeHistoryInputSchema = z
   .object({
     recordId: idSchema.transform((id) => id.toLowerCase()),
-    purpose: knowledgePurposeSchema,
+    purpose: knowledgePurposeSchema.optional(),
     cursor: cursor.optional(),
   })
   .strict();

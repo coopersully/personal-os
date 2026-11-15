@@ -13,6 +13,7 @@ import type { Principal } from "../types.js";
 import {
   currentKnowledgeForRetrieval,
   findOwnedKnowledgeRevision,
+  isKnowledgeVisibleToAgent,
   knowledgeValidityOverlaps,
   ownedKnowledgeRevision,
   projectKnowledgeRevision,
@@ -70,13 +71,12 @@ function entityMatches(
 async function validateEntityRefs(
   { tx, access, authorizedScopes }: KnowledgeRetrievalSession,
   principal: Principal,
-  purpose: KnowledgeQuery["purpose"],
   refs: Set<string>,
 ) {
   for (const id of refs) {
     const revision = await findOwnedKnowledgeRevision(tx, principal.userId, id);
     if (revision) {
-      const projection = await access.projectForRetrieval(tx, principal, revision, purpose);
+      const projection = await access.projectForRetrieval(tx, principal, revision);
       if (projection.state === "available") continue;
     } else if (
       (principal.actorType === "user" || authorizedScopes.includes("goals:read")) &&
@@ -91,6 +91,8 @@ async function validateEntityRefs(
 type Candidate = {
   record: KnowledgeRecord;
   content: KnowledgeRecord["content"];
+  /** 1 when the record was saved for the requested purpose; purpose only ranks. */
+  purpose: number;
   exact: number;
   related: number;
   current: number;
@@ -128,10 +130,8 @@ async function fullTextRanks(
 
 function matchesReviewView(record: KnowledgeRecord, view: KnowledgeQuery["reviewView"], at: Date) {
   if (!view) return true;
-  const current = record.status === "active" && revisionIsCurrent(record, at);
-  if (view === "accepted") return current && !record.stale;
-  if (view === "review_due") return current && record.stale;
-  return record.status === "proposed" || record.status === "disputed" || (current && record.stale);
+  if (view === "accepted") return record.status === "active" && revisionIsCurrent(record, at);
+  return record.status === "proposed" || record.status === "disputed";
 }
 
 export async function selectKnowledgeCandidates(
@@ -144,7 +144,7 @@ export async function selectKnowledgeCandidates(
   // state, not a revision status.
   const status = query.status === "trashed" ? undefined : query.status;
   const refs = new Set(query.entityRefs);
-  await validateEntityRefs(session, principal, query.purpose, refs);
+  await validateEntityRefs(session, principal, refs);
   const rows = await currentKnowledgeForRetrieval(tx, principal, query, authorizedScopes);
   const candidates: Candidate[] = [];
   let unavailable = false;
@@ -159,14 +159,17 @@ export async function selectKnowledgeCandidates(
       })
     )
       continue;
-    const projection = await access.projectForRetrieval(tx, principal, revision, query.purpose);
+    const projection = await access.projectForRetrieval(tx, principal, revision);
     if (projection.state !== "available") {
       // We cannot text-match or inspect an unavailable body. Report an
       // incomplete source result only after current authorization passed.
       if (
         projection.state === "unavailable" &&
         !refs.size &&
-        (!status || status === snapshot.status || status === "disputed") &&
+        (status
+          ? status === snapshot.status || status === "disputed"
+          : snapshot.status !== "archived") &&
+        (!query.origin || query.origin === metadata.origin) &&
         query.hasConflict !== true
       )
         unavailable = true;
@@ -177,7 +180,9 @@ export async function selectKnowledgeCandidates(
     const { exact, related } = entityMatches(record, content, refs);
     if (
       (refs.size && !exact && !related) ||
-      (status && status !== record.status) ||
+      // Archived memory is left out unless the caller asks for it.
+      (status ? status !== record.status : record.status === "archived") ||
+      (query.origin && query.origin !== record.origin) ||
       !matchesReviewView(record, query.reviewView, at) ||
       (query.hasConflict !== undefined && query.hasConflict !== record.conflictRecordIds.length > 0)
     )
@@ -185,9 +190,10 @@ export async function selectKnowledgeCandidates(
     candidates.push({
       record,
       content,
+      purpose: Number(query.purpose !== undefined && record.purposes.includes(query.purpose)),
       exact,
       related,
-      current: Number(record.status === "active" && !record.stale && revisionIsCurrent(record, at)),
+      current: Number(record.status === "active" && revisionIsCurrent(record, at)),
       freshness: Date.parse(record.acceptance?.acceptedAt ?? record.createdAt),
       source: sourcePriority(record),
     });
@@ -197,6 +203,7 @@ export async function selectKnowledgeCandidates(
   const matches = ranks ? candidates.filter(({ record }) => ranks.has(record.id)) : candidates;
   matches.sort(
     (a, b) =>
+      b.purpose - a.purpose ||
       (ranks?.get(b.record.id) ?? 0) - (ranks?.get(a.record.id) ?? 0) ||
       b.exact - a.exact ||
       b.current - a.current ||
@@ -236,7 +243,7 @@ export function createKnowledgeSearchService(dependencies: KnowledgeRetrievalDep
         principal,
         {
           operation: "history",
-          filter: [input.purpose, input.recordId],
+          filter: [input.purpose ?? null, input.recordId],
           cursor: input.cursor,
         },
         async (session) => {
@@ -244,25 +251,20 @@ export function createKnowledgeSearchService(dependencies: KnowledgeRetrievalDep
           const current = await ownedKnowledgeRevision(tx, principal, input.recordId, false, {
             includeTrashed: principal.actorType === "user",
           });
-          const disclosure = await access.retrievalDisclosure(
-            tx,
-            principal,
-            current,
-            input.purpose,
-          );
+          // A record hidden from this agent reads as missing, never as merely denied.
+          if (
+            principal.actorType === "agent" &&
+            !isKnowledgeVisibleToAgent(current, principal.scopes)
+          )
+            throw new AppError("not_found", "The knowledge record was not found.");
+          const disclosure = await access.retrievalDisclosure(tx, principal, current);
           if (disclosure.state === "denied")
-            throw new AppError("forbidden", "The memory history is unavailable for this purpose.");
+            throw new AppError("forbidden", "The memory history is unavailable to this caller.");
           return pageKnowledgeHistory(
             session,
             principal.userId,
             input.recordId,
-            () => (row) =>
-              access.projectForRetrieval(
-                tx,
-                principal,
-                projectKnowledgeRevision(row),
-                input.purpose,
-              ),
+            () => (row) => access.projectForRetrieval(tx, principal, projectKnowledgeRevision(row)),
           );
         },
       );

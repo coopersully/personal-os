@@ -161,37 +161,15 @@ function memoryUseFields(
   return [
     ["Workspace", record.scope.workspace ? memoryLabel(record.scope.workspace) : "All workspaces"],
     ["Allowed uses", record.purposes.map(memoryLabel).join(", ")],
-    ["Visibility", record.sensitivity === "sensitive" ? "Only you" : "Authorized agents"],
+    ["Sensitivity", record.sensitivity === "sensitive" ? "Sensitive" : "Standard"],
   ];
 }
 
 function submittedFields(input: KnowledgeLifecycleInput): Array<[string, string]> {
   if (input.action === "revise") return memoryClaimFields(input.content);
   if (input.action === "supersede") return [["Replacement memory ID", input.replacementId]];
-  if (input.action === "restrict") {
-    const { scope, purposes, sensitivity } = input.restrictions;
-    return [
-      ...(scope
-        ? [
-            ["Workspace", scope.workspace ? memoryLabel(scope.workspace) : "All workspaces"] as [
-              string,
-              string,
-            ],
-          ]
-        : []),
-      ...(purposes
-        ? [["Allowed uses", purposes.map(memoryLabel).join(", ")] as [string, string]]
-        : []),
-      ...(sensitivity
-        ? [
-            ["Visibility", sensitivity === "sensitive" ? "Only you" : "Authorized agents"] as [
-              string,
-              string,
-            ],
-          ]
-        : []),
-    ];
-  }
+  if (input.action === "restrict" || input.action === "widen")
+    return [["Workspace", input.workspace ? memoryLabel(input.workspace) : "All workspaces"]];
   return [["Action", input.action === "confirm" ? "Confirm memory" : "Dispute memory"]];
 }
 
@@ -475,12 +453,7 @@ export function NewMemory({
         close();
         onSaved();
         return {
-          message:
-            result.outcome === "pending_owner_review"
-              ? "Memory saved for review."
-              : result.outcome === "forgotten"
-                ? "This memory is unavailable."
-                : "Memory saved.",
+          message: result.outcome === "forgotten" ? "This memory is unavailable." : "Memory saved.",
         };
       },
     });
@@ -559,28 +532,31 @@ export function MemoryRecordDetail({
         setMode("detail");
         setDraftRecord(null);
         onChanged();
-        if (result.outcome === "readable" && result.record.purposes.includes(purpose)) {
+        if (result.outcome === "readable") {
           setLocalRecord(result.record);
         } else {
           close();
         }
-        const messages = {
+        const messages: Record<KnowledgeLifecycleInput["action"], string> = {
           revise: "Memory saved.",
           confirm: "Memory confirmed.",
           dispute: "Memory disputed.",
           restrict: "Memory use restricted.",
+          widen: "Memory use widened.",
           supersede: "Memory superseded.",
+          archive: "Memory archived.",
+          unarchive: "Memory unarchived.",
+          raise_sensitivity: "Memory marked sensitive.",
+          set_sensitivity: "Memory sensitivity updated.",
+          set_access: "Agent access updated.",
+          resolve_conflict: "Conflict resolved.",
           trash: "Memory moved to Trash.",
           restore: "Memory restored.",
           delete_now: "Memory deleted.",
         };
         return {
           message:
-            result.outcome === "pending_owner_review"
-              ? "Memory saved for review."
-              : result.outcome === "readable"
-                ? messages[input.action]
-                : "This memory is unavailable.",
+            result.outcome === "readable" ? messages[input.action] : "This memory is unavailable.",
         };
       },
       recover: (error) => {
@@ -699,7 +675,7 @@ export function MemoryRecordDetail({
                 <div className="flex flex-wrap items-start gap-2">
                   {mutable ? (
                     <>
-                      {record.status !== "active" || record.stale ? (
+                      {record.status !== "active" ? (
                         <Button
                           variant="secondary"
                           size="sm"

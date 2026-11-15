@@ -54,7 +54,10 @@ const record: KnowledgeRecord = {
   claimKey: '[null,"preference","owner","communication_style"]',
   conflictRecordIds: [],
   evidenceAvailable: true,
-  stale: false,
+  ownerHeld: true,
+  agentAccess: "allowed",
+  core: false,
+  lastConfirmedAt: null,
   supersededBy: null,
   trashedAt: null,
   trashGroupId: null,
@@ -278,14 +281,9 @@ it("prefers a fresh same-revision projection and clears the selected detail on a
   expect(screen.queryByText("Current source projection")).not.toBeInTheDocument();
 });
 
-it("shows both restriction choices and preserves a narrower draft after concurrent restriction", async () => {
-  const before: KnowledgeRecord = { ...record, purposes: ["planning", "review", "communication"] };
-  const latest: KnowledgeRecord = {
-    ...before,
-    revision: 4,
-    purposes: ["planning", "review"],
-    sensitivity: "sensitive",
-  };
+it("narrows the workspace and preserves the draft after a concurrent change", async () => {
+  const before: KnowledgeRecord = record;
+  const latest: KnowledgeRecord = { ...before, revision: 4, sensitivity: "sensitive" };
   vi.mocked(api.getKnowledge).mockResolvedValueOnce(before).mockResolvedValue(latest);
   vi.mocked(api.updateKnowledge)
     .mockRejectedValueOnce(
@@ -295,32 +293,24 @@ it("shows both restriction choices and preserves a narrower draft after concurre
   mount();
   fireEvent.click(await screen.findByRole("button", { name: /Communication style.*concise/i }));
   fireEvent.click(await screen.findByRole("button", { name: "Restrict use" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Review" }));
+  fireEvent.change(screen.getByRole("combobox", { name: "Workspace" }), {
+    target: { value: "tasks" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "Save restrictions" }));
   fireEvent.click(await screen.findByRole("button", { name: "Review latest memory" }));
   const keep = await screen.findByRole("button", { name: "Keep editing restrictions" });
   expect(
-    within(screen.getByRole("region", { name: "Current claim" })).getByText("Only you"),
+    within(screen.getByRole("region", { name: "Current claim" })).getByText("Sensitive"),
   ).toBeVisible();
   expect(
-    within(screen.getByRole("region", { name: "Submitted change" })).getByText(
-      "Planning, Communication",
-    ),
+    within(screen.getByRole("region", { name: "Submitted change" })).getByText("Tasks"),
   ).toBeVisible();
   fireEvent.click(keep);
-  expect(screen.getByRole("checkbox", { name: "Review" })).not.toBeChecked();
-  expect(screen.queryByRole("checkbox", { name: "Communication" })).not.toBeInTheDocument();
+  expect(screen.getByRole("combobox", { name: "Workspace" })).toHaveValue("tasks");
   fireEvent.click(screen.getByRole("button", { name: "Save restrictions" }));
   await waitFor(() =>
     expect(api.updateKnowledge).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        expectedRevision: 4,
-        restrictions: {
-          scope: { workspace: null },
-          purposes: ["planning"],
-          sensitivity: "sensitive",
-        },
-      }),
+      expect.objectContaining({ action: "restrict", expectedRevision: 4, workspace: "tasks" }),
     ),
   );
 });

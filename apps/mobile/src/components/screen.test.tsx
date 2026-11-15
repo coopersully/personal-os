@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   motion: true,
   region: vi.fn(),
   scroll: {} as Record<string, unknown>,
+  fixed: undefined as number | undefined,
 }));
 vi.mock("react-native", async () => {
   const native = await import("../../test/native");
@@ -21,6 +22,14 @@ vi.mock("react-native", async () => {
     ...native,
     Platform: h.platform,
     Animated: { View: native.View },
+    View: ({ children, style }: PropsWithChildren<{ style?: unknown }>) => {
+      const bottom = [style]
+        .flat(3)
+        .map((entry) => (entry as { paddingBottom?: number } | undefined)?.paddingBottom)
+        .findLast((value) => value !== undefined);
+      if (bottom !== undefined) h.fixed = bottom;
+      return <div>{children}</div>;
+    },
     ScrollView: ({ children, ...props }: PropsWithChildren<Record<string, unknown>>) => {
       h.scroll = props;
       return <div data-testid="scroll">{children}</div>;
@@ -87,6 +96,27 @@ it("clears the floating native tab bar on iPhone tab pages and nowhere else", ()
     </Screen>,
   );
   expect(bottom()).toBe(34);
+  // A fixed page, such as a pinned composer, gets the same clearance on iPhone only.
+  const fixed = () => h.fixed;
+  view.rerender(
+    <Screen chrome scroll={false} tabBar>
+      Conversation
+    </Screen>,
+  );
+  expect(fixed()).toBe(34);
+  h.platform.OS = "ios";
+  view.rerender(
+    <Screen chrome scroll={false} tabBar>
+      Conversation
+    </Screen>,
+  );
+  expect(fixed()).toBe(tabBarClearance);
+  view.rerender(
+    <Screen chrome scroll={false}>
+      Editor
+    </Screen>,
+  );
+  expect(fixed()).toBe(34);
 });
 it("uses safe-area adjustment without shared chrome and preserves compact non-scrolling forms", () => {
   h.inset = 0;

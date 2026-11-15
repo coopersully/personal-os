@@ -94,7 +94,7 @@ export function FinanceAssistantScreen() {
     if (view === "Activity" || view === "Conversation" || view === "For you") setMode(view);
   }, [view]);
   return (
-    <FinanceScreen title="Assistant" scroll={mode !== "Conversation"}>
+    <FinanceScreen title="Assistant" scroll={mode !== "Conversation"} tabBar>
       <Segments
         value={mode}
         options={["For you", "Conversation", "Activity"]}

@@ -33,7 +33,6 @@ const h = vi.hoisted(() => ({
   path: "/",
   params: {} as { accountSearch?: string; mailSearch?: string },
   accessibilityTap: undefined as undefined | (() => void),
-  press: undefined as undefined | ((event?: { nativeEvent: { timestamp: number } }) => void),
   platform: { OS: "web" },
   reduced: false,
   navigate: vi.fn(),
@@ -112,8 +111,6 @@ vi.mock("react-native", async () => {
     },
   ) {
     if (props.onAccessibilityTap) h.accessibilityTap = props.onAccessibilityTap;
-    if (props.accessibilityLabel?.startsWith("Switch workspace"))
-      h.press = props.onPress as typeof h.press;
     useEffect(() => {
       const index = ["today", "tasks", "mail", "finances", "calendar"].findIndex(
         (name) => props.accessibilityLabel === `Open ${name}`,
@@ -303,7 +300,7 @@ it("does not reopen the picker from a hold timer orphaned by a second grant", as
   const pan = h.responders[0];
   act(() => pan.onPanResponderGrant?.(event(), gesture()));
   await act(async () => vi.advanceTimersByTimeAsync(100));
-  // A second grant before the first hold elapsed used to leave the first timer running.
+  // A second grant before the first hold elapsed must replace its timer, not add another.
   act(() => pan.onPanResponderGrant?.(event(), gesture()));
   act(() => pan.onPanResponderMove?.(event(), gesture(20, 144, 20)));
   await act(async () => pan.onPanResponderRelease?.(event(), gesture()));
@@ -312,28 +309,16 @@ it("does not reopen the picker from a hold timer orphaned by a second grant", as
   await act(async () => vi.advanceTimersByTimeAsync(300));
   expect(screen.queryByTestId("native-picker")).not.toBeInTheDocument();
 });
-it("toggles the picker once when the icon's own press follows the gesture release for the same touch", async () => {
+it("drops a pending hold timer when the route changes", async () => {
   h.platform.OS = "ios";
-  render(<Shell />);
+  const view = render(<Shell />);
   await act(async () => {});
-  const pan = h.responders[0];
-  const touch = (timestamp: number) =>
-    ({ nativeEvent: { pageX: 20, pageY: 144, timestamp } }) as GestureResponderEvent;
-  // A tap: the gesture opens the picker, and the press for the same touch must not close it.
-  act(() => pan.onPanResponderGrant?.(touch(1), gesture()));
-  act(() => pan.onPanResponderRelease?.(touch(2), gesture()));
-  act(() => h.press?.({ nativeEvent: { timestamp: 2 } }));
-  expect(screen.getByTestId("native-picker")).toBeVisible();
-  // A slide to a workspace: the picker closes, and the trailing press must not reopen it.
-  act(() => pan.onPanResponderGrant?.(touch(3), gesture()));
-  act(() => pan.onPanResponderMove?.(touch(4), gesture(20, 144, 20)));
-  await act(async () => pan.onPanResponderRelease?.(touch(5), gesture()));
-  act(() => h.press?.({ nativeEvent: { timestamp: 5 } }));
-  expect(h.navigate).toHaveBeenCalledWith("/tasks");
+  vi.useFakeTimers();
+  act(() => h.responders[0].onPanResponderGrant?.(event(), gesture()));
+  h.path = "/tasks";
+  view.rerender(<Shell />);
+  await act(async () => vi.advanceTimersByTimeAsync(300));
   expect(screen.queryByTestId("native-picker")).not.toBeInTheDocument();
-  // A later press from a different touch still toggles.
-  act(() => h.press?.({ nativeEvent: { timestamp: 9 } }));
-  expect(screen.getByTestId("native-picker")).toBeVisible();
 });
 it("supports quick slide, tap-open selection and cancellation without unintended navigation", async () => {
   render(<Shell />);

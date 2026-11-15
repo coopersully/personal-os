@@ -29,7 +29,7 @@ export function Screen({
   edgeToEdge?: boolean;
   backgroundColor?: string;
   bounces?: boolean;
-  /** The page sits inside native tabs, whose floating bar covers the bottom of the scroll area. */
+  /** The page sits inside native tabs, whose floating bar covers the bottom of the page. */
   tabBar?: boolean;
   onScroll?: ScrollViewProps["onScroll"];
   onRefresh?: () => Promise<unknown>;
@@ -38,6 +38,8 @@ export function Screen({
   const motion = useWorkspaceMotion();
   const insets = useSafeAreaInsets();
   const headerInset = useWorkspaceHeaderInset();
+  // Native tabs add no insets of their own, so a tab page clears the floating bar itself.
+  const tabBarInset = tabBar && Platform.OS === "ios" ? tabBarClearance : undefined;
   return (
     <View
       style={{
@@ -79,11 +81,7 @@ export function Screen({
                   edgeToEdge && { paddingHorizontal: 0, maxWidth: undefined, flexGrow: 1 },
                   {
                     paddingTop: edgeToEdge ? 0 : headerInset + (chrome ? 4 : 16),
-                    // Tabs no longer add UIKit insets, so the page clears the floating bar itself.
-                    paddingBottom:
-                      tabBar && Platform.OS === "ios"
-                        ? tabBarClearance
-                        : Math.max(insets.bottom, 20),
+                    paddingBottom: tabBarInset ?? Math.max(insets.bottom, 20),
                   },
                 ]}
               >
@@ -93,7 +91,12 @@ export function Screen({
               <View
                 style={[
                   styles.content,
-                  { flex: 1, minHeight: 0, paddingTop: headerInset, paddingBottom: insets.bottom },
+                  {
+                    flex: 1,
+                    minHeight: 0,
+                    paddingTop: headerInset,
+                    paddingBottom: tabBarInset ?? insets.bottom,
+                  },
                 ]}
               >
                 {children}

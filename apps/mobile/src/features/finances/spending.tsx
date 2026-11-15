@@ -173,7 +173,7 @@ export function FinanceSpendingScreen() {
   }, [routePeriod, routeMode]);
   const query = useSpending(period === "This week" ? "week" : "month");
   return (
-    <FinanceScreen title="Spending">
+    <FinanceScreen title="Spending" tabBar>
       <Segments
         value={mode}
         options={["Summary", "Transactions"]}

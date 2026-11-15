@@ -436,9 +436,9 @@ it("uses filled native tab assets with workspace tint and the standard labels", 
   for (const icon of screen.getAllByTestId("native-tab-icon"))
     expect(icon.getAttribute("data-selected")).toContain("Filled.png");
 });
-it("leaves every tab page's header spacing to the page, so a list cannot be pushed low", () => {
+it("leaves every tab page's header spacing to the page, so a list is not inset twice", () => {
   // Each page pads its list by the fixed search header. The tabs otherwise switch a tab's first
-  // scroll view to UIKit's automatic insets, which left a gap above to-do after a switch.
+  // scroll view to UIKit's automatic insets on top of that padding.
   for (const workspace of ["tasks", "mail", "finances"] as const) {
     const view = render(<WorkspaceTabs workspace={workspace} />);
     for (const tab of screen.getAllByRole("tab"))

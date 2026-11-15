@@ -23,7 +23,7 @@ function AccountList() {
   if (query.data?.accounts.some((account) => account.kind === "other") || tab === "Other")
     options.push("Other");
   return (
-    <FinanceScreen title="Accounts">
+    <FinanceScreen title="Accounts" tabBar>
       <Segments value={tab} options={options} onChange={setTab} />
       <ReadState query={query}>
         {!visible.length && (

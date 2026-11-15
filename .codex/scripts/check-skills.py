@@ -32,6 +32,8 @@ def frontmatter(text):
             # line parser; require single-line values so the length checks stay honest.
             if (value == "" or value[0] in ">|") and match.group(1) != "metadata":
                 value = None
+            if value and value[:1] in ('"', "'") and (len(value) < 2 or value[-1] != value[0]):
+                value = None  # unterminated quoted scalar
             fields[match.group(1)] = value if value is None else value.strip('"').strip("'")
     return fields
 
@@ -60,7 +62,7 @@ def check_skill(folder):
         errors.append(f"{agents}/openai.yml: Codex reads agents/openai.yaml")
     meta = agents / "openai.yaml"
     if meta.exists():
-        short = re.search(r"^\s*short_description:\s*(.*)$", meta.read_text(encoding="utf-8"), re.M)
+        short = re.search(r"^[ \t]*short_description:[ \t]*(.*)$", meta.read_text(encoding="utf-8"), re.M)
         raw = short.group(1).strip() if short else ""
         value = "" if raw[:1] in ">|" else raw.strip('"').strip("'")
         if not value or len(value) > 64:

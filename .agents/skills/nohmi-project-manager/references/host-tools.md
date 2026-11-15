@@ -16,7 +16,7 @@ grant, limit, platform approval and verification rule in this skill still applie
 | Inspect or place chats in a sidebar section | Codex app project/sidebar section tools | `mcp__ccd_sidebar__list_sections`, `create_section`, `move_sessions` |
 | Archive a completed chat | `set_thread_archived` | `mcp__ccd_session_mgmt__archive_session` |
 | Heartbeat or bounded wait, where authorized | Codex app automations | `ScheduleWakeup` where available, or a scheduled task (`mcp__scheduled-tasks__*`) |
-| Pause a dedicated heartbeat | Codex automation update | `mcp__scheduled-tasks__update_scheduled_task` |
+| Pause a dedicated heartbeat | Codex automation update | `mcp__scheduled-tasks__update_scheduled_task` for a scheduled task; `ScheduleWakeup` with `stop: true` for a self-paced loop |
 
 ## Manager state location
 
@@ -36,6 +36,7 @@ it to one copy under the existing single-writer claim before continuing.
   If preservation is uncertain, do not archive. A host approval prompt is a platform approval; the
   standing cleanup authority does not bypass it.
 - `archive_session` also archives that session's finished side sessions and any sessions sharing its
-  worktree, and it refuses a session that is working, pinned or open on screen. Check those
-  sessions' dirty, unpushed and ignored local files too before archiving; a refusal is a lifecycle gap.
+  worktree, and it refuses a session that is working, pinned or open on screen. Before archiving,
+  prove each such session's own completion (its acceptance, settled PRs, and preserved dirty, unpushed
+  and ignored local work); otherwise do not archive. A refusal is a lifecycle gap.
 - Read back `list_sessions` after every title, section or archive write.

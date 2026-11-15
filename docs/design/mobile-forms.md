@@ -317,7 +317,13 @@ never grants access before the existing authorization flow completes.
 
 Security lists readable device summaries and opens technical metadata/revocation on a native
 child page. Mark a session current only when the authenticated server response says `isCurrent`
-is true; user-agent, IP and missing metadata cannot establish identity. Invitations have separate
+is true; user-agent, IP and missing metadata cannot establish identity. That session leads the
+page as "This iPhone" under This device; the rest follow under Other devices, most recently active
+first. The session API returns no device name or platform, so a name is only what the user agent
+supports: browser and operating system, "nohmi app" for the app's own signature, another client's
+product name, or "Unknown device". A device row stacks the name over one line of recency
+("Active 3 hours ago"); exact times, IP and the raw user agent stay on the child page. Sign out
+sits in its own group below the ordinary account actions. Invitations have separate
 list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Execution
 policy pages; setup material, token scopes and one-time secrets do not become a root-page wall.
 All existing human authority, role checks, scope confirmations and secret-clearing guards remain.

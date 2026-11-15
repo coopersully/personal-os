@@ -102,7 +102,12 @@ export function CategoryCreate({
         style={{ color: t.ink, fontSize: 17, minHeight: 44, padding: 0 }}
       />
       <Actions inset={false}>
-        <Action label="Cancel" disabled={pending} onPress={() => setName(null)} />
+        <Action
+          label="Cancel"
+          accessibilityLabel="Cancel new category"
+          disabled={pending}
+          onPress={() => setName(null)}
+        />
         <Action
           label="Add"
           accessibilityLabel="Add category"

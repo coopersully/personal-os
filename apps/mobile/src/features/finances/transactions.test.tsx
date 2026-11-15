@@ -1086,3 +1086,70 @@ it("does not offer selection over a previous filter's rows or during the reload 
     true,
   );
 });
+
+it("sends a category chosen for a new transaction and can hand the choice back to nohmi", async () => {
+  h.api.createFinanceTransaction.mockResolvedValue(transaction);
+  await fillNewTransaction();
+  press(/Category.*Chosen by nohmi/);
+  await chooseLoaded("Rent And Utilities");
+  expect(screen.getByRole("button", { name: /Category.*Rent And Utilities/ })).toBeTruthy();
+  press(/Category.*Rent And Utilities/);
+  await chooseLoaded("Chosen by nohmi");
+  press(/Category.*Chosen by nohmi/);
+  await chooseLoaded("Travel");
+  fireEvent.click(save());
+  await waitFor(() => expect(h.success).toHaveBeenCalled());
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledWith(
+    expect.objectContaining({ category: "Travel" }),
+  );
+});
+
+it("abandons a new category name without writing", async () => {
+  await fillNewTransaction();
+  press("New category");
+  type("New category name", "Pet care");
+  // The inline dismissal is named apart from the form's own Cancel.
+  press("Cancel new category");
+  expect(screen.queryByLabelText("New category name")).toBeNull();
+  expect(screen.getByRole("button", { name: "New category" })).toBeTruthy();
+  expect(h.api.createFinanceCategory).not.toHaveBeenCalled();
+});
+
+it("reads every page of that day before deciding an earlier add left no record", async () => {
+  h.api.createFinanceTransaction.mockRejectedValueOnce(new Error("timeout"));
+  await fillNewTransaction();
+  type("Date (ISO date/time)", "2026-11-03");
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
+  h.api.listFinanceTransactions.mockReset();
+  h.api.listFinanceTransactions
+    .mockResolvedValueOnce({ items: [transaction], nextCursor: "page-2" })
+    .mockResolvedValueOnce({
+      items: [{ ...transaction, merchant: "Corner bakery", amount: 8.4, date: "2026-11-03" }],
+      nextCursor: null,
+    })
+    .mockResolvedValue({ items: [], nextCursor: null });
+  fireEvent.click(save());
+  await waitFor(() => expect(h.info).toHaveBeenCalled());
+  expect(h.api.listFinanceTransactions.mock.calls[1][0]).toMatchObject({ cursor: "page-2" });
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledOnce();
+});
+
+it("stops selecting at the server's limit of 100 and says so", async () => {
+  const many = Array.from({ length: 101 }, (_, index) => ({
+    ...transaction,
+    id: `t-${index}`,
+    merchant: `Shop ${String(index).padStart(3, "0")}`,
+  }));
+  h.api.listFinanceTransactions.mockResolvedValue({ items: many, nextCursor: null });
+  mount(<Transactions />);
+  await screen.findByRole("button", { name: /Shop 000/ });
+  press("Select transactions");
+  // Rows keep their elements while selection changes, so look them up once.
+  const rows = screen.getAllByRole("button").filter((row) => row.textContent?.includes("Shop "));
+  expect(rows).toHaveLength(101);
+  for (const row of rows) fireEvent.click(row);
+  expect(screen.getByRole("button", { name: "Categorize 100 selected transactions" })).toBeTruthy();
+  expect(h.info).toHaveBeenCalledWith("Select up to 100 transactions at a time.");
+  expect(screen.getByRole("button", { name: /Shop 100/ }).textContent).toContain("Not selected");
+}, 30_000);

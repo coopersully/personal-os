@@ -742,6 +742,46 @@ it("opens canonical transaction details from a review", async () => {
     params: { id: transaction.id },
   });
 });
+it("names provider-coded categories as words on review cards and budget rows", async () => {
+  h.api.getFinanceReviewQueue.mockResolvedValue([
+    {
+      id: "review",
+      rationale: null,
+      reason: "unknown_merchant",
+      transaction: { ...transaction, category: "MEDICAL" },
+    },
+    {
+      id: "suggested",
+      rationale: null,
+      reason: "unknown_merchant",
+      suggestedCategory: { id: "c", name: "ENTERTAINMENT" },
+      transaction: { ...transaction, id: "transaction-2", merchant: "Cinema", category: null },
+    },
+  ]);
+  const view = mount(<FinanceAssistantScreen />);
+  expect((await screen.findByRole("button", { name: /^Corner market/ })).textContent).toContain(
+    "Medical",
+  );
+  expect(screen.getByRole("button", { name: /^Cinema/ }).textContent).toContain("Entertainment");
+  expect(screen.queryByText(/MEDICAL|ENTERTAINMENT/)).toBeNull();
+  view.unmount();
+  h.api.getFinanceBudgetStatus.mockResolvedValueOnce([
+    { budget: { id: "one", category: "RENT_AND_UTILITIES", limit: 100 }, spent: 20, remaining: 80 },
+  ]);
+  mount(<FinancePlanScreen />);
+  expect(await screen.findByText("Rent And Utilities")).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^Rent And Utilities, \$20\.00 spent/ })).toBeTruthy();
+  expect(screen.queryByText(/RENT_AND_UTILITIES/)).toBeNull();
+});
+it("titles a budget category page with words for a provider-coded category", async () => {
+  h.params = { id: categoryBudget.id, month: categoryBudget.month };
+  h.api.getFinanceBudgetStatus.mockResolvedValue([
+    { budget: { ...categoryBudget, category: "TRANSPORTATION" }, spent: 42, remaining: 558 },
+  ]);
+  mount(<BudgetCategoryRoute />);
+  expect(await screen.findByText("Transportation")).toBeTruthy();
+  expect(screen.queryByText("TRANSPORTATION")).toBeNull();
+});
 it("paginates recorded activity with its authoritative cursor", async () => {
   h.params = { view: "Activity" };
   h.api.listFinanceActivity

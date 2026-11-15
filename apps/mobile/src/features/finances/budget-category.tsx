@@ -12,7 +12,7 @@ import { Icon } from "../../components/icons";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SettingLabel } from "../../components/settings-row-content";
 import { useTheme, workspaceColor } from "../../theme";
-import { categoryIcon } from "./category-presentation";
+import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
 import { formatMoney } from "./presentation";
 import { Transactions } from "./spending";
@@ -50,7 +50,7 @@ export function FinanceBudgetCategoryScreen() {
       </FinanceScreen>
     );
   return (
-    <FinanceScreen title={item?.budget.category ?? "Category budget"}>
+    <FinanceScreen title={item ? categoryLabel(item.budget.category) : "Category budget"}>
       <ReadState query={query}>
         {item ? (
           <>
@@ -245,7 +245,7 @@ function LimitForm({ record, onDone }: { record: FinanceBudget; onDone?: () => v
           }),
         }}
       />
-      <FinanceScreen title={snapshot.category}>
+      <FinanceScreen title={categoryLabel(snapshot.category)}>
         <Card>
           <Copy secondary>{monthLabel(snapshot.month)} · Monthly limit</Copy>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>

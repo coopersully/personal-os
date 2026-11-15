@@ -6,7 +6,7 @@ import { toast } from "sonner-native";
 import { EntityPicker } from "../../components/forms/entity-picker";
 import { Icon } from "../../components/icons";
 import { spacing, useTheme } from "../../theme";
-import { categoryIcon } from "./category-presentation";
+import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
 import { appliedTransaction } from "./mutations";
 import { FinanceRow, ReadState } from "./ui";
@@ -105,7 +105,7 @@ export function TransactionCategory({
           <FinanceRow
             centered
             title="Category"
-            value={suggested ?? "Uncategorized"}
+            value={categoryLabel(suggested)}
             icon={categoryIcon(item.category ?? "Uncategorized")}
             valueTone={needsInput ? "attention" : undefined}
             accessibilityHint={
@@ -138,7 +138,7 @@ export function TransactionCategory({
             icon="grid"
             value={item.categoryId ?? null}
             options={(categories.data ?? []).map((entry) => ({
-              label: entry.name,
+              label: categoryLabel(entry.name),
               icon: categoryIcon(entry.name),
               value: entry.id,
             }))}

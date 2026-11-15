@@ -180,5 +180,14 @@ describe("task row details", () => {
   });
 });
 it("words an item count in the singular and plural", () => {
-  expect([0, 1, 2, 1234].map(itemCount)).toEqual(["0 items", "1 item", "2 items", "1,234 items"]);
+  expect([0, 1, 2, 1234].map((count) => itemCount(count))).toEqual([
+    "0 items",
+    "1 item",
+    "2 items",
+    "1,234 items",
+  ]);
+  expect([itemCount(1, "container"), itemCount(3, "container")]).toEqual([
+    "1 container",
+    "3 containers",
+  ]);
 });

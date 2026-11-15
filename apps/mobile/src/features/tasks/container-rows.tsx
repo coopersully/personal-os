@@ -5,6 +5,7 @@ import { RowActions } from "../../components/row-actions";
 import { entityDictionary } from "../../product/entities";
 import { radius, spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
 import { finishedProjectLabel } from "./container-directory";
+import { type TaskScope, useItemCounts } from "./navigation-counts";
 import { formatTargetDate, itemCount } from "./presentation";
 import { Action, groupEdges, styles } from "./ui";
 
@@ -12,8 +13,8 @@ type ContainerRowActions = {
   first: boolean;
   last: boolean;
   pinned: boolean;
-  /** Items the row opens; absent while the total is unread. */
-  count?: number;
+  /** The list the row opens. The row reads its total, so only drawn rows ask for one. */
+  scope: TaskScope;
   disabled: boolean;
   onOpen: () => void;
   onPin: () => void;
@@ -43,6 +44,7 @@ function ContainerRow({
   permanent?: boolean;
 }) {
   const t = useTheme();
+  const [count] = useItemCounts([actions.scope]);
   return (
     <View
       style={[
@@ -54,9 +56,7 @@ function ContainerRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Open ${name}${state ? `, ${state.toLocaleLowerCase()}` : ""}`}
-        accessibilityValue={
-          actions.count === undefined ? undefined : { text: itemCount(actions.count) }
-        }
+        accessibilityValue={count === undefined ? undefined : { text: itemCount(count) }}
         onPress={actions.onOpen}
         style={{
           flex: 1,
@@ -80,8 +80,8 @@ function ContainerRow({
           >
             <Text style={{ color: t.ink, fontSize: 17 }}>{name}</Text>
             {permanent && <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>}
-            {actions.count !== undefined && (
-              <Text style={{ color: t.secondary, fontSize: 12 }}>{itemCount(actions.count)}</Text>
+            {count !== undefined && (
+              <Text style={{ color: t.secondary, fontSize: 12 }}>{itemCount(count)}</Text>
             )}
           </View>
           {!!subtitle && (
@@ -164,7 +164,7 @@ export function PinnedContainers({
   items,
   kind,
   onOpen,
-  countOf,
+  scopeOf,
   loading = false,
   onRetry,
   onPin,
@@ -174,8 +174,8 @@ export function PinnedContainers({
   items: Array<TaskList | TaskProject>;
   kind: "list" | "project";
   onOpen: (record: TaskList | TaskProject) => void;
-  /** Items a card opens; undefined while the total is unread. */
-  countOf: (record: TaskList | TaskProject) => number | undefined;
+  /** The list each card opens, and so counts. */
+  scopeOf: (record: TaskList | TaskProject) => TaskScope;
   loading?: boolean;
   onRetry?: () => void;
   onPin: (record: TaskList | TaskProject) => void;
@@ -200,78 +200,103 @@ export function PinnedContainers({
           keyExtractor={(item) => item.id}
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: spacing.md }}
-          renderItem={({ item }) => {
-            const state = "lifecycle" in item ? finishedProjectLabel(item) : null;
-            const count = countOf(item);
-            return (
-              <View
-                style={{
-                  width: 180,
-                  minHeight: 96,
-                  padding: spacing.lg,
-                  gap: spacing.sm,
-                  borderRadius: radius.panel,
-                  backgroundColor: t.surface,
-                }}
-              >
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "flex-start",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <Icon
-                    name={entityDictionary[kind].icon}
-                    color={workspaceColor(t, "tasks")}
-                    size={22}
-                  />
-                  <RowActions
-                    label={`Actions for ${item.name}`}
-                    actions={[
-                      {
-                        id: "unpin",
-                        label: `Unpin ${item.name}`,
-                        icon: "pin",
-                        onPress: () => onPin(item),
-                        disabled,
-                      },
-                      ...("kind" in item && item.kind === "inbox"
-                        ? []
-                        : [
-                            {
-                              id: "edit",
-                              label: `Edit ${item.name}`,
-                              icon: "settings" as const,
-                              onPress: () => onEdit(item),
-                            },
-                          ]),
-                    ]}
-                  />
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open pinned ${kind}: ${item.name}${state ? `, ${state.toLocaleLowerCase()}` : ""}`}
-                  accessibilityValue={count === undefined ? undefined : { text: itemCount(count) }}
-                  onPress={() => onOpen(item)}
-                  style={{ minHeight: touchTarget, justifyContent: "center" }}
-                >
-                  <Text numberOfLines={2} style={{ fontSize: 16, fontWeight: "600", color: t.ink }}>
-                    {item.name}
-                  </Text>
-                  {"kind" in item && item.kind === "inbox" && (
-                    <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>
-                  )}
-                  {state && <Text style={{ color: t.secondary, fontSize: 12 }}>{state}</Text>}
-                  {count !== undefined && (
-                    <Text style={{ color: t.secondary, fontSize: 12 }}>{itemCount(count)}</Text>
-                  )}
-                </Pressable>
-              </View>
-            );
-          }}
+          renderItem={({ item }) => (
+            <PinnedCard
+              item={item}
+              kind={kind}
+              scope={scopeOf(item)}
+              disabled={disabled}
+              onOpen={onOpen}
+              onPin={onPin}
+              onEdit={onEdit}
+            />
+          )}
         />
       )}
+    </View>
+  );
+}
+/** A pinned card reads its own count, so only the cards the row has drawn ask for one. */
+function PinnedCard({
+  item,
+  kind,
+  scope,
+  disabled,
+  onOpen,
+  onPin,
+  onEdit,
+}: {
+  item: TaskList | TaskProject;
+  kind: "list" | "project";
+  scope: TaskScope;
+  disabled: boolean;
+  onOpen: (record: TaskList | TaskProject) => void;
+  onPin: (record: TaskList | TaskProject) => void;
+  onEdit: (record: TaskList | TaskProject) => void;
+}) {
+  const t = useTheme();
+  const state = "lifecycle" in item ? finishedProjectLabel(item) : null;
+  const [count] = useItemCounts([scope]);
+  return (
+    <View
+      style={{
+        width: 180,
+        minHeight: 96,
+        padding: spacing.lg,
+        gap: spacing.sm,
+        borderRadius: radius.panel,
+        backgroundColor: t.surface,
+      }}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+        }}
+      >
+        <Icon name={entityDictionary[kind].icon} color={workspaceColor(t, "tasks")} size={22} />
+        <RowActions
+          label={`Actions for ${item.name}`}
+          actions={[
+            {
+              id: "unpin",
+              label: `Unpin ${item.name}`,
+              icon: "pin",
+              onPress: () => onPin(item),
+              disabled,
+            },
+            ...("kind" in item && item.kind === "inbox"
+              ? []
+              : [
+                  {
+                    id: "edit",
+                    label: `Edit ${item.name}`,
+                    icon: "settings" as const,
+                    onPress: () => onEdit(item),
+                  },
+                ]),
+          ]}
+        />
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open pinned ${kind}: ${item.name}${state ? `, ${state.toLocaleLowerCase()}` : ""}`}
+        accessibilityValue={count === undefined ? undefined : { text: itemCount(count) }}
+        onPress={() => onOpen(item)}
+        style={{ minHeight: touchTarget, justifyContent: "center" }}
+      >
+        <Text numberOfLines={2} style={{ fontSize: 16, fontWeight: "600", color: t.ink }}>
+          {item.name}
+        </Text>
+        {"kind" in item && item.kind === "inbox" && (
+          <Text style={{ color: t.secondary, fontSize: 12 }}>Permanent</Text>
+        )}
+        {state && <Text style={{ color: t.secondary, fontSize: 12 }}>{state}</Text>}
+        {count !== undefined && (
+          <Text style={{ color: t.secondary, fontSize: 12 }}>{itemCount(count)}</Text>
+        )}
+      </Pressable>
     </View>
   );
 }

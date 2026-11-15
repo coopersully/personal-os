@@ -311,6 +311,8 @@ export function TaskListScreen({
       );
     else execute();
   };
+  // The selection is what is still listed: a refresh that drops a row drops it from the count
+  // and the actions together.
   const selectedItems = items.filter((item) => selected.includes(itemKey(item)));
   // Select all takes the loaded items that can change, up to the selection limit of 100; a
   // read-only item would block each action.
@@ -319,7 +321,7 @@ export function TaskListScreen({
     .slice(0, 100)
     .map(itemKey);
   const allSelected =
-    selected.length === selectable.length && selectable.every((key) => selected.includes(key));
+    selectedItems.length === selectable.length && selectable.every((key) => selected.includes(key));
   const canAct = selectedItems.length > 0 && selectedItems.every((item) => !item.readOnly);
   return (
     <View style={{ flex: 1, backgroundColor: t.canvas }}>
@@ -423,10 +425,10 @@ export function TaskListScreen({
                 {query.group && query.group !== "none" ? ` · Grouped by ${query.group}` : ""}
               </Text>
             </View>
-            {selected.length > 0 && (
+            {selectedItems.length > 0 && (
               <Section>
                 <View style={styles.toolbar}>
-                  <Text style={{ color: t.ink, padding: 12 }}>{selected.length} selected</Text>
+                  <Text style={{ color: t.ink, padding: 12 }}>{selectedItems.length} selected</Text>
                   <Action label="Cancel" onPress={() => setSelected([])} />
                   {selectable.length > 0 && !allSelected && (
                     <Action
@@ -541,7 +543,7 @@ export function TaskListScreen({
                   task?.projectId && !query.projectId ? projectNames.get(task.projectId) : undefined
                 }
                 marked={marked}
-                selecting={selected.length > 0}
+                selecting={selectedItems.length > 0}
                 pending={action.pending}
                 first={starts(index)}
                 last={index === items.length - 1 || starts(index + 1)}

@@ -1406,13 +1406,17 @@ COO-220 — iPhone bulk selection can select every loaded item that can change; 
 Projects and Archive show item counts; a project page shows the project's why and target date.
 
 - Select all sits in the selection bar, takes the loaded changeable items up to the existing
-  limit of 100 and drops a read-only pick. Bulk feedback stays one Sonner toast.
+  limit of 100 and drops a read-only pick. The selected count and the actions cover only
+  selected items still listed. Bulk feedback stays one Sonner toast.
 - Counts are the `total` of the query each destination opens, read with `limit: 1` through the
-  existing task workspace route (one read per destination or visible container). Archive counts
-  its containers from the loaded directories. An unread or failed total shows no count; failed
-  totals raise one Sonner error. A Tasks action refreshes the counts without waiting for them.
+  existing task workspace route: seven reads for Browse, and one per list or project row or
+  pinned card that the directory has drawn. Browse's Archive row counts containers from the
+  loaded directories. An unread or failed total shows no count; failed totals raise one Sonner
+  error. Counts re-read after a Tasks action, without holding it open, and on returning to a
+  directory.
 - The project header sits under the title, above filters and tasks.
 - No API, schema or shared-component change. The Browse rows use a Tasks-owned row because the
   shared navigation row has no trailing value.
-- This is a local candidate covered by focused tests. The simulator check of bulk complete and
-  trash after Select all is outstanding. It is not a production or TestFlight release.
+- Verified by presentation and screen tests only. The simulator check of bulk complete and trash
+  after Select all is outstanding, and row virtualization bounding the count reads is a property
+  of the device list that jsdom does not exercise. Not a production or TestFlight release.

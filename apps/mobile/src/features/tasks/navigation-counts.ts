@@ -1,9 +1,9 @@
 import type { TaskList, TaskProject, TaskWorkspaceQuery } from "@personal-os/domain";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner-native";
 import type { ContainerRow } from "./container-directory";
-import { errorMessage, useTaskApi, useTaskResources } from "./data";
+import { errorMessage, useTaskApi } from "./data";
 
 export type TaskScope = Partial<TaskWorkspaceQuery>;
 
@@ -47,7 +47,13 @@ export const viewStatus = (scope: TaskScope, showCompletedTasks: boolean | undef
  */
 export function useItemCounts(scopes: TaskScope[]): (number | undefined)[] {
   const api = useTaskApi();
-  const { settings } = useTaskResources();
+  // Watches the preferences the screen already reads without asking for them again: a row
+  // that mounts must not retry a failed read behind the screen's own Retry.
+  const settings = useQuery({
+    queryKey: ["tasks", "settings"],
+    queryFn: () => api.getWorkspaceSettings("tasks"),
+    enabled: false,
+  });
   const showCompleted = settings.data?.preferences.showCompletedTasks;
   const results = useQueries({
     queries: scopes.map((scope) => {

@@ -2,11 +2,12 @@
 import type { TaskWorkspaceItem } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { PropsWithChildren, ReactNode } from "react";
+import { type PropsWithChildren, type ReactNode, useEffect } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import TaskPreferencesScreen from "../../app/task-preferences";
 import { MobileDataProvider } from "./data";
 import { TasksHub } from "./hub";
+import { formatTargetDate } from "./presentation";
 import { TaskListScreen } from "./task-list";
 
 vi.mock("react", async () => {
@@ -41,6 +42,7 @@ const h = vi.hoisted(() => ({
     taskRowDetails: ["estimate"],
     includeArchivedInSearch: true,
   },
+  focus: (() => {}) as () => void,
   listTaskWorkspace: vi.fn(),
   listTaskLists: vi.fn(),
   listTaskProjects: vi.fn(),
@@ -69,6 +71,11 @@ vi.mock("../auth/context", () => ({
 }));
 vi.mock("expo-router", () => ({
   router: { push: h.push, back: h.back },
+  // Focus runs on mount, as on a device; `h.focus` replays a later return to the screen.
+  useFocusEffect: (effect: () => void) => {
+    h.focus = effect;
+    useEffect(effect, [effect]);
+  },
   Stack: {
     Screen: ({
       options,
@@ -1924,7 +1931,7 @@ it("shows a project's why and target date above its tasks, and nothing for a pro
   });
   await loaded();
   const why = await screen.findByText("See the coast before winter");
-  expect(screen.getByText("Target Dec 5, 2026")).toBeVisible();
+  expect(screen.getByText(`Target ${formatTargetDate("2026-12-05")}`)).toBeVisible();
   expect(
     why.compareDocumentPosition(screen.getByRole("button", { name: "Open task: Task one" })) &
       Node.DOCUMENT_POSITION_FOLLOWING,
@@ -2054,4 +2061,64 @@ it("finishes an action without waiting for the navigation counts to refresh", as
   await waitFor(() =>
     expect(screen.getByRole("checkbox", { name: "Complete Task one" })).toBeEnabled(),
   );
+});
+it("leaves items that have not been loaded out of Select all", async () => {
+  h.listTaskWorkspace.mockImplementation(async (query) => ({
+    items: query.cursor ? [task("three")] : [task("one"), task("two")],
+    total: 3,
+    nextCursor: query.cursor ? null : "page-two",
+  }));
+  show();
+  fireEvent.contextMenu(await loaded());
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(screen.getByText("2 selected")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await screen.findByText("Task three");
+  // The newly loaded item is not selected, and Select all is offered again for it.
+  expect(screen.getByText("2 selected")).toBeVisible();
+  expect(screen.getByRole("checkbox", { name: "Select Task three" })).not.toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(screen.getByText("3 selected")).toBeVisible();
+});
+it("counts and acts on only the selected items still listed after a refresh drops one", async () => {
+  h.items = [task("one"), task("two")];
+  show();
+  fireEvent.contextMenu(await loaded());
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(screen.getByText("2 selected")).toBeVisible();
+  h.items = [task("one")];
+  fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
+  await waitFor(() => expect(screen.queryByText("Task two")).not.toBeInTheDocument());
+  expect(screen.getByText("1 selected")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Complete" }));
+  await waitFor(() => expect(h.completeTask).toHaveBeenCalledTimes(1));
+});
+it("re-reads the counts after a task action and when the directory is returned to", async () => {
+  h.lists = [list("inbox", "Inbox", { kind: "inbox" })];
+  let total = 2;
+  h.listTaskWorkspace.mockImplementation(async (query) => ({
+    items: h.items,
+    total: query.limit === 1 ? total : h.items.length,
+    nextCursor: null,
+  }));
+  render(
+    <MobileDataProvider>
+      <TasksHub mode="lists" />
+      <TaskListScreen title="to-do" scope={{ view: "all" }} />
+    </MobileDataProvider>,
+  );
+  const row = await screen.findByRole("button", { name: "Open Inbox" });
+  await within(row).findByText("2 items");
+  total = 1;
+  fireEvent.click(screen.getByRole("checkbox", { name: "Complete Task one" }));
+  await within(row).findByText("1 item");
+  total = 5;
+  act(() => h.focus());
+  await within(row).findByText("5 items");
+});
+it("does not read the counts a second time on the first focus", async () => {
+  totals(() => 1);
+  hub("views");
+  await within(screen.getByRole("button", { name: "Trash" })).findByText("1");
+  expect(h.listTaskWorkspace).toHaveBeenCalledTimes(7);
 });

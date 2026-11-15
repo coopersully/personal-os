@@ -1,6 +1,7 @@
 import type { TaskList, TaskProject } from "@personal-os/domain";
-import { router } from "expo-router";
-import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useRef, useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { FilterChip } from "../../components/filter-chip";
 import { Icon, type IconName } from "../../components/icons";
@@ -87,16 +88,29 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
     { label: "History", icon: "history", view: "history" },
   ];
   const searching = mode === "views" && !!search.trim();
-  const counted =
-    mode === "views"
-      ? searching
-        ? []
-        : browse.map(({ view }) => browseScopes[view])
-      : filtered.map(scopeOf);
-  const totals = useItemCounts(counted);
-  const containerCount = (kind: "list" | "project", id: string) =>
-    totals[filtered.findIndex((row) => row.kind === kind && row.record.id === id)];
-  const links: { label: string; icon: IconName; count?: number; press: () => void }[] = [
+  // Browse reads its seven totals here; a list or project row reads its own, so a long
+  // directory asks only for the rows it has drawn.
+  const totals = useItemCounts(
+    mode === "views" && !searching ? browse.map(({ view }) => browseScopes[view]) : [],
+  );
+  // Coming back to a directory re-reads the counts on screen, so they follow changes made
+  // elsewhere. The first focus is the mount, whose reads are already under way.
+  const client = useQueryClient();
+  const focused = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focused.current)
+        void client.refetchQueries({ queryKey: ["tasks", "count"], type: "active" });
+      focused.current = true;
+    }, [client]),
+  );
+  const links: {
+    label: string;
+    icon: IconName;
+    count?: number;
+    unit?: string;
+    press: () => void;
+  }[] = [
     ...browse.map(({ label, icon, view }, index) => ({
       label,
       icon,
@@ -107,6 +121,7 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
       label: "Archive",
       icon: "archive",
       // Archive lists containers, so it counts them, and only once both directories are read.
+      unit: "container",
       count:
         resources.lists.data && resources.projects.data
           ? containerDirectory({ mode: "archive", search: "", lists, projects }).length
@@ -162,6 +177,7 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
                         accessibilityLabel={link.label}
                         accessibilityValue={
                           link.count === undefined ? undefined : { text: itemCount(link.count) }
+                          // Only Upcoming and History are cards, and both count items.
                         }
                         onPress={link.press}
                         style={({ pressed }) => ({
@@ -280,8 +296,8 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
                     : undefined
                 }
                 onOpen={(record) => openContainer(mode === "lists" ? "list" : "project", record)}
-                countOf={(record) =>
-                  containerCount(mode === "lists" ? "list" : "project", record.id)
+                scopeOf={(record) =>
+                  scopeOf({ kind: mode === "lists" ? "list" : "project", record } as ContainerRow)
                 }
               />
             )}
@@ -314,7 +330,7 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
             first: index === 0,
             last: index === directoryRows.length - 1,
             pinned: !!pinned,
-            count: containerCount(kind, record.id),
+            scope: scopeOf({ kind, record } as ContainerRow),
             disabled: action.pending || !preferences || mode === "archive",
             onOpen: () => openContainer(kind, record),
             onPin: () => pin(kind, record.id),
@@ -343,11 +359,14 @@ function CountRow({
   label,
   icon,
   count,
+  unit,
   press,
 }: {
   label: string;
   icon: IconName;
   count?: number;
+  /** What the count counts when it is not items: Archive counts containers. */
+  unit?: string;
   press: () => void;
 }) {
   const t = useTheme();
@@ -355,7 +374,7 @@ function CountRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityValue={count === undefined ? undefined : { text: itemCount(count) }}
+      accessibilityValue={count === undefined ? undefined : { text: itemCount(count, unit) }}
       onPress={press}
       style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}
     >

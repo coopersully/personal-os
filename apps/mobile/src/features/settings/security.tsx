@@ -2,7 +2,7 @@ import type { Session } from "@personal-os/api-client";
 import { createInvitationInputSchema } from "@personal-os/domain";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, useWindowDimensions, View } from "react-native";
 import { toast } from "sonner-native";
 import { formRow } from "../../components/forms/form-row";
 import { SectionNote } from "../../components/forms/section-content";
@@ -85,7 +85,10 @@ export function sessionLastActive(lastSeenAt: string, now = Date.now()) {
   if (minutes < 60) return `Active ${minutes} minutes ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `Active ${hours} ${hours === 1 ? "hour" : "hours"} ago`;
-  const days = Math.floor(hours / 24);
+  // Calendar days in the device's timezone: 30 hours ago can be the day before yesterday.
+  const startOfDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const days = Math.round((startOfDay(new Date(now)) - startOfDay(seen)) / 86_400_000);
   if (days === 1) return "Active yesterday";
   if (days < 7) return `Active ${days} days ago`;
   return `Last active ${seen.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
@@ -102,21 +105,30 @@ function describeDevice(session: Session): Device {
     summary: client === "Unknown device" ? "Active now" : `${client} · Active now`,
   };
 }
+/** Timestamps are compared as instants; an unreadable one sorts last. */
+const seenAt = (session: Session) => {
+  const time = Date.parse(session.lastSeenAt);
+  return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
+};
 /** This device first, then the most recently active. */
 function orderDevices(sessions: Session[]) {
   return sessions
     .map(describeDevice)
     .sort(
       (a, b) =>
-        Number(b.isCurrent === true) - Number(a.isCurrent === true) ||
-        b.lastSeenAt.localeCompare(a.lastSeenAt),
+        Number(b.isCurrent === true) - Number(a.isCurrent === true) || seenAt(b) - seenAt(a),
     );
 }
 const exactTime = (value: string) =>
   new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-/** The name keeps the row's full width and the summary sits under it, so neither wraps early. */
+/**
+ * The name keeps the row's full width and the summary sits under it, so neither wraps early.
+ * At accessibility text sizes each line may take a second line rather than lose its end.
+ */
 function DeviceRow({ device }: { device: Device }) {
   const t = useTheme();
+  const { fontScale } = useWindowDimensions();
+  const lines = fontScale >= 1.3 ? 2 : 1;
   return (
     <Pressable
       accessibilityRole="button"
@@ -127,10 +139,10 @@ function DeviceRow({ device }: { device: Device }) {
       style={({ pressed }) => ({ ...formRow, opacity: pressed ? 0.6 : 1 })}
     >
       <View style={{ flex: 1, minWidth: 0, gap: spacing.xs }}>
-        <SettingLabel numberOfLines={1} style={{ flex: 0 }}>
+        <SettingLabel numberOfLines={lines} style={{ flex: 0 }}>
           {device.name}
         </SettingLabel>
-        <SettingDetail numberOfLines={1}>{device.summary}</SettingDetail>
+        <SettingDetail numberOfLines={lines}>{device.summary}</SettingDetail>
       </View>
       <Icon name="chevron" color={t.secondary} size={16} />
     </Pressable>

@@ -24,6 +24,7 @@ const h = vi.hoisted(() => ({
   params: { id: "fixture-session" },
   push: vi.fn(),
   signedIn: true,
+  fontScale: 1,
   owner: true,
   epoch: 1,
   api: {} as Record<string, unknown>,
@@ -109,6 +110,7 @@ vi.mock("./settings-row", () => ({
 }));
 vi.mock("react-native", () => ({
   Platform: { OS: "ios", isPad: false },
+  useWindowDimensions: () => ({ width: 390, height: 844, fontScale: h.fontScale }),
   Pressable: ({
     children,
     onPress,
@@ -173,6 +175,7 @@ vi.mock("../tasks/ui", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   h.signedIn = true;
+  h.fontScale = 1;
   h.owner = true;
   h.epoch = 1;
   h.sessions.mockReset().mockResolvedValue([]);
@@ -578,4 +581,40 @@ it.each([
   ["not a date", "Last active time unavailable"],
 ])("describes last activity at %s as %s", (lastSeenAt, summary) => {
   expect(sessionLastActive(lastSeenAt, new Date(NOW).getTime())).toBe(summary);
+});
+
+it("lets a device row take a second line at accessibility text sizes instead of cutting off its recency", async () => {
+  freezeClock();
+  h.fontScale = 1.3;
+  h.sessions.mockResolvedValue([device("fixture-session", CHROME_MAC, "2026-11-01T12:00:00Z")]);
+  show();
+  const row = await screen.findByRole("button", { name: /^Chrome on Mac, Last active/ });
+  expect(within(row).getByText("Chrome on Mac").dataset.lines).toBe("2");
+  expect(within(row).getByText(/^Last active/).dataset.lines).toBe("2");
+});
+
+it("orders other devices by the instant they were last active, not by timestamp text", async () => {
+  freezeClock();
+  h.sessions.mockResolvedValue([
+    device("offset", "curl/8.7.1", "2026-11-14T10:00:00+02:00"),
+    device("utc", CHROME_MAC, "2026-11-14T09:00:00Z"),
+    device("unreadable", "Firefox/130 Linux", "not a date"),
+  ]);
+  show();
+  await screen.findByRole("button", { name: /^curl/ });
+  expect(rows("Signed-in devices")).toEqual([
+    "Chrome on Mac, Active 3 hours ago",
+    "curl, Active 4 hours ago",
+    "Firefox on Linux, Last active time unavailable",
+  ]);
+});
+
+it.each([
+  [new Date(2026, 10, 13, 0, 30), "Active yesterday"],
+  [new Date(2026, 10, 12, 23, 0), "Active 2 days ago"],
+  [new Date(2026, 10, 13, 23, 0), "Active 2 hours ago"],
+])("counts calendar days, so %s seen from 1am on 14 Nov is %s", (seen, summary) => {
+  expect(sessionLastActive(seen.toISOString(), new Date(2026, 10, 14, 1, 0).getTime())).toBe(
+    summary,
+  );
 });

@@ -107,6 +107,37 @@ active chips and effective sorting/grouping beside results. Preserve fixed desti
 distinguish filter reset from view reset, and make saved defaults explicit. See the detailed form
 contract for geometry, state and reset behavior. Do not scatter configuration through result lists.
 
+### Task row details
+
+A task row keeps its full title, wrapping rather than truncating, then quieter lines below it.
+The scan line stays about urgency: Read-only, Reminder, Cancelled, High priority and the due
+date, with the overdue treatment unchanged. A one-line context line follows with reserved time
+and the estimate, then the owning List / Project on a line of its own, so neither a long
+reservation nor a long container name can push the other out of view. Reserved time
+and the container always show when the task has them; a row inside a list or project browser, or
+under a List or Project filter, does not repeat that container. Estimate, notes and tags follow
+the saved row-detail preference shared with the web app: notes take at most two lines, tags wrap
+as small chips and a row shows five before counting the rest (+2 more). Nothing optional shows
+until the preference has loaded. An absent value, or a container that cannot be named, renders
+nothing; never a placeholder. Reminders have only notes. The row's accessibility value carries
+the same lines in reading order.
+
+### Archived items in task search
+
+"Include archived in search" (on by default) widens a task search to completed and cancelled
+items and to items in archived Lists and archived or finished Projects, the same intent as the
+web search toggle. Those container matches are read separately and listed last under "In
+archived or finished lists and projects", after
+every other match has loaded; the item count covers both. The preference applies wherever a
+search has no status of its own: it leaves alone a destination with a fixed status (To-do is open
+items), a Status the person chose, History and Trash. Inside a list or project one read with
+every status already covers its archived work. With the preference off a search keeps the view's
+own status. Until the preference has loaded a search is not widened. One search that
+fails raises one Sonner error even though it makes two reads; if only the archived read fails
+while other matches are showing, the list offers "Retry loading archived matches" and counts the
+matches it has. A cancelled task names itself Cancelled on the scan line, since it is otherwise
+drawn like a completed one.
+
 ## Accessibility and verification
 
 Preserve Dynamic Type, meaningful accessible labels, checked/selected/disabled states, keyboard

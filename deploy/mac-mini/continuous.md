@@ -166,30 +166,58 @@ release images (roughly 820 MB per revision) and build cache. PostgreSQL failed
 with ENOSPC while a deploy was quiescing, blocking it for attended recovery. The
 controller now bounds that growth itself, under the same operation lock:
 
-- **Headroom preflight.** Before building, and again after building but before
-  quiescing, it measures available space on the VM's `/var/lib/docker` through
-  the dedicated socket. The probe runs `df` from the pinned local PostgreSQL image
-  with no network, a read-only root and a read-only mount, so it pulls nothing.
-  Below 4 GiB it first reclaims (below), then measures again. If still short,
-  the attempt ends `idle` with `error: insufficient-docker-disk` and the normal
-  fifteen-minute backoff; no writer is stopped and the live release keeps
-  serving. A failed probe is an ordinary `prepare-failed`.
-- **Retention after a successful switch.** It keeps the `ilo-local/{api,mcp,web}`
-  tags of the newly deployed revision and the previous one, then removes every
-  other `ilo-local/{api,mcp,web}:<40-hex SHA>` tag. A preflight reclaim keeps the
-  serving revision, the last transaction's previous revision (when recorded) and,
-  after a build, the candidate. It never removes an image referenced by any
-  container, running or stopped, nor any image in the active configuration.
-  Removal is by tag without `--force`, so Docker independently refuses an
-  in-use image. It then runs `docker builder prune --force --keep-storage 3GB`.
-  Volumes, containers, ancillary images and other repositories are never touched.
-- A retention failure after a switch records `retentionError:
-  image-retention-failed` in `status` and never blocks or rolls back the release;
-  the next successful switch retries it. Dangling untagged images are not pruned.
+- **Headroom preflight.** Before building it requires 6 GiB free on the VM's
+  `/var/lib/docker` (4 GiB plus a 2 GiB build allowance, because the build grows
+  the disk the live PostgreSQL uses). After building, and before quiescing, it
+  requires 4 GiB. The probe runs `df` from the pinned local PostgreSQL image
+  through the dedicated socket with `--pull never`, no network, a read-only root
+  and a read-only mount. When space is short, or the probe itself fails (a full
+  disk can prevent creating the probe container), it reclaims (below) and
+  measures again. A partial reclaim failure is recorded but still re-measured.
+  Still short: the attempt ends `idle` with `error: insufficient-docker-disk`
+  and the normal fifteen-minute backoff. Still unmeasurable: `prepare-failed`.
+  Either way no writer is stopped and the live release keeps serving. `status`
+  shows the last measurement as `dockerFree`.
+- **Rollback release.** On each completed switch the controller records the
+  replaced release's revision and API/MCP/web image IDs as `rollback` (shown by
+  `status`). Only completion sets it, so a resumed or failed attempt never
+  displaces it. A first controller install has none until its first switch.
+- **Retention.** After a successful switch (skipped while maintenance is
+  requested) it keeps the new revision and the rollback release; a preflight
+  reclaim keeps the serving revision, the candidate and the rollback release.
+  Every other `ilo-local/{api,mcp,web}:<40-hex SHA>` tag is removed in batches
+  of 50. Images referenced by any container (running or stopped), the active
+  configuration's image IDs and the rollback image IDs are excluded, under any
+  tag. A container whose image identity is not an exact ID fails the reclaim
+  before anything is removed. Removal is by tag without `--force`: removing an
+  image's last tag deletes it (Docker still refuses one a container uses);
+  otherwise it is only untagged. It then runs `docker builder prune --force
+  --keep-storage 3GB`. Volumes, containers, digest-pinned ancillary images and
+  other repositories are never touched. Dangling untagged images are not pruned.
+- A reclaim failure records `retentionError: image-retention-failed` in `status`
+  and never blocks or rolls back a release; the next reclaim retries and clears it.
+- Pruning build cache means the next build re-downloads and re-verifies pinned
+  remote files such as the AWS RDS CA bundle. A rotated upstream file then fails
+  that build (`prepare-failed`, live release unaffected) until its checksum pin
+  is updated.
 
 If the preflight keeps failing, inspect `docker system df` through the dedicated
 socket. Space held by the kept revisions, PostgreSQL data or non-release images
 needs an attended decision; do not delete volumes to make room.
+
+**Attended installation verification.** Tests cannot prove the live daemon's
+behavior. When installing this controller, before loading the LaunchAgent and
+again after its first completed switch, record on the tracking issue: `docker
+version`; `docker info --format '{{.Driver}} {{.DriverStatus}}'` (overlay2 or
+the containerd image store, which keeps image content under `/var/lib/containerd`
+and may sit on a different filesystem than the probe measures); `docker buildx
+ls` and `docker builder du` (the builder pruned through the dedicated socket);
+`docker system df`; and `colima ssh -- df -h /var/lib/docker /var/lib/containerd`
+compared with the controller's `dockerFree`. Also confirm `docker builder prune
+--keep-storage` is still accepted (newer releases deprecate it for
+`--reserved-space`). With a large existing backlog, the first reclaim may hold
+the operation lock for several minutes; an attended prune of old `ilo-local`
+tags at installation avoids that.
 
 ## Bounds and evidence
 

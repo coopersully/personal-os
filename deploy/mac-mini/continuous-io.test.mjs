@@ -148,7 +148,17 @@ function fakeRuntime(responses) {
   return {
     calls,
     runtime: {
-      config: { images: { api: id("1"), postgres: id("0") } },
+      // Ancillary images are digest-pinned exactly as the README prescribes.
+      config: {
+        images: {
+          api: id("1"),
+          mcp: id("2"),
+          web: id("5"),
+          postgres: `postgres@${id("0")}`,
+          gateway: `nginxinc/nginx-unprivileged@${id("6")}`,
+          tunnel: `cloudflare/cloudflared@${id("7")}`,
+        },
+      },
       docker: async (args, options) => {
         calls.push({ args, options });
         const key = args.slice(0, 2).join(" ");
@@ -171,7 +181,10 @@ test("reclaim never removes in-use images, forces removal, or prunes volumes", a
     "container ls": () => container,
     "container inspect": () => id("3"),
   });
-  await controllerIO("/private/nohmi-source.git").reclaim(runtime, [sha("a")]);
+  await controllerIO("/private/nohmi-source.git").reclaim(runtime, {
+    revisions: [sha("a")],
+    images: [],
+  });
   const removed = calls.filter((c) => c.args[0] === "image" && c.args[1] === "rm");
   assert.deepEqual(
     removed.map((c) => c.args),
@@ -194,7 +207,10 @@ test("reclaim still prunes build cache but reports a failed image removal", asyn
     },
   });
   await assert.rejects(
-    controllerIO("/private/nohmi-source.git").reclaim(runtime, [sha("a")]),
+    controllerIO("/private/nohmi-source.git").reclaim(runtime, {
+      revisions: [sha("a")],
+      images: [],
+    }),
     /could not be removed/,
   );
   assert.equal(calls.at(-1).args[0], "builder");
@@ -210,7 +226,39 @@ test("Docker headroom is measured offline through the pinned local image", async
   assert.ok(args.includes("none") && args.includes("--read-only"));
   assert.equal(args[args.indexOf("--pull") + 1], "never");
   assert.ok(args.includes("/var/lib/docker:/probe:ro"));
-  assert.ok(args.includes(id("0")));
+  assert.ok(args.includes(`postgres@${id("0")}`));
   for (const output of ["", "garbage", "Filesystem\n/dev/vdb1 1 2 lots 9% /probe"])
     assert.throws(() => parseAvailableBytes(output));
+});
+
+test("reclaim protects rollback images under any tag and removes the rest in batches", async () => {
+  const lines = [`ilo-local/api\t${sha("9")}\t${id("8")}`];
+  for (let n = 0; n < 60; n++)
+    lines.push(`ilo-local/web\t${n.toString(16).padStart(40, "0")}\t${id("4")}`);
+  const { calls, runtime } = fakeRuntime({ "image ls": () => lines.join("\n") });
+  await controllerIO("/private/nohmi-source.git").reclaim(runtime, {
+    revisions: [sha("a")],
+    images: [id("8"), "not-an-id"],
+  });
+  const removed = calls.filter((c) => c.args[0] === "image" && c.args[1] === "rm");
+  assert.deepEqual(
+    removed.map((c) => c.args.length - 2),
+    [50, 10],
+  );
+  assert.ok(!removed.some((c) => c.args.includes(`ilo-local/api:${sha("9")}`)));
+});
+
+test("an unrecognized container image identity fails closed before any removal", async () => {
+  const { calls, runtime } = fakeRuntime({
+    "image ls": () => `ilo-local/api\t${sha("d")}\t${id("4")}`,
+    "container ls": () => "f".repeat(64),
+    "container inspect": () => "ilo-local/api:latest",
+  });
+  await assert.rejects(
+    controllerIO("/private/nohmi-source.git").reclaim(runtime, {
+      revisions: [sha("a")],
+      images: [],
+    }),
+  );
+  assert.ok(!calls.some((c) => c.args[1] === "rm" || c.args[0] === "builder"));
 });

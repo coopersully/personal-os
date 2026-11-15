@@ -5,19 +5,52 @@ import { privateFile, withLock, writePrivate } from "./safety.mjs";
 
 const commit = /^[a-f0-9]{40}$/;
 const pollInterval = 5 * 60_000;
+const GiB = 1024 ** 3;
 // The 2026-11-14 outage: PostgreSQL hit ENOSPC on a full 24 GiB VM disk while
-// a deploy was quiescing. Builds and backups need this much room to be safe.
-export const minimumDockerFree = 4 * 1024 ** 3;
+// a deploy was quiescing. Writers are never stopped below this free space.
+export const minimumDockerFree = 4 * GiB;
+// Building three images grows images and cache while live PostgreSQL writes
+// to the same disk; a build only starts with this additional allowance.
+export const buildAllowance = 2 * GiB;
 
 class InsufficientDockerDisk extends Error {}
 
-// Reclaims only unused release images outside `keep`, then re-measures. The
-// live release is never stopped for space; a shortfall defers the release.
-async function ensureDockerHeadroom(io, runtime, keep) {
-  if ((await io.dockerFree(runtime)) >= minimumDockerFree) return;
-  await io.reclaim(runtime, keep);
-  if ((await io.dockerFree(runtime)) < minimumDockerFree)
+async function measureDockerFree(io, runtime) {
+  try {
+    return await io.dockerFree(runtime);
+  } catch {
+    return null; // A full disk can make the probe container itself fail.
+  }
+}
+
+// Reclaims unused release images outside `keep` whenever space is short or
+// unmeasurable, then lets a fresh measurement decide. The live release is
+// never stopped for space; a shortfall defers the release instead.
+async function ensureDockerHeadroom(io, runtime, state, keep, minimum, now) {
+  let free = await measureDockerFree(io, runtime);
+  if (free === null || free < minimum) {
+    try {
+      await io.reclaim(runtime, keep);
+      delete state.retentionError;
+    } catch {
+      state.retentionError = "image-retention-failed";
+    }
+    free = await measureDockerFree(io, runtime);
+  }
+  if (free === null) throw new Error("Docker disk headroom could not be measured.");
+  state.dockerFree = { bytes: free, at: new Date(now).toISOString() };
+  if (free < minimum)
     throw new InsufficientDockerDisk("Docker disk headroom is below the release minimum.");
+}
+
+// The last successfully replaced release, retained for attended rollback. It is
+// set only at completion, so a resumed or failed attempt never overwrites it.
+function rollbackKeep(state, ...revisions) {
+  const images = state.rollback?.images ?? {};
+  return {
+    revisions: [...revisions, state.rollback?.revision].filter(Boolean),
+    images: ["api", "mcp", "web"].map((name) => images[name]).filter(Boolean),
+  };
 }
 
 export function eligibleRelease({ candidate, deployed, descendant, runs }) {
@@ -301,8 +334,17 @@ export async function tick(configPath, io, now = Date.now()) {
       }
       state.releaseEligibility = normalEligibility ? "successful-main-ci" : "attended-ci-override";
       await io.check(runtime);
-      const retained = [state.deployed, state.previousConfig?.revision];
-      await ensureDockerHeadroom(io, runtime, retained);
+      // Keeping the candidate stops a tight disk from deleting and rebuilding
+      // the same release every backoff interval.
+      const retained = rollbackKeep(state, state.deployed, candidate);
+      await ensureDockerHeadroom(
+        io,
+        runtime,
+        state,
+        retained,
+        minimumDockerFree + buildAllowance,
+        now,
+      );
       state.phase = "building";
       state.candidate = candidate;
       save();
@@ -311,7 +353,7 @@ export async function tick(configPath, io, now = Date.now()) {
       // existing runtime files; this check does not use a prepared next config.
       if (io.checkImages) await io.checkImages(next);
       // The build consumed space; measure again before stopping any writer.
-      await ensureDockerHeadroom(io, runtime, [...retained, candidate]);
+      await ensureDockerHeadroom(io, runtime, state, retained, minimumDockerFree, now);
       if (maintenance() || (await io.main()) !== candidate) {
         state.phase = "idle";
         state.error = "candidate-superseded-or-maintenance";
@@ -383,6 +425,12 @@ export async function tick(configPath, io, now = Date.now()) {
       // recorded, but its writers and ingress are intentionally stopped.
       if (maintenance()) await io.stop(runtime);
       state.deployed = candidate;
+      state.rollback = {
+        revision: state.previousConfig.revision,
+        images: Object.fromEntries(
+          ["api", "mcp", "web"].map((name) => [name, state.previousConfig.images[name]]),
+        ),
+      };
       if (state.adoption) {
         state.bootstrapConsumed = true;
         delete state.adoption;
@@ -407,9 +455,11 @@ export async function tick(configPath, io, now = Date.now()) {
       return;
     }
     // The release is complete. Retention failure is recorded, never a reason
-    // to block or roll back: the next successful switch retries it.
+    // to block or roll back: the next reclaim retries it. Attended maintenance
+    // keeps the lock free of Docker cleanup work.
+    if (maintenance()) return;
     try {
-      await io.reclaim(runtime, [candidate, state.previousConfig.revision]);
+      await io.reclaim(runtime, rollbackKeep(state, candidate));
       delete state.retentionError;
     } catch {
       state.retentionError = "image-retention-failed";

@@ -41,6 +41,8 @@ try {
           error: state.error,
           cleanupError: state.cleanupError,
           retentionError: state.retentionError,
+          dockerFree: state.dockerFree,
+          rollback: state.rollback?.revision,
           health: state.health,
           ciOverride: state.ciOverride,
           releaseEligibility: state.releaseEligibility,

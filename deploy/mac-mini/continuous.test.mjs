@@ -112,7 +112,11 @@ function fixture(t) {
       calls.push("restart");
     },
     // Each queued measurement is consumed in order; then the disk is roomy.
-    dockerFree: async () => disk.free.shift() ?? 10 * 1024 ** 3,
+    dockerFree: async () => {
+      const free = disk.free.shift() ?? 10 * 1024 ** 3;
+      if (free === "fail") throw new Error("probe container could not start");
+      return free;
+    },
     reclaim: async (_runtime, keep) => {
       reclaims.push(keep);
     },
@@ -557,14 +561,17 @@ test("normal CI wins and an override cannot retry a failed build or follow chang
 });
 
 const GiB = 1024 ** 3;
+const previousImages = { api: image, mcp: image, web: image };
 
 test("a successful switch retains only the new and previous release images", async (t) => {
   const f = fixture(t);
   await tick(f.configPath, f.io, 1_000_000);
   assert.equal(f.state().deployed, candidate);
+  assert.deepEqual(f.state().rollback, { revision: old, images: previousImages });
   // Roomy disk: no preflight reclaim, then exactly one post-switch retention.
-  assert.deepEqual(f.reclaims, [[candidate, old]]);
+  assert.deepEqual(f.reclaims, [{ revisions: [candidate, old], images: [image, image, image] }]);
   assert.equal(f.state().retentionError, undefined);
+  assert.equal(f.state().dockerFree.bytes, 10 * GiB);
 });
 
 test("retention failure after a switch is recorded without blocking the release", async (t) => {
@@ -580,15 +587,29 @@ test("retention failure after a switch is recorded without blocking the release"
   assert.deepEqual(f.calls, ["build", "stop", "drained", "backup", "start", "publish"]);
 });
 
+test("maintenance requested during publication skips post-switch retention", async (t) => {
+  const f = fixture(t);
+  f.io.publish = async () => {
+    f.calls.push("publish");
+    writePrivate(join(f.root, "maintenance.json"), "{}");
+  };
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.equal(f.state().deployed, candidate);
+  assert.deepEqual(f.reclaims, []);
+});
+
 test("insufficient Docker disk before building defers the release without stopping it", async (t) => {
   const f = fixture(t);
-  f.disk.free.push(1 * GiB, 3 * GiB);
+  // 5 GiB passes the quiesce minimum but not the extra build allowance.
+  f.disk.free.push(5 * GiB, 5 * GiB);
   await tick(f.configPath, f.io, 1_000_000);
   assert.deepEqual(f.calls, []);
-  assert.deepEqual(f.reclaims, [[old, undefined]]);
+  // The candidate's images are kept so a retry need not rebuild them.
+  assert.deepEqual(f.reclaims, [{ revisions: [old, candidate], images: [] }]);
   const state = f.state();
   assert.equal(state.phase, "idle");
   assert.equal(state.error, "insufficient-docker-disk");
+  assert.equal(state.dockerFree.bytes, 5 * GiB);
   assert.equal(state.nextPollAt, 1_000_000 + 15 * 60_000);
   assert.equal(JSON.parse(privateFile(f.configPath)).revision, old);
 });
@@ -598,8 +619,7 @@ test("a build that exhausts headroom never quiesces the live release", async (t)
   f.disk.free.push(10 * GiB, 2 * GiB, 2 * GiB);
   await tick(f.configPath, f.io, 1_000_000);
   assert.deepEqual(f.calls, ["build"]);
-  // The built candidate is kept alongside the serving release while reclaiming.
-  assert.deepEqual(f.reclaims, [[old, undefined, candidate]]);
+  assert.deepEqual(f.reclaims, [{ revisions: [old, candidate], images: [] }]);
   assert.equal(f.state().phase, "idle");
   assert.equal(f.state().error, "insufficient-docker-disk");
   assert.equal(f.state().previousConfig, undefined);
@@ -611,19 +631,61 @@ test("reclaiming enough space lets the release continue", async (t) => {
   f.disk.free.push(1 * GiB, 8 * GiB);
   await tick(f.configPath, f.io, 1_000_000);
   assert.equal(f.state().deployed, candidate);
-  assert.deepEqual(f.reclaims, [
-    [old, undefined],
-    [candidate, old],
-  ]);
+  assert.equal(f.reclaims.length, 2);
+});
+
+test("a full disk that breaks the probe is reclaimed before measuring again", async (t) => {
+  const f = fixture(t);
+  f.disk.free.push("fail", 8 * GiB);
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.equal(f.state().deployed, candidate);
+  assert.deepEqual(f.reclaims[0], { revisions: [old, candidate], images: [] });
 });
 
 test("an unmeasurable Docker disk fails preparation before any writer stops", async (t) => {
   const f = fixture(t);
-  f.io.dockerFree = async () => {
-    throw new Error("probe failed");
-  };
+  f.disk.free.push("fail", "fail");
   await tick(f.configPath, f.io, 1_000_000);
   assert.deepEqual(f.calls, []);
+  assert.equal(f.reclaims.length, 1);
   assert.equal(f.state().phase, "idle");
   assert.equal(f.state().error, "prepare-failed");
+});
+
+test("a partial reclaim failure still lets a fresh measurement decide", async (t) => {
+  const f = fixture(t);
+  let failures = 1;
+  f.io.reclaim = async (_runtime, keep) => {
+    f.reclaims.push(keep);
+    if (failures-- > 0) throw new Error("one tag could not be removed");
+  };
+  f.disk.free.push(1 * GiB, 8 * GiB);
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.equal(f.state().deployed, candidate);
+  // The later post-switch retention succeeded and cleared the recorded failure.
+  assert.equal(f.state().retentionError, undefined);
+});
+
+test("a resumed attempt never displaces the recorded rollback release", async (t) => {
+  const f = fixture(t);
+  const rollback = { revision: "e".repeat(40), images: { api: `sha256:${"e".repeat(64)}` } };
+  writePrivate(
+    join(f.root, "continuous-state.json"),
+    JSON.stringify({
+      version: 1,
+      phase: "idle",
+      deployed: old,
+      health: {},
+      nextPollAt: 0,
+      // A resumed transaction leaves previousConfig equal to the serving release.
+      previousConfig: f.config,
+      rollback,
+    }),
+  );
+  f.disk.free.push(1 * GiB, 1 * GiB);
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.deepEqual(f.reclaims, [
+    { revisions: [old, candidate, rollback.revision], images: [rollback.images.api] },
+  ]);
+  assert.deepEqual(f.state().rollback, rollback);
 });

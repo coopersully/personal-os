@@ -263,6 +263,8 @@ export function controllerIO(repository, overrides = {}) {
           { timeout: 120_000 },
         ),
       ),
+    // keep: { revisions: release SHAs whose tags stay, images: extra image IDs
+    // (the attended-rollback release) that stay even under another tag.
     reclaim: async (runtime, keep) => {
       const images = (
         await runtime.docker([
@@ -288,22 +290,32 @@ export function controllerIO(repository, overrides = {}) {
         .filter(Boolean);
       if (containers.some((id) => !/^[a-f0-9]{64}$/.test(id)))
         throw new Error("Invalid container identity.");
+      // Container image identities must be exact IDs; anything else fails
+      // closed rather than leaving an in-use image unprotected.
       const used = containers.length
         ? (await runtime.docker(["container", "inspect", "--format", "{{.Image}}", ...containers]))
             .split("\n")
             .filter(Boolean)
         : [];
+      // Configuration may pin ancillary images as repo@sha256 digests. Those
+      // can never be local ilo-local release images, so only exact IDs matter.
+      const configured = [...Object.values(runtime.config.images), ...keep.images].filter((value) =>
+        imageId.test(value),
+      );
       const remove = retentionPlan({
         images,
-        protectedIds: [...used, ...Object.values(runtime.config.images)],
-        keep,
+        protectedIds: [...used, ...configured],
+        keep: keep.revisions,
       });
-      // No --force: Docker independently refuses an image a container uses.
+      // No --force: Docker refuses to delete an image a container uses. Batches
+      // continue past individual failures, which are reported afterwards.
       let failed = false;
-      for (const reference of remove)
-        await runtime.docker(["image", "rm", reference]).catch(() => {
-          failed = true;
-        });
+      for (let index = 0; index < remove.length; index += 50)
+        await runtime
+          .docker(["image", "rm", ...remove.slice(index, index + 50)], { timeout: 300_000 })
+          .catch(() => {
+            failed = true;
+          });
       // Build cache only; never volumes, containers or other images.
       await runtime.docker(["builder", "prune", "--force", "--keep-storage", buildCacheKeep], {
         timeout: 600_000,

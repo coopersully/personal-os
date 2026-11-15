@@ -1276,6 +1276,68 @@ it("says when lists and projects could not be read and offers a retry", async ()
   expect(await screen.findByRole("button", { name: "List, Any list" })).toBeEnabled();
   expect(screen.queryByRole("button", { name: "Retry loading lists and projects" })).toBeNull();
 });
+function RefreshDirectoryFixture() {
+  const query = useQueryClient();
+  return (
+    <button
+      type="button"
+      onClick={() => void query.refetchQueries({ queryKey: ["tasks", "lists"] })}
+    >
+      Background directory refresh
+    </button>
+  );
+}
+it("keeps cached lists and projects usable when a refresh fails, reports it through Sonner and offers a retry", async () => {
+  h.lists.push(list("home", "Home"));
+  render(
+    <MobileDataProvider>
+      <TaskListScreen title="to-do" scope={{ view: "all" }} />
+      <RefreshDirectoryFixture />
+    </MobileDataProvider>,
+  );
+  await loaded();
+  filters();
+  expect(await screen.findByRole("button", { name: "List, Any list" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Retry loading lists and projects" })).toBeNull();
+  h.listTaskLists.mockRejectedValue(new Error("offline"));
+  fireEvent.click(screen.getByRole("button", { name: "Background directory refresh" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Retry loading lists and projects" }));
+  // The failure is one Sonner error, never copy in the sheet, and the choices already read stay.
+  expect(h.error).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/offline|could not|couldn/i)).toBeNull();
+  expect(screen.getByRole("button", { name: "Project, Any project" })).toBeEnabled();
+  // A retry that fails again is said again, once.
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole("button", { name: "List, Any list" }));
+  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  await waitFor(() => expect(lastQuery()).toMatchObject({ listId: "home" }));
+  h.listTaskLists.mockImplementation(async () => ({ items: h.lists, nextCursor: null }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading lists and projects" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Retry loading lists and projects" })).toBeNull(),
+  );
+  expect(h.error).toHaveBeenCalledTimes(2);
+});
+it("keeps a project chosen on its own when its parent list is chosen", async () => {
+  h.lists.push(list("home", "Home"), list("work", "Work"));
+  h.projects = [project("garden", "Garden", { listId: "home" })];
+  show();
+  await loaded();
+  filters();
+  fireEvent.click(await screen.findByRole("button", { name: "Project, Any project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Garden" }));
+  await waitFor(() => expect(lastQuery()).toMatchObject({ projectId: "garden" }));
+  expect(lastQuery()).not.toHaveProperty("listId");
+  fireEvent.click(screen.getByRole("button", { name: "List, Any list" }));
+  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  await waitFor(() => expect(lastQuery()).toMatchObject({ listId: "home", projectId: "garden" }));
+  expect(screen.getByRole("button", { name: "Remove Project: Garden" })).toBeVisible();
+  // Another list still drops it.
+  fireEvent.click(screen.getByRole("button", { name: "List, Home" }));
+  fireEvent.click(screen.getByRole("button", { name: "Work" }));
+  await waitFor(() => expect(lastQuery()).toMatchObject({ listId: "work" }));
+  expect(lastQuery()).not.toHaveProperty("projectId");
+});
 it("keeps a selected list or project that is no longer offered, so it can still be cleared", async () => {
   show({ initialFilters: { listId: "gone", projectId: "lost" } });
   await loaded();

@@ -105,8 +105,10 @@ export function TaskListScreen({
   );
   // Choices are offered only once both reads have answered, never from a partial directory.
   const containersReady = !!resources.lists.data && !!resources.projects.data;
-  const containersFailed =
-    !containersReady && (resources.lists.isError || resources.projects.isError);
+  const directoryError = resources.lists.isError || resources.projects.isError;
+  const containersFailed = !containersReady && directoryError;
+  // A refresh that fails over a directory already read keeps those choices usable and offers
+  // the retry; the query cache reports each failed read as one Sonner error.
   // A selection that is no longer offered stays in its row, named as its chip names it.
   // The row and its chip name a selection from this one place: the record's name when the
   // directory has it (archived and trashed included), otherwise "Unavailable".
@@ -171,10 +173,13 @@ export function TaskListScreen({
     }));
   const chooseContainer = (key: "listId" | "projectId", value: string) =>
     setFilters((current) => ({
-      // Another list invalidates the chosen project; a container makes the Type filter moot.
+      // A project from another list is dropped, one in the chosen list stays; a container
+      // makes the Type filter moot.
       ...without(current, [
         key,
-        ...(key === "listId" ? (["projectId"] as const) : []),
+        ...(key === "listId" && !(value && selectedProject?.listId === value)
+          ? (["projectId"] as const)
+          : []),
         ...(value ? (["kind"] as const) : []),
       ]),
       ...(value ? { [key]: value } : {}),
@@ -500,7 +505,7 @@ export function TaskListScreen({
                     ]}
                     onChange={(value) => chooseContainer("projectId", value)}
                   />
-                  {containersFailed && (
+                  {directoryError && (
                     <Action
                       label="Retry loading lists and projects"
                       onPress={() => {

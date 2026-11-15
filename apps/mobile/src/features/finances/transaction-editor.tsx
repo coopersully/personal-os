@@ -15,6 +15,7 @@ import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
 import { appliedTransaction } from "./mutations";
 import { TransactionCreateForm } from "./transaction-new";
+import { TransactionSplitForm } from "./transaction-splits";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
 
 function TransactionForm({ record, field }: { record: FinanceTransaction; field?: string }) {
@@ -213,7 +214,11 @@ export function FinanceTransactionEditor() {
       {id ? (
         <ReadState query={query}>
           {query.data?.data ? (
-            <TransactionForm key={id} record={query.data.data} field={field} />
+            field === "splits" ? (
+              <TransactionSplitForm key={id} record={query.data.data} />
+            ) : (
+              <TransactionForm key={id} record={query.data.data} field={field} />
+            )
           ) : null}
         </ReadState>
       ) : (

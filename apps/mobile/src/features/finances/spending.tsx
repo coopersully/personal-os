@@ -18,6 +18,7 @@ import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead, useSpending } from "./data";
 import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
 import { SpendingChart } from "./spending-chart";
+import { isSplit } from "./splits";
 import { selectionLimit, useBulkCategorize } from "./transaction-bulk";
 import {
   defaultTransactionView,
@@ -333,7 +334,7 @@ export function Transactions({
                     // State is written out, so it is not carried by the glyph or colour alone.
                     selection ? (chosen ? "Selected" : "Not selected") : null,
                     formatLocalDate(item.date),
-                    categoryLabel(item.category),
+                    isSplit(item) ? "Split" : categoryLabel(item.category),
                     item.pending ? "Pending" : null,
                     item.needsReview ? "Needs review" : null,
                   ]

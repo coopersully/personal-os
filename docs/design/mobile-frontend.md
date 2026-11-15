@@ -279,6 +279,61 @@ counts, then confirms. Resolution is bound to the reviewed comparison revision; 
 comparison stops nothing and reloads. Stop tracking and duplicate resolution each keep a native
 confirmation that names the account and what is preserved.
 
+### Finance transaction management
+
+Spending offers Add as a command that opens the new transaction form: beside Select and Filters on
+Transactions, and on its own line above the content on Summary, where it stays through a category
+drill-down. It does not wait for the spending read, so it is there while that loads or fails. A
+manual account's action menu opens the same form with that account chosen. Spending has no
+floating plus, because it would sit over row amounts. The form uses Required and Optional as
+placeholders, like the account form, rather than sample values. A transaction a person adds belongs to a manual
+account, because the server removes a transaction only from one: the form offers manual accounts
+only, chooses a lone one, and explains what is missing when there is none. Merchant, Amount,
+Account and Date are required; the date defaults to today in the account planning timezone. A
+blank Category leaves the choice to nohmi. Adding has no retry key, so after an unknown outcome the
+next Save first looks on that account and date for the record the earlier attempt would have left,
+and adds nothing when it finds one. If any field of the draft was changed since, category and notes
+included, the form stays open, says the earlier version is recorded and offers Add anyway. That
+action hands its toast to the save, which clears the action from it (an updated toast keeps its
+earlier action unless told otherwise), and writes nothing while a save is running, once the add is
+confirmed or submitted, or after the form has been left. Leaving after an unknown outcome never says the
+transaction was not added, and re-reads Finance data. An amount takes a comma only as thousands
+grouping; `12,50` is corrected beside the field, never read as 1250.
+
+Transaction details put Edit transaction and, for a manual account's transaction only, the
+destructive Remove transaction in the top-right action menu. Remove is not offered while the
+account is unknown. It keeps a native confirmation, keeps its idempotency key across an unknown
+outcome, and returns to the list only on a confirmed removal or when the record is already gone.
+
+A category row is followed by New category, which expands in place to a name and Cancel/Add. The
+new category is selected in the draft; the form's Save still persists the transaction against its
+original revision. A name that already reads the same as an existing category is selected rather
+than written again. Categories stored under one of the provider's raw codes are shown as words
+(`RENT_AND_UTILITIES` reads "Rent And Utilities", as on web) wherever Finance names a category;
+other names, including all-capitals ones such as `HSA`, are left as written, and writes still send
+the stored name.
+
+Every non-drill-down transaction list has Select and Filters beside its search. Filters is a sheet
+with Category, Review, Sort by and Order as native choices that apply at once; a list already
+scoped to one budget category omits Category. Review offers Needs review and No review needed,
+which is every record not flagged, reviewed or not. Each active filter, and a non-default order, is
+a selected shared filter chip above the list that clears on press, and the Filters control names
+the active count and order to assistive technology. Rows state Pending and Needs review in their
+text.
+
+Select turns rows into toggles that state Selected or Not selected in their text. Categorize
+applies one category to at most 100 displayed records after a native confirmation, each guarded by
+the revision on screen, without changing merchant rules. One toast reports how many were applied
+and, separately, how many went to review, changed elsewhere, were rejected or are unconfirmed; a
+record the response does not mention is never counted as applied. Every submission ends the
+selection and reloads the list, and nothing can be selected again until a reload succeeds. That
+reload is silent when it works and raises one error when it fails, beside the Reload row.
+Selection is unavailable while the list is loading, failed, empty or showing a previous filter's
+rows.
+
+Changing a transaction's date is not available: the API accepts only a category or a note on an
+existing transaction.
+
 ### Transaction conversations and review
 
 - Needs your input cards show merchant, amount and category, and open the canonical transaction details page. Details place attention on the category row itself, with direct selection and approval. Do not duplicate the field with a separate Choose category banner/button. Notes remain optional and never count as a missing required field. This is record state, not action-result feedback.
@@ -361,6 +416,11 @@ The workspace search header floats above page content without an opaque full-wid
 Keep its native Liquid Glass capsule and reserve its safe-area-plus-header height inside page content
 so initial headings never sit under the controls. Shared Screen and virtualized Tasks lists use the
 same header inset; scrolling content and decorative backgrounds can pass behind the fixed header.
+Because pages own that spacing, native tab pages turn off UIKit's automatic content insets, so a
+list is never inset twice. A tab page therefore also clears the floating tab bar itself: lists pad
+their end by 100 points and the five Finances tab pages pass `tabBar` to the shared `Screen`, which
+applies the same clearance whether or not the page scrolls. Routes that open above the tabs, such
+as Finances details and editors, do not.
 Keep the glass material's system appearance stable during scrolling; adapt foreground contrast
 without changing the navigator or scroll surface's identity.
 

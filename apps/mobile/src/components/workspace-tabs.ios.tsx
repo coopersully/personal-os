@@ -12,7 +12,14 @@ export function WorkspaceTabs({ workspace }: { workspace: WorkspaceWithPages }) 
       iconColor={{ default: theme.secondary, selected: workspaceColor(theme, workspace) }}
     >
       {workspacePages[workspace].map((page) => (
-        <NativeTabs.Trigger key={page.name} name={page.name} accessibilityLabel={page.label}>
+        <NativeTabs.Trigger
+          key={page.name}
+          name={page.name}
+          accessibilityLabel={page.label}
+          // Pages reserve the fixed search header themselves. Otherwise the tabs switch a tab's
+          // first scroll view to UIKit's automatic insets on top of that padding.
+          disableAutomaticContentInsets
+        >
           <NativeTabs.Trigger.Label>{page.label}</NativeTabs.Trigger.Label>
           <NativeTabs.Trigger.Icon
             renderingMode="template"

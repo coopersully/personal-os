@@ -45,10 +45,17 @@ async function ensureDockerHeadroom(io, runtime, state, keep, minimum, now) {
 
 // The last successfully replaced release, retained for attended rollback. It is
 // set only at completion, so a resumed or failed attempt never overwrites it.
+// State written before this record existed falls back to its completed
+// transaction's previous configuration, which then names a different release.
 function rollbackKeep(state, ...revisions) {
-  const images = state.rollback?.images ?? {};
+  const rollback =
+    state.rollback ??
+    (state.completedAt && state.previousConfig?.revision !== state.deployed
+      ? state.previousConfig
+      : undefined);
+  const images = rollback?.images ?? {};
   return {
-    revisions: [...revisions, state.rollback?.revision].filter(Boolean),
+    revisions: [...revisions, rollback?.revision].filter(Boolean),
     images: ["api", "mcp", "web"].map((name) => images[name]).filter(Boolean),
   };
 }

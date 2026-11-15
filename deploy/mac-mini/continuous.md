@@ -181,7 +181,9 @@ controller now bounds that growth itself, under the same operation lock:
 - **Rollback release.** On each completed switch the controller records the
   replaced release's revision and API/MCP/web image IDs as `rollback` (shown by
   `status`). Only completion sets it, so a resumed or failed attempt never
-  displaces it. A first controller install has none until its first switch.
+  displaces it. State from an earlier controller falls back to its completed
+  transaction's previous configuration; a first install has none until its
+  first switch.
 - **Retention.** After a successful switch (skipped while maintenance is
   requested) it keeps the new revision and the rollback release; a preflight
   reclaim keeps the serving revision, the candidate and the rollback release.

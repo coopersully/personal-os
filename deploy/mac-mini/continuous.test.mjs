@@ -689,3 +689,30 @@ test("a resumed attempt never displaces the recorded rollback release", async (t
   ]);
   assert.deepEqual(f.state().rollback, rollback);
 });
+
+test("state from an earlier controller keeps its completed predecessor for rollback", async (t) => {
+  const f = fixture(t);
+  const earlier = "e".repeat(40);
+  const earlierImage = `sha256:${"e".repeat(64)}`;
+  writePrivate(
+    join(f.root, "continuous-state.json"),
+    JSON.stringify({
+      version: 1,
+      phase: "idle",
+      deployed: old,
+      health: {},
+      nextPollAt: 0,
+      completedAt: "2026-11-01T00:00:00.000Z",
+      previousConfig: {
+        ...f.config,
+        revision: earlier,
+        images: { ...f.config.images, api: earlierImage },
+      },
+    }),
+  );
+  f.disk.free.push(1 * GiB, 1 * GiB);
+  await tick(f.configPath, f.io, 1_000_000);
+  assert.deepEqual(f.reclaims, [
+    { revisions: [old, candidate, earlier], images: [earlierImage, image, image] },
+  ]);
+});

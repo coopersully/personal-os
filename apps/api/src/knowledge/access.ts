@@ -798,6 +798,8 @@ export function createKnowledgeAccess(now: () => Date) {
           ? [content.value.recordId]
           : [];
     const referenceStates = new Map<string, ReferenceState>();
+    // IDs with no record in this view: trashed (outside the owner's Trash view) or purged.
+    const forgotten = new Set<string>();
     for (const id of references) {
       const source = await findOwnedKnowledgeRevision(
         tx,
@@ -806,7 +808,10 @@ export function createKnowledgeAccess(now: () => Date) {
         false,
         trashVisibility,
       );
-      if (!source) continue;
+      if (!source) {
+        forgotten.add(id);
+        continue;
+      }
       try {
         preserveKnowledgeDisclosure({ ...snapshot, purposes: [purpose] }, source.snapshot);
         if (
@@ -870,7 +875,11 @@ export function createKnowledgeAccess(now: () => Date) {
     const structuralAvailable =
       !missingGoal &&
       structuralIds.every(
-        (id) => referenceStates.get(id.toLowerCase())?.projection.structuralAvailable === true,
+        (id) =>
+          referenceStates.get(id.toLowerCase())?.projection.structuralAvailable === true ||
+          // A relationship is linked, not derived: a trashed or purged endpoint reads as
+          // forgotten by ID and discloses none of its content.
+          (content.kind === "relationship" && forgotten.has(id.toLowerCase())),
       );
     if (
       principal.actorType === "agent" &&

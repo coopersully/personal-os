@@ -202,6 +202,58 @@ describe("memory trash and purge", () => {
     });
   });
 
+  it("trash_does_not_cascade_to_linked_relationships", async () => {
+    const f = await fixture();
+    const person = await f.save(fact("linked-person-private-detail"));
+    const other = await f.save(fact("linked-other-person"));
+    const relationship = await f.save(
+      fact("unused", {
+        content: {
+          kind: "relationship",
+          value: {
+            subjectId: person.id,
+            objectId: other.id,
+            relationship: "partner",
+            direction: "bidirectional",
+          },
+        },
+      }),
+    );
+    expect(await f.act("trash", person)).toMatchObject({ outcome: "trashed" });
+
+    const trashed = await f.search.search(f.owner, { ...planning, status: "trashed", limit: 50 });
+    expect(trashed.items.map(({ id }) => id)).toEqual([person.id]);
+    await expect(f.records.get(f.agent, { id: person.id, ...planning })).rejects.toMatchObject({
+      status: 404,
+    });
+    for (const read of [
+      () => f.records.get(f.agent, { id: relationship.id, ...planning }),
+      async () =>
+        (await f.search.search(f.agent, { ...planning, limit: 50 })).items.find(
+          ({ id }) => id === relationship.id,
+        ),
+    ]) {
+      const visible = await read();
+      expect(visible).toMatchObject({
+        id: relationship.id,
+        status: "active",
+        trashedAt: null,
+        content: { value: { subjectId: person.id, objectId: other.id } },
+      });
+      expect(JSON.stringify(visible)).not.toContain("linked-person-private-detail");
+    }
+
+    f.advance(knowledgeTrashRetentionMs + 1);
+    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 1 });
+    const afterPurge = await f.records.get(f.agent, { id: relationship.id, ...planning });
+    expect(afterPurge).toMatchObject({ id: relationship.id, status: "active" });
+    expect(JSON.stringify(afterPurge)).not.toContain("linked-person-private-detail");
+    expect(await f.records.get(f.owner, { id: person.id, ...planning })).toMatchObject({
+      id: person.id,
+      state: "forgotten",
+    });
+  });
+
   it("restore_returns_only_its_trash_group", async () => {
     const f = await fixture();
     const a = await f.save(fact("restore-source"));

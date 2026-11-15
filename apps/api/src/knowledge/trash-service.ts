@@ -28,7 +28,8 @@ import {
 
 /**
  * Move the record and, transitively, every untrashed record derived from it into one trash
- * group named by the target. Already trashed records keep their own group.
+ * group named by the target. Already trashed records keep their own group. Relationship
+ * records that merely name a trashed record as subject or object stay where they are.
  */
 async function trashDerivationClosure(
   tx: KnowledgeTransaction,
@@ -44,6 +45,27 @@ async function trashDerivationClosure(
       JOIN knowledge_derivations d ON d.user_id = ${userId} AND d.source_record_id = closure.id
       JOIN knowledge_records r ON r.user_id = d.user_id AND r.id = d.record_id
         AND r.trashed_at IS NULL
+      JOIN knowledge_revisions v ON v.user_id = d.user_id AND v.record_id = d.record_id
+        AND v.revision = d.revision
+      LEFT JOIN knowledge_revision_metadata m ON m.user_id = v.user_id
+        AND m.record_id = v.record_id AND m.revision = v.revision
+      CROSS JOIN LATERAL (
+        SELECT CASE
+          WHEN v.snapshot->'content'->>'kind' = 'inference'
+            AND (m.metadata->>'generatedInference')::boolean
+          THEN (v.snapshot->'content'->'value'->>'proposition')::jsonb
+          ELSE v.snapshot->'content'
+        END AS claim
+      ) c
+      -- A relationship only links its subject and object; it is not derived from them.
+      WHERE NOT (
+        d.kind = 'content_evidence'
+        AND c.claim->>'kind' = 'relationship'
+        AND d.source_record_id IN (
+          (c.claim->'value'->>'subjectId')::uuid,
+          (c.claim->'value'->>'objectId')::uuid
+        )
+      )
     )
     UPDATE knowledge_records r SET
       trashed_at = ${at.toISOString()}::timestamptz,

@@ -3,6 +3,7 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { Icon } from "../../components/icons";
 import { spacing, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
+import { dateShortcuts, identifyShortcut } from "./date-shortcuts";
 import type { OptionsMenuProps } from "./options-menu";
 import { activeFilters } from "./presentation";
 import { Action } from "./ui";
@@ -16,6 +17,8 @@ const labels: Record<string, string> = {
   sort: "Sort",
   group: "Group",
   tag: "Tag",
+  listId: "List",
+  projectId: "Project",
   dueAfter: "Due after",
   dueBefore: "Due before",
   scheduledAfter: "Reserved after",
@@ -25,6 +28,7 @@ export function ActiveFilters({
   filters,
   choices,
   search,
+  names = {},
   onRemove,
   onClearSearch,
   onClear,
@@ -32,7 +36,9 @@ export function ActiveFilters({
   filters: Partial<TaskWorkspaceQuery>;
   choices: OptionsMenuProps["choices"];
   search: string;
-  onRemove: (key: keyof TaskWorkspaceQuery) => void;
+  /** Readable names for filters whose value is an identifier. */
+  names?: { listId?: string; projectId?: string };
+  onRemove: (keys: (keyof TaskWorkspaceQuery)[]) => void;
   onClearSearch: () => void;
   onClear: () => void;
 }) {
@@ -60,8 +66,18 @@ export function ActiveFilters({
       <Icon name="cancel" size={14} color={t.secondary} />
     </Pressable>
   );
-  const entries = activeFilters(filters);
-  if (!entries.length && !search.trim()) return null;
+  const timeZone = state.user?.planningTimezone ?? "UTC";
+  // A due range that came from a shortcut reads as that shortcut and is removed as one filter.
+  const shortcut = identifyShortcut(
+    { after: filters.dueAfter, before: filters.dueBefore },
+    timeZone,
+  );
+  const shortcutLabel =
+    shortcut === "any" ? undefined : dateShortcuts.find(({ value }) => value === shortcut)?.label;
+  const entries = activeFilters(filters).filter(
+    ([key]) => !shortcutLabel || (key !== "dueAfter" && key !== "dueBefore"),
+  );
+  if (!entries.length && !shortcutLabel && !search.trim()) return null;
   return (
     <View style={{ marginBottom: spacing.sm }}>
       <ScrollView
@@ -71,6 +87,11 @@ export function ActiveFilters({
         contentContainerStyle={{ gap: spacing.xs }}
       >
         {search.trim() ? chip("search", `Search: ${search}`, onClearSearch) : null}
+        {shortcutLabel
+          ? chip("dueWithin", `Due within: ${shortcutLabel}`, () =>
+              onRemove(["dueAfter", "dueBefore"]),
+            )
+          : null}
         {entries.map(([key, value]) => {
           const choice = choices.find((item) => item.key === key);
           const display =
@@ -79,11 +100,13 @@ export function ActiveFilters({
               ? new Intl.DateTimeFormat(undefined, {
                   month: "short",
                   day: "numeric",
-                  timeZone: state.user?.planningTimezone,
+                  timeZone,
                 }).format(new Date(String(value)))
-              : String(value));
+              : key === "listId" || key === "projectId"
+                ? (names[key] ?? "Unavailable")
+                : String(value));
           return chip(key, `${choice?.label ?? labels[key] ?? key}: ${display}`, () =>
-            onRemove(key as keyof TaskWorkspaceQuery),
+            onRemove([key as keyof TaskWorkspaceQuery]),
           );
         })}
         <Action label="Clear all" onPress={onClear} />

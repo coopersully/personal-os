@@ -9,6 +9,7 @@ import { SheetHeader } from "../../components/sheet-header";
 import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { entityDictionary } from "../../product/entities";
 import { spacing, useTheme } from "../../theme";
+import { useAuth } from "../auth/context";
 import { ActiveFilters } from "./active-filters";
 import { projectAcceptsNewWork } from "./container-directory";
 import {
@@ -23,7 +24,15 @@ import {
   useTaskSearch,
 } from "./data";
 import { DateField } from "./date-field";
+import {
+  type DateShortcut,
+  dateShortcuts,
+  identifyShortcut,
+  shortcutBounds,
+} from "./date-shortcuts";
+import { listOption } from "./list-presentation";
 import { OptionsMenu } from "./options-menu";
+import { SearchableChoice } from "./searchable-choice";
 import { TaskRow } from "./task-row";
 import {
   Action,
@@ -53,6 +62,8 @@ export function TaskListScreen({
   const t = useTheme();
   const headerInset = useWorkspaceHeaderInset();
   const api = useTaskApi();
+  const { state } = useAuth();
+  const timeZone = state.user?.planningTimezone ?? "UTC";
   const resources = useTaskResources();
   const { search, setSearch } = useTaskSearch();
   const [debounced, setDebounced] = useState(search);
@@ -76,8 +87,54 @@ export function TaskListScreen({
         ? "open_and_completed"
         : undefined),
     ...filters,
+    // Lists and projects only hold tasks; narrowing by one never returns reminders.
+    ...(filters.listId || filters.projectId ? { kind: "task" as const } : {}),
     ...(debounced ? { query: debounced } : {}),
   };
+  // A list or project browser keeps its own scope, and reminders have no container.
+  const containerFilters = !scope.listId && !scope.projectId && scope.kind !== "reminder";
+  const listChoices = (resources.lists.data ?? []).filter(
+    (row) => !row.deletedAt && row.availability === "active",
+  );
+  const projectChoices = (resources.projects.data ?? []).filter(
+    (row) =>
+      !row.deletedAt &&
+      row.availability === "active" &&
+      listChoices.some((list) => list.id === row.listId) &&
+      (!filters.listId || row.listId === filters.listId),
+  );
+  // Choices are offered only once both reads have answered, never from a partial directory.
+  const containersReady = !!resources.lists.data && !!resources.projects.data;
+  const directoryError = resources.lists.isError || resources.projects.isError;
+  const containersFailed = !containersReady && directoryError;
+  // A refresh that fails over a directory already read keeps those choices usable and offers
+  // the retry; the query cache reports each failed read as one Sonner error.
+  // A selection that is no longer offered stays in its row, named as its chip names it.
+  // The row and its chip name a selection from this one place: the record's name when the
+  // directory has it (archived and trashed included), otherwise "Unavailable".
+  const selectedList = resources.lists.data?.find((row) => row.id === filters.listId);
+  const selectedProject = resources.projects.data?.find((row) => row.id === filters.projectId);
+  const selectedNames = {
+    listId: filters.listId ? (selectedList?.name ?? "Unavailable") : undefined,
+    projectId: filters.projectId ? (selectedProject?.name ?? "Unavailable") : undefined,
+  };
+  // A selection that is not on offer, or cannot be read, still appears as the row's value.
+  const currentChoice = (key: "listId" | "projectId", offered: { id: string }[]) => {
+    const value = filters[key];
+    const label = selectedNames[key];
+    return value && label && !offered.some((row) => row.id === value)
+      ? [{ value, label, plain: true }]
+      : [];
+  };
+  const anyContainer = (label: string) => ({
+    value: "",
+    label: containersFailed ? "Unavailable" : label,
+    plain: true,
+  });
+  const dueShortcut = identifyShortcut(
+    { after: filters.dueAfter, before: filters.dueBefore },
+    timeZone,
+  );
   const menuChoices = buildViewOptions(query, scope);
   const scopedProject = resources.projects.data?.find((row) => row.id === scope.projectId);
   const scopedList = resources.lists.data?.find((row) => row.id === scopedProject?.listId);
@@ -98,8 +155,47 @@ export function TaskListScreen({
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const items = uniqueItems(page.data?.pages.flatMap((result) => result.items) ?? []);
+  const without = (current: Partial<TaskWorkspaceQuery>, keys: (keyof TaskWorkspaceQuery)[]) => {
+    const next = { ...current };
+    for (const key of keys) delete next[key];
+    return next;
+  };
   const updateFilter = (key: keyof TaskWorkspaceQuery, value: string) =>
-    setFilters((current) => ({ ...current, [key]: value || undefined }));
+    setFilters((current) => ({
+      // A due state such as Overdue or No due date replaces a due-date range, and a range
+      // picked by hand replaces a due state, as on the web.
+      ...(key === "due" && value && value !== "any"
+        ? without(current, ["dueAfter", "dueBefore"])
+        : (key === "dueAfter" || key === "dueBefore") && value
+          ? without(current, ["due"])
+          : current),
+      [key]: value || undefined,
+    }));
+  const chooseContainer = (key: "listId" | "projectId", value: string) =>
+    setFilters((current) => ({
+      // A project from another list is dropped, one in the chosen list stays; a container
+      // makes the Type filter moot.
+      ...without(current, [
+        key,
+        ...(key === "listId" && !(value && selectedProject?.listId === value)
+          ? (["projectId"] as const)
+          : []),
+        ...(value ? (["kind"] as const) : []),
+      ]),
+      ...(value ? { [key]: value } : {}),
+    }));
+  const chooseDueShortcut = (shortcut: DateShortcut) => {
+    const { after, before } = shortcutBounds(shortcut, timeZone);
+    setFilters((current) => ({
+      // A shortcut is a whole-day range; it replaces a due state it would contradict.
+      ...without(current, [
+        "dueAfter",
+        "dueBefore",
+        ...(shortcut === "any" ? [] : (["due"] as const)),
+      ]),
+      ...(after && before ? { dueAfter: after, dueBefore: before } : {}),
+    }));
+  };
   const edit = (item: TaskWorkspaceItem) =>
     router.push({
       pathname: "/task-editor",
@@ -220,13 +316,8 @@ export function TaskListScreen({
               filters={filters}
               choices={menuChoices}
               search={search}
-              onRemove={(key) =>
-                setFilters((current) => {
-                  const next = { ...current };
-                  delete next[key];
-                  return next;
-                })
-              }
+              names={selectedNames}
+              onRemove={(keys) => setFilters((current) => without(current, keys))}
               onClearSearch={() => setSearch("")}
               onClear={() => {
                 setFilters({});
@@ -388,6 +479,43 @@ export function TaskListScreen({
                     onChange={(value) => updateFilter(choice.key, value)}
                   />
                 ))}
+              {containerFilters && (
+                <>
+                  <SearchableChoice
+                    entity="list"
+                    label="List"
+                    disabled={!containersReady || query.kind === "reminder"}
+                    value={filters.listId ?? ""}
+                    options={[
+                      anyContainer("Any list"),
+                      ...listChoices.map(listOption),
+                      ...currentChoice("listId", listChoices),
+                    ]}
+                    onChange={(value) => chooseContainer("listId", value)}
+                  />
+                  <SearchableChoice
+                    entity="project"
+                    label="Project"
+                    disabled={!containersReady || query.kind === "reminder"}
+                    value={filters.projectId ?? ""}
+                    options={[
+                      anyContainer("Any project"),
+                      ...projectChoices.map((row) => ({ value: row.id, label: row.name })),
+                      ...currentChoice("projectId", projectChoices),
+                    ]}
+                    onChange={(value) => chooseContainer("projectId", value)}
+                  />
+                  {directoryError && (
+                    <Action
+                      label="Retry loading lists and projects"
+                      onPress={() => {
+                        if (resources.lists.isError) void resources.lists.refetch();
+                        if (resources.projects.isError) void resources.projects.refetch();
+                      }}
+                    />
+                  )}
+                </>
+              )}
             </Section>
             <Section title="Dates & tags">
               <Field
@@ -396,6 +524,17 @@ export function TaskListScreen({
                 value={filters.tag ?? ""}
                 onChangeText={(value) => updateFilter("tag", value.trim())}
                 autoCapitalize="none"
+              />
+              <Choice
+                label="Due within"
+                value={dueShortcut}
+                options={[
+                  ...dateShortcuts,
+                  ...(dueShortcut === "custom" ? [{ value: "custom", label: "Custom range" }] : []),
+                ]}
+                onChange={(value) => {
+                  if (value !== "custom") chooseDueShortcut(value as DateShortcut);
+                }}
               />
               <DateField
                 label="Due after"

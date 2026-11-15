@@ -50,7 +50,25 @@ export const scopeDetails: Partial<Record<AccessScope, string>> = {
     "Only when your review policy lets eligible work skip Reviews, it can change notification preferences or disconnect the verified Texting destination.",
   "finances:maintain":
     "Sync providers, reconcile and categorize under approved rules, and create durable runs. Questions and approvals stay pending.",
+  "texting:write": "Needs “Read text conversation”, so that is turned on with it.",
 };
+
+/**
+ * A permission the server refuses to grant without another. Only the pairs the token schema
+ * enforces belong here, so the switches never offer a combination that would be rejected.
+ */
+export const scopePrerequisites: Partial<Record<AccessScope, AccessScope>> = {
+  "texting:write": "texting:read",
+};
+
+/** The selection after one switch changes, keeping every prerequisite pair consistent. */
+export function toggleScope(current: readonly AccessScope[], scope: AccessScope, on: boolean) {
+  if (on) {
+    const needed = scopePrerequisites[scope];
+    return [...new Set([...current, scope, ...(needed ? [needed] : [])])];
+  }
+  return current.filter((value) => value !== scope && scopePrerequisites[value] !== scope);
+}
 
 /**
  * The full reach of each permission, one per line, for a consent step. A short name alone

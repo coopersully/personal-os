@@ -18,7 +18,14 @@ import { useAuth } from "../auth/context";
 import { confirmedRejection } from "../finances/mutations";
 import { errorMessage } from "../tasks/data";
 import { Choice, confirm, State } from "../tasks/ui";
-import { dateTime, permissionRecap, scopeDetails, scopeGroups, scopeLabels } from "./agent-copy";
+import {
+  dateTime,
+  permissionRecap,
+  scopeDetails,
+  scopeGroups,
+  scopeLabels,
+  toggleScope,
+} from "./agent-copy";
 import { DetailBlock, PermissionBlock } from "./agent-rows";
 import {
   type SettingsApi,
@@ -378,9 +385,7 @@ export function AgentAccess() {
                   value={scopes.includes(scope)}
                   disabled={locked}
                   onChange={(selected) =>
-                    setScopes((current) =>
-                      selected ? [...current, scope] : current.filter((value) => value !== scope),
-                    )
+                    setScopes((current) => toggleScope(current, scope, selected))
                   }
                 />
               ))}

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
+import type { AccessScope } from "@personal-os/domain";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { scopeLabels } from "./agent-copy";
+import { scopeLabels, scopePrerequisites, toggleScope } from "./agent-copy";
 import {
   AgentAccessScreen,
   AgentPolicyScreen,
@@ -508,12 +509,54 @@ it("retains a rejected scope grant draft and validates dependent scopes before t
   expect(screen.getByLabelText("Read tasks")).toBeChecked();
   expect(h.error).toHaveBeenCalledWith(expect.objectContaining({ message: "Grant rejected" }));
   expect(screen.queryByText("New access token")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText("Read tasks"));
-  fireEvent.click(screen.getByLabelText("Send text messages"));
+});
+it("keeps sending texts tied to reading them so a token the server would refuse is never offered", async () => {
+  h.createToken.mockResolvedValue({ token: "texting-token" });
+  render(<AgentAccessScreen />);
+  const send = () => screen.getByLabelText("Send text messages");
+  const read = () => screen.getByLabelText("Read text conversation");
+  fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "Text helper" } });
+  // Turning on send also turns on the read permission it needs.
+  fireEvent.click(send());
+  expect(send()).toBeChecked();
+  expect(read()).toBeChecked();
+  // Turning read off takes send with it; turning send off leaves read alone.
+  fireEvent.click(read());
+  expect(send()).not.toBeChecked();
+  expect(read()).not.toBeChecked();
+  fireEvent.click(send());
+  fireEvent.click(send());
+  expect(send()).not.toBeChecked();
+  expect(read()).toBeChecked();
+  fireEvent.click(send());
   fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+  expect(h.confirm).toHaveBeenLastCalledWith(
+    "Grant agent access?",
+    "Text helper will receive these permissions:\n• Read text conversation\n• Send text messages. Needs “Read text conversation”, so that is turned on with it.\nKeep its token private.",
+    expect.any(Function),
+  );
   await approve();
-  expect(h.createToken).toHaveBeenCalledOnce();
-  expect(screen.getByLabelText("Send text messages")).toBeChecked();
+  // The request passes validation and reaches the server; nothing is reported as a failure.
+  expect(h.createToken).toHaveBeenCalledWith({
+    name: "Text helper",
+    scopes: ["texting:read", "texting:write"],
+  });
+  expect(h.error).not.toHaveBeenCalled();
+});
+it("only pairs the permissions the token schema requires", () => {
+  expect(scopePrerequisites).toEqual({ "texting:write": "texting:read" });
+  for (const [scope, needed] of Object.entries(scopePrerequisites)) {
+    expect(() => tokenInput("helper", [scope as AccessScope])).toThrow();
+    expect(() => tokenInput("helper", [scope as AccessScope, needed])).not.toThrow();
+  }
+  expect(toggleScope(["tasks:read"], "texting:write", true)).toEqual([
+    "tasks:read",
+    "texting:write",
+    "texting:read",
+  ]);
+  expect(
+    toggleScope(["texting:read", "texting:write", "tasks:read"], "texting:read", false),
+  ).toEqual(["tasks:read"]);
 });
 it("revokes named token and OAuth grants through confirmed endpoints without exposing a stored secret", async () => {
   h.resources["agent-tokens"] = [

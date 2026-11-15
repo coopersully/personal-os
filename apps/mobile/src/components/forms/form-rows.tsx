@@ -13,7 +13,7 @@ import {
 import { radius, spacing, touchTarget, useTheme } from "../../theme";
 import { Icon, type IconName } from "../icons";
 import { useSettingsAccent, useSettingsAccentColor } from "../settings-accent";
-import { SettingLabel, SettingValue } from "../settings-row-content";
+import { SettingDetail, SettingLabel, SettingValue } from "../settings-row-content";
 import { formBlock, formRow } from "./form-row";
 
 export { formBlock, formRow, insetRow } from "./form-row";
@@ -193,12 +193,15 @@ export function SearchField(props: TextInputProps & { accessibilityLabel: string
 }
 export function ToggleRow({
   label,
+  detail,
   icon,
   value,
   onChange,
   disabled,
 }: {
   label: string;
+  /** A short condition or consequence set under the label; the label stays the switch's name. */
+  detail?: string;
   icon?: IconName;
   value: boolean;
   onChange: (value: boolean) => void;
@@ -210,9 +213,17 @@ export function ToggleRow({
   return (
     <View style={styles.settingRow}>
       {icon && <Icon name={icon} size={22} color={t.secondary} />}
-      <SettingLabel>{label}</SettingLabel>
+      {detail ? (
+        <View style={{ flex: 1, minWidth: 0, gap: spacing.xs }}>
+          <SettingLabel style={{ flex: 0 }}>{label}</SettingLabel>
+          <SettingDetail>{detail}</SettingDetail>
+        </View>
+      ) : (
+        <SettingLabel>{label}</SettingLabel>
+      )}
       <Switch
         accessibilityLabel={label}
+        accessibilityHint={detail}
         value={value}
         onValueChange={onChange}
         disabled={disabled}

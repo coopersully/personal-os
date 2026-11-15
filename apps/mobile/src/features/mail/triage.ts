@@ -1,9 +1,10 @@
 import type { ApiClientError } from "@personal-os/api-client";
 import type { MailThread, MailThreadSummary } from "@personal-os/domain";
 import { type InfiniteData, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner-native";
 import type { RowAction } from "../../components/row-action-button";
+import { useAuth } from "../auth/context";
 import { useMail, useMailAccounts } from "./data";
 import { archivedMailboxIds, leftMailTarget, type MailChange, mailWriteRejected } from "./logic";
 
@@ -36,6 +37,9 @@ const copy: Record<Action, { loading: string; done: string; verb: string; state:
   },
 };
 
+/** How long after an unconfirmed write Mail is read a second time. */
+export const UNCONFIRMED_RECHECK_MS = 5_000;
+
 function failure(action: Action, error: unknown) {
   const { verb, state } = copy[action];
   if (!mailWriteRejected(error))
@@ -55,19 +59,18 @@ function failure(action: Action, error: unknown) {
  */
 export function useMailTriage() {
   const { api, owner } = useMail();
+  const { session } = useAuth();
   const client = useQueryClient();
   const mailboxes = useMailAccounts().data?.flatMap((account) => account.mailboxes);
   const [changes, setChanges] = useState<ReadonlyMap<string, MailChange>>(new Map());
   const busy = useRef(new Set<string>());
-  // Follows the signed-in owner and outlives the list, so a change that settles after the list
-  // closed still reports its outcome, while one that settles for another owner does not.
-  const active = useRef(owner);
-  useEffect(() => {
-    active.current = owner;
-  }, [owner]);
-
   async function send(action: Action, thread: MailThreadSummary, change: MailChange) {
-    if (!owner || active.current !== owner || busy.current.has(thread.id)) return;
+    if (!owner || busy.current.has(thread.id)) return;
+    // The session itself, read when the write settles: it outlives this list, so a change that
+    // settles after the list closed still reports its outcome, and one that settles after a
+    // sign-out reports nothing to whoever is signed in next.
+    const epoch = session.epoch();
+    const current = () => session.epoch() === epoch;
     busy.current.add(thread.id);
     setChanges((current) => new Map(current).set(thread.id, change));
     const settle = () => {
@@ -92,11 +95,17 @@ export function useMailTriage() {
       });
     } catch (error) {
       settle();
-      if (active.current !== owner) return void toast.dismiss(id);
+      if (!current()) return void toast.dismiss(id);
       toast.error(failure(action, error), { id });
-      return refresh();
+      refresh();
+      // nohmi's record can trail the provider after an unknown outcome; look once more.
+      if (!mailWriteRejected(error))
+        setTimeout(() => {
+          if (current()) refresh();
+        }, UNCONFIRMED_RECHECK_MS);
+      return;
     }
-    if (active.current !== owner) {
+    if (!current()) {
       settle();
       return void toast.dismiss(id);
     }
@@ -139,14 +148,16 @@ export function useMailTriage() {
     let undone = false;
     toast.success(
       copy[action].done,
-      action === "archive"
+      // Gmail restores a conversation by label. An iCloud archive moves the message to another
+      // mailbox, and the API cannot yet move it back, so no inverse is offered there.
+      action === "archive" && thread.provider === "google"
         ? {
             id,
             duration: 10_000,
             action: {
               label: "Undo",
               onClick: () => {
-                if (undone) return;
+                if (undone || !current()) return;
                 undone = true;
                 void send(
                   "restore",

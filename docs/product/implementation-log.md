@@ -1375,7 +1375,11 @@ server code changed.
   it. A rejection or an unconfirmed outcome drops the overlay, raises one Sonner error and re-reads
   Mail. A response carrying `partialEffect`, a timeout, a lost connection and a 5xx are all
   unconfirmed.
-- A confirmed Archive offers a ten-second Undo that restores the previous mailboxes.
+- A confirmed Archive of a Gmail conversation offers a ten-second Undo that restores the previous
+  mailboxes. iCloud offers none: the thread update moves the message to Archive but keeps the
+  thread's provider identifier pointing at the inbox, so a restore returns success without moving
+  anything. Restoring an archived iCloud conversation needs an API change and is not in this work.
+- After an unconfirmed outcome Mail is read at once and again five seconds later.
 - Snooze, bulk triage, deletion, drafts and sending are not included. This is a local candidate
   covered by focused tests; it was not run on a simulator or device or against a live Gmail or
   iCloud mailbox, and it is not a production or TestFlight release.

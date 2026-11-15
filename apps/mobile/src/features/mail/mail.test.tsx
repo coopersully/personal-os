@@ -13,6 +13,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import InboxRoute from "../../app/(workspaces)/mail/index";
 import MailboxesRoute from "../../app/(workspaces)/mail/mailboxes";
 import { MAIL_PAGE_SIZE } from "./logic";
+import { UNCONFIRMED_RECHECK_MS } from "./triage";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -24,6 +25,7 @@ vi.mock("@tanstack/react-query", async () => {
 });
 const h = vi.hoisted(() => ({
   owner: "owner" as string | undefined,
+  epoch: 0,
   params: {} as { mailSearch?: string },
   setParams: vi.fn(),
   focus: undefined as undefined | (() => (() => void) | undefined),
@@ -80,6 +82,7 @@ vi.mock("../auth/context", () => ({
   useAuth: () => ({
     state: { user: h.owner ? { id: h.owner } : null },
     session: {
+      epoch: () => h.epoch,
       api: () => ({
         listMailThreadSummaries: h.summaries,
         getMailSetupContext: h.accounts,
@@ -152,6 +155,7 @@ let client: QueryClient;
 beforeEach(() => {
   vi.clearAllMocks();
   h.owner = "owner";
+  h.epoch = 0;
   h.params = {};
   h.focus = undefined;
   h.foreground = undefined;
@@ -169,6 +173,7 @@ beforeEach(() => {
   h.messages.mockResolvedValue([message("m1")]);
 });
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   client.clear();
 });
@@ -740,7 +745,8 @@ it.each([
   ["a lost connection", () => new TypeError("Network request failed")],
   ["a server fault", () => rejection(503)],
   ["a timeout", () => rejection(408)],
-  ["a provider change nohmi could not record", () => rejection(409, { partialEffect: true })],
+  ["a provider change nohmi could not record", () => rejection(503, { partialEffect: true })],
+  ["a conflict after the provider changed", () => rejection(409, { partialEffect: true })],
 ])("never assumes the outcome of an archive after %s", async (_name, fault) => {
   h.toast.loading.mockReturnValue("toast-1");
   h.update.mockRejectedValueOnce(fault());
@@ -854,18 +860,18 @@ it("offers Archive only for a conversation that is in an inbox", async () => {
 it.each([
   ["confirmed", () => Promise.resolve(confirmedThread("one"))],
   ["rejected", () => Promise.reject(rejection(422))],
-])("drops a %s change that settles after the owner changed", async (_name, settle) => {
+])("drops a %s change that settles after the session changed", async (_name, settle) => {
   h.toast.loading.mockReturnValue("toast-1");
   let release: () => void = () => {};
   h.update.mockReturnValueOnce(
     new Promise<void>((resolve) => (release = resolve)).then(() => settle()),
   );
-  const view = render(wrap(<InboxRoute />));
+  render(wrap(<InboxRoute />));
   await screen.findByRole("button", unreadRow);
   choose("Actions for Board packet", "Mark as read");
 
-  h.owner = "someone-else";
-  view.rerender(wrap(<InboxRoute />));
+  // Read from the session when the write settles, whether or not the list has re-rendered.
+  h.epoch += 1;
   await act(async () => release());
   await waitFor(() => expect(h.toast.dismiss).toHaveBeenCalledExactlyOnceWith("toast-1"));
   expect(h.toast.success).not.toHaveBeenCalled();
@@ -887,16 +893,126 @@ it("reports the outcome of a change that settles after its list has closed", asy
   expect(h.toast.dismiss).not.toHaveBeenCalled();
 });
 
-it("does not undo an archive for a different signed-in owner", async () => {
+it("does not undo an archive once the session has changed", async () => {
   h.update.mockResolvedValueOnce(confirmedThread("one", { mailboxIds: [] }));
-  const view = render(wrap(<InboxRoute />));
+  render(wrap(<InboxRoute />));
   await screen.findByRole("button", unreadRow);
   choose("Actions for Board packet", "Archive");
   await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
 
-  h.owner = "someone-else";
-  view.rerender(wrap(<InboxRoute />));
+  h.epoch += 1;
   await act(async () => h.toast.success.mock.calls[0][1].action.onClick());
   expect(h.update).toHaveBeenCalledTimes(1);
   expect(h.toast.loading).toHaveBeenCalledTimes(1);
+});
+
+it("offers no Undo after archiving an iCloud conversation", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  h.summaries.mockResolvedValue([summary("one", { provider: "icloud", unread: true })]);
+  h.update.mockResolvedValueOnce(confirmedThread("one", { provider: "icloud", mailboxIds: [] }));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  h.summaries.mockResolvedValue([]);
+
+  choose("Actions for Board packet", "Archive");
+  // The API cannot move an archived iCloud message back, so no inverse is advertised.
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Conversation archived", {
+      id: "toast-1",
+    }),
+  );
+  await waitFor(() => expect(screen.queryByRole("button", unreadRow)).toBeNull());
+});
+
+it.each([
+  [
+    "rejected",
+    () => rejection(409),
+    "Couldn’t move the conversation back to Inbox because it changed. Review it and try again.",
+  ],
+  [
+    "unconfirmed",
+    () => new TypeError("Network request failed"),
+    "Couldn’t confirm the conversation was moved back to Inbox. It may have changed in your mailbox; check it once Mail refreshes before trying again.",
+  ],
+])("keeps an archived conversation out of the inbox when Undo is %s", async (_name, fault, text) => {
+  h.toast.loading.mockReturnValueOnce("archive-toast").mockReturnValueOnce("undo-toast");
+  h.update.mockResolvedValueOnce(confirmedThread("one", { mailboxIds: [], unread: true }));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  h.summaries.mockResolvedValue([summary("two")]);
+  choose("Actions for Board packet", "Archive");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(h.accounts).toHaveBeenCalledTimes(2));
+  const undo = h.toast.success.mock.calls[0][1].action.onClick;
+
+  h.update.mockRejectedValueOnce(fault());
+  await act(async () => undo());
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(text, { id: "undo-toast" }),
+  );
+  // Nothing claims it is back: the row stays out, and only a fresh read can return it.
+  expect(h.toast.success).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button", unreadRow)).toBeNull();
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(h.accounts).toHaveBeenCalledTimes(3));
+  expect(screen.queryByRole("button", unreadRow)).toBeNull();
+  // The failed Undo offers no further Undo, and the first one is spent.
+  await act(async () => undo());
+  expect(h.update).toHaveBeenCalledTimes(2);
+  noInlineResult();
+});
+
+it("archives from the open conversation and closes it once confirmed", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  h.update.mockResolvedValueOnce(confirmedThread("one", { mailboxIds: [], unread: true }));
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", unreadRow));
+  const reader = await screen.findByRole("dialog");
+  await within(reader).findByText("Please review before Thursday.");
+  h.summaries.mockResolvedValue([summary("two")]);
+
+  fireEvent.click(within(reader).getByRole("button", { name: "Conversation actions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+  await waitFor(() => expect(screen.queryByText("Please review before Thursday.")).toBeNull());
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.toast.success.mock.calls[0][0]).toBe("Conversation archived");
+  expect(h.update).toHaveBeenCalledExactlyOnceWith("one", {
+    mailboxIds: [],
+    expectedUpdatedAt: "2026-11-09T12:00:00.000Z",
+  });
+  expect(h.toast.error).not.toHaveBeenCalled();
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole("button", unreadRow)).toBeNull();
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("reads Mail a second time a few seconds after an unconfirmed change, never after a rejection", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
+  h.update.mockRejectedValueOnce(rejection(503)).mockRejectedValueOnce(rejection(422));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+
+  choose("Actions for Board packet", "Mark as read");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(2));
+  await act(async () => vi.advanceTimersByTimeAsync(UNCONFIRMED_RECHECK_MS));
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(h.accounts).toHaveBeenCalledTimes(3));
+
+  choose("Actions for Board packet", "Mark as read");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(4));
+  await act(async () => vi.advanceTimersByTimeAsync(UNCONFIRMED_RECHECK_MS));
+  expect(h.summaries).toHaveBeenCalledTimes(4);
+
+  // A session that changed during the wait is not read for.
+  h.update.mockRejectedValueOnce(rejection(503));
+  choose("Actions for Board packet", "Mark as read");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(h.summaries).toHaveBeenCalledTimes(5));
+  h.epoch += 1;
+  await act(async () => vi.advanceTimersByTimeAsync(UNCONFIRMED_RECHECK_MS));
+  expect(h.summaries).toHaveBeenCalledTimes(5);
 });

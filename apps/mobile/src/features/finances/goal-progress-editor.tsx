@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Alert, View } from "react-native";
+import { View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { PaddedSurfaceRows } from "../../components/forms/form-rows";
@@ -13,7 +13,8 @@ import { SettingsAccentProvider } from "../../components/settings-accent";
 import { DateField } from "../tasks/date-field";
 import { TextRow } from "./account-editor";
 import { useFinance, useFinanceRead } from "./data";
-import { parseProgressCents } from "./goal-progress";
+import { confirmChoice } from "./goal-confirm";
+import { isCalendarDate, parseProgressCents } from "./goal-progress";
 import { confirmedRejection, localToday } from "./mutations";
 import { Card, Copy, FinanceScreen, ReadState } from "./ui";
 
@@ -51,15 +52,25 @@ function ProgressForm({ goal }: { goal: FinanceGoal }) {
   const cents = parseProgressCents(amount);
   const invalidAmount = !!amount.trim() && cents === undefined;
   const invalidCurrency = !!currency && !/^[A-Z]{3}$/.test(currency);
-  const futureDate = !!asOf && !!today && asOf > today;
+  const invalidDate = !!asOf && !isCalendarDate(asOf);
+  const futureDate = !!asOf && !invalidDate && !!today && asOf > today;
   const invalid =
-    cents === undefined || !/^[A-Z]{3}$/.test(currency) || !asOf || !today || futureDate;
+    cents === undefined ||
+    !/^[A-Z]{3}$/.test(currency) ||
+    !asOf ||
+    invalidDate ||
+    !today ||
+    futureDate;
   const close = () =>
     edited
-      ? Alert.alert("Discard changes?", "Your progress statement has not been recorded.", [
-          { text: "Keep editing", style: "cancel" },
-          { text: "Discard", style: "destructive", onPress: () => router.back() },
-        ])
+      ? confirmChoice({
+          title: "Discard changes?",
+          message: "Your progress statement has not been recorded.",
+          cancel: "Keep editing",
+          accept: "Discard",
+          destructive: true,
+          onAccept: () => router.back(),
+        })
       : router.back();
   const refresh = () => client.invalidateQueries({ queryKey: ["finances", owner] });
 
@@ -167,6 +178,7 @@ function ProgressForm({ goal }: { goal: FinanceGoal }) {
             </SettingsAccentProvider>
           </PaddedSurfaceRows>
         </Card>
+        {invalidDate && <Copy>Enter the date as a calendar date such as 2026-02-01.</Copy>}
         {futureDate && <Copy>The progress date cannot be in the future.</Copy>}
         {!timezone && <Copy>Set your account timezone in Settings to choose the date.</Copy>}
         <Copy secondary>

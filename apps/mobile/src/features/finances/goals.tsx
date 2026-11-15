@@ -4,7 +4,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Alert } from "react-native";
 import { toast } from "sonner-native";
 import { editorActionsOptions } from "../../components/editor-header";
 import { Action, Actions } from "../../components/forms/form-rows";
@@ -12,6 +11,7 @@ import type { RowAction } from "../../components/row-action-button";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { useTheme } from "../../theme";
 import { useFinance, useFinanceRead } from "./data";
+import { confirmChoice } from "./goal-confirm";
 import {
   confirmedProgress,
   goalDate,
@@ -191,14 +191,14 @@ function GoalActions({ goal }: { goal: FinanceGoal }) {
       icon: "check",
       disabled: pending,
       onPress: () =>
-        Alert.alert(
-          `Mark ${goal.name} complete?`,
-          "Its target and recorded amount stay as they are. Progress is confirmed for one version of a goal, so it will need confirming again afterwards.",
-          [
-            { text: "Cancel", style: "cancel" },
-            { text: "Mark complete", onPress: () => void change("complete") },
-          ],
-        ),
+        confirmChoice({
+          title: `Mark ${goal.name} complete?`,
+          message:
+            "Its target and recorded amount stay as they are. Progress is confirmed for one version of a goal, so it will need confirming again afterwards.",
+          cancel: "Cancel",
+          accept: "Mark complete",
+          onAccept: () => void change("complete"),
+        }),
     });
   actions.push({
     id: "remove",
@@ -207,14 +207,15 @@ function GoalActions({ goal }: { goal: FinanceGoal }) {
     destructive: true,
     disabled: pending,
     onPress: () =>
-      Alert.alert(
-        `Remove ${goal.name}?`,
-        "It leaves your goals. Budget versions that already allocate to it keep their record.",
-        [
-          { text: "Keep goal", style: "cancel" },
-          { text: "Remove goal", style: "destructive", onPress: () => void change("remove") },
-        ],
-      ),
+      confirmChoice({
+        title: `Remove ${goal.name}?`,
+        message:
+          "It leaves your goals. Budget versions that already allocate to it keep their record.",
+        cancel: "Keep goal",
+        accept: "Remove goal",
+        destructive: true,
+        onAccept: () => void change("remove"),
+      }),
   });
   return <Stack.Screen options={editorActionsOptions("Goal actions", actions, t)} />;
 }

@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Alert, View } from "react-native";
+import { View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { EnumChoice } from "../../components/forms/enum-choice";
@@ -14,7 +14,8 @@ import { SettingsAccentProvider } from "../../components/settings-accent";
 import { DateField } from "../tasks/date-field";
 import { TextRow } from "./account-editor";
 import { useFinance, useFinanceRead } from "./data";
-import { goalPriorities, parseTarget } from "./goal-progress";
+import { confirmChoice } from "./goal-confirm";
+import { goalPriorities, isCalendarDate, parseTarget } from "./goal-progress";
 import { confirmedRejection } from "./mutations";
 import { Card, Copy, FinanceScreen, ReadState } from "./ui";
 
@@ -53,13 +54,18 @@ function GoalForm({ record, known }: { record: FinanceGoal | null; known: string
   };
   const amount = parseTarget(target);
   const invalidTarget = !!target.trim() && amount === undefined;
-  const invalid = !name.trim() || amount === undefined;
+  const invalidDeadline = !!deadline && !isCalendarDate(deadline);
+  const invalid = !name.trim() || amount === undefined || invalidDeadline;
   const close = () =>
     edited
-      ? Alert.alert("Discard changes?", "Unsaved edits will be lost.", [
-          { text: "Keep editing", style: "cancel" },
-          { text: "Discard", style: "destructive", onPress: () => router.back() },
-        ])
+      ? confirmChoice({
+          title: "Discard changes?",
+          message: "Unsaved edits will be lost.",
+          cancel: "Keep editing",
+          accept: "Discard",
+          destructive: true,
+          onAccept: () => router.back(),
+        })
       : router.back();
   const refresh = () => client.invalidateQueries({ queryKey: ["finances", owner] });
   /** Reports a write the server answered; returns whether it was applied. */
@@ -180,7 +186,7 @@ function GoalForm({ record, known }: { record: FinanceGoal | null; known: string
   }
 
   async function save() {
-    if (lock.current || !edited || amount === undefined || !name.trim()) return;
+    if (lock.current || !edited || invalid || amount === undefined) return;
     lock.current = true;
     setPending(true);
     const id = toast.loading(snapshot ? "Saving goal…" : "Adding goal…");
@@ -249,6 +255,7 @@ function GoalForm({ record, known }: { record: FinanceGoal | null; known: string
             />
           </PaddedSurfaceRows>
         </Card>
+        {invalidDeadline && <Copy>Enter the deadline as a date such as 2028-03-01.</Copy>}
         <Copy secondary>
           Name and Target are required. Deadline is optional.
           {timezone ? "" : " Set your account timezone in Settings to choose a deadline."}

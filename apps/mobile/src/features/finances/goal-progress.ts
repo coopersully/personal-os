@@ -105,3 +105,11 @@ export function parseTarget(text: string): number | undefined {
   const amount = Number(value.replaceAll(",", ""));
   return amount <= 21_474_836.47 ? amount : undefined;
 }
+
+/** Whether text is a real calendar date written as YYYY-MM-DD, which is what the record accepts. */
+export function isCalendarDate(text: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const [year, month, day] = text.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.toISOString().slice(0, 10) === text;
+}

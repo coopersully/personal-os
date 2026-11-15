@@ -9,6 +9,7 @@ import {
   confirmedProgress,
   goalDate,
   goalSummary,
+  isCalendarDate,
   parseProgressCents,
   parseTarget,
 } from "./goal-progress";
@@ -35,6 +36,7 @@ const h = vi.hoisted(() => ({
   setParams: vi.fn(),
   back: vi.fn(),
   alert: vi.fn(),
+  platform: "ios",
   screen: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
@@ -64,7 +66,11 @@ vi.mock("react-native", () => {
       <span role="progressbar" aria-label={accessibilityLabel} />
     ),
     Alert: { alert: h.alert },
-    Platform: { OS: "web" },
+    Platform: {
+      get OS() {
+        return h.platform;
+      },
+    },
     useColorScheme: () => "light",
     Pressable: ({
       children,
@@ -234,6 +240,7 @@ beforeEach(() => {
   h.owner = "owner-a";
   h.timezone = "America/New_York";
   h.params = {};
+  h.platform = "ios";
   h.api.listFinanceGoals.mockResolvedValue(
     goals([reserve, trip, { ...trip, id: "goal-3", name: "Old car", status: "removed" }]),
   );
@@ -1065,7 +1072,11 @@ it("records a progress statement for the version that was opened", async () => {
   expect(save()).toHaveProperty("disabled", true);
   type("As of (ISO date/time)", "");
   expect(save()).toHaveProperty("disabled", true);
+  type("As of (ISO date/time)", "2026-02-30");
+  expect(screen.getByText("Enter the date as a calendar date such as 2026-02-01.")).toBeTruthy();
+  expect(save()).toHaveProperty("disabled", true);
   type("As of (ISO date/time)", "2026-02-01");
+  expect(screen.queryByText("Enter the date as a calendar date such as 2026-02-01.")).toBeNull();
   fireEvent.click(save());
   await waitFor(() =>
     expect(h.success).toHaveBeenCalledWith("Goal progress confirmed", { id: "feedback" }),
@@ -1217,4 +1228,50 @@ it("needs a timezone to date a statement, and a goal that still exists", async (
   h.params = { id: "goal-3" };
   mount(<FinanceGoalProgress />);
   await screen.findByText("This goal is unavailable.");
+});
+
+// ── Review follow-ups ────────────────────────────────────────────────────────
+
+it("accepts only real calendar dates written as YYYY-MM-DD", () => {
+  expect(isCalendarDate("2028-02-29")).toBe(true);
+  expect(isCalendarDate("2026-02-30")).toBe(false);
+  expect(isCalendarDate("2026-13-01")).toBe(false);
+  expect(isCalendarDate("2026-2-1")).toBe(false);
+  expect(isCalendarDate("2026-02-01T00:00")).toBe(false);
+});
+
+it("holds Save and asks for a correction while the deadline is not a calendar date", async () => {
+  mount(<FinanceGoalEditor />);
+  await screen.findByText("Add goal");
+  type("Name", "House deposit");
+  type("Target", "5000");
+  type("Deadline (ISO date/time)", "2028-02-30");
+  expect(screen.getByText("Enter the deadline as a date such as 2028-03-01.")).toBeTruthy();
+  expect(save()).toHaveProperty("disabled", true);
+  fireEvent.click(save());
+  expect(h.api.manageFinanceGoal).not.toHaveBeenCalled();
+  type("Deadline (ISO date/time)", "2028-03-01");
+  expect(screen.queryByText("Enter the deadline as a date such as 2028-03-01.")).toBeNull();
+  expect(save()).toHaveProperty("disabled", false);
+});
+
+it("asks through the browser's confirmation where the native alert does nothing", async () => {
+  h.platform = "web";
+  const ask = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+  vi.stubGlobal("confirm", ask);
+  try {
+    h.params = { id: "goal-1" };
+    h.api.manageFinanceGoal.mockResolvedValue(completed({ ...reserve, status: "removed" }));
+    mount(<FinanceGoalScreen />);
+    await screen.findByText("Confirmed progress");
+    press("Remove goal");
+    expect(ask).toHaveBeenCalledWith(expect.stringContaining("Remove Emergency reserve?"));
+    expect(h.api.manageFinanceGoal).not.toHaveBeenCalled();
+    press("Remove goal");
+    await waitFor(() => expect(h.success).toHaveBeenCalledWith("Goal removed", { id: "feedback" }));
+    expect(sent()).toMatchObject({ operation: "remove", goalId: "goal-1" });
+    expect(h.alert).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

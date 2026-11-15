@@ -374,8 +374,9 @@ which shows its confirmed progress, target, deadline, priority and status. Its t
 menu holds Edit goal, Confirm progress, Pause goal or Resume goal, Mark complete and, last and
 destructive, Remove goal. Pause is offered for an active goal, Resume for a paused one, and Mark
 complete until the goal is completed. Mark complete and Remove goal each keep a native
-confirmation that names the goal; Pause and Resume act at once. A removed goal leaves the list and
-its page closes.
+confirmation that names the goal; Pause and Resume act at once. In the browser build, where the
+native alert does nothing, these confirmations and the forms' discard prompt use the browser's own
+confirmation. A removed goal leaves the list and its page closes.
 
 Progress is a recorded statement, never an inference: the person's own, or one their agent
 recorded for them, which the goal page labels as such. A goal shows an amount and a
@@ -395,7 +396,8 @@ the largest the stored record holds, although the API accepts more;
 an empty Deadline reads as not set. Confirm progress is its own form: Amount (zero is valid), Currency and As of, which
 defaults to today in the account planning timezone and cannot be later. Currency starts from the
 goal's last statement. Each form names its required fields. An invalid Target, Amount or Currency
-states its correction beside the field; a future As of date is corrected in a line under the
+states its correction beside the field; a typed Deadline or As of that is not a real calendar
+date holds Save and is corrected in a line under the fields; a future As of date is corrected in a line under the
 fields, and a cleared one only disables Save.
 
 Every goal write carries the version that was on screen and an idempotency key. The key is kept

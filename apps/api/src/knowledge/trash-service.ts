@@ -1,4 +1,10 @@
-import { type Database, knowledgeRecords } from "@personal-os/database";
+import {
+  type Database,
+  knowledgeRecords,
+  knowledgeRevisionMetadata,
+  knowledgeRevisions,
+  knowledgeTombstones,
+} from "@personal-os/database";
 import {
   type KnowledgeMutationResult,
   type KnowledgeTrashAction,
@@ -6,7 +12,7 @@ import {
   knowledgeTrashInputSchema,
   knowledgeTrashRetentionMs,
 } from "@personal-os/domain";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import {
@@ -16,8 +22,10 @@ import {
   type KnowledgeRevision,
   type KnowledgeTransaction,
   ownedKnowledgeRevision,
+  projectKnowledgeRevision,
   requireKnowledgeOwner,
 } from "./access.js";
+import { knowledgeDerivedClosure, knowledgeDerivedSources } from "./derivation-closure.js";
 import { purgeTrashedKnowledge } from "./purge-service.js";
 import {
   findKnowledgeReceipt,
@@ -38,35 +46,7 @@ async function trashDerivationClosure(
   at: Date,
 ) {
   const { rows } = await tx.execute<{ id: string }>(sql`
-    WITH RECURSIVE closure(id) AS (
-      SELECT ${recordId}::uuid
-      UNION
-      SELECT d.record_id FROM closure
-      JOIN knowledge_derivations d ON d.user_id = ${userId} AND d.source_record_id = closure.id
-      JOIN knowledge_records r ON r.user_id = d.user_id AND r.id = d.record_id
-        AND r.trashed_at IS NULL
-      JOIN knowledge_revisions v ON v.user_id = d.user_id AND v.record_id = d.record_id
-        AND v.revision = d.revision
-      LEFT JOIN knowledge_revision_metadata m ON m.user_id = v.user_id
-        AND m.record_id = v.record_id AND m.revision = v.revision
-      CROSS JOIN LATERAL (
-        SELECT CASE
-          WHEN v.snapshot->'content'->>'kind' = 'inference'
-            AND (m.metadata->>'generatedInference')::boolean
-          THEN (v.snapshot->'content'->'value'->>'proposition')::jsonb
-          ELSE v.snapshot->'content'
-        END AS claim
-      ) c
-      -- A relationship only links its subject and object; it is not derived from them.
-      WHERE NOT (
-        d.kind = 'content_evidence'
-        AND c.claim->>'kind' = 'relationship'
-        AND d.source_record_id IN (
-          (c.claim->'value'->>'subjectId')::uuid,
-          (c.claim->'value'->>'objectId')::uuid
-        )
-      )
-    )
+    ${knowledgeDerivedClosure(userId, [recordId], { untrashedOnly: true })}
     UPDATE knowledge_records r SET
       trashed_at = ${at.toISOString()}::timestamptz,
       trash_group_id = ${recordId}::uuid,
@@ -87,6 +67,63 @@ async function trashGroupMembers(tx: KnowledgeTransaction, userId: string, group
     .from(knowledgeRecords)
     .where(and(eq(knowledgeRecords.userId, userId), eq(knowledgeRecords.trashGroupId, groupId)));
   return rows.map(({ id }) => id);
+}
+
+/**
+ * A restored record must not outlive a source it was derived from. Sources trashed in another
+ * group or already purged block the restore; the caller restores or deletes those first.
+ */
+async function restoreBlockers(tx: KnowledgeTransaction, userId: string, groupId: string) {
+  const rows = await tx
+    .select({
+      recordId: knowledgeRevisions.recordId,
+      snapshot: knowledgeRevisions.snapshot,
+      metadata: knowledgeRevisionMetadata.metadata,
+      claimKey: knowledgeRevisionMetadata.claimKey,
+    })
+    .from(knowledgeRevisions)
+    .innerJoin(
+      knowledgeRecords,
+      and(
+        eq(knowledgeRecords.userId, knowledgeRevisions.userId),
+        eq(knowledgeRecords.id, knowledgeRevisions.recordId),
+      ),
+    )
+    .leftJoin(
+      knowledgeRevisionMetadata,
+      and(
+        eq(knowledgeRevisionMetadata.userId, knowledgeRevisions.userId),
+        eq(knowledgeRevisionMetadata.recordId, knowledgeRevisions.recordId),
+        eq(knowledgeRevisionMetadata.revision, knowledgeRevisions.revision),
+      ),
+    )
+    .where(and(eq(knowledgeRevisions.userId, userId), eq(knowledgeRecords.trashGroupId, groupId)));
+  const members = new Set(rows.map(({ recordId }) => recordId.toLowerCase()));
+  const sources = new Set<string>();
+  for (const id of members) {
+    const revisions = rows
+      .filter(({ recordId }) => recordId.toLowerCase() === id)
+      .map((row) => projectKnowledgeRevision({ ...row, trashedAt: null, trashGroupId: null }));
+    for (const source of knowledgeDerivedSources(revisions))
+      if (!members.has(source)) sources.add(source);
+  }
+  if (!sources.size) return [];
+  const ids = [...sources];
+  const trashed = await tx
+    .select({ id: knowledgeRecords.id })
+    .from(knowledgeRecords)
+    .where(
+      and(
+        eq(knowledgeRecords.userId, userId),
+        inArray(knowledgeRecords.id, ids),
+        isNotNull(knowledgeRecords.trashedAt),
+      ),
+    );
+  const purged = await tx
+    .select({ id: knowledgeTombstones.recordId })
+    .from(knowledgeTombstones)
+    .where(and(eq(knowledgeTombstones.userId, userId), inArray(knowledgeTombstones.recordId, ids)));
+  return [...trashed, ...purged].map(({ id }) => id).sort();
 }
 
 function requireTrashGroupRoot(current: KnowledgeRevision) {
@@ -145,6 +182,13 @@ export function createKnowledgeTrashService({ db, now }: { db: Database; now: ()
         requireTrashGroupRoot(current);
         if (at.getTime() - (current.trashedAt?.getTime() ?? 0) > knowledgeTrashRetentionMs)
           throw new AppError("conflict", "This memory is past its Trash retention.");
+        const blockedBy = await restoreBlockers(tx, principal.userId, current.snapshot.id);
+        if (blockedBy.length)
+          throw new AppError(
+            "conflict",
+            "This memory was derived from memory that is in Trash or deleted.",
+            { blockedBy },
+          );
         await tx
           .update(knowledgeRecords)
           .set({ trashedAt: null, trashGroupId: null, statusBeforeTrash: null })

@@ -1744,11 +1744,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       if (startedAt - knowledgePurgedAt < knowledgePurgeIntervalMs) return;
       const signal = dependencies.runtimeLifecycle?.signal;
       for (let batch = 0; batch < 10 && !signal?.aborted; batch++) {
-        const { purged } = await knowledgePurge.purgeExpired({
+        const { selected } = await knowledgePurge.purgeExpired({
           limit: knowledgePurgeBatchSize,
           ...(signal ? { signal } : {}),
         });
-        if (purged < knowledgePurgeBatchSize) {
+        // A short selection means nothing past retention remained when this batch began.
+        if (selected < knowledgePurgeBatchSize && !signal?.aborted) {
           knowledgePurgedAt = startedAt;
           break;
         }

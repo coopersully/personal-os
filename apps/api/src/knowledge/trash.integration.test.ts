@@ -244,7 +244,7 @@ describe("memory trash and purge", () => {
     }
 
     f.advance(knowledgeTrashRetentionMs + 1);
-    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 1 });
+    expect(await f.purge.purgeExpired({ limit: 100 })).toMatchObject({ purged: 1 });
     const afterPurge = await f.records.get(f.agent, { id: relationship.id, ...planning });
     expect(afterPurge).toMatchObject({ id: relationship.id, status: "active" });
     expect(JSON.stringify(afterPurge)).not.toContain("linked-person-private-detail");
@@ -286,6 +286,94 @@ describe("memory trash and purge", () => {
     expect(await f.records.get(f.agent, { id: c.id, ...planning })).toMatchObject({ id: c.id });
   });
 
+  it("restore_refuses_while_a_source_is_trashed_elsewhere", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("elsewhere-source"));
+    const b = await f.save(derivedFrom(a, "elsewhere-derived"));
+    await f.act("trash", b);
+    await f.act("trash", a);
+
+    await expect(f.act("restore", b)).rejects.toMatchObject({
+      status: 409,
+      details: { blockedBy: [a.id] },
+    });
+    await expect(f.records.get(f.agent, { id: b.id, ...planning })).rejects.toMatchObject({
+      status: 404,
+    });
+    await f.act("restore", a);
+    expect(await f.act("restore", b)).toMatchObject({ outcome: "readable", record: { id: b.id } });
+    expect(await f.records.get(f.agent, { id: b.id, ...planning })).toMatchObject({ id: b.id });
+  });
+
+  it("purging_a_source_purges_derived_copies_in_other_groups", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("multi-source-a"));
+    const d = await f.save(fact("multi-source-d"));
+    const b = await f.save(
+      fact("multi-derived-secret", {
+        evidence: [
+          { type: "statement", wording: "The owner stated this explicitly." },
+          { type: "domain_record", domain: "knowledge", id: a.id, revision: 1 },
+          { type: "domain_record", domain: "knowledge", id: d.id, revision: 1 },
+        ],
+      }),
+    );
+    await f.act("trash", a);
+    expect(await f.act("delete_now", d)).toMatchObject({ outcome: "forgotten" });
+
+    for (const id of [b.id, d.id])
+      expect(await f.records.get(f.owner, { id, ...planning })).toMatchObject({
+        id,
+        state: "forgotten",
+      });
+    expect(
+      await database.db
+        .select()
+        .from(knowledgeRevisions)
+        .where(eq(knowledgeRevisions.recordId, b.id)),
+    ).toEqual([]);
+    expect(await f.act("restore", a)).toMatchObject({ outcome: "readable", record: { id: a.id } });
+    await expect(f.records.get(f.agent, { id: b.id, ...planning })).rejects.toMatchObject({
+      status: 404,
+    });
+    const page = await f.search.search(f.agent, { ...planning, limit: 50 });
+    expect(page.items.map(({ id }) => id)).toEqual([a.id]);
+    expect(JSON.stringify(page)).not.toContain("multi-derived-secret");
+  });
+
+  it("restore_refuses_when_a_source_was_already_purged", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("purged-elsewhere-a"));
+    const d = await f.save(fact("purged-elsewhere-d"));
+    const b = await f.save(
+      fact("purged-elsewhere-derived", {
+        evidence: [
+          { type: "domain_record", domain: "knowledge", id: a.id, revision: 1 },
+          { type: "domain_record", domain: "knowledge", id: d.id, revision: 1 },
+        ],
+      }),
+    );
+    await f.act("trash", a);
+    // A source purged without its dependents (as an earlier purge could): its edges are gone,
+    // but B's revisions still name it.
+    await database.db.delete(knowledgeRecords).where(eq(knowledgeRecords.id, d.id));
+    await database.db.insert(knowledgeTombstones).values({
+      userId: f.owner.userId,
+      recordId: d.id,
+      trashedAt: new Date("2026-11-12T12:00:00Z"),
+      purgedAt: new Date("2026-11-12T12:00:00Z"),
+    });
+
+    await expect(f.act("restore", a)).rejects.toMatchObject({
+      status: 409,
+      details: { blockedBy: [d.id] },
+    });
+    for (const id of [a.id, b.id])
+      await expect(f.records.get(f.agent, { id, ...planning })).rejects.toMatchObject({
+        status: 404,
+      });
+  });
+
   it("trash_invalidates_open_cursors", async () => {
     const f = await fixture();
     for (const value of ["cursor-one", "cursor-two", "cursor-three"]) await f.save(fact(value));
@@ -313,9 +401,9 @@ describe("memory trash and purge", () => {
     await f.act("trash", a);
 
     f.advance(knowledgeTrashRetentionMs);
-    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 0 });
+    expect(await f.purge.purgeExpired({ limit: 100 })).toMatchObject({ purged: 0 });
     f.advance(1);
-    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 2 });
+    expect(await f.purge.purgeExpired({ limit: 100 })).toMatchObject({ purged: 2 });
 
     const { db } = database;
     for (const id of [a.id, b.id]) {
@@ -423,7 +511,7 @@ describe("memory trash and purge", () => {
     const trashed = await f.save(fact("delete-trashed-value"));
     await f.act("trash", trashed);
     expect(await f.act("delete_now", trashed)).toMatchObject({ outcome: "forgotten" });
-    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 0 });
+    expect(await f.purge.purgeExpired({ limit: 100 })).toMatchObject({ purged: 0 });
   });
 
   it("purge_is_idempotent", async () => {
@@ -431,8 +519,8 @@ describe("memory trash and purge", () => {
     const a = await f.save(fact("idempotent-value"));
     await f.act("trash", a);
     f.advance(knowledgeTrashRetentionMs + 1);
-    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 1 });
-    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 0 });
+    expect(await f.purge.purgeExpired({ limit: 100 })).toMatchObject({ purged: 1 });
+    expect(await f.purge.purgeExpired({ limit: 100 })).toMatchObject({ purged: 0 });
     expect(
       await database.db
         .select()
@@ -467,7 +555,7 @@ describe("memory trash and purge", () => {
     expect(JSON.stringify([ownerReplay, agentReplay])).not.toMatch(/replay-(owner|agent)-value/);
 
     f.advance(knowledgeTrashRetentionMs + 1);
-    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 2 });
+    expect(await f.purge.purgeExpired({ limit: 100 })).toMatchObject({ purged: 2 });
     expect(await f.records.create(f.owner, ownerInput)).toEqual({
       receiptId: ownerReplay.receiptId,
       recordId: ownerSaved.id,

@@ -87,11 +87,7 @@ export async function findKnowledgeReceipt(
 }
 
 /** Where a record ID stands now: readable content, the owner's Trash, or purged. */
-async function knowledgeRecordPresence(
-  tx: KnowledgeTransaction,
-  userId: string,
-  recordId: string,
-) {
+async function knowledgeRecordPresence(tx: KnowledgeTransaction, userId: string, recordId: string) {
   const [record] = await tx
     .select({ trashedAt: knowledgeRecords.trashedAt })
     .from(knowledgeRecords)

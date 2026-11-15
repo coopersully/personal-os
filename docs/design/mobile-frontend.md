@@ -440,8 +440,11 @@ Choosing a result clears the search and opens an existing screen; search never m
 tasks, reminders, transactions and accounts open their detail; a list or project opens its task
 browser, with every status when it is archived or closed; a calendar or mail rule opens its
 settings page, a finance category Finances settings, a plan the Plan tab and a mailbox the mailbox
-list. Mail has no conversation route, so a conversation opens Mail searched for its subject. Result
-previews are private: they are not kept in the query cache after the list closes.
+list. Mail has no conversation route, so a conversation opens Mail searched for its subject. That
+list reads inboxes only, so an archived conversation opens the mailbox list instead, and a
+conversation that exists only in Sent or Drafts is not found by the subject search; both need a
+conversation route. Result previews are private: they are not kept in the query cache after the
+list closes.
 
 ### Transparent sticky workspace search
 

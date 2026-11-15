@@ -55,6 +55,11 @@ it("shows every status inside a closed or archived container and opens Mail for 
   expect(searchDestination("tasks", result("List", "Archived")).href).toMatchObject({
     params: { listId: "r1", status: "all" },
   });
+  // Mail's list search reads inboxes only, so it cannot show an archived conversation.
+  expect(searchDestination("mail", result("Conversation", "Archived"))).toEqual({
+    href: "/mail/mailboxes",
+    open: "navigate",
+  });
   expect(searchDestination("mail", result("Conversation", null, " "))).toEqual({
     href: "/mail",
     open: "navigate",

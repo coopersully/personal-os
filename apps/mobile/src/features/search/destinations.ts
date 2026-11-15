@@ -70,7 +70,9 @@ export function searchDestination(
         params: { title, view: "all", kind: "task", projectId: id, ...closed },
       });
     case "Conversation":
-      // Mail has no conversation route; its server-backed list search shows the conversation.
+      // Mail has no conversation route. Its list search covers inboxes only, so a conversation
+      // outside them (Archived) opens the mailbox list, where its mailbox can be chosen.
+      if (result.state) return page("/mail/mailboxes");
       return page(title.trim() ? { pathname: "/mail", params: { mailSearch: title } } : "/mail");
     case "Mailbox":
       return page("/mail/mailboxes");

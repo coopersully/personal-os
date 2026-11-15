@@ -174,7 +174,7 @@ export function FinancePlanScreen() {
     if (view === "Budget" || view === "Cash flow" || view === "Wealth") setMode(view);
   }, [view]);
   return (
-    <FinanceScreen title="Plan">
+    <FinanceScreen title="Plan" tabBar>
       <Segments
         value={mode}
         options={["Budget", "Cash flow", "Wealth"]}

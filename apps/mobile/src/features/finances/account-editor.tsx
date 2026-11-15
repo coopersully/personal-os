@@ -23,7 +23,7 @@ const kinds: readonly { value: FinanceAccountKind; label: string }[] = [
   { value: "other", label: "Other" },
 ];
 
-function TextRow({
+export function TextRow({
   label,
   correction,
   ...input

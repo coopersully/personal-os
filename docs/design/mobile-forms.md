@@ -339,8 +339,10 @@ supports: browser and operating system, "nohmi app" for the app's own signature,
 product name, or "Unknown device". A device row stacks the name over one line of recency
 ("Active 3 hours ago"); exact times, IP and the raw user agent stay on the child page. Sign out
 sits in its own group below the ordinary account actions. Invitations have separate
-list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Execution
-policy pages; setup material, token scopes and one-time secrets do not become a root-page wall.
+list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Review
+policy pages; setup material, token permissions and one-time secrets do not become a root-page wall.
+Agents copy says "permissions", never "scopes", and names permissions in plain language; a
+confirmation states what will happen in the same words as the screen it belongs to.
 All existing human authority, role checks, scope confirmations and secret-clearing guards remain.
 
 Notifications leads with device controls and links to separate Global and Finances text-policy

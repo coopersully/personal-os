@@ -10,9 +10,11 @@ import { editorDismissOptions } from "../../components/editor-header";
 import { EntityPicker } from "../../components/forms/entity-picker";
 import { FormSave, useFormKeyboardOffset } from "../../components/forms/form-save";
 import { useTheme } from "../../theme";
-import { categoryIcon } from "./category-presentation";
+import { CategoryCreate } from "./category-create";
+import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
 import { appliedTransaction } from "./mutations";
+import { TransactionCreateForm } from "./transaction-new";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
 
 function TransactionForm({ record, field }: { record: FinanceTransaction; field?: string }) {
@@ -122,7 +124,7 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
             centered
             title="Category"
             icon={categoryIcon(category ?? "Uncategorized")}
-            value={category ?? "Uncategorized"}
+            value={categoryLabel(category)}
             valueTone={!category ? "attention" : undefined}
             accessibilityHint={!category ? "Needs your input. Choose a category." : undefined}
             onPress={pending || submitted ? undefined : () => setChoosing(!choosing)}
@@ -136,7 +138,7 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
                 options={[
                   { label: "Uncategorized", value: null, icon: categoryIcon("Uncategorized") },
                   ...(categories.data ?? []).map((item) => ({
-                    label: item.name,
+                    label: categoryLabel(item.name),
                     icon: categoryIcon(item.name),
                     value: item.name,
                   })),
@@ -149,6 +151,16 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
                 onClose={() => setChoosing(false)}
               />
             </ReadState>
+          )}
+          {categories.data && (
+            <CategoryCreate
+              categories={categories.data}
+              disabled={pending || submitted}
+              onCreated={(created) => {
+                setCategory(created.name);
+                setEdited(true);
+              }}
+            />
           )}
         </Card>
         <Section title="Notes">
@@ -186,15 +198,27 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
   );
 }
 export function FinanceTransactionEditor() {
-  const { id, field } = useLocalSearchParams<{ id: string; field?: string }>();
-  const query = useFinanceRead(["transaction", id], (api) => api.getFinanceTransaction(id), !!id);
+  const { id, field, accountId } = useLocalSearchParams<{
+    id?: string;
+    field?: string;
+    accountId?: string;
+  }>();
+  const query = useFinanceRead(
+    ["transaction", id],
+    (api) => api.getFinanceTransaction(id as string),
+    !!id,
+  );
   return (
     <View style={{ flex: 1 }}>
-      <ReadState query={query}>
-        {query.data?.data ? (
-          <TransactionForm key={id} record={query.data.data} field={field} />
-        ) : null}
-      </ReadState>
+      {id ? (
+        <ReadState query={query}>
+          {query.data?.data ? (
+            <TransactionForm key={id} record={query.data.data} field={field} />
+          ) : null}
+        </ReadState>
+      ) : (
+        <TransactionCreateForm accountId={accountId} />
+      )}
       <AppToaster editor />
     </View>
   );

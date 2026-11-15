@@ -1,0 +1,4 @@
+interface:
+  display_name: "nohmi Oversight"
+  short_description: "Coordinate nohmi epics, owners and delivery"
+  default_prompt: "Use $oversight to coordinate the assigned nohmi epic through its owners, tracking and accepted delivery."

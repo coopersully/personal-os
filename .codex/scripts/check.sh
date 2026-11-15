@@ -51,7 +51,10 @@ node --test \
 bash ./.codex/scripts/environment.test.sh
 PYTHONDONTWRITEBYTECODE=1 python3 .codex/scripts/verification-runner.test.py
 PYTHONDONTWRITEBYTECODE=1 python3 .codex/scripts/verification-admission.test.py
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ./.agents/skills/ship-it/scripts -p '*_test.py'
+PYTHONDONTWRITEBYTECODE=1 python3 .codex/scripts/check-skills.py
+for scripts in ship-it personal-os-deploy-status pr-shepherd resolve-pr-comments; do
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "./.agents/skills/$scripts/scripts" -p '*_test.py'
+done
 
 grep -Eq '^## Work map$' .github/pull_request_template.md &&
   grep -Eq '^- Project: \[Nohmi\]\(https://linear\.app/coopersully/project/nohmi-6799e74a853f\)' .github/pull_request_template.md &&

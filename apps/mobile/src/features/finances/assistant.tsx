@@ -2,7 +2,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { View } from "react-native";
-import { categoryIcon } from "./category-presentation";
+import { categoryIcon, categoryLabel } from "./category-presentation";
 import { Conversation } from "./conversation";
 import { useFinance, useFinanceRead } from "./data";
 import { financeLabel, recordAmount } from "./presentation";
@@ -59,9 +59,11 @@ function Attention() {
                     title={review.transaction.merchant}
                     value={recordAmount(review.transaction.amount, review.transaction.currencyCode)}
                     subtitle={
-                      review.transaction.category ??
-                      review.suggestedCategory?.name ??
-                      "Choose a category"
+                      review.transaction.category || review.suggestedCategory?.name
+                        ? categoryLabel(
+                            review.transaction.category ?? review.suggestedCategory?.name,
+                          )
+                        : "Choose a category"
                     }
                     icon={categoryIcon(
                       review.transaction.category ??
@@ -94,7 +96,7 @@ export function FinanceAssistantScreen() {
     if (view === "Activity" || view === "Conversation" || view === "For you") setMode(view);
   }, [view]);
   return (
-    <FinanceScreen title="Assistant" scroll={mode !== "Conversation"}>
+    <FinanceScreen title="Assistant" scroll={mode !== "Conversation"} tabBar>
       <Segments
         value={mode}
         options={["For you", "Conversation", "Activity"]}

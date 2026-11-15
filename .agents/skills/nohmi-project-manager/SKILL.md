@@ -1,6 +1,6 @@
 ---
 name: nohmi-project-manager
-description: Discuss nohmi product direction and coordinate its oversight chats, priorities and cross-epic dependencies. Use for portfolio decisions and PM check-ins, not implementation or skill maintenance.
+description: Discuss nohmi product direction and coordinate its oversight chats, priorities and cross-epic dependencies. Use when making portfolio decisions or running PM check-ins in Codex or Claude Code, not implementation or skill maintenance.
 ---
 
 # Nohmi project manager
@@ -60,15 +60,18 @@ resolved feedback and provider protections still apply. Merged, deployed and acc
 
 ## Sources and continuity
 
-Use Linear for live Nohmi issues/relations, GitHub for PR/check/review facts and Codex app tools for
-chat ownership and lifecycle. Use authenticated CLI fallback when needed after verifying repository
+Use Linear for live Nohmi issues/relations, GitHub for PR/check/review facts and the host's
+chat/session tools for chat ownership and lifecycle; map each action to Codex or Claude Code with
+[host tools](references/host-tools.md). Report an action the host lacks as a gap; never simulate it. Use authenticated CLI fallback when needed after verifying repository
 identity. Finish relevant pagination; missing sources are not empty results. Follow repository
 linear-context and work-context: resolve unique live Nohmi Project before each write, reuse direct
 issues, preserve human assignments/priorities and verify effects. Tracker updates reflect material
 changes; a heartbeat alone does not justify another Linear comment.
 
-Recover the existing manager continuity under ~/.codex/nohmi-network/project-manager and outcome
-registry; do not create another tracker. Keep compact epic/issue/owner identities, priorities,
+Recover the existing manager continuity from the one state directory resolved in
+[host tools](references/host-tools.md#manager-state-location) (`~/.codex/nohmi-network/project-manager`
+when it exists, otherwise `${NOHMI_NETWORK_STATE:-~/.nohmi-network}/project-manager`) and the outcome
+registry; never keep two copies and do not create another tracker. Keep compact epic/issue/owner identities, priorities,
 acceptance, actual prerequisite work, grants/pauses, decision source, blocker onset, last meaningful
 progress, evidence timestamp, pending action/acknowledgement and next event. Store detailed receipts
 by reference, not transcript copies. Checked-at is separate from progress-at. Reconcile live state
@@ -83,7 +86,8 @@ persist, but platform approvals and later narrower limits still apply. Use curre
 and repository delivery/admission contracts; do not require retired head/orchestrator skill files.
 The PM occupies that portfolio role rather than installing a second head.
 This repository directory is the canonical implementation. Personal discovery may link or route here;
-do not maintain a second editable copy or require a personal installation for repository use. No financial action,
+do not maintain a second editable copy or require a personal installation for repository use.
+Codex reads it through `.agents/skills` and Claude Code through the `.claude/skills` link; both are this copy. No financial action,
 SMS send, production rollout or arbitrary backlog launch follows from management authority.
 
 Use [repository oversight's portfolio reference](../oversight/references/portfolio.md) for verified issue/chat mappings, `<repo> - <epic>`
@@ -96,9 +100,9 @@ changes occur merely on loading this skill.
 Archive dedicated completed chats under existing authority only after full assigned/integrated
 acceptance, settled PRs, stopped execution, preserved dirty/unpushed work and finished handoff/release
 obligations. Oversight handles children; PM verifies completed oversight cleanup without racing it.
-Use set_thread_archived and verify the result. Pause only the completed owner's dedicated heartbeat,
+Archive the chat/session with the host's archive tool and verify the result. Pause only the completed owner's dedicated heartbeat,
 never an ongoing shared monitor. Preserve the ongoing PM, unfinished/paused/shared work and uncertain
-recovery. Archival does not delete branches/worktrees. Idle or merged alone is not completion.
+recovery. Archival never deletes branches. Codex archival keeps worktrees; Claude Code `archive_session` removes the session's worktree by default, so confirm its contents, including ignored local files, are preserved or accepted as disposable first ([host tools](references/host-tools.md)). Idle or merged alone is not completion.
 
 ## Scheduled operation
 

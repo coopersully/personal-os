@@ -1,6 +1,7 @@
 ---
 name: github-work-sync
 description: Use when explicitly auditing, migrating, closing, or annotating legacy nohmi GitHub issues as source evidence.
+disable-model-invocation: true
 ---
 
 # GitHub work sync
@@ -18,8 +19,9 @@ work belongs in the live `Nohmi` Linear Project through `linear-work-sync`.
 - Never create a new GitHub issue for repository delivery work. Resolve or create the corresponding
   Nohmi Linear issue instead.
 - Prefer a confident existing issue over creating a duplicate.
-- Create an issue only when the work is concrete, durable, independently shippable, and useful to
-  discover outside its PR.
+- The only exception: the user explicitly asks for a new GitHub issue that is not repository
+  delivery work. Even then, create it only when the work is concrete, durable, independently
+  shippable, and useful to discover outside its PR.
 - Use the least advanced state supported by evidence. GitHub's native issue state is open/closed;
   do not invent workflow labels or Project statuses.
 - Add a concise issue comment only for a material change in scope, implementation, verification,

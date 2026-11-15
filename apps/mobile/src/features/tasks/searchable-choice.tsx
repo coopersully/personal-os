@@ -121,7 +121,7 @@ export function SearchableChoice({
                     }}
                     style={({ pressed }) => [styles.settingRow, { opacity: pressed ? 0.6 : 1 }]}
                   >
-                    {entity && item.label !== "None" && (
+                    {entity && item.label !== "None" && !item.plain && (
                       <Icon
                         name={item.icon ?? entityDictionary[entity].icon}
                         color={listTint(item.color, t.dark, t.secondary)}

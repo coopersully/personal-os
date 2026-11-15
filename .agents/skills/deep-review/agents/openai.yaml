@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deep Review"
+  short_description: "Independent specialist review against nohmi standards."
+  default_prompt: "Use $deep-review to review the current nohmi changes against the acceptance contract and code standards."

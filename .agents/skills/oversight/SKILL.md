@@ -1,6 +1,6 @@
 ---
 name: oversight
-description: Coordinate nohmi epics and delivery across Linear issues, PRs and existing owners. Use for outcome oversight, adoption, heartbeats and bounded portfolio routing, not implementation or skill maintenance.
+description: Coordinate nohmi epics and delivery across Linear issues, PRs and existing owners. Use when running outcome oversight, adoption, heartbeats or bounded portfolio routing in Codex or Claude Code, not implementation or skill maintenance.
 ---
 
 # nohmi oversight
@@ -14,6 +14,8 @@ Read [product context](references/product-context.md) to ground scope and accept
 vision, master design and current implementation. The repository contracts remain authoritative
 for role boundaries, tracking, verification and protected merges. Load the lifecycle for dispatch,
 monitoring for scheduled checks, reporting for substantive status, and portfolio for chat lifecycle.
+Chat, sidebar-section, archive and heartbeat steps are host-neutral; map each to the current host
+with [host tools](references/host-tools.md). An unsupported action is a reported gap, never simulated.
 
 ## Working loop
 
@@ -37,15 +39,17 @@ Completion archival follows the separate standing grant in [portfolio](reference
 1. **Get context and inspect owners.** Read [agent context](../../../docs/engineering/agent-context.md),
    relevant canonical requirements, live issues/PRs and the current work/instructions of existing
    chats. Establish scope, acceptance, settled decisions, grants, current owners and dependencies.
-2. **Create or reuse the outcome section.** Inspect live sidebar sections and memberships first.
+2. **Create or reuse the outcome section.** Using the host's sidebar section/group tools, inspect
+   live sections and memberships first.
    Reuse the section already serving this outcome; create one only when none matches. Save its actual
    ID and name. A similar title alone does not prove shared ownership.
 3. **Resolve and link work.** Resolve the unique live Nohmi Project; match existing direct issues or
    create the missing bounded issues before dispatch. Record issue links, human/implementation/
    acceptance owners, dependencies, related existing scopes and chat identities/links. Preserve
    completed scopes and existing assignments; do not create duplicate tracking or reopen settled work.
-4. **Name and place relevant chats.** Use verified live identities to give dedicated outcome chats
-   the titles defined in the heartbeat contract below and place them in the section. Reuse existing
+4. **Name and place relevant chats.** Use verified live identities and the host's chat/session
+   tools to give dedicated outcome chats the titles defined in the heartbeat contract below, then
+   move them into the section/group. Reuse existing
    chats. Preserve explicit user titles; reference unrelated or shared chats and their owners without renaming or moving them.
    Titles and placement never prove checkout ownership or transfer it.
 5. **Verify and retain receipts.** Read back tool results for section membership, chat names and
@@ -103,7 +107,7 @@ still complete the kickoff gate above before dispatch.
   explicit exceptions: the portfolio manager maps to COO-170 — Portfolio oversight but is named
   exactly `Nohmi project manager`.
 - Reuse the recorded epic section, with Lead first and persistent owners in dependency/delivery
-  order. Subagents have no sidebar rows. Preserve explicit user title choices as recorded
+  order where the host can order members; otherwise record the ordering gap. Subagents have no sidebar rows. Preserve explicit user title choices as recorded
   exclusions when they remain applicable after the October 26 naming instruction.
   Never rename, move or reorder unrelated/shared chats to make a section look consistent.
 - Check current direct issue coverage and owners under the
@@ -169,7 +173,8 @@ explicit creation authority. Cooper’s October 26 implementation preference is 
 and the next supported continuation, preserving checkpoints and active owners. Never claim an
 unverified in-flight model change; if live switching is unsupported, use a safe stopped-owner handoff
 before replacement, never duplicate executors. Preserve Lead/independent-reviewer settings and later
-user overrides. Unavailable requested settings block dispatch rather than permit substitution.
+user overrides. Unavailable requested settings block dispatch rather than permit substitution
+(see [host tools](references/host-tools.md) for each host's support).
 Writable work requires an explicitly isolated checkout and owned paths.
 
 The head never implements or merges; an assigned orchestrator delegates repairs and owns acceptance.

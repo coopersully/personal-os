@@ -112,6 +112,8 @@ vi.mock("../tasks/data", () => ({ errorMessage: (error: Error) => error.message 
 vi.mock("../../theme", () => ({
   spacing: { sm: 8, md: 12 },
   useTheme: () => ({}),
+  // Security's actions are the shared settings action rows, which read the workspace accent.
+  workspaceColor: () => "#202024",
 }));
 vi.mock("sonner-native", () => ({ toast: { error: h.error, success: h.success } }));
 vi.mock("expo-constants", () => ({

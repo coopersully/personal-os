@@ -192,13 +192,31 @@ Filters to open a focused sheet with compact labeled choices, followed by dates/
 insert configuration fields into the result list. Changes preview immediately; Done dismisses
 the sheet. Preserve list/project and fixed Tasks/Reminders scope; omit inapplicable type choices.
 
+Global task views narrow by List and by Project through the searchable choice sheet used when
+moving a task. A list or project browser and the Reminders view never offer these choices, so a
+fixed scope cannot be filtered away. Choosing a list keeps only that list's projects on offer and
+drops a project from another list; either choice returns tasks only and removes the Type choice.
+A project chosen on its own stays when its own list is then chosen.
+Both rows stay disabled until lists and projects have loaded, and while Type is Reminders. If
+that read fails, both read Unavailable beside a retry. If a later refresh fails, the choices
+already loaded stay usable beside the same retry, and the failure is the one Sonner error every
+failed read raises, never copy in the sheet. A selected list or project that is no
+longer offered stays in its row under its name, or as Unavailable when it cannot be read; the row
+and its chip always show the same label. Any list and Any project take no entity icon.
+
+Due within offers Today, Tomorrow and Next 7 days above the date pickers. Each is a whole-day
+range in the planning timezone, written to the same Due after and Due before bounds as the web
+presets. A shortcut or a due date picked by hand replaces a due state such as Today & overdue,
+and choosing a due state clears the range. A range edited by hand reads Custom range.
+
 Sort by and Group by are presentation choices, separate from matching filters. On iOS use native
 menu pickers with system selection marks, not check characters prefixed to option text. Describe
 choices in user language (Open & completed, Due date, Newest first), never raw enum values. Show
 the effective sort/group summary next to the result count, including inherited defaults.
 
 Active overrides/search use removable 44-point chips with readable values and explicit accessible
-remove labels. Dates are formatted for people. Reset filters preserves presentation and search;
+remove labels. Dates are formatted for people; a List or Project chip shows its name and a
+shortcut range is one chip (Due within: Tomorrow) that removes both bounds. Reset filters preserves presentation and search;
 Reset view returns to the destination's scope and saved defaults. Saving sort/group defaults is
 a distinct explicit action with Sonner feedback and existing revision safeguards.
 
@@ -317,9 +335,17 @@ never grants access before the existing authorization flow completes.
 
 Security lists readable device summaries and opens technical metadata/revocation on a native
 child page. Mark a session current only when the authenticated server response says `isCurrent`
-is true; user-agent, IP and missing metadata cannot establish identity. Invitations have separate
-list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Execution
-policy pages; setup material, token scopes and one-time secrets do not become a root-page wall.
+is true; user-agent, IP and missing metadata cannot establish identity. That session leads the
+page as "This iPhone" under This device; the rest follow under Other devices, most recently active
+first. The session API returns no device name or platform, so a name is only what the user agent
+supports: browser and operating system, "nohmi app" for the app's own signature, another client's
+product name, or "Unknown device". A device row stacks the name over one line of recency
+("Active 3 hours ago"); exact times, IP and the raw user agent stay on the child page. Sign out
+sits in its own group below the ordinary account actions. Invitations have separate
+list/create pages. Agents opens concise Connected agents, Setup, Reviews, Access and Review
+policy pages; setup material, token permissions and one-time secrets do not become a root-page wall.
+Agents copy says "permissions", never "scopes", and names permissions in plain language; a
+confirmation states what will happen in the same words as the screen it belongs to.
 All existing human authority, role checks, scope confirmations and secret-clearing guards remain.
 
 Notifications leads with device controls and links to separate Global and Finances text-policy

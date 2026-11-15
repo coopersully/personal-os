@@ -198,8 +198,8 @@ fixed scope cannot be filtered away. Choosing a list keeps only that list's proj
 drops a project from another list; either choice returns tasks only and removes the Type choice.
 Both rows stay disabled until lists and projects have loaded, and while Type is Reminders. If
 that read fails, both read Unavailable beside a retry. A selected list or project that is no
-longer offered stays in its row as Unavailable, matching its chip. Any list and Any project take
-no entity icon.
+longer offered stays in its row under its name, or as Unavailable when it cannot be read; the row
+and its chip always show the same label. Any list and Any project take no entity icon.
 
 Due within offers Today, Tomorrow and Next 7 days above the date pickers. Each is a whole-day
 range in the planning timezone, written to the same Due after and Due before bounds as the web

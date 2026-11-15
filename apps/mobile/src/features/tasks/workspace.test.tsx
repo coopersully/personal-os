@@ -1317,3 +1317,30 @@ it("draws a list's icon beside each list but none beside Any list", async () => 
     screen.getByRole("button", { name: "Any list" }).querySelector('[data-icon="views"]'),
   ).toBeNull();
 });
+it("names an archived selected list and project the same in the row and the chip", async () => {
+  h.lists.push(list("old", "Old list", { availability: "archived" }));
+  h.projects = [project("attic", "Attic", { listId: "old", availability: "archived" })];
+  show({ initialFilters: { listId: "old", projectId: "attic" } });
+  await loaded();
+  filters();
+  expect(await screen.findByRole("button", { name: "List, Old list" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Project, Attic" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Remove List: Old list" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Remove Project: Attic" })).toBeVisible();
+  // It is kept only as the current selection, never offered as a fresh choice.
+  fireEvent.click(screen.getByRole("button", { name: "Remove List: Old list" }));
+  fireEvent.click(await screen.findByRole("button", { name: "List, Any list" }));
+  expect(screen.queryByRole("button", { name: "Old list" })).not.toBeInTheDocument();
+});
+it("names a filter set before a failed read the same in the row and the chip", async () => {
+  h.listTaskLists.mockRejectedValue(new Error("offline"));
+  h.listTaskProjects.mockRejectedValue(new Error("offline"));
+  show({ initialFilters: { listId: "home", projectId: "garden" } });
+  await loaded();
+  filters();
+  expect(await screen.findByRole("button", { name: "List, Unavailable" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Project, Unavailable" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Remove List: Unavailable" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Remove Project: Unavailable" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /, None$/ })).toBeNull();
+});

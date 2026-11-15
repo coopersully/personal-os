@@ -1377,7 +1377,8 @@ shortcut range is one chip.
 - No API, schema or shared-component change. The shortcut bounds are a mobile copy of the web
   preset maths; moving both to the shared domain package is a follow-up.
 - A failed lists or projects read shows both rows as Unavailable with a retry, and a selected
-  list or project that is no longer offered stays in its row as Unavailable so it can be cleared.
+  list or project that is no longer offered stays in its row, named as its chip names it, so it
+  can be cleared.
 - This is a local candidate covered by focused tests. The simulator check on To-do and All is
   outstanding, so the List and Project pickers opening over the filter sheet have not been seen
   on a device or simulator. It is not a production or TestFlight release.

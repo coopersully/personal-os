@@ -108,12 +108,22 @@ export function TaskListScreen({
   const containersFailed =
     !containersReady && (resources.lists.isError || resources.projects.isError);
   // A selection that is no longer offered stays in its row, named as its chip names it.
+  // The row and its chip name a selection from this one place: the record's name when the
+  // directory has it (archived and trashed included), otherwise "Unavailable".
   const selectedList = resources.lists.data?.find((row) => row.id === filters.listId);
   const selectedProject = resources.projects.data?.find((row) => row.id === filters.projectId);
-  const unavailable = (value: string | undefined, offered: { id: string }[]) =>
-    value && containersReady && !offered.some((row) => row.id === value)
-      ? [{ value, label: "Unavailable", plain: true }]
+  const selectedNames = {
+    listId: filters.listId ? (selectedList?.name ?? "Unavailable") : undefined,
+    projectId: filters.projectId ? (selectedProject?.name ?? "Unavailable") : undefined,
+  };
+  // A selection that is not on offer, or cannot be read, still appears as the row's value.
+  const currentChoice = (key: "listId" | "projectId", offered: { id: string }[]) => {
+    const value = filters[key];
+    const label = selectedNames[key];
+    return value && label && !offered.some((row) => row.id === value)
+      ? [{ value, label, plain: true }]
       : [];
+  };
   const anyContainer = (label: string) => ({
     value: "",
     label: containersFailed ? "Unavailable" : label,
@@ -301,10 +311,7 @@ export function TaskListScreen({
               filters={filters}
               choices={menuChoices}
               search={search}
-              names={{
-                listId: selectedList?.name,
-                projectId: selectedProject?.name,
-              }}
+              names={selectedNames}
               onRemove={(keys) => setFilters((current) => without(current, keys))}
               onClearSearch={() => setSearch("")}
               onClear={() => {
@@ -477,7 +484,7 @@ export function TaskListScreen({
                     options={[
                       anyContainer("Any list"),
                       ...listChoices.map(listOption),
-                      ...unavailable(filters.listId, listChoices),
+                      ...currentChoice("listId", listChoices),
                     ]}
                     onChange={(value) => chooseContainer("listId", value)}
                   />
@@ -489,7 +496,7 @@ export function TaskListScreen({
                     options={[
                       anyContainer("Any project"),
                       ...projectChoices.map((row) => ({ value: row.id, label: row.name })),
-                      ...unavailable(filters.projectId, projectChoices),
+                      ...currentChoice("projectId", projectChoices),
                     ]}
                     onChange={(value) => chooseContainer("projectId", value)}
                   />

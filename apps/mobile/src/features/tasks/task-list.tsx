@@ -75,17 +75,27 @@ export function TaskListScreen({
   const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const action = useTaskAction();
+  const preferences = resources.settings.data?.preferences;
+  const lifecycleView = scope.view === "history" || scope.view === "trash";
+  // "Include archived in search" widens a search to finished items, and to items in archived
+  // Lists and Projects, unless the destination or the person has already chosen a status.
+  const widenSearch =
+    !!debounced &&
+    !!preferences?.includeArchivedInSearch &&
+    !lifecycleView &&
+    !scope.status &&
+    !filters.status;
   const query = {
     ...scope,
-    sort: scope.sort ?? resources.settings.data?.preferences.taskSort ?? "default",
-    group: scope.group ?? resources.settings.data?.preferences.taskGroup ?? "none",
+    sort: scope.sort ?? preferences?.taskSort ?? "default",
+    group: scope.group ?? preferences?.taskGroup ?? "none",
     status:
       scope.status ??
-      (resources.settings.data?.preferences.showCompletedTasks &&
-      scope.view !== "history" &&
-      scope.view !== "trash"
-        ? "open_and_completed"
-        : undefined),
+      (widenSearch
+        ? ("all" as const)
+        : preferences?.showCompletedTasks && !lifecycleView
+          ? "open_and_completed"
+          : undefined),
     ...filters,
     // Lists and projects only hold tasks; narrowing by one never returns reminders.
     ...(filters.listId || filters.projectId ? { kind: "task" as const } : {}),
@@ -154,7 +164,40 @@ export function TaskListScreen({
     refetchInterval: query.sort === "auto" ? 60_000 : false,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
-  const items = uniqueItems(page.data?.pages.flatMap((result) => result.items) ?? []);
+  // Outside a list or project the server leaves archived containers out of every status but
+  // Archived, so a widened search reads them separately and lists them after the other matches.
+  const searchArchived =
+    widenSearch && !query.listId && !query.projectId && query.kind !== "reminder";
+  const archivedQuery = { ...query, status: "archived" as const };
+  const archivedPage = useInfiniteQuery({
+    queryKey: ["tasks", "workspace", archivedQuery],
+    enabled: searchArchived,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      api.listTaskWorkspace({ ...archivedQuery, cursor: pageParam, limit: 30 }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+  const matches = uniqueItems(page.data?.pages.flatMap((result) => result.items) ?? []);
+  // Archived matches follow the complete set of other matches, never interleave with a page.
+  const archivedMatches =
+    searchArchived && page.data && !page.hasNextPage
+      ? uniqueItems(archivedPage.data?.pages.flatMap((result) => result.items) ?? []).filter(
+          (item) => !matches.some((match) => itemKey(match) === itemKey(item)),
+        )
+      : [];
+  const items = [...matches, ...archivedMatches];
+  const archivedStart = archivedMatches.length ? matches.length : -1;
+  const total =
+    page.data && (!searchArchived || archivedPage.data)
+      ? page.data.pages[0].total + (searchArchived ? (archivedPage.data?.pages[0].total ?? 0) : 0)
+      : null;
+  const more = page.hasNextPage
+    ? page
+    : searchArchived && archivedPage.hasNextPage
+      ? archivedPage
+      : null;
+  const listNames = new Map((resources.lists.data ?? []).map((row) => [row.id, row.name]));
+  const projectNames = new Map((resources.projects.data ?? []).map((row) => [row.id, row.name]));
   const without = (current: Partial<TaskWorkspaceQuery>, keys: (keyof TaskWorkspaceQuery)[]) => {
     const next = { ...current };
     for (const key of keys) delete next[key];
@@ -271,8 +314,11 @@ export function TaskListScreen({
         }}
         refreshControl={
           <RefreshControl
-            refreshing={page.isRefetching}
-            onRefresh={() => void page.refetch()}
+            refreshing={page.isRefetching || (searchArchived && archivedPage.isRefetching)}
+            onRefresh={() => {
+              void page.refetch();
+              if (searchArchived) void archivedPage.refetch();
+            }}
             tintColor={t.ink}
           />
         }
@@ -335,7 +381,7 @@ export function TaskListScreen({
             )}
             <View style={[styles.toolbar, { marginBottom: spacing.md }]}>
               <Text style={{ color: t.secondary, marginRight: "auto" }}>
-                {page.data ? `${page.data.pages[0].total} items` : ""}
+                {total === null ? "" : `${total} items`}
                 {` · ${menuChoices.find((choice) => choice.key === "sort")?.options.find((option) => option.value === query.sort)?.label ?? "Recommended"}`}
                 {query.group && query.group !== "none" ? ` · Grouped by ${query.group}` : ""}
               </Text>
@@ -386,8 +432,15 @@ export function TaskListScreen({
         }
         ListEmptyComponent={
           <State
-            loading={page.isPending}
-            retry={page.isError ? () => void page.refetch() : undefined}
+            loading={page.isPending || (searchArchived && archivedPage.isPending)}
+            retry={
+              page.isError || (searchArchived && archivedPage.isError)
+                ? () => {
+                    if (page.isError) void page.refetch();
+                    if (searchArchived && archivedPage.isError) void archivedPage.refetch();
+                  }
+                : undefined
+            }
             empty={
               debounced || Object.keys(filters).length
                 ? "No matches. Adjust your filters or search."
@@ -412,30 +465,42 @@ export function TaskListScreen({
                   ? [...keys, itemKey(item)]
                   : keys,
             );
+          // A group or the archived section starts a new rounded block of rows.
+          const starts = (at: number) =>
+            at === 0 ||
+            at === archivedStart ||
+            (query.group !== "none" && items[at - 1].groupKey !== items[at].groupKey);
+          const task = item.kind === "task" ? item.record : null;
           return (
             <View>
-              {query.group !== "none" &&
-                (index === 0 || items[index - 1].groupKey !== item.groupKey) && (
-                  <Text
-                    accessibilityRole="header"
-                    style={{ color: t.secondary, marginTop: 16, marginBottom: 8 }}
-                  >
-                    {groupTitle === "none" || !groupTitle ? "Ungrouped" : groupTitle}
-                  </Text>
-                )}
+              {index === archivedStart && (
+                <Text
+                  accessibilityRole="header"
+                  style={{ color: t.secondary, marginTop: 16, marginBottom: 8 }}
+                >
+                  In archived lists and projects
+                </Text>
+              )}
+              {query.group !== "none" && starts(index) && (
+                <Text
+                  accessibilityRole="header"
+                  style={{ color: t.secondary, marginTop: 16, marginBottom: 8 }}
+                >
+                  {groupTitle === "none" || !groupTitle ? "Ungrouped" : groupTitle}
+                </Text>
+              )}
               <TaskRow
                 item={item}
+                details={preferences?.taskRowDetails}
+                list={task && !query.listId ? listNames.get(task.listId) : undefined}
+                project={
+                  task?.projectId && !query.projectId ? projectNames.get(task.projectId) : undefined
+                }
                 marked={marked}
                 selecting={selected.length > 0}
                 pending={action.pending}
-                first={
-                  index === 0 ||
-                  (query.group !== "none" && items[index - 1].groupKey !== item.groupKey)
-                }
-                last={
-                  index === items.length - 1 ||
-                  (query.group !== "none" && items[index + 1].groupKey !== item.groupKey)
-                }
+                first={starts(index)}
+                last={index === items.length - 1 || starts(index + 1)}
                 onSelect={toggle}
                 onOpen={() => edit(item)}
                 onComplete={() => perform([item], done ? "reopen" : "complete")}
@@ -444,11 +509,11 @@ export function TaskListScreen({
           );
         }}
         ListFooterComponent={
-          page.hasNextPage ? (
+          more ? (
             <Action
-              label={page.isFetchingNextPage ? "Loading…" : "Load more"}
-              disabled={page.isFetchingNextPage}
-              onPress={() => void page.fetchNextPage()}
+              label={more.isFetchingNextPage ? "Loading…" : "Load more"}
+              disabled={more.isFetchingNextPage}
+              onPress={() => void more.fetchNextPage()}
             />
           ) : undefined
         }

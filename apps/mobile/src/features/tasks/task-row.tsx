@@ -5,10 +5,19 @@ import { spacing, useTheme, workspaceColor } from "../../theme";
 import { useAuth } from "../auth/context";
 import { isPastDue } from "./due-date";
 import { isOpen } from "./logic";
-import { taskMetadata } from "./presentation";
+import {
+  type TaskRowDetail,
+  taskMetadata,
+  taskRowDetails,
+  taskRowSummary,
+  visibleRowTags,
+} from "./presentation";
 import { groupEdges, styles } from "./ui";
 export function TaskRow({
   item,
+  details,
+  list,
+  project,
   marked,
   selecting,
   pending,
@@ -19,6 +28,11 @@ export function TaskRow({
   onOpen,
 }: {
   item: TaskWorkspaceItem;
+  /** The saved row-detail preference; nothing optional shows until it has loaded. */
+  details?: readonly TaskRowDetail[];
+  /** Names of the owning List and Project, left out where the screen already names them. */
+  list?: string;
+  project?: string;
   marked: boolean;
   selecting: boolean;
   pending: boolean;
@@ -32,7 +46,11 @@ export function TaskRow({
   const done = !isOpen(item);
   const overdue = !done && !item.deletedAt && isPastDue(item.record.dueAt);
   const { state } = useAuth();
-  const metadata = taskMetadata(item, state.user?.planningTimezone);
+  const timezone = state.user?.planningTimezone;
+  const metadata = taskMetadata(item, timezone);
+  const shown = taskRowDetails(item, { details, timezone, list, project });
+  const summary = taskRowSummary(metadata, shown, overdue);
+  const hiddenTags = shown.tags.length - visibleRowTags;
   return (
     <View
       style={[
@@ -85,6 +103,7 @@ export function TaskRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Open ${item.kind}: ${item.record.title}`}
+        accessibilityValue={summary ? { text: summary } : undefined}
         onPress={() => (selecting ? onSelect() : onOpen())}
         onLongPress={onSelect}
         style={{
@@ -120,6 +139,39 @@ export function TaskRow({
               </Text>
             ))}
           </Text>
+        )}
+        {shown.context.length > 0 && (
+          <Text numberOfLines={1} style={{ color: t.secondary, fontSize: 12 }}>
+            {shown.context.join(" · ")}
+          </Text>
+        )}
+        {shown.notes && (
+          <Text numberOfLines={2} style={{ color: t.secondary, fontSize: 13 }}>
+            {shown.notes}
+          </Text>
+        )}
+        {shown.tags.length > 0 && (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.xs }}>
+            {[
+              ...shown.tags.slice(0, visibleRowTags).map((tag) => ({ key: `tag:${tag}`, tag })),
+              ...(hiddenTags > 0 ? [{ key: "more", tag: `+${hiddenTags} more` }] : []),
+            ].map(({ key, tag }) => (
+              <View
+                key={key}
+                style={{
+                  maxWidth: "100%",
+                  borderRadius: 10,
+                  paddingHorizontal: spacing.sm,
+                  paddingVertical: 2,
+                  backgroundColor: t.canvas,
+                }}
+              >
+                <Text numberOfLines={1} style={{ color: t.secondary, fontSize: 12 }}>
+                  {tag}
+                </Text>
+              </View>
+            ))}
+          </View>
         )}
       </Pressable>
     </View>

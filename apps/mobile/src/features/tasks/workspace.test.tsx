@@ -1406,3 +1406,179 @@ it("names a filter set before a failed read the same in the row and the chip", a
   expect(screen.getByRole("button", { name: "Remove Project: Unavailable" })).toBeVisible();
   expect(screen.queryByRole("button", { name: /, None$/ })).toBeNull();
 });
+const detailed = () =>
+  task("one", {
+    scheduledAt: "2026-11-06T09:30:00Z",
+    estimateMinutes: 90,
+    notes: "Bring the long ladder",
+    tags: ["home", "errands"],
+    listId: "house",
+    projectId: "move",
+  });
+const withContainers = () => {
+  h.lists.push(list("house", "House"));
+  h.projects = [project("move", "Move", { listId: "house" })];
+};
+it("always shows the owning list, project and reserved time on a task row", async () => {
+  withContainers();
+  h.items = [detailed()];
+  h.preferences.taskRowDetails = [];
+  show();
+  await loaded();
+  expect(await screen.findByText("Reserved Nov 6, 9:30 AM · House / Move")).toBeVisible();
+  expect(screen.queryByText(/1 hr 30 min/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Bring the long ladder")).not.toBeInTheDocument();
+  expect(screen.queryByText("home")).not.toBeInTheDocument();
+});
+it.each([
+  [
+    "estimate",
+    "Reserved Nov 6, 9:30 AM · 1 hr 30 min · House / Move",
+    ["Bring the long ladder", "home"],
+  ],
+  ["notes", "Bring the long ladder", ["home", "errands"]],
+  ["tags", "errands", ["Bring the long ladder"]],
+] as const)("shows the %s row detail only when its preference is on", async (detail, shown, hidden) => {
+  withContainers();
+  h.items = [detailed()];
+  h.preferences.taskRowDetails = [detail];
+  show();
+  await loaded();
+  expect(await screen.findByText(shown)).toBeVisible();
+  if (detail !== "estimate") expect(screen.queryByText(/1 hr 30 min/)).not.toBeInTheDocument();
+  for (const text of hidden) expect(screen.queryByText(text)).not.toBeInTheDocument();
+});
+it("renders no detail line for a task with nothing to show and counts tags beyond the fifth", async () => {
+  h.items = [
+    task("one"),
+    task("two", { tags: ["a", "b", "c", "d", "e", "f", "g"], listId: "gone" }),
+  ];
+  h.preferences.taskRowDetails = ["estimate", "tags", "notes"];
+  show({ scope: { view: "all", listId: "inbox" } });
+  const row = await loaded();
+  // Scoped to Inbox, the row has no container to repeat and no other detail.
+  expect(row.textContent).toBe("Task one");
+  expect(screen.getByText("e")).toBeVisible();
+  expect(screen.queryByText("f")).not.toBeInTheDocument();
+  expect(screen.getByText("+2 more")).toBeVisible();
+});
+it("leaves out a container that cannot be named", async () => {
+  h.items = [task("one", { listId: "gone", projectId: "missing" })];
+  show();
+  const row = await loaded();
+  await waitFor(() => expect(h.listTaskProjects).toHaveBeenCalled());
+  await act(async () => {});
+  expect(row.textContent).toBe("Task one");
+});
+const search = (value: string) =>
+  fireEvent.change(screen.getByLabelText("Search tasks"), { target: { value } });
+it("widens a search to finished and archived items when the preference is on", async () => {
+  h.listTaskWorkspace.mockImplementation(async (query) =>
+    query.status === "archived"
+      ? { items: [task("old", { title: "Garden shed" })], total: 1, nextCursor: null }
+      : { items: h.items, total: h.items.length, nextCursor: null },
+  );
+  show({ standalone: true });
+  await loaded();
+  expect(h.listTaskWorkspace).not.toHaveBeenCalledWith(
+    expect.objectContaining({ status: "archived" }),
+  );
+  search("garden");
+  await screen.findByRole("button", { name: "Open task: Garden shed" });
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith(
+    expect.objectContaining({ query: "garden", status: "all" }),
+  );
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith(
+    expect.objectContaining({ query: "garden", status: "archived" }),
+  );
+  expect(screen.getByRole("heading", { name: "In archived lists and projects" })).toBeVisible();
+  expect(screen.getByText(/^2 items/)).toBeVisible();
+});
+it("keeps a search to the view's own status when the preference is off", async () => {
+  h.preferences.includeArchivedInSearch = false;
+  show({ standalone: true });
+  await loaded();
+  search("garden");
+  await waitFor(() =>
+    expect(h.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "garden" }),
+    ),
+  );
+  await act(async () => {});
+  for (const [query] of h.listTaskWorkspace.mock.calls) {
+    expect(query.status).toBeUndefined();
+  }
+  expect(
+    screen.queryByRole("heading", { name: "In archived lists and projects" }),
+  ).not.toBeInTheDocument();
+});
+it("does not widen a search past a fixed or chosen status, or inside a list", async () => {
+  const { unmount } = show({ standalone: true, scope: { view: "all", status: "open" } });
+  await loaded();
+  search("garden");
+  await waitFor(() =>
+    expect(h.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "garden", status: "open" }),
+    ),
+  );
+  unmount();
+  h.listTaskWorkspace.mockClear();
+  show({ standalone: true, scope: { view: "all", listId: "inbox" } });
+  await loaded();
+  search("garden");
+  // A list already returns its own archived work, so one read with every status is enough.
+  await waitFor(() =>
+    expect(h.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "garden", status: "all", listId: "inbox" }),
+    ),
+  );
+  await act(async () => {});
+  expect(h.listTaskWorkspace).not.toHaveBeenCalledWith(
+    expect.objectContaining({ status: "archived" }),
+  );
+});
+it("explains the row-detail and search preferences without calling them web-only", async () => {
+  render(
+    <MobileDataProvider>
+      <TaskPreferencesScreen />
+    </MobileDataProvider>,
+  );
+  await screen.findByRole("switch", { name: "Show estimate" });
+  expect(screen.queryByText(/configure the web app/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Shown under each task on iPhone and in the web app/)).toBeVisible();
+  expect(screen.getByText(/also finds completed and cancelled items/)).toBeVisible();
+});
+it("pages and refreshes archived matches after the other matches, and retries a failed archived read", async () => {
+  h.items = [];
+  let fail = true;
+  h.listTaskWorkspace.mockImplementation(async (query) => {
+    if (query.status !== "archived") return { items: [], total: 0, nextCursor: null };
+    if (fail) throw new Error("offline");
+    return query.cursor
+      ? { items: [task("older", { title: "Garden gate" })], total: 2, nextCursor: null }
+      : { items: [task("old", { title: "Garden shed" })], total: 2, nextCursor: "more" };
+  });
+  show({ standalone: true });
+  await screen.findByText("You’re all caught up here.");
+  search("garden");
+  // The failed archived read is one Sonner error and a retry, never an empty result.
+  const retry = await screen.findByRole("button", { name: "Retry loading" });
+  expect(h.error).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("No matches. Adjust your filters or search.")).not.toBeInTheDocument();
+  fail = false;
+  fireEvent.click(retry);
+  await screen.findByRole("button", { name: "Open task: Garden shed" });
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await screen.findByRole("button", { name: "Open task: Garden gate" });
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith(
+    expect.objectContaining({ status: "archived", cursor: "more" }),
+  );
+  expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  const calls = h.listTaskWorkspace.mock.calls.filter(([q]) => q.status === "archived").length;
+  fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
+  await waitFor(() =>
+    expect(
+      h.listTaskWorkspace.mock.calls.filter(([q]) => q.status === "archived").length,
+    ).toBeGreaterThan(calls),
+  );
+});

@@ -5,7 +5,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FinanceTransactionScreen } from "./details";
-import { Transactions } from "./spending";
 import { FinanceTransactionEditor } from "./transaction-editor";
 
 vi.mock("expo-crypto", () => ({ randomUUID: () => crypto.randomUUID() }));
@@ -637,13 +636,6 @@ it("shows a split transaction's parts by category and opens them from the catego
   });
   await openActions();
   expect(screen.getByRole("button", { name: "Edit splits" })).toBeTruthy();
-});
-
-it("labels a split transaction as Split in a transaction list", async () => {
-  h.api.listFinanceTransactions.mockResolvedValue({ items: [split], nextCursor: null });
-  mount(<Transactions />);
-  expect(await screen.findByRole("button", { name: /Corner market.*Split/ })).toBeTruthy();
-  expect(screen.queryByText(/Uncategorized/)).toBeNull();
 });
 
 // Draft edges and late answers

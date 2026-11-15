@@ -351,9 +351,10 @@ saved and keep the draft, and a save whose outcome is unknown says so, keeps the
 Finance data and changes the discard prompt so it never claims the splits were not saved. The
 editor closes only on a confirmed save, and transaction details show parts only from what the
 server returned. A split transaction's Category row reads "Split in N parts" and opens the editor
-rather than asking for a category; its parts are listed by category with their treatment, and
-transaction lists label it Split. The reusable merchant rule the web dialog offers for a
-single-category breakdown is not offered on iPhone.
+rather than asking for a category; its parts are listed by category with their treatment. The
+transaction list read does not return parts, so a list row cannot yet tell a split transaction
+from an uncategorized one. The reusable merchant rule the web dialog offers for a single-category
+breakdown is not offered on iPhone.
 
 ### Transaction conversations and review
 

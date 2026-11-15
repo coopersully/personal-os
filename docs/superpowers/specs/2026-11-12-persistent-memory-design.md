@@ -1,6 +1,6 @@
 # Persistent memory completion design
 
-Status: Planning complete; product implementation and release acceptance remain outstanding.
+Status: Superseded by 2026-11-15-persistent-memory-design.md
 Owner: COO-165 — Persistent memory. Implementation slices: COO-166 — Memory API/MCP,
 COO-167 — Purpose-bound retrieval, COO-168 — Inspectable memory controls.
 

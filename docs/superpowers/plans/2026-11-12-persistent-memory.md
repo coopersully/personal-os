@@ -1,5 +1,7 @@
 # Persistent Memory Implementation Plan
 
+Status: Superseded by 2026-11-15-persistent-memory-design.md
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Complete correctable, forgettable, discoverable memory across authorized agents and app sessions.

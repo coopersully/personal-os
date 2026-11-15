@@ -24,6 +24,8 @@ export const scopeLabels: Record<AccessScope, string> = {
   "finances:read": "Read sensitive financial accounts and activity",
   "finances:write": "Manage financial records, plans, and reviews",
   "finances:maintain": "Maintain Finances",
+  "knowledge:read": "Memory: read what nohmi knows about you",
+  "knowledge:write": "Memory: save what nohmi knows about you",
   "goals:read": "Read goals & motives",
   "goals:write": "Manage goals & motives",
   "tracking:read": "Read private ritual responses",

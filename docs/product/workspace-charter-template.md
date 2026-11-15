@@ -2,9 +2,7 @@
 
 Use this charter before planning or parallelizing a new workspace steward. Replace every bracketed
 prompt with a domain-specific decision. Do not begin with MCP tool names; begin with the ledger and
-the professional work required to keep it trustworthy. The charter defines nohmi's persistent
-knowledge, tools, deterministic automation and workflow support for external agents. It must name
-which steps require external judgment and never introduce a built-in agent.
+the professional work required to keep it trustworthy.
 
 ## 1. Purpose and promise
 
@@ -73,23 +71,26 @@ Describe the domain-owned sequence for `all`, a bounded time window, and an exac
    summaries;
 7. recalculate models and health;
 8. record proposed or reinforced knowledge;
-9. expose evidence for external-agent advice and store attributed recommendations;
+9. advise;
 10. publish the review; and
 11. verify terminal state.
 
 Specify durable run/step state, leases, retry limits, idempotency, cancellation, recovery, and
 concurrent-run behavior. Name what can remain outstanding without misreporting success.
 
-Define the external caller contract: bounded work/knowledge discovery, current scopes, claims,
-revision checks, idempotency, source attribution and safe resumption by a fresh authorized session.
-Do not require a particular host, cloud runtime, registered schedule or agent response time.
-Polling is a supported access pattern; optional events announce work without promising execution.
-nohmi supplies the persistent brain, workflows, knowledge, tools and deterministic automation.
-External agents supply reasoning, conversation and judgment; no built-in agent may be introduced.
+Define the external scheduling contract: supported hosts, the expected cadence metadata and
+check-in health shown by nohmi, and the setup or repair handoff back to the owning platform. Give
+every declared schedule an immutable nohmi-owned local identity, require scheduled maintenance
+inputs to carry it through the authenticated connection, validate that binding, and propagate the
+identity through run, health, revocation, idempotency, and coalescing records. Retain only a
+non-secret credential reference and optional host automation identity; leave schedule identity
+absent for manual and otherwise unscheduled invocations. nohmi must not create, edit, activate,
+pause, or execute a recurring maintenance schedule; internal timers may only continue or recover
+work from an invocation already accepted.
 
 ## 7. Rulebook, questions, and learning
 
-- What may an external agent record as a provisional inference, and with what evidence?
+- What can the steward infer provisionally?
 - What needs a one-off answer?
 - Which knowledge may become active after explicit promotion or safe repeated reinforcement?
 - Which actions still require an explicitly approved domain rule?

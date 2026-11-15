@@ -20,6 +20,7 @@ vi.mock("react", async () => {
   return createRequire(`${process.cwd()}/package.json`)("react");
 });
 const h = vi.hoisted(() => ({
+  setQueryData: vi.fn(),
   confirm: vi.fn(),
   updatePolicy: vi.fn(),
   refresh: vi.fn(),
@@ -63,7 +64,7 @@ vi.mock("../auth/context", () => ({
   useAuth: () => ({ state: { user: { id: "fixture" } }, session: { epoch: () => 1 } }),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: h.setQueryData }),
 }));
 type Row = { label: string; value?: string; disabled?: boolean; onPress?: () => void };
 vi.mock("./settings-row", () => ({
@@ -198,22 +199,27 @@ vi.mock("../../components/forms/form-rows", () => ({
   ),
   ToggleRow: ({
     label,
+    detail,
     value,
     onChange,
     disabled,
   }: {
     label: string;
+    detail?: string;
     value: boolean;
     onChange: (next: boolean) => void;
     disabled?: boolean;
   }) => (
-    <input
-      aria-label={label}
-      type="checkbox"
-      checked={value}
-      disabled={disabled}
-      onChange={() => onChange(!value)}
-    />
+    <>
+      <input
+        aria-label={label}
+        type="checkbox"
+        checked={value}
+        disabled={disabled}
+        onChange={() => onChange(!value)}
+      />
+      {detail && <p>{detail}</p>}
+    </>
   ),
 }));
 afterEach(cleanup);
@@ -750,6 +756,49 @@ it("requires named confirmation before narrowing review bypass using the reviewe
   );
   await approve();
   expect(h.updatePolicy).toHaveBeenCalledWith({ expectedVersion: 12, reviewBypassEnabled: false });
+});
+const policySwitch = () => screen.getByLabelText("Apply eligible work without waiting in Review");
+it("shows the policy the server accepted without depending on a second read", async () => {
+  const saved = { version: 10, reviewBypassEnabled: true };
+  h.updatePolicy.mockResolvedValue(saved);
+  render(<AgentPolicyScreen />);
+  fireEvent.click(policySwitch());
+  await approve();
+  expect(h.setQueryData).toHaveBeenCalledWith(
+    ["settings", "fixture", 1, "agent-execution-policy"],
+    saved,
+  );
+  expect(h.refresh).not.toHaveBeenCalledWith("agent-execution-policy");
+  expect(h.success).toHaveBeenCalledWith("Review policy saved");
+  expect(policySwitch()).toBeEnabled();
+});
+it("keeps a rejected policy change visible and blocks further changes until a refresh succeeds", async () => {
+  h.updatePolicy.mockRejectedValue(new Error("Version conflict"));
+  render(<AgentPolicyScreen />);
+  fireEvent.click(policySwitch());
+  await approve();
+  expect(h.error).toHaveBeenCalledWith(expect.objectContaining({ message: "Version conflict" }));
+  expect(h.setQueryData).not.toHaveBeenCalled();
+  expect(policySwitch()).toBeChecked();
+  expect(policySwitch()).toBeDisabled();
+  expect(screen.getByText(/^Not confirmed\. Refresh the review policy/)).toBeVisible();
+  expect(screen.queryByText("Version conflict")).not.toBeInTheDocument();
+  // A failed refresh does not unblock it.
+  h.refresh.mockResolvedValueOnce({ data: undefined, error: new Error("Offline") });
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" })),
+  );
+  expect(policySwitch()).toBeDisabled();
+  h.refresh.mockResolvedValueOnce({
+    data: { version: 9, reviewBypassEnabled: false },
+    error: null,
+  });
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review policy" })),
+  );
+  expect(policySwitch()).toBeEnabled();
+  expect(policySwitch()).not.toBeChecked();
+  expect(screen.queryByText(/^Not confirmed/)).not.toBeInTheDocument();
 });
 it("labels returned OAuth clients with no scopes without inventing authority", () => {
   h.resources["agent-oauth-clients"] = [

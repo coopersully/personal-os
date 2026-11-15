@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -97,9 +98,15 @@ beforeEach(() => {
     listAgentAccessWorkItems: async () => ({ items: [], unavailableDomains: [], nextCursor: null }),
   };
 });
+let client: QueryClient | undefined;
+function CaptureClient() {
+  client = useQueryClient();
+  return null;
+}
 const show = () =>
   render(
     <MobileDataProvider>
+      <CaptureClient />
       <AgentPolicyScreen />
     </MobileDataProvider>,
   );
@@ -150,4 +157,21 @@ it("updates one loading toast on a successful cached policy refresh", async () =
   expect(h.error).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Apply eligible work without waiting in Review")).toBeChecked();
   expect(screen.queryByText("Review policy refreshed")).not.toBeInTheDocument();
+});
+it("reports a later background read failure once while keeping the cached policy on screen", async () => {
+  h.policy
+    .mockResolvedValueOnce({ version: 9, reviewBypassEnabled: true })
+    .mockRejectedValueOnce(new Error("Offline"));
+  show();
+  await screen.findByLabelText("Apply eligible work without waiting in Review");
+  expect(h.error).not.toHaveBeenCalled();
+  await act(async () => {
+    await client?.refetchQueries();
+  });
+  await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
+  // Reported by the screen itself: no loading toast and no toast id to update.
+  expect(h.error.mock.calls[0]).toHaveLength(1);
+  expect(h.loading).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Apply eligible work without waiting in Review")).toBeChecked();
+  expect(screen.queryByText(h.error.mock.calls[0]?.[0])).not.toBeInTheDocument();
 });

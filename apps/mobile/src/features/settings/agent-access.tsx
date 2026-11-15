@@ -3,6 +3,7 @@ import {
   accessScopeSchema,
   createAccessTokenInputSchema,
 } from "@personal-os/domain";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner-native";
 import {
@@ -89,6 +90,7 @@ const selectableGroups = scopeGroups(selectableScopes);
 /** Review policy: whether eligible agent work may skip the review queue. */
 export function AgentExecutionPolicy() {
   const action = useSettingsAction();
+  const client = useQueryClient();
   const policy = useSettingsResource(
     "agent-execution-policy",
     (api) => api.getExecutionPolicySettings(),
@@ -96,24 +98,38 @@ export function AgentExecutionPolicy() {
     true,
   );
   const { state, session } = useAuth();
+  const policyKey = ["settings", state.user?.id, session.epoch(), "agent-execution-policy"];
+  // An explicit refresh reports its own failure through its toast; this marks that failure
+  // as owned as soon as the read settles, before the screen renders it.
+  const ownedError = useRef(0);
   const policyRefresh = useSettingsRefresh(
-    [["settings", state.user?.id, session.epoch(), "agent-execution-policy"]],
-    [policy.refetch],
+    [policyKey],
+    [
+      async () => {
+        const result = await policy.refetch();
+        if (result.error) ownedError.current = result.errorUpdatedAt;
+        return result;
+      },
+    ],
     "Review policy refreshed",
     "action",
   );
-  const initialPolicyFeedback = useRef(true);
+  // Every other failed read (the first one, or a later background one over cached data) is
+  // reported here once, because this query opts out of the global read feedback.
+  const reportedError = useRef(0);
   useEffect(() => {
-    if (!initialPolicyFeedback.current) return;
-    if (policy.data) initialPolicyFeedback.current = false;
-    else if (policy.error) {
-      initialPolicyFeedback.current = false;
-      toast.error(errorMessage(policy.error));
-    }
-  }, [policy.data, policy.error]);
-  const refreshPolicy = () => {
-    initialPolicyFeedback.current = false;
-    void policyRefresh.refresh();
+    if (!policy.error) return;
+    const failedAt = policy.errorUpdatedAt ?? 0;
+    if (failedAt === ownedError.current || failedAt === reportedError.current) return;
+    reportedError.current = failedAt;
+    toast.error(errorMessage(policy.error));
+  }, [policy.error, policy.errorUpdatedAt]);
+  // A rejected or uncertain save keeps the attempted value on screen and blocks further
+  // changes until an explicit refresh shows what the server holds.
+  const [unconfirmed, setUnconfirmed] = useState<boolean | null>(null);
+  const refreshPolicy = async () => {
+    const result = await policyRefresh.refresh();
+    if (result?.ok) setUnconfirmed(null);
   };
   useDirtyDismiss(false, action.pending);
   return (
@@ -122,9 +138,14 @@ export function AgentExecutionPolicy() {
         {policy.data ? (
           <ToggleRow
             label="Apply eligible work without waiting in Review"
+            detail={
+              unconfirmed === null
+                ? undefined
+                : "Not confirmed. Refresh the review policy to see what is saved."
+            }
             icon="check"
-            value={policy.data.reviewBypassEnabled}
-            disabled={action.pending}
+            value={unconfirmed ?? policy.data.reviewBypassEnabled}
+            disabled={action.pending || unconfirmed !== null}
             onChange={(reviewBypassEnabled) => {
               const current = policy.data;
               if (!current) return;
@@ -135,19 +156,26 @@ export function AgentExecutionPolicy() {
                 reviewBypassEnabled
                   ? "Eligible work will be applied without waiting in Reviews. This currently applies only to reversible Finance changes that your rules allow. Permissions, questions and required approvals still apply."
                   : "Eligible work will wait in Reviews until you decide.",
-                () =>
-                  void action.run(async (api) => {
-                    await api.updateExecutionPolicySettings({
+                async () => {
+                  const result = await action.run(async (api) => {
+                    // The accepted policy is the server's answer, so the switch does not
+                    // depend on a second read that could fail after a successful save.
+                    const saved = await api.updateExecutionPolicySettings({
                       expectedVersion: current.version,
                       reviewBypassEnabled,
                     });
-                    await policy.refetch();
-                  }, "Review policy saved"),
+                    client.setQueryData(policyKey, saved);
+                  }, "Review policy saved");
+                  if (!result?.ok) setUnconfirmed(reviewBypassEnabled);
+                },
               );
             }}
           />
         ) : (
-          <State loading={policy.isPending} retry={policy.isError ? refreshPolicy : undefined} />
+          <State
+            loading={policy.isPending}
+            retry={policy.isError ? () => void refreshPolicy() : undefined}
+          />
         )}
       </Section>
       <SectionFootnote>
@@ -160,7 +188,7 @@ export function AgentExecutionPolicy() {
           label="Refresh review policy"
           icon="refresh"
           disabled={action.pending || policyRefresh.pending}
-          onPress={refreshPolicy}
+          onPress={() => void refreshPolicy()}
         />
       </Section>
     </>

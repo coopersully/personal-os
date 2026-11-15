@@ -640,6 +640,17 @@ it("shows a split transaction's parts by category and opens them from the catego
 
 // Draft edges and late answers
 
+it("offers no parts for a pending transaction opened directly", async () => {
+  h.params = { id: transaction.id, field: "splits" };
+  h.api.getFinanceTransaction.mockResolvedValue({ data: { ...transaction, pending: true } });
+  mount(<FinanceTransactionEditor />);
+  expect(await screen.findByText(/still pending/)).toBeTruthy();
+  expect(screen.queryByLabelText("Part 1 amount")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Save splits" })).toBeNull();
+  press("Close");
+  expect(h.back).toHaveBeenCalledTimes(1);
+});
+
 it("opens a part whose category is gone as Unavailable and restores a blank rationale", async () => {
   h.api.setFinanceTransactionBreakdown.mockResolvedValue(split);
   await openSplits({

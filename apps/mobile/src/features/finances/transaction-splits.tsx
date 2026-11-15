@@ -178,6 +178,23 @@ export function TransactionSplitForm({ record }: { record: FinanceTransaction })
   }
 
   const names = new Map((categories.data ?? []).map((item) => [item.id, item.name]));
+  // The server gives a breakdown only to a posted transaction; offer nothing it would reject.
+  if (snapshot.pending)
+    return (
+      <View style={{ flex: 1 }}>
+        <Stack.Screen
+          options={{
+            title: "split transaction",
+            ...editorDismissOptions({ label: "Close", onPress: () => router.back() }),
+          }}
+        />
+        <FinanceScreen title={record.merchant}>
+          <Card>
+            <Copy>This transaction is still pending. It can be split once it has posted.</Copy>
+          </Card>
+        </FinanceScreen>
+      </View>
+    );
   return (
     <View style={{ flex: 1 }}>
       <Stack.Screen

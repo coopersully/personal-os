@@ -101,7 +101,8 @@ archived containers, not merely closed projects; those remain under Projects. Tr
 Restore. Give Archive and Trash distinct icons. Trash does not offer capture or permanent deletion
 without an explicit product decision and confirmation. A failed restore keeps the item recoverable.
 
-Filters live in a bounded sheet; sort/group use native selected menus. Display human-readable
+Filters live in a bounded sheet; sort/group use native selected menus. Global views narrow by
+List, Project and the Today, Tomorrow and Next 7 days due shortcuts. Display human-readable
 active chips and effective sorting/grouping beside results. Preserve fixed destination scope,
 distinguish filter reset from view reset, and make saved defaults explicit. See the detailed form
 contract for geometry, state and reset behavior. Do not scatter configuration through result lists.

@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
@@ -246,7 +248,7 @@ it("reads Calendar and Mail for the account's day and resolves a conversation wi
     from: expect.stringMatching(/T00:00:00/),
     to: expect.stringMatching(/T00:00:00/),
   });
-  expect(h.read).toHaveBeenCalledWith({ domain: "mail", status: "open", limit: 50 });
+  expect(h.read).toHaveBeenCalledWith({ domain: "mail", status: "open", limit: 100 });
   fireEvent.click(screen.getByText("Open mail"));
   expect(h.loading).toHaveBeenCalledWith("Opening conversation…", { id: "today-mail-open-owner" });
   expect(await screen.findByText(/Fare approval/)).toBeVisible();
@@ -316,4 +318,19 @@ it("clears the opening toast without an error when a read fails after the accoun
   expect(await screen.findByText("null")).toBeVisible();
   expect(h.dismiss).toHaveBeenCalledWith("today-mail-open-owner");
   expect(h.error).not.toHaveBeenCalled();
+});
+it("says a conversation is gone instead of blaming the connection when the thread no longer exists", async () => {
+  h.thread.mockRejectedValue(
+    new ApiClientError({ code: "not_found", status: 404, message: "Not found" }),
+  );
+  mount();
+  await screen.findByText("Loaded");
+  fireEvent.click(screen.getByText("Open mail"));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith("This conversation is no longer available.", {
+      id: "today-mail-open-owner",
+    }),
+  );
+  expect(h.error).toHaveBeenCalledOnce();
+  expect(screen.queryByText(/no longer available/)).toBeNull();
 });

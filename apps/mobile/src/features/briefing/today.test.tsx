@@ -626,3 +626,16 @@ it("orders events that start together by title so the brief does not reshuffle b
   );
   expect(screen.getByText("2 events left")).toBeVisible();
 });
+it("does not count a neighbouring day's all-day event as part of today outside UTC", () => {
+  // The day's instant range overlaps the next calendar date, so the read can return this event.
+  h.data = {
+    ...data(),
+    timezone: "America/Los_Angeles",
+    events: query([event("next", "Offsite", "2026-11-10", "2026-11-11", { allDay: true })]),
+  };
+  render(<TodayHome />);
+  expect(screen.queryByText("Offsite")).toBeNull();
+  expect(screen.getByText("Nothing scheduled today.")).toBeVisible();
+  expect(screen.queryByText("Nothing else scheduled today.")).toBeNull();
+  expect(screen.getByText("0 events left")).toBeVisible();
+});

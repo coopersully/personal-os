@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import {
   localDateAt,
   localDateTimeToUtc,
@@ -91,7 +92,7 @@ export function useTodayData() {
   const mail = useQuery({
     ...common,
     queryKey: ["today", owner, "mail-attention"],
-    queryFn: () => api.listAttentionItems({ domain: "mail", status: "open", limit: 50 }),
+    queryFn: () => api.listAttentionItems({ domain: "mail", status: "open", limit: 100 }),
   });
   const mailAccounts = useQuery({
     ...common,
@@ -186,12 +187,14 @@ export function useTodayData() {
       toast.dismiss(openId);
       // A conversation that arrives after the account changed belongs to nobody on screen.
       return feedbackOwner.current === owner ? thread : null;
-    } catch {
-      if (feedbackOwner.current === owner)
+    } catch (error) {
+      if (feedbackOwner.current !== owner) toast.dismiss(openId);
+      else if (error instanceof ApiClientError && error.status === 404)
+        toast.error("This conversation is no longer available.", { id: openId });
+      else
         toast.error("Couldn’t open this conversation. Check your connection and try again.", {
           id: openId,
         });
-      else toast.dismiss(openId);
       return null;
     }
   };

@@ -279,6 +279,46 @@ counts, then confirms. Resolution is bound to the reviewed comparison revision; 
 comparison stops nothing and reloads. Stop tracking and duplicate resolution each keep a native
 confirmation that names the account and what is preserved.
 
+### Finance transaction management
+
+Spending has a floating plus that opens the new transaction form; a manual account's action menu
+opens the same form with that account chosen. A transaction a person adds belongs to a manual
+account, because the server removes a transaction only from one: the form offers manual accounts
+only, chooses a lone one, and explains what is missing when there is none. Merchant, Amount,
+Account and Date are required; the date defaults to today in the account planning timezone. A
+blank Category leaves the choice to nohmi. Adding has no retry key, so after an unknown outcome the
+next Save first looks on that account and date for the record the earlier attempt would have left,
+and adds nothing when it finds one.
+
+Transaction details put Edit transaction and, for a manual account's transaction only, the
+destructive Remove transaction in the top-right action menu. Remove is not offered while the
+account is unknown. It keeps a native confirmation, keeps its idempotency key across an unknown
+outcome, and returns to the list only on a confirmed removal or when the record is already gone.
+
+A category row is followed by New category, which expands in place to a name and Cancel/Add. The
+new category is selected in the draft; the form's Save still persists the transaction against its
+original revision. A name that already exists is selected rather than written again. Categories
+stored under a provider's raw code are shown as words (`RENT_AND_UTILITIES` reads "Rent And
+Utilities", as on web) wherever a category is named; writes still send the stored name.
+
+Every non-drill-down transaction list has Select and Filters beside its search. Filters is a sheet
+with Category, Review, Sort by and Order as native choices that apply at once; a list already
+scoped to one budget category omits Category. Each active filter, and a non-default order, is a
+removable chip above the list, and the Filters control names the active count and order to
+assistive technology. Rows state Pending and Needs review in their text.
+
+Select turns rows into toggles that state Selected or Not selected in their text. Categorize
+applies one category to at most 100 displayed records after a native confirmation, each guarded by
+the revision on screen, without changing merchant rules. One toast reports how many were applied
+and, separately, how many went to review, changed elsewhere, were rejected or are unconfirmed; a
+record the response does not mention is never counted as applied. Every submission ends the
+selection and reloads the list, and nothing can be selected again until a reload succeeds.
+Selection is unavailable while the list is loading, failed, empty or showing a previous filter's
+rows.
+
+Changing a transaction's date is not available: the API accepts only a category or a note on an
+existing transaction.
+
 ### Transaction conversations and review
 
 - Needs your input cards show merchant, amount and category, and open the canonical transaction details page. Details place attention on the category row itself, with direct selection and approval. Do not duplicate the field with a separate Choose category banner/button. Notes remain optional and never count as a missing required field. This is record state, not action-result feedback.

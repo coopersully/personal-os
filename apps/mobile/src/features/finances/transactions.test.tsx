@@ -1053,3 +1053,33 @@ it("ends a selection when the list changes", async () => {
   expect(await screen.findByRole("button", { name: "Select transactions" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: /^Categorize/ })).toBeNull();
 });
+
+it("does not offer selection over a previous filter's rows or during the reload after a submission", async () => {
+  mount(<Transactions />);
+  await screen.findByRole("button", { name: /Corner market/ });
+  // A new filter is loading: the rows on screen belong to the previous one.
+  h.api.listFinanceTransactions.mockReturnValue(new Promise(() => undefined));
+  type("Search transactions", "coffee");
+  await screen.findByRole("progressbar", { name: "Updating transactions" });
+  expect(screen.getByRole("button", { name: /Corner market/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Select transactions" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  cleanup();
+  h.api.listFinanceTransactions.mockResolvedValue({
+    items: [transaction, other],
+    nextCursor: null,
+  });
+  h.api.applyFinanceCategorizations.mockResolvedValue([applied(transaction), applied(other)]);
+  await selectBoth();
+  // The reload after the submission has not answered yet.
+  h.api.listFinanceTransactions.mockReturnValue(new Promise(() => undefined));
+  await categorizeAs("Travel");
+  await waitFor(() => expect(h.success).toHaveBeenCalled());
+  expect(screen.getByRole("button", { name: /Corner market/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Select transactions" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+});

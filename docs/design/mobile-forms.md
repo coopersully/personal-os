@@ -196,12 +196,15 @@ Global task views narrow by List and by Project through the searchable choice sh
 moving a task. A list or project browser and the Reminders view never offer these choices, so a
 fixed scope cannot be filtered away. Choosing a list keeps only that list's projects on offer and
 drops a project from another list; either choice returns tasks only and removes the Type choice.
-Both rows stay disabled until lists and projects have loaded, and while Type is Reminders.
+Both rows stay disabled until lists and projects have loaded, and while Type is Reminders. If
+that read fails, both read Unavailable beside a retry. A selected list or project that is no
+longer offered stays in its row as Unavailable, matching its chip. Any list and Any project take
+no entity icon.
 
 Due within offers Today, Tomorrow and Next 7 days above the date pickers. Each is a whole-day
 range in the planning timezone, written to the same Due after and Due before bounds as the web
-presets. A shortcut replaces a due state such as Today & overdue, and choosing a due state clears
-the range. A range edited by hand reads Custom range.
+presets. A shortcut or a due date picked by hand replaces a due state such as Today & overdue,
+and choosing a due state clears the range. A range edited by hand reads Custom range.
 
 Sort by and Group by are presentation choices, separate from matching filters. On iOS use native
 menu pickers with system selection marks, not check characters prefixed to option text. Describe

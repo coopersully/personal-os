@@ -1264,3 +1264,56 @@ it("applies and clears the Today, Tomorrow and Next 7 days due shortcuts", async
   expect(lastQuery()).not.toHaveProperty("dueAfter");
   expect(lastQuery()).not.toHaveProperty("dueBefore");
 });
+it("says when lists and projects could not be read and offers a retry", async () => {
+  h.listTaskLists.mockRejectedValue(new Error("offline"));
+  show();
+  await loaded();
+  filters();
+  expect(await screen.findByRole("button", { name: "List, Unavailable" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Project, Unavailable" })).toBeDisabled();
+  h.listTaskLists.mockImplementation(async () => ({ items: h.lists, nextCursor: null }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading lists and projects" }));
+  expect(await screen.findByRole("button", { name: "List, Any list" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Retry loading lists and projects" })).toBeNull();
+});
+it("keeps a selected list or project that is no longer offered, so it can still be cleared", async () => {
+  show({ initialFilters: { listId: "gone", projectId: "lost" } });
+  await loaded();
+  filters();
+  // The row and the chip agree, instead of the row reading None.
+  expect(await screen.findByRole("button", { name: "List, Unavailable" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Project, Unavailable" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Remove List: Unavailable" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "List, Unavailable" }));
+  expect(screen.getByRole("button", { name: "Unavailable" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Any list" }));
+  await waitFor(() => expect(lastQuery()).not.toHaveProperty("listId"));
+  expect(lastQuery()).not.toHaveProperty("projectId");
+});
+it("drops the view's due default when a due date is picked by hand", async () => {
+  show({ initialFilters: { due: "today" } });
+  await loaded();
+  filters();
+  fireEvent.change(screen.getByLabelText("Due after (ISO date/time)"), {
+    target: { value: "2026-12-01T12:00:00Z" },
+  });
+  await waitFor(() => expect(lastQuery()).toMatchObject({ dueAfter: "2026-12-01T12:00:00Z" }));
+  expect(lastQuery()).not.toHaveProperty("due");
+  expect(screen.queryByRole("button", { name: /^Remove Due: / })).toBeNull();
+});
+it("draws a list's icon beside each list but none beside Any list", async () => {
+  h.lists.push(list("home", "Home"));
+  show();
+  await loaded();
+  filters();
+  fireEvent.click(await screen.findByRole("button", { name: "List, Any list" }));
+  expect(
+    screen.getByRole("button", { name: "Home" }).querySelector('[data-icon="views"]'),
+  ).not.toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Any list" }).querySelector('[data-icon="views"]'),
+  ).toBeNull();
+});

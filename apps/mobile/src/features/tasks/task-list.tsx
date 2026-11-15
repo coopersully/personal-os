@@ -105,6 +105,20 @@ export function TaskListScreen({
   );
   // Choices are offered only once both reads have answered, never from a partial directory.
   const containersReady = !!resources.lists.data && !!resources.projects.data;
+  const containersFailed =
+    !containersReady && (resources.lists.isError || resources.projects.isError);
+  // A selection that is no longer offered stays in its row, named as its chip names it.
+  const selectedList = resources.lists.data?.find((row) => row.id === filters.listId);
+  const selectedProject = resources.projects.data?.find((row) => row.id === filters.projectId);
+  const unavailable = (value: string | undefined, offered: { id: string }[]) =>
+    value && containersReady && !offered.some((row) => row.id === value)
+      ? [{ value, label: "Unavailable", plain: true }]
+      : [];
+  const anyContainer = (label: string) => ({
+    value: "",
+    label: containersFailed ? "Unavailable" : label,
+    plain: true,
+  });
   const dueShortcut = identifyShortcut(
     { after: filters.dueAfter, before: filters.dueBefore },
     timeZone,
@@ -136,10 +150,13 @@ export function TaskListScreen({
   };
   const updateFilter = (key: keyof TaskWorkspaceQuery, value: string) =>
     setFilters((current) => ({
-      // A due state such as Overdue or No due date replaces a due-date range, as on the web.
+      // A due state such as Overdue or No due date replaces a due-date range, and a range
+      // picked by hand replaces a due state, as on the web.
       ...(key === "due" && value && value !== "any"
         ? without(current, ["dueAfter", "dueBefore"])
-        : current),
+        : (key === "dueAfter" || key === "dueBefore") && value
+          ? without(current, ["due"])
+          : current),
       [key]: value || undefined,
     }));
   const chooseContainer = (key: "listId" | "projectId", value: string) =>
@@ -285,9 +302,8 @@ export function TaskListScreen({
               choices={menuChoices}
               search={search}
               names={{
-                listId: resources.lists.data?.find((row) => row.id === filters.listId)?.name,
-                projectId: resources.projects.data?.find((row) => row.id === filters.projectId)
-                  ?.name,
+                listId: selectedList?.name,
+                projectId: selectedProject?.name,
               }}
               onRemove={(keys) => setFilters((current) => without(current, keys))}
               onClearSearch={() => setSearch("")}
@@ -458,7 +474,11 @@ export function TaskListScreen({
                     label="List"
                     disabled={!containersReady || query.kind === "reminder"}
                     value={filters.listId ?? ""}
-                    options={[{ value: "", label: "Any list" }, ...listChoices.map(listOption)]}
+                    options={[
+                      anyContainer("Any list"),
+                      ...listChoices.map(listOption),
+                      ...unavailable(filters.listId, listChoices),
+                    ]}
                     onChange={(value) => chooseContainer("listId", value)}
                   />
                   <SearchableChoice
@@ -467,11 +487,21 @@ export function TaskListScreen({
                     disabled={!containersReady || query.kind === "reminder"}
                     value={filters.projectId ?? ""}
                     options={[
-                      { value: "", label: "Any project" },
+                      anyContainer("Any project"),
                       ...projectChoices.map((row) => ({ value: row.id, label: row.name })),
+                      ...unavailable(filters.projectId, projectChoices),
                     ]}
                     onChange={(value) => chooseContainer("projectId", value)}
                   />
+                  {containersFailed && (
+                    <Action
+                      label="Retry loading lists and projects"
+                      onPress={() => {
+                        if (resources.lists.isError) void resources.lists.refetch();
+                        if (resources.projects.isError) void resources.projects.refetch();
+                      }}
+                    />
+                  )}
                 </>
               )}
             </Section>

@@ -1371,9 +1371,13 @@ shortcut range is one chip.
 
 - The query matches the web filters: a list or project sends `listId`/`projectId` with
   `kind: "task"`, choosing a list drops a project, and a shortcut sends whole-day `dueAfter` and
-  `dueBefore` bounds in the planning timezone in place of a `due` state.
+  `dueBefore` bounds in the planning timezone in place of a `due` state. A due date picked by
+  hand also replaces the `due` state.
 - A list or project browser and the Reminders view do not offer List or Project.
 - No API, schema or shared-component change. The shortcut bounds are a mobile copy of the web
   preset maths; moving both to the shared domain package is a follow-up.
-- This is a local candidate covered by focused tests and a simulator check; it is not a
-  production or TestFlight release.
+- A failed lists or projects read shows both rows as Unavailable with a retry, and a selected
+  list or project that is no longer offered stays in its row as Unavailable so it can be cleared.
+- This is a local candidate covered by focused tests. The simulator check on To-do and All is
+  outstanding, so the List and Project pickers opening over the filter sheet have not been seen
+  on a device or simulator. It is not a production or TestFlight release.

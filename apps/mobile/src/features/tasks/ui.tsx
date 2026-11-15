@@ -48,7 +48,14 @@ export function Heading({
     </View>
   );
 }
-export type Option = { value: string; label: string; icon?: IconName; color?: string };
+export type Option = {
+  value: string;
+  label: string;
+  icon?: IconName;
+  color?: string;
+  /** A choice that is not an entity, such as Any list, takes no entity icon. */
+  plain?: boolean;
+};
 export { EnumChoice as Choice } from "../../components/forms/enum-choice";
 export function State({
   loading,

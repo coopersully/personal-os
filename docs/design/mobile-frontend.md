@@ -288,7 +288,10 @@ only, chooses a lone one, and explains what is missing when there is none. Merch
 Account and Date are required; the date defaults to today in the account planning timezone. A
 blank Category leaves the choice to nohmi. Adding has no retry key, so after an unknown outcome the
 next Save first looks on that account and date for the record the earlier attempt would have left,
-and adds nothing when it finds one.
+and adds nothing when it finds one. If the draft was changed since, the form stays open, says the
+earlier version is recorded and offers Add anyway. Leaving after an unknown outcome never says the
+transaction was not added, and re-reads Finance data. An amount takes a comma only as thousands
+grouping; `12,50` is corrected beside the field, never read as 1250.
 
 Transaction details put Edit transaction and, for a manual account's transaction only, the
 destructive Remove transaction in the top-right action menu. Remove is not offered while the
@@ -297,22 +300,27 @@ outcome, and returns to the list only on a confirmed removal or when the record 
 
 A category row is followed by New category, which expands in place to a name and Cancel/Add. The
 new category is selected in the draft; the form's Save still persists the transaction against its
-original revision. A name that already exists is selected rather than written again. Categories
-stored under a provider's raw code are shown as words (`RENT_AND_UTILITIES` reads "Rent And
-Utilities", as on web) wherever a category is named; writes still send the stored name.
+original revision. A name that already reads the same as an existing category is selected rather
+than written again. Categories stored under one of the provider's raw codes are shown as words
+(`RENT_AND_UTILITIES` reads "Rent And Utilities", as on web) wherever Finance names a category;
+other names, including all-capitals ones such as `HSA`, are left as written, and writes still send
+the stored name.
 
 Every non-drill-down transaction list has Select and Filters beside its search. Filters is a sheet
 with Category, Review, Sort by and Order as native choices that apply at once; a list already
-scoped to one budget category omits Category. Each active filter, and a non-default order, is a
-removable chip above the list, and the Filters control names the active count and order to
-assistive technology. Rows state Pending and Needs review in their text.
+scoped to one budget category omits Category. Review offers Needs review and No review needed,
+which is every record not flagged, reviewed or not. Each active filter, and a non-default order, is
+a selected shared filter chip above the list that clears on press, and the Filters control names
+the active count and order to assistive technology. Rows state Pending and Needs review in their
+text.
 
 Select turns rows into toggles that state Selected or Not selected in their text. Categorize
 applies one category to at most 100 displayed records after a native confirmation, each guarded by
 the revision on screen, without changing merchant rules. One toast reports how many were applied
 and, separately, how many went to review, changed elsewhere, were rejected or are unconfirmed; a
 record the response does not mention is never counted as applied. Every submission ends the
-selection and reloads the list, and nothing can be selected again until a reload succeeds.
+selection and reloads the list, and nothing can be selected again until a reload succeeds. That
+reload is silent when it works and raises one error when it fails, beside the Reload row.
 Selection is unavailable while the list is loading, failed, empty or showing a previous filter's
 rows.
 

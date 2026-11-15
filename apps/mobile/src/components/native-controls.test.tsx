@@ -195,8 +195,20 @@ vi.mock("expo-router/native-tabs", () => {
     <span data-testid="native-tab-icon" data-default={src.default} data-selected={src.selected} />
   );
   const Trigger = Object.assign(
-    ({ children, accessibilityLabel }: PropsWithChildren<{ accessibilityLabel: string }>) => (
-      <div role="tab" tabIndex={0} aria-label={accessibilityLabel}>
+    ({
+      children,
+      accessibilityLabel,
+      disableAutomaticContentInsets,
+    }: PropsWithChildren<{
+      accessibilityLabel: string;
+      disableAutomaticContentInsets?: boolean;
+    }>) => (
+      <div
+        role="tab"
+        tabIndex={0}
+        aria-label={accessibilityLabel}
+        data-automatic-insets={String(!disableAutomaticContentInsets)}
+      >
         {children}
       </div>
     ),
@@ -423,6 +435,16 @@ it("uses filled native tab assets with workspace tint and the standard labels", 
   expect(h.tabs.iconColor).toEqual(expect.objectContaining({ selected: h.tabs.tintColor }));
   for (const icon of screen.getAllByTestId("native-tab-icon"))
     expect(icon.getAttribute("data-selected")).toContain("Filled.png");
+});
+it("leaves every tab page's header spacing to the page, so a title cannot slide under the search bar", () => {
+  // Each page pads its list by the fixed search header. UIKit's automatic insets on the same
+  // list moved Browse's title under the search bar and left a gap above to-do.
+  for (const workspace of ["tasks", "mail", "finances"] as const) {
+    const view = render(<WorkspaceTabs workspace={workspace} />);
+    for (const tab of screen.getAllByRole("tab"))
+      expect(tab).toHaveAttribute("data-automatic-insets", "false");
+    view.unmount();
+  }
 });
 it("passes native glass modifiers for vertical selection and respects Reduce Motion", () => {
   const { rerender } = render(<WorkspacePicker selected="tasks" options={workspaces} />);

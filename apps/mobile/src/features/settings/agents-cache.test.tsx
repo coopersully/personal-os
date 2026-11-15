@@ -36,7 +36,14 @@ vi.mock("react-native", () => ({
     <div style={style}>{children}</div>
   ),
 }));
-vi.mock("expo-router", () => ({ Stack: { Screen: () => null } }));
+vi.mock("expo-router", () => ({
+  Stack: { Screen: () => null },
+  useNavigation: () => ({
+    getState: () => ({ index: 1 }),
+    isFocused: () => true,
+    addListener: () => () => {},
+  }),
+}));
 vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
 vi.mock("../../components/forms/form-save", () => ({ FormSave: () => null }));
 vi.mock("../../components/forms/use-dirty-dismiss", () => ({ useDirtyDismiss: () => () => {} }));

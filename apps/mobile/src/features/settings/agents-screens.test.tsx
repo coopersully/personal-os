@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -18,6 +18,13 @@ vi.mock("react", async () => {
   return createRequire(`${process.cwd()}/package.json`)("react");
 });
 const h = vi.hoisted(() => ({
+  stackIndex: 1,
+  focused: true,
+  stateListeners: new Set<() => void>(),
+  back: vi.fn(),
+  replace: vi.fn(),
+  canGoBack: vi.fn(() => true),
+  screenOptions: [] as Record<string, unknown>[],
   confirm: vi.fn(),
   push: vi.fn(),
   openURL: vi.fn(),
@@ -25,16 +32,37 @@ const h = vi.hoisted(() => ({
   errors: new Set<string>(),
   pending: new Set<string>(),
 }));
+Object.assign(h, {
+  navigation: {
+    getState: () => ({ index: h.stackIndex }),
+    isFocused: () => h.focused,
+    addListener: (_event: string, listener: () => void) => {
+      h.stateListeners.add(listener);
+      return () => h.stateListeners.delete(listener);
+    },
+  },
+});
 vi.mock("react-native", async () => ({
   ...(await import("../../../test/native")),
   Linking: { openURL: h.openURL },
 }));
-vi.mock("expo-router", () => ({ router: { push: h.push }, Stack: { Screen: () => null } }));
+vi.mock("expo-router", () => ({
+  router: { push: h.push, back: h.back, replace: h.replace, canGoBack: h.canGoBack },
+  Stack: {
+    Screen: ({ options }: { options: Record<string, unknown> }) => {
+      h.screenOptions.push(options);
+      return null;
+    },
+  },
+  useNavigation: () => (h as unknown as { navigation: object }).navigation,
+}));
 vi.mock("sonner-native", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("../../components/icons", () => ({
   Icon: ({ name }: { name: string }) => <i data-icon={name} />,
 }));
-vi.mock("../../components/editor-header", () => ({ editorDismissOptions: () => ({}) }));
+vi.mock("../../components/editor-header", () => ({
+  editorDismissOptions: (action: { label: string; onPress: () => void }) => ({ dismiss: action }),
+}));
 vi.mock("../../components/forms/form-save", () => ({ FormSave: () => null }));
 vi.mock("../../components/forms/use-dirty-dismiss", () => ({ useDirtyDismiss: () => undefined }));
 vi.mock("../../components/forms/enum-choice", () => ({
@@ -90,6 +118,11 @@ vi.mock("./data", () => ({
 afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
+  h.stackIndex = 1;
+  h.focused = true;
+  h.stateListeners.clear();
+  h.screenOptions = [];
+  h.canGoBack.mockReturnValue(true);
   h.errors.clear();
   h.pending.clear();
   h.resources = {
@@ -155,6 +188,60 @@ describe("Agents root", () => {
     ]);
     fireEvent.click(screen.getByRole("button", { name: "Reviews" }));
     expect(h.push).toHaveBeenCalledWith("/settings/agents/reviews");
+  });
+});
+
+describe("Agents root back control", () => {
+  const dismiss = () =>
+    h.screenOptions.map((options) => options.dismiss).filter(Boolean) as {
+      label: string;
+      onPress: () => void;
+    }[];
+  const shown = () => Boolean(h.screenOptions.at(-1)?.dismiss);
+  it("adds no second back control when Agents is reached from Settings", () => {
+    render(<AgentsSettingsScreen />);
+    expect(dismiss()).toEqual([]);
+  });
+  it("drops its Back once the stack reports Settings beneath it, even if the first read was stale", () => {
+    // On a push the state read at mount can still be the previous one (index 0).
+    h.stackIndex = 0;
+    render(<AgentsSettingsScreen />);
+    h.screenOptions = [];
+    h.stackIndex = 1;
+    act(() => {
+      for (const listener of h.stateListeners) listener();
+    });
+    expect(dismiss()).toEqual([]);
+    expect(shown()).toBe(false);
+  });
+  it("keeps its Back while a child page is open above it", () => {
+    h.stackIndex = 0;
+    const view = render(<AgentsSettingsScreen />);
+    h.stackIndex = 1;
+    h.focused = false;
+    h.screenOptions = [];
+    act(() => {
+      for (const listener of h.stateListeners) listener();
+    });
+    view.rerender(<AgentsSettingsScreen />);
+    expect(shown()).toBe(true);
+  });
+  it("shows a visible Back when Agents is the first screen in the stack", () => {
+    h.stackIndex = 0;
+    render(<AgentsSettingsScreen />);
+    expect(dismiss()).toHaveLength(1);
+    expect(dismiss()[0]?.label).toBe("Back");
+    dismiss()[0]?.onPress();
+    expect(h.back).toHaveBeenCalledOnce();
+    expect(h.replace).not.toHaveBeenCalled();
+  });
+  it("returns to Today when there is nothing to go back to", () => {
+    h.stackIndex = 0;
+    h.canGoBack.mockReturnValue(false);
+    render(<AgentsSettingsScreen />);
+    dismiss()[0]?.onPress();
+    expect(h.replace).toHaveBeenCalledWith("/");
+    expect(h.back).not.toHaveBeenCalled();
   });
 });
 

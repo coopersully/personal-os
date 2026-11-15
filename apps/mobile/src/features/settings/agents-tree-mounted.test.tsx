@@ -54,6 +54,11 @@ vi.mock("../auth/context", () => ({
 vi.mock("expo-router", () => ({
   router: { push: h.push },
   Stack: { Screen: () => null },
+  useNavigation: () => ({
+    getState: () => ({ index: 1 }),
+    isFocused: () => true,
+    addListener: () => () => {},
+  }),
   usePreventRemove: () => () => {},
 }));
 vi.mock("react-native", () => ({

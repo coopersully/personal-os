@@ -41,7 +41,15 @@ vi.mock("react-native", () => ({
     <div style={style}>{children}</div>
   ),
 }));
-vi.mock("expo-router", () => ({ router: { push: vi.fn() }, Stack: { Screen: () => null } }));
+vi.mock("expo-router", () => ({
+  router: { push: vi.fn() },
+  Stack: { Screen: () => null },
+  useNavigation: () => ({
+    getState: () => ({ index: 1 }),
+    isFocused: () => true,
+    addListener: () => () => {},
+  }),
+}));
 vi.mock("../../components/editor-header", () => ({
   editorDismissOptions: ({ onPress }: { onPress: () => void }) => {
     h.dismiss = onPress;

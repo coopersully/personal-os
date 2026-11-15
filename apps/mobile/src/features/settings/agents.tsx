@@ -5,8 +5,8 @@ import {
   agentAccountUpdateSchema,
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { router, Stack } from "expo-router";
-import { useState } from "react";
+import { router, Stack, useNavigation } from "expo-router";
+import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import {
@@ -221,9 +221,35 @@ function ConnectedAgents({
   );
 }
 type AgentPage = "connected" | "setup" | "reviews" | "access" | "policy";
+/**
+ * True while the focused screen is the first one in its stack. The account menu opens Agents
+ * that way, and the bar then has no back item of its own. The navigation state read during
+ * render can still be the previous one, so this follows the state after mount instead.
+ */
+function useFirstInStack() {
+  const navigation = useNavigation();
+  const [first, setFirst] = useState(false);
+  useEffect(() => {
+    const update = () => {
+      if (navigation.isFocused()) setFirst(navigation.getState()?.index === 0);
+    };
+    update();
+    return navigation.addListener("state", update);
+  }, [navigation]);
+  return first;
+}
 export function AgentsSettingsScreen() {
+  // Reached from Settings, the stack already supplies its own back item.
+  const first = useFirstInStack();
+  const back = editorDismissOptions({
+    label: "Back",
+    onPress: () => (router.canGoBack() ? router.back() : router.replace("/")),
+  });
+  // Header options persist once set, so the other case clears them explicitly.
+  const none = Object.fromEntries(Object.keys(back).map((key) => [key, undefined]));
   return (
     <FormBody>
+      <Stack.Screen options={first ? back : none} />
       <Section>
         <SettingsRow
           label="Connected agents"

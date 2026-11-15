@@ -13,6 +13,8 @@ export function taskMetadata(item: TaskWorkspaceItem, timezone = "UTC") {
   return [
     item.readOnly ? "Read-only" : null,
     item.kind === "reminder" ? "Reminder" : null,
+    // A cancelled task is struck through like a completed one; only this names the difference.
+    item.kind === "task" && item.record.lifecycle === "cancelled" ? "Cancelled" : null,
     item.record.priority === "high" ? "High priority" : null,
     item.record.dueAt ? `Due ${formatMoment(item.record.dueAt, timezone)}` : null,
   ].filter((value): value is string => !!value);

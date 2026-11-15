@@ -1,9 +1,10 @@
 import type { TaskWorkspaceItem, TaskWorkspaceQuery } from "@personal-os/domain";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FlatList, Modal, RefreshControl, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { toast } from "sonner-native";
 import { FloatingAdd } from "../../components/floating-add";
 import { SheetHeader } from "../../components/sheet-header";
 import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
@@ -14,6 +15,7 @@ import { ActiveFilters } from "./active-filters";
 import { projectAcceptsNewWork } from "./container-directory";
 import {
   actWithUndo,
+  errorMessage,
   type ItemAction,
   isOpen,
   itemKey,
@@ -78,7 +80,7 @@ export function TaskListScreen({
   const preferences = resources.settings.data?.preferences;
   const lifecycleView = scope.view === "history" || scope.view === "trash";
   // "Include archived in search" widens a search to finished items, and to items in archived
-  // Lists and Projects, unless the destination or the person has already chosen a status.
+  // Lists and archived or finished Projects, unless the destination or the person has already chosen a status.
   const widenSearch =
     !!debounced &&
     !!preferences?.includeArchivedInSearch &&
@@ -172,11 +174,25 @@ export function TaskListScreen({
   const archivedPage = useInfiniteQuery({
     queryKey: ["tasks", "workspace", archivedQuery],
     enabled: searchArchived,
+    // Reported below, so two failed reads of one search raise one Sonner error, not two.
+    meta: { scopedReadFeedback: true },
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) =>
       api.listTaskWorkspace({ ...archivedQuery, cursor: pageParam, limit: 30 }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
+  const archivedFailed = searchArchived && archivedPage.isError;
+  const reportedArchivedError = useRef(0);
+  const { errorUpdatedAt: archivedErrorAt, error: archivedError } = archivedPage;
+  const mainSettled = !page.isFetching;
+  const mainFailed = page.isError;
+  useEffect(() => {
+    // Once the main read settles: its own failure already raised the error for this search.
+    if (!archivedFailed || !mainSettled || reportedArchivedError.current === archivedErrorAt)
+      return;
+    reportedArchivedError.current = archivedErrorAt;
+    if (!mainFailed) toast.error(errorMessage(archivedError));
+  }, [archivedFailed, mainSettled, mainFailed, archivedErrorAt, archivedError]);
   const matches = uniqueItems(page.data?.pages.flatMap((result) => result.items) ?? []);
   // Archived matches follow the complete set of other matches, never interleave with a page.
   const archivedMatches =
@@ -188,7 +204,7 @@ export function TaskListScreen({
   const items = [...matches, ...archivedMatches];
   const archivedStart = archivedMatches.length ? matches.length : -1;
   const total =
-    page.data && (!searchArchived || archivedPage.data)
+    page.data && (!searchArchived || archivedPage.data || archivedFailed)
       ? page.data.pages[0].total + (searchArchived ? (archivedPage.data?.pages[0].total ?? 0) : 0)
       : null;
   const more = page.hasNextPage
@@ -434,10 +450,10 @@ export function TaskListScreen({
           <State
             loading={page.isPending || (searchArchived && archivedPage.isPending)}
             retry={
-              page.isError || (searchArchived && archivedPage.isError)
+              page.isError || archivedFailed
                 ? () => {
                     if (page.isError) void page.refetch();
-                    if (searchArchived && archivedPage.isError) void archivedPage.refetch();
+                    if (archivedFailed) void archivedPage.refetch();
                   }
                 : undefined
             }
@@ -478,7 +494,7 @@ export function TaskListScreen({
                   accessibilityRole="header"
                   style={{ color: t.secondary, marginTop: 16, marginBottom: 8 }}
                 >
-                  In archived lists and projects
+                  In archived or finished lists and projects
                 </Text>
               )}
               {query.group !== "none" && starts(index) && (
@@ -509,7 +525,14 @@ export function TaskListScreen({
           );
         }}
         ListFooterComponent={
-          more ? (
+          archivedFailed && items.length > 0 ? (
+            // Other matches are showing, so the unread archived matches get their own retry.
+            <Action
+              label="Retry loading archived matches"
+              disabled={archivedPage.isFetching}
+              onPress={() => void archivedPage.refetch()}
+            />
+          ) : more ? (
             <Action
               label={more.isFetchingNextPage ? "Loading…" : "Load more"}
               disabled={more.isFetchingNextPage}

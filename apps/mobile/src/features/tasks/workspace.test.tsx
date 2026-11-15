@@ -1491,7 +1491,9 @@ it("widens a search to finished and archived items when the preference is on", a
   expect(h.listTaskWorkspace).toHaveBeenCalledWith(
     expect.objectContaining({ query: "garden", status: "archived" }),
   );
-  expect(screen.getByRole("heading", { name: "In archived lists and projects" })).toBeVisible();
+  expect(
+    screen.getByRole("heading", { name: "In archived or finished lists and projects" }),
+  ).toBeVisible();
   expect(screen.getByText(/^2 items/)).toBeVisible();
 });
 it("keeps a search to the view's own status when the preference is off", async () => {
@@ -1509,7 +1511,7 @@ it("keeps a search to the view's own status when the preference is off", async (
     expect(query.status).toBeUndefined();
   }
   expect(
-    screen.queryByRole("heading", { name: "In archived lists and projects" }),
+    screen.queryByRole("heading", { name: "In archived or finished lists and projects" }),
   ).not.toBeInTheDocument();
 });
 it("does not widen a search past a fixed or chosen status, or inside a list", async () => {
@@ -1581,4 +1583,121 @@ it("pages and refreshes archived matches after the other matches, and retries a 
       h.listTaskWorkspace.mock.calls.filter(([q]) => q.status === "archived").length,
     ).toBeGreaterThan(calls),
   );
+});
+it("lists archived matches only after every other match has loaded", async () => {
+  h.listTaskWorkspace.mockImplementation(async (query) =>
+    query.status === "archived"
+      ? { items: [task("old", { title: "Garden shed" })], total: 1, nextCursor: null }
+      : query.cursor
+        ? { items: [task("two", { title: "Garden two" })], total: 2, nextCursor: null }
+        : { items: [task("one")], total: 2, nextCursor: "next" },
+  );
+  show({ standalone: true });
+  await loaded();
+  search("garden");
+  await waitFor(() =>
+    expect(h.listTaskWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "garden", status: "archived" }),
+    ),
+  );
+  await act(async () => {});
+  expect(screen.queryByRole("button", { name: "Open task: Garden shed" })).not.toBeInTheDocument();
+  // Load more continues the other matches first.
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await screen.findByRole("button", { name: "Open task: Garden two" });
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith(
+    expect.objectContaining({ status: "all", cursor: "next" }),
+  );
+  expect(await screen.findByRole("button", { name: "Open task: Garden shed" })).toBeVisible();
+  expect(screen.getByText(/^3 items/)).toBeVisible();
+});
+it("starts the archived section as its own block when results are grouped", async () => {
+  h.preferences.taskGroup = "list";
+  h.listTaskWorkspace.mockImplementation(async (query) =>
+    query.status === "archived"
+      ? {
+          items: [{ ...task("old", { title: "Garden shed" }), groupKey: "inbox" }],
+          total: 1,
+          nextCursor: null,
+        }
+      : { items: [{ ...task("one"), groupKey: "inbox" }], total: 1, nextCursor: null },
+  );
+  show({ standalone: true });
+  await loaded();
+  search("garden");
+  await screen.findByRole("button", { name: "Open task: Garden shed" });
+  expect(
+    screen.getByRole("heading", { name: "In archived or finished lists and projects" }),
+  ).toBeVisible();
+  // The same list heads both blocks: once above the other matches, once under Archived.
+  expect(screen.getAllByRole("heading", { name: "Inbox" })).toHaveLength(2);
+});
+it.each([
+  ["History", { scope: { view: "history" } }, undefined],
+  ["Reminders", { scope: { view: "all", kind: "reminder" } }, "all"],
+] as const)("makes no archived read when searching %s", async (_name, props, status) => {
+  show({ standalone: true, ...props } as never);
+  await loaded();
+  search("garden");
+  await waitFor(() =>
+    expect(h.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "garden" }),
+    ),
+  );
+  await act(async () => {});
+  expect(h.listTaskWorkspace.mock.lastCall?.[0].status).toBe(status);
+  expect(h.listTaskWorkspace).not.toHaveBeenCalledWith(
+    expect.objectContaining({ status: "archived" }),
+  );
+});
+it("keeps a chosen Status when searching", async () => {
+  show({ standalone: true, initialFilters: { status: "completed" } });
+  await loaded();
+  search("garden");
+  await waitFor(() =>
+    expect(h.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ query: "garden", status: "completed" }),
+    ),
+  );
+  await act(async () => {});
+  expect(h.listTaskWorkspace).not.toHaveBeenCalledWith(
+    expect.objectContaining({ status: "archived" }),
+  );
+});
+it("raises one Sonner error when both reads of a search fail", async () => {
+  show({ standalone: true });
+  await loaded();
+  h.listTaskWorkspace.mockRejectedValue(new Error("offline"));
+  search("garden");
+  await screen.findByRole("button", { name: "Retry loading" });
+  await act(async () => {});
+  expect(h.error).toHaveBeenCalledTimes(1);
+});
+it("offers a retry for archived matches beside the matches that did load", async () => {
+  let fail = true;
+  h.listTaskWorkspace.mockImplementation(async (query) => {
+    if (query.status !== "archived") return { items: h.items, total: 1, nextCursor: null };
+    if (fail) throw new Error("offline");
+    return { items: [task("old", { title: "Garden shed" })], total: 1, nextCursor: null };
+  });
+  show({ standalone: true });
+  await loaded();
+  search("garden");
+  const retry = await screen.findByRole("button", { name: "Retry loading archived matches" });
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
+  expect(screen.getByText(/^1 items/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Open task: Task one" })).toBeVisible();
+  fail = false;
+  fireEvent.click(retry);
+  await screen.findByRole("button", { name: "Open task: Garden shed" });
+  expect(
+    screen.queryByRole("button", { name: "Retry loading archived matches" }),
+  ).not.toBeInTheDocument();
+  expect(h.error).toHaveBeenCalledTimes(1);
+});
+it("names a cancelled task on its scan line", async () => {
+  h.items = [task("one", { lifecycle: "cancelled", cancelledAt: "2026-11-02T12:00:00Z" })];
+  show({ scope: { view: "history" } });
+  await loaded();
+  expect(screen.getByText("Cancelled")).toBeVisible();
 });

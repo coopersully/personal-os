@@ -109,7 +109,7 @@ contract for geometry, state and reset behavior. Do not scatter configuration th
 
 ### Task row details
 
-A task row keeps its full title, wrapping rather than truncating, then up to four quieter lines.
+A task row keeps its full title, wrapping rather than truncating, then quieter lines below it.
 The scan line stays about urgency: Read-only, Reminder, High priority and the due date, with the
 overdue treatment unchanged. A context line follows with reserved time, the estimate and the
 owning List / Project, in that order so a long container name is what truncates. Reserved time
@@ -124,13 +124,18 @@ the same lines in reading order.
 ### Archived items in task search
 
 "Include archived in search" (on by default) widens a task search to completed and cancelled
-items and to items in archived Lists and Projects, as the web search does. Matches in archived
-containers are read separately and listed last under "In archived lists and projects", after
+items and to items in archived Lists and archived or finished Projects, the same intent as the
+web search toggle. Those container matches are read separately and listed last under "In
+archived or finished lists and projects", after
 every other match has loaded; the item count covers both. The preference applies wherever a
 search has no status of its own: it leaves alone a destination with a fixed status (To-do is open
 items), a Status the person chose, History and Trash. Inside a list or project one read with
 every status already covers its archived work. With the preference off a search keeps the view's
-own status.
+own status. Until the preference has loaded a search is not widened. One search that
+fails raises one Sonner error even though it makes two reads; if only the archived read fails
+while other matches are showing, the list offers "Retry loading archived matches" and counts the
+matches it has. A cancelled task names itself Cancelled on the scan line, since it is otherwise
+drawn like a completed one.
 
 ## Accessibility and verification
 

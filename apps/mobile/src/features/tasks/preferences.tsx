@@ -202,8 +202,8 @@ function Preferences({
         </Section>
         <Section title="Search">
           <SectionNote>
-            When on, a search also finds completed and cancelled items and items in archived Lists
-            and Projects.
+            When on, a search also finds completed and cancelled items and items in archived or
+            finished Lists and Projects.
           </SectionNote>
           <ToggleRow
             label="Include archived in search"

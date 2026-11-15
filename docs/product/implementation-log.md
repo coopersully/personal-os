@@ -1394,7 +1394,8 @@ search".
   nothing. A row does not repeat a container its screen is scoped or filtered to.
 - Search: with the preference on, a search without a fixed or chosen status sends `status: "all"`
   and, outside a list or project, a second read with `status: "archived"` whose matches are
-  listed last under their own heading. To-do (fixed open status), History and Trash are unchanged.
+  listed last under their own heading. A failed search raises one Sonner error; a failed
+  archived read beside other matches offers its own retry. Cancelled tasks say Cancelled. To-do (fixed open status), History and Trash are unchanged.
 - The preference notes no longer say the row-detail toggles configure only the web app.
 - No API, schema or shared-component change.
 - Verified by presentation and screen tests only. Not checked on a simulator or device.

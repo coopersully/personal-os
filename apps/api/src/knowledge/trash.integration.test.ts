@@ -374,6 +374,113 @@ describe("memory trash and purge", () => {
       });
   });
 
+  async function people(f: Awaited<ReturnType<typeof fixture>>) {
+    return {
+      person: await f.save(fact("endpoint-person-detail")),
+      other: await f.save(fact("endpoint-other-person")),
+    };
+  }
+  function relationshipContent(subjectId: string, objectId: string) {
+    return {
+      kind: "relationship" as const,
+      value: { subjectId, objectId, relationship: "partner", direction: "bidirectional" as const },
+    };
+  }
+  async function expectAllStored(ids: string[]) {
+    for (const id of ids)
+      expect(
+        await database.db
+          .select({ id: knowledgeRevisions.id })
+          .from(knowledgeRevisions)
+          .where(eq(knowledgeRevisions.recordId, id)),
+      ).not.toHaveLength(0);
+  }
+
+  it("restore_refuses_a_relationship_that_cites_its_trashed_endpoint_as_evidence", async () => {
+    const f = await fixture();
+    const { person, other } = await people(f);
+    const relationship = await f.save(
+      fact("unused", {
+        content: relationshipContent(person.id, other.id),
+        evidence: [{ type: "domain_record", domain: "knowledge", id: person.id, revision: 1 }],
+      }),
+    );
+    await f.act("trash", relationship);
+    await f.act("trash", person);
+
+    await expect(f.act("restore", relationship)).rejects.toMatchObject({
+      status: 409,
+      details: { blockedBy: [person.id] },
+    });
+    expect(await f.act("delete_now", person)).toMatchObject({ outcome: "forgotten" });
+    for (const id of [person.id, relationship.id])
+      expect(await f.records.get(f.owner, { id, ...planning })).toMatchObject({
+        id,
+        state: "forgotten",
+      });
+    await expectAllStored([other.id]);
+  });
+
+  it("evidence_in_an_earlier_revision_still_counts_after_it_becomes_an_endpoint", async () => {
+    const f = await fixture();
+    const { person, other } = await people(f);
+    const cited = await f.save(derivedFrom(person, "cites-the-person"));
+    const revised = await f.lifecycle.mutate(f.owner, {
+      action: "revise",
+      recordId: cited.id,
+      expectedRevision: 1,
+      mutationKey: randomUUID(),
+      content: relationshipContent(person.id, other.id),
+    });
+    expect(revised).toMatchObject({ outcome: "readable", record: { revision: 2 } });
+    const relationship = { id: cited.id, revision: 2 };
+    await f.act("trash", relationship);
+    await f.act("trash", person);
+
+    await expect(f.act("restore", relationship)).rejects.toMatchObject({
+      status: 409,
+      details: { blockedBy: [person.id] },
+    });
+    await f.act("restore", person);
+    await f.act("restore", relationship);
+    // Trashing the person again moves the record cited by revision 1 with it.
+    await f.act("trash", person);
+    const trashed = await f.search.search(f.owner, { ...planning, status: "trashed", limit: 50 });
+    expect(
+      Object.fromEntries(trashed.items.map(({ id, trashGroupId }) => [id, trashGroupId])),
+    ).toEqual({ [person.id]: person.id, [cited.id]: person.id });
+  });
+
+  it("purge_guard_erases_nothing_when_a_derived_record_is_not_in_trash", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("guard-source"));
+    const b = await f.save(derivedFrom(a, "guard-derived"));
+    await f.act("trash", a);
+    // Force the state no API path reaches: a derived record outside Trash.
+    await database.db
+      .update(knowledgeRecords)
+      .set({ trashedAt: null, trashGroupId: null, statusBeforeTrash: null })
+      .where(eq(knowledgeRecords.id, b.id));
+
+    await expect(f.act("delete_now", a)).rejects.toMatchObject({
+      status: 500,
+      details: { recordIds: [b.id] },
+    });
+    f.advance(knowledgeTrashRetentionMs + 1);
+    await expect(f.purge.purgeExpired({ limit: 100 })).rejects.toMatchObject({ status: 500 });
+    await expectAllStored([a.id, b.id]);
+    expect(
+      await database.db
+        .select()
+        .from(knowledgeTombstones)
+        .where(eq(knowledgeTombstones.userId, f.owner.userId)),
+    ).toEqual([]);
+    expect(await f.records.get(f.owner, { id: a.id, ...planning })).toMatchObject({
+      id: a.id,
+      trashGroupId: a.id,
+    });
+  });
+
   it("trash_invalidates_open_cursors", async () => {
     const f = await fixture();
     for (const value of ["cursor-one", "cursor-two", "cursor-three"]) await f.save(fact(value));

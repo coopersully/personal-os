@@ -12,6 +12,7 @@ import {
 } from "@personal-os/database";
 import { knowledgeTrashRetentionMs } from "@personal-os/domain";
 import { and, asc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
+import { AppError } from "../errors.js";
 import { bumpKnowledgeEpoch, type KnowledgeTransaction, lockKnowledgeOwner } from "./access.js";
 import { knowledgeDerivedClosure } from "./derivation-closure.js";
 
@@ -19,7 +20,8 @@ const maxPurgeBatch = 100;
 
 /**
  * Erase trashed records, and every record derived from them in any trash group, down to a
- * content-free tombstone, so no derived copy outlives its source. The caller holds the owner's
+ * content-free tombstone, so no derived copy outlives its source. Throws, erasing nothing,
+ * if that closure reaches a record that is not in Trash. The caller holds the owner's
  * knowledge write lock. Other records' immutable revisions keep any reference to these IDs;
  * those IDs resolve to the tombstone. Rows already purged are skipped, so a rerun is safe.
  */
@@ -66,6 +68,13 @@ export async function purgeTrashedKnowledge(
       ),
     )
     .for("update");
+  // Restore refuses while a source is in Trash elsewhere, so every derived record should be in
+  // Trash. If one is not, stop before erasing anything rather than delete live memory.
+  const live = erased.filter(({ trashedAt }) => trashedAt === null).map(({ id }) => id);
+  if (live.length)
+    throw new AppError("internal_error", "Purge reached memory that is not in Trash.", {
+      recordIds: live.sort(),
+    });
   const ids = erased.map(({ id }) => id);
 
   await tx
@@ -147,23 +156,31 @@ export function createKnowledgePurgeService({ db, now }: { db: Database; now: ()
         .orderBy(asc(knowledgeRecords.trashedAt), asc(knowledgeRecords.id))
         .limit(Math.max(0, Math.min(limit, maxPurgeBatch)));
       let purged = 0;
+      let failure: unknown;
       for (const { userId, id } of due) {
         if (signal?.aborted) break;
-        purged += await db.transaction(async (tx) => {
-          await lockKnowledgeOwner(tx, userId);
-          // Take the account row before record rows, matching owner sessions, so account
-          // deletion waits for this purge instead of deadlocking with it.
-          const [owner] = await tx
-            .select({ id: users.id })
-            .from(users)
-            .where(eq(users.id, userId))
-            .for("key share");
-          if (!owner) return 0;
-          const count = await purgeTrashedKnowledge(tx, userId, [id], at, trashedBefore);
-          if (count) await bumpKnowledgeEpoch(tx, userId);
-          return count;
-        });
+        // One record that cannot be purged safely must not hold back everyone else's.
+        purged += await db
+          .transaction(async (tx) => {
+            await lockKnowledgeOwner(tx, userId);
+            // Take the account row before record rows, matching owner sessions, so account
+            // deletion waits for this purge instead of deadlocking with it.
+            const [owner] = await tx
+              .select({ id: users.id })
+              .from(users)
+              .where(eq(users.id, userId))
+              .for("key share");
+            if (!owner) return 0;
+            const count = await purgeTrashedKnowledge(tx, userId, [id], at, trashedBefore);
+            if (count) await bumpKnowledgeEpoch(tx, userId);
+            return count;
+          })
+          .catch((error: unknown) => {
+            failure ??= error;
+            return 0;
+          });
       }
+      if (failure) throw failure;
       return { purged, selected: due.length };
     },
   };

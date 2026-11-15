@@ -12,7 +12,7 @@ import {
   knowledgeTrashInputSchema,
   knowledgeTrashRetentionMs,
 } from "@personal-os/domain";
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import {
@@ -25,7 +25,11 @@ import {
   projectKnowledgeRevision,
   requireKnowledgeOwner,
 } from "./access.js";
-import { knowledgeDerivedClosure, knowledgeDerivedSources } from "./derivation-closure.js";
+import {
+  knowledgeDerivedClosure,
+  knowledgeRevisionSources,
+  knowledgeSourcesTrashedOutsideGroup,
+} from "./derivation-closure.js";
 import { purgeTrashedKnowledge } from "./purge-service.js";
 import {
   findKnowledgeReceipt,
@@ -99,31 +103,27 @@ async function restoreBlockers(tx: KnowledgeTransaction, userId: string, groupId
     )
     .where(and(eq(knowledgeRevisions.userId, userId), eq(knowledgeRecords.trashGroupId, groupId)));
   const members = new Set(rows.map(({ recordId }) => recordId.toLowerCase()));
-  const sources = new Set<string>();
-  for (const id of members) {
-    const revisions = rows
-      .filter(({ recordId }) => recordId.toLowerCase() === id)
-      .map((row) => projectKnowledgeRevision({ ...row, trashedAt: null, trashGroupId: null }));
-    for (const source of knowledgeDerivedSources(revisions))
-      if (!members.has(source)) sources.add(source);
+  const named = new Set<string>();
+  for (const row of rows) {
+    const revision = projectKnowledgeRevision({ ...row, trashedAt: null, trashGroupId: null });
+    for (const source of knowledgeRevisionSources(revision))
+      if (!members.has(source)) named.add(source);
   }
-  if (!sources.size) return [];
-  const ids = [...sources];
-  const trashed = await tx
-    .select({ id: knowledgeRecords.id })
-    .from(knowledgeRecords)
-    .where(
-      and(
-        eq(knowledgeRecords.userId, userId),
-        inArray(knowledgeRecords.id, ids),
-        isNotNull(knowledgeRecords.trashedAt),
-      ),
-    );
-  const purged = await tx
-    .select({ id: knowledgeTombstones.recordId })
-    .from(knowledgeTombstones)
-    .where(and(eq(knowledgeTombstones.userId, userId), inArray(knowledgeTombstones.recordId, ids)));
-  return [...trashed, ...purged].map(({ id }) => id).sort();
+  const { rows: trashed } = await tx.execute<{ id: string }>(
+    knowledgeSourcesTrashedOutsideGroup(userId, groupId),
+  );
+  const purged = named.size
+    ? await tx
+        .select({ id: knowledgeTombstones.recordId })
+        .from(knowledgeTombstones)
+        .where(
+          and(
+            eq(knowledgeTombstones.userId, userId),
+            inArray(knowledgeTombstones.recordId, [...named]),
+          ),
+        )
+    : [];
+  return [...new Set([...trashed, ...purged].map(({ id }) => id))].sort();
 }
 
 function requireTrashGroupRoot(current: KnowledgeRevision) {

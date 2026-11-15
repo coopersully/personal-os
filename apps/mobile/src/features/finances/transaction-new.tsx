@@ -62,6 +62,8 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
   const lock = useRef(false);
   const unconfirmed = useRef<SentTransaction | null>(null);
   const added = useRef(false);
+  // Read by a toast action pressed before the submitted state has rendered.
+  const settled = useRef(false);
   const latestSave = useRef<(replaces?: string | number) => Promise<void>>(async () => undefined);
   const active = useRef(true);
   const currentOwner = useRef(owner);
@@ -134,8 +136,21 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
   /** `replaces` is the toast whose action asked for this save; the progress takes its place. */
   async function save(replaces?: string | number) {
     // A toast action can outlive the form or a confirmed add; neither may write again.
-    if (!active.current || added.current) return void toast.dismiss(replaces);
-    if (lock.current || !edited || submitted || amount === undefined || !date || !accountId) return;
+    if (!active.current || added.current) {
+      // Without an id, dismiss clears every toast, the confirmation of the add included.
+      if (replaces !== undefined) toast.dismiss(replaces);
+      return;
+    }
+    if (
+      lock.current ||
+      !edited ||
+      submitted ||
+      settled.current ||
+      amount === undefined ||
+      !date ||
+      !accountId
+    )
+      return;
     if (!merchant.trim()) return;
     const attempt: SentTransaction = {
       accountId,
@@ -148,9 +163,11 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
     };
     lock.current = true;
     setPending(true);
+    // An update is merged into the toast it replaces, so the action is cleared explicitly;
+    // otherwise Add anyway would stay through progress, success and failure.
     const id = toast.loading(
       "Adding transaction…",
-      replaces === undefined ? undefined : { id: replaces },
+      replaces === undefined ? undefined : { id: replaces, action: undefined },
     );
     try {
       const earlier = unconfirmed.current;
@@ -177,7 +194,7 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
             // Any field changed since, category and notes included: closing would drop that edit.
             toast.info(
               `Your earlier attempt already added “${earlier.merchant}”. This changed draft has not been added.`,
-              // The action hands its own toast to the save, so it cannot be pressed twice.
+              // The action hands its own toast to the save, which removes the action from it.
               { id, action: { label: "Add anyway", onClick: () => void latestSave.current(id) } },
             );
             return;
@@ -207,6 +224,7 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
       }
       if (!current()) return void toast.dismiss(id);
       if (!appliedTransaction(result)) {
+        settled.current = true;
         setSubmitted(true);
         toast.info(
           "status" in result && result.status === "needs_input"

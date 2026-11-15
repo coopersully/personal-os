@@ -281,7 +281,9 @@ confirmation that names the account and what is preserved.
 
 ### Finance transaction management
 
-Transactions in Spending has Add beside Select and Filters, which opens the new transaction form; a
+Spending offers Add as a command that opens the new transaction form: beside Select and Filters on
+Transactions, and on its own line above the content on Summary, where it stays through a category
+drill-down. It does not wait for the spending read, so it is there while that loads or fails. A
 manual account's action menu opens the same form with that account chosen. Spending has no
 floating plus, because it would sit over row amounts. The form uses Required and Optional as
 placeholders, like the account form, rather than sample values. A transaction a person adds belongs to a manual
@@ -292,8 +294,9 @@ blank Category leaves the choice to nohmi. Adding has no retry key, so after an 
 next Save first looks on that account and date for the record the earlier attempt would have left,
 and adds nothing when it finds one. If any field of the draft was changed since, category and notes
 included, the form stays open, says the earlier version is recorded and offers Add anyway. That
-action hands its toast to the save, and writes nothing once the add is confirmed or the form has
-been left. Leaving after an unknown outcome never says the
+action hands its toast to the save, which clears the action from it (an updated toast keeps its
+earlier action unless told otherwise), and writes nothing while a save is running, once the add is
+confirmed or submitted, or after the form has been left. Leaving after an unknown outcome never says the
 transaction was not added, and re-reads Finance data. An amount takes a comma only as thousands
 grouping; `12,50` is corrected beside the field, never read as 1250.
 

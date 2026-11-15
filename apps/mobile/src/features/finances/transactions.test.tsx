@@ -19,6 +19,7 @@ vi.mock("@tanstack/react-query", async () => {
 });
 const h = vi.hoisted(() => ({
   owner: "owner-a",
+  timezone: "America/New_York" as string | undefined,
   params: {} as Record<string, string>,
   push: vi.fn(),
   navigate: vi.fn(),
@@ -127,7 +128,7 @@ vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ b
 vi.mock("../auth/context", () => ({
   useOptionalAuth: () => null,
   useAuth: () => ({
-    state: { user: { id: h.owner, planningTimezone: "America/New_York" } },
+    state: { user: { id: h.owner, planningTimezone: h.timezone } },
     session: { api: () => h.api, epoch: () => h.owner },
   }),
 }));
@@ -285,6 +286,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   for (const mock of Object.values(h.api)) mock.mockReset();
   h.owner = "owner-a";
+  h.timezone = "America/New_York";
   h.params = {};
   h.api.listFinanceAccounts.mockResolvedValue(accounts([account, linked]));
   h.api.listFinanceTransactions.mockResolvedValue({
@@ -300,11 +302,15 @@ afterEach(cleanup);
 
 // Adding a manual transaction
 
-it("opens the new transaction form from the Transactions action row and from a manual account", async () => {
-  // Summary has no add control: nothing floats over a row's amount in either mode.
+it("opens the new transaction form from Summary, the Transactions action row and a manual account", async () => {
+  // Summary offers Add as a command above its content, while the spending read is still loading.
   const summary = mount(<FinanceSpendingScreen />);
-  expect(screen.queryByRole("button", { name: "Add transaction" })).toBeNull();
+  const first = screen.getByRole("button", { name: "Add transaction" });
+  expect(first.querySelector('[data-icon="add"]')).toBeNull();
+  fireEvent.click(first);
+  expect(h.push).toHaveBeenLastCalledWith("/finance-transaction-edit");
   summary.unmount();
+  h.push.mockClear();
   h.params = { mode: "Transactions" };
   const view = mount(<FinanceSpendingScreen />);
   const add = await screen.findByRole("button", { name: "Add transaction" });
@@ -324,6 +330,15 @@ it("opens the new transaction form from the Transactions action row and from a m
     pathname: "/finance-transaction-edit",
     params: { accountId: account.id },
   });
+});
+
+it("keeps Add on Transactions when the spending period cannot be read", () => {
+  h.timezone = undefined;
+  h.params = { mode: "Transactions" };
+  mount(<FinanceSpendingScreen />);
+  expect(screen.queryByRole("button", { name: "Select transactions" })).toBeNull();
+  press("Add transaction");
+  expect(h.push).toHaveBeenCalledWith("/finance-transaction-edit");
 });
 
 it("does not offer adding a transaction to a connected account", async () => {
@@ -1465,13 +1480,45 @@ it("adds once when Add anyway is pressed twice", async () => {
   await waitFor(() =>
     expect(h.success).toHaveBeenCalledWith("Transaction added", expect.anything()),
   );
-  // The progress took the action's own toast, and a second press writes nothing.
-  expect(h.loading).toHaveBeenLastCalledWith("Adding transaction…", { id: "feedback" });
+  // The progress took the action's own toast and removed Add anyway from it; a second press
+  // writes nothing.
+  // Strict: a missing key would leave the merged toast's action in place.
+  expect(h.loading.mock.lastCall).toStrictEqual([
+    "Adding transaction…",
+    { id: "feedback", action: undefined },
+  ]);
   await act(async () => action.onClick());
   await act(async () => action.onClick());
+  // Saving from the form after the add clears no toast: an id-less dismiss would clear them all.
+  fireEvent.click(save());
   expect(h.api.createFinanceTransaction).toHaveBeenCalledTimes(2); // the timeout and the one add
   expect(h.success).toHaveBeenCalledOnce();
   expect(h.back).toHaveBeenCalledOnce();
+  expect(h.dismiss.mock.calls.length).toBeGreaterThan(0);
+  for (const [id] of h.dismiss.mock.calls) expect(id).toBe("feedback");
+});
+
+it("adds once when Add anyway is pressed again before the first add settles", async () => {
+  const action = await recordedThenEdited(() => type("Amount", "9.40"));
+  const request = deferred<unknown>();
+  h.api.createFinanceTransaction.mockReturnValue(request.promise);
+  await act(async () => action.onClick());
+  await act(async () => action.onClick());
+  await settle(request, transaction);
+  await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledTimes(2); // the timeout and the one add
+});
+
+it("adds nothing when Add anyway is pressed before a submitted outcome has rendered", async () => {
+  const action = await recordedThenEdited(() => type("Amount", "9.40"));
+  h.api.createFinanceTransaction.mockResolvedValue({ status: "needs_input" });
+  await act(async () => {
+    action.onClick();
+    // The save has released its lock, and the form has not rendered its submitted state yet.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    action.onClick();
+  });
+  expect(h.api.createFinanceTransaction).toHaveBeenCalledTimes(2); // the timeout and the one add
 });
 
 it("adds nothing when Add anyway is pressed after the form was left", async () => {

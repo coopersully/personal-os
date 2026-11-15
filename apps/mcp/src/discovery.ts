@@ -21,6 +21,11 @@ type DiscoveryOptions = {
 };
 
 export function registerPersonalOsContextTool(server: McpServer, options: DiscoveryOptions): void {
+  const availableTools = availableToolNames(
+    options.scopes,
+    options.readOnly,
+    options.includeCompatibility,
+  );
   server.registerTool(
     "get_ilo_context",
     {
@@ -33,12 +38,17 @@ export function registerPersonalOsContextTool(server: McpServer, options: Discov
       apiResult(async () => ({
         ...(await options.api.getPersonalOsContext()),
         mcp: {
-          availableTools: availableToolNames(
-            options.scopes,
-            options.readOnly,
-            options.includeCompatibility,
-          ),
+          availableTools,
           readOnly: options.readOnly,
+          ...(availableTools.includes("get_context_for_intent")
+            ? {
+                memoryGuidance: [
+                  "Search before saving to find duplicate or conflicting knowledge.",
+                  "Cite supporting sources and distinguish stated knowledge from inference.",
+                  "Fetch fresh purpose-bound context after a memory mutation.",
+                ],
+              }
+            : {}),
           workflow: [
             "context: orient to the user, time, readiness, and granted access",
             "inspect: read current state and source evidence",

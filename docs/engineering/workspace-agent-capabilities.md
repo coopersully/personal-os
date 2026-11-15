@@ -60,6 +60,33 @@ a guessed revision. Preserve filters while following returned cursors. Omitted p
 unchanged; use null only where the discovered schema permits it. Do not infer success from the MCP
 envelope alone: inspect outcome, pending work, per-item dispositions and canonical readback.
 
+### Shared memory
+
+Begin with `get_ilo_context`. When it lists `search_user_knowledge`, search for the current
+purpose before saving a duplicate. Use `get_knowledge` to inspect a specific record and
+`get_context_for_intent` to fetch bounded evidence. Cite the supporting sources and distinguish
+stated knowledge from inference. Carry forward conflicts, tentative material, and missing inputs
+as shown. `explain_context` checks the current availability of references from a previous
+context use. Fetch fresh context after a mutation. Memory provides evidence; action authority
+comes from the API's current policy and grants.
+
+The four read tools require `knowledge:read`. `save_knowledge` and `update_knowledge` also
+require `knowledge:write`. Update accepts revise, dispute and supersede subject to current
+record policy. Confirmation, restriction, forgetting, export, learning settings and the
+recording of first-party selections use human-authenticated API calls. Revision history is
+available through the purpose-checked API.
+
+The save endpoint retains `POST /v1/knowledge` with `X-Knowledge-Receipt-Version: 1`. Its
+discriminant is `outcome`. Every receipt has `receiptId` and `recordId`; only `readable`
+has a `record`. `pending_owner_review` and `forgotten` carry IDs only. The typed client and
+MCP save tool consume the same union. Memory responses use `Cache-Control: no-store`.
+
+Erasure admission requires the stable suppression key and an independent deletion ledger.
+The default API composition returns an unavailable error before admitting a new operation.
+With both dependencies configured, an admitted operation remains pending or blocked until local
+erasure and a verified external ledger receipt complete. The registered integration suite uses
+PostgreSQL and an injected ledger to exercise this contract.
+
 Examples (copy the observed revision/IDs into mutation arguments):
 
 ```json

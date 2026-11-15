@@ -1,5 +1,18 @@
 # Finance MVP implementation plan
 
+> **Historical plan — scope superseded 2026-09-28.** Preserve the original milestones below as
+> historical context, not current dispatch instructions. Cooper clarified that nohmi is the
+> account's persistent brain, storage and toolkit, never a built-in agent. Named Codex/Claude
+> launch gates, mandatory host/schedule registration, agent wake-up and latency requirements are
+> superseded. The new scope also includes per-category carryover and explicit combined budget
+> limits. Read the reconciled canonical docs and the written designs for
+> [Finance](../specs/2026-09-28-finance-toolkit-design.md),
+> [Texting](../specs/2026-09-28-texting-toolkit-design.md), and
+> [shared toolkit](../specs/2026-09-28-shared-agent-toolkit-design.md).
+> Those designs await written review and replacement implementation plans. Do not start new work
+> from the old prompts or infer new authorization from their earlier approval. This notice does
+> not interrupt an existing task, modify an external schedule, or erase prior delivery evidence.
+
 > **For agentic workers:** Use `superpowers:executing-plans` for the assigned workstream only.
 > Cooper selected separate Codex tasks, each with its own worktree, branch and PR. This orchestration
 > task coordinates them; it does not perform their feature implementation.

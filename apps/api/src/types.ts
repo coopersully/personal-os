@@ -19,6 +19,7 @@ import type {
 } from "@personal-os/domain";
 import type { AppConfig } from "./config.js";
 import type { EmailDelivery } from "./email-delivery.js";
+import type { KnowledgeForgetDependencies } from "./knowledge/forget-service.js";
 import type { RuntimeLifecycle } from "./runtime-lifecycle.js";
 
 export type Principal = {
@@ -37,6 +38,7 @@ export type AppDependencies = {
   email?: EmailDelivery;
   google?: GoogleConnector;
   icloud?: ICloudConnector;
+  knowledgeForget?: KnowledgeForgetDependencies;
   log?: (entry: RequestLog) => void;
   now?: () => Date;
   plaid?: PlaidConnector;

@@ -56,6 +56,23 @@ Use the shared [feedback rubric](../feedback.md) for every operation.
 - Query failures expose Retry; background failures retain prior values with a
   stale warning. Each error has one announcement owner.
 
+## Memory
+
+Memory lives in the Personal group at `/settings?section=memory`. Saved records show
+their origin and current review state. All memory includes expired and superseded
+records, which can still be inspected or forgotten. The selected use filters the
+records by permitted purpose. Text search sends its input in the authenticated search body.
+Record details disclose sources, contributors, permitted uses, and paginated
+history on request. Corrections save explicitly and revision conflicts retain the
+draft until the person has reviewed the latest revision. A rejected page cursor
+clears previously displayed memory while the app rechecks access and reloads the list.
+
+Forgetting previews dependent copies and revision counts before confirmation.
+Source material and exported downloads remain in their original locations. While
+erasure runs, Settings displays the operation state and offers status or retry
+controls. A fresh session can recover a pending or blocked operation from the
+owner-only status endpoint. Only confirmed completion gets a success toast.
+
 ## Titles and subsection headers
 
 Use title case for Settings page titles, navigation destinations, and section labels

@@ -44,6 +44,10 @@ import type {
   FinanceProvider,
   GoogleConnectionService,
   HomeLocation,
+  KnowledgeContextReference,
+  KnowledgePreferenceKey,
+  KnowledgePreferenceSelection,
+  KnowledgeQuery,
   LegacyMailRuleAction,
   MailAddress,
   MailAttachment,
@@ -7035,5 +7039,442 @@ export const financeDecisionDeclines = pgTable(
       sql`${table.targetKind} IN ('review_batch','budget_start_preview','review_batch_undo')`,
     ),
     check("finance_decision_decline_owner", sql`${table.declinedBy} = ${table.userId}`),
+  ],
+);
+
+/** Stable account-owned knowledge identity; content lives in immutable revisions. */
+export const knowledgeRecords = pgTable(
+  "knowledge_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("knowledge_records_owner_id_idx").on(table.userId, table.id)],
+);
+export const knowledgeRevisions = pgTable(
+  "knowledge_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    revision: integer("revision").notNull(),
+    snapshot: jsonb("snapshot")
+      .$type<import("@personal-os/domain").KnowledgeRecordSnapshot>()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_revisions_owner_record_revision_idx").on(
+      table.userId,
+      table.recordId,
+      table.revision,
+    ),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const knowledgeSources = pgTable(
+  "knowledge_sources",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    source: jsonb("source").$type<import("@personal-os/domain").KnowledgeSource>().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const knowledgeRelationships = pgTable(
+  "knowledge_relationships",
+  {
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    relatedRecordId: uuid("related_record_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_relationships_pair_idx").on(
+      table.userId,
+      table.recordId,
+      table.relatedRecordId,
+    ),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId, table.relatedRecordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+/** Operational receipts retain hashes and references, never knowledge values. */
+export const knowledgeReceipts = pgTable(
+  "knowledge_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    mutationKey: uuid("mutation_key").notNull(),
+    requestHash: text("request_hash"),
+    replayVerifier: text("replay_verifier"),
+    actorId: uuid("actor_id"),
+    privateProposal: boolean("private_proposal").notNull().default(false),
+  },
+  (table) => [
+    uniqueIndex("knowledge_receipts_owner_key_idx").on(table.userId, table.mutationKey),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/** Revision-keyed provenance projects legacy snapshots without altering their content. */
+export const knowledgeRevisionMetadata = pgTable(
+  "knowledge_revision_metadata",
+  {
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    revision: integer("revision").notNull(),
+    claimKey: text("claim_key"),
+    metadata: jsonb("metadata")
+      .$type<import("@personal-os/domain").KnowledgeRevisionMetadata>()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.recordId, table.revision] }),
+    foreignKey({
+      name: "knowledge_revision_metadata_revision_fk",
+      columns: [table.userId, table.recordId, table.revision],
+      foreignColumns: [
+        knowledgeRevisions.userId,
+        knowledgeRevisions.recordId,
+        knowledgeRevisions.revision,
+      ],
+    }).onDelete("cascade"),
+    index("knowledge_revision_metadata_owner_claim_idx").on(
+      table.userId,
+      sql`md5(${table.claimKey})`,
+    ),
+  ],
+);
+
+export const knowledgeOwnerEpochs = pgTable(
+  "knowledge_owner_epochs",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    epoch: bigint("epoch", { mode: "number" }).notNull(),
+  },
+  (table) => [check("knowledge_owner_epochs_positive", sql`${table.epoch} > 0`)],
+);
+
+/** A source can be a copied dependency of many revisions. Ordinary links are kept separately. */
+export const knowledgeDerivations = pgTable(
+  "knowledge_derivations",
+  {
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    revision: integer("revision").notNull(),
+    sourceRecordId: uuid("source_record_id").notNull(),
+    sourceRevision: integer("source_revision").notNull(),
+    kind: text("kind").$type<import("@personal-os/domain").KnowledgeDerivationKind>().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.userId,
+        table.recordId,
+        table.revision,
+        table.sourceRecordId,
+        table.sourceRevision,
+        table.kind,
+      ],
+    }),
+    foreignKey({
+      name: "knowledge_derivations_revision_fk",
+      columns: [table.userId, table.recordId, table.revision],
+      foreignColumns: [
+        knowledgeRevisions.userId,
+        knowledgeRevisions.recordId,
+        knowledgeRevisions.revision,
+      ],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "knowledge_derivations_source_revision_fk",
+      columns: [table.userId, table.sourceRecordId, table.sourceRevision],
+      foreignColumns: [
+        knowledgeRevisions.userId,
+        knowledgeRevisions.recordId,
+        knowledgeRevisions.revision,
+      ],
+    }).onDelete("cascade"),
+    index("knowledge_derivations_owner_source_idx").on(table.userId, table.sourceRecordId),
+    check(
+      "knowledge_derivations_kind_check",
+      sql`${table.kind} IN ('source_record', 'entity_meaning', 'content_evidence', 'revision_proposal')`,
+    ),
+    check("knowledge_derivations_no_self", sql`${table.recordId} <> ${table.sourceRecordId}`),
+  ],
+);
+
+/** A session issues one interaction. Its committed selection survives session revocation. */
+export const knowledgeSelectionInteractions = pgTable(
+  "knowledge_selection_interactions",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }),
+    localDate: date("local_date"),
+    timeZone: text("time_zone"),
+    key: text("key").$type<KnowledgePreferenceKey>(),
+    value: text("value").$type<KnowledgePreferenceSelection["value"]>(),
+    generation: integer("generation"),
+  },
+  (table) => [
+    index("knowledge_selections_owner_time_idx")
+      .on(table.userId, table.occurredAt)
+      .where(sql`${table.occurredAt} IS NOT NULL`),
+    index("knowledge_selections_unused_expiry_idx")
+      .on(table.userId, table.expiresAt)
+      .where(sql`${table.occurredAt} IS NULL`),
+    check("knowledge_selections_valid_admission", sql`${table.expiresAt} > ${table.issuedAt}`),
+    check(
+      "knowledge_selections_valid_event",
+      sql`
+      (${table.occurredAt} IS NULL AND ${table.localDate} IS NULL AND ${table.timeZone} IS NULL
+        AND ${table.key} IS NULL AND ${table.value} IS NULL AND ${table.generation} IS NULL)
+      OR (${table.occurredAt} IS NOT NULL AND ${table.occurredAt} >= ${table.issuedAt}
+        AND ${table.occurredAt} < ${table.expiresAt}
+        AND ${table.localDate} IS NOT NULL AND ${table.timeZone} IS NOT NULL
+        AND ${table.generation} IS NOT NULL AND ${table.generation} >= 0
+        AND ${table.key} IS NOT NULL AND ${table.value} IS NOT NULL
+        AND ((${table.key} = 'presentation.detail' AND ${table.value} IN ('concise', 'detailed'))
+          OR (${table.key} = 'presentation.format' AND ${table.value} IN ('prose', 'bullets'))))
+    `,
+    ),
+  ],
+);
+
+export const knowledgeLearningSettings = pgTable(
+  "knowledge_learning_settings",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    automaticPreferenceAcceptance: boolean("automatic_preference_acceptance").notNull(),
+    revision: integer("revision").notNull(),
+  },
+  (table) => [check("knowledge_learning_settings_revision_positive", sql`${table.revision} > 0`)],
+);
+
+/** Generations keep previously collected choices from undoing an explicit rejection and reset. */
+export const knowledgeLearningSuppressions = pgTable(
+  "knowledge_learning_suppressions",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    key: text("key").$type<KnowledgePreferenceKey>().notNull(),
+    suppressed: boolean("suppressed").notNull(),
+    generation: integer("generation").notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.key] }),
+    check(
+      "knowledge_learning_suppressions_valid_key",
+      sql`${table.key} IN ('presentation.detail', 'presentation.format')`,
+    ),
+    check("knowledge_learning_suppressions_valid_generation", sql`${table.generation} >= 0`),
+  ],
+);
+
+export const knowledgeLearningReceipts = pgTable(
+  "knowledge_learning_receipts",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    mutationKey: uuid("mutation_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.mutationKey] })],
+);
+
+/** The operation is both the durable worker outbox and its content-free receipt. */
+export const knowledgeForgetOperations = pgTable(
+  "knowledge_forget_operations",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recordId: uuid("record_id").notNull(),
+    previewId: uuid("preview_id").notNull(),
+    epoch: bigint("epoch", { mode: "number" }).notNull(),
+    mutationKey: uuid("mutation_key").notNull(),
+    status: text("status").$type<"pending" | "blocked" | "completed">().notNull(),
+    phase: text("phase").$type<"plan" | "erase" | "scrub" | "ledger">().notNull(),
+    scrubCursor: uuid("scrub_cursor"),
+    keyProof: text("key_proof").notNull(),
+    suppressionFingerprints: jsonb("suppression_fingerprints")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    deletedSelectionIds: jsonb("deleted_selection_ids").$type<string[]>().notNull().default([]),
+    failures: integer("failures").notNull().default(0),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    leaseId: uuid("lease_id"),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("knowledge_forget_operations_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("knowledge_forget_operations_owner_key_idx").on(table.userId, table.mutationKey),
+    uniqueIndex("knowledge_forget_operations_active_owner_idx")
+      .on(table.userId)
+      .where(sql`${table.status} <> 'completed'`),
+    index("knowledge_forget_operations_due_idx")
+      .on(table.dueAt, table.id)
+      .where(sql`${table.status} = 'pending'`),
+    check(
+      "knowledge_forget_operations_status",
+      sql`${table.status} IN ('pending', 'blocked', 'completed')`,
+    ),
+    check(
+      "knowledge_forget_operations_phase",
+      sql`${table.phase} IN ('plan', 'erase', 'scrub', 'ledger')`,
+    ),
+    check(
+      "knowledge_forget_operations_lease",
+      sql`(${table.leaseId} IS NULL) = (${table.leaseUntil} IS NULL)`,
+    ),
+  ],
+);
+
+export const knowledgeForgetTargets = pgTable(
+  "knowledge_forget_targets",
+  {
+    userId: uuid("user_id").notNull(),
+    operationId: uuid("operation_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    erased: boolean("erased").notNull().default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.recordId] }),
+    index("knowledge_forget_targets_work_idx").on(
+      table.userId,
+      table.operationId,
+      table.erased,
+      table.recordId,
+    ),
+    foreignKey({
+      name: "knowledge_forget_targets_operation_fk",
+      columns: [table.userId, table.operationId],
+      foreignColumns: [knowledgeForgetOperations.userId, knowledgeForgetOperations.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+export const knowledgeForgetPreviews = pgTable(
+  "knowledge_forget_previews",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recordId: uuid("record_id").notNull(),
+    epoch: bigint("epoch", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_forget_previews_owner_record_idx").on(table.userId, table.recordId),
+  ],
+);
+
+export const knowledgeForgetSuppressions = pgTable(
+  "knowledge_forget_suppressions",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    keyProof: text("key_proof").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.fingerprint] })],
+);
+
+/** Additional mutation keys for a repeated forget of an existing target. */
+export const knowledgeForgetReplayBindings = pgTable(
+  "knowledge_forget_replay_bindings",
+  {
+    userId: uuid("user_id").notNull(),
+    mutationKey: uuid("mutation_key").notNull(),
+    previewId: uuid("preview_id").notNull(),
+    ownerEpoch: bigint("owner_epoch", { mode: "number" }).notNull(),
+    operationId: uuid("operation_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.mutationKey] }),
+    index("knowledge_forget_replay_bindings_operation_idx").on(table.userId, table.operationId),
+    foreignKey({
+      name: "knowledge_forget_replay_bindings_operation_fk",
+      columns: [table.userId, table.operationId],
+      foreignColumns: [knowledgeForgetOperations.userId, knowledgeForgetOperations.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+/** Context receipts carry only the authorized references selected for disclosure. */
+export const knowledgeContextUses = pgTable(
+  "knowledge_context_uses",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: uuid("actor_id").notNull(),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    purpose: text("purpose").$type<KnowledgeQuery["purpose"]>().notNull(),
+    workspace: text("workspace").$type<NonNullable<KnowledgeQuery["workspace"]>>(),
+    epoch: bigint("epoch", { mode: "number" }).notNull(),
+    selectionEventIds: uuid("selection_event_ids").array(),
+    references: jsonb("references").$type<KnowledgeContextReference[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("knowledge_context_uses_owner_idx").on(table.userId),
+    check("knowledge_context_uses_actor_check", sql`${table.actorType} IN ('user', 'agent')`),
+    check(
+      "knowledge_context_uses_purpose_check",
+      sql`${table.purpose} IN ('setup', 'bookkeeping', 'planning', 'review', 'communication', 'recovery')`,
+    ),
+    check(
+      "knowledge_context_uses_workspace_check",
+      sql`${table.workspace} IN ('tasks', 'calendar', 'mail', 'finances')`,
+    ),
+    check("knowledge_context_uses_epoch_check", sql`${table.epoch} >= 0`),
+    check(
+      "knowledge_context_uses_selection_refs_check",
+      sql`cardinality(${table.selectionEventIds}) <= 2`,
+    ),
+    check(
+      "knowledge_context_uses_refs_check",
+      sql`jsonb_typeof(${table.references}) = 'array' AND jsonb_array_length(${table.references}) <= 50`,
+    ),
   ],
 );

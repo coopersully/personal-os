@@ -1,14 +1,20 @@
 # nohmi User Knowledge
 
 - Status: Approved target product contract; not yet implemented as a complete system
-- Last reconciled: 2026-09-11
+- Last reconciled: 2026-11-12
 
 ## Purpose
 
-User Knowledge is nohmi's durable, user-owned understanding of the person. It lets every authorized
-workspace reason with the person's goals, priorities, motives, relationships, circumstances,
-preferences, constraints, routines, habits, decisions, and learned patterns without forcing each
-workspace to build an isolated and contradictory profile.
+nohmi is the account's persistent brain, storage, and tools. User Knowledge holds durable,
+user-owned understanding that authorized external agents manage and retrieve across agents and
+previous runs. The brain is persistent knowledge and domain expertise, not a built-in reasoning
+agent. nohmi will never have a built-in agent. External agents interpret, infer, triage, advise,
+and converse using the knowledge and workflows nohmi supplies.
+
+Knowledge belongs to the account, not the agent, model vendor, connection, or chat that recorded
+it. An authorized agent can retrieve and build on another agent's contributions or an earlier
+run's decisions without copying chat history. Current scopes, purpose, sensitivity, and source
+permissions still apply; sharing an account does not give every agent unrestricted access.
 
 The purpose is not to remember everything or place a transcript into every model prompt. The
 purpose is to retrieve the smallest trustworthy context needed for a specific decision, disclose
@@ -19,8 +25,9 @@ User Knowledge is multi-user infrastructure even when an early environment has o
 knowledge object, revision, relationship, evidence source, embedding, search candidate, context
 pack, and access record belongs to an authenticated owner and is filtered by that ownership before
 structured or semantic retrieval. Similar names, relationships, provider identities, phone numbers,
-or embedding proximity can never join knowledge across users. Future household or delegated access
-requires an explicit sharing, consent, and revocation model rather than weakening this isolation.
+or embedding proximity can never join knowledge across users. Shared household financial plans
+and multiple-person financial management are permanently out of scope. Separate accounts remain
+isolated; multiple authorized agents on one account are not multiple financial owners.
 
 ## Product boundaries
 
@@ -78,11 +85,53 @@ Every knowledge record must carry:
 - relationships to other knowledge and exact workspace records; and
 - immutable revision and supersession history.
 
+Agent contributions also identify their authenticated connection and originating run when present.
+They retain the original evidence chain across agent reuse. Another agent repeating an inference
+is not independent corroboration. Concurrent edits require the expected revision; conflicts remain
+inspectable rather than last-writer-wins. A claim or expiring work lease never grants exclusive
+ownership of account knowledge. Revoking a connection ends its access, not the account's ownership
+of its prior contributions; deletion and export follow the person's data controls.
+
+The [shared toolkit design](../superpowers/specs/2026-09-28-shared-agent-toolkit-design.md)
+specifies cross-agent retrieval, mutation, history, and acceptance requirements. Its detailed
+design is pending written review; these account-owned knowledge principles are settled decisions.
+
+The [completion specification](../superpowers/specs/2026-10-12-finance-texting-completion-design.md)
+now defines the proposed typed storage, opt-in read/write scopes, bounded context, lifecycle, narrow
+deterministic promotion rule and migration contract. The
+[shared toolkit plan](../superpowers/plans/2026-10-12-shared-toolkit-completion.md) maps these to
+implementation and acceptance tasks. They remain target design, not delivered persistent memory.
+
 The source record and an exact excerpt or safe structured observation should remain available when
 the person is allowed to inspect it. A generated summary is useful retrieval material but cannot be
 the only evidence for a durable belief.
 
 ## Learning lifecycle
+
+### November 12, 2026 completion decision
+
+Cooper confirmed that sufficiently evidenced low-risk preferences may be accepted automatically,
+while retaining their inferred origin and easy correction. Sensitive facts require explicit owner
+confirmation. Knowledge confirmation never changes agent authority; permission or action-policy
+changes still require the owning domain's separate approval flow.
+
+The [dedicated memory design](../superpowers/specs/2026-11-12-persistent-memory-design.md) and
+[implementation plan](../superpowers/plans/2026-11-12-persistent-memory.md) now own completion scope.
+They supersede the memory portions of the historical shared-toolkit plans, without adopting their
+unrelated Finance/Texting, general work-claim or goal-redesign work.
+
+Initial engineering defaults restrict automatic acceptance to presentation detail and format:
+three independent first-party user selections on three distinct local dates within 30 days,
+no contrary selection or conflict, and enabled learning. Inferred origin remains visible after
+acceptance. Owner correction or rejection suppresses automatic relearning until explicitly reset.
+Other inferred claims remain proposals. Sensitive agent proposals are owner-only and confirmation
+does not enable sensitive agent disclosure in this release.
+
+Correction preserves ordinary history; forgetting deliberately erases live and historical content,
+dependent copies and receipt replay, retaining only content-free recovery metadata. Original domain
+records remain separately owned. Restore-safe deletion requires the independently durable deletion
+ledger and verified recovery path described in the design; external agents' already received copies
+cannot be recalled. These are target requirements, not claims of implemented behavior.
 
 1. A user statement may create active knowledge immediately when its meaning and scope are clear.
 2. An agent observation creates proposed knowledge with evidence, confidence, scope, sensitivity,
@@ -151,9 +200,9 @@ Examples:
 | Maintain Finances | Household circumstances, jurisdiction, income stability, obligations, goals, reserves, risk tolerance | Ask for required evidence and avoid high-impact guidance until answered |
 | Process a general text | Communication preferences plus only the knowledge contracts required by the routed intents | Ask which record, workspace, person, or meaning the request refers to before dispatching |
 
-The Texting coordinator may use enough shared knowledge to route a request, but it does not receive
-the union of every possible child workspace's context. Each routed child intent retrieves its own
-purpose-bound context after workspace access and disclosure policy are established.
+An external agent processing Texting can retrieve purpose-bound knowledge through the same tools.
+Texting does not infer a message's meaning or receive the union of every workspace's context.
+Each requested child operation enforces workspace access and disclosure policy independently.
 
 ## Agent tools
 
@@ -171,9 +220,10 @@ The target agent interface includes:
 - `supersede_knowledge`: preserve history while replacing an outdated belief; and
 - `explain_context`: show why knowledge was selected, omitted, or considered missing for one run.
 
-High-level workspace tools should assemble their required context internally. Callers use the
-surgical knowledge tools for free-form exploration, correction, and explanation, not to recreate
-the hidden steps of a maintenance workflow.
+High-level workspace tools assemble bounded evidence and expose applicable workflows and next
+actions. Callers also use surgical knowledge tools to retrieve, contribute, correct, dispute, and
+supersede knowledge. Domain checks and deterministic steps stay in nohmi; reasoning and decisions
+among permitted next actions belong to the external agent. No hidden internal agent completes them.
 
 ## Cross-workspace use
 
@@ -194,7 +244,7 @@ circumstances, routines, preferences, constraints, workspace knowledge, and rece
 The interface must let the person:
 
 - see what nohmi believes and how confident it is;
-- distinguish what they said from what nohmi inferred;
+- distinguish what they said from what an external agent inferred and identify that agent/run;
 - inspect the source and every workspace allowed to use it;
 - promote, correct, restrict, dispute, supersede, or delete knowledge;
 - review recent automatic promotions and their reinforcement evidence;
@@ -224,6 +274,30 @@ implemented, the target relies on credential scopes, purpose-limited context ass
 privacy rules above; the deferred control must not be described as available.
 
 ## Relationship to current implementation
+
+The initial source implementation provides `POST /v1/knowledge`,
+`GET /v1/knowledge/:id?purpose=…`, and registered `save_knowledge` / `get_knowledge` MCP tools.
+PostgreSQL owns record identity, immutable initial revisions, attributed sources, relationships,
+and retry receipts. Explicit `knowledge:read` and `knowledge:write` grants are opt-in for agents;
+existing credentials receive no new grants. Every read and retry rechecks the live credential,
+owner, purpose, workspace and inherited source scopes. Sensitive records remain owner-only until
+category disclosure controls exist. An agent statement retains original wording and external
+session/message references; an agent interpretation remains proposed inference. A knowledge receipt
+and redacted audit event commit together, without changing workspace action policy.
+
+Incoming typed values are limited to 8 KiB of serialized UTF-8 JSON, with ordinary text fields
+limited to 2,048 characters. Inference propositions allow 8,256 characters so automatic agent
+interpretations can preserve the complete accepted typed content and its JSON wrapper without
+truncation. The 8 KiB request-value limit still applies to directly submitted inferences; generated
+inference envelopes may exceed that input limit. Reads and exact retries retain the persisted
+proposition verbatim.
+
+This is a save/read foundation, not the complete target system: correction, deletion controls,
+promotion, conflict resolution, search, context packs, source migration, and About you remain
+unimplemented. Goal revision evidence is rejected until Goals exposes a revision contract.
+Focused PostgreSQL and registered MCP/API/client tests establish source behavior, not production
+availability. No provider or production mutation is required by these tests.
+
 
 | Current record | What it provides | Why it is not complete User Knowledge |
 | --- | --- | --- |

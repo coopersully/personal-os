@@ -96,3 +96,33 @@ it("exposes SMS work only with all Texting grants and removes it in read-only mo
     ).not.toContain(name);
   }
 });
+
+describe("knowledge scope discovery", () => {
+  it("requires both write grants and makes only reads visible in read-only sessions", () => {
+    const reads = [
+      "explain_context",
+      "get_context_for_intent",
+      "get_knowledge",
+      "search_user_knowledge",
+    ];
+    const writes = ["save_knowledge", "update_knowledge"];
+    const knowledgeTools = (scopes: Parameters<typeof availableToolNames>[0], readOnly: boolean) =>
+      availableToolNames(scopes, readOnly)
+        .filter((name) => personalOsToolCatalog[name].domain === "knowledge")
+        .sort();
+    for (const scopes of [[], ["knowledge:read"], ["knowledge:write"], ["tasks:write"]] as const) {
+      expect(knowledgeTools(new Set(scopes), false)).toEqual(
+        scopes.some((scope) => scope === "knowledge:read") ? reads : [],
+      );
+    }
+    const both = new Set(["knowledge:read", "knowledge:write"] as const);
+    expect(knowledgeTools(both, false)).toEqual([...reads, ...writes].sort());
+    expect(knowledgeTools(both, true)).toEqual(reads);
+    expect(personalOsToolCatalog.update_knowledge).toMatchObject({
+      requiredScopes: ["knowledge:read", "knowledge:write"],
+      policy: "approved_rule",
+      destructive: true,
+      readOnly: false,
+    });
+  });
+});

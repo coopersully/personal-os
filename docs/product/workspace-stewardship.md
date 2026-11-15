@@ -1,14 +1,22 @@
 # nohmi workspace stewardship
 
 - Status: Target product doctrine
-- Last reconciled: 2026-09-10
+- Last reconciled: 2026-09-28
 
 ## Product definition
 
-A workspace steward is nohmi's persistent expert behavior for one product workspace. It maintains
-that workspace's living ledger, applies approved domain knowledge and rules, completes authorized
-work, isolates questions that require human judgment, learns from answers and safe reinforced
-patterns, and produces an evidence-backed review of the current state and how to improve it.
+A workspace's stewardship contract is the knowledge, workflows, tools, and deterministic
+automation nohmi provides to external agents and the person. nohmi is the account's persistent
+brain and storage; it will never have a built-in agent. Synchronization, normalization, reliable
+calculations, explicit rule execution, evidence checks, and durable work reduce entropy and give
+agents high-signal material to triage. External agents supply reasoning, conversation, interpretation,
+recommendations, and judgments that are not explicit deterministic operations.
+
+Agents manage knowledge through nohmi, and other authorized agents or previous/later runs on the
+same account can retrieve and build on it. The domain retains evidence, provenance, corrections,
+permissions, and shared state; no host's private session is the canonical memory. References below
+to interviews, learning, advice, questions, and narrative reviews mean agent/toolkit collaboration,
+not an internal model loop.
 
 The person may describe how they want the workspace to operate in ordinary language. Guided setup
 turns that intent into explicit source meanings, preferences, review cadence, notifications, and
@@ -16,11 +24,11 @@ proposed rules. It may propose a complete rule set at once, but every rule remai
 dedicated, version-bound preview shows its scope, examples, consequences, conflicts, authority, and
 recovery path and the owning domain receives the required approval.
 
-The steward is not an MCP prompt, scheduled client automation, batch-cleanup endpoint, or separate
-agent persona. It is nohmi product behavior owned by the domain and available consistently to the
-app, API, MCP clients, desktop client, and future first-party callers. A client should be able to
-express a small intent such as `maintain finances`; the Finance domain, rather than the client,
-knows what maintaining Finances entails.
+The toolkit is available consistently through app, API, and MCP. A high-level intent such as
+`maintain finances` can run deterministic preparation and return a resumable work queue, relevant
+knowledge, workflow guidance, and permitted next actions. It need not finish agent judgment in
+one call. Agents follow or adapt the supplied guidance within enforced domain invariants; they
+do not reimplement calculations, persistence, permission checks, or provider reliability.
 
 The four core stewards are Mail, Tasks, Calendar, and Finances. Their complete purposes and
 interfaces are defined in [`workspaces and interfaces`](workspaces.md).
@@ -42,9 +50,8 @@ Each workspace defines these domain-specific capabilities:
 
 1. **Living ledger.** Canonical records, source evidence, provenance, freshness, reconciliations,
    annotations, decisions, rules, questions, and prior review artifacts.
-2. **Expert playbook.** A researched, versioned model of the professional disciplines needed to
-   care for the ledger. The steward combines their useful methods without claiming a human
-   credential.
+2. **Expert playbook.** Researched, versioned knowledge and procedures that external agents can
+   retrieve and apply to the ledger without claiming a human credential.
 3. **Definition of maintained.** Observable conditions that distinguish healthy, stale, uncertain,
    incomplete, and blocked states.
 4. **Knowledge contract.** The required, optional, and prohibited User Knowledge for each workflow,
@@ -61,9 +68,9 @@ Each workspace defines these domain-specific capabilities:
 9. **Question and learning loop.** Bounded questions with the evidence and choices needed to answer
    them. Answers resolve the present case and may create or reinforce User Knowledge; reusable
    action rules remain subject to their domain approval policy.
-10. **Analysis and advice.** A continuing interpretation of what the ledger means, what is changing,
-   what the person appears to value, and what options would improve the position. Advice cites its
-   evidence, assumptions, time horizon, confidence, and unresolved risks.
+10. **Analysis and advice support.** Reliable analytical tools and durable, agent-authored advice
+    citing evidence, assumptions, time horizon, confidence, and unresolved risks. nohmi validates
+    references and authority; it does not generate expert judgment internally.
 11. **Review artifact.** A durable period write-up that explains what was examined, changed,
     learned, left outstanding, and recommended next. It links back to source material, the User
     Knowledge revisions used, and the activity trail.
@@ -114,12 +121,13 @@ Every workspace supports the same conceptual pair:
 - **Surgical:** inspect or change one explicitly identified item. This is the precise substrate used
   by the UI, an expert, or a maintenance turn.
 - **Maintain:** do everything outstanding within `all`, a bounded time window, or an exact target.
-  The domain decides the sequence and records each step.
+  The domain supplies deterministic stages and durable work; external agents perform judgment
+  steps and select permitted operations. The run records both without hosting the agent.
 
-MCP should normally expose a small orientation/status tool and one maintenance-intent tool for the
-workspace, while retaining granular tools when callers need surgical control. Those tools are an
-intent surface, not the place where expert judgment, context assembly, or workflow sequencing
-lives.
+MCP should expose orientation/status, maintenance support, and granular tools for control. The
+API owns context assembly, deterministic workflow steps, state and authority. External agents
+retrieve the playbook, reason over evidence, and select permitted next steps. MCP remains a thin
+adapter, not a second policy engine or a hidden reasoning agent.
 
 Where onboarding is nontrivial, the same surface also exposes a setup intent or shared setup plan.
 Across workspaces the vocabulary should remain predictable: setup defines how the workspace should
@@ -136,36 +144,19 @@ Bypass alone and ordinary write access do not authorize action-rule activation.
 
 ## Scheduling boundary
 
-An external scheduler is the sole authority for invoking a maintenance intent at the person's
-chosen cadence. Supported patterns include ChatGPT and Codex scheduled tasks, Claude recurring
-tasks and routines, Gemini scheduled actions or headless automation, operating-system schedulers,
-and other MCP hosts. nohmi never creates, edits, activates, pauses, or executes the recurring
-maintenance schedule. The current compatibility matrix and official references live in
-[`external automation hosts`](automation-hosts.md).
+External callers choose their execution and cadence; nohmi never hosts the agent or creates,
+edits or executes its recurring schedule. No host registration, cloud runtime, local schedule
+identity, wake-up mechanism or agent response time is required. The contract is
+[external caller interoperability](automation-hosts.md).
 
-This authority is per schedule, not an exclusive workspace lease. The person may configure
-multiple hosts and overlapping schedules for the same maintenance intent. Every declaration has an
-immutable nohmi-owned local schedule identity. A declared schedule must pass that identity on each
-invocation, where nohmi validates it against the authenticated connection and propagates it through
-the run, health, revocation, idempotency, and coalescing records; a host automation identity remains
-optional evidence. Manual and otherwise unscheduled invocations leave the schedule identity absent.
-Compatible work coalesces or resumes, while incompatible scopes remain separate without replaying
-completed effects.
+Several authorized agents may work on the same account. Polling for work is supported; optional
+events announce availability without guaranteeing external execution. Claims, revision checks,
+idempotency and shared receipts coordinate callers. Account-owned knowledge and work remain
+available to later authorized runs. Optional caller metadata cannot grant authority.
 
-The scheduler owns when to call. nohmi owns what the intent means, the knowledge and evidence it
-requires, durable execution, policy, idempotency, questions, review, recovery, and the verified
-terminal result. nohmi may show a declared expected cadence, last observed invocation, and overdue
-or unknown check-in health, but these are observational and never trigger work. Scheduled prompts
-must stay small and must not duplicate the domain workflow.
-
-Internal queues, leases, retries, delayed authorized effects, and recovery timers may complete an
-already accepted invocation. They cannot originate a new recurring maintenance turn.
-
-A steward may publish a typed notification intent when maintenance completes, needs input, or
-requires recovery. The shared Texting service—not the workspace—applies channel settings, renders
-concise SMS, routes replies back to exact work nodes, and preserves delivery state. General inbound
-texts are dispatched through the shared Texting coordinator; the workspace retains all domain
-judgment and terminal truth.
+nohmi continues deterministic synchronization, approved rules and accepted-work recovery under its
+domain contracts. These reduce entropy or complete accepted effects; they do not replace external
+reasoning or create recurring agent work. Work requiring judgment remains honestly pending.
 
 ## Learning and promotion
 

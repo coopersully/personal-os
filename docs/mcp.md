@@ -75,30 +75,24 @@ The normalized tool vocabulary is intentionally low entropy: provider-specific i
 capabilities remain available as evidence, but an agent should learn one Mail, Tasks, Calendar,
 Finances, and User Knowledge contract rather than a separate workflow for every provider.
 
-Maintenance is not batch CRUD and the MCP host does not provide the sequence. The workspace API
-owns its expert playbook, knowledge contract, rulebook, orchestration, durable run state, question/learning loop,
-advisory model, review artifact, idempotency, and completion decision. MCP only validates the
-intent, calls the authenticated typed API, and returns the durable state. A host instruction such
-as `maintain finances` should therefore work consistently without embedding Finance procedure in a
-Claude, Codex, or other client automation.
+nohmi is the account's persistent brain, storage and tools, never a built-in agent. The API
+supplies domain knowledge, playbooks, deterministic preparation, calculations, authority checks,
+durable work and verified effects. External agents retrieve that material, reason, triage, converse
+and select permitted operations. MCP is a thin authenticated adapter, not a second reasoning or
+policy engine. A maintenance intent can return work awaiting agent judgment rather than completing
+all reasoning inside one call.
 
-The person may schedule the same maintenance intent through any number of ChatGPT or Codex scheduled
-tasks, Claude recurring tasks or routines, Gemini scheduled actions or headless automation, an
-operating-system scheduler, or another MCP-capable host. Multiple hosts and overlapping schedules
-are permitted; nohmi must not choose one exclusive owner merely to simplify orchestration. Those
-systems are the sole authority for creating, editing, activating, pausing, and delivering the
-recurring schedule. nohmi may record an expected cadence and observed check-in health, but those
-records never invoke the tool; nohmi owns durable execution, context, policy, questions, recovery,
-and completion truth only after a host calls it.
+Knowledge belongs to the account. Authorized agents and fresh sessions can retrieve permitted
+contributions and work from other agents or previous runs, with original sources and revision
+history. Current connection scopes still govern access; provenance does not grant authority.
 
-Each call accepts an optional immutable nohmi-owned local schedule identity in addition to its
-invoking connection, host-declared automation identity when available, requested scope, and
-idempotency identity. The local schedule identity is required when a declared external schedule
-invokes maintenance and is validated against the authenticated connection; manual and otherwise
-unscheduled calls leave it absent. Run, health, revocation, idempotency, and coalescing records
-propagate that identity so the domain's durable-run contract can coalesce or resume compatible
-concurrent calls, keep incompatible scopes separate, and distinguish schedules without replaying
-completed external effects.
+External callers control their runtime, cadence and schedules. The target requires no particular
+host, local/cloud runtime, schedule registration, automatic wake-up or agent response-time guarantee.
+Polling for pending work is supported; optional authenticated events announce work availability.
+No event receipt establishes that an agent ran. Concurrent callers use work claims, revisions and
+idempotency rather than a mandatory host/schedule registry. Optional caller/run labels are
+observational metadata. This reconciles target requirements on 2026-09-28; runtime availability
+continues to come from actual discovery and registered operations.
 
 The maintenance intent never widens scopes or policy. Consequential actions retain the policy,
 revision, source evidence, audit, and recovery behavior of their surgical operations. A terminal
@@ -114,12 +108,13 @@ Texting is a shared general inbox, not a fifth workspace. Its target high-level 
 
 - `get_texting_status` for connection, consent, conversation backlog, active child intents,
   awaiting replies, delivery uncertainty, and valid recovery actions; and
-- `maintain_texting` for claiming unprocessed inbound messages, routing free-form and
-  cross-workspace requests, resuming child work, resolving bound answers or reviews, composing a
-  concise reply, and reconciling uncertain delivery.
+- `maintain_texting` for deterministic reconciliation and exposing unprocessed messages, exact
+  bindings, interrupted child work and valid recovery actions to external agents. Additional
+  granular discovery/claim/result capabilities follow the shared work contract.
 
-The API-owned Texting coordinator dispatches only to domain-owned operations available under the
-caller's scopes and global/per-workspace settings. It does not place multi-domain logic in MCP.
+External agents interpret free-form messages, choose domain tools, clarify ambiguity and compose
+substantive replies. The API validates structured routing and bounded answer/approval bindings
+under current scopes and channel/domain policy. Neither the API nor MCP runs an internal agent.
 Workspace maintenance publishes typed notification intents; Texting renders and sends them without
 letting a workspace call Twilio or read the shared conversation.
 
@@ -133,33 +128,30 @@ The existing `read_text_conversation` and `send_text_message` tools are surgical
 not this general-inbox coordinator. The high-level Texting tools and dispatch behavior are target
 contracts and must not be advertised until current discovery and tests prove they ship.
 
-### Target User Knowledge surface
+### User Knowledge
 
-High-level workspace tools retrieve purpose-bound context internally. The target shared surgical
-surface adds:
+The registered shared tools use the credential's live grants and one declared retrieval purpose:
 
-- `get_nohmi_context` for identity, time, authority, workspace readiness, knowledge readiness, and
-  available intent surfaces;
-- `get_context_for_intent` for the bounded context pack required by one declared purpose and target;
+- `get_ilo_context` lists available tools and includes memory guidance for credentials that can
+  retrieve context;
+- `get_context_for_intent` returns a bounded context pack for a declared purpose and optional target;
 - `search_user_knowledge` and `get_knowledge` for precise inspection;
-- `propose_knowledge`, `update_knowledge`, `promote_knowledge`, and `supersede_knowledge` for the
-  typed learning lifecycle; and
-- `explain_context` for the selection, omission, provenance, confidence, and missing requirements
-  behind a consequential result.
+- `save_knowledge` for sourced statements and proposals, and `update_knowledge` for authorized
+  revision, dispute, or supersession;
+- `explain_context` rechecks which references from an earlier context use are still available.
 
-Semantic retrieval never bypasses scope, purpose, sensitivity, or workspace policy. User-authored
-knowledge may become active immediately; agent inferences begin as proposals and may become active
-through manual promotion or domain-defined safe promotion after independent reinforcement or
-successful reuse. Knowledge never grants or expands action authority.
+Search before saving. Cite the supporting sources, distinguish stated knowledge from inference, and
+fetch fresh context after changing a record. Retrieval enforces scope, purpose, sensitivity, and
+workspace policy. User-authored knowledge may become active immediately. Agent inferences begin
+as proposals. Knowledge never grants or expands action authority.
 
 Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
-an external model host's context are planned but deferred. The initial target continues to use
-credential scopes, purpose-bounded API results, and existing privacy policy; do not delay typed MCP
-parity on this later disclosure-control layer or advertise it as shipped.
+an external model host's context remain planned. The current tools use credential scopes,
+purpose-bounded API results, and existing privacy policy. Human-authenticated API calls handle
+confirmation, restriction, forgetting, export, and learning controls.
 
-This surface is a target contract, not a claim about current tool discovery. See
-[`User Knowledge`](product/user-knowledge.md) and
-[`ADR 0005`](architecture/0005-user-knowledge.md).
+See the [tool dictionary](engineering/workspace-agent-tools.md),
+[`User Knowledge`](product/user-knowledge.md), and [`ADR 0005`](architecture/0005-user-knowledge.md).
 
 The following discovery rules describe the current pre-cutover implementation evidence. The target
 identifiers are defined above and replace these names at hard cutover.

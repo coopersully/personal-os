@@ -55,6 +55,7 @@ runtimeLifecycle.startBackgroundTask("startup-native-push", async () => {
 });
 const scheduler = setInterval(() => {
   runtimeLifecycle.startBackgroundTask("local-demo-fixtures", refreshLocalDemo);
+  runtimeLifecycle.startBackgroundTask("knowledge-forgetting", dispatchKnowledgeForgetting);
   runtimeLifecycle.startBackgroundTask("scheduled-connector-sync", async () => {
     await app.syncDueConnectors().catch(() => {
       process.stderr.write("[personal-os] scheduled connector sync failed\n");
@@ -107,6 +108,7 @@ runtimeLifecycle.startBackgroundTask("startup-finance-maintenance", dispatchFina
 runtimeLifecycle.startBackgroundTask("startup-finance-backfill", dispatchFinanceBackfill);
 runtimeLifecycle.startBackgroundTask("startup-texting-recovery", dispatchTextingRecovery);
 runtimeLifecycle.startBackgroundTask("startup-finance-notifications", dispatchFinanceNotifications);
+runtimeLifecycle.startBackgroundTask("knowledge-forgetting", dispatchKnowledgeForgetting);
 runtimeLifecycle.startBackgroundTask(
   "startup-finance-setup-integrity",
   dispatchFinanceSetupIntegrity,
@@ -171,6 +173,13 @@ async function dispatchTextingRecovery(): Promise<void> {
       process.stderr.write(`[personal-os] Texting recovery failed: ${String(error)}\n`);
       throw error;
     });
+}
+
+async function dispatchKnowledgeForgetting(): Promise<void> {
+  await app.runKnowledgeForgetting().catch(() => {
+    process.stderr.write("[personal-os] Knowledge erasure worker pass failed.\n");
+    throw new Error("Knowledge erasure worker pass failed.");
+  });
 }
 
 async function dispatchFinanceSetupIntegrity(): Promise<void> {

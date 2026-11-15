@@ -204,6 +204,8 @@ export const updateUserInputSchema = z
 export type UpdateUserInput = z.infer<typeof updateUserInputSchema>;
 
 export const accessScopeSchema = z.enum([
+  "knowledge:read",
+  "knowledge:write",
   "reminders:read",
   "reminders:write",
   "tasks:read",

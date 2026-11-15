@@ -97,6 +97,14 @@ import { createFinanceSmsAcknowledgementDispatcher } from "./finance-sms-acknowl
 import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
+import { createKnowledgeContextService } from "./knowledge/context-service.js";
+import { createKnowledgeExportService } from "./knowledge/export-service.js";
+import { createKnowledgeForgetService } from "./knowledge/forget-service.js";
+import { validKnowledgeForgetKey } from "./knowledge/forget-suppression.js";
+import { createKnowledgeLearningService } from "./knowledge/learning-service.js";
+import { createKnowledgeLifecycleService } from "./knowledge/lifecycle-service.js";
+import { createKnowledgeRecordService } from "./knowledge/record-service.js";
+import { createKnowledgeSearchService } from "./knowledge/search-service.js";
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
@@ -125,6 +133,7 @@ import { registerFinanceMaintenanceExecutionRoutes } from "./routes/finance-main
 import { registerFinanceOnboardingRoutes } from "./routes/finance-onboarding.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
+import { registerKnowledgeRoutes } from "./routes/knowledge.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
 import { registerNativePushRoutes } from "./routes/native-push.js";
@@ -194,6 +203,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
   dispatchDueFinanceMaintenance: () => Promise<void>;
   runTextingRecovery: () => Promise<void> | null;
   runFinanceNotifications: () => Promise<void> | null;
+  runKnowledgeForgetting: () => Promise<void>;
   dispatchNativePush: () => Promise<void> | null;
   quiesceTextingRecovery: () => void;
   superviseICloudMail: () => Promise<void>;
@@ -614,6 +624,25 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
     now,
   });
+  const { suppressionKey, ledger } = dependencies.knowledgeForget ?? {};
+  const forgettingConfigured = ledger !== undefined && validKnowledgeForgetKey(suppressionKey);
+  const knowledgePersistence = {
+    db: dependencies.db,
+    now,
+    ...(suppressionKey ? { suppressionKey } : {}),
+  };
+  const knowledgeRetrieval = {
+    db: dependencies.db,
+    now,
+    encryptionKey: dependencies.config.encryptionKey,
+  };
+  const knowledgeForget = createKnowledgeForgetService({
+    db: dependencies.db,
+    now,
+    // Existing fingerprints still guard writes if the ledger goes away.
+    // New erasure admission needs both dependencies.
+    ...(forgettingConfigured ? { ledger, suppressionKey } : {}),
+  });
   const goalService = createGoalsService({ db: dependencies.db, now });
   const maintenance = createWorkspaceMaintenanceService({ db: dependencies.db, now });
   const mailMaintenance = createMailMaintenanceService({
@@ -921,6 +950,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       allowHeaders: ["Content-Type", "Authorization", "X-Request-Id"],
       allowMethods: ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"],
       credentials: true,
+      exposeHeaders: ["X-Knowledge-Receipt-Version"],
       origin: dependencies.config.allowedOrigins,
     }),
   );
@@ -1264,6 +1294,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/mail/*", authenticate);
   app.use("/v1/goals/*", authenticate);
   app.use("/v1/goals", authenticate);
+  const authenticateKnowledge: MiddlewareHandler<AppEnv> = async (context, next) => {
+    context.header("Cache-Control", "no-store");
+    return authenticate(context, next);
+  };
+  app.use("/v1/knowledge", authenticateKnowledge);
+  app.use("/v1/knowledge/*", authenticateKnowledge);
   app.use("/v1/rituals", authenticate);
   app.use("/v1/rituals/*", authenticate);
   app.use("/v1/motives/*", authenticate);
@@ -1581,6 +1617,17 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     mutationContext,
   });
 
+  registerKnowledgeRoutes({
+    app,
+    knowledge: createKnowledgeRecordService(knowledgePersistence),
+    lifecycle: createKnowledgeLifecycleService(knowledgePersistence),
+    forget: knowledgeForget,
+    forgettingConfigured,
+    learning: createKnowledgeLearningService(knowledgePersistence),
+    search: createKnowledgeSearchService(knowledgeRetrieval),
+    context: createKnowledgeContextService(knowledgeRetrieval),
+    export: createKnowledgeExportService(knowledgeRetrieval),
+  });
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
   registerRitualRoutes({
     app,
@@ -1702,6 +1749,13 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     },
     runFinanceNotifications() {
       return financeNotificationRuntime.run();
+    },
+    async runKnowledgeForgetting() {
+      if (!forgettingConfigured) return;
+      const signal = dependencies.runtimeLifecycle?.signal;
+      for (let batch = 0; batch < 5 && !signal?.aborted; batch++) {
+        if (!(await knowledgeForget.runOnce(signal ? { signal } : {}))) break;
+      }
     },
     dispatchNativePush() {
       return nativePushRuntime.run();
@@ -1877,6 +1931,8 @@ function escapeHtml(value: string): string {
 }
 
 const oauthScopeLabels: Record<string, string> = {
+  "knowledge:read": "Read saved personal knowledge for authorized purposes",
+  "knowledge:write": "Save personal knowledge with source attribution",
   "mail:execute":
     "With review bypass enabled, send exact saved drafts, activate reviewed rules, reconcile delivery, and manage Mail stewardship and preferences. Combined Mail, Calendar, and Tasks execution grants also permit source sync and disconnection. Sending cannot be undone.",
   "finances:execute":

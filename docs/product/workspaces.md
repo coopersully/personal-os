@@ -7,7 +7,7 @@
 > declaration that the redesigned experience has shipped.
 
 - Status: Target product contract; current implementation is recorded separately
-- Last reconciled: 2026-09-10
+- Last reconciled: 2026-09-28
 
 ## The workspace model
 
@@ -16,9 +16,10 @@ increasingly happens through digital systems. It unifies fragmented provider dat
 simple first-party interfaces for direct control, and gives authorized agents consistent tools for
 understanding, triaging, and resolving work on the person's behalf.
 
-Each workspace combines a familiar application, a trustworthy ledger, an expert steward, a
-maintenance workflow, and narrow tools. The UI, public API, and MCP operate on the same records and
-policy boundaries; none of them keeps a separate interpretation of the person's life.
+Each workspace combines a familiar application, trustworthy ledger, expert knowledge, maintenance
+workflows, deterministic automations, and narrow tools. nohmi is the account's persistent brain;
+external agents manage and reuse its knowledge across agents and runs. It never contains a built-in
+agent. The UI, public API, and MCP operate on the same records and policy boundaries.
 
 Provider differences are normalized into small, stable, workspace-native concepts so an agent can
 learn the nohmi contract once instead of repeatedly interpreting Gmail, iCloud, Plaid, or another
@@ -48,13 +49,14 @@ Every workspace should expose the following interfaces over one domain-owned sou
 | Public API | Provide the authoritative product boundary. | Enforce identity, ownership, policy, revisions, idempotency, audit, connector behavior, and durable workflow state for every caller. |
 | Guided setup and workflow definition | Learn how this person wants the workspace to operate. | Interview for goals, source meanings, constraints, preferred reviews, notification boundaries, and the person's ideal workflow; propose configuration and rules for approval instead of requiring them to translate their needs into settings. |
 | MCP orientation and status | Let an unfamiliar agent understand the workspace quickly. | Report capabilities, freshness, health, active guidance, outstanding work, applicable knowledge, missing context, and the next safe action. |
-| MCP maintenance intent | Let an external scheduler or person invoke a complete domain workflow with a small instruction. | Start or resume the domain-owned maintenance turn without requiring the client to reproduce expertise or orchestration. |
+| MCP maintenance intent | Prepare and resume a domain workflow with a small instruction. | Run deterministic steps and expose shared knowledge, work, guidance, and permitted next actions for external agent judgment. |
 | MCP surgical tools | Give agents precise access to exact records and decisions. | Support free-form questions and narrowly scoped reads, previews, corrections, and authorized actions such as reading a balance or inspecting one event. |
 | Questions and reviews | Preserve human judgment without blocking unrelated work. | Persist the work nodes created by setup and maintenance: what nohmi did, what it could not safely decide, the evidence behind each question, and the consequence of each answer. |
 | Settings and recovery | Make control and degraded state obvious. | Expose sources, synchronization, permissions, agent access, guidance, rules, connector failures, retries, exports, and deletion. |
 
-Texting is a shared general inbox across these interfaces, not another workspace. It routes each
-free-form request, answer, or exact review to its owning workspace; workspace maintenance may
+Texting is a shared general inbox across these interfaces, not another workspace. External agents
+interpret free-form requests; Texting exposes messages and validates structured bindings and
+workspace operations. Workspace maintenance may
 publish concise SMS results and questions through Texting according to the person's global and
 per-workspace settings. The complete contracts are
 [`texting and SMS`](texting-operations.md) and
@@ -220,10 +222,12 @@ agent maintenance is the intended way to keep the workspace useful and current. 
 for the durable motivation, evidence standards, and human decision boundary.
 
 The [Finance MVP specification](finance-workspace-plan.md) defines the first complete delivery
-journey against this larger target. Both Codex and Claude must support separately verified
-maintenance and two-way Finance SMS at launch, including durable answers and continuation after
-the original agent session ends. Users retain equivalent inspection and manual correction in the
-app. Shared Texting owns the conversation; Finance owns meaning, policy and bookkeeping.
+journey against this larger target. Acceptance proves durable questions, real SMS transport,
+retrieval and safe resumption from a fresh authorized session, and manual correction in the app.
+No vendor, host runtime, automatic agent wake-up, or agent response time is a release requirement.
+Finance serves one person in USD; shared financial plans are permanently excluded, while currencies
+may be extended later. Shared Texting owns transport; external agents own conversation reasoning;
+Finance owns financial meaning, policy and bookkeeping.
 
 An explicit `Finance:` or `Finance context:` SMS records the person's note verbatim as prospective
 context. It does not infer an amount, recipient, matching transaction or bookkeeping change. An
@@ -300,16 +304,12 @@ actions or headless automation, an operating-system scheduler, or another MCP-ca
 configure several hosts or schedules for the same workspace or maintenance intent; nohmi does not
 select a single owner or prevent this power-user workflow.
 
-The external platform owns cadence and invocation. nohmi owns the meaning of maintenance,
-knowledge retrieval, policy checks, durable run state, idempotency, questions, reviews, recovery,
-and the verified terminal result; a client should be able to invoke one maintenance intent rather
-than reconstruct the workflow. Every declared schedule receives an immutable nohmi-owned local
-identity, and scheduled calls must pass it through the authenticated connection; nohmi validates and
-propagates it through run, health, revocation, idempotency, and coalescing records. Only a non-secret
-credential reference, optional host automation identity, trigger evidence, scope, and idempotency
-identity are retained. Manual and otherwise unscheduled invocations leave schedule identity absent.
-Compatible concurrent calls coalesce or resume durable work, while conflicting scopes remain
-separate and report their own honest result.
+The external caller owns cadence, availability, reasoning and invocation. nohmi owns knowledge,
+workflow guidance, deterministic operations, authority, durable work, and verified results. No host
+or schedule registration is required to use the tools. Optional caller labels are observational
+metadata, not authority or guarantees of future execution. Polling is supported; optional events
+announce available work without promising agent execution. Compatible calls resume durable work;
+claims, revision guards and idempotency prevent duplicate effects under overlapping callers.
 
 ## Target versus current implementation
 

@@ -9,11 +9,14 @@ import {
   knowledgeRevisionMetadata,
   knowledgeRevisions,
   knowledgeSources,
+  knowledgeTombstones,
 } from "@personal-os/database";
 import {
   type AccessScope,
+  type KnowledgeForgottenRecord,
   type KnowledgeMutationInput,
   type KnowledgeReadInput,
+  type KnowledgeRecord,
   type KnowledgeRecordSnapshot,
   type KnowledgeRevisionMetadata,
   type KnowledgeSaveResult,
@@ -30,7 +33,6 @@ import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import {
-  assertForgetMutationKeyUnused,
   bumpKnowledgeEpoch,
   createKnowledgeAccess,
   emptyKnowledgeMetadata,
@@ -44,7 +46,6 @@ import {
   ownedKnowledgeRevision,
   preserveKnowledgeDisclosure,
 } from "./access.js";
-import { admitKnowledgeClaim, matchesKnowledgeForgetReplay } from "./forget-suppression.js";
 
 type KnowledgeAccess = ReturnType<typeof createKnowledgeAccess>;
 type StoredReceipt = typeof knowledgeReceipts.$inferSelect;
@@ -69,35 +70,38 @@ export async function findKnowledgeReceipt(
   principal: Principal,
   mutationKey: string,
   requestHash: string,
-  suppressionKey: Uint8Array | undefined,
 ) {
-  const { userId } = principal;
   const [receipt] = await tx
     .select()
     .from(knowledgeReceipts)
     .where(
-      and(eq(knowledgeReceipts.userId, userId), eq(knowledgeReceipts.mutationKey, mutationKey)),
+      and(
+        eq(knowledgeReceipts.userId, principal.userId),
+        eq(knowledgeReceipts.mutationKey, mutationKey),
+      ),
     );
-  await assertForgetMutationKeyUnused(tx, userId, mutationKey);
   if (!receipt) return;
-  if (
-    receipt.requestHash === null &&
-    principal.actorType !== "user" &&
-    receipt.actorId !== principal.actorId
-  )
-    throw new AppError("not_found", "The knowledge receipt was not found.");
-  const matches =
-    receipt.requestHash !== null
-      ? receipt.requestHash === requestHash
-      : matchesKnowledgeForgetReplay(
-          receipt.replayVerifier,
-          suppressionKey,
-          userId,
-          mutationKey,
-          requestHash,
-        );
-  if (!matches) throw new AppError("conflict", "This mutation key was used for another request.");
+  if (receipt.requestHash !== requestHash)
+    throw new AppError("conflict", "This mutation key was used for another request.");
   return receipt;
+}
+
+/** Where a record ID stands now: readable content, the owner's Trash, or purged. */
+async function knowledgeRecordPresence(
+  tx: KnowledgeTransaction,
+  userId: string,
+  recordId: string,
+) {
+  const [record] = await tx
+    .select({ trashedAt: knowledgeRecords.trashedAt })
+    .from(knowledgeRecords)
+    .where(and(eq(knowledgeRecords.userId, userId), eq(knowledgeRecords.id, recordId)));
+  if (record) return record.trashedAt ? ("trashed" as const) : ("live" as const);
+  const [tombstone] = await tx
+    .select({ recordId: knowledgeTombstones.recordId })
+    .from(knowledgeTombstones)
+    .where(and(eq(knowledgeTombstones.userId, userId), eq(knowledgeTombstones.recordId, recordId)));
+  return tombstone ? ("purged" as const) : ("missing" as const);
 }
 
 export async function presentKnowledgeReceipt(
@@ -107,10 +111,13 @@ export async function presentKnowledgeReceipt(
   receipt: StoredReceipt,
   purposes?: KnowledgeReadInput["purpose"][],
 ): Promise<KnowledgeSaveResult> {
-  if (receipt.requestHash === null) {
-    if (principal.actorType !== "user" && receipt.actorId !== principal.actorId)
-      throw new AppError("not_found", "The knowledge receipt was not found.");
-    return { receiptId: receipt.id, recordId: receipt.recordId, outcome: "forgotten" };
+  const presence = await knowledgeRecordPresence(tx, principal.userId, receipt.recordId);
+  if (presence !== "live") {
+    // Replay never returns content once the record left the default view. Agents never
+    // learn whether a record is in Trash or purged.
+    const outcome =
+      presence === "trashed" && principal.actorType === "user" ? "trashed" : "forgotten";
+    return { receiptId: receipt.id, recordId: receipt.recordId, outcome };
   }
   const revision = await ownedKnowledgeRevision(tx, principal, receipt.recordId);
   const allowedPurposes = purposes ?? revision.snapshot.purposes;
@@ -167,7 +174,10 @@ async function assertReferenceAcyclic(
     for (const edge of await knowledgeRevisionDerivations(tx, userId, next))
       refs.add(edge.sourceRecordId);
     for (const id of refs) {
-      const reference = await findOwnedKnowledgeRevision(tx, userId, id);
+      // Integrity, not disclosure: a restore must not complete a cycle through Trash.
+      const reference = await findOwnedKnowledgeRevision(tx, userId, id, false, {
+        includeTrashed: true,
+      });
       if (reference) queue.push(reference);
     }
   }
@@ -416,7 +426,7 @@ export async function prepareKnowledgeRevision({
 export async function saveKnowledgeSidecar(
   tx: KnowledgeTransaction,
   userId: string,
-  { snapshot, metadata, claimKey }: KnowledgeRevision,
+  { snapshot, metadata, claimKey }: Pick<KnowledgeRevision, "snapshot" | "metadata" | "claimKey">,
   derivations: KnowledgeDerivation[] = [],
 ) {
   await tx
@@ -472,12 +482,7 @@ export async function writeKnowledgeRevision(
       );
   }
   await tx.insert(knowledgeRevisions).values({ userId, recordId, revision, snapshot });
-  await saveKnowledgeSidecar(
-    tx,
-    userId,
-    { snapshot, metadata, claimKey, hasSidecar: true },
-    derivations,
-  );
+  await saveKnowledgeSidecar(tx, userId, { snapshot, metadata, claimKey }, derivations);
   if (newSources.length)
     await tx
       .insert(knowledgeSources)
@@ -502,7 +507,6 @@ export async function writeKnowledgeReceipt(
     recordId: record.id,
     mutationKey: input.mutationKey,
     requestHash: input.requestHash,
-    replayVerifier: null,
     actorId: principal.actorId,
     privateProposal: input.privateProposal ?? false,
   };
@@ -528,23 +532,40 @@ export async function writeKnowledgeReceipt(
 }
 
 /** Storage and disclosure authority stay in the API, including exact retries. */
-export function createKnowledgeRecordService({
-  db,
-  now,
-  suppressionKey,
-}: {
-  db: Database;
-  now: () => Date;
-  suppressionKey?: Uint8Array;
-}) {
+export function createKnowledgeRecordService({ db, now }: { db: Database; now: () => Date }) {
   const access = createKnowledgeAccess(now);
   return {
-    async get(principal: Principal, raw: KnowledgeReadInput) {
+    /** The owner may read a trashed record by ID and sees a purged ID as forgotten. */
+    async get(
+      principal: Principal,
+      raw: KnowledgeReadInput,
+    ): Promise<KnowledgeRecord | KnowledgeForgottenRecord> {
       const input = knowledgeReadInputSchema.parse(raw);
       return db.transaction(async (tx) => {
         await access.admit(tx, principal, ["knowledge:read"], "read");
-        const record = await ownedKnowledgeRevision(tx, principal, input.id);
-        return access.present(tx, principal, record, input.purpose);
+        const owner = principal.actorType === "user";
+        const record = await findOwnedKnowledgeRevision(tx, principal.userId, input.id, false, {
+          includeTrashed: owner,
+        });
+        if (record) return access.present(tx, principal, record, input.purpose);
+        const [tombstone] = owner
+          ? await tx
+              .select()
+              .from(knowledgeTombstones)
+              .where(
+                and(
+                  eq(knowledgeTombstones.userId, principal.userId),
+                  eq(knowledgeTombstones.recordId, input.id),
+                ),
+              )
+          : [];
+        if (!tombstone) throw new AppError("not_found", "The knowledge record was not found.");
+        return {
+          id: tombstone.recordId,
+          state: "forgotten",
+          trashedAt: tombstone.trashedAt.toISOString(),
+          purgedAt: tombstone.purgedAt.toISOString(),
+        };
       });
     },
     async create(principal: Principal, raw: KnowledgeMutationInput): Promise<KnowledgeSaveResult> {
@@ -554,23 +575,10 @@ export function createKnowledgeRecordService({
         const scopes = [...knowledgeWriteScopes];
         if (input.scope.workspace) scopes.push(`${input.scope.workspace}:read`);
         await access.admit(tx, principal, scopes);
-        const prior = await findKnowledgeReceipt(
-          tx,
-          principal,
-          input.mutationKey,
-          requestHash,
-          suppressionKey,
-        );
+        const prior = await findKnowledgeReceipt(tx, principal, input.mutationKey, requestHash);
         if (prior) return presentKnowledgeReceipt(tx, access, principal, prior, input.purposes);
         const at = now();
         const write = await prepareKnowledgeRevision({ tx, access, principal, input, at });
-        await admitKnowledgeClaim(tx, {
-          principal,
-          claimKey: write.claimKey,
-          key: suppressionKey,
-          explicitReadd: principal.actorType === "user" && write.metadata.origin === "stated",
-          at,
-        });
         await writeKnowledgeRevision(tx, principal, write, at);
         const receipt = await writeKnowledgeReceipt(
           tx,

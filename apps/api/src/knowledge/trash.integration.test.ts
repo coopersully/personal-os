@@ -1,0 +1,443 @@
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import {
+  accessTokens,
+  createDatabaseClient,
+  type DatabaseClient,
+  knowledgeDerivations,
+  knowledgeReceipts,
+  knowledgeRecords,
+  knowledgeRelationships,
+  knowledgeRevisionMetadata,
+  knowledgeRevisions,
+  knowledgeSources,
+  knowledgeTombstones,
+  migrateDatabase,
+  sessions,
+  users,
+} from "@personal-os/database";
+import {
+  type KnowledgeContextPack,
+  type KnowledgeMutationInput,
+  knowledgeReceiptSchema,
+  knowledgeTrashRetentionMs,
+} from "@personal-os/domain";
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { and, eq, or } from "drizzle-orm";
+import { hashToken } from "../security.js";
+import type { Principal } from "../types.js";
+import { createKnowledgeContextService } from "./context-service.js";
+import { createKnowledgeExportService } from "./export-service.js";
+import { createKnowledgeLifecycleService } from "./lifecycle-service.js";
+import { createKnowledgePurgeService } from "./purge-service.js";
+import { createKnowledgeRecordService } from "./record-service.js";
+import { createKnowledgeSearchService } from "./search-service.js";
+
+const planning = { purpose: "planning" } as const;
+
+function fact(value: string, overrides?: Partial<KnowledgeMutationInput>): KnowledgeMutationInput {
+  return {
+    mutationKey: randomUUID(),
+    content: {
+      kind: "fact",
+      value: {
+        subject: `Fixture ${randomUUID()}`,
+        predicate: "planning detail",
+        value: { type: "string", value },
+      },
+    },
+    scope: { workspace: null },
+    sensitivity: "standard",
+    purposes: ["planning", "review"],
+    evidence: [{ type: "statement", wording: "The owner stated this explicitly." }],
+    relatedRecordIds: [],
+    ...overrides,
+  };
+}
+
+function derivedFrom(source: { id: string; revision: number }, value: string) {
+  return fact(value, {
+    evidence: [
+      { type: "statement", wording: "The owner stated this explicitly." },
+      { type: "domain_record", domain: "knowledge", id: source.id, revision: source.revision },
+    ],
+  });
+}
+
+function packIds(pack: KnowledgeContextPack) {
+  return [...pack.stated, ...pack.inferred, ...pack.tentative, ...pack.conflicts].map(
+    ({ id }) => id,
+  );
+}
+
+describe("memory trash and purge", () => {
+  let container: StartedPostgreSqlContainer;
+  let database: DatabaseClient;
+  const fixtureIds: string[] = [];
+
+  beforeAll(async () => {
+    container = await new PostgreSqlContainer("postgres:17.5-alpine").start();
+    database = createDatabaseClient(container.getConnectionUri());
+    await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
+  }, 120_000);
+  afterEach(async () => {
+    for (const id of fixtureIds.splice(0)) await database.db.delete(users).where(eq(users.id, id));
+  });
+  afterAll(async () => {
+    await database?.close();
+    await container?.stop();
+  });
+
+  async function fixture() {
+    const userId = randomUUID();
+    fixtureIds.push(userId);
+    const sessionId = randomUUID();
+    const scopes = ["knowledge:read", "knowledge:write"] as const;
+    await database.db.insert(users).values({
+      id: userId,
+      email: `${userId}@example.test`,
+      displayName: "Owner",
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    await database.db.insert(sessions).values({
+      id: sessionId,
+      userId,
+      tokenHash: hashToken(randomUUID()),
+      expiresAt: new Date("2027-12-01T00:00:00Z"),
+    });
+    const owner: Principal = {
+      userId,
+      actorId: userId,
+      actorType: "user",
+      sessionId,
+      scopes: new Set(),
+    };
+    const actorId = randomUUID();
+    await database.db.insert(accessTokens).values({
+      id: actorId,
+      userId,
+      name: "Memory agent",
+      tokenHash: hashToken(randomUUID()),
+      scopes: [...scopes],
+    });
+    const agent: Principal = { userId, actorId, actorType: "agent", scopes: new Set(scopes) };
+    let clock = Date.parse("2026-11-12T12:00:00Z");
+    const config = {
+      db: database.db,
+      now: () => new Date(clock),
+      encryptionKey: Buffer.alloc(32, 11).toString("base64"),
+    };
+    const records = createKnowledgeRecordService(config);
+    const lifecycle = createKnowledgeLifecycleService(config);
+    function act(
+      action: "trash" | "restore" | "delete_now",
+      record: { id: string; revision: number },
+      principal: Principal = owner,
+    ) {
+      return lifecycle.mutate(principal, {
+        action,
+        recordId: record.id,
+        expectedRevision: record.revision,
+        mutationKey: randomUUID(),
+      });
+    }
+    return {
+      owner,
+      agent,
+      records,
+      lifecycle,
+      act,
+      search: createKnowledgeSearchService(config),
+      context: createKnowledgeContextService(config),
+      exporter: createKnowledgeExportService(config),
+      purge: createKnowledgePurgeService(config),
+      advance: (ms: number) => {
+        clock += ms;
+      },
+      async save(input: KnowledgeMutationInput, principal = owner) {
+        return knowledgeReceiptSchema.parse(await records.create(principal, input)).record;
+      },
+    };
+  }
+
+  it("trash_hides_record_and_derived_copies_from_agents", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("trash-source-value"));
+    const b = await f.save(derivedFrom(a, "trash-derived-value"));
+    const kept = await f.save(fact("kept-value"));
+    expect(await f.records.get(f.agent, { id: b.id, ...planning })).toMatchObject({ id: b.id });
+
+    expect(await f.act("trash", a)).toMatchObject({ recordId: a.id, outcome: "trashed" });
+
+    for (const id of [a.id, b.id])
+      await expect(f.records.get(f.agent, { id, ...planning })).rejects.toMatchObject({
+        status: 404,
+      });
+    for (const id of [a.id, b.id])
+      await expect(f.search.history(f.agent, { recordId: id, ...planning })).rejects.toMatchObject({
+        status: 404,
+      });
+    for (const principal of [f.agent, f.owner]) {
+      const page = await f.search.search(principal, { ...planning, limit: 50 });
+      expect(page.items.map(({ id }) => id)).toEqual([kept.id]);
+      expect(JSON.stringify(page)).not.toMatch(/trash-(source|derived)-value/);
+    }
+    const pack = await f.context.context(f.agent, { ...planning, limit: 50 });
+    expect(packIds(pack)).toEqual([kept.id]);
+    expect(JSON.stringify(pack)).not.toMatch(/trash-(source|derived)-value/);
+    const exported = await f.exporter.exportPage(f.owner, {});
+    expect(exported.items.map(({ id }) => id)).toEqual([kept.id]);
+
+    const trashed = await f.search.search(f.owner, { ...planning, status: "trashed", limit: 50 });
+    expect(trashed.items.map(({ id }) => id).sort()).toEqual([a.id, b.id].sort());
+    for (const item of trashed.items)
+      expect(item).toMatchObject({ trashGroupId: a.id, trashedAt: "2026-11-12T12:00:00.000Z" });
+    await expect(
+      f.search.search(f.agent, { ...planning, status: "trashed" }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(await f.records.get(f.owner, { id: b.id, ...planning })).toMatchObject({
+      id: b.id,
+      trashGroupId: a.id,
+    });
+  });
+
+  it("restore_returns_only_its_trash_group", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("restore-source"));
+    const b = await f.save(derivedFrom(a, "restore-derived"));
+    const c = await f.save(derivedFrom(b, "restore-descendant"));
+    await f.act("trash", b);
+    await f.act("trash", a);
+    const trashed = await f.search.search(f.owner, { ...planning, status: "trashed", limit: 50 });
+    expect(
+      Object.fromEntries(trashed.items.map(({ id, trashGroupId }) => [id, trashGroupId])),
+    ).toEqual({ [a.id]: a.id, [b.id]: b.id, [c.id]: b.id });
+
+    await expect(f.act("restore", c)).rejects.toMatchObject({ status: 409 });
+    const restored = await f.act("restore", a);
+    expect(restored).toMatchObject({
+      outcome: "readable",
+      record: { id: a.id, status: "active", trashedAt: null, trashGroupId: null },
+    });
+    expect(await f.records.get(f.agent, { id: a.id, ...planning })).toMatchObject({
+      id: a.id,
+      status: "active",
+    });
+    for (const id of [b.id, c.id])
+      await expect(f.records.get(f.agent, { id, ...planning })).rejects.toMatchObject({
+        status: 404,
+      });
+    const still = await f.search.search(f.owner, { ...planning, status: "trashed", limit: 50 });
+    expect(still.items.map(({ id }) => id).sort()).toEqual([b.id, c.id].sort());
+    await f.act("restore", b);
+    expect(await f.records.get(f.agent, { id: c.id, ...planning })).toMatchObject({ id: c.id });
+  });
+
+  it("trash_invalidates_open_cursors", async () => {
+    const f = await fixture();
+    for (const value of ["cursor-one", "cursor-two", "cursor-three"]) await f.save(fact(value));
+    const order = (await f.search.search(f.agent, { ...planning, limit: 50 })).items;
+    const first = await f.search.search(f.agent, { ...planning, limit: 1 });
+    expect(first.items.map(({ id }) => id)).toEqual([order[0]?.id]);
+    if (!first.nextCursor || !order[1]) throw new Error("Expected a continuation.");
+
+    await f.act("trash", order[1]);
+
+    await expect(
+      f.search.search(f.agent, { ...planning, limit: 1, cursor: first.nextCursor }),
+    ).rejects.toMatchObject({ status: 409 });
+    const fresh = await f.search.search(f.agent, { ...planning, limit: 50 });
+    expect(fresh.items.map(({ id }) => id)).not.toContain(order[1].id);
+    expect(fresh.items).toHaveLength(2);
+  });
+
+  it("purge_after_30_days_leaves_only_tombstone", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("purge-secret-value"));
+    const b = await f.save(derivedFrom(a, "purge-derived-value"));
+    const linked = await f.save(fact("linked-value", { relatedRecordIds: [a.id] }));
+    const trashedAt = new Date("2026-11-12T12:00:00Z");
+    await f.act("trash", a);
+
+    f.advance(knowledgeTrashRetentionMs);
+    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 0 });
+    f.advance(1);
+    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 2 });
+
+    const { db } = database;
+    for (const id of [a.id, b.id]) {
+      expect(await db.select().from(knowledgeRecords).where(eq(knowledgeRecords.id, id))).toEqual(
+        [],
+      );
+      expect(
+        await db.select().from(knowledgeRevisions).where(eq(knowledgeRevisions.recordId, id)),
+      ).toEqual([]);
+      expect(
+        await db
+          .select()
+          .from(knowledgeRevisionMetadata)
+          .where(eq(knowledgeRevisionMetadata.recordId, id)),
+      ).toEqual([]);
+      expect(
+        await db.select().from(knowledgeSources).where(eq(knowledgeSources.recordId, id)),
+      ).toEqual([]);
+      expect(
+        await db
+          .select()
+          .from(knowledgeRelationships)
+          .where(
+            or(
+              eq(knowledgeRelationships.recordId, id),
+              eq(knowledgeRelationships.relatedRecordId, id),
+            ),
+          ),
+      ).toEqual([]);
+      expect(
+        await db
+          .select()
+          .from(knowledgeDerivations)
+          .where(
+            or(eq(knowledgeDerivations.recordId, id), eq(knowledgeDerivations.sourceRecordId, id)),
+          ),
+      ).toEqual([]);
+      expect(
+        await db
+          .select()
+          .from(knowledgeTombstones)
+          .where(
+            and(
+              eq(knowledgeTombstones.userId, f.owner.userId),
+              eq(knowledgeTombstones.recordId, id),
+            ),
+          ),
+      ).toEqual([
+        {
+          userId: f.owner.userId,
+          recordId: id,
+          trashedAt,
+          purgedAt: new Date(trashedAt.getTime() + knowledgeTrashRetentionMs + 1),
+        },
+      ]);
+    }
+    const [linkedRevision] = await db
+      .select({ snapshot: knowledgeRevisions.snapshot })
+      .from(knowledgeRevisions)
+      .where(eq(knowledgeRevisions.recordId, linked.id));
+    expect(linkedRevision?.snapshot.relatedRecordIds).toEqual([a.id]);
+    const receipts = await db
+      .select()
+      .from(knowledgeReceipts)
+      .where(eq(knowledgeReceipts.recordId, a.id));
+    expect(receipts.length).toBeGreaterThan(0);
+
+    expect(await f.records.get(f.owner, { id: a.id, ...planning })).toEqual({
+      id: a.id,
+      state: "forgotten",
+      trashedAt: trashedAt.toISOString(),
+      purgedAt: new Date(trashedAt.getTime() + knowledgeTrashRetentionMs + 1).toISOString(),
+    });
+    await expect(f.records.get(f.agent, { id: a.id, ...planning })).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(f.search.history(f.owner, { recordId: a.id, ...planning })).rejects.toMatchObject({
+      status: 404,
+    });
+    const exported = JSON.stringify(await f.exporter.exportPage(f.owner, {}));
+    expect(exported).not.toMatch(/purge-(secret|derived)-value/);
+    expect(await f.records.get(f.agent, { id: linked.id, ...planning })).toMatchObject({
+      id: linked.id,
+      relatedRecordIds: [],
+    });
+  });
+
+  it("delete_now_purges_immediately", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("delete-now-value"));
+    const b = await f.save(derivedFrom(a, "delete-now-derived"));
+    expect(await f.act("delete_now", a)).toMatchObject({ recordId: a.id, outcome: "forgotten" });
+    for (const id of [a.id, b.id]) {
+      expect(
+        await database.db
+          .select()
+          .from(knowledgeRevisions)
+          .where(eq(knowledgeRevisions.recordId, id)),
+      ).toEqual([]);
+      expect(await f.records.get(f.owner, { id, ...planning })).toMatchObject({
+        id,
+        state: "forgotten",
+      });
+    }
+    const trashed = await f.save(fact("delete-trashed-value"));
+    await f.act("trash", trashed);
+    expect(await f.act("delete_now", trashed)).toMatchObject({ outcome: "forgotten" });
+    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 0 });
+  });
+
+  it("purge_is_idempotent", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("idempotent-value"));
+    await f.act("trash", a);
+    f.advance(knowledgeTrashRetentionMs + 1);
+    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 1 });
+    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 0 });
+    expect(
+      await database.db
+        .select()
+        .from(knowledgeTombstones)
+        .where(eq(knowledgeTombstones.recordId, a.id)),
+    ).toHaveLength(1);
+  });
+
+  it("replay_after_trash_is_content_free", async () => {
+    const f = await fixture();
+    const ownerInput = fact("replay-owner-value");
+    const agentInput = fact("replay-agent-value", {
+      evidence: [{ type: "observation", reference: "Observed in a planning session." }],
+    });
+    const ownerSaved = await f.save(ownerInput);
+    const agentReceipt = await f.records.create(f.agent, agentInput);
+    await f.act("trash", ownerSaved);
+    await f.act("trash", { id: agentReceipt.recordId, revision: 1 });
+
+    const ownerReplay = await f.records.create(f.owner, ownerInput);
+    expect(ownerReplay).toEqual({
+      receiptId: expect.any(String),
+      recordId: ownerSaved.id,
+      outcome: "trashed",
+    });
+    const agentReplay = await f.records.create(f.agent, agentInput);
+    expect(agentReplay).toEqual({
+      receiptId: agentReceipt.receiptId,
+      recordId: agentReceipt.recordId,
+      outcome: "forgotten",
+    });
+    expect(JSON.stringify([ownerReplay, agentReplay])).not.toMatch(/replay-(owner|agent)-value/);
+
+    f.advance(knowledgeTrashRetentionMs + 1);
+    expect(await f.purge.purgeExpired({ limit: 100 })).toEqual({ purged: 2 });
+    expect(await f.records.create(f.owner, ownerInput)).toEqual({
+      receiptId: ownerReplay.receiptId,
+      recordId: ownerSaved.id,
+      outcome: "forgotten",
+    });
+    await expect(
+      f.records.create(f.owner, { ...ownerInput, purposes: ["review"] }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("agent_cannot_trash_restore_or_delete_now", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("agent-denied-value"));
+    for (const action of ["trash", "restore", "delete_now"] as const)
+      await expect(f.act(action, a, f.agent)).rejects.toMatchObject({ status: 403 });
+    await f.act("trash", a);
+    for (const action of ["restore", "delete_now"] as const)
+      await expect(f.act(action, a, f.agent)).rejects.toMatchObject({ status: 403 });
+    expect(
+      (await f.search.search(f.owner, { ...planning, status: "trashed" })).items.map(
+        ({ id }) => id,
+      ),
+    ).toEqual([a.id]);
+  });
+});

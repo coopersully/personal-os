@@ -25,21 +25,11 @@ it("redacts invalid service output and preserves request validation errors", asy
     epoch: 1,
     nextCursor: null,
   }));
-  const active = vi.fn(async () => [{ operationId: id, status: "pending" as const }]);
   type Routes = Parameters<typeof registerKnowledgeRoutes>[0];
   registerKnowledgeRoutes({
     app,
     knowledge: { create, get: vi.fn() },
     lifecycle: {} as Routes["lifecycle"],
-    forget: {
-      active,
-      preview: vi.fn(),
-      forget: vi.fn(),
-      status: vi.fn(),
-      retry: vi.fn(),
-      runOnce: vi.fn(),
-    },
-    forgettingConfigured: false,
     search: { search, history: vi.fn() },
     context: {} as Routes["context"],
     export: {} as Routes["export"],
@@ -65,10 +55,6 @@ it("redacts invalid service output and preserves request validation errors", asy
       })
     ).status,
   ).toBe(400);
-  const operations = await app.request("/v1/knowledge/operations");
-  expect(operations.status).toBe(200);
-  expect(await operations.json()).toEqual([{ operationId: id, status: "pending" }]);
-
   const invalidInput = await save({ privateContent: true });
   expect(invalidInput.status).toBe(400);
   expect(await invalidInput.json()).toMatchObject({ error: { code: "invalid_request" } });
@@ -94,7 +80,7 @@ it("redacts invalid service output and preserves request validation errors", asy
   });
 });
 
-it("removed_learning_routes_are_gone", async () => {
+it("removed_learning_and_forgetting_routes_are_gone", async () => {
   const id = "11111111-1111-4111-8111-111111111111";
   const app = new Hono<AppEnv>();
   app.use("*", async (context, next) => {
@@ -108,8 +94,6 @@ it("removed_learning_routes_are_gone", async () => {
     app,
     knowledge: {} as Routes["knowledge"],
     lifecycle: {} as Routes["lifecycle"],
-    forget: {} as Routes["forget"],
-    forgettingConfigured: false,
     search: {} as Routes["search"],
     context: {} as Routes["context"],
     export: {} as Routes["export"],
@@ -120,6 +104,11 @@ it("removed_learning_routes_are_gone", async () => {
     ["POST", "/v1/knowledge/selections"],
     ["POST", "/v1/knowledge/selection-interactions"],
     ["POST", "/v1/knowledge/learning-reset"],
+    ["POST", "/v1/knowledge/forget"],
+    ["GET", "/v1/knowledge/operations"],
+    ["GET", `/v1/knowledge/operations/${id}`],
+    ["POST", `/v1/knowledge/operations/${id}/retry`],
+    ["POST", `/v1/knowledge/${id}/forget-preview`],
   ] as const) {
     const response = await app.request(path, { method, ...(method === "POST" ? { body } : {}) });
     expect(response.status, `${method} ${path}`).toBe(404);

@@ -1,5 +1,5 @@
 import { ApiClientError } from "@personal-os/api-client";
-import { knowledgeErasurePendingReason } from "@personal-os/domain";
+import type { KnowledgeForgottenRecord, KnowledgeRecord } from "@personal-os/domain";
 import { CancelledError, type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -36,20 +36,20 @@ export function memoryErrorStatus(error: unknown) {
   return error instanceof ApiClientError ? error.status : undefined;
 }
 
-function isErasureFence(error: unknown) {
-  return (
-    error instanceof ApiClientError &&
-    error.status === 503 &&
-    typeof error.details === "object" &&
-    error.details !== null &&
-    "reason" in error.details &&
-    error.details.reason === knowledgeErasurePendingReason
-  );
+/** The Memory screen treats a purged record like any other record that is no longer available. */
+export function readableMemory(result: KnowledgeRecord | KnowledgeForgottenRecord) {
+  if ("state" in result)
+    throw new ApiClientError({
+      code: "not_found",
+      message: "This memory was deleted.",
+      status: 404,
+    });
+  return result;
 }
 
 type ContentAuthority = {
   canPublish: () => boolean;
-  onRevalidate: (reason: "erasure" | "cursor") => void;
+  onRevalidate: () => void;
 };
 
 // Keep private command inputs out of the mutation cache and Sonner messages.
@@ -94,13 +94,6 @@ export function useMemoryActions(
     return () => isCurrent() && captured === version.current && (authority?.canPublish() ?? true);
   }
 
-  function handleFence(error: unknown) {
-    if (!authority || !isErasureFence(error)) return false;
-    invalidate();
-    authority.onRevalidate("erasure");
-    return true;
-  }
-
   async function read<T>(request: () => Promise<T>, cursor?: string): Promise<T> {
     const isAuthorized = captureAuthority();
     try {
@@ -108,11 +101,11 @@ export function useMemoryActions(
       if (!isAuthorized()) throw new CancelledError({ silent: true });
       return result;
     } catch (error) {
-      if (!isAuthorized() || handleFence(error)) throw new CancelledError({ silent: true });
+      if (!isAuthorized()) throw new CancelledError({ silent: true });
       // A continuation conflict can mean previously disclosed records have been withdrawn.
       if (cursor && authority && memoryErrorStatus(error) === 409) {
         invalidate();
-        authority.onRevalidate("cursor");
+        authority.onRevalidate();
         throw new CancelledError({ silent: true });
       }
       throw error;
@@ -162,7 +155,7 @@ export function useMemoryActions(
         toast.dismiss(id);
       }
     } catch (error) {
-      if (!isAuthorized() || handleFence(error)) return;
+      if (!isAuthorized()) return;
       const message = recover?.(error) ?? failure;
       finishToast(id, { message, tone: "error" });
     } finally {

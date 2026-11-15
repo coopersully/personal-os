@@ -39,7 +39,8 @@ export const knowledgeQuerySchema = z
       .min(1)
       .refine((value) => !value.includes("\u0000") && !/[\uD800-\uDFFF]/u.test(value))
       .optional(),
-    status: knowledgeRecordSchema.shape.status.optional(),
+    /** `trashed` is an owner-only view of the Trash, not a record status. */
+    status: z.enum([...knowledgeRecordSchema.shape.status.options, "trashed"]).optional(),
     kind: z
       .enum(knowledgeContentSchema.options.map((schema) => schema.shape.kind.value))
       .optional(),
@@ -50,6 +51,10 @@ export const knowledgeQuerySchema = z
   })
   .strict();
 export type KnowledgeQuery = z.infer<typeof knowledgeQuerySchema>;
+/** Agents never see Trash, so their query surface omits the owner-only `trashed` view. */
+export const knowledgeAgentQuerySchema = knowledgeQuerySchema.extend({
+  status: knowledgeRecordSchema.shape.status.optional(),
+});
 
 export const knowledgeHistoryInputSchema = z
   .object({

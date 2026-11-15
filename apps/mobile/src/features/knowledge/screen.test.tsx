@@ -12,14 +12,10 @@ vi.mock("react", async () => {
 });
 const h = vi.hoisted(() => ({
   api: {
-    listActiveKnowledgeForgetOperations: vi.fn(),
     searchKnowledge: vi.fn(),
     getKnowledge: vi.fn(),
     getKnowledgeHistory: vi.fn(),
     updateKnowledge: vi.fn(),
-    previewKnowledgeForget: vi.fn(),
-    forgetKnowledge: vi.fn(),
-    getKnowledgeForgetStatus: vi.fn(),
   },
   epoch: 1,
   owner: "owner",
@@ -97,7 +93,6 @@ vi.mock("../../components/forms/form-save", () => ({
 }));
 
 const id = "7d175d08-e235-49e9-900a-8b103bb68f9c";
-const operationId = "dbca94ac-3766-46bc-91c9-12bc87b2acdc";
 const inferred: KnowledgeRecord = {
   id,
   origin: "inferred",
@@ -135,6 +130,8 @@ const inferred: KnowledgeRecord = {
   conflictRecordIds: [],
   evidenceAvailable: true,
   supersededBy: null,
+  trashedAt: null,
+  trashGroupId: null,
 };
 const revised: KnowledgeRecord = {
   ...inferred,
@@ -173,19 +170,15 @@ beforeEach(() => {
   h.owner = "owner";
   h.epoch = 1;
   h.toast.loading.mockReturnValue("memory-toast");
-  h.api.listActiveKnowledgeForgetOperations.mockResolvedValue([]);
   h.api.searchKnowledge.mockResolvedValue(page([inferred]));
   h.api.getKnowledge.mockResolvedValue(inferred);
   h.api.getKnowledgeHistory.mockResolvedValue(page([revised, inferred], 2));
 });
 afterEach(cleanup);
 
-it("native_owner_reviews_corrects_and_forgets", async () => {
+it("native_owner_reviews_and_corrects", async () => {
   setup();
   await screen.findByText(/Inferred/);
-  expect(h.api.listActiveKnowledgeForgetOperations.mock.invocationCallOrder[0]).toBeLessThan(
-    h.api.searchKnowledge.mock.invocationCallOrder[0],
-  );
   await openEditor();
   h.api.getKnowledge.mockResolvedValue(revised);
   h.api.searchKnowledge.mockResolvedValue(page([revised], 2));
@@ -197,33 +190,20 @@ it("native_owner_reviews_corrects_and_forgets", async () => {
   );
   press("Revision history");
   await screen.findByText("Accepted by you");
-  h.api.previewKnowledgeForget.mockResolvedValue({
-    recordId: id,
-    previewId: id,
-    ownerEpoch: 2,
-    affected: [{ recordId: id, revision: 2 }],
-    nextCursor: null,
-    historyCount: 2,
-    dependentCopyCount: 0,
+});
+
+it("native_treats_a_deleted_memory_as_unavailable", async () => {
+  h.api.getKnowledge.mockResolvedValue({
+    id,
+    state: "forgotten",
+    trashedAt: "2026-11-12T15:00:00.000Z",
+    purgedAt: "2026-11-12T15:00:00.000Z",
   });
-  press("Preview forgetting");
-  await screen.findByRole("button", { name: "Forget memory" });
-  h.api.forgetKnowledge.mockResolvedValue({ outcome: "pending_erasure", operationId });
-  h.api.getKnowledgeForgetStatus.mockResolvedValue({ operationId, status: "pending" });
-  press("Forget memory");
-  expect(h.buttons[0]?.text).toBe("Cancel");
-  act(() => h.buttons[1]?.onPress?.());
-  await screen.findByText("Memory is unavailable while erasure runs.");
-  expect(screen.queryByText("prose")).toBeNull();
-  h.api.getKnowledgeForgetStatus.mockResolvedValue({ operationId, status: "completed" });
-  h.api.searchKnowledge.mockResolvedValue(page([], 3));
-  press("Check erasure status");
-  await screen.findByText("No matching memory");
-  expect(h.toast.success).toHaveBeenCalledWith(
-    "Memory forgotten.",
-    expect.objectContaining({ id: expect.any(String) }),
-  );
-  expect(screen.queryByText("Memory forgotten.")).toBeNull();
+  setup();
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style/ }));
+  await screen.findByRole("button", { name: "Back to memory" });
+  expect(screen.queryByRole("button", { name: "Edit memory" })).toBeNull();
+  expect(screen.queryByText("bullets")).toBeNull();
 });
 
 it("back_navigation_and_logout_fence_pending_writes", async () => {

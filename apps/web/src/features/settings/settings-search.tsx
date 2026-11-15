@@ -50,7 +50,7 @@ const searchTerms: Record<keyof typeof settingsDescriptions, string> = {
     "checklist steps morning evening night schedule time zone timezone history tracking responses",
   goals: "priorities targets outcomes",
   "completed-outcomes": "finished goals history completed",
-  memory: "knowledge learned preferences forget export personal context",
+  memory: "knowledge preferences trash delete export personal context",
   motives: "values purpose motivation",
   reviews: "approvals pending requests",
   appearance: "theme light dark system color mode",

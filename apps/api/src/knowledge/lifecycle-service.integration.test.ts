@@ -195,9 +195,9 @@ describe("knowledge lifecycle", () => {
         validity: { validFrom: "2026-12-01T00:00:00Z", validUntil: null },
       }),
     );
-    expect(
-      (await records().get(human, { id: first.record.id, purpose: "planning" })).conflictRecordIds,
-    ).toEqual([overlapping.record.id]);
+    expect(await records().get(human, { id: first.record.id, purpose: "planning" })).toMatchObject({
+      conflictRecordIds: [overlapping.record.id],
+    });
     expect(overlapping.record.conflictRecordIds).toEqual([first.record.id]);
     expect(later.record.conflictRecordIds).toEqual([]);
   });
@@ -222,6 +222,7 @@ describe("knowledge lifecycle", () => {
     });
     const ownerRecord = await records().get(human, { id: saved.recordId, purpose: "planning" });
     expect(ownerRecord).toMatchObject({ status: "proposed", origin: "stated", acceptance: null });
+    if ("state" in ownerRecord) throw new Error("Expected a readable record.");
     const confirm = {
       action: "confirm" as const,
       recordId: saved.recordId,
@@ -612,9 +613,9 @@ describe("knowledge lifecycle", () => {
     );
     expect(second.record.claimKey).toEqual(first.record.claimKey);
     expect(second.record.conflictRecordIds).toEqual([first.recordId]);
-    expect(
-      (await records().get(agent, { id: first.recordId, purpose: "planning" })).conflictRecordIds,
-    ).toEqual([]);
+    expect(await records().get(agent, { id: first.recordId, purpose: "planning" })).toMatchObject({
+      conflictRecordIds: [],
+    });
   });
   it("denies readable receipt replay when the owner makes the record sensitive", async () => {
     const { human, agent } = await fixture();

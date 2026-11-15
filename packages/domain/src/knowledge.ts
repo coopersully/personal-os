@@ -258,13 +258,31 @@ export const knowledgeRecordSchema = knowledgeRecordSnapshotSchema.extend({
   evidenceAvailable: z.boolean(),
   stale: z.boolean(),
   supersededBy: idSchema.nullable(),
+  /** Set only on records in the owner's Trash; agents never receive a trashed record. */
+  trashedAt: isoDateTimeSchema.nullable(),
+  /** The record whose trash action moved this one; restore and delete now act on that group. */
+  trashGroupId: idSchema.nullable(),
 });
 export type KnowledgeRecord = z.infer<typeof knowledgeRecordSchema>;
+/** What the owner reads for a purged record ID: a content-free tombstone. */
+export const knowledgeForgottenRecordSchema = z
+  .object({
+    id: idSchema,
+    state: z.literal("forgotten"),
+    trashedAt: isoDateTimeSchema,
+    purgedAt: isoDateTimeSchema,
+  })
+  .strict();
+export type KnowledgeForgottenRecord = z.infer<typeof knowledgeForgottenRecordSchema>;
 export const knowledgeReadInputSchema = z
   .object({ id: idSchema, purpose: knowledgePurposeSchema })
   .strict();
 export type KnowledgeReadInput = z.infer<typeof knowledgeReadInputSchema>;
-export const knowledgeReadResultSchema = z.strictObject({ record: knowledgeRecordSchema });
+export const knowledgeReadResultSchema = z.union([
+  z.strictObject({ record: knowledgeRecordSchema }),
+  knowledgeForgottenRecordSchema,
+]);
+export type KnowledgeReadResult = z.infer<typeof knowledgeReadResultSchema>;
 export const knowledgeReceiptSchema = z
   .object({
     receiptId: idSchema,

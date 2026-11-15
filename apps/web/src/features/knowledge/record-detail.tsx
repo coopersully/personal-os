@@ -1,5 +1,4 @@
 import {
-  type KnowledgeForgetPreview,
   type KnowledgeLifecycleInput,
   type KnowledgeMutationInput,
   type KnowledgeRecord,
@@ -25,7 +24,12 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { type MemoryActions, memoryErrorStatus, useMemoryWriteKey } from "./actions";
+import {
+  type MemoryActions,
+  memoryErrorStatus,
+  readableMemory,
+  useMemoryWriteKey,
+} from "./actions";
 import {
   memoryAcceptance,
   memoryContent,
@@ -36,8 +40,7 @@ import {
 import { MemoryRestrictions, memoryClaimFields, RecordEditor } from "./record-editor";
 
 type Purpose = KnowledgeRecord["purposes"][number];
-type DetailMode = "detail" | "edit" | "restrict" | "supersede" | "forget";
-type Preview = { page: KnowledgeForgetPreview; mutationKey: string; offset: number };
+type DetailMode = "detail" | "edit" | "restrict" | "supersede";
 type Selection = { id: string; purpose: Purpose };
 
 export function MemoryDialog({
@@ -513,7 +516,6 @@ export function MemoryRecordDetail({
   restoreFocus,
   openRecord,
   onChanged,
-  onForget,
 }: {
   selection: Selection;
   queryKey: readonly unknown[];
@@ -522,7 +524,6 @@ export function MemoryRecordDetail({
   restoreFocus: () => void;
   openRecord: (id: string) => void;
   onChanged: () => void;
-  onForget: (operationId: string | null, toastId: string) => void;
 }) {
   const { id, purpose } = selection;
   const retryableInput = useMemoryWriteKey();
@@ -532,7 +533,7 @@ export function MemoryRecordDetail({
     queryKey: detailKey,
     queryFn: ({ signal }) => {
       signal.throwIfAborted();
-      return actions.read(() => api.getKnowledge({ id, purpose }));
+      return actions.read(() => api.getKnowledge({ id, purpose }).then(readableMemory));
     },
     retry: false,
   });
@@ -542,9 +543,6 @@ export function MemoryRecordDetail({
   const [history, setHistory] = useState(false);
   const [conflict, setConflict] = useState<KnowledgeLifecycleInput | null>(null);
   const [reviewed, setReviewed] = useState<KnowledgeRecord | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [previewStale, setPreviewStale] = useState(false);
-  const [previousPages, setPreviousPages] = useState<Preview[]>([]);
   const accessLost = [401, 403, 404].includes(memoryErrorStatus(detail.error) ?? 0);
   const record = accessLost ? undefined : (detail.data ?? localRecord);
 
@@ -572,6 +570,9 @@ export function MemoryRecordDetail({
           dispute: "Memory disputed.",
           restrict: "Memory use restricted.",
           supersede: "Memory superseded.",
+          trash: "Memory moved to Trash.",
+          restore: "Memory restored.",
+          delete_now: "Memory deleted.",
         };
         return {
           message:
@@ -595,7 +596,7 @@ export function MemoryRecordDetail({
     void actions.run({
       pending: "Loading the latest memory…",
       failure: "Couldn’t load the latest memory.",
-      request: () => api.getKnowledge({ id, purpose }),
+      request: () => api.getKnowledge({ id, purpose }).then(readableMemory),
       complete: (current) => {
         setReviewed(current);
         return undefined;
@@ -625,71 +626,6 @@ export function MemoryRecordDetail({
     save(parsed.data);
   }
 
-  function loadPreview(next = false) {
-    const cursor = next ? preview?.page.nextCursor : undefined;
-    void actions.run({
-      pending: "Checking what will be forgotten…",
-      failure: "Couldn’t load the forgetting preview.",
-      request: () => api.previewKnowledgeForget({ recordId: id, ...(cursor ? { cursor } : {}) }),
-      complete: (page) => {
-        if (next && preview) setPreviousPages((pages) => [...pages, preview]);
-        else setPreviousPages([]);
-        setPreview({
-          page,
-          mutationKey: next && preview ? preview.mutationKey : crypto.randomUUID(),
-          offset: next && preview ? preview.offset + preview.page.affected.length : 0,
-        });
-        setPreviewStale(false);
-        setMode("forget");
-        return undefined;
-      },
-      recover: (error) => {
-        if (memoryErrorStatus(error) !== 409) return undefined;
-        setPreviewStale(true);
-        return "This preview changed. Refresh it before forgetting.";
-      },
-    });
-  }
-
-  function forget() {
-    if (!preview || previewStale) return;
-    void actions.run({
-      pending: "Submitting forgetting request…",
-      failure: "Couldn’t confirm the forgetting request. You can retry this preview.",
-      request: () =>
-        api.forgetKnowledge({
-          previewId: preview.page.previewId,
-          ownerEpoch: preview.page.ownerEpoch,
-          mutationKey: preview.mutationKey,
-        }),
-      complete: (result, toastId) => {
-        if (result.outcome === "pending_erasure") {
-          onForget(result.operationId, toastId);
-          return {
-            message: "Forgetting in progress.",
-            tone: "info",
-            persistent: true,
-            description: "Memory will be available again when erasure finishes.",
-          };
-        }
-        if (result.outcome === "forgotten") {
-          onForget(null, toastId);
-          return { message: "Memory forgotten." };
-        }
-        return { message: "Couldn’t confirm erasure.", tone: "info" };
-      },
-      recover: (error) => {
-        if (memoryErrorStatus(error) === 409 || memoryErrorStatus(error) === 404) {
-          setPreviewStale(true);
-          return "This preview changed. Refresh it before forgetting.";
-        }
-        return memoryErrorStatus(error) === 503
-          ? "Forgetting is temporarily unavailable."
-          : undefined;
-      },
-    });
-  }
-
   function startEditor(next: "edit" | "restrict" | "supersede") {
     if (!record) return;
     setDraftRecord(record);
@@ -712,11 +648,9 @@ export function MemoryRecordDetail({
         ? "Restrict memory use"
         : mode === "supersede"
           ? "Supersede memory"
-          : mode === "forget"
-            ? "Forget memory?"
-            : summary && summary.title.length <= 80
-              ? summary.title
-              : "Memory details";
+          : summary && summary.title.length <= 80
+            ? summary.title
+            : "Memory details";
   const description =
     mode === "edit"
       ? "Save your correction as a new revision."
@@ -724,11 +658,9 @@ export function MemoryRecordDetail({
         ? "Limit where and why this memory can be used."
         : mode === "supersede"
           ? "Choose the saved memory that should replace this one."
-          : mode === "forget"
-            ? "This permanently erases this memory, its revision history, and copies derived from it."
-            : record
-              ? `${memoryLabel(memoryContent(record).kind)} · revision ${record.revision}`
-              : "View the saved record.";
+          : record
+            ? `${memoryLabel(memoryContent(record).kind)} · revision ${record.revision}`
+            : "View the saved record.";
 
   return (
     <>
@@ -738,38 +670,17 @@ export function MemoryRecordDetail({
         busy={actions.busy}
         close={mode === "detail" || accessLost ? close : goBack}
         restoreFocus={restoreFocus}
-        safe={mode === "forget"}
-        showFooter={accessLost || mode === "forget" || mode === "detail"}
+        showFooter={accessLost || mode === "detail"}
         footer={
-          accessLost ? undefined : mode === "forget" ? (
+          !accessLost && mode === "detail" && mutable ? (
             <Button
-              variant="destructive"
-              disabled={actions.busy || previewStale}
-              onClick={forget}
+              disabled={actions.busy}
+              variant="secondary"
+              onClick={() => startEditor("edit")}
               className="flex-1"
             >
-              Forget permanently
+              Edit memory
             </Button>
-          ) : mode === "detail" ? (
-            mutable ? (
-              <Button
-                disabled={actions.busy}
-                variant="secondary"
-                onClick={() => startEditor("edit")}
-                className="flex-1"
-              >
-                Edit memory
-              </Button>
-            ) : (
-              <Button
-                disabled={actions.busy || !record}
-                variant="destructive"
-                onClick={() => loadPreview()}
-                className="flex-1"
-              >
-                Preview forgetting
-              </Button>
-            )
           ) : undefined
         }
       >
@@ -824,14 +735,6 @@ export function MemoryRecordDetail({
                       >
                         Restrict use
                       </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={actions.busy}
-                        onClick={() => loadPreview()}
-                      >
-                        Preview forgetting
-                      </Button>
                     </>
                   ) : null}
                   <Button
@@ -881,66 +784,6 @@ export function MemoryRecordDetail({
             cancel={back}
             onSubmit={(replacementId) => action("supersede", replacementId)}
           />
-        ) : null}
-        {mode === "forget" && preview && !accessLost ? (
-          <div className="flex flex-col gap-3">
-            <ul className="flex flex-col gap-1">
-              <li>
-                {preview.page.dependentCopyCount} dependent{" "}
-                {preview.page.dependentCopyCount === 1 ? "copy" : "copies"}
-              </li>
-              <li>
-                {preview.page.historyCount} saved{" "}
-                {preview.page.historyCount === 1 ? "revision" : "revisions"}
-              </li>
-            </ul>
-            <p>
-              Original source material, independent memories, and files you already downloaded stay
-              where they are.
-            </p>
-            <details>
-              <summary>
-                Affected memories {preview.offset + 1}–
-                {preview.offset + preview.page.affected.length}
-              </summary>
-              <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
-                {preview.page.affected.map(({ recordId, revision }) => (
-                  <li key={`${recordId}:${revision}`}>
-                    {recordId === id ? "This memory" : recordId} · revision {revision}
-                  </li>
-                ))}
-              </ul>
-            </details>
-            <div className="flex flex-wrap gap-2">
-              {previewStale ? (
-                <Button variant="secondary" disabled={actions.busy} onClick={() => loadPreview()}>
-                  Refresh preview
-                </Button>
-              ) : null}
-              {previousPages.length && !previewStale ? (
-                <Button
-                  variant="secondary"
-                  disabled={actions.busy}
-                  onClick={() => {
-                    const previous = previousPages.at(-1);
-                    if (previous) setPreview(previous);
-                    setPreviousPages((pages) => pages.slice(0, -1));
-                  }}
-                >
-                  Previous affected memories
-                </Button>
-              ) : null}
-              {preview.page.nextCursor && !previewStale ? (
-                <Button
-                  variant="secondary"
-                  disabled={actions.busy}
-                  onClick={() => loadPreview(true)}
-                >
-                  More affected memories
-                </Button>
-              ) : null}
-            </div>
-          </div>
         ) : null}
       </MemoryDialog>
       {conflict && !accessLost ? (

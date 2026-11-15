@@ -4,7 +4,6 @@ import {
   type KnowledgeMutationResult,
   knowledgeClaimContent,
   knowledgeClaimKey,
-  knowledgeClaimValue,
   knowledgeLifecycleInputSchema,
 } from "@personal-os/domain";
 import { AppError } from "../errors.js";
@@ -18,7 +17,6 @@ import {
   preserveKnowledgeDisclosure,
   requireKnowledgeOwner,
 } from "./access.js";
-import { admitKnowledgeClaim } from "./forget-suppression.js";
 import {
   findKnowledgeReceipt,
   knowledgeRequestHash,
@@ -30,6 +28,7 @@ import {
   writeKnowledgeReceipt,
   writeKnowledgeRevision,
 } from "./record-service.js";
+import { createKnowledgeTrashService } from "./trash-service.js";
 
 async function validateSupersession(
   tx: KnowledgeTransaction,
@@ -47,34 +46,27 @@ async function validateSupersession(
   }
 }
 
-export function createKnowledgeLifecycleService({
-  db,
-  now,
-  suppressionKey,
-}: {
-  db: Database;
-  now: () => Date;
-  suppressionKey?: Uint8Array;
-}) {
+export function createKnowledgeLifecycleService({ db, now }: { db: Database; now: () => Date }) {
   const access = createKnowledgeAccess(now);
+  const trash = createKnowledgeTrashService({ db, now });
   return {
     async mutate(
       principal: Principal,
       raw: KnowledgeLifecycleInput,
     ): Promise<KnowledgeMutationResult> {
       const input = knowledgeLifecycleInputSchema.parse(raw);
+      if (input.action === "trash" || input.action === "restore" || input.action === "delete_now") {
+        const { action, ...identity } = input;
+        if (action === "trash") return trash.trash(principal, identity);
+        if (action === "restore") return trash.restore(principal, identity);
+        return trash.deleteNow(principal, identity);
+      }
       if (input.action === "confirm" || input.action === "restrict")
         requireKnowledgeOwner(principal);
       const requestHash = knowledgeRequestHash(principal, input);
       return db.transaction(async (tx) => {
         await access.admit(tx, principal, knowledgeWriteScopes);
-        const prior = await findKnowledgeReceipt(
-          tx,
-          principal,
-          input.mutationKey,
-          requestHash,
-          suppressionKey,
-        );
+        const prior = await findKnowledgeReceipt(tx, principal, input.mutationKey, requestHash);
         if (prior) return presentKnowledgeReceipt(tx, access, principal, prior);
 
         const current = await ownedKnowledgeRevision(tx, principal, input.recordId, true);
@@ -172,39 +164,6 @@ export function createKnowledgeLifecycleService({
             break;
           }
         }
-        let contentChanged = false;
-        if (input.action === "revise") {
-          const previous = knowledgeClaimContent(snapshot, metadata.generatedInference);
-          if (principal.actorType === "agent") {
-            // Claim values omit decision reasons. Agent writes also need to
-            // recheck suppression when they replace source evidence.
-            contentChanged =
-              JSON.stringify(input.content) !== JSON.stringify(previous) ||
-              (input.evidence !== undefined &&
-                JSON.stringify(input.evidence) !==
-                  JSON.stringify(snapshot.sources.map((source) => source.evidence)));
-          } else {
-            contentChanged =
-              JSON.stringify(knowledgeClaimValue(input.content)) !==
-              JSON.stringify(knowledgeClaimValue(previous));
-          }
-        }
-        if (
-          (input.action === "revise" || input.action === "restrict") &&
-          (write.snapshot.id !== snapshot.id ||
-            write.claimKey !== current.claimKey ||
-            contentChanged)
-        )
-          await admitKnowledgeClaim(tx, {
-            principal,
-            claimKey: write.claimKey,
-            key: suppressionKey,
-            explicitReadd:
-              input.action === "revise" &&
-              principal.actorType === "user" &&
-              write.metadata.origin === "stated",
-            at,
-          });
         if (!current.hasSidecar)
           await saveKnowledgeSidecar(tx, principal.userId, current, derivations);
         await writeKnowledgeRevision(tx, principal, write, at);

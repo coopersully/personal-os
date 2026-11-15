@@ -7050,8 +7050,21 @@ export const knowledgeRecords = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     revision: integer("revision").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Trash is a record state, not a revision status; all three columns move together. */
+    trashedAt: timestamp("trashed_at", { withTimezone: true }),
+    trashGroupId: uuid("trash_group_id"),
+    statusBeforeTrash: text("status_before_trash"),
   },
-  (table) => [uniqueIndex("knowledge_records_owner_id_idx").on(table.userId, table.id)],
+  (table) => [
+    uniqueIndex("knowledge_records_owner_id_idx").on(table.userId, table.id),
+    index("knowledge_records_trashed_idx")
+      .on(table.trashedAt)
+      .where(sql`${table.trashedAt} IS NOT NULL`),
+    check(
+      "knowledge_records_trash_state",
+      sql`(${table.trashedAt} IS NULL) = (${table.trashGroupId} IS NULL) AND (${table.trashedAt} IS NULL) = (${table.statusBeforeTrash} IS NULL)`,
+    ),
+  ],
 );
 export const knowledgeRevisions = pgTable(
   "knowledge_revisions",
@@ -7114,26 +7127,36 @@ export const knowledgeRelationships = pgTable(
     }).onDelete("cascade"),
   ],
 );
-/** Operational receipts retain hashes and references, never knowledge values. */
+/** Operational receipts retain hashes and references, never knowledge values. They outlive
+ * a purged record so a retried mutation stays content-free. */
 export const knowledgeReceipts = pgTable(
   "knowledge_receipts",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     recordId: uuid("record_id").notNull(),
     mutationKey: uuid("mutation_key").notNull(),
-    requestHash: text("request_hash"),
-    replayVerifier: text("replay_verifier"),
-    actorId: uuid("actor_id"),
+    requestHash: text("request_hash").notNull(),
+    actorId: uuid("actor_id").notNull(),
     privateProposal: boolean("private_proposal").notNull().default(false),
   },
-  (table) => [
-    uniqueIndex("knowledge_receipts_owner_key_idx").on(table.userId, table.mutationKey),
-    foreignKey({
-      columns: [table.userId, table.recordId],
-      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
-    }).onDelete("cascade"),
-  ],
+  (table) => [uniqueIndex("knowledge_receipts_owner_key_idx").on(table.userId, table.mutationKey)],
+);
+
+/** Content-free remains of a purged record, so references read as forgotten. */
+export const knowledgeTombstones = pgTable(
+  "knowledge_tombstones",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recordId: uuid("record_id").notNull(),
+    trashedAt: timestamp("trashed_at", { withTimezone: true }).notNull(),
+    purgedAt: timestamp("purged_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.recordId] })],
 );
 
 /** Revision-keyed provenance projects legacy snapshots without altering their content. */
@@ -7223,128 +7246,6 @@ export const knowledgeDerivations = pgTable(
       sql`${table.kind} IN ('source_record', 'entity_meaning', 'content_evidence', 'revision_proposal')`,
     ),
     check("knowledge_derivations_no_self", sql`${table.recordId} <> ${table.sourceRecordId}`),
-  ],
-);
-
-/** The operation is both the durable worker outbox and its content-free receipt. */
-export const knowledgeForgetOperations = pgTable(
-  "knowledge_forget_operations",
-  {
-    id: uuid("id").primaryKey(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    recordId: uuid("record_id").notNull(),
-    previewId: uuid("preview_id").notNull(),
-    epoch: bigint("epoch", { mode: "number" }).notNull(),
-    mutationKey: uuid("mutation_key").notNull(),
-    status: text("status").$type<"pending" | "blocked" | "completed">().notNull(),
-    phase: text("phase").$type<"plan" | "erase" | "scrub" | "ledger">().notNull(),
-    scrubCursor: uuid("scrub_cursor"),
-    keyProof: text("key_proof").notNull(),
-    suppressionFingerprints: jsonb("suppression_fingerprints")
-      .$type<string[]>()
-      .notNull()
-      .default([]),
-    failures: integer("failures").notNull().default(0),
-    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
-    leaseId: uuid("lease_id"),
-    leaseUntil: timestamp("lease_until", { withTimezone: true }),
-  },
-  (table) => [
-    uniqueIndex("knowledge_forget_operations_owner_id_idx").on(table.userId, table.id),
-    uniqueIndex("knowledge_forget_operations_owner_key_idx").on(table.userId, table.mutationKey),
-    uniqueIndex("knowledge_forget_operations_active_owner_idx")
-      .on(table.userId)
-      .where(sql`${table.status} <> 'completed'`),
-    index("knowledge_forget_operations_due_idx")
-      .on(table.dueAt, table.id)
-      .where(sql`${table.status} = 'pending'`),
-    check(
-      "knowledge_forget_operations_status",
-      sql`${table.status} IN ('pending', 'blocked', 'completed')`,
-    ),
-    check(
-      "knowledge_forget_operations_phase",
-      sql`${table.phase} IN ('plan', 'erase', 'scrub', 'ledger')`,
-    ),
-    check(
-      "knowledge_forget_operations_lease",
-      sql`(${table.leaseId} IS NULL) = (${table.leaseUntil} IS NULL)`,
-    ),
-  ],
-);
-
-export const knowledgeForgetTargets = pgTable(
-  "knowledge_forget_targets",
-  {
-    userId: uuid("user_id").notNull(),
-    operationId: uuid("operation_id").notNull(),
-    recordId: uuid("record_id").notNull(),
-    erased: boolean("erased").notNull().default(false),
-  },
-  (table) => [
-    primaryKey({ columns: [table.userId, table.recordId] }),
-    index("knowledge_forget_targets_work_idx").on(
-      table.userId,
-      table.operationId,
-      table.erased,
-      table.recordId,
-    ),
-    foreignKey({
-      name: "knowledge_forget_targets_operation_fk",
-      columns: [table.userId, table.operationId],
-      foreignColumns: [knowledgeForgetOperations.userId, knowledgeForgetOperations.id],
-    }).onDelete("cascade"),
-  ],
-);
-
-export const knowledgeForgetPreviews = pgTable(
-  "knowledge_forget_previews",
-  {
-    id: uuid("id").primaryKey(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    recordId: uuid("record_id").notNull(),
-    epoch: bigint("epoch", { mode: "number" }).notNull(),
-  },
-  (table) => [
-    uniqueIndex("knowledge_forget_previews_owner_record_idx").on(table.userId, table.recordId),
-  ],
-);
-
-export const knowledgeForgetSuppressions = pgTable(
-  "knowledge_forget_suppressions",
-  {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    fingerprint: text("fingerprint").notNull(),
-    keyProof: text("key_proof").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.userId, table.fingerprint] })],
-);
-
-/** Additional mutation keys for a repeated forget of an existing target. */
-export const knowledgeForgetReplayBindings = pgTable(
-  "knowledge_forget_replay_bindings",
-  {
-    userId: uuid("user_id").notNull(),
-    mutationKey: uuid("mutation_key").notNull(),
-    previewId: uuid("preview_id").notNull(),
-    ownerEpoch: bigint("owner_epoch", { mode: "number" }).notNull(),
-    operationId: uuid("operation_id").notNull(),
-    recordId: uuid("record_id").notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.userId, table.mutationKey] }),
-    index("knowledge_forget_replay_bindings_operation_idx").on(table.userId, table.operationId),
-    foreignKey({
-      name: "knowledge_forget_replay_bindings_operation_fk",
-      columns: [table.userId, table.operationId],
-      foreignColumns: [knowledgeForgetOperations.userId, knowledgeForgetOperations.id],
-    }).onDelete("cascade"),
   ],
 );
 

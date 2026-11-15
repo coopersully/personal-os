@@ -1,14 +1,8 @@
 import {
-  activeKnowledgeForgetOperationsSchema,
   knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
   knowledgeExplainInputSchema,
   knowledgeExportInputSchema,
-  knowledgeForgetInputSchema,
-  knowledgeForgetOperationInputSchema,
-  knowledgeForgetPreviewInputSchema,
-  knowledgeForgetPreviewSchema,
-  knowledgeForgetStatusSchema,
   knowledgeHistoryInputSchema,
   knowledgeLifecycleInputSchema,
   knowledgeMutationInputSchema,
@@ -24,14 +18,12 @@ import { z } from "zod";
 import { AppError } from "../errors.js";
 import type { createKnowledgeContextService } from "../knowledge/context-service.js";
 import type { createKnowledgeExportService } from "../knowledge/export-service.js";
-import type { createKnowledgeForgetService } from "../knowledge/forget-service.js";
 import type { createKnowledgeLifecycleService } from "../knowledge/lifecycle-service.js";
 import type { createKnowledgeRecordService } from "../knowledge/record-service.js";
 import type { createKnowledgeSearchService } from "../knowledge/search-service.js";
 import type { AppEnv } from "../types.js";
-import { parseBody, parseOptionalBody, requireHuman } from "./support.js";
+import { parseBody } from "./support.js";
 
-const empty = z.strictObject({});
 const object = z.record(z.string(), z.unknown());
 const knowledgeSearchQuerySchema = knowledgeQuerySchema.omit({ timeWindow: true }).extend({
   from: z.string().optional(),
@@ -58,7 +50,7 @@ function queryParameters(context: Context, repeated?: string) {
 
 function pathInput(input: Record<string, unknown>, key: string, value: string) {
   if (Object.hasOwn(input, key))
-    throw new AppError("invalid_request", "The record or operation ID must come from the path.");
+    throw new AppError("invalid_request", "The ID must come from the path.");
   return { ...input, [key]: value };
 }
 
@@ -73,8 +65,6 @@ export function registerKnowledgeRoutes({
   app,
   knowledge,
   lifecycle,
-  forget,
-  forgettingConfigured,
   search,
   context: contextService,
   export: exportService,
@@ -82,8 +72,6 @@ export function registerKnowledgeRoutes({
   app: Hono<AppEnv>;
   knowledge: ReturnType<typeof createKnowledgeRecordService>;
   lifecycle: ReturnType<typeof createKnowledgeLifecycleService>;
-  forget: ReturnType<typeof createKnowledgeForgetService>;
-  forgettingConfigured: boolean;
   search: ReturnType<typeof createKnowledgeSearchService>;
   context: ReturnType<typeof createKnowledgeContextService>;
   export: ReturnType<typeof createKnowledgeExportService>;
@@ -150,62 +138,6 @@ export function registerKnowledgeRoutes({
       ),
     );
   });
-  app.post("/v1/knowledge/forget", async (context) => {
-    const input = await parseBody(context, knowledgeForgetInputSchema);
-    const result = parseKnowledgeResponse(
-      knowledgeMutationResultSchema,
-      await forget.forget(context.get("principal"), input),
-    );
-    return context.json(result, result.outcome === "pending_erasure" ? 202 : 200);
-  });
-  app.get("/v1/knowledge/operations", requireHuman, async (context) => {
-    empty.parse(queryParameters(context));
-    return context.json(
-      parseKnowledgeResponse(
-        activeKnowledgeForgetOperationsSchema,
-        await forget.active(context.get("principal")),
-      ),
-    );
-  });
-  app.get("/v1/knowledge/operations/:id", async (context) => {
-    const input = knowledgeForgetOperationInputSchema.parse(
-      pathInput(queryParameters(context), "operationId", context.req.param("id")),
-    );
-    return context.json(
-      parseKnowledgeResponse(
-        knowledgeForgetStatusSchema,
-        await forget.status(context.get("principal"), input),
-      ),
-    );
-  });
-  app.post("/v1/knowledge/operations/:id/retry", requireHuman, async (context) => {
-    await parseOptionalBody(context, empty);
-    const input = knowledgeForgetOperationInputSchema.parse({
-      operationId: context.req.param("id"),
-    });
-    const principal = context.get("principal");
-    if (!forgettingConfigured) {
-      const status = await forget.status(principal, input);
-      if (status.status === "completed")
-        return context.json(parseKnowledgeResponse(knowledgeForgetStatusSchema, status));
-      throw new AppError("service_unavailable", "Knowledge forgetting is temporarily unavailable.");
-    }
-    return context.json(
-      parseKnowledgeResponse(knowledgeForgetStatusSchema, await forget.retry(principal, input)),
-    );
-  });
-  app.post("/v1/knowledge/:id/forget-preview", async (context) => {
-    const body = await parseOptionalBody(context, object);
-    const input = knowledgeForgetPreviewInputSchema.parse(
-      pathInput(body, "recordId", context.req.param("id")),
-    );
-    return context.json(
-      parseKnowledgeResponse(
-        knowledgeForgetPreviewSchema,
-        await forget.preview(context.get("principal"), input),
-      ),
-    );
-  });
   app.post("/v1/knowledge/:id/actions", async (context) => {
     const body = await parseBody(context, object);
     const input = knowledgeLifecycleInputSchema.parse(
@@ -234,7 +166,13 @@ export function registerKnowledgeRoutes({
     const input = knowledgeReadInputSchema.parse(
       pathInput(queryParameters(context), "id", context.req.param("id")),
     );
-    const record = await knowledge.get(context.get("principal"), input);
-    return context.json(parseKnowledgeResponse(knowledgeReadResultSchema, { record }));
+    const result = await knowledge.get(context.get("principal"), input);
+    // The owner reads a purged ID as a content-free tombstone; agents get 404 instead.
+    return context.json(
+      parseKnowledgeResponse(
+        knowledgeReadResultSchema,
+        "state" in result ? result : { record: result },
+      ),
+    );
   });
 }

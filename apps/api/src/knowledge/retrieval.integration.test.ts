@@ -28,10 +28,6 @@ import { hashToken } from "../security.js";
 import type { Principal } from "../types.js";
 import { createKnowledgeContextService } from "./context-service.js";
 import { createKnowledgeExportService } from "./export-service.js";
-import {
-  createKnowledgeForgetService,
-  type KnowledgeDeletionLedgerEntry,
-} from "./forget-service.js";
 import { createKnowledgeLifecycleService } from "./lifecycle-service.js";
 import { createKnowledgeRecordService } from "./record-service.js";
 import { createKnowledgeSearchService } from "./search-service.js";
@@ -141,20 +137,7 @@ describe("purpose-bound memory retrieval", () => {
       db: database.db,
       now: () => new Date(clock),
       encryptionKey: Buffer.alloc(32, 11).toString("base64"),
-      suppressionKey: Buffer.alloc(32, 17),
     };
-    const ledgerEntries = new Map<string, KnowledgeDeletionLedgerEntry>();
-    const forget = createKnowledgeForgetService({
-      ...config,
-      ledger: {
-        async append(entry) {
-          ledgerEntries.set(entry.operationId, entry);
-        },
-        async readReceipt(id) {
-          return ledgerEntries.get(id) ?? null;
-        },
-      },
-    });
     const records = createKnowledgeRecordService(config);
     const lifecycle = createKnowledgeLifecycleService(config);
     return {
@@ -162,7 +145,6 @@ describe("purpose-bound memory retrieval", () => {
       agent,
       newAgent,
       lifecycle,
-      forget,
       records,
       search: createKnowledgeSearchService(config),
       context: createKnowledgeContextService(config),
@@ -277,15 +259,13 @@ describe("purpose-bound memory retrieval", () => {
     await expect(
       f.search.history(f.agent, { ...planning, recordId: restricted.id }),
     ).rejects.toMatchObject({ status: 403 });
-    const { previewId, ownerEpoch } = await f.forget.preview(f.owner, { recordId: forgotten.id });
-    const pending = await f.forget.forget(f.owner, {
-      previewId,
-      ownerEpoch,
+    const deleted = await f.lifecycle.mutate(f.owner, {
+      action: "delete_now",
+      recordId: forgotten.id,
+      expectedRevision: 1,
       mutationKey: randomUUID(),
     });
-    expect(pending.outcome).toBe("pending_erasure");
-    await expect(f.context.explain(f.agent, explain)).rejects.toMatchObject({ status: 503 });
-    expect(await f.forget.runOnce({})).toBe(true);
+    expect(deleted.outcome).toBe("forgotten");
     expect(await f.context.explain(f.agent, explain)).toMatchObject({ state: "unavailable" });
     await expect(
       f.search.history(f.owner, { ...planning, recordId: forgotten.id }),
@@ -654,9 +634,9 @@ describe("purpose-bound memory retrieval", () => {
       .values({ id: goalId, userId: f.owner.userId, title: "Fixture goal" });
     const goal = await f.save(fact("unused", { content: { kind: "goal", value: { goalId } } }));
     const linked = await f.save(fact("independent orchard", { relatedRecordIds: [goal.id] }));
-    expect((await f.records.get(f.agent, { ...planning, id: linked.id })).relatedRecordIds).toEqual(
-      [goal.id],
-    );
+    expect(await f.records.get(f.agent, { ...planning, id: linked.id })).toMatchObject({
+      relatedRecordIds: [goal.id],
+    });
     await database.db
       .update(accessTokens)
       .set({ scopes: ["knowledge:read"] })

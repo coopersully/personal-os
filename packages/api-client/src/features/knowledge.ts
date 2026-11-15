@@ -1,10 +1,6 @@
 import {
-  activeKnowledgeForgetOperationsSchema,
   type KnowledgeExplainInput,
   type KnowledgeExportInput,
-  type KnowledgeForgetInput,
-  type KnowledgeForgetOperationInput,
-  type KnowledgeForgetPreviewInput,
   type KnowledgeHistoryInput,
   type KnowledgeLifecycleInput,
   type KnowledgeMutationInput,
@@ -12,8 +8,6 @@ import {
   type KnowledgeReadInput,
   knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
-  knowledgeForgetPreviewSchema,
-  knowledgeForgetStatusSchema,
   knowledgeMutationResultSchema,
   knowledgePageSchema,
   knowledgeReadResultSchema,
@@ -22,7 +16,6 @@ import {
 
 const knowledgePath = "/v1/knowledge";
 const recordPath = (id: string) => `${knowledgePath}/${encodeURIComponent(id)}`;
-const operationPath = (id: string) => `${knowledgePath}/operations/${encodeURIComponent(id)}`;
 const json = (method: "POST", value: unknown): RequestInit => ({
   method,
   body: JSON.stringify(value),
@@ -36,36 +29,16 @@ export function createKnowledgeApiClient(
     async saveKnowledge(input: KnowledgeMutationInput) {
       return knowledgeSaveResultSchema.parse(await request(knowledgePath, json("POST", input)));
     },
+    /** Returns the record, or a content-free tombstone when the owner reads a purged ID. */
     async getKnowledge({ id, purpose }: KnowledgeReadInput) {
-      const response = await request(`${recordPath(id)}?${new URLSearchParams({ purpose })}`);
-      return knowledgeReadResultSchema.parse(response).record;
+      const response = knowledgeReadResultSchema.parse(
+        await request(`${recordPath(id)}?${new URLSearchParams({ purpose })}`),
+      );
+      return "state" in response ? response : response.record;
     },
     async updateKnowledge({ recordId, ...action }: KnowledgeLifecycleInput) {
       return knowledgeMutationResultSchema.parse(
         await request(`${recordPath(recordId)}/actions`, json("POST", action)),
-      );
-    },
-    async previewKnowledgeForget({ recordId, ...body }: KnowledgeForgetPreviewInput) {
-      return knowledgeForgetPreviewSchema.parse(
-        await request(`${recordPath(recordId)}/forget-preview`, json("POST", body)),
-      );
-    },
-    async forgetKnowledge(input: KnowledgeForgetInput) {
-      return knowledgeMutationResultSchema.parse(
-        await request(`${knowledgePath}/forget`, json("POST", input)),
-      );
-    },
-    async listActiveKnowledgeForgetOperations() {
-      return activeKnowledgeForgetOperationsSchema.parse(
-        await request(`${knowledgePath}/operations`),
-      );
-    },
-    async getKnowledgeForgetStatus({ operationId }: KnowledgeForgetOperationInput) {
-      return knowledgeForgetStatusSchema.parse(await request(operationPath(operationId)));
-    },
-    async retryKnowledgeForget({ operationId }: KnowledgeForgetOperationInput) {
-      return knowledgeForgetStatusSchema.parse(
-        await request(`${operationPath(operationId)}/retry`, { method: "POST" }),
       );
     },
     async searchKnowledge(input: KnowledgeQuery) {

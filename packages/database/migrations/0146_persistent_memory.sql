@@ -2,8 +2,14 @@
 CREATE TABLE knowledge_records (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  revision integer NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now(),
- CONSTRAINT knowledge_records_owner_id_idx UNIQUE(user_id,id)
+ trashed_at timestamptz NULL, trash_group_id uuid NULL, status_before_trash text NULL,
+ CONSTRAINT knowledge_records_owner_id_idx UNIQUE(user_id,id),
+ CONSTRAINT knowledge_records_trash_state CHECK (
+  (trashed_at IS NULL) = (trash_group_id IS NULL) AND (trashed_at IS NULL) = (status_before_trash IS NULL)
+ )
 );
+--> statement-breakpoint
+CREATE INDEX knowledge_records_trashed_idx ON knowledge_records (trashed_at) WHERE trashed_at IS NOT NULL;
 --> statement-breakpoint
 CREATE TABLE knowledge_revisions (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, record_id uuid NOT NULL, revision integer NOT NULL,
@@ -24,11 +30,17 @@ CREATE TABLE knowledge_relationships (
  FOREIGN KEY(user_id,related_record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE
 );
 --> statement-breakpoint
+-- Receipts outlive a purged record so a retried mutation stays content-free.
 CREATE TABLE knowledge_receipts (
- id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, record_id uuid NOT NULL,
- mutation_key uuid NOT NULL, request_hash text NOT NULL,
- CONSTRAINT knowledge_receipts_owner_key_idx UNIQUE(user_id,mutation_key),
- FOREIGN KEY(user_id,record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ record_id uuid NOT NULL, mutation_key uuid NOT NULL, request_hash text NOT NULL, actor_id uuid NOT NULL,
+ CONSTRAINT knowledge_receipts_owner_key_idx UNIQUE(user_id,mutation_key)
+);
+--> statement-breakpoint
+CREATE TABLE knowledge_tombstones (
+ user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, record_id uuid NOT NULL,
+ trashed_at timestamptz NOT NULL, purged_at timestamptz NOT NULL,
+ PRIMARY KEY (user_id, record_id)
 );
 --> statement-breakpoint
 -- from branch 0140_knowledge_lifecycle.sql
@@ -88,86 +100,6 @@ CREATE TRIGGER knowledge_invalidate_signed_source AFTER DELETE ON "text_inbound_
 --> statement-breakpoint
 CREATE TRIGGER knowledge_invalidate_goal_source AFTER DELETE ON "goals"
   FOR EACH ROW EXECUTE FUNCTION knowledge_invalidate_external_source();
---> statement-breakpoint
--- from branch 0142_knowledge_forgetting.sql
-ALTER TABLE "knowledge_receipts" ALTER COLUMN "request_hash" DROP NOT NULL;
---> statement-breakpoint
-ALTER TABLE "knowledge_receipts" ADD COLUMN "actor_id" uuid;
---> statement-breakpoint
-CREATE TABLE "knowledge_forget_operations" (
-  "id" uuid PRIMARY KEY,
-  "user_id" uuid NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
-  "record_id" uuid NOT NULL,
-  "preview_id" uuid NOT NULL,
-  "epoch" bigint NOT NULL,
-  "mutation_key" uuid NOT NULL,
-  "status" text NOT NULL,
-  "phase" text NOT NULL,
-  "scrub_cursor" uuid,
-  "key_proof" text NOT NULL,
-  "suppression_fingerprints" jsonb DEFAULT '[]'::jsonb NOT NULL,
-  "failures" integer DEFAULT 0 NOT NULL,
-  "due_at" timestamptz NOT NULL,
-  "lease_id" uuid,
-  "lease_until" timestamptz,
-  CONSTRAINT "knowledge_forget_operations_status" CHECK ("status" IN ('pending', 'blocked', 'completed')),
-  CONSTRAINT "knowledge_forget_operations_phase" CHECK ("phase" IN ('plan', 'erase', 'scrub', 'ledger')),
-  CONSTRAINT "knowledge_forget_operations_lease" CHECK (("lease_id" IS NULL) = ("lease_until" IS NULL))
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX "knowledge_forget_operations_owner_id_idx" ON "knowledge_forget_operations" ("user_id", "id");
---> statement-breakpoint
-CREATE UNIQUE INDEX "knowledge_forget_operations_owner_key_idx" ON "knowledge_forget_operations" ("user_id", "mutation_key");
---> statement-breakpoint
-CREATE UNIQUE INDEX "knowledge_forget_operations_active_owner_idx" ON "knowledge_forget_operations" ("user_id") WHERE "status" <> 'completed';
---> statement-breakpoint
-CREATE INDEX "knowledge_forget_operations_due_idx" ON "knowledge_forget_operations" ("due_at", "id") WHERE "status" = 'pending';
---> statement-breakpoint
-CREATE TABLE "knowledge_forget_targets" (
-  "user_id" uuid NOT NULL,
-  "operation_id" uuid NOT NULL,
-  "record_id" uuid NOT NULL,
-  "erased" boolean DEFAULT false NOT NULL,
-  PRIMARY KEY ("user_id", "record_id"),
-  CONSTRAINT "knowledge_forget_targets_operation_fk" FOREIGN KEY ("user_id", "operation_id")
-    REFERENCES "knowledge_forget_operations" ("user_id", "id") ON DELETE CASCADE
-);
---> statement-breakpoint
-CREATE INDEX "knowledge_forget_targets_work_idx" ON "knowledge_forget_targets" ("user_id", "operation_id", "erased", "record_id");
---> statement-breakpoint
-CREATE TABLE "knowledge_forget_previews" (
-  "id" uuid PRIMARY KEY,
-  "user_id" uuid NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
-  "record_id" uuid NOT NULL,
-  "epoch" bigint NOT NULL
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX "knowledge_forget_previews_owner_record_idx" ON "knowledge_forget_previews" ("user_id", "record_id");
---> statement-breakpoint
-CREATE TABLE "knowledge_forget_suppressions" (
-  "user_id" uuid NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
-  "fingerprint" text NOT NULL,
-  "key_proof" text NOT NULL,
-  PRIMARY KEY ("user_id", "fingerprint")
-);
---> statement-breakpoint
--- from branch 0143_knowledge_forget_replay.sql
-ALTER TABLE "knowledge_receipts" ADD COLUMN "replay_verifier" text;
---> statement-breakpoint
-CREATE TABLE "knowledge_forget_replay_bindings" (
-  "user_id" uuid NOT NULL,
-  "mutation_key" uuid NOT NULL,
-  "preview_id" uuid NOT NULL,
-  "owner_epoch" bigint NOT NULL,
-  "operation_id" uuid NOT NULL,
-  "record_id" uuid NOT NULL,
-  PRIMARY KEY ("user_id", "mutation_key"),
-  CONSTRAINT "knowledge_forget_replay_bindings_operation_fk" FOREIGN KEY ("user_id", "operation_id")
-    REFERENCES "knowledge_forget_operations" ("user_id", "id") ON DELETE CASCADE
-);
---> statement-breakpoint
-CREATE INDEX "knowledge_forget_replay_bindings_operation_idx"
-  ON "knowledge_forget_replay_bindings" ("user_id", "operation_id");
 --> statement-breakpoint
 -- from branch 0144_knowledge_context_receipts.sql
 CREATE TABLE "knowledge_context_uses" (

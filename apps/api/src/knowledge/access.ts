@@ -3,8 +3,6 @@ import {
   type Database,
   goals,
   knowledgeDerivations,
-  knowledgeForgetOperations,
-  knowledgeForgetReplayBindings,
   knowledgeOwnerEpochs,
   knowledgeRecords,
   knowledgeRevisionMetadata,
@@ -27,11 +25,10 @@ import {
   knowledgeClaimKey,
   knowledgeClaimValue,
   knowledgeContentSchema,
-  knowledgeErasurePendingReason,
   knowledgeRecordSnapshotSchema,
   knowledgeRevisionMetadataSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 
@@ -43,7 +40,12 @@ export type KnowledgeRevision = {
   metadata: KnowledgeRevisionMetadata;
   claimKey: string | null;
   hasSidecar: boolean;
+  /** Record-level trash state; a trashed record is never disclosed to an agent. */
+  trashedAt: Date | null;
+  trashGroupId: string | null;
 };
+/** Default reads exclude Trash. Only the owner may opt in, by ID or the Trash view. */
+export type KnowledgeTrashVisibility = { includeTrashed?: boolean };
 export type KnowledgeDerivation = {
   sourceRecordId: string;
   sourceRevision: number;
@@ -107,26 +109,6 @@ export function lockKnowledgeOwner(
     : tx.execute(sql`SELECT pg_advisory_xact_lock_shared(hashtextextended(${lockKey}, 0))`);
 }
 
-export async function assertKnowledgeContentAvailable(tx: KnowledgeTransaction, userId: string) {
-  const [active] = await tx
-    .select({ id: knowledgeForgetOperations.id })
-    .from(knowledgeForgetOperations)
-    .where(
-      and(
-        eq(knowledgeForgetOperations.userId, userId),
-        ne(knowledgeForgetOperations.status, "completed"),
-      ),
-    )
-    .limit(1);
-  if (active)
-    throw new AppError(
-      "service_unavailable",
-      "Memory is unavailable while forgetting is in progress.",
-      { reason: knowledgeErasurePendingReason },
-    );
-}
-
-/** Check authority under the owner lock before revealing an erasure fence. */
 async function lockKnowledgeContent<T>(
   tx: KnowledgeTransaction,
   userId: string,
@@ -134,9 +116,7 @@ async function lockKnowledgeContent<T>(
   mode: "read" | "write" = "write",
 ) {
   await lockKnowledgeOwner(tx, userId, mode);
-  const authority = await reauthorize();
-  await assertKnowledgeContentAvailable(tx, userId);
-  return authority;
+  return reauthorize();
 }
 
 export function admitHumanKnowledgeContent(
@@ -155,33 +135,6 @@ export function admitHumanKnowledgeContent(
     },
     mode,
   );
-}
-
-export async function assertForgetMutationKeyUnused(
-  tx: KnowledgeTransaction,
-  userId: string,
-  mutationKey: string,
-) {
-  const [forget] = await tx
-    .select({ id: knowledgeForgetOperations.id })
-    .from(knowledgeForgetOperations)
-    .where(
-      and(
-        eq(knowledgeForgetOperations.userId, userId),
-        eq(knowledgeForgetOperations.mutationKey, mutationKey),
-      ),
-    );
-  const [repeat] = await tx
-    .select({ key: knowledgeForgetReplayBindings.mutationKey })
-    .from(knowledgeForgetReplayBindings)
-    .where(
-      and(
-        eq(knowledgeForgetReplayBindings.userId, userId),
-        eq(knowledgeForgetReplayBindings.mutationKey, mutationKey),
-      ),
-    );
-  if (forget || repeat)
-    throw new AppError("conflict", "This mutation key was used for another request.");
 }
 
 export async function readKnowledgeEpoch(tx: KnowledgeTransaction, userId: string) {
@@ -285,7 +238,15 @@ const revisionSelection = {
   snapshot: knowledgeRevisions.snapshot,
   metadata: knowledgeRevisionMetadata.metadata,
   claimKey: knowledgeRevisionMetadata.claimKey,
+  trashedAt: knowledgeRecords.trashedAt,
+  trashGroupId: knowledgeRecords.trashGroupId,
 };
+
+/** The one trash predicate for agent reads; SQL readers use `knowledgeNotTrashed`. */
+export function isKnowledgeVisibleToAgent(record: Pick<KnowledgeRevision, "trashedAt">) {
+  return record.trashedAt === null;
+}
+export const knowledgeNotTrashed = isNull(knowledgeRecords.trashedAt);
 
 function currentRevisions(tx: KnowledgeTransaction) {
   return tx
@@ -313,16 +274,19 @@ function currentRevisions(tx: KnowledgeTransaction) {
 export function currentKnowledgeForRetrieval(
   tx: KnowledgeTransaction,
   principal: Principal,
-  query: Pick<KnowledgeQuery, "purpose" | "workspace" | "kind">,
+  query: Pick<KnowledgeQuery, "purpose" | "workspace" | "kind" | "status">,
   authorizedScopes: AccessScope[],
 ) {
   const snapshot = knowledgeRevisions.snapshot;
   const workspace = sql`(${snapshot}->'scope'->>'workspace')`;
   const kind = sql`(${snapshot}->'content'->>'kind')`;
   const scopes = sql`${JSON.stringify(authorizedScopes)}::jsonb`;
+  if (query.status === "trashed" && principal.actorType !== "user")
+    throw new AppError("forbidden", "Trash is available to the account owner.");
   return currentRevisions(tx).where(
     and(
       eq(knowledgeRecords.userId, principal.userId),
+      query.status === "trashed" ? isNotNull(knowledgeRecords.trashedAt) : knowledgeNotTrashed,
       sql`${snapshot}->'purposes' @> ${JSON.stringify([query.purpose])}::jsonb`,
       query.workspace
         ? or(sql`${workspace} IS NULL`, sql`${workspace} = ${query.workspace}`)
@@ -360,6 +324,7 @@ export function ownedKnowledgeHistoryRecordIds(
     .where(
       and(
         eq(knowledgeRecords.userId, userId),
+        knowledgeNotTrashed,
         start
           ? start.inclusive
             ? lte(knowledgeRecords.id, start.id)
@@ -397,6 +362,13 @@ export function ownedKnowledgeHistory(
   return tx
     .select({ ...revisionSelection, revision: knowledgeRevisions.revision })
     .from(knowledgeRevisions)
+    .innerJoin(
+      knowledgeRecords,
+      and(
+        eq(knowledgeRecords.userId, knowledgeRevisions.userId),
+        eq(knowledgeRecords.id, knowledgeRevisions.recordId),
+      ),
+    )
     .leftJoin(
       knowledgeRevisionMetadata,
       and(
@@ -442,6 +414,7 @@ export async function knowledgeClaimRevisions(
   const candidates = await currentRevisions(tx).where(
     and(
       eq(knowledgeRecords.userId, userId),
+      knowledgeNotTrashed,
       exceptId ? ne(knowledgeRecords.id, exceptId) : undefined,
       or(
         sql`md5(${knowledgeRevisionMetadata.claimKey}) = md5(${claimKey})`,
@@ -459,6 +432,8 @@ export function projectKnowledgeRevision(row: {
   snapshot: KnowledgeRecordSnapshot;
   metadata: KnowledgeRevisionMetadata | null;
   claimKey: string | null;
+  trashedAt: Date | null;
+  trashGroupId: string | null;
 }): KnowledgeRevision {
   const snapshot = knowledgeRecordSnapshotSchema.parse(row.snapshot);
   const metadata = row.metadata
@@ -468,6 +443,8 @@ export function projectKnowledgeRevision(row: {
     snapshot,
     metadata,
     hasSidecar: row.metadata !== null,
+    trashedAt: row.trashedAt,
+    trashGroupId: row.trashGroupId,
     claimKey: knowledgeClaimKey(
       snapshot.scope.workspace,
       knowledgeClaimContent(snapshot, metadata.generatedInference),
@@ -480,9 +457,14 @@ export async function findOwnedKnowledgeRevision(
   userId: string,
   id: string,
   lock = false,
+  { includeTrashed = false }: KnowledgeTrashVisibility = {},
 ) {
   const query = currentRevisions(tx).where(
-    and(eq(knowledgeRecords.userId, userId), eq(knowledgeRecords.id, id)),
+    and(
+      eq(knowledgeRecords.userId, userId),
+      eq(knowledgeRecords.id, id),
+      includeTrashed ? undefined : knowledgeNotTrashed,
+    ),
   );
   const [row] = await (lock ? query.for("update", { of: knowledgeRecords }) : query);
   return row ? projectKnowledgeRevision(row) : null;
@@ -493,8 +475,10 @@ export async function ownedKnowledgeRevision(
   principal: Principal,
   id: string,
   lock = false,
+  visibility: KnowledgeTrashVisibility = {},
 ) {
-  const record = await findOwnedKnowledgeRevision(tx, principal.userId, id, lock);
+  if (visibility.includeTrashed) requireKnowledgeOwner(principal);
+  const record = await findOwnedKnowledgeRevision(tx, principal.userId, id, lock, visibility);
   if (!record) throw new AppError("not_found", "The knowledge record was not found.");
   return record;
 }
@@ -571,6 +555,8 @@ async function historicalCopyReferences(
       metadata: legacyMetadata(legacy.snapshot),
       claimKey: null,
       hasSidecar: false,
+      trashedAt: null,
+      trashGroupId: null,
     };
     for (const reference of directSourceReferences(old)) {
       const key = reference.toLowerCase();
@@ -755,6 +741,10 @@ export function createKnowledgeAccess(now: () => Date) {
     } = {},
   ): Promise<DisclosureProjection> {
     const { snapshot, metadata } = revision;
+    if (principal.actorType === "agent" && !isKnowledgeVisibleToAgent(revision))
+      throw new AppError("not_found", "The knowledge record was not found.");
+    // A trashed record shown in the owner's Trash may still cite records trashed with it.
+    const trashVisibility = trashReferenceVisibility(principal, revision);
     if (options.ancestors?.has(snapshot.id))
       throw new AppError("conflict", "Knowledge disclosure dependencies cannot form a cycle.");
     const checked = options.checked ?? new Map();
@@ -809,7 +799,13 @@ export function createKnowledgeAccess(now: () => Date) {
           : [];
     const referenceStates = new Map<string, ReferenceState>();
     for (const id of references) {
-      const source = await findOwnedKnowledgeRevision(tx, principal.userId, id);
+      const source = await findOwnedKnowledgeRevision(
+        tx,
+        principal.userId,
+        id,
+        false,
+        trashVisibility,
+      );
       if (!source) continue;
       try {
         preserveKnowledgeDisclosure({ ...snapshot, purposes: [purpose] }, source.snapshot);
@@ -956,7 +952,13 @@ export function createKnowledgeAccess(now: () => Date) {
       }
     }
     const replacement = metadata.supersededBy
-      ? await findOwnedKnowledgeRevision(tx, principal.userId, metadata.supersededBy)
+      ? await findOwnedKnowledgeRevision(
+          tx,
+          principal.userId,
+          metadata.supersededBy,
+          false,
+          trashReferenceVisibility(principal, revision),
+        )
       : null;
     const supersededBy =
       replacement && (await isDisclosable(tx, principal, replacement, purpose, retrieval))
@@ -977,6 +979,8 @@ export function createKnowledgeAccess(now: () => Date) {
       claimKey,
       supersededBy,
       conflictRecordIds: conflictRecordIds.sort(),
+      trashedAt: revision.trashedAt?.toISOString() ?? null,
+      trashGroupId: revision.trashGroupId,
     };
   }
 
@@ -1056,6 +1060,13 @@ export function createKnowledgeAccess(now: () => Date) {
     projectForRetrieval,
     retrievalDisclosure,
   };
+}
+
+function trashReferenceVisibility(
+  principal: Principal,
+  revision: KnowledgeRevision,
+): KnowledgeTrashVisibility {
+  return { includeTrashed: principal.actorType === "user" && revision.trashedAt !== null };
 }
 
 function isKnowledgeDisclosureError(error: unknown) {

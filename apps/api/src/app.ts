@@ -99,9 +99,8 @@ import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { createKnowledgeContextService } from "./knowledge/context-service.js";
 import { createKnowledgeExportService } from "./knowledge/export-service.js";
-import { createKnowledgeForgetService } from "./knowledge/forget-service.js";
-import { validKnowledgeForgetKey } from "./knowledge/forget-suppression.js";
 import { createKnowledgeLifecycleService } from "./knowledge/lifecycle-service.js";
+import { createKnowledgePurgeService } from "./knowledge/purge-service.js";
 import { createKnowledgeRecordService } from "./knowledge/record-service.js";
 import { createKnowledgeSearchService } from "./knowledge/search-service.js";
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
@@ -202,7 +201,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
   dispatchDueFinanceMaintenance: () => Promise<void>;
   runTextingRecovery: () => Promise<void> | null;
   runFinanceNotifications: () => Promise<void> | null;
-  runKnowledgeForgetting: () => Promise<void>;
+  runKnowledgePurge: () => Promise<void>;
   dispatchNativePush: () => Promise<void> | null;
   quiesceTextingRecovery: () => void;
   superviseICloudMail: () => Promise<void>;
@@ -222,6 +221,9 @@ export type PersonalOsApp = Hono<AppEnv> & {
   }>;
 };
 
+// The purge runs well inside the daily guarantee for Trash retention.
+const knowledgePurgeIntervalMs = 6 * 60 * 60 * 1000;
+const knowledgePurgeBatchSize = 100;
 const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
 const googleCallbackSchema = z.object({
   code: z.string().min(1).optional(),
@@ -623,25 +625,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
     now,
   });
-  const { suppressionKey, ledger } = dependencies.knowledgeForget ?? {};
-  const forgettingConfigured = ledger !== undefined && validKnowledgeForgetKey(suppressionKey);
-  const knowledgePersistence = {
-    db: dependencies.db,
-    now,
-    ...(suppressionKey ? { suppressionKey } : {}),
-  };
+  const knowledgePersistence = { db: dependencies.db, now };
   const knowledgeRetrieval = {
     db: dependencies.db,
     now,
     encryptionKey: dependencies.config.encryptionKey,
   };
-  const knowledgeForget = createKnowledgeForgetService({
-    db: dependencies.db,
-    now,
-    // Existing fingerprints still guard writes if the ledger goes away.
-    // New erasure admission needs both dependencies.
-    ...(forgettingConfigured ? { ledger, suppressionKey } : {}),
-  });
+  const knowledgePurge = createKnowledgePurgeService(knowledgePersistence);
+  let knowledgePurgedAt = Number.NEGATIVE_INFINITY;
   const goalService = createGoalsService({ db: dependencies.db, now });
   const maintenance = createWorkspaceMaintenanceService({ db: dependencies.db, now });
   const mailMaintenance = createMailMaintenanceService({
@@ -1620,8 +1611,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     app,
     knowledge: createKnowledgeRecordService(knowledgePersistence),
     lifecycle: createKnowledgeLifecycleService(knowledgePersistence),
-    forget: knowledgeForget,
-    forgettingConfigured,
     search: createKnowledgeSearchService(knowledgeRetrieval),
     context: createKnowledgeContextService(knowledgeRetrieval),
     export: createKnowledgeExportService(knowledgeRetrieval),
@@ -1748,11 +1737,21 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     runFinanceNotifications() {
       return financeNotificationRuntime.run();
     },
-    async runKnowledgeForgetting() {
-      if (!forgettingConfigured) return;
+    /** Purges memory past its Trash retention at most every six hours. A failed pass retries
+     * on the next scheduler tick. */
+    async runKnowledgePurge() {
+      const startedAt = now().getTime();
+      if (startedAt - knowledgePurgedAt < knowledgePurgeIntervalMs) return;
       const signal = dependencies.runtimeLifecycle?.signal;
-      for (let batch = 0; batch < 5 && !signal?.aborted; batch++) {
-        if (!(await knowledgeForget.runOnce(signal ? { signal } : {}))) break;
+      for (let batch = 0; batch < 10 && !signal?.aborted; batch++) {
+        const { purged } = await knowledgePurge.purgeExpired({
+          limit: knowledgePurgeBatchSize,
+          ...(signal ? { signal } : {}),
+        });
+        if (purged < knowledgePurgeBatchSize) {
+          knowledgePurgedAt = startedAt;
+          break;
+        }
       }
     },
     dispatchNativePush() {

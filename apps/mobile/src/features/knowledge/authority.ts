@@ -1,5 +1,5 @@
 import { ApiClientError } from "@personal-os/api-client";
-import { type KnowledgePage, knowledgeErasurePendingReason } from "@personal-os/domain";
+import type { KnowledgeForgottenRecord, KnowledgePage, KnowledgeRecord } from "@personal-os/domain";
 import { randomUUID } from "expo-crypto";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner-native";
@@ -15,15 +15,15 @@ export type MemoryAccess = {
 export function statusOf(error: unknown) {
   return error instanceof ApiClientError ? error.status : undefined;
 }
-export function isErasureFence(error: unknown) {
-  return (
-    error instanceof ApiClientError &&
-    error.status === 503 &&
-    typeof error.details === "object" &&
-    error.details !== null &&
-    "reason" in error.details &&
-    error.details.reason === knowledgeErasurePendingReason
-  );
+/** The Memory screen treats a purged record like any other record that is no longer available. */
+export function readableMemory(result: KnowledgeRecord | KnowledgeForgottenRecord) {
+  if ("state" in result)
+    throw new ApiClientError({
+      code: "not_found",
+      message: "This memory was deleted.",
+      status: 404,
+    });
+  return result;
 }
 
 export function useVisitAuthority(isSignedIn: Current) {

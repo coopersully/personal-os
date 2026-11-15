@@ -1,15 +1,13 @@
 import {
-  type KnowledgeForgetStatus,
   type KnowledgeQuery,
   type KnowledgeRecord,
   knowledgePurposeSchema,
   knowledgeWorkspaceSchema,
 } from "@personal-os/domain";
 import { router, Stack, useFocusEffect, usePreventRemove } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Keyboard, View } from "react-native";
 import { toast } from "sonner-native";
-import { Body, Heading } from "../../components/detail-content";
 import { editorDismissOptions } from "../../components/editor-header";
 import { FloatingAdd } from "../../components/forms/form-save";
 import { Icon } from "../../components/icons";
@@ -21,7 +19,6 @@ import { confirmDiscard, Field, Section } from "../goals/controls";
 import { SettingsActionRow } from "../settings/settings-row";
 import {
   type Feedback,
-  isErasureFence,
   type MemoryAccess,
   type MemoryApi,
   readMemory,
@@ -45,7 +42,6 @@ import { memoryShareAvailable, shareMemoryPage } from "./share";
 
 type Destination = { kind: "list" } | { kind: "detail"; selection: Selection };
 const listDestination: Destination = { kind: "list" };
-type ActiveErasure = { operationId: string; status: "pending" | "blocked"; toastId?: string };
 
 export function MemoryScreen() {
   const { state, session } = useAuth();
@@ -84,69 +80,29 @@ function MemoryVisit({
   const [api] = useState(apiFactory);
   const visit = useVisitAuthority(signedIn);
   const [generation, setGeneration] = useState(0);
-  const activeGeneration = useRef(0);
-  const [available, setAvailable] = useState(false);
   const [destination, setDestination] = useState<Destination>(listDestination);
-  const [erasure, setErasure] = useState<ActiveErasure>();
-  const allowed = useRef(false);
   const seenEpoch = useRef<number>(undefined);
   const operations = useMemoryCommands(visit.capture);
-  const current = visit.current;
   const invalidate = visit.invalidate;
-  const operationId = erasure?.operationId;
-  const operationToast = erasure?.toastId;
   const { finish } = operations;
 
   const revalidate = useCallback(
-    (next: Destination = listDestination, admitted?: ActiveErasure) => {
+    (next: Destination = listDestination) => {
       invalidate();
-      allowed.current = false;
       seenEpoch.current = undefined;
-      setAvailable(false);
       setDestination(next);
-      setErasure(admitted);
-      activeGeneration.current += 1;
-      setGeneration(activeGeneration.current);
+      setGeneration((value) => value + 1);
     },
     [invalidate],
   );
 
-  const discover = useCallback(
-    async (signal: AbortSignal) => {
-      if (operationId) return true;
-      const isCurrent = () =>
-        !signal.aborted && current() && generation === activeGeneration.current;
-      let result: Awaited<ReturnType<MemoryApi["listActiveKnowledgeForgetOperations"]>>;
-      try {
-        result = await api.listActiveKnowledgeForgetOperations();
-      } catch (error) {
-        if (isCurrent()) throw error;
-        return;
-      }
-      if (!isCurrent()) return;
-      if (result[0]) {
-        revalidate(listDestination, result[0]);
-      } else {
-        allowed.current = true;
-        setAvailable(true);
-      }
-      return true;
-    },
-    [api, current, operationId, revalidate, generation],
-  );
-  const gate = useMemoryResource(discover);
-
   const access = useMemo<MemoryAccess>(
     () => ({
-      capture: () => {
-        const authorized = visit.capture();
-        return () => authorized() && allowed.current;
-      },
+      capture: visit.capture,
       recover(error, cursor) {
-        const fenced = isErasureFence(error);
-        if (!fenced && !(cursor && statusOf(error) === 409)) return false;
+        if (!(cursor && statusOf(error) === 409)) return false;
         revalidate();
-        if (!fenced) toast.error("This memory page changed. Reloading saved memory.");
+        toast.error("This memory page changed. Reloading saved memory.");
         return true;
       },
       observe({ epoch }) {
@@ -161,49 +117,10 @@ function MemoryVisit({
     [visit.capture, revalidate],
   );
 
-  function admitted(id: string | null, toastId: string) {
-    revalidate(listDestination, id ? { operationId: id, status: "pending", toastId } : undefined);
-  }
-
-  if (erasure) {
-    return (
-      <>
-        <Stack.Screen options={{ title: "Memory" }} />
-        <ErasureStatus
-          key={operationId}
-          {...{ api, current, erasure }}
-          onComplete={(feedbackId) => {
-            if (operationToast && operationToast !== feedbackId)
-              finish(operationToast, { message: "Memory forgotten." });
-            revalidate();
-          }}
-          onBlocked={() => {
-            if (operationToast)
-              finish(operationToast, { message: "Erasure needs attention.", tone: "error" });
-          }}
-          retain={finish}
-        />
-      </>
-    );
-  }
-  if (!available) {
-    return (
-      <MemoryBody>
-        <Stack.Screen options={{ title: "Memory" }} />
-        <MemoryReadState
-          {...gate}
-          label="memory availability"
-          retry={() =>
-            void gate.reload().catch(() => toast.error("Couldn’t check memory availability."))
-          }
-        />
-      </MemoryBody>
-    );
-  }
   return (
     <PrivateMemory
       key={generation}
-      {...{ api, access, admitted }}
+      {...{ api, access }}
       initial={destination}
       revalidate={revalidate}
       retain={finish}
@@ -211,117 +128,14 @@ function MemoryVisit({
   );
 }
 
-function ErasureStatus({
-  api,
-  current,
-  erasure,
-  onComplete,
-  onBlocked,
-  retain,
-}: {
-  api: MemoryApi;
-  current: () => boolean;
-  erasure: ActiveErasure;
-  onComplete: (feedbackId?: string) => void;
-  onBlocked: () => void;
-  retain: (id: string, feedback: Feedback) => void;
-}) {
-  const { operationId } = erasure;
-  const mounted = useVisitAuthority(current);
-  const commands = useMemoryCommands(mounted.capture);
-  const [phase, setPhase] = useState<KnowledgeForgetStatus["status"]>(erasure.status);
-  const callbacks = useRef({ onComplete, onBlocked });
-  callbacks.current = { onComplete, onBlocked };
-  const previous = useRef<string>(undefined);
-
-  const update = useCallback((value: KnowledgeForgetStatus, feedbackId?: string) => {
-    if (value.status === "completed") callbacks.current.onComplete(feedbackId);
-    else if (value.status === "blocked" && previous.current !== "blocked")
-      callbacks.current.onBlocked();
-    previous.current = value.status;
-    setPhase(value.status);
-  }, []);
-
-  useEffect(() => {
-    const canPublish = mounted.capture();
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const value = await api.getKnowledgeForgetStatus({ operationId });
-        if (stopped || !canPublish()) return;
-        update(value);
-        if (value.status !== "pending") return;
-      } catch {
-        // The explicit status command provides actionable feedback on demand.
-      }
-      if (!stopped && canPublish()) timer = setTimeout(() => void poll(), 4000);
-    };
-    if (phase === "pending" && !commands.busy) void poll();
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-    };
-  }, [api, mounted.capture, operationId, phase, update, commands.busy]);
-
-  function check(retry = false) {
-    void commands.run({
-      loading: retry ? "Retrying erasure…" : "Checking erasure status…",
-      failure: retry ? "Couldn’t retry erasure." : "Couldn’t check erasure status.",
-      request: () =>
-        retry
-          ? api.retryKnowledgeForget({ operationId })
-          : api.getKnowledgeForgetStatus({ operationId }),
-      complete: (value, toastId) => {
-        update(value, toastId);
-        if (value.status === "completed") {
-          if (erasure.toastId) return;
-          return { message: "Memory forgotten." };
-        }
-        return value.status === "blocked"
-          ? { message: "Erasure needs attention.", tone: "error" }
-          : { message: "Erasure is still in progress.", tone: "info" };
-      },
-      retain,
-    });
-  }
-
-  return (
-    <MemoryBody>
-      <Heading>Forgetting</Heading>
-      <Body>
-        {phase === "blocked"
-          ? "Memory access is paused during erasure."
-          : "Memory is unavailable while erasure runs."}
-      </Body>
-      <Section>
-        <SettingsActionRow
-          label="Check erasure status"
-          icon="refresh"
-          onPress={() => check()}
-          disabled={commands.busy}
-        />
-        {phase === "blocked" && (
-          <SettingsActionRow
-            label="Retry erasure"
-            onPress={() => check(true)}
-            disabled={commands.busy}
-          />
-        )}
-      </Section>
-    </MemoryBody>
-  );
-}
-
 type PrivateProps = {
   api: MemoryApi;
   access: MemoryAccess;
   initial: Destination;
-  revalidate: (next?: Destination, erasure?: ActiveErasure) => void;
+  revalidate: (next?: Destination) => void;
   retain: (id: string, feedback: Feedback) => void;
-  admitted: (id: string | null, toastId: string) => void;
 };
-function PrivateMemory({ api, access, initial, revalidate, retain, admitted }: PrivateProps) {
+function PrivateMemory({ api, access, initial, revalidate, retain }: PrivateProps) {
   const [destination, setDestination] = useState<Destination | { kind: "add" }>(initial);
   const [purpose, setPurpose] = useState<KnowledgeQuery["purpose"]>(
     initial.kind === "detail" ? initial.selection.purpose : "planning",
@@ -352,7 +166,7 @@ function PrivateMemory({ api, access, initial, revalidate, retain, admitted }: P
         <Stack.Screen options={{ title: "Memory details" }} />
         <MemoryDetail
           key={destination.selection.id}
-          {...{ api, access, open, retain, admitted }}
+          {...{ api, access, open, retain }}
           selection={destination.selection}
           close={close}
           changed={(selection) =>
@@ -415,7 +229,6 @@ function PrivateMemory({ api, access, initial, revalidate, retain, admitted }: P
         {...{ api, access, open, purpose }}
         setPurpose={setPurpose}
         onAdd={() => setDestination({ kind: "add" })}
-        onErasure={(result) => revalidate(listDestination, result)}
       />
     </>
   );
@@ -440,9 +253,8 @@ type ListProps = {
   setPurpose: (purpose: KnowledgeQuery["purpose"]) => void;
   open: (id: string) => void;
   onAdd: () => void;
-  onErasure: (operation: ActiveErasure) => void;
 };
-function MemoryList({ api, access, purpose, setPurpose, open, onAdd, onErasure }: ListProps) {
+function MemoryList({ api, access, purpose, setPurpose, open, onAdd }: ListProps) {
   const [view, setView] = useState<ViewMode>("accepted");
   const [status, setStatus] = useState<Status | "">("");
   const [workspace, setWorkspace] = useState<KnowledgeQuery["workspace"]>();
@@ -528,7 +340,7 @@ function MemoryList({ api, access, purpose, setPurpose, open, onAdd, onErasure }
   return (
     <MemoryListResults
       key={JSON.stringify(query)}
-      {...{ api, access, query, load, open, onErasure }}
+      {...{ api, access, query, load, open }}
       disabled={commands.busy}
       add={<FloatingAdd label="Add memory" onPress={onAdd} disabled={commands.busy} />}
       header={(pending) => (
@@ -644,12 +456,11 @@ function MemoryListResults({
   query,
   load,
   open,
-  onErasure,
   header,
   footer,
   add,
   disabled,
-}: Pick<ListProps, "api" | "access" | "open" | "onErasure"> & {
+}: Pick<ListProps, "api" | "access" | "open"> & {
   query: KnowledgeQuery;
   load: (
     signal: AbortSignal,
@@ -668,19 +479,6 @@ function MemoryListResults({
 
   async function refresh() {
     if (pending) return;
-    const current = access.capture();
-    let active: Awaited<ReturnType<MemoryApi["listActiveKnowledgeForgetOperations"]>>;
-    try {
-      active = await api.listActiveKnowledgeForgetOperations();
-    } catch (error) {
-      if (current()) throw error;
-      return;
-    }
-    if (!current()) return;
-    if (active[0]) {
-      onErasure(active[0]);
-      return;
-    }
     setMore([]);
     await list.reload();
   }

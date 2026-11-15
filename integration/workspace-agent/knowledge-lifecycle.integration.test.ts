@@ -24,7 +24,6 @@ import { eq, sql } from "drizzle-orm";
 import { createApp } from "../../apps/api/src/app.js";
 import { loadConfig } from "../../apps/api/src/config.js";
 import { lockKnowledgeOwner } from "../../apps/api/src/knowledge/access.js";
-import type { KnowledgeDeletionLedgerEntry } from "../../apps/api/src/knowledge/forget-service.js";
 import { createRuntimeLifecycle } from "../../apps/api/src/runtime-lifecycle.js";
 import { hashToken } from "../../apps/api/src/security.js";
 import { createPersonalOsMcpServer } from "../../apps/mcp/src/server.js";
@@ -52,7 +51,7 @@ describe.sequential("registered memory lifecycle", () => {
     await database.db.delete(users);
   });
 
-  async function fixture(ledgerMode: "available" | "missing" | "unreachable" = "available") {
+  async function fixture() {
     const userId = randomUUID();
     const sessionToken = randomUUID();
     await database.db.insert(users).values({
@@ -66,7 +65,6 @@ describe.sequential("registered memory lifecycle", () => {
       tokenHash: hashToken(sessionToken),
       expiresAt: new Date(now().getTime() + 60 * 60_000),
     });
-    const ledger = new Map<string, KnowledgeDeletionLedgerEntry>();
     const runtimeLifecycle = createRuntimeLifecycle();
     const app = createApp({
       db: database.db,
@@ -80,22 +78,6 @@ describe.sequential("registered memory lifecycle", () => {
         GOOGLE_REDIRECT_URI: "https://api.example.test/v1/connectors/google/callback",
         X_REDIRECT_URI: "https://api.example.test/v1/x-bookmarks/callback",
       }),
-      ...(ledgerMode !== "missing"
-        ? {
-            knowledgeForget: {
-              suppressionKey: Buffer.alloc(32, 11),
-              ledger: {
-                async append(entry: KnowledgeDeletionLedgerEntry) {
-                  if (ledgerMode === "unreachable") throw new Error("Fixture ledger offline");
-                  ledger.set(entry.operationId, structuredClone(entry));
-                },
-                async readReceipt(id: string) {
-                  return ledger.get(id) ?? null;
-                },
-              },
-            },
-          }
-        : {}),
     });
     const transport = {
       baseUrl: "https://api.example.test",
@@ -132,7 +114,7 @@ describe.sequential("registered memory lifecycle", () => {
       return { id, token, api, connect };
     }
 
-    return { owner, agent, app, ledger, runtimeLifecycle, sessionToken, userId };
+    return { owner, agent, app, runtimeLifecycle, sessionToken, userId };
   }
 
   function content(value: string): KnowledgeMutationInput["content"] {
@@ -162,7 +144,7 @@ describe.sequential("registered memory lifecycle", () => {
     return personalOsToolOutputSchema.parse(response.structuredContent).result;
   }
 
-  it("two_agents_observe_owner_correction_and_forgetting", async () => {
+  it("two_agents_observe_owner_correction_trash_and_deletion", async () => {
     const f = await fixture();
     const a = await f.agent("Agent A");
     const b = await f.agent("Agent B");
@@ -311,64 +293,60 @@ describe.sequential("registered memory lifecycle", () => {
         ),
       ).toEqual([2, 1]);
       await expect(b.api.exportKnowledge()).rejects.toMatchObject({ status: 403 });
-      const preview = await f.owner.previewKnowledgeForget({ recordId: savedId });
-      expect(preview).toMatchObject({
-        affected: [
-          { recordId: savedId, revision: 1 },
-          { recordId: savedId, revision: 2 },
-        ],
-        historyCount: 2,
-      });
-      const request = {
-        previewId: preview.previewId,
-        ownerEpoch: preview.ownerEpoch,
-        mutationKey: randomUUID(),
-      };
-      const pending = await f.owner.forgetKnowledge(request);
-      if (pending.outcome !== "pending_erasure") throw new Error("Expected pending erasure");
-      const operation = { operationId: pending.operationId };
-      expect(await f.owner.getKnowledgeForgetStatus(operation)).toMatchObject({
-        status: "pending",
-      });
-      await expect(b.api.searchKnowledge(planning)).rejects.toMatchObject({ status: 503 });
-      expect(
-        f.runtimeLifecycle.startBackgroundTask("knowledge-forget", () =>
-          f.app.runKnowledgeForgetting(),
-        ),
-      ).toBe(true);
-      await f.runtimeLifecycle.waitForIdle();
-      expect(await f.owner.getKnowledgeForgetStatus(operation)).toMatchObject({
-        status: "completed",
-      });
-      expect(await f.owner.retryKnowledgeForget(operation)).toMatchObject({ status: "completed" });
-      expect(await f.owner.forgetKnowledge(request)).toMatchObject({
-        outcome: "forgotten",
+      const identity = { recordId: savedId, expectedRevision: 2 };
+      const trash = { ...identity, action: "trash" as const, mutationKey: randomUUID() };
+      expect(await f.owner.updateKnowledge(trash)).toEqual({
+        outcome: "trashed",
+        receiptId: expect.any(String),
         recordId: savedId,
       });
+      expect((await b.api.searchKnowledge(planning)).items).toEqual([]);
+      await expect(b.api.getKnowledge({ id: savedId, ...planning })).rejects.toMatchObject({
+        status: 404,
+      });
+      await expect(
+        b.api.updateKnowledge({ ...identity, action: "restore", mutationKey: randomUUID() }),
+      ).rejects.toMatchObject({ status: 403 });
       expect(await a.api.saveKnowledge(original)).toEqual({
         outcome: "forgotten",
         receiptId: expect.any(String),
         recordId: savedId,
       });
+      expect(
+        (await f.owner.searchKnowledge({ ...planning, status: "trashed" })).items,
+      ).toMatchObject([{ id: savedId, trashGroupId: savedId }]);
+      const deletion = { ...identity, action: "delete_now" as const, mutationKey: randomUUID() };
+      expect(await f.owner.updateKnowledge(deletion)).toMatchObject({
+        outcome: "forgotten",
+        recordId: savedId,
+      });
+      expect(await f.owner.updateKnowledge(trash)).toMatchObject({ outcome: "forgotten" });
+      expect(await f.owner.getKnowledge({ id: savedId, ...planning })).toMatchObject({
+        id: savedId,
+        state: "forgotten",
+      });
+      expect(
+        f.runtimeLifecycle.startBackgroundTask("knowledge-purge", () => f.app.runKnowledgePurge()),
+      ).toBe(true);
+      await f.runtimeLifecycle.waitForIdle();
       const exported = await f.owner.exportKnowledge();
       expect(exported.items.some((row) => row.id === savedId)).toBe(false);
       expect(JSON.stringify(exported)).not.toContain("Thursday");
       expect(JSON.stringify(exported)).not.toContain("Tuesday");
-      expect(JSON.stringify([...f.ledger.values()])).not.toContain("Thursday");
     } finally {
       await fresh.close();
     }
-    const afterForget = await b.connect();
+    const afterDeletion = await b.connect();
     try {
       expect(
-        await tool(afterForget.client, "explain_context", { contextUseId: previousContextId }),
+        await tool(afterDeletion.client, "explain_context", { contextUseId: previousContextId }),
       ).toEqual({ contextUseId: previousContextId, state: "unavailable" });
       const after = knowledgeContextPackSchema.parse(
-        await tool(afterForget.client, "get_context_for_intent", planning),
+        await tool(afterDeletion.client, "get_context_for_intent", planning),
       );
       expect(after.stated).toEqual([]);
       await f.owner.deleteAccessToken(b.id);
-      const denied = await afterForget.client.callTool({
+      const denied = await afterDeletion.client.callTool({
         name: "search_user_knowledge",
         arguments: planning,
       });
@@ -376,7 +354,7 @@ describe.sequential("registered memory lifecycle", () => {
         status: 401,
       });
     } finally {
-      await afterForget.close();
+      await afterDeletion.close();
     }
   });
 
@@ -397,25 +375,6 @@ describe.sequential("registered memory lifecycle", () => {
         })
       ).status,
     ).toBe(404);
-  });
-
-  it("refuses unconfigured erasure before fencing memory", async () => {
-    const f = await fixture("missing");
-    const original = input("Tuesday");
-    original.evidence = [{ type: "statement", wording: "Tuesday" }];
-    const { recordId } = knowledgeReceiptSchema.parse(await f.owner.saveKnowledge(original));
-    const preview = await f.owner.previewKnowledgeForget({ recordId });
-    await expect(
-      f.owner.forgetKnowledge({
-        previewId: preview.previewId,
-        ownerEpoch: preview.ownerEpoch,
-        mutationKey: randomUUID(),
-      }),
-    ).rejects.toMatchObject({ status: 503 });
-    expect(await f.owner.getKnowledge({ id: recordId, ...planning })).toMatchObject({
-      content: original.content,
-    });
-    expect((await f.owner.searchKnowledge(planning)).epoch).toBe(preview.ownerEpoch);
   });
 
   it("denies a registered owner mutation queued before logout commits", async () => {
@@ -464,32 +423,13 @@ describe.sequential("registered memory lifecycle", () => {
     });
   });
 
-  it("keeps an admitted erasure pending during a configured ledger outage", async () => {
-    const f = await fixture("unreachable");
+  it("denies memory reads and writes outside the credential's grant", async () => {
+    const f = await fixture();
     const ungranted = await f.agent("Unrelated grant", ["tasks:read"]);
     const reader = await f.agent("Read grant", ["knowledge:read"]);
     const original = input("Tuesday");
     original.evidence = [{ type: "statement", wording: "Tuesday" }];
     const { recordId } = knowledgeReceiptSchema.parse(await f.owner.saveKnowledge(original));
-    const { previewId, ownerEpoch } = await f.owner.previewKnowledgeForget({ recordId });
-    const request = { previewId, ownerEpoch, mutationKey: randomUUID() };
-    const pending = await f.owner.forgetKnowledge(request);
-    if (pending.outcome !== "pending_erasure") throw new Error("Expected pending erasure");
-    await f.app.runKnowledgeForgetting();
-    expect(
-      await f.owner.getKnowledgeForgetStatus({ operationId: pending.operationId }),
-    ).toMatchObject({ status: "pending" });
-    expect(await f.owner.listActiveKnowledgeForgetOperations()).toEqual([
-      { operationId: pending.operationId, status: "pending" },
-    ]);
-    await expect(reader.api.listActiveKnowledgeForgetOperations()).rejects.toMatchObject({
-      status: 403,
-    });
-    expect(await f.owner.forgetKnowledge(request)).toEqual(pending);
-    await expect(f.owner.searchKnowledge(planning)).rejects.toMatchObject({
-      status: 503,
-      details: { reason: "knowledge_erasure_pending" },
-    });
     for (const read of [
       () => ungranted.api.searchKnowledge(planning),
       () => ungranted.api.getKnowledge({ id: recordId, ...planning }),
@@ -497,7 +437,7 @@ describe.sequential("registered memory lifecycle", () => {
     ]) {
       await expect(read()).rejects.toMatchObject({ status: 403 });
     }
-    await expect(reader.api.searchKnowledge(planning)).rejects.toMatchObject({ status: 503 });
+    expect((await reader.api.searchKnowledge(planning)).items).toMatchObject([{ id: recordId }]);
     await expect(reader.api.saveKnowledge(input("Wednesday"))).rejects.toMatchObject({
       status: 403,
     });

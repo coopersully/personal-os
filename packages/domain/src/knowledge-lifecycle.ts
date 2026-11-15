@@ -41,6 +41,15 @@ export const knowledgeAgentLifecycleInputSchema = z.discriminatedUnion(
   "action",
   agentKnowledgeActions,
 );
+/** Trash, restore and delete now are person-only record states; they never create a revision. */
+export const knowledgeTrashActionSchema = z.enum(["trash", "restore", "delete_now"]);
+export type KnowledgeTrashAction = z.infer<typeof knowledgeTrashActionSchema>;
+/** Trashed memory stays recoverable this long before the purge job erases it. */
+export const knowledgeTrashRetentionMs = 30 * 24 * 60 * 60 * 1000;
+
+export const knowledgeTrashInputSchema = z.object(mutationIdentity).strict();
+export type KnowledgeTrashInput = z.infer<typeof knowledgeTrashInputSchema>;
+
 export const knowledgeLifecycleInputSchema = z.discriminatedUnion("action", [
   ...agentKnowledgeActions,
   z.object({ ...mutationIdentity, action: z.literal("confirm") }).strict(),
@@ -58,6 +67,9 @@ export const knowledgeLifecycleInputSchema = z.discriminatedUnion("action", [
         .refine((restriction) => Object.keys(restriction).length > 0),
     })
     .strict(),
+  knowledgeTrashInputSchema.extend({ action: z.literal("trash") }),
+  knowledgeTrashInputSchema.extend({ action: z.literal("restore") }),
+  knowledgeTrashInputSchema.extend({ action: z.literal("delete_now") }),
 ]);
 export type KnowledgeLifecycleInput = z.infer<typeof knowledgeLifecycleInputSchema>;
 
@@ -68,73 +80,22 @@ export const knowledgePendingReviewReceiptSchema = z
     outcome: z.literal("pending_owner_review"),
   })
   .strict();
+/** Content-free receipt for a record in the owner's Trash. Agents receive `forgotten` instead. */
+export const knowledgeTrashedReceiptSchema = z
+  .object({ receiptId: idSchema, recordId: idSchema, outcome: z.literal("trashed") })
+  .strict();
 export const knowledgeForgottenReceiptSchema = z
   .object({ receiptId: idSchema, recordId: idSchema, outcome: z.literal("forgotten") })
   .strict();
 export const knowledgeSaveResultSchema = z.discriminatedUnion("outcome", [
   knowledgeReceiptSchema,
   knowledgePendingReviewReceiptSchema,
+  knowledgeTrashedReceiptSchema,
   knowledgeForgottenReceiptSchema,
 ]);
 export type KnowledgeSaveResult = z.infer<typeof knowledgeSaveResultSchema>;
-export const knowledgeMutationResultSchema = z.discriminatedUnion("outcome", [
-  ...knowledgeSaveResultSchema.options,
-  z
-    .object({
-      receiptId: idSchema,
-      recordId: idSchema,
-      outcome: z.literal("pending_erasure"),
-      operationId: idSchema,
-    })
-    .strict(),
-]);
-export type KnowledgeMutationResult = z.infer<typeof knowledgeMutationResultSchema>;
-
-export const knowledgeForgetPreviewInputSchema = z
-  .object({
-    recordId: idSchema,
-    cursor: z
-      .object({
-        previewId: idSchema,
-        ownerEpoch: z.int().nonnegative(),
-        recordId: idSchema,
-        revision: z.int().positive(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-export const knowledgeForgetPreviewSchema = z
-  .object({
-    previewId: idSchema,
-    ownerEpoch: z.int().nonnegative(),
-    recordId: idSchema,
-    affected: z
-      .array(z.object({ recordId: idSchema, revision: z.int().positive() }).strict())
-      .max(50),
-    dependentCopyCount: z.int().nonnegative(),
-    historyCount: z.int().nonnegative(),
-    nextCursor: knowledgeForgetPreviewInputSchema.shape.cursor.unwrap().nullable(),
-  })
-  .strict();
-export const knowledgeForgetInputSchema = z
-  .object({ previewId: idSchema, ownerEpoch: z.int().nonnegative(), mutationKey: z.uuid() })
-  .strict();
-export const knowledgeForgetOperationInputSchema = z.object({ operationId: idSchema }).strict();
-/** Authorized content callers can distinguish a durable fence from generic unavailability. */
-export const knowledgeErasurePendingReason = "knowledge_erasure_pending";
-export const knowledgeForgetStatusSchema = knowledgeForgetOperationInputSchema.extend({
-  status: z.enum(["pending", "blocked", "completed"]),
-});
-// The owner-level erasure fence permits at most one active operation.
-export const activeKnowledgeForgetOperationsSchema = z
-  .array(knowledgeForgetOperationInputSchema.extend({ status: z.enum(["pending", "blocked"]) }))
-  .max(1);
-export type KnowledgeForgetPreviewInput = z.infer<typeof knowledgeForgetPreviewInputSchema>;
-export type KnowledgeForgetPreview = z.infer<typeof knowledgeForgetPreviewSchema>;
-export type KnowledgeForgetInput = z.infer<typeof knowledgeForgetInputSchema>;
-export type KnowledgeForgetOperationInput = z.infer<typeof knowledgeForgetOperationInputSchema>;
-export type KnowledgeForgetStatus = z.infer<typeof knowledgeForgetStatusSchema>;
+export const knowledgeMutationResultSchema = knowledgeSaveResultSchema;
+export type KnowledgeMutationResult = KnowledgeSaveResult;
 
 export const knowledgeDerivationKindSchema = z.enum([
   "source_record",

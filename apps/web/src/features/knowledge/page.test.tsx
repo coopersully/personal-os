@@ -16,10 +16,6 @@ vi.mock("@/api", () => ({
     getKnowledgeHistory: vi.fn(),
     exportKnowledge: vi.fn(),
     updateKnowledge: vi.fn(),
-    listActiveKnowledgeForgetOperations: vi.fn(),
-    previewKnowledgeForget: vi.fn(),
-    forgetKnowledge: vi.fn(),
-    getKnowledgeForgetStatus: vi.fn(),
   },
 }));
 
@@ -60,6 +56,8 @@ const record: KnowledgeRecord = {
   evidenceAvailable: true,
   stale: false,
   supersededBy: null,
+  trashedAt: null,
+  trashGroupId: null,
 };
 
 function mount() {
@@ -83,7 +81,6 @@ async function openEditor() {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(api.listActiveKnowledgeForgetOperations).mockResolvedValue([]);
   vi.mocked(api.searchKnowledge).mockResolvedValue({
     schemaVersion: 1,
     state: "available",
@@ -94,7 +91,7 @@ beforeEach(() => {
   vi.mocked(api.getKnowledge).mockResolvedValue(record);
 });
 
-it("owner_can_correct_inferred_memory_and_forget_dependents", async () => {
+it("owner_can_correct_inferred_memory", async () => {
   const latest: KnowledgeRecord = {
     ...record,
     revision: 4,
@@ -130,22 +127,6 @@ it("owner_can_correct_inferred_memory_and_forget_dependents", async () => {
     items: [corrected, latest],
     nextCursor: null,
   });
-  vi.mocked(api.previewKnowledgeForget).mockResolvedValue({
-    previewId: id,
-    ownerEpoch: 5,
-    recordId: id,
-    affected: [{ recordId: id, revision: 5 }],
-    dependentCopyCount: 2,
-    historyCount: 5,
-    nextCursor: null,
-  });
-  vi.mocked(api.forgetKnowledge).mockResolvedValue({
-    receiptId: operationId,
-    recordId: id,
-    outcome: "pending_erasure",
-    operationId,
-  });
-  vi.mocked(api.getKnowledgeForgetStatus).mockResolvedValue({ operationId, status: "completed" });
   mount();
   expect(await screen.findByText("Inferred")).toBeVisible();
   await openEditor();
@@ -157,7 +138,7 @@ it("owner_can_correct_inferred_memory_and_forget_dependents", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
   expect(screen.getByLabelText("Value", { exact: true })).toHaveValue("detailed");
   fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
-  const forget = await screen.findByRole("button", { name: "Preview forgetting" });
+  await waitFor(() => expect(api.updateKnowledge).toHaveBeenCalledTimes(2));
   expect(api.updateKnowledge).toHaveBeenLastCalledWith(
     expect.objectContaining({ expectedRevision: 4 }),
   );
@@ -170,12 +151,20 @@ it("owner_can_correct_inferred_memory_and_forget_dependents", async () => {
   const history = await within(detail).findByRole("region", { name: "Revision history" });
   expect(await within(history).findByText("Inferred", { exact: true })).toBeVisible();
   expect(within(history).getAllByText("Accepted by you")).toHaveLength(2);
-  fireEvent.click(forget);
-  expect(await screen.findByText("2 dependent copies")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Forget permanently" }));
-  const forgotten = await screen.findByText("Memory forgotten.");
-  expect(forgotten.closest("[data-sonner-toast]")).not.toBeNull();
-  expect(screen.getAllByText("Memory forgotten.")).toEqual([forgotten]);
+});
+
+it("treats a deleted memory as no longer available", async () => {
+  vi.mocked(api.getKnowledge).mockResolvedValue({
+    id,
+    state: "forgotten",
+    trashedAt: now,
+    purgedAt: now,
+  });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*concise/i }));
+  const detail = await screen.findByRole("dialog", { name: "Memory details" });
+  await waitFor(() => expect(within(detail).queryByText("Inferred")).not.toBeInTheDocument());
+  expect(within(detail).queryByRole("button", { name: "Edit memory" })).not.toBeInTheDocument();
 });
 
 it("late_save_after_logout_cannot_restore_memory", async () => {
@@ -226,69 +215,6 @@ it("drops a late save and its toast after leaving Memory", async () => {
   expect(screen.getByText("Other settings")).toBeVisible();
   expect(screen.queryByText("Memory saved.")).not.toBeInTheDocument();
   expect(client.getQueryCache().findAll({ queryKey: ["memory", owner] })).toHaveLength(0);
-});
-
-function fencedError() {
-  return new ApiClientError({
-    status: 503,
-    code: "service_unavailable",
-    message: "Memory is unavailable while forgetting is in progress.",
-    details: { reason: "knowledge_erasure_pending" },
-  });
-}
-
-it("hides private content immediately after a fenced detail response, before discovery resolves", async () => {
-  vi.mocked(api.listActiveKnowledgeForgetOperations)
-    .mockResolvedValueOnce([])
-    .mockImplementation(() => new Promise(() => {}));
-  vi.mocked(api.getKnowledge).mockRejectedValue(fencedError());
-  mount();
-  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*concise/i }));
-  await waitFor(() => expect(api.listActiveKnowledgeForgetOperations).toHaveBeenCalledTimes(2));
-  expect(
-    screen.queryByRole("button", { name: /Communication style.*concise/i }),
-  ).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Download memory" })).not.toBeInTheDocument();
-  expect(screen.queryByText("Inferred")).not.toBeInTheDocument();
-});
-
-it("drops a delayed export response after learning of an admitted erasure", async () => {
-  let finish!: () => void;
-  vi.mocked(api.exportKnowledge).mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finish = () =>
-          resolve({
-            schemaVersion: 1,
-            items: [record],
-            epoch: 3,
-            state: "available",
-            nextCursor: null,
-          });
-      }),
-  );
-  vi.mocked(api.getKnowledge).mockRejectedValue(fencedError());
-  vi.mocked(api.listActiveKnowledgeForgetOperations)
-    .mockResolvedValueOnce([])
-    .mockResolvedValue([{ operationId, status: "blocked" }]);
-  vi.mocked(api.getKnowledgeForgetStatus).mockResolvedValue({ operationId, status: "blocked" });
-  const exportFile = vi.fn(() => "blob:memory");
-  const original = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
-  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: exportFile });
-  try {
-    mount();
-    fireEvent.click(await screen.findByRole("button", { name: "Download memory" }));
-    fireEvent.click(screen.getByRole("button", { name: "Download" }));
-    await waitFor(() => expect(api.exportKnowledge).toHaveBeenCalledOnce());
-    fireEvent.click(screen.getByRole("button", { name: /Communication style.*concise/i }));
-    expect(await screen.findByRole("button", { name: "Retry erasure" })).toBeVisible();
-    await act(async () => finish());
-    expect(exportFile).not.toHaveBeenCalled();
-    expect(screen.queryByText("Memory download started.")).not.toBeInTheDocument();
-  } finally {
-    if (original) Object.defineProperty(URL, "createObjectURL", original);
-    else Reflect.deleteProperty(URL, "createObjectURL");
-  }
 });
 
 it("keeps an overdue active record out of the Accepted request and requests all review candidates", async () => {
@@ -425,19 +351,7 @@ function invalidCursor() {
   return new ApiClientError({ status: 409, code: "conflict", message: "The cursor changed." });
 }
 
-function heldErasureDiscovery() {
-  let release!: () => void;
-  const response = new Promise<[]>((resolve) => {
-    release = () => resolve([]);
-  });
-  vi.mocked(api.listActiveKnowledgeForgetOperations)
-    .mockResolvedValueOnce([])
-    .mockReturnValueOnce(response);
-  return release;
-}
-
 it("drops previously disclosed rows before restarting a rejected list cursor", async () => {
-  const release = heldErasureDiscovery();
   const page = { schemaVersion: 1, state: "available" } as const;
   vi.mocked(api.searchKnowledge)
     .mockResolvedValueOnce({ ...page, items: [record], epoch: 3, nextCursor: "old-list" })
@@ -448,12 +362,13 @@ it("drops previously disclosed rows before restarting a rejected list cursor", a
     await screen.findByRole("button", { name: /Communication style.*concise/i }),
   ).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Load more memories" }));
-  await waitFor(() => expect(api.listActiveKnowledgeForgetOperations).toHaveBeenCalledTimes(2));
-  expect(screen.queryByText("Inferred")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Download memory" })).not.toBeInTheDocument();
-  expect(api.searchKnowledge).toHaveBeenCalledTimes(2);
-  await act(async () => release());
   expect(await screen.findByText("No matching memory")).toBeVisible();
+  expect(screen.queryByText("Inferred")).not.toBeInTheDocument();
+  const notice = await screen.findByText(
+    "This memory page expired or changed. Reloading saved memory.",
+  );
+  expect(notice.closest("[data-sonner-toast]")).not.toBeNull();
+  expect(api.searchKnowledge).toHaveBeenCalledTimes(3);
   expect(api.searchKnowledge).toHaveBeenLastCalledWith({
     purpose: "planning",
     reviewView: "accepted",
@@ -461,7 +376,6 @@ it("drops previously disclosed rows before restarting a rejected list cursor", a
 });
 
 it("clears disclosed revision sources when a restriction invalidates the next history page", async () => {
-  const release = heldErasureDiscovery();
   const revision: KnowledgeRecord = {
     ...record,
     sources: [
@@ -489,10 +403,8 @@ it("clears disclosed revision sources when a restriction invalidates the next hi
   fireEvent.click(await screen.findByText("Sources for revision 3"));
   expect(screen.getByText("Former revision source")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Load more revisions" }));
-  await waitFor(() => expect(api.listActiveKnowledgeForgetOperations).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(screen.queryByText("Former revision source")).not.toBeInTheDocument();
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  await act(async () => release());
   expect(
     await screen.findByRole("button", { name: /Communication style.*concise/i }),
   ).toBeVisible();
@@ -529,12 +441,12 @@ it("reopens an ordinary superseded predecessor from All memory", async () => {
     }),
   );
   fireEvent.click(await screen.findByRole("button", { name: /Communication style.*Superseded/i }));
-  const preview = await screen.findByRole("button", { name: "Preview forgetting" });
-  await waitFor(() => expect(preview).toBeEnabled());
+  const detail = await screen.findByRole("dialog", { name: "Communication style" });
+  expect(await within(detail).findByRole("button", { name: "Show history" })).toBeEnabled();
+  expect(within(detail).queryByRole("button", { name: "Edit memory" })).not.toBeInTheDocument();
 });
 
 it("revalidates disclosures and resets the download after an export cursor conflict", async () => {
-  const release = heldErasureDiscovery();
   vi.mocked(api.exportKnowledge)
     .mockResolvedValueOnce({
       schemaVersion: 1,
@@ -559,12 +471,9 @@ it("revalidates disclosures and resets the download after an export cursor confl
     fireEvent.click(screen.getByRole("button", { name: "Download" }));
     fireEvent.click(await screen.findByRole("button", { name: "Download next page" }));
     fireEvent.click(screen.getByRole("button", { name: "Download" }));
-    await waitFor(() => expect(api.listActiveKnowledgeForgetOperations).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText("Inferred")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Download memory" })).toBeVisible();
     expect(api.exportKnowledge).toHaveBeenLastCalledWith({ cursor: "old-export" });
     expect(create).toHaveBeenCalledOnce();
-    await act(async () => release());
-    expect(await screen.findByRole("button", { name: "Download memory" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Download next page" })).not.toBeInTheDocument();
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:memory"), { timeout: 1500 });
   } finally {

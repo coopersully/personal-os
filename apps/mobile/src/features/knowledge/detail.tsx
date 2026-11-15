@@ -1,5 +1,4 @@
 import type {
-  KnowledgeForgetPreview,
   KnowledgeLifecycleInput,
   KnowledgeRecord,
   KnowledgeSource,
@@ -7,7 +6,7 @@ import type {
 import { randomUUID } from "expo-crypto";
 import { Stack, usePreventRemove } from "expo-router";
 import { useCallback, useState } from "react";
-import { Alert, View } from "react-native";
+import { View } from "react-native";
 import { toast } from "sonner-native";
 import { Body, Facts, Heading } from "../../components/detail-content";
 import { editorDismissOptions } from "../../components/editor-header";
@@ -17,6 +16,7 @@ import {
   type Feedback,
   type MemoryAccess,
   type MemoryApi,
+  readableMemory,
   readMemory,
   statusOf,
   useMemoryCommands,
@@ -43,7 +43,6 @@ type Props = {
   open: (id: string) => void;
   changed: (selection?: Selection) => void;
   retain: (id: string, feedback: Feedback) => void;
-  admitted: (operationId: string | null, toastId: string) => void;
 };
 
 function dateLabel(date: string) {
@@ -152,27 +151,17 @@ function RecordFacts({
   );
 }
 
-export function MemoryDetail({
-  api,
-  access,
-  selection,
-  close,
-  open,
-  changed,
-  retain,
-  admitted,
-}: Props) {
+export function MemoryDetail({ api, access, selection, close, open, changed, retain }: Props) {
   const { id, purpose } = selection;
   const load = useCallback(
-    (signal: AbortSignal) => readMemory(access, signal, () => api.getKnowledge({ id, purpose })),
+    (signal: AbortSignal) =>
+      readMemory(access, signal, () => api.getKnowledge({ id, purpose }).then(readableMemory)),
     [access, api, id, purpose],
   );
   const detail = useMemoryResource(load);
   const record = detail.value;
   return record ? (
-    <RecordSession
-      {...{ api, access, selection, close, open, changed, retain, admitted, record }}
-    />
+    <RecordSession {...{ api, access, selection, close, open, changed, retain, record }} />
   ) : (
     <MemoryBody>
       <MemoryReadState
@@ -191,6 +180,9 @@ const saveMessages = {
   dispute: "Memory disputed.",
   restrict: "Memory use restricted.",
   supersede: "Memory superseded.",
+  trash: "Memory moved to Trash.",
+  restore: "Memory restored.",
+  delete_now: "Memory deleted.",
 };
 
 function RecordSession({
@@ -201,23 +193,17 @@ function RecordSession({
   open,
   changed,
   retain,
-  admitted,
   record,
 }: Props & { record: KnowledgeRecord }) {
   const { id, purpose } = selection;
   const commands = useMemoryCommands(access.capture, access.recover);
   const mutationKey = useMutationKey();
-  const forgetKey = useMutationKey();
-  const [mode, setMode] = useState<"detail" | "forget" | EditMode>("detail");
+  const [mode, setMode] = useState<"detail" | EditMode>("detail");
   const [dirty, setDirty] = useState(false);
   const [history, setHistory] = useState(false);
   const [baseline, setBaseline] = useState(record);
   const [conflict, setConflict] = useState<KnowledgeLifecycleInput>();
   const [reviewed, setReviewed] = useState<KnowledgeRecord>();
-  const [previewPages, setPreviewPages] = useState<KnowledgeForgetPreview[]>([]);
-  const [previewIndex, setPreviewIndex] = useState(0);
-  const [previewStale, setPreviewStale] = useState(false);
-  const preview = previewPages[previewIndex];
 
   function back() {
     if (dirty && !commands.busy) confirmDiscard(close);
@@ -264,7 +250,7 @@ function RecordSession({
     void commands.run({
       loading: "Loading the latest memory…",
       failure: "Couldn’t load the latest memory.",
-      request: () => api.getKnowledge({ id, purpose }),
+      request: () => api.getKnowledge({ id, purpose }).then(readableMemory),
       complete: (result) => {
         setReviewed(result);
         return { message: "Latest revision loaded.", tone: "info" };
@@ -278,70 +264,6 @@ function RecordSession({
   function simple(action: "confirm" | "dispute") {
     if (conflict) return;
     save({ action, recordId: id, expectedRevision: baseline.revision, mutationKey: randomUUID() });
-  }
-
-  function loadPreview(cursor?: KnowledgeForgetPreview["nextCursor"]) {
-    void commands.run({
-      loading: "Preparing forgetting preview…",
-      failure: "Couldn’t load the forgetting preview.",
-      cursor: Boolean(cursor),
-      request: () => api.previewKnowledgeForget({ recordId: id, ...(cursor ? { cursor } : {}) }),
-      complete: (result) => {
-        if (!access.observe({ epoch: result.ownerEpoch })) return;
-        if (cursor) {
-          setPreviewPages((pages) => [...pages, result]);
-          setPreviewIndex((page) => page + 1);
-        } else {
-          setPreviewPages([result]);
-          setPreviewIndex(0);
-        }
-        setPreviewStale(false);
-        setMode("forget");
-        return { message: "Forgetting preview ready.", tone: "info" };
-      },
-    });
-  }
-
-  function forget() {
-    if (!preview || previewStale) return;
-    const body = { previewId: preview.previewId, ownerEpoch: preview.ownerEpoch };
-    Alert.alert(
-      "Permanently forget this memory?",
-      "Its revision history and derived copies will be erased.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Forget",
-          style: "destructive",
-          onPress: () =>
-            void commands.run({
-              loading: "Requesting erasure…",
-              failure: "Couldn’t confirm the request. You can retry this preview.",
-              request: () => api.forgetKnowledge({ ...body, mutationKey: forgetKey(body) }),
-              complete: (result, toastId) => {
-                if (result.outcome === "pending_erasure") {
-                  admitted(result.operationId, toastId);
-                  return { message: "Forgetting in progress.", tone: "info" };
-                }
-                if (result.outcome === "forgotten") {
-                  admitted(null, toastId);
-                  return { message: "Memory forgotten." };
-                }
-                return { message: "Couldn’t confirm erasure.", tone: "error" };
-              },
-              rejected: (error) => {
-                if ([404, 409].includes(statusOf(error) ?? 0)) {
-                  setPreviewStale(true);
-                  setPreviewPages([]);
-                  return "The preview changed. Refresh it before forgetting.";
-                }
-                if (statusOf(error) === 503) return "Forgetting is temporarily unavailable.";
-              },
-              retain,
-            }),
-        },
-      ],
-    );
   }
 
   const disabled = commands.busy || Boolean(conflict);
@@ -405,70 +327,6 @@ function RecordSession({
           )}
         />
       </>
-    );
-  }
-
-  if (mode === "forget") {
-    return (
-      <MemoryBody>
-        {header}
-        <Heading>Forget memory?</Heading>
-        <MemoryText>
-          Forgetting erases this memory, its history and derived copies. Independent sources and
-          exported files remain.
-        </MemoryText>
-        {preview && (
-          <>
-            <Facts
-              facts={[
-                { label: "Derived copies", value: String(preview.dependentCopyCount) },
-                { label: "Revisions", value: String(preview.historyCount) },
-              ]}
-            />
-            <Section title={`Affected revisions · page ${previewIndex + 1}`}>
-              <View style={{ padding: 16, gap: 8 }}>
-                {preview.affected.map((item) => (
-                  <MemoryText key={`${item.recordId}:${item.revision}`}>
-                    {item.recordId} · revision {item.revision}
-                  </MemoryText>
-                ))}
-              </View>
-              {previewIndex > 0 && (
-                <SettingsActionRow
-                  label="Previous preview page"
-                  onPress={() => setPreviewIndex(previewIndex - 1)}
-                  disabled={commands.busy}
-                />
-              )}
-              {(preview.nextCursor || previewPages[previewIndex + 1]) && (
-                <SettingsActionRow
-                  label="Next preview page"
-                  disabled={commands.busy}
-                  onPress={() => {
-                    if (previewPages[previewIndex + 1]) setPreviewIndex(previewIndex + 1);
-                    else if (preview.nextCursor) loadPreview(preview.nextCursor);
-                  }}
-                />
-              )}
-            </Section>
-            <SettingsActionRow
-              label="Forget memory"
-              icon="trash"
-              destructive
-              disabled={commands.busy || previewStale}
-              onPress={forget}
-            />
-          </>
-        )}
-        {previewStale && (
-          <SettingsActionRow
-            label="Refresh forgetting preview"
-            onPress={() => loadPreview()}
-            disabled={commands.busy}
-          />
-        )}
-        <SettingsActionRow label="Back to memory" onPress={back} />
-      </MemoryBody>
     );
   }
 
@@ -542,15 +400,6 @@ function RecordSession({
         />
       </Section>
       {history && <History {...{ api, access, selection }} />}
-      <Section title="Erasure">
-        <SettingsActionRow
-          label="Preview forgetting"
-          icon="trash"
-          destructive
-          onPress={() => loadPreview()}
-          disabled={disabled}
-        />
-      </Section>
       <SettingsActionRow label="Back to memory" onPress={close} />
     </MemoryBody>
   );

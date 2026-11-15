@@ -140,6 +140,9 @@ export async function selectKnowledgeCandidates(
   query: KnowledgeQuery,
 ) {
   const { tx, access, at, authorizedScopes } = session;
+  // `trashed` selects the owner's Trash (row selection enforces owner-only); it is a record
+  // state, not a revision status.
+  const status = query.status === "trashed" ? undefined : query.status;
   const refs = new Set(query.entityRefs);
   await validateEntityRefs(session, principal, query.purpose, refs);
   const rows = await currentKnowledgeForRetrieval(tx, principal, query, authorizedScopes);
@@ -163,7 +166,7 @@ export async function selectKnowledgeCandidates(
       if (
         projection.state === "unavailable" &&
         !refs.size &&
-        (!query.status || query.status === snapshot.status || query.status === "disputed") &&
+        (!status || status === snapshot.status || status === "disputed") &&
         query.hasConflict !== true
       )
         unavailable = true;
@@ -174,7 +177,7 @@ export async function selectKnowledgeCandidates(
     const { exact, related } = entityMatches(record, content, refs);
     if (
       (refs.size && !exact && !related) ||
-      (query.status && query.status !== record.status) ||
+      (status && status !== record.status) ||
       !matchesReviewView(record, query.reviewView, at) ||
       (query.hasConflict !== undefined && query.hasConflict !== record.conflictRecordIds.length > 0)
     )
@@ -238,7 +241,9 @@ export function createKnowledgeSearchService(dependencies: KnowledgeRetrievalDep
         },
         async (session) => {
           const { tx, access } = session;
-          const current = await ownedKnowledgeRevision(tx, principal, input.recordId);
+          const current = await ownedKnowledgeRevision(tx, principal, input.recordId, false, {
+            includeTrashed: principal.actorType === "user",
+          });
           const disclosure = await access.retrievalDisclosure(
             tx,
             principal,

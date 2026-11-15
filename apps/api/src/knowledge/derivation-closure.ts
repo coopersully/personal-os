@@ -4,9 +4,13 @@ import type { KnowledgeRevision } from "./access.js";
 
 /**
  * The one definition of "derived from" for Trash, purge and restore: every stored derivation
- * edge of any revision, except the `content_evidence` edges from a relationship revision to its
- * own subject or object. A relationship only links its endpoints (spec §5.6); an endpoint the
- * same revision also cites as evidence still counts through that evidence edge.
+ * edge of any revision, except
+ * - the `content_evidence` edges from a relationship revision to its own subject or object. A
+ *   relationship only links its endpoints (spec §5.6); an endpoint the same revision also cites
+ *   as evidence still counts through that evidence edge;
+ * - `revision_proposal` edges once the proposal is resolved. Only a pending proposal (current
+ *   status `proposed`) depends on the record it proposes to change. An accepted proposal is an
+ *   independent record linked by supersession, and a rejected one is superseded.
  *
  * Yields `counted(record_id, revision, source_record_id)` for one owner.
  */
@@ -18,6 +22,9 @@ function countedDerivations(userId: string): SQL {
       AND v.revision = d.revision
     LEFT JOIN knowledge_revision_metadata m ON m.user_id = v.user_id
       AND m.record_id = v.record_id AND m.revision = v.revision
+    JOIN knowledge_records cr ON cr.user_id = d.user_id AND cr.id = d.record_id
+    JOIN knowledge_revisions cv ON cv.user_id = cr.user_id AND cv.record_id = cr.id
+      AND cv.revision = cr.revision
     CROSS JOIN LATERAL (
       SELECT CASE
         WHEN v.snapshot->'content'->>'kind' = 'inference'
@@ -33,6 +40,8 @@ function countedDerivations(userId: string): SQL {
         (c.claim->'value'->>'subjectId')::uuid,
         (c.claim->'value'->>'objectId')::uuid
       )
+    ) AND NOT (
+      d.kind = 'revision_proposal' AND cv.snapshot->>'status' IS DISTINCT FROM 'proposed'
     )
   )`;
 }
@@ -73,7 +82,8 @@ export function knowledgeSourcesTrashedOutsideGroup(userId: string, groupId: str
  * The same rule read from an immutable revision, for sources whose edges a purge removed:
  * knowledge evidence, the entity-meaning target and decision/inference evidence records.
  * Relationship endpoints count only when also cited as evidence, as in `countedDerivations`.
- * A revision proposal's original is omitted: purging it purges the proposal too.
+ * A revision proposal's original is omitted: purging it purges a pending proposal too, and a
+ * resolved proposal no longer depends on it.
  */
 export function knowledgeRevisionSources({ snapshot, metadata }: KnowledgeRevision) {
   const sources = new Set<string>();

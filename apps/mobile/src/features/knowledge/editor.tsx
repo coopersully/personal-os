@@ -51,11 +51,14 @@ function Permissions({
   record,
   change,
   disabled,
+  workspaceOnly = false,
 }: {
   value: PermissionDraft;
   record?: KnowledgeRecord;
   change: (value: PermissionDraft) => void;
   disabled: boolean;
+  /** Restricting only narrows the workspace, so it offers nothing else. */
+  workspaceOnly?: boolean;
 }) {
   return (
     <>
@@ -72,33 +75,37 @@ function Permissions({
           onChange={(workspace) => change({ ...value, workspace: workspace || null })}
           disabled={disabled || Boolean(record?.scope.workspace)}
         />
-        <MemoryChoice
-          label="Sensitivity"
-          value={value.sensitivity}
-          choices={["standard", "sensitive"]}
-          labels={visibilityLabels}
-          onChange={(sensitivity) => change({ ...value, sensitivity })}
-          disabled={disabled || record?.sensitivity === "sensitive"}
-        />
-      </Section>
-      <Section title="Allowed uses">
-        {(record?.purposes ?? knowledgePurposeSchema.options).map((purpose) => (
-          <ToggleRow
-            key={purpose}
-            label={memoryLabel(purpose)}
-            value={value.purposes.includes(purpose)}
-            onChange={(allowed) =>
-              change({
-                ...value,
-                purposes: allowed
-                  ? [...value.purposes, purpose]
-                  : value.purposes.filter((item) => item !== purpose),
-              })
-            }
+        {workspaceOnly ? null : (
+          <MemoryChoice
+            label="Sensitivity"
+            value={value.sensitivity}
+            choices={["standard", "sensitive"]}
+            labels={visibilityLabels}
+            onChange={(sensitivity) => change({ ...value, sensitivity })}
             disabled={disabled}
           />
-        ))}
+        )}
       </Section>
+      {workspaceOnly ? null : (
+        <Section title="Allowed uses">
+          {knowledgePurposeSchema.options.map((purpose) => (
+            <ToggleRow
+              key={purpose}
+              label={memoryLabel(purpose)}
+              value={value.purposes.includes(purpose)}
+              onChange={(allowed) =>
+                change({
+                  ...value,
+                  purposes: allowed
+                    ? [...value.purposes, purpose]
+                    : value.purposes.filter((item) => item !== purpose),
+                })
+              }
+              disabled={disabled}
+            />
+          ))}
+        </Section>
+      )}
     </>
   );
 }
@@ -132,12 +139,8 @@ export function MemoryEditor({
   const parsed = contentDraft(kind, draft, original);
   // Restricting only narrows the workspace of the just-reviewed revision.
   const restricted = {
+    ...permissions,
     workspace: record?.scope.workspace ?? permissions.workspace,
-    purposes: record
-      ? permissions.purposes.filter((entry) => record.purposes.includes(entry))
-      : permissions.purposes,
-    sensitivity:
-      record?.sensitivity === "sensitive" ? ("sensitive" as const) : permissions.sensitivity,
   };
   const unchanged =
     mode === "edit"
@@ -276,9 +279,10 @@ export function MemoryEditor({
           value={mode === "restrict" ? restricted : permissions}
           change={(value) => change(() => setPermissions(value))}
           disabled={disabled}
+          workspaceOnly={mode === "restrict"}
         />
       )}
-      {invalid && !restricted.purposes.length && (
+      {invalid && mode === "add" && !permissions.purposes.length && (
         <MemoryText>Select at least one allowed use.</MemoryText>
       )}
     </>,

@@ -481,6 +481,89 @@ describe("memory trash and purge", () => {
     });
   });
 
+  /** An agent revises the owner's record, which waits as a linked pending proposal. */
+  async function proposeChange(f: Awaited<ReturnType<typeof fixture>>, value: string) {
+    const original = await f.save(fact(value));
+    const proposal = knowledgeReceiptSchema.parse(
+      await f.lifecycle.mutate(f.agent, {
+        action: "revise",
+        recordId: original.id,
+        expectedRevision: original.revision,
+        mutationKey: randomUUID(),
+        content: {
+          ...original.content,
+          value: { ...original.content.value, value: { type: "string", value: `${value} v2` } },
+        } as typeof original.content,
+        evidence: [],
+      }),
+    ).record;
+    expect(proposal).toMatchObject({ status: "proposed" });
+    return { original, proposal };
+  }
+
+  it("accepted_proposal_survives_trash_of_superseded_original", async () => {
+    const f = await fixture();
+    const { original, proposal } = await proposeChange(f, "accepted");
+    const accepted = knowledgeReceiptSchema.parse(
+      await f.lifecycle.mutate(f.owner, {
+        action: "resolve_conflict",
+        keep: "proposed",
+        recordId: proposal.id,
+        expectedRevision: proposal.revision,
+        mutationKey: randomUUID(),
+      }),
+    ).record;
+    expect(accepted.status).toBe("active");
+    const superseded = await f.records.get(f.owner, { id: original.id });
+    if ("state" in superseded) throw new Error("Expected the superseded original.");
+    expect(superseded.status).toBe("superseded");
+
+    await f.act("trash", superseded);
+    const trashedIds = (await f.search.search(f.owner, { status: "trashed" })).items.map(
+      ({ id }) => id,
+    );
+    expect(trashedIds).toEqual([original.id]);
+    expect(await f.records.get(f.agent, { id: accepted.id })).toMatchObject({
+      id: accepted.id,
+      status: "active",
+      trashedAt: null,
+    });
+    expect((await f.search.search(f.agent, {})).items.map(({ id }) => id)).toEqual([accepted.id]);
+
+    // Deleting the original now purges it alone; the purge guard finds nothing live to erase.
+    await f.act("delete_now", superseded);
+    await expectAllStored([accepted.id]);
+    expect(
+      (
+        await database.db
+          .select({ id: knowledgeTombstones.recordId })
+          .from(knowledgeTombstones)
+          .where(eq(knowledgeTombstones.userId, f.owner.userId))
+      ).map(({ id }) => id),
+    ).toEqual([original.id]);
+    expect(await f.records.get(f.agent, { id: accepted.id })).toMatchObject({ status: "active" });
+  });
+
+  it("pending_proposal_follows_trashed_original", async () => {
+    const f = await fixture();
+    const { original, proposal } = await proposeChange(f, "pending");
+    await f.act("trash", original);
+    const trashed = (await f.search.search(f.owner, { status: "trashed" })).items;
+    expect(
+      trashed
+        .map(({ id, trashGroupId }) => ({ id, trashGroupId }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    ).toEqual(
+      [
+        { id: original.id, trashGroupId: original.id },
+        { id: proposal.id, trashGroupId: original.id },
+      ].sort((a, b) => a.id.localeCompare(b.id)),
+    );
+    await expect(f.records.get(f.agent, { id: proposal.id })).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
   it("trash_invalidates_open_cursors", async () => {
     const f = await fixture();
     for (const value of ["cursor-one", "cursor-two", "cursor-three"]) await f.save(fact(value));

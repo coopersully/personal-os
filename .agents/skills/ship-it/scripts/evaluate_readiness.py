@@ -206,6 +206,25 @@ def current_attempts(checks):
     return selected
 
 
+def one_result_per_workflow(group):
+    """Accept one result, or one proven current result from each distinct workflow.
+
+    Branch protection may require a context that several workflows report (for
+    example the source CI run and a metadata revalidation run); GitHub then needs
+    the latest result from each workflow to pass. Unproven or same-workflow
+    duplicates stay ambiguous. Success of every member is checked separately.
+    """
+    if len(group) == 1:
+        return True
+    if not group:
+        return False
+    fields = ("workflowId", "runId", "runAttempt")
+    if not all(all(type(c.get(k)) is int and c[k] > 0 for k in fields) and c.get("event")
+               for c in group):
+        return False
+    return len({c["workflowId"] for c in group}) == len(group)
+
+
 def evaluate(state):
     pr = state.get("pr") or {}
     head = pr.get("headSha")
@@ -455,7 +474,8 @@ def evaluate(state):
     by_name = {}
     for check in checks:
         by_name.setdefault(check.get("name"), []).append(check)
-    missing = [name for name in expected if len(by_name.get(name, [])) != 1]
+    missing = [name for name in expected
+               if not one_result_per_workflow(by_name.get(name, []))]
     if missing:
         remediation_codes.append("required_checks_missing")
         remediation_reasons.append(

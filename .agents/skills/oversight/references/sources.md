@@ -1,8 +1,8 @@
 # Sources, issue loading and queues
 
 Use the available Linear connector for delivery state, GitHub connector for PR/check/review facts,
-and Codex chat/project tools for actual ownership and checkout identity. Discover supported tools
-before acting. An authenticated repository CLI is a fallback when connector capability is missing;
+and the host's chat/session and project tools for actual ownership and checkout identity
+([host tools](host-tools.md)). Discover supported tools before acting. An authenticated repository CLI is a fallback when connector capability is missing;
 verify repository/account identity, pagination and permissions. Tool failure never means no work.
 For product-state evidence through nohmi tools, call get_ilo_context first, inspect authoritative
 state, use required previews, and verify returned effects. Do not use product APIs as a second

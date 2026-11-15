@@ -6,7 +6,7 @@ credential boundary. A skill installation alone does not start unattended work.
 
 ## Durable checkpoint
 
-Use `scripts/checkpoint.py <operation> --key <canonical-PR-URL> --owner <host/task-id>`.
+Use `python3 .agents/skills/ship-it/scripts/checkpoint.py <operation> --key <canonical-PR-URL> --owner <host/task-id>`.
 For `save`, `begin`, `finish`, and `transfer`, pass `--payload <sanitized-json-file>`.
 The registry is `<git-common-dir>/ship-it/`, shared by worktrees on this host. Writes use an exclusive
 file lock and atomic replacement. A contended registry operation waits up to five seconds, then

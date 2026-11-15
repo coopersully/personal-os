@@ -116,6 +116,8 @@ must exist and succeed; optional skipped/neutral checks outside that union do no
 identity and candidate SHA explicitly. Legacy commit statuses require equivalent authenticated
 provider evidence; do not invent an app ID from a username.
 
+A required context may appear once per distinct workflow when several workflows report it (here `ci.yml` and `pr-metadata.yml` both report `CI required`). Include the current result from each, with proven `workflowId`, `runId`, `runAttempt` and `event`; every one must succeed. Same-workflow or unproven duplicates stay ambiguous.
+
 Each check may carry positive integer `workflowId`, `runId`, `runAttempt`, and nonempty `event`.
 Only an older attempt of the same name/provider/head/workflow/run/event can be superseded by a newer
 attempt. Missing identity, same-attempt duplicates, or different runs stay ambiguous. For separate

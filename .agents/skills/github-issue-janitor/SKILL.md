@@ -1,6 +1,7 @@
 ---
 name: github-issue-janitor
 description: Use when explicitly auditing or cleaning up legacy nohmi GitHub issues and their pull-request evidence.
+disable-model-invocation: true
 ---
 
 # GitHub issue janitor

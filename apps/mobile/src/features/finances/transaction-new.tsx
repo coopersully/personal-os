@@ -305,6 +305,7 @@ export function TransactionCreateForm({ accountId: preset }: { accountId?: strin
                   />
                 </Card>
               </Section>
+              {!timezone && <Copy>Set your account timezone in Settings to choose the date.</Copy>}
               <Copy secondary>
                 Merchant, Amount, Account and Date are required. Leave Category to nohmi and it
                 chooses one from the merchant.

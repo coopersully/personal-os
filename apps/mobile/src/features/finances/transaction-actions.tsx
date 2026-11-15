@@ -45,10 +45,14 @@ export function TransactionActions({
     // An unconfirmed removal keeps its key, so trying again cannot act twice.
     removeKey.current ??= randomUUID();
     const leave = async () => {
-      // Drop the removed record before the lists refetch, so nothing reads it again.
-      client.removeQueries({ queryKey: ["finances", owner, "transaction", item.id] });
       router.back();
-      await client.invalidateQueries({ queryKey: ["finances", owner] });
+      // Everything derived from the ledger is re-read except the removed record itself, which
+      // this screen still shows until it closes and would only fail to load.
+      await client.invalidateQueries({
+        queryKey: ["finances", owner],
+        predicate: (entry) =>
+          !(entry.queryKey[2] === "transaction" && entry.queryKey[3] === item.id),
+      });
     };
     try {
       const result = await api.removeFinanceTransaction(item.id, {

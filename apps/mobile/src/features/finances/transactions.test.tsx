@@ -681,6 +681,9 @@ it("removes a manual transaction only after confirmation", async () => {
     idempotencyKey: expect.any(String),
   });
   expect(h.back).toHaveBeenCalledOnce();
+  // Lists are re-read; the removed record is not fetched again, which would only fail.
+  await waitFor(() => expect(h.api.listFinanceAccounts).toHaveBeenCalledTimes(2));
+  expect(h.api.getFinanceTransaction).toHaveBeenCalledOnce();
   expectNoInlineResult();
 });
 

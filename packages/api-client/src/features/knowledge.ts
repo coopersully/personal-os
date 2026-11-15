@@ -10,9 +10,6 @@ import {
   type KnowledgeMutationInput,
   type KnowledgeQuery,
   type KnowledgeReadInput,
-  type KnowledgeSelectionInput,
-  type KnowledgeSettingsInput,
-  type KnowledgeSuppressionResetInput,
   knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
   knowledgeForgetPreviewSchema,
@@ -21,16 +18,12 @@ import {
   knowledgePageSchema,
   knowledgeReadResultSchema,
   knowledgeSaveResultSchema,
-  knowledgeSelectionInteractionSchema,
-  knowledgeSelectionResultSchema,
-  knowledgeSettingsSchema,
-  knowledgeSuppressionResetResultSchema,
 } from "@personal-os/domain";
 
 const knowledgePath = "/v1/knowledge";
 const recordPath = (id: string) => `${knowledgePath}/${encodeURIComponent(id)}`;
 const operationPath = (id: string) => `${knowledgePath}/operations/${encodeURIComponent(id)}`;
-const json = (method: "POST" | "PATCH", value: unknown): RequestInit => ({
+const json = (method: "POST", value: unknown): RequestInit => ({
   method,
   body: JSON.stringify(value),
 });
@@ -99,29 +92,6 @@ export function createKnowledgeApiClient(
       const path = `${knowledgePath}/export`;
       return knowledgePageSchema.parse(
         await request(cursor === undefined ? path : `${path}?${new URLSearchParams({ cursor })}`),
-      );
-    },
-    async getKnowledgeSettings() {
-      return knowledgeSettingsSchema.parse(await request(`${knowledgePath}/settings`));
-    },
-    async updateKnowledgeSettings(input: KnowledgeSettingsInput) {
-      return knowledgeSettingsSchema.parse(
-        await request(`${knowledgePath}/settings`, json("PATCH", input)),
-      );
-    },
-    async issueKnowledgeSelectionInteraction() {
-      return knowledgeSelectionInteractionSchema.parse(
-        await request(`${knowledgePath}/selection-interactions`, { method: "POST" }),
-      );
-    },
-    async recordKnowledgeSelection(input: KnowledgeSelectionInput) {
-      return knowledgeSelectionResultSchema.parse(
-        await request(`${knowledgePath}/selections`, json("POST", input)),
-      );
-    },
-    async resetKnowledgeLearning(input: KnowledgeSuppressionResetInput) {
-      return knowledgeSuppressionResetResultSchema.parse(
-        await request(`${knowledgePath}/learning-reset`, json("POST", input)),
       );
     },
   };

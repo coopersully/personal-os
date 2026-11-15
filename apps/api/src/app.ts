@@ -101,7 +101,6 @@ import { createKnowledgeContextService } from "./knowledge/context-service.js";
 import { createKnowledgeExportService } from "./knowledge/export-service.js";
 import { createKnowledgeForgetService } from "./knowledge/forget-service.js";
 import { validKnowledgeForgetKey } from "./knowledge/forget-suppression.js";
-import { createKnowledgeLearningService } from "./knowledge/learning-service.js";
 import { createKnowledgeLifecycleService } from "./knowledge/lifecycle-service.js";
 import { createKnowledgeRecordService } from "./knowledge/record-service.js";
 import { createKnowledgeSearchService } from "./knowledge/search-service.js";
@@ -1623,7 +1622,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     lifecycle: createKnowledgeLifecycleService(knowledgePersistence),
     forget: knowledgeForget,
     forgettingConfigured,
-    learning: createKnowledgeLearningService(knowledgePersistence),
     search: createKnowledgeSearchService(knowledgeRetrieval),
     context: createKnowledgeContextService(knowledgeRetrieval),
     export: createKnowledgeExportService(knowledgeRetrieval),

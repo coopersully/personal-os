@@ -40,7 +40,6 @@ it("redacts invalid service output and preserves request validation errors", asy
       runOnce: vi.fn(),
     },
     forgettingConfigured: false,
-    learning: {} as Routes["learning"],
     search: { search, history: vi.fn() },
     context: {} as Routes["context"],
     export: {} as Routes["export"],
@@ -93,4 +92,36 @@ it("redacts invalid service output and preserves request validation errors", asy
       requestId: "memory-receipt-test",
     },
   });
+});
+
+it("removed_learning_routes_are_gone", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const app = new Hono<AppEnv>();
+  app.use("*", async (context, next) => {
+    context.set("principal", { actorId: id, actorType: "user", scopes: new Set(), userId: id });
+    context.set("requestId", "removed-learning-routes-test");
+    await next();
+  });
+  app.onError(errorResponse);
+  type Routes = Parameters<typeof registerKnowledgeRoutes>[0];
+  registerKnowledgeRoutes({
+    app,
+    knowledge: {} as Routes["knowledge"],
+    lifecycle: {} as Routes["lifecycle"],
+    forget: {} as Routes["forget"],
+    forgettingConfigured: false,
+    search: {} as Routes["search"],
+    context: {} as Routes["context"],
+    export: {} as Routes["export"],
+  });
+  const body = JSON.stringify({});
+  for (const [method, path] of [
+    ["GET", "/v1/knowledge/settings"],
+    ["POST", "/v1/knowledge/selections"],
+    ["POST", "/v1/knowledge/selection-interactions"],
+    ["POST", "/v1/knowledge/learning-reset"],
+  ] as const) {
+    const response = await app.request(path, { method, ...(method === "POST" ? { body } : {}) });
+    expect(response.status, `${method} ${path}`).toBe(404);
+  }
 });

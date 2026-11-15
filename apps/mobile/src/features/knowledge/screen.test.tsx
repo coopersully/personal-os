@@ -16,7 +16,6 @@ const h = vi.hoisted(() => ({
     searchKnowledge: vi.fn(),
     getKnowledge: vi.fn(),
     getKnowledgeHistory: vi.fn(),
-    getKnowledgeSettings: vi.fn(),
     updateKnowledge: vi.fn(),
     previewKnowledgeForget: vi.fn(),
     forgetKnowledge: vi.fn(),
@@ -106,20 +105,20 @@ const inferred: KnowledgeRecord = {
   status: "active",
   stale: false,
   schemaVersion: 1,
-  claimKey: '[null,"preference","owner","presentation.format"]',
+  claimKey: '[null,"preference","owner","communication_style"]',
   content: {
     kind: "preference",
     value: {
       subject: "owner",
-      key: "presentation.format",
+      key: "communication_style",
       value: { type: "string", value: "bullets" },
     },
   },
   acceptance: {
-    kind: "evidence_rule",
-    ruleVersion: "v1",
+    kind: "owner",
+    actorId: id,
     acceptedAt: "2026-11-12T15:00:00.000Z",
-    evidenceIds: [id, id, id],
+    evidenceIds: [],
   },
   author: { actorId: id, actorType: "user" },
   requiredReadScopes: [],
@@ -146,7 +145,7 @@ const revised: KnowledgeRecord = {
     kind: "preference",
     value: {
       subject: "owner",
-      key: "presentation.format",
+      key: "communication_style",
       value: { type: "string", value: "prose" },
     },
   },
@@ -165,7 +164,7 @@ function setup() {
 const button = (name: string | RegExp) => screen.getByRole("button", { name });
 const press = (name: string | RegExp) => fireEvent.click(button(name));
 async function openEditor() {
-  fireEvent.click(await screen.findByRole("button", { name: /Response format/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style/ }));
   fireEvent.click(await screen.findByRole("button", { name: "Edit memory" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Value" }), { target: { value: "prose" } });
 }
@@ -177,10 +176,6 @@ beforeEach(() => {
   h.api.listActiveKnowledgeForgetOperations.mockResolvedValue([]);
   h.api.searchKnowledge.mockResolvedValue(page([inferred]));
   h.api.getKnowledge.mockResolvedValue(inferred);
-  h.api.getKnowledgeSettings.mockResolvedValue({
-    automaticPreferenceAcceptance: true,
-    revision: 1,
-  });
   h.api.getKnowledgeHistory.mockResolvedValue(page([revised, inferred], 2));
 });
 afterEach(cleanup);
@@ -196,12 +191,12 @@ it("native_owner_reviews_corrects_and_forgets", async () => {
   h.api.searchKnowledge.mockResolvedValue(page([revised], 2));
   h.api.updateKnowledge.mockResolvedValue({ outcome: "readable", record: revised });
   press("Save changes");
-  await screen.findByText("Prose");
+  await screen.findAllByText("prose");
   expect(h.api.updateKnowledge).toHaveBeenCalledWith(
     expect.objectContaining({ action: "revise", expectedRevision: 1 }),
   );
   press("Revision history");
-  await screen.findByText("Accepted from 3 selections");
+  await screen.findByText("Accepted by you");
   h.api.previewKnowledgeForget.mockResolvedValue({
     recordId: id,
     previewId: id,
@@ -219,7 +214,7 @@ it("native_owner_reviews_corrects_and_forgets", async () => {
   expect(h.buttons[0]?.text).toBe("Cancel");
   act(() => h.buttons[1]?.onPress?.());
   await screen.findByText("Memory is unavailable while erasure runs.");
-  expect(screen.queryByText("Prose")).toBeNull();
+  expect(screen.queryByText("prose")).toBeNull();
   h.api.getKnowledgeForgetStatus.mockResolvedValue({ operationId, status: "completed" });
   h.api.searchKnowledge.mockResolvedValue(page([], 3));
   press("Check erasure status");
@@ -249,7 +244,7 @@ it("back_navigation_and_logout_fence_pending_writes", async () => {
       view.refreshSession();
     }
     await act(async () => resolve({ outcome: "readable", record: revised }));
-    await waitFor(() => expect(screen.queryByText("Prose")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("prose")).toBeNull());
     expect(h.toast.success).not.toHaveBeenCalled();
     expect(h.toast.dismiss).toHaveBeenCalled();
   }

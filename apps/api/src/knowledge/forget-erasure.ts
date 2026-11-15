@@ -8,7 +8,6 @@ import {
   knowledgeRevisions,
   knowledgeSources,
   knowledgeForgetOperations as operations,
-  knowledgeSelectionInteractions as selections,
   knowledgeForgetTargets as targets,
 } from "@personal-os/database";
 import {
@@ -16,10 +15,7 @@ import {
   type KnowledgeRecordSnapshot,
   type KnowledgeSource,
   knowledgeClaimContent,
-  knowledgePreferenceClaimKey,
-  knowledgePreferenceKeySchema,
   knowledgeRecordSnapshotSchema,
-  preferenceKeyForClaim,
 } from "@personal-os/domain";
 import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import {
@@ -57,7 +53,6 @@ function revisionPage(tx: KnowledgeTransaction) {
  * even if a subsequent lifecycle mutation added a provenance sidecar. */
 async function supplementalEdges(tx: KnowledgeTransaction, userId: string) {
   const edges: { record_id: string; source_id: string }[] = [];
-  const preferenceClaims: { record_id: string; claim_key: string }[] = [];
   let cursor: { recordId: string; revision: number } | undefined;
   for (;;) {
     const page = await revisionPage(tx)
@@ -77,11 +72,9 @@ async function supplementalEdges(tx: KnowledgeTransaction, userId: string) {
       .orderBy(knowledgeRevisions.recordId, knowledgeRevisions.revision)
       .limit(knowledgeForgetBatchSize);
     for (const row of page) {
-      const { snapshot, metadata, hasSidecar, claimKey } = projectKnowledgeRevision(row);
+      const { snapshot, metadata, hasSidecar } = projectKnowledgeRevision(row);
       const content = knowledgeClaimContent(snapshot, metadata.generatedInference);
       const ids = new Set(legacyKnowledgeCopiedRecordIds(snapshot));
-      if (claimKey && row.claimKey === null && preferenceKeyForClaim(claimKey))
-        preferenceClaims.push({ record_id: snapshot.id, claim_key: claimKey });
       if (!hasSidecar) {
         for (const { evidence } of snapshot.sources) {
           if (evidence.type === "domain_record" && evidence.domain === "knowledge")
@@ -94,27 +87,17 @@ async function supplementalEdges(tx: KnowledgeTransaction, userId: string) {
       }
       for (const id of ids) edges.push({ record_id: snapshot.id, source_id: id });
     }
-    if (page.length < knowledgeForgetBatchSize) return { edges, preferenceClaims };
+    if (page.length < knowledgeForgetBatchSize) return edges;
     cursor = page.at(-1);
   }
 }
 
 async function derivationClosure(tx: KnowledgeTransaction, userId: string, recordId: string) {
   const legacy = await supplementalEdges(tx, userId);
-  const learnedKeys = sql.join(
-    knowledgePreferenceKeySchema.options.map((key) => sql`${knowledgePreferenceClaimKey(key)}`),
-    sql`, `,
-  );
   return sql`
     WITH RECURSIVE supplemental AS MATERIALIZED (
       SELECT record_id, source_id
-      FROM jsonb_to_recordset(${JSON.stringify(legacy.edges)}::jsonb) AS refs(record_id uuid, source_id uuid)
-    ), preference_claims AS MATERIALIZED (
-      SELECT record_id, claim_key, metadata ? 'selectionGeneration' AS learned
-      FROM knowledge_revision_metadata WHERE user_id = ${userId} AND claim_key IN (${learnedKeys})
-      UNION
-      SELECT record_id, claim_key, false FROM
-        jsonb_to_recordset(${JSON.stringify(legacy.preferenceClaims)}::jsonb) AS claims(record_id uuid, claim_key text)
+      FROM jsonb_to_recordset(${JSON.stringify(legacy)}::jsonb) AS refs(record_id uuid, source_id uuid)
     ), closure(id) AS (
       SELECT ${recordId}::uuid
       UNION
@@ -124,12 +107,6 @@ async function derivationClosure(tx: KnowledgeTransaction, userId: string, recor
         WHERE d.user_id = ${userId} AND d.source_record_id = closure.id
         UNION ALL
         SELECT s.record_id FROM supplemental s WHERE s.source_id = closure.id
-        UNION ALL
-        -- Forgetting the key deletes those selection events, so include
-        -- records inferred from them without treating stated peers as copies.
-        SELECT inferred.record_id
-        FROM preference_claims target JOIN preference_claims inferred USING (claim_key)
-        WHERE target.record_id = closure.id AND inferred.learned
       ) dependent
     )`;
 }
@@ -178,10 +155,6 @@ export async function planForgetErasure(tx: KnowledgeTransaction, op: KnowledgeF
     INSERT INTO knowledge_forget_targets (user_id, operation_id, record_id)
     SELECT ${op.userId}::uuid, ${op.id}::uuid, closure.id FROM closure
   `);
-  // Unused interactions contain no key, so none issued before the fence are replayable.
-  await tx
-    .delete(selections)
-    .where(and(eq(selections.userId, op.userId), isNull(selections.occurredAt)));
   await tx.update(operations).set({ phase: "erase" }).where(eq(operations.id, op.id));
 }
 
@@ -203,7 +176,6 @@ export async function eraseForgetBatch(
     .limit(knowledgeForgetBatchSize);
   const ids = batch.map(({ id }) => id);
   const fingerprints = new Set(op.suppressionFingerprints);
-  const deletedSelectionIds = new Set(op.deletedSelectionIds);
   if (ids.length) {
     const claims = new Set(
       (
@@ -214,12 +186,9 @@ export async function eraseForgetBatch(
         .map((row) => projectKnowledgeRevision(row).claimKey)
         .filter((key) => key !== null),
     );
-    const selectionKeys = new Set<NonNullable<ReturnType<typeof preferenceKeyForClaim>>>();
     for (const claimKey of claims) {
       const fingerprint = knowledgeForgetFingerprint(suppressionKey, op.userId, claimKey);
       fingerprints.add(fingerprint);
-      const preferenceKey = preferenceKeyForClaim(claimKey);
-      if (preferenceKey) selectionKeys.add(preferenceKey);
     }
     const newFingerprints = [...fingerprints].filter(
       (fingerprint) => !op.suppressionFingerprints.includes(fingerprint),
@@ -235,13 +204,6 @@ export async function eraseForgetBatch(
           })),
         )
         .onConflictDoNothing();
-    }
-    if (selectionKeys.size) {
-      const deleted = await tx
-        .delete(selections)
-        .where(and(eq(selections.userId, op.userId), inArray(selections.key, [...selectionKeys])))
-        .returning({ id: selections.id });
-      for (const row of deleted) deletedSelectionIds.add(row.id);
     }
 
     // Keep only the receipt/record identity; deleting revisions also cascades
@@ -325,16 +287,17 @@ export async function eraseForgetBatch(
     .set({
       phase: remaining ? "erase" : "scrub",
       suppressionFingerprints: [...fingerprints].sort(),
-      deletedSelectionIds: [...deletedSelectionIds],
     })
     .where(eq(operations.id, op.id));
 }
 
-function removedSource(source: KnowledgeSource, forgotten: Set<string>, selections: Set<string>) {
+function removedSource(source: KnowledgeSource, forgotten: Set<string>) {
   const { evidence } = source;
-  return evidence.type === "domain_record" && evidence.domain === "knowledge"
-    ? forgotten.has(evidence.id.toLowerCase())
-    : evidence.type === "first_party_selection" && selections.has(evidence.id.toLowerCase());
+  return (
+    evidence.type === "domain_record" &&
+    evidence.domain === "knowledge" &&
+    forgotten.has(evidence.id.toLowerCase())
+  );
 }
 
 function stripEvidenceIds(
@@ -387,30 +350,25 @@ export async function scrubForgetBatch(tx: KnowledgeTransaction, op: KnowledgeFo
           .where(and(eq(targets.userId, op.userId), eq(targets.operationId, op.id)))
       ).map(({ id }) => id.toLowerCase()),
     );
-    const selectionIds = new Set(op.deletedSelectionIds.map((id) => id.toLowerCase()));
     const removedSources = new Set<string>();
     const sourceRows = await tx
       .select({ source: knowledgeSources.source })
       .from(knowledgeSources)
       .where(and(eq(knowledgeSources.userId, op.userId), inArray(knowledgeSources.recordId, ids)));
     for (const { source } of sourceRows) {
-      if (removedSource(source, forgotten, selectionIds))
-        removedSources.add(source.id.toLowerCase());
+      if (removedSource(source, forgotten)) removedSources.add(source.id.toLowerCase());
     }
     const revisions = await revisionPage(tx).where(
       and(eq(knowledgeRevisions.userId, op.userId), inArray(knowledgeRevisions.recordId, ids)),
     );
     for (const { snapshot } of revisions) {
       for (const source of snapshot.sources) {
-        if (removedSource(source, forgotten, selectionIds))
-          removedSources.add(source.id.toLowerCase());
+        if (removedSource(source, forgotten)) removedSources.add(source.id.toLowerCase());
       }
     }
     const removed = (id: string) => {
       const normalized = id.toLowerCase();
-      return (
-        forgotten.has(normalized) || selectionIds.has(normalized) || removedSources.has(normalized)
-      );
+      return forgotten.has(normalized) || removedSources.has(normalized);
     };
     for (const row of revisions) {
       const { snapshot, metadata, hasSidecar } = projectKnowledgeRevision(row);
@@ -456,11 +414,7 @@ export async function scrubForgetBatch(tx: KnowledgeTransaction, op: KnowledgeFo
           : null;
       const evidenceIds = metadata.acceptance?.evidenceIds.filter((id) => !removed(id));
       const acceptance =
-        metadata.acceptance &&
-        evidenceIds &&
-        (evidenceIds.length || metadata.acceptance.kind === "owner")
-          ? { ...metadata.acceptance, evidenceIds }
-          : null;
+        metadata.acceptance && evidenceIds ? { ...metadata.acceptance, evidenceIds } : null;
       if (
         inheritedRecordIds.length !== metadata.inheritedRecordIds.length ||
         inheritedSourceIds.length !== metadata.inheritedSourceIds.length ||
@@ -519,10 +473,6 @@ export async function scrubForgetBatch(tx: KnowledgeTransaction, op: KnowledgeFo
   const more = batch.length > knowledgeForgetBatchSize;
   await tx
     .update(operations)
-    .set(
-      more
-        ? { scrubCursor: ids.at(-1) }
-        : { phase: "ledger", scrubCursor: null, deletedSelectionIds: [] },
-    )
+    .set(more ? { scrubCursor: ids.at(-1) } : { phase: "ledger", scrubCursor: null })
     .where(eq(operations.id, op.id));
 }

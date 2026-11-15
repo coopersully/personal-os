@@ -17,7 +17,6 @@ import {
   knowledgeContextPackSchema,
   knowledgePageSchema,
   knowledgePendingReviewReceiptSchema,
-  knowledgePreferenceClaimKey,
   knowledgeReceiptSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -381,43 +380,9 @@ describe.sequential("registered memory lifecycle", () => {
     }
   });
 
-  it("serves human-only settings and selections with strict public inputs", async () => {
+  it("rejects repeated purposes and omits the removed learning routes", async () => {
     const f = await fixture();
     const a = await f.agent("Scoped agent");
-    expect(await f.owner.getKnowledgeSettings()).toEqual({
-      automaticPreferenceAcceptance: true,
-      revision: 0,
-    });
-    expect(
-      await f.owner.updateKnowledgeSettings({
-        automaticPreferenceAcceptance: false,
-        expectedRevision: 0,
-        mutationKey: randomUUID(),
-      }),
-    ).toEqual({ automaticPreferenceAcceptance: false, revision: 1 });
-    await expect(a.api.getKnowledgeSettings()).rejects.toMatchObject({ status: 403 });
-    await expect(a.api.issueKnowledgeSelectionInteraction()).rejects.toMatchObject({ status: 403 });
-    const { sourceEventId } = await f.owner.issueKnowledgeSelectionInteraction();
-    const selection = { key: "presentation.detail", value: "concise", sourceEventId } as const;
-    expect(await f.owner.recordKnowledgeSelection(selection)).toMatchObject({
-      outcome: "readable",
-      record: { status: "proposed", origin: "inferred" },
-    });
-    const context = await a.api.getKnowledgeContext(planning);
-    expect(context.recentSelections).toMatchObject([selection]);
-    expect(
-      await a.api.explainKnowledgeContext({ contextUseId: context.contextUseId }),
-    ).toMatchObject({
-      state: "available",
-      selectionReferences: [{ sourceEventId, validUntil: "2026-11-13T15:00:00.000Z" }],
-    });
-    const reset = {
-      claimKey: knowledgePreferenceClaimKey(selection.key),
-      expectedEpoch: context.epoch,
-      mutationKey: randomUUID(),
-    };
-    await expect(a.api.resetKnowledgeLearning(reset)).rejects.toMatchObject({ status: 403 });
-    expect(await f.owner.resetKnowledgeLearning(reset)).toEqual({ epoch: context.epoch });
     expect(
       (
         await f.app.request("/v1/knowledge?purpose=planning&purpose=review", {
@@ -427,11 +392,11 @@ describe.sequential("registered memory lifecycle", () => {
     ).toBe(400);
     expect(
       (
-        await f.app.request("/v1/knowledge/settings?unknown=true", {
+        await f.app.request("/v1/knowledge/settings", {
           headers: { authorization: `Session ${f.sessionToken}` },
         })
       ).status,
-    ).toBe(400);
+    ).toBe(404);
   });
 
   it("refuses unconfigured erasure before fencing memory", async () => {

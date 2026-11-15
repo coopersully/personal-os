@@ -32,7 +32,6 @@ export * from "./finance-maintenance.js";
 export * from "./finance-provider-transaction-evidence.js";
 export * from "./goals.js";
 export * from "./knowledge.js";
-export * from "./knowledge-learning.js";
 export * from "./knowledge-lifecycle.js";
 export * from "./knowledge-retrieval.js";
 export * from "./mail.js";

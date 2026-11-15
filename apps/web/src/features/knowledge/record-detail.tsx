@@ -241,12 +241,6 @@ function SourceEvidence({
           Message <code>{evidence.id}</code>
         </span>
       );
-    case "first_party_selection":
-      return (
-        <span>
-          Selection <code>{evidence.id}</code>
-        </span>
-      );
   }
 }
 
@@ -282,17 +276,12 @@ function RecordInformation({
 }) {
   const content = memoryContent(record);
   const summary = memorySummary(content);
-  const selectionCount = record.sources.filter(
-    (source) => source.classification === "first_party_selection" && !source.availability,
-  ).length;
   const data: Array<[string, string]> = [
     ["Acceptance", memoryAcceptance(record)],
     ["Contributor", record.author.actorType === "user" ? "You" : `Agent ${record.author.actorId}`],
     ...memoryUseFields(record),
     ["Added", dateLabel(record.createdAt)],
   ];
-  if (record.acceptance?.kind !== "evidence_rule" && selectionCount)
-    data.push(["Supporting selections", String(selectionCount)]);
   if (record.acceptance) data.push(["Accepted", dateLabel(record.acceptance.acceptedAt)]);
   if (record.validFrom) data.push(["Available from", dateLabel(record.validFrom)]);
   if (record.validUntil) data.push(["Available until", dateLabel(record.validUntil)]);

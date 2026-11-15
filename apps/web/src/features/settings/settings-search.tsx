@@ -17,7 +17,7 @@ export const settingsDescriptions = {
   rituals: "Shape your morning and evening routines.",
   "completed-outcomes": "Review outcomes you’ve finished.",
   goals: "Choose the outcomes you want to work toward.",
-  memory: "Review saved context, sources, and preference learning.",
+  memory: "Review saved context and its sources.",
   motives: "Keep what matters to you close to your plans.",
   reviews: "Review decisions and requests that need your approval.",
   appearance: "Choose a comfortable color mode for nohmi.",

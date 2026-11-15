@@ -1,5 +1,4 @@
 import {
-  type KnowledgePreferenceKey,
   type KnowledgeRecord,
   knowledgeClaimKey,
   knowledgeContentSchema,
@@ -7,10 +6,6 @@ import {
 
 export type MemoryContent = KnowledgeRecord["content"];
 export const memoryKinds = knowledgeContentSchema.options.map((schema) => schema.shape.kind.value);
-export const preferenceLabels = {
-  "presentation.detail": "Response detail",
-  "presentation.format": "Response format",
-} satisfies Record<KnowledgePreferenceKey, string>;
 
 export function memoryLabel(value: string) {
   return value.replace(/_/g, " ").replace(/^./, (character) => character.toUpperCase());
@@ -46,15 +41,10 @@ export function memorySummary(content: MemoryContent): { title: string; text: st
       };
     case "preference": {
       const { subject, key, value } = content.value;
-      const label = Object.hasOwn(preferenceLabels, key)
-        ? preferenceLabels[key as KnowledgePreferenceKey]
-        : memoryLabel(key);
+      const label = memoryLabel(key);
       return {
         title: subject === "owner" ? label : `${subject} · ${label}`,
-        text:
-          value.type === "string" && Object.hasOwn(preferenceLabels, key)
-            ? memoryLabel(value.value)
-            : String(value.value),
+        text: String(value.value),
       };
     }
     case "relationship":
@@ -84,10 +74,6 @@ export function memorySummary(content: MemoryContent): { title: string; text: st
 }
 
 export function memoryAcceptance(record: KnowledgeRecord) {
-  if (record.acceptance?.kind === "evidence_rule") {
-    const count = record.acceptance.evidenceIds.length;
-    return `Accepted from ${count} ${count === 1 ? "selection" : "selections"}`;
-  }
   if (record.acceptance?.kind === "owner") return "Accepted by you";
   return record.status === "proposed" ? "Awaiting review" : "Acceptance unrecorded";
 }

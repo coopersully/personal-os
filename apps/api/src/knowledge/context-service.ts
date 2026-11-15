@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { knowledgeContextUses, knowledgeSelectionInteractions } from "@personal-os/database";
+import { knowledgeContextUses } from "@personal-os/database";
 import {
   type KnowledgeContextExplanation,
   type KnowledgeContextPack,
@@ -7,18 +7,15 @@ import {
   type KnowledgeContextReference,
   type KnowledgeExplainInput,
   type KnowledgeQuery,
-  type KnowledgeRecentSelection,
   type KnowledgeRecord,
   knowledgeContextMaxBytes,
   knowledgeContextReferenceSchema,
   knowledgeExplainInputSchema,
-  knowledgePreferenceSelectionSchema,
   knowledgeQuerySchema,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, inArray, lte } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Principal } from "../types.js";
 import { findOwnedKnowledgeRevision, revisionIsCurrent } from "./access.js";
-import { selectionDayMs, selectionPurposes } from "./learning-evidence.js";
 import {
   createKnowledgeRetrievalSession,
   type KnowledgeRetrievalDependencies,
@@ -36,69 +33,6 @@ function contextReason(record: KnowledgeRecord, at: Date): KnowledgeContextReaso
   return record.origin === "inferred" ? "inferred" : "stated";
 }
 
-function recentSelectionWindow(at: Date) {
-  const occurredAt = knowledgeSelectionInteractions.occurredAt;
-  return and(gt(occurredAt, new Date(at.getTime() - selectionDayMs)), lte(occurredAt, at));
-}
-
-function canUseSelections(purpose: KnowledgeQuery["purpose"]) {
-  return selectionPurposes.some((allowed) => allowed === purpose);
-}
-
-function selectionReference(sourceEventId: string, occurredAt: Date) {
-  return {
-    sourceEventId,
-    validUntil: new Date(occurredAt.getTime() + selectionDayMs).toISOString(),
-  };
-}
-
-async function recentSelections(
-  { at, tx }: KnowledgeRetrievalSession,
-  userId: string,
-): Promise<KnowledgeRecentSelection[]> {
-  const events = knowledgeSelectionInteractions;
-  const rows = await tx
-    .selectDistinctOn([events.key], {
-      key: events.key,
-      value: events.value,
-      sourceEventId: events.id,
-      occurredAt: events.occurredAt,
-    })
-    .from(events)
-    .where(and(eq(events.userId, userId), recentSelectionWindow(at)))
-    .orderBy(asc(events.key), desc(events.occurredAt), desc(events.id));
-  return rows.flatMap(({ key, value, sourceEventId, occurredAt }) => {
-    const selection = knowledgePreferenceSelectionSchema.safeParse({ key, value });
-    return occurredAt && selection.success
-      ? [
-          {
-            ...selection.data,
-            ...selectionReference(sourceEventId, occurredAt),
-          },
-        ]
-      : [];
-  });
-}
-
-async function explainSelections(
-  { tx, at }: KnowledgeRetrievalSession,
-  userId: string,
-  purpose: KnowledgeQuery["purpose"],
-  ids: string[],
-) {
-  if (!ids.length || !canUseSelections(purpose)) return [];
-  const events = knowledgeSelectionInteractions;
-  const rows = await tx
-    .select({ id: events.id, occurredAt: events.occurredAt })
-    .from(events)
-    .where(and(eq(events.userId, userId), inArray(events.id, ids), recentSelectionWindow(at)));
-  const byId = new Map(rows.map(({ id, occurredAt }) => [id, occurredAt]));
-  return ids.flatMap((id) => {
-    const occurredAt = byId.get(id);
-    return occurredAt ? [selectionReference(id, occurredAt)] : [];
-  });
-}
-
 function reference(record: KnowledgeRecord) {
   return { recordId: record.id, revision: record.revision };
 }
@@ -107,7 +41,6 @@ function contextPage(
   session: KnowledgeRetrievalSession,
   records: KnowledgeRecord[],
   unavailable: boolean,
-  selections: KnowledgeRecentSelection[],
   limit: number,
 ) {
   const ranked = records.map((record) => ({ record, reason: contextReason(record, session.at) }));
@@ -115,7 +48,6 @@ function contextPage(
     retrievalFingerprint([
       unavailable,
       ranked.map(({ record, reason }) => [knowledgeRecordVisibility(record), reason]),
-      selections.map(({ sourceEventId }) => sourceEventId),
     ]),
   );
   const pack: KnowledgeContextPack = {
@@ -125,7 +57,6 @@ function contextPage(
     inferred: [],
     tentative: [],
     conflicts: [],
-    recentSelections: selections,
     missingInputs: unavailable
       ? ["source_unavailable", "no_current_memory"]
       : ["no_current_memory"],
@@ -181,14 +112,10 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
             principal,
             input,
           );
-          const selections = canUseSelections(input.purpose)
-            ? await recentSelections(session, principal.userId)
-            : [];
           const { pack, references } = contextPage(
             session,
             records,
             unavailable,
-            selections,
             input.limit ?? 20,
           );
           await session.tx.insert(knowledgeContextUses).values({
@@ -200,7 +127,6 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
             workspace: input.workspace ?? null,
             epoch: session.epoch,
             references,
-            selectionEventIds: selections.map(({ sourceEventId }) => sourceEventId),
             createdAt: session.at,
           });
           return pack;
@@ -234,18 +160,8 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
             !authorizedScopes.includes(`${receipt.workspace}:read`))
         )
           return unavailable;
-        const selectionIds = receipt.selectionEventIds ?? [];
-        const selectionReferences = await explainSelections(
-          session,
-          principal.userId,
-          receipt.purpose,
-          selectionIds,
-        );
-        let changed =
-          receipt.epoch !== epoch ||
-          receipt.selectionEventIds === null ||
-          selectionReferences.length !== selectionIds.length;
-        let visible = selectionReferences.length > 0;
+        let changed = receipt.epoch !== epoch;
+        let visible = false;
         const references: (KnowledgeContextReference & { origin: KnowledgeRecord["origin"] })[] =
           [];
         for (const saved of receipt.references) {
@@ -279,17 +195,11 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
           }
           references.push({ ...selected, origin: projection.record.origin });
         }
-        // Pre-0145 receipts cannot prove which selections were disclosed.
-        if (
-          !visible &&
-          (receipt.references.length || selectionIds.length || receipt.selectionEventIds === null)
-        )
-          return unavailable;
+        if (!visible && receipt.references.length) return unavailable;
         return {
           contextUseId,
           state: changed ? "changed" : "available",
           references,
-          selectionReferences,
         };
       });
     },

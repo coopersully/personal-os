@@ -28,19 +28,12 @@ import {
   knowledgeClaimValue,
   knowledgeContentSchema,
   knowledgeErasurePendingReason,
-  knowledgePreferenceSelectionSchema,
   knowledgeRecordSnapshotSchema,
   knowledgeRevisionMetadataSchema,
 } from "@personal-os/domain";
 import { and, desc, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
-import {
-  availableSelectionEvent,
-  selectionEvidence,
-  selectionRuleSupports,
-  selectionRuleVersion,
-} from "./learning-evidence.js";
 
 export type KnowledgeTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Purpose = KnowledgeReadInput["purpose"];
@@ -670,32 +663,6 @@ function supportChanged(reference: ReferenceState | undefined, expectedRevision?
   );
 }
 
-/** Check the original rule window rather than aging valid evidence out before its review date. */
-export async function knowledgeSelectionSupport(
-  tx: KnowledgeTransaction,
-  userId: string,
-  { snapshot, metadata }: KnowledgeRevision,
-) {
-  const { acceptance, selectionGeneration } = metadata;
-  if (selectionGeneration === undefined || acceptance?.kind !== "evidence_rule") return null;
-  if (acceptance.ruleVersion !== selectionRuleVersion) return false;
-  if (snapshot.content.kind !== "preference" || snapshot.content.value.value.type !== "string")
-    return false;
-  const selection = knowledgePreferenceSelectionSchema.safeParse({
-    key: snapshot.content.value.key,
-    value: snapshot.content.value.value.value,
-  });
-  if (!selection.success) return false;
-  const evidence = await selectionEvidence(
-    tx,
-    userId,
-    selection.data.key,
-    selectionGeneration,
-    new Date(acceptance.acceptedAt),
-  );
-  return selectionRuleSupports(evidence, selection.data.value);
-}
-
 export function createKnowledgeAccess(now: () => Date) {
   async function authorize(
     tx: KnowledgeTransaction,
@@ -747,8 +714,6 @@ export function createKnowledgeAccess(now: () => Date) {
     userId: string,
     evidence: KnowledgeSource["evidence"],
   ) {
-    if (evidence.type === "first_party_selection")
-      return availableSelectionEvent(tx, userId, evidence.id);
     if (evidence.type === "signed_inbound_message") {
       const [claim] = await tx
         .select({ id: textInboundClaims.id })
@@ -919,18 +884,11 @@ export function createKnowledgeAccess(now: () => Date) {
     )
       throw new AppError("not_found", "The knowledge source is unavailable.");
     const needsSupport = activeEdges.length > 0 || implicitCopies.length > 0 || sources.length > 0;
-    const ruleSupport = await knowledgeSelectionSupport(tx, principal.userId, revision);
-    const stale =
-      snapshot.status === "active" &&
-      metadata.acceptance?.kind === "evidence_rule" &&
-      snapshot.reviewAt !== null &&
-      Date.parse(snapshot.reviewAt) <= now().getTime();
     const independentlyStated =
-      (metadata.origin === "stated" &&
-        sources.some(
-          (source) => source.classification === "owner_statement" && source.actorType === "user",
-        )) ||
-      (metadata.selectionGeneration !== undefined && metadata.acceptance?.kind === "owner");
+      metadata.origin === "stated" &&
+      sources.some(
+        (source) => source.classification === "owner_statement" && source.actorType === "user",
+      );
     const result = {
       sources,
       relatedRecordIds: ordinaryLinks.filter((id) => {
@@ -943,10 +901,9 @@ export function createKnowledgeAccess(now: () => Date) {
       structuralAvailable,
       evidenceAvailable:
         structuralAvailable &&
-        (independentlyStated ||
-          (!supportStale && (ruleSupport ?? (!needsSupport || availableSupport)))),
-      supportStale: !independentlyStated && (supportStale || ruleSupport === false),
-      stale,
+        (independentlyStated || (!supportStale && (!needsSupport || availableSupport))),
+      supportStale: !independentlyStated && supportStale,
+      stale: false,
     };
     checked.set(snapshot.id, result);
     return result;

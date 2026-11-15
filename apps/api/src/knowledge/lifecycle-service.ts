@@ -19,9 +19,7 @@ import {
   requireKnowledgeOwner,
 } from "./access.js";
 import { admitKnowledgeClaim } from "./forget-suppression.js";
-import { suppressSelectionLearning } from "./learning-evidence.js";
 import {
-  applyOwnerPreference,
   findKnowledgeReceipt,
   knowledgeRequestHash,
   knowledgeWriteScopes,
@@ -119,9 +117,7 @@ export function createKnowledgeLifecycleService({
               replaceEvidence: input.evidence !== undefined,
               asProposal:
                 principal.actorType === "agent" &&
-                (metadata.acceptance?.kind === "owner" ||
-                  metadata.disputedBy === "user" ||
-                  metadata.selectionGeneration !== undefined),
+                (metadata.acceptance?.kind === "owner" || metadata.disputedBy === "user"),
               input: {
                 mutationKey: input.mutationKey,
                 content: input.content,
@@ -145,10 +141,7 @@ export function createKnowledgeLifecycleService({
             write.metadata.disputedBy = null;
             break;
           case "supersede": {
-            if (
-              principal.actorType === "agent" &&
-              (metadata.acceptance?.kind === "owner" || metadata.selectionGeneration !== undefined)
-            )
+            if (principal.actorType === "agent" && metadata.acceptance?.kind === "owner")
               throw new AppError(
                 "forbidden",
                 "The account owner must supersede accepted knowledge.",
@@ -215,12 +208,6 @@ export function createKnowledgeLifecycleService({
         if (!current.hasSidecar)
           await saveKnowledgeSidecar(tx, principal.userId, current, derivations);
         await writeKnowledgeRevision(tx, principal, write, at);
-        if (principal.actorType === "user") {
-          if (input.action !== "confirm")
-            await suppressSelectionLearning(tx, principal.userId, current.claimKey);
-          if (input.action === "revise" || input.action === "confirm")
-            await applyOwnerPreference(tx, principal, write, at);
-        }
         const receipt = await writeKnowledgeReceipt(
           tx,
           principal,

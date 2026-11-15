@@ -34,9 +34,7 @@ import {
 import { MemoryBody, MemoryChoice, MemoryReadState, MemoryText } from "./controls";
 import { MemoryDetail, type Selection } from "./detail";
 import { MemoryEditor } from "./editor";
-import { MemoryLearning } from "./learning";
 import {
-  memoryAcceptance,
   memoryContent,
   memoryKinds,
   memoryLabel,
@@ -45,7 +43,7 @@ import {
 } from "./presentation";
 import { memoryShareAvailable, shareMemoryPage } from "./share";
 
-type Destination = { kind: "list" | "learning" } | { kind: "detail"; selection: Selection };
+type Destination = { kind: "list" } | { kind: "detail"; selection: Selection };
 const listDestination: Destination = { kind: "list" };
 type ActiveErasure = { operationId: string; status: "pending" | "blocked"; toastId?: string };
 
@@ -64,7 +62,10 @@ export function MemoryScreen() {
     }, []),
   );
   const epoch = session.epoch();
-  const signedIn = useCallback(() => focusedRef.current && session.epoch() === epoch, [session, epoch]);
+  const signedIn = useCallback(
+    () => focusedRef.current && session.epoch() === epoch,
+    [session, epoch],
+  );
   if (!focused || state.status !== "signedIn") return null;
   return (
     <SettingsAccentProvider>
@@ -113,7 +114,8 @@ function MemoryVisit({
   const discover = useCallback(
     async (signal: AbortSignal) => {
       if (operationId) return true;
-      const isCurrent = () => !signal.aborted && current() && generation === activeGeneration.current;
+      const isCurrent = () =>
+        !signal.aborted && current() && generation === activeGeneration.current;
       let result: Awaited<ReturnType<MemoryApi["listActiveKnowledgeForgetOperations"]>>;
       try {
         result = await api.listActiveKnowledgeForgetOperations();
@@ -360,17 +362,6 @@ function PrivateMemory({ api, access, initial, revalidate, retain, admitted }: P
       </>
     );
   }
-  if (destination.kind === "learning") {
-    return (
-      <>
-        <Stack.Screen options={{ title: "Preference Learning" }} />
-        <MemoryLearning
-          {...{ api, access, close, retain }}
-          changed={() => revalidate({ kind: "learning" })}
-        />
-      </>
-    );
-  }
   if (destination.kind === "add") {
     return (
       <>
@@ -424,7 +415,6 @@ function PrivateMemory({ api, access, initial, revalidate, retain, admitted }: P
         {...{ api, access, open, purpose }}
         setPurpose={setPurpose}
         onAdd={() => setDestination({ kind: "add" })}
-        onLearning={() => setDestination({ kind: "learning" })}
         onErasure={(result) => revalidate(listDestination, result)}
       />
     </>
@@ -450,19 +440,9 @@ type ListProps = {
   setPurpose: (purpose: KnowledgeQuery["purpose"]) => void;
   open: (id: string) => void;
   onAdd: () => void;
-  onLearning: () => void;
   onErasure: (operation: ActiveErasure) => void;
 };
-function MemoryList({
-  api,
-  access,
-  purpose,
-  setPurpose,
-  open,
-  onAdd,
-  onLearning,
-  onErasure,
-}: ListProps) {
+function MemoryList({ api, access, purpose, setPurpose, open, onAdd, onErasure }: ListProps) {
   const [view, setView] = useState<ViewMode>("accepted");
   const [status, setStatus] = useState<Status | "">("");
   const [workspace, setWorkspace] = useState<KnowledgeQuery["workspace"]>();
@@ -636,7 +616,6 @@ function MemoryList({
       )}
       footer={(pending) => (
         <Section title="Memory settings">
-          <SettingsActionRow label="Preference learning" onPress={onLearning} disabled={pending} />
           <SettingsActionRow
             label={exportPosition.cursor ? "Share next export page" : "Share memory export"}
             onPress={share}
@@ -767,7 +746,7 @@ function MemoryRow({ record, open }: { record: KnowledgeRecord; open: () => void
     <RecordRow
       title={summary.title}
       leading={<Icon name="history" size={20} color={t.secondary} />}
-      subtitle={`${summary.text}\n${memoryLabel(record.origin)} · ${memoryState(record)}${record.acceptance?.kind === "evidence_rule" ? ` · ${memoryAcceptance(record)}` : ""}`}
+      subtitle={`${summary.text}\n${memoryLabel(record.origin)} · ${memoryState(record)}`}
       onPress={open}
     />
   );

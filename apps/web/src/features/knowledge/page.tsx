@@ -25,8 +25,7 @@ import {
   usePreferenceSession,
 } from "../workspace-settings/account-save-session";
 import { memoryKey, registerMemoryCleanup, useMemoryActions } from "./actions";
-import { LearningSettings, PreferenceSelection } from "./learning-settings";
-import { memoryAcceptance, memoryContent, memoryLabel, memorySummary } from "./presentation";
+import { memoryContent, memoryLabel, memorySummary } from "./presentation";
 import { MemoryBadges, MemoryRecordDetail, NewMemory } from "./record-detail";
 
 type View = "accepted" | "review" | "conflicts" | "all";
@@ -241,7 +240,6 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
     enabled: contentReady,
     retry: false,
   });
-  const listEpoch = records.data?.pages[0]?.epoch;
 
   const close = () => {
     setSelection(null);
@@ -614,13 +612,6 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
               </Tabs>
             </div>
           </SettingsSection>
-          <PreferenceSelection actions={actions} onChanged={refresh} />
-          <LearningSettings
-            queryKey={queryKey}
-            epoch={listEpoch}
-            actions={actions}
-            onChanged={refresh}
-          />
           {adding ? (
             <NewMemory
               purpose={filters.purpose}
@@ -706,9 +697,6 @@ function MemoryRow({
           <span>{title}</span>
           <span className="line-clamp-2 font-normal text-muted-foreground">{text}</span>
           <MemoryBadges record={record} />
-          {record.acceptance?.kind === "evidence_rule" ? (
-            <span className="text-xs text-muted-foreground">{memoryAcceptance(record)}</span>
-          ) : null}
         </span>
         <ChevronRightIcon aria-hidden="true" />
       </Button>

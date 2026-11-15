@@ -7,7 +7,6 @@ import {
   knowledgeRecordSchema,
   knowledgeWorkspaceSchema,
 } from "./knowledge.js";
-import { knowledgePreferenceSelectionSchema } from "./knowledge-learning.js";
 
 export const knowledgeRetrievalMaxRecords = 50;
 export const knowledgeContextMaxBytes = 32_768;
@@ -90,16 +89,6 @@ export const knowledgeContextReferenceSchema = knowledgeRecordReferenceSchema.ex
 });
 export type KnowledgeContextReference = z.infer<typeof knowledgeContextReferenceSchema>;
 
-const selectionReferenceFields = {
-  sourceEventId: idSchema,
-  validUntil: isoDateTimeSchema,
-};
-const [firstSelection, ...otherSelections] = knowledgePreferenceSelectionSchema.options;
-const recentSelection = z.discriminatedUnion("key", [
-  firstSelection.extend(selectionReferenceFields),
-  ...otherSelections.map((selection) => selection.extend(selectionReferenceFields)),
-]);
-export type KnowledgeRecentSelection = z.infer<typeof recentSelection>;
 const section = z.array(knowledgeRecordSchema).max(knowledgeRetrievalMaxRecords);
 export const knowledgeContextPackSchema = z
   .object({
@@ -109,7 +98,6 @@ export const knowledgeContextPackSchema = z
     inferred: section,
     tentative: section,
     conflicts: section,
-    recentSelections: z.array(recentSelection).max(2),
     missingInputs: z.array(z.enum(["no_current_memory", "source_unavailable"])).max(2),
     truncated: z.boolean(),
     nextCursor: cursor.nullable(),
@@ -132,14 +120,12 @@ export type KnowledgeContextPack = z.infer<typeof knowledgeContextPackSchema>;
 export const knowledgeExplainInputSchema = z.object({ contextUseId: idSchema }).strict();
 export type KnowledgeExplainInput = z.infer<typeof knowledgeExplainInputSchema>;
 const explainedRecord = knowledgeContextReferenceSchema.extend({ origin: knowledgeOriginSchema });
-const explainedSelection = z.object(selectionReferenceFields).strict();
 export const knowledgeContextExplanationSchema = z.discriminatedUnion("state", [
   z
     .object({
       contextUseId: idSchema,
       state: z.enum(["available", "changed"]),
       references: z.array(explainedRecord).max(knowledgeRetrievalMaxRecords),
-      selectionReferences: z.array(explainedSelection).max(2),
     })
     .strict(),
   z

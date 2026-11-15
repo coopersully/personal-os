@@ -2,9 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   auditEvents,
   type Database,
-  knowledgeLearningReceipts,
   knowledgeReceipts,
-  knowledgeSelectionInteractions,
   knowledgeForgetOperations as operations,
   knowledgeForgetPreviews as previews,
   knowledgeForgetReplayBindings as replays,
@@ -22,7 +20,7 @@ import {
   knowledgeForgetOperationInputSchema,
   knowledgeForgetPreviewInputSchema,
 } from "@personal-os/domain";
-import { and, asc, eq, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, asc, eq, isNull, lte, or } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
@@ -118,28 +116,7 @@ async function assertMutationKeyUnused(
     .where(
       and(eq(knowledgeReceipts.userId, userId), eq(knowledgeReceipts.mutationKey, mutationKey)),
     );
-  const [learning] = await tx
-    .select({ key: knowledgeLearningReceipts.mutationKey })
-    .from(knowledgeLearningReceipts)
-    .where(
-      and(
-        eq(knowledgeLearningReceipts.userId, userId),
-        eq(knowledgeLearningReceipts.mutationKey, mutationKey),
-      ),
-    );
-  // A committed selection owns its event ID even when it produced no knowledge receipt.
-  const [selection] = await tx
-    .select({ id: knowledgeSelectionInteractions.id })
-    .from(knowledgeSelectionInteractions)
-    .where(
-      and(
-        eq(knowledgeSelectionInteractions.userId, userId),
-        eq(knowledgeSelectionInteractions.id, mutationKey),
-        isNotNull(knowledgeSelectionInteractions.occurredAt),
-      ),
-    );
-  if (record || learning || selection)
-    throw new AppError("conflict", "This mutation key was used for another request.");
+  if (record) throw new AppError("conflict", "This mutation key was used for another request.");
 }
 
 function validReceipt(

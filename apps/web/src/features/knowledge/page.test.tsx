@@ -1,11 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
-import {
-  type KnowledgeRecord,
-  knowledgePreferenceClaimKey,
-  knowledgePreferenceContent,
-} from "@personal-os/domain";
+import type { KnowledgeRecord } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -19,10 +15,7 @@ vi.mock("@/api", () => ({
     getKnowledge: vi.fn(),
     getKnowledgeHistory: vi.fn(),
     exportKnowledge: vi.fn(),
-    issueKnowledgeSelectionInteraction: vi.fn(),
-    recordKnowledgeSelection: vi.fn(),
     updateKnowledge: vi.fn(),
-    getKnowledgeSettings: vi.fn(),
     listActiveKnowledgeForgetOperations: vi.fn(),
     previewKnowledgeForget: vi.fn(),
     forgetKnowledge: vi.fn(),
@@ -34,6 +27,14 @@ const owner = "11111111-1111-4111-8111-111111111111";
 const id = "22222222-2222-4222-8222-222222222222";
 const operationId = "33333333-3333-4333-8333-333333333333";
 const now = "2026-11-12T12:00:00.000Z";
+const preference = (value: string): KnowledgeRecord["content"] => ({
+  kind: "preference",
+  value: {
+    subject: "owner",
+    key: "communication_style",
+    value: { type: "string", value },
+  },
+});
 const record: KnowledgeRecord = {
   id,
   author: { actorId: owner, actorType: "user" },
@@ -42,7 +43,7 @@ const record: KnowledgeRecord = {
   validUntil: null,
   reviewAt: null,
   schemaVersion: 1,
-  content: knowledgePreferenceContent({ key: "presentation.detail", value: "concise" }),
+  content: preference("concise"),
   scope: { workspace: null },
   sensitivity: "standard",
   purposes: ["planning"],
@@ -53,13 +54,8 @@ const record: KnowledgeRecord = {
   relatedRecordIds: [],
   createdAt: now,
   origin: "inferred",
-  acceptance: {
-    kind: "evidence_rule",
-    ruleVersion: "1",
-    acceptedAt: now,
-    evidenceIds: [id, owner, operationId],
-  },
-  claimKey: knowledgePreferenceClaimKey("presentation.detail"),
+  acceptance: { kind: "owner", actorId: owner, acceptedAt: now, evidenceIds: [] },
+  claimKey: '[null,"preference","owner","communication_style"]',
   conflictRecordIds: [],
   evidenceAvailable: true,
   stale: false,
@@ -78,7 +74,7 @@ function mount() {
 }
 
 async function openEditor() {
-  fireEvent.click(await screen.findByRole("button", { name: /Response detail.*Concise/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*concise/i }));
   fireEvent.click(await screen.findByRole("button", { name: "Edit memory" }));
   fireEvent.change(screen.getByLabelText("Value", { exact: true }), {
     target: { value: "detailed" },
@@ -95,10 +91,6 @@ beforeEach(() => {
     items: [record],
     nextCursor: null,
   });
-  vi.mocked(api.getKnowledgeSettings).mockResolvedValue({
-    automaticPreferenceAcceptance: true,
-    revision: 2,
-  });
   vi.mocked(api.getKnowledge).mockResolvedValue(record);
 });
 
@@ -110,7 +102,7 @@ it("owner_can_correct_inferred_memory_and_forget_dependents", async () => {
       kind: "preference",
       value: {
         subject: "Travel profile",
-        key: "presentation.detail",
+        key: "communication_style",
         value: { type: "string", value: "concise" },
       },
     },
@@ -119,7 +111,7 @@ it("owner_can_correct_inferred_memory_and_forget_dependents", async () => {
     ...latest,
     revision: 5,
     origin: "stated",
-    content: knowledgePreferenceContent({ key: "presentation.detail", value: "detailed" }),
+    content: preference("detailed"),
     acceptance: { kind: "owner", actorId: owner, acceptedAt: now, evidenceIds: [] },
   };
   vi.mocked(api.updateKnowledge)
@@ -156,7 +148,6 @@ it("owner_can_correct_inferred_memory_and_forget_dependents", async () => {
   vi.mocked(api.getKnowledgeForgetStatus).mockResolvedValue({ operationId, status: "completed" });
   mount();
   expect(await screen.findByText("Inferred")).toBeVisible();
-  expect(await screen.findByText("Accepted from 3 selections")).toBeVisible();
   await openEditor();
   fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
   fireEvent.click(await screen.findByRole("button", { name: "Review latest memory" }));
@@ -173,12 +164,12 @@ it("owner_can_correct_inferred_memory_and_forget_dependents", async () => {
   const saved = await screen.findByText("Memory saved.");
   expect(saved.closest("[data-sonner-toast]")).not.toBeNull();
   expect(screen.getAllByText("Memory saved.")).toEqual([saved]);
-  const detail = screen.getByRole("dialog", { name: "Response detail" });
+  const detail = screen.getByRole("dialog", { name: "Communication style" });
   expect(within(detail).getByText("Stated", { exact: true })).toBeVisible();
   fireEvent.click(within(detail).getByRole("button", { name: "Show history" }));
   const history = await within(detail).findByRole("region", { name: "Revision history" });
   expect(await within(history).findByText("Inferred", { exact: true })).toBeVisible();
-  expect(within(history).getByText("Accepted from 3 selections")).toBeVisible();
+  expect(within(history).getAllByText("Accepted by you")).toHaveLength(2);
   fireEvent.click(forget);
   expect(await screen.findByText("2 dependent copies")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Forget permanently" }));
@@ -218,30 +209,6 @@ it("late_save_after_logout_cannot_restore_memory", async () => {
   expect(client.getQueryCache().findAll({ queryKey: ["memory", owner] })).toHaveLength(0);
 });
 
-it("replays a temporary selection with its original server-issued ID after uncertainty", async () => {
-  vi.mocked(api.issueKnowledgeSelectionInteraction).mockResolvedValue({
-    sourceEventId: id,
-    expiresAt: now,
-  });
-  vi.mocked(api.recordKnowledgeSelection)
-    .mockRejectedValueOnce(new Error("Connection interrupted"))
-    .mockResolvedValue({ outcome: "recorded" });
-  mount();
-  const useThisTime = await screen.findByRole("button", { name: "Use this time" });
-  fireEvent.click(useThisTime);
-  const retry = await screen.findByText(
-    "Couldn’t confirm this choice. You can retry the same selection.",
-  );
-  expect(retry.closest("[data-sonner-toast]")).not.toBeNull();
-  fireEvent.click(useThisTime);
-  expect(await screen.findByText("Choice available for 24 hours.")).toBeVisible();
-  expect(api.issueKnowledgeSelectionInteraction).toHaveBeenCalledTimes(1);
-  expect(vi.mocked(api.recordKnowledgeSelection).mock.calls).toEqual([
-    [{ key: "presentation.detail", value: "concise", sourceEventId: id }],
-    [{ key: "presentation.detail", value: "concise", sourceEventId: id }],
-  ]);
-});
-
 it("drops a late save and its toast after leaving Memory", async () => {
   let finish!: () => void;
   vi.mocked(api.updateKnowledge).mockImplementation(
@@ -276,10 +243,10 @@ it("hides private content immediately after a fenced detail response, before dis
     .mockImplementation(() => new Promise(() => {}));
   vi.mocked(api.getKnowledge).mockRejectedValue(fencedError());
   mount();
-  fireEvent.click(await screen.findByRole("button", { name: /Response detail.*Concise/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*concise/i }));
   await waitFor(() => expect(api.listActiveKnowledgeForgetOperations).toHaveBeenCalledTimes(2));
   expect(
-    screen.queryByRole("button", { name: /Response detail.*Concise/i }),
+    screen.queryByRole("button", { name: /Communication style.*concise/i }),
   ).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Download memory" })).not.toBeInTheDocument();
   expect(screen.queryByText("Inferred")).not.toBeInTheDocument();
@@ -313,7 +280,7 @@ it("drops a delayed export response after learning of an admitted erasure", asyn
     fireEvent.click(await screen.findByRole("button", { name: "Download memory" }));
     fireEvent.click(screen.getByRole("button", { name: "Download" }));
     await waitFor(() => expect(api.exportKnowledge).toHaveBeenCalledOnce());
-    fireEvent.click(screen.getByRole("button", { name: /Response detail.*Concise/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Communication style.*concise/i }));
     expect(await screen.findByRole("button", { name: "Retry erasure" })).toBeVisible();
     await act(async () => finish());
     expect(exportFile).not.toHaveBeenCalled();
@@ -400,7 +367,7 @@ it("shows both restriction choices and preserves a narrower draft after concurre
     )
     .mockResolvedValue({ receiptId: id, recordId: id, outcome: "readable", record: latest });
   mount();
-  fireEvent.click(await screen.findByRole("button", { name: /Response detail.*Concise/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*concise/i }));
   fireEvent.click(await screen.findByRole("button", { name: "Restrict use" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Review" }));
   fireEvent.click(screen.getByRole("button", { name: "Save restrictions" }));
@@ -448,7 +415,7 @@ it("leaves an untouched generated inference out of the revise path", async () =>
   };
   vi.mocked(api.getKnowledge).mockResolvedValue(generated);
   mount();
-  fireEvent.click(await screen.findByRole("button", { name: /Response detail.*Concise/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*concise/i }));
   fireEvent.click(await screen.findByRole("button", { name: "Edit memory" }));
   expect(screen.getByRole("button", { name: "Save memory" })).toBeDisabled();
   expect(api.updateKnowledge).not.toHaveBeenCalled();
@@ -477,7 +444,9 @@ it("drops previously disclosed rows before restarting a rejected list cursor", a
     .mockRejectedValueOnce(invalidCursor())
     .mockResolvedValue({ ...page, items: [], epoch: 4, nextCursor: null });
   mount();
-  expect(await screen.findByRole("button", { name: /Response detail.*Concise/i })).toBeVisible();
+  expect(
+    await screen.findByRole("button", { name: /Communication style.*concise/i }),
+  ).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Load more memories" }));
   await waitFor(() => expect(api.listActiveKnowledgeForgetOperations).toHaveBeenCalledTimes(2));
   expect(screen.queryByText("Inferred")).not.toBeInTheDocument();
@@ -515,7 +484,7 @@ it("clears disclosed revision sources when a restriction invalidates the next hi
     })
     .mockRejectedValueOnce(invalidCursor());
   mount();
-  fireEvent.click(await screen.findByRole("button", { name: /Response detail.*Concise/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*concise/i }));
   fireEvent.click(await screen.findByRole("button", { name: "Show history" }));
   fireEvent.click(await screen.findByText("Sources for revision 3"));
   expect(screen.getByText("Former revision source")).toBeVisible();
@@ -524,7 +493,9 @@ it("clears disclosed revision sources when a restriction invalidates the next hi
   expect(screen.queryByText("Former revision source")).not.toBeInTheDocument();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await act(async () => release());
-  expect(await screen.findByRole("button", { name: /Response detail.*Concise/i })).toBeVisible();
+  expect(
+    await screen.findByRole("button", { name: /Communication style.*concise/i }),
+  ).toBeVisible();
   expect(api.getKnowledgeHistory).toHaveBeenCalledTimes(2);
 });
 
@@ -557,7 +528,7 @@ it("reopens an ordinary superseded predecessor from All memory", async () => {
       status: "superseded",
     }),
   );
-  fireEvent.click(await screen.findByRole("button", { name: /Response detail.*Superseded/i }));
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*Superseded/i }));
   const preview = await screen.findByRole("button", { name: "Preview forgetting" });
   await waitFor(() => expect(preview).toBeEnabled());
 });

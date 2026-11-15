@@ -90,7 +90,6 @@ function sourceReference(source: KnowledgeSource) {
       return evidence.reference;
     case "domain_record":
       return `${memoryLabel(evidence.domain)} ${evidence.id} · revision ${evidence.revision}`;
-    case "first_party_selection":
     case "signed_inbound_message":
       return evidence.id;
   }

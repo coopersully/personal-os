@@ -24,7 +24,6 @@ import {
   knowledgeReadInputSchema,
   knowledgeRecordSnapshotSchema,
   knowledgeValiditySchema,
-  preferenceKeyForClaim,
 } from "@personal-os/domain";
 import { and, eq } from "drizzle-orm";
 import { auditValues } from "../audit.js";
@@ -39,16 +38,13 @@ import {
   type KnowledgeDerivation,
   type KnowledgeRevision,
   type KnowledgeTransaction,
-  knowledgeClaimRevisions,
   knowledgeReferences,
   knowledgeRevisionDerivations,
   knowledgeSourceReferences,
-  knowledgeValidityOverlaps,
   ownedKnowledgeRevision,
   preserveKnowledgeDisclosure,
 } from "./access.js";
 import { admitKnowledgeClaim, matchesKnowledgeForgetReplay } from "./forget-suppression.js";
-import { suppressSelectionLearning } from "./learning-evidence.js";
 
 type KnowledgeAccess = ReturnType<typeof createKnowledgeAccess>;
 type StoredReceipt = typeof knowledgeReceipts.$inferSelect;
@@ -313,7 +309,6 @@ export async function prepareKnowledgeRevision({
     retainSupport && principal.actorType === "user" && current.metadata.origin === "inferred"
       ? current
       : undefined;
-  const retainedSelection = retainedInference?.metadata.selectionGeneration;
   const sameGeneratedInference =
     sameContent &&
     !asProposal &&
@@ -347,7 +342,7 @@ export async function prepareKnowledgeRevision({
   const status =
     retainedInference?.snapshot.status ??
     (privateProposal ||
-    (origin === "inferred" && retainedSelection === undefined) ||
+    origin === "inferred" ||
     asProposal ||
     (snapshot !== undefined && principal.actorType === "agent")
       ? "proposed"
@@ -356,7 +351,6 @@ export async function prepareKnowledgeRevision({
     ...emptyKnowledgeMetadata,
     origin,
     generatedInference,
-    ...(retainedSelection === undefined ? {} : { selectionGeneration: retainedSelection }),
     acceptance: retainedInference
       ? retainedInference.metadata.acceptance
       : status === "active" && principal.actorType === "user"
@@ -496,50 +490,6 @@ export async function writeKnowledgeRevision(
       );
 }
 
-/** An explicit preference replaces overlapping automatic inference without rewriting its history. */
-export async function applyOwnerPreference(
-  tx: KnowledgeTransaction,
-  principal: Principal,
-  write: RevisionWrite,
-  at: Date,
-) {
-  const { claimKey, snapshot, metadata } = write;
-  if (
-    principal.actorType !== "user" ||
-    metadata.acceptance?.kind !== "owner" ||
-    !claimKey ||
-    !preferenceKeyForClaim(claimKey)
-  )
-    return;
-  await suppressSelectionLearning(tx, principal.userId, claimKey);
-  for (const other of await knowledgeClaimRevisions(tx, principal.userId, claimKey, snapshot.id)) {
-    if (
-      other.metadata.selectionGeneration === undefined ||
-      other.metadata.acceptance?.kind === "owner" ||
-      other.snapshot.status === "superseded" ||
-      other.snapshot.status === "expired" ||
-      !knowledgeValidityOverlaps(snapshot, other.snapshot)
-    )
-      continue;
-    await writeKnowledgeRevision(
-      tx,
-      principal,
-      {
-        snapshot: {
-          ...other.snapshot,
-          revision: other.snapshot.revision + 1,
-          status: "superseded",
-        },
-        metadata: { ...other.metadata, supersededBy: snapshot.id },
-        claimKey,
-        derivations: await knowledgeRevisionDerivations(tx, principal.userId, other),
-        newSources: [],
-      },
-      at,
-    );
-  }
-}
-
 export async function writeKnowledgeReceipt(
   tx: KnowledgeTransaction,
   principal: Principal,
@@ -622,7 +572,6 @@ export function createKnowledgeRecordService({
           at,
         });
         await writeKnowledgeRevision(tx, principal, write, at);
-        await applyOwnerPreference(tx, principal, write, at);
         const receipt = await writeKnowledgeReceipt(
           tx,
           principal,

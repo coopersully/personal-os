@@ -158,15 +158,10 @@ export const knowledgeSourceSchema = z
       "owner_statement",
       "agent_recorded_statement",
       "agent_observation",
-      "first_party_selection",
       "domain_record",
       "signed_inbound_message",
     ]),
-    // First-party evidence is constructed only by the server, never admitted by a write schema.
-    evidence: z.discriminatedUnion("type", [
-      ...knowledgeEvidenceSchema.options,
-      z.object({ type: z.literal("first_party_selection"), id: idSchema }).strict(),
-    ]),
+    evidence: knowledgeEvidenceSchema,
     actorType: z.enum(["user", "agent"]),
     actorId: idSchema,
     availability: z.literal("unavailable").optional(),
@@ -217,14 +212,6 @@ export const knowledgeAcceptanceSchema = z.discriminatedUnion("kind", [
       evidenceIds: z.array(idSchema).max(20),
     })
     .strict(),
-  z
-    .object({
-      kind: z.literal("evidence_rule"),
-      ruleVersion: z.string().min(1),
-      acceptedAt: isoDateTimeSchema,
-      evidenceIds: z.array(idSchema).min(1).max(20),
-    })
-    .strict(),
 ]);
 export const knowledgeOriginSchema = z.enum(["stated", "inferred"]);
 export const knowledgeRevisionMetadataSchema = z
@@ -233,7 +220,6 @@ export const knowledgeRevisionMetadataSchema = z
     origin: knowledgeOriginSchema,
     acceptance: knowledgeAcceptanceSchema.nullable(),
     generatedInference: z.boolean(),
-    selectionGeneration: z.int().nonnegative().optional(),
     supersededBy: idSchema.nullable(),
     disputedBy: z.enum(["user", "agent"]).nullable(),
     inheritedRecordIds: z.array(idSchema),

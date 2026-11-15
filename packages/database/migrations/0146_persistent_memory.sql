@@ -89,65 +89,6 @@ CREATE TRIGGER knowledge_invalidate_signed_source AFTER DELETE ON "text_inbound_
 CREATE TRIGGER knowledge_invalidate_goal_source AFTER DELETE ON "goals"
   FOR EACH ROW EXECUTE FUNCTION knowledge_invalidate_external_source();
 --> statement-breakpoint
--- from branch 0141_knowledge_learning.sql
-CREATE TABLE "knowledge_selection_interactions" (
-  "id" uuid PRIMARY KEY,
-  "user_id" uuid NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
-  "session_id" uuid NOT NULL,
-  "issued_at" timestamptz NOT NULL,
-  "expires_at" timestamptz NOT NULL,
-  "occurred_at" timestamptz,
-  "local_date" date,
-  "time_zone" text,
-  "key" text,
-  "value" text,
-  "generation" integer,
-  CONSTRAINT "knowledge_selections_valid_admission" CHECK ("expires_at" > "issued_at"),
-  CONSTRAINT "knowledge_selections_valid_event" CHECK (
-    ("occurred_at" IS NULL AND "local_date" IS NULL AND "time_zone" IS NULL
-      AND "key" IS NULL AND "value" IS NULL AND "generation" IS NULL)
-    OR ("occurred_at" IS NOT NULL AND "occurred_at" >= "issued_at" AND "occurred_at" < "expires_at"
-      AND "local_date" IS NOT NULL AND "time_zone" IS NOT NULL
-      AND "generation" IS NOT NULL AND "generation" >= 0 AND "key" IS NOT NULL AND "value" IS NOT NULL
-      AND (("key" = 'presentation.detail' AND "value" IN ('concise', 'detailed'))
-        OR ("key" = 'presentation.format' AND "value" IN ('prose', 'bullets'))))
-  )
-);
---> statement-breakpoint
-CREATE INDEX "knowledge_selections_owner_time_idx"
-  ON "knowledge_selection_interactions" ("user_id", "occurred_at") WHERE "occurred_at" IS NOT NULL;
---> statement-breakpoint
-CREATE INDEX "knowledge_selections_unused_expiry_idx"
-  ON "knowledge_selection_interactions" ("user_id", "expires_at") WHERE "occurred_at" IS NULL;
---> statement-breakpoint
-CREATE TABLE "knowledge_learning_settings" (
-  "user_id" uuid PRIMARY KEY REFERENCES "users" ("id") ON DELETE CASCADE,
-  "automatic_preference_acceptance" boolean NOT NULL,
-  "revision" integer NOT NULL,
-  CONSTRAINT "knowledge_learning_settings_revision_positive" CHECK ("revision" > 0)
-);
---> statement-breakpoint
-CREATE TABLE "knowledge_learning_suppressions" (
-  "user_id" uuid NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
-  "key" text NOT NULL,
-  "suppressed" boolean NOT NULL,
-  "generation" integer NOT NULL DEFAULT 0,
-  PRIMARY KEY ("user_id", "key"),
-  CONSTRAINT "knowledge_learning_suppressions_valid_key"
-    CHECK ("key" IN ('presentation.detail', 'presentation.format')),
-  CONSTRAINT "knowledge_learning_suppressions_valid_generation" CHECK ("generation" >= 0)
-);
---> statement-breakpoint
-CREATE TABLE "knowledge_learning_receipts" (
-  "user_id" uuid NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
-  "mutation_key" uuid NOT NULL,
-  "request_hash" text NOT NULL,
-  PRIMARY KEY ("user_id", "mutation_key")
-);
---> statement-breakpoint
-CREATE TRIGGER knowledge_invalidate_selection_source AFTER DELETE ON "knowledge_selection_interactions"
-  FOR EACH ROW WHEN (OLD."occurred_at" IS NOT NULL) EXECUTE FUNCTION knowledge_invalidate_external_source();
---> statement-breakpoint
 -- from branch 0142_knowledge_forgetting.sql
 ALTER TABLE "knowledge_receipts" ALTER COLUMN "request_hash" DROP NOT NULL;
 --> statement-breakpoint
@@ -165,7 +106,6 @@ CREATE TABLE "knowledge_forget_operations" (
   "scrub_cursor" uuid,
   "key_proof" text NOT NULL,
   "suppression_fingerprints" jsonb DEFAULT '[]'::jsonb NOT NULL,
-  "deleted_selection_ids" jsonb DEFAULT '[]'::jsonb NOT NULL,
   "failures" integer DEFAULT 0 NOT NULL,
   "due_at" timestamptz NOT NULL,
   "lease_id" uuid,
@@ -251,7 +191,4 @@ CREATE INDEX "knowledge_context_uses_owner_idx" ON "knowledge_context_uses" ("us
 --> statement-breakpoint
 -- from branch 0145_knowledge_context_selection_refs.sql
 ALTER TABLE "knowledge_context_uses"
-  ALTER COLUMN "epoch" TYPE bigint,
-  ADD COLUMN "selection_event_ids" uuid[],
-  ADD CONSTRAINT "knowledge_context_uses_selection_refs_check"
-    CHECK (cardinality("selection_event_ids") <= 2);
+  ALTER COLUMN "epoch" TYPE bigint;

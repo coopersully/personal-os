@@ -18,13 +18,6 @@ import {
   knowledgeReadInputSchema,
   knowledgeReadResultSchema,
   knowledgeSaveResultSchema,
-  knowledgeSelectionInputSchema,
-  knowledgeSelectionInteractionSchema,
-  knowledgeSelectionResultSchema,
-  knowledgeSettingsInputSchema,
-  knowledgeSettingsSchema,
-  knowledgeSuppressionResetInputSchema,
-  knowledgeSuppressionResetResultSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
@@ -32,7 +25,6 @@ import { AppError } from "../errors.js";
 import type { createKnowledgeContextService } from "../knowledge/context-service.js";
 import type { createKnowledgeExportService } from "../knowledge/export-service.js";
 import type { createKnowledgeForgetService } from "../knowledge/forget-service.js";
-import type { createKnowledgeLearningService } from "../knowledge/learning-service.js";
 import type { createKnowledgeLifecycleService } from "../knowledge/lifecycle-service.js";
 import type { createKnowledgeRecordService } from "../knowledge/record-service.js";
 import type { createKnowledgeSearchService } from "../knowledge/search-service.js";
@@ -83,7 +75,6 @@ export function registerKnowledgeRoutes({
   lifecycle,
   forget,
   forgettingConfigured,
-  learning,
   search,
   context: contextService,
   export: exportService,
@@ -93,7 +84,6 @@ export function registerKnowledgeRoutes({
   lifecycle: ReturnType<typeof createKnowledgeLifecycleService>;
   forget: ReturnType<typeof createKnowledgeForgetService>;
   forgettingConfigured: boolean;
-  learning: ReturnType<typeof createKnowledgeLearningService>;
   search: ReturnType<typeof createKnowledgeSearchService>;
   context: ReturnType<typeof createKnowledgeContextService>;
   export: ReturnType<typeof createKnowledgeExportService>;
@@ -157,52 +147,6 @@ export function registerKnowledgeRoutes({
       parseKnowledgeResponse(
         knowledgePageSchema,
         await exportService.exportPage(context.get("principal"), input),
-      ),
-    );
-  });
-  app.get("/v1/knowledge/settings", async (context) => {
-    empty.parse(queryParameters(context));
-    return context.json(
-      parseKnowledgeResponse(
-        knowledgeSettingsSchema,
-        await learning.getSettings(context.get("principal")),
-      ),
-    );
-  });
-  app.patch("/v1/knowledge/settings", async (context) => {
-    const input = await parseBody(context, knowledgeSettingsInputSchema);
-    return context.json(
-      parseKnowledgeResponse(
-        knowledgeSettingsSchema,
-        await learning.updateSettings(context.get("principal"), input),
-      ),
-    );
-  });
-  app.post("/v1/knowledge/selection-interactions", async (context) => {
-    await parseOptionalBody(context, empty);
-    return context.json(
-      parseKnowledgeResponse(
-        knowledgeSelectionInteractionSchema,
-        await learning.issueSelectionInteraction(context.get("principal")),
-      ),
-      201,
-    );
-  });
-  app.post("/v1/knowledge/selections", async (context) => {
-    const input = await parseBody(context, knowledgeSelectionInputSchema);
-    return context.json(
-      parseKnowledgeResponse(
-        knowledgeSelectionResultSchema,
-        await learning.recordSelection(context.get("principal"), input),
-      ),
-    );
-  });
-  app.post("/v1/knowledge/learning-reset", async (context) => {
-    const input = await parseBody(context, knowledgeSuppressionResetInputSchema);
-    return context.json(
-      parseKnowledgeResponse(
-        knowledgeSuppressionResetResultSchema,
-        await learning.resetSuppression(context.get("principal"), input),
       ),
     );
   });
@@ -285,7 +229,8 @@ export function registerKnowledgeRoutes({
       ),
     );
   });
-  app.get("/v1/knowledge/:id", async (context) => {
+  // Only UUID-shaped segments are record reads; other single segments are unknown routes.
+  app.get("/v1/knowledge/:id{[0-9a-fA-F-]{36}}", async (context) => {
     const input = knowledgeReadInputSchema.parse(
       pathInput(queryParameters(context), "id", context.req.param("id")),
     );

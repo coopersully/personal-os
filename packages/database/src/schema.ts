@@ -45,8 +45,6 @@ import type {
   GoogleConnectionService,
   HomeLocation,
   KnowledgeContextReference,
-  KnowledgePreferenceKey,
-  KnowledgePreferenceSelection,
   KnowledgeQuery,
   LegacyMailRuleAction,
   MailAddress,
@@ -7228,94 +7226,6 @@ export const knowledgeDerivations = pgTable(
   ],
 );
 
-/** A session issues one interaction. Its committed selection survives session revocation. */
-export const knowledgeSelectionInteractions = pgTable(
-  "knowledge_selection_interactions",
-  {
-    id: uuid("id").primaryKey(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    sessionId: uuid("session_id").notNull(),
-    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }),
-    localDate: date("local_date"),
-    timeZone: text("time_zone"),
-    key: text("key").$type<KnowledgePreferenceKey>(),
-    value: text("value").$type<KnowledgePreferenceSelection["value"]>(),
-    generation: integer("generation"),
-  },
-  (table) => [
-    index("knowledge_selections_owner_time_idx")
-      .on(table.userId, table.occurredAt)
-      .where(sql`${table.occurredAt} IS NOT NULL`),
-    index("knowledge_selections_unused_expiry_idx")
-      .on(table.userId, table.expiresAt)
-      .where(sql`${table.occurredAt} IS NULL`),
-    check("knowledge_selections_valid_admission", sql`${table.expiresAt} > ${table.issuedAt}`),
-    check(
-      "knowledge_selections_valid_event",
-      sql`
-      (${table.occurredAt} IS NULL AND ${table.localDate} IS NULL AND ${table.timeZone} IS NULL
-        AND ${table.key} IS NULL AND ${table.value} IS NULL AND ${table.generation} IS NULL)
-      OR (${table.occurredAt} IS NOT NULL AND ${table.occurredAt} >= ${table.issuedAt}
-        AND ${table.occurredAt} < ${table.expiresAt}
-        AND ${table.localDate} IS NOT NULL AND ${table.timeZone} IS NOT NULL
-        AND ${table.generation} IS NOT NULL AND ${table.generation} >= 0
-        AND ${table.key} IS NOT NULL AND ${table.value} IS NOT NULL
-        AND ((${table.key} = 'presentation.detail' AND ${table.value} IN ('concise', 'detailed'))
-          OR (${table.key} = 'presentation.format' AND ${table.value} IN ('prose', 'bullets'))))
-    `,
-    ),
-  ],
-);
-
-export const knowledgeLearningSettings = pgTable(
-  "knowledge_learning_settings",
-  {
-    userId: uuid("user_id")
-      .primaryKey()
-      .references(() => users.id, { onDelete: "cascade" }),
-    automaticPreferenceAcceptance: boolean("automatic_preference_acceptance").notNull(),
-    revision: integer("revision").notNull(),
-  },
-  (table) => [check("knowledge_learning_settings_revision_positive", sql`${table.revision} > 0`)],
-);
-
-/** Generations keep previously collected choices from undoing an explicit rejection and reset. */
-export const knowledgeLearningSuppressions = pgTable(
-  "knowledge_learning_suppressions",
-  {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    key: text("key").$type<KnowledgePreferenceKey>().notNull(),
-    suppressed: boolean("suppressed").notNull(),
-    generation: integer("generation").notNull().default(0),
-  },
-  (table) => [
-    primaryKey({ columns: [table.userId, table.key] }),
-    check(
-      "knowledge_learning_suppressions_valid_key",
-      sql`${table.key} IN ('presentation.detail', 'presentation.format')`,
-    ),
-    check("knowledge_learning_suppressions_valid_generation", sql`${table.generation} >= 0`),
-  ],
-);
-
-export const knowledgeLearningReceipts = pgTable(
-  "knowledge_learning_receipts",
-  {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    mutationKey: uuid("mutation_key").notNull(),
-    requestHash: text("request_hash").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.userId, table.mutationKey] })],
-);
-
 /** The operation is both the durable worker outbox and its content-free receipt. */
 export const knowledgeForgetOperations = pgTable(
   "knowledge_forget_operations",
@@ -7336,7 +7246,6 @@ export const knowledgeForgetOperations = pgTable(
       .$type<string[]>()
       .notNull()
       .default([]),
-    deletedSelectionIds: jsonb("deleted_selection_ids").$type<string[]>().notNull().default([]),
     failures: integer("failures").notNull().default(0),
     dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
     leaseId: uuid("lease_id"),
@@ -7452,7 +7361,6 @@ export const knowledgeContextUses = pgTable(
     purpose: text("purpose").$type<KnowledgeQuery["purpose"]>().notNull(),
     workspace: text("workspace").$type<NonNullable<KnowledgeQuery["workspace"]>>(),
     epoch: bigint("epoch", { mode: "number" }).notNull(),
-    selectionEventIds: uuid("selection_event_ids").array(),
     references: jsonb("references").$type<KnowledgeContextReference[]>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
@@ -7468,10 +7376,6 @@ export const knowledgeContextUses = pgTable(
       sql`${table.workspace} IN ('tasks', 'calendar', 'mail', 'finances')`,
     ),
     check("knowledge_context_uses_epoch_check", sql`${table.epoch} >= 0`),
-    check(
-      "knowledge_context_uses_selection_refs_check",
-      sql`cardinality(${table.selectionEventIds}) <= 2`,
-    ),
     check(
       "knowledge_context_uses_refs_check",
       sql`jsonb_typeof(${table.references}) = 'array' AND jsonb_array_length(${table.references}) <= 50`,

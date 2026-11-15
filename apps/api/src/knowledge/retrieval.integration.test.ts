@@ -19,7 +19,6 @@ import {
   knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
   knowledgePageSchema,
-  knowledgePreferenceContent,
   knowledgeQuerySchema,
   knowledgeReceiptSchema,
 } from "@personal-os/domain";
@@ -33,7 +32,6 @@ import {
   createKnowledgeForgetService,
   type KnowledgeDeletionLedgerEntry,
 } from "./forget-service.js";
-import { createKnowledgeLearningService } from "./learning-service.js";
 import { createKnowledgeLifecycleService } from "./lifecycle-service.js";
 import { createKnowledgeRecordService } from "./record-service.js";
 import { createKnowledgeSearchService } from "./search-service.js";
@@ -159,7 +157,6 @@ describe("purpose-bound memory retrieval", () => {
     });
     const records = createKnowledgeRecordService(config);
     const lifecycle = createKnowledgeLifecycleService(config);
-    const learning = createKnowledgeLearningService(config);
     return {
       owner,
       agent,
@@ -175,17 +172,6 @@ describe("purpose-bound memory retrieval", () => {
       },
       async save(input: KnowledgeMutationInput, principal = owner) {
         return knowledgeReceiptSchema.parse(await records.create(principal, input)).record;
-      },
-      async select() {
-        const { sourceEventId } = await learning.issueSelectionInteraction(owner);
-        return {
-          sourceEventId,
-          result: await learning.recordSelection(owner, {
-            sourceEventId,
-            key: "presentation.detail",
-            value: "concise",
-          }),
-        };
       },
     };
   }
@@ -353,24 +339,14 @@ describe("purpose-bound memory retrieval", () => {
       expectedRevision: 1,
       mutationKey: randomUUID(),
     });
-    await f.select();
-    f.advance(day);
-    await f.select();
-    f.advance(day);
-    const { result } = await f.select();
-    const inferred = knowledgeReceiptSchema.parse(result).record;
-    expect(
-      (await f.context.context(f.agent, { ...planning, text: "concise" })).inferred.map(
-        (record) => record.id,
-      ),
-    ).toEqual([inferred.id]);
+    const proposed = await f.save(fact("concise", { evidence: [] }), f.agent);
     f.advance(91 * day);
     const inactive = await f.context.context(f.agent, {
       ...planning,
       text: "obsolete OR contested OR concise",
     });
     expect([...inactive.stated, ...inactive.inferred]).toEqual([]);
-    expect(inactive.tentative.map(({ id }) => id).sort()).toEqual([expired.id, inferred.id].sort());
+    expect(inactive.tentative.map(({ id }) => id).sort()).toEqual([expired.id, proposed.id].sort());
     expect(inactive.conflicts.map(({ id }) => id)).toEqual([disputed.id]);
     expect(inactive.missingInputs).toContain("no_current_memory");
     const search = { ...planning, text: "obsolete OR contested OR concise", limit: 1 } as const;
@@ -385,7 +361,7 @@ describe("purpose-bound memory retrieval", () => {
       cursor: firstReview.nextCursor,
     });
     expect([...firstReview.items, ...secondReview.items].map(({ id }) => id).sort()).toEqual(
-      [disputed.id, inferred.id].sort(),
+      [disputed.id, proposed.id].sort(),
     );
     await expect(
       f.search.search(f.owner, {
@@ -585,65 +561,9 @@ describe("purpose-bound memory retrieval", () => {
     });
   });
 
-  it("purpose-gates event-only context and rechecks its receipts after expiry and erasure", async () => {
-    const f = await fixture();
-    const event = await f.select();
-    const query = { ...planning, text: "quartz" };
-    const pack = await f.context.context(f.agent, query);
-    expect([...pack.stated, ...pack.inferred, ...pack.tentative, ...pack.conflicts]).toEqual([]);
-    expect(pack.recentSelections).toHaveLength(1);
-    expect((await f.context.context(f.agent, { purpose: "recovery" })).recentSelections).toEqual(
-      [],
-    );
-    const explain = { contextUseId: pack.contextUseId };
-    expect(await f.context.explain(f.agent, explain)).toMatchObject({
-      state: "available",
-      selectionReferences: [{ sourceEventId: event.sourceEventId }],
-    });
-    const [receipt] = await database.db
-      .select()
-      .from(knowledgeContextUses)
-      .where(eq(knowledgeContextUses.id, pack.contextUseId));
-    expect(JSON.stringify(receipt)).toContain(event.sourceEventId);
-    expect(JSON.stringify(receipt)).not.toContain("concise");
-    f.advance(day);
-    expect(await f.context.explain(f.agent, explain), "expired selection").toEqual({
-      contextUseId: pack.contextUseId,
-      state: "unavailable",
-    });
-
-    const fresh = await f.select();
-    const beforeForget = await f.context.context(f.agent, query);
-    expect([
-      ...beforeForget.stated,
-      ...beforeForget.inferred,
-      ...beforeForget.tentative,
-      ...beforeForget.conflicts,
-    ]).toEqual([]);
-    expect(beforeForget.recentSelections[0]?.sourceEventId).toBe(fresh.sourceEventId);
-    const preference = await f.save(
-      fact("unused", {
-        content: knowledgePreferenceContent({ key: "presentation.detail", value: "concise" }),
-      }),
-    );
-    const { previewId, ownerEpoch } = await f.forget.preview(f.owner, { recordId: preference.id });
-    await f.forget.forget(f.owner, { previewId, ownerEpoch, mutationKey: randomUUID() });
-    expect(await f.forget.runOnce({})).toBe(true);
-    expect(
-      await f.context.explain(f.agent, { contextUseId: beforeForget.contextUseId }),
-      "erased selection",
-    ).toMatchObject({ state: "unavailable" });
-  });
-
   it("retains the inferred origin of a tentative context reference", async () => {
     const f = await fixture();
-    await f.select();
-    f.advance(day);
-    await f.select();
-    f.advance(day);
-    const { result } = await f.select();
-    const record = knowledgeReceiptSchema.parse(result).record;
-    f.advance(91 * day);
+    const record = await f.save(fact("tentative orchard", { evidence: [] }), f.agent);
     const pack = await f.context.context(f.agent, planning);
     expect(pack.tentative.map(({ id }) => id)).toEqual([record.id]);
     expect(
@@ -827,36 +747,6 @@ describe("purpose-bound memory retrieval", () => {
       state: "available",
       references: [{ recordId: record.id }],
     });
-  });
-
-  it("expires recentSelections at 24 hours without aging out the 30-day learning evidence", async () => {
-    const f = await fixture();
-    await f.select();
-    f.advance(day);
-    await f.select();
-    f.advance(day);
-    const third = await f.select();
-    const learned = knowledgeReceiptSchema.parse(third.result).record;
-    expect((await f.context.context(f.agent, planning)).recentSelections).toEqual([
-      {
-        key: "presentation.detail",
-        value: "concise",
-        sourceEventId: third.sourceEventId,
-        validUntil: "2026-11-15T12:00:00.000Z",
-      },
-    ]);
-    f.advance(day);
-    const later = await f.context.context(f.agent, planning);
-    expect(later.recentSelections).toEqual([]);
-    expect(later.inferred).toEqual([
-      expect.objectContaining({
-        id: learned.id,
-        acceptance: expect.objectContaining({
-          kind: "evidence_rule",
-          evidenceIds: expect.arrayContaining([third.sourceEventId]),
-        }),
-      }),
-    ]);
   });
 
   it("does not expose a continuation for more than 100 denied export revisions", async () => {

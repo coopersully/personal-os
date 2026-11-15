@@ -16,8 +16,6 @@ import {
 import {
   type KnowledgeLifecycleInput,
   type KnowledgeMutationInput,
-  knowledgePreferenceClaimKey,
-  knowledgePreferenceContent,
   knowledgeReceiptSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -28,7 +26,6 @@ import {
   createKnowledgeForgetService,
   type KnowledgeDeletionLedgerEntry,
 } from "./forget-service.js";
-import { createKnowledgeLearningService } from "./learning-service.js";
 import { createKnowledgeLifecycleService } from "./lifecycle-service.js";
 import { createKnowledgeRecordService } from "./record-service.js";
 
@@ -105,7 +102,6 @@ describe("knowledge forgetting", () => {
     const forget = createKnowledgeForgetService({ ...config, ledger });
     const records = createKnowledgeRecordService(config);
     const lifecycle = createKnowledgeLifecycleService(config);
-    const learning = createKnowledgeLearningService(config);
     async function save(value: string, overrides?: Partial<KnowledgeMutationInput>) {
       return knowledgeReceiptSchema.parse(await records.create(owner, input(value, overrides)))
         .record;
@@ -125,7 +121,6 @@ describe("knowledge forgetting", () => {
       forget,
       records,
       lifecycle,
-      learning,
       save,
       admit,
       advance(ms: number) {
@@ -327,8 +322,7 @@ describe("knowledge forgetting", () => {
     const { previewId, ownerEpoch } = await f.forget.preview(f.owner, {
       recordId: receipt.recordId,
     });
-    const { sourceEventId } = await f.learning.issueSelectionInteraction(f.owner);
-    const repeat = { previewId, ownerEpoch, mutationKey: sourceEventId };
+    const repeat = { previewId, ownerEpoch, mutationKey: randomUUID() };
     const repeatedReceipt = await f.forget.forget(f.owner, repeat);
     expect(repeatedReceipt).toMatchObject({ outcome: "forgotten", recordId: receipt.recordId });
     expect(await f.forget.forget(f.owner, repeat)).toEqual(repeatedReceipt);
@@ -344,20 +338,6 @@ describe("knowledge forgetting", () => {
     await expect(
       f.records.create(f.owner, input("unrelated write", { mutationKey: repeat.mutationKey })),
     ).rejects.toMatchObject({ status: 409 });
-    await expect(
-      f.learning.updateSettings(f.owner, {
-        mutationKey: repeat.mutationKey,
-        expectedRevision: 0,
-        automaticPreferenceAcceptance: false,
-      }),
-    ).rejects.toMatchObject({ status: 409 });
-    await expect(
-      f.learning.recordSelection(f.owner, {
-        sourceEventId,
-        key: "presentation.detail",
-        value: "concise",
-      }),
-    ).rejects.toMatchObject({ status: 409 });
     await database.db.delete(users).where(eq(users.id, f.owner.userId));
     expect(
       (
@@ -370,123 +350,12 @@ describe("knowledge forgetting", () => {
     expect(f.ledger.append).toHaveBeenCalledTimes(1);
   });
 
-  it("erases matching selections and prevents recreation until a human re-add", async () => {
-    const f = await fixture();
-    const selection = { key: "presentation.detail", value: "concise" } as const;
-    const issue = async () => (await f.learning.issueSelectionInteraction(f.owner)).sourceEventId;
-    const select = async () =>
-      f.learning.recordSelection(f.owner, {
-        ...selection,
-        sourceEventId: await issue(),
-      });
-    const learned = knowledgeReceiptSchema.parse(await select()).record;
-    await f.learning.recordSelection(f.owner, {
-      key: "presentation.format",
-      value: "prose",
-      sourceEventId: await issue(),
-    });
-    const pending = await issue();
-    const admitted = await f.admit(learned.id);
-    await expect(f.learning.issueSelectionInteraction(f.owner)).rejects.toMatchObject({
-      status: 503,
-    });
-    await f.forget.runOnce();
-    expect(await f.forget.status(f.owner, { operationId: admitted.operationId })).toMatchObject({
-      status: "completed",
-    });
-    const { rows } = await database.pool.query(
-      "SELECT key FROM knowledge_selection_interactions WHERE user_id = $1",
-      [f.owner.userId],
-    );
-    expect(rows).toEqual([{ key: "presentation.format" }]);
-    await expect(
-      f.learning.recordSelection(f.owner, { ...selection, sourceEventId: pending }),
-    ).rejects.toMatchObject({ status: 404 });
-    const epoch = await database.pool.query(
-      "SELECT epoch FROM knowledge_owner_epochs WHERE user_id = $1",
-      [f.owner.userId],
-    );
-    await f.learning.resetSuppression(f.owner, {
-      expectedEpoch: Number(epoch.rows[0].epoch),
-      claimKey: knowledgePreferenceClaimKey(selection.key),
-      mutationKey: randomUUID(),
-    });
-    for (let day = 0; day < 3; day++) {
-      f.advance(86_400_000);
-      expect(await select()).toEqual({ outcome: "recorded" });
-    }
-    await expect(
-      f.records.create(
-        f.agent,
-        input("ignored", {
-          content: knowledgePreferenceContent(selection),
-          evidence: [],
-        }),
-      ),
-    ).rejects.toMatchObject({ status: 409 });
-    await f.save("ignored", { content: knowledgePreferenceContent(selection) });
-    expect(
-      (
-        await database.pool.query(
-          "SELECT * FROM knowledge_forget_suppressions WHERE user_id = $1",
-          [f.owner.userId],
-        )
-      ).rows,
-    ).toEqual([]);
-  });
-
-  it("previews and erases learned copies of deleted selection evidence but preserves stated peers", async () => {
-    const f = await fixture();
-    const key = "presentation.detail";
-    const { sourceEventId } = await f.learning.issueSelectionInteraction(f.owner);
-    const learned = knowledgeReceiptSchema.parse(
-      await f.learning.recordSelection(f.owner, { sourceEventId, key, value: "concise" }),
-    );
-    const root = await f.save("stated preference", {
-      content: knowledgePreferenceContent({ key, value: "detailed" }),
-    });
-    const peer = await f.save("independent preference", {
-      content: knowledgePreferenceContent({ key, value: "concise" }),
-      relatedRecordIds: [root.id],
-    });
-    const preview = await f.forget.preview(f.owner, { recordId: root.id });
-    expect(preview.dependentCopyCount).toBe(1);
-    expect(new Set(preview.affected.map(({ recordId }) => recordId))).toEqual(
-      new Set([root.id, learned.record.id]),
-    );
-    const { operationId } = await f.admit(root.id);
-    await f.forget.runOnce();
-    expect(await f.forget.status(f.owner, { operationId })).toMatchObject({ status: "completed" });
-    expect(await f.records.get(f.owner, { id: peer.id, purpose: "planning" })).toMatchObject({
-      content: peer.content,
-      relatedRecordIds: [],
-    });
-    await expect(
-      f.records.get(f.owner, { id: learned.record.id, purpose: "planning" }),
-    ).rejects.toMatchObject({ status: 404 });
-    expect(
-      (
-        await database.pool.query("SELECT request_hash FROM knowledge_receipts WHERE id = $1", [
-          learned.receiptId,
-        ])
-      ).rows,
-    ).toEqual([{ request_hash: null }]);
-  });
-
   it.each([
     "no sidecar",
     "null claim sidecar",
-  ])("suppresses the declared legacy generated claim with %s and includes selection-derived copies", async (legacyShape) => {
+  ])("suppresses the declared legacy generated claim with %s", async (legacyShape) => {
     const f = await fixture();
-    const key = "presentation.detail";
-    const { sourceEventId } = await f.learning.issueSelectionInteraction(f.owner);
-    const learned = knowledgeReceiptSchema.parse(
-      await f.learning.recordSelection(f.owner, { sourceEventId, key, value: "concise" }),
-    );
-    const request = input("legacy", {
-      content: knowledgePreferenceContent({ key, value: "detailed" }),
-      evidence: [],
-    });
+    const request = input("legacy", { evidence: [] });
     const legacy = knowledgeReceiptSchema.parse(await f.records.create(f.agent, request)).record;
     expect(legacy.content.kind).toBe("inference");
     if (legacyShape === "no sidecar")
@@ -500,23 +369,14 @@ describe("knowledge forgetting", () => {
         .where(eq(knowledgeRevisionMetadata.recordId, legacy.id));
 
     const preview = await f.forget.preview(f.owner, { recordId: legacy.id });
-    expect(preview.dependentCopyCount).toBe(1);
-    expect(new Set(preview.affected.map(({ recordId }) => recordId))).toEqual(
-      new Set([legacy.id, learned.recordId]),
-    );
+    expect(preview.dependentCopyCount).toBe(0);
+    expect(new Set(preview.affected.map(({ recordId }) => recordId))).toEqual(new Set([legacy.id]));
     const { operationId } = await f.admit(legacy.id);
     await f.forget.runOnce();
     expect(await f.forget.status(f.owner, { operationId })).toMatchObject({ status: "completed" });
     await expect(
       f.records.create(f.agent, { ...request, mutationKey: randomUUID() }),
     ).rejects.toMatchObject({ status: 409 });
-    expect(
-      (
-        await database.pool.query("SELECT * FROM knowledge_selection_interactions WHERE id = $1", [
-          sourceEventId,
-        ])
-      ).rows,
-    ).toEqual([]);
   });
 
   it("keeps suppression on same-claim survivor edits and rechecks the session on re-add", async () => {
@@ -621,31 +481,6 @@ describe("knowledge forgetting", () => {
     ).rejects.toMatchObject({ status: 409 });
     expect(await f.records.get(f.owner, { id: peer.id, purpose: "planning" })).toMatchObject({
       revision: 2,
-    });
-  });
-
-  it("rejects committed recorded-only selection IDs for both forget paths", async () => {
-    const f = await fixture();
-    const root = await f.save("first record");
-    const peer = await f.save("second record");
-    const { operationId } = await f.admit(root.id);
-    await f.forget.runOnce();
-    expect(await f.forget.status(f.owner, { operationId })).toMatchObject({ status: "completed" });
-    await f.save("explicit preference", {
-      content: knowledgePreferenceContent({ key: "presentation.detail", value: "concise" }),
-    });
-    const { sourceEventId } = await f.learning.issueSelectionInteraction(f.owner);
-    const selection = { sourceEventId, key: "presentation.detail", value: "concise" } as const;
-    expect(await f.learning.recordSelection(f.owner, selection)).toEqual({ outcome: "recorded" });
-    for (const recordId of [root.id, peer.id]) {
-      const { previewId, ownerEpoch } = await f.forget.preview(f.owner, { recordId });
-      await expect(
-        f.forget.forget(f.owner, { previewId, ownerEpoch, mutationKey: sourceEventId }),
-      ).rejects.toMatchObject({ status: 409 });
-    }
-    expect(await f.learning.recordSelection(f.owner, selection)).toEqual({ outcome: "recorded" });
-    expect(await f.records.get(f.owner, { id: peer.id, purpose: "planning" })).toMatchObject({
-      revision: 1,
     });
   });
 

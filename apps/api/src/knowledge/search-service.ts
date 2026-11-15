@@ -33,7 +33,6 @@ function sourcePriority(record: KnowledgeRecord) {
     if (source.availability === "unavailable") continue;
     const rank = {
       owner_statement: 5,
-      first_party_selection: 4,
       signed_inbound_message: 3,
       domain_record: 3,
       agent_recorded_statement: 2,

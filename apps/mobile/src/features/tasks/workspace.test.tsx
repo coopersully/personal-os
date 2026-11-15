@@ -1425,17 +1425,15 @@ it("always shows the owning list, project and reserved time on a task row", asyn
   h.preferences.taskRowDetails = [];
   show();
   await loaded();
-  expect(await screen.findByText("Reserved Nov 6, 9:30 AM · House / Move")).toBeVisible();
+  // The container has its own line, so reserved time cannot push it out of view.
+  expect(await screen.findByText("House / Move")).toBeVisible();
+  expect(screen.getByText("Reserved Nov 6, 9:30 AM")).toBeVisible();
   expect(screen.queryByText(/1 hr 30 min/)).not.toBeInTheDocument();
   expect(screen.queryByText("Bring the long ladder")).not.toBeInTheDocument();
   expect(screen.queryByText("home")).not.toBeInTheDocument();
 });
 it.each([
-  [
-    "estimate",
-    "Reserved Nov 6, 9:30 AM · 1 hr 30 min · House / Move",
-    ["Bring the long ladder", "home"],
-  ],
+  ["estimate", "Reserved Nov 6, 9:30 AM · 1 hr 30 min", ["Bring the long ladder", "home"]],
   ["notes", "Bring the long ladder", ["home", "errands"]],
   ["tags", "errands", ["Bring the long ladder"]],
 ] as const)("shows the %s row detail only when its preference is on", async (detail, shown, hidden) => {
@@ -1700,4 +1698,27 @@ it("names a cancelled task on its scan line", async () => {
   show({ scope: { view: "history" } });
   await loaded();
   expect(screen.getByText("Cancelled")).toBeVisible();
+});
+it("keeps Load more for ordinary matches when the archived read fails", async () => {
+  h.listTaskWorkspace.mockImplementation(async (query) => {
+    if (query.status === "archived") throw new Error("offline");
+    return query.cursor
+      ? { items: [task("two", { title: "Garden two" })], total: 2, nextCursor: null }
+      : { items: [task("one")], total: 2, nextCursor: "next" };
+  });
+  show({ standalone: true });
+  await loaded();
+  search("garden");
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
+  // Ordinary pages come first; the archived retry waits until they are all loaded.
+  expect(
+    screen.queryByRole("button", { name: "Retry loading archived matches" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+  await screen.findByRole("button", { name: "Open task: Garden two" });
+  expect(h.listTaskWorkspace).toHaveBeenCalledWith(
+    expect.objectContaining({ status: "all", cursor: "next" }),
+  );
+  expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Retry loading archived matches" })).toBeVisible();
 });

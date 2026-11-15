@@ -126,17 +126,19 @@ describe("task row details", () => {
   } as unknown as TaskWorkspaceItem;
   it("always shows reserved time and the container, and nothing optional by default", () => {
     expect(taskRowDetails(item, { list: "Home", project: "Move" })).toEqual({
-      context: ["Reserved Nov 6, 12:30 AM", "Home / Move"],
+      context: ["Reserved Nov 6, 12:30 AM"],
+      container: "Home / Move",
       notes: null,
       tags: [],
     });
     expect(
-      taskRowDetails(item, { timezone: "America/Los_Angeles", project: "Move" }).context,
-    ).toEqual(["Reserved Nov 5, 4:30 PM", "Move"]);
+      taskRowDetails(item, { timezone: "America/Los_Angeles", project: "Move" }),
+    ).toMatchObject({ context: ["Reserved Nov 5, 4:30 PM"], container: "Move" });
   });
   it("adds each saved detail on its own", () => {
     expect(taskRowDetails(item, { details: ["estimate"] })).toEqual({
       context: ["Reserved Nov 6, 12:30 AM", "50 min"],
+      container: null,
       notes: null,
       tags: [],
     });
@@ -150,6 +152,7 @@ describe("task row details", () => {
     } as TaskWorkspaceItem;
     expect(taskRowDetails(bare, { details: ["estimate", "tags", "notes"] })).toEqual({
       context: [],
+      container: null,
       notes: null,
       tags: [],
     });
@@ -162,7 +165,7 @@ describe("task row details", () => {
     } as TaskWorkspaceItem;
     expect(
       taskRowDetails(reminder, { details: ["estimate", "tags", "notes"], list: "Home" }),
-    ).toEqual({ context: [], notes: "Call back", tags: [] });
+    ).toEqual({ context: [], container: null, notes: "Call back", tags: [] });
   });
   it("formats an estimate in hours once it reaches one", () => {
     expect([45, 60, 90].map(formatEstimate)).toEqual(["45 min", "1 hr", "1 hr 30 min"]);

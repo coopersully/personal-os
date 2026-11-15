@@ -57,8 +57,9 @@ export function taskRowDetails(
       task?.estimateMinutes && details.includes("estimate")
         ? formatEstimate(task.estimateMinutes)
         : null,
-      container || null,
     ].filter((value): value is string => !!value),
+    // Its own line, so reserved time and the estimate can never push it out of view.
+    container: container || null,
     notes: notes || null,
     tags: task && details.includes("tags") ? task.tags : [],
   };
@@ -66,7 +67,7 @@ export function taskRowDetails(
 /** Everything a row shows besides its title, in reading order, for assistive technology. */
 export function taskRowSummary(
   metadata: string[],
-  { context, notes, tags }: ReturnType<typeof taskRowDetails>,
+  { context, container, notes, tags }: ReturnType<typeof taskRowDetails>,
   overdue = false,
 ) {
   return [
@@ -74,6 +75,7 @@ export function taskRowSummary(
       overdue && part.startsWith("Due ") ? part.replace("Due ", "Overdue ") : part,
     ),
     ...context,
+    container,
     notes,
     tags.length ? `Tags: ${tags.join(", ")}` : null,
   ]

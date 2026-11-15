@@ -110,9 +110,10 @@ contract for geometry, state and reset behavior. Do not scatter configuration th
 ### Task row details
 
 A task row keeps its full title, wrapping rather than truncating, then quieter lines below it.
-The scan line stays about urgency: Read-only, Reminder, High priority and the due date, with the
-overdue treatment unchanged. A context line follows with reserved time, the estimate and the
-owning List / Project, in that order so a long container name is what truncates. Reserved time
+The scan line stays about urgency: Read-only, Reminder, Cancelled, High priority and the due
+date, with the overdue treatment unchanged. A one-line context line follows with reserved time
+and the estimate, then the owning List / Project on a line of its own, so neither a long
+reservation nor a long container name can push the other out of view. Reserved time
 and the container always show when the task has them; a row inside a list or project browser, or
 under a List or Project filter, does not repeat that container. Estimate, notes and tags follow
 the saved row-detail preference shared with the web app: notes take at most two lines, tags wrap

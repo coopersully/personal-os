@@ -1389,8 +1389,8 @@ COO-219 — iPhone task rows show reserved time and the owning List / Project, a
 row-detail preference for estimate, notes and tags. A task search honors "Include archived in
 search".
 
-- Row lines: title, urgency scan line (unchanged), a context line (reserved time, estimate,
-  container), up to two lines of notes, then tag chips (five, then a count). Absent values render
+- Row lines: title, urgency scan line (unchanged), a context line (reserved time,
+  estimate), the List / Project on its own line, up to two lines of notes, then tag chips (five, then a count). Absent values render
   nothing. A row does not repeat a container its screen is scoped or filtered to.
 - Search: with the preference on, a search without a fixed or chosen status sends `status: "all"`
   and, outside a list or project, a second read with `status: "archived"` whose matches are

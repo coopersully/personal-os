@@ -145,6 +145,11 @@ export function TaskRow({
             {shown.context.join(" · ")}
           </Text>
         )}
+        {shown.container && (
+          <Text numberOfLines={1} style={{ color: t.secondary, fontSize: 12 }}>
+            {shown.container}
+          </Text>
+        )}
         {shown.notes && (
           <Text numberOfLines={2} style={{ color: t.secondary, fontSize: 13 }}>
             {shown.notes}

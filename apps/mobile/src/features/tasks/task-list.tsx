@@ -182,7 +182,8 @@ export function TaskListScreen({
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const archivedFailed = searchArchived && archivedPage.isError;
-  const reportedArchivedError = useRef(0);
+  // Seeded from the cache so a remount does not report a failure that was already reported.
+  const reportedArchivedError = useRef(archivedPage.errorUpdatedAt);
   const { errorUpdatedAt: archivedErrorAt, error: archivedError } = archivedPage;
   const mainSettled = !page.isFetching;
   const mainFailed = page.isError;
@@ -525,18 +526,19 @@ export function TaskListScreen({
           );
         }}
         ListFooterComponent={
-          archivedFailed && items.length > 0 ? (
+          // Ordinary matches page first; a failed archived read never hides their Load more.
+          more && (page.hasNextPage || !archivedFailed) ? (
+            <Action
+              label={more.isFetchingNextPage ? "Loading…" : "Load more"}
+              disabled={more.isFetchingNextPage}
+              onPress={() => void more.fetchNextPage()}
+            />
+          ) : archivedFailed && items.length > 0 ? (
             // Other matches are showing, so the unread archived matches get their own retry.
             <Action
               label="Retry loading archived matches"
               disabled={archivedPage.isFetching}
               onPress={() => void archivedPage.refetch()}
-            />
-          ) : more ? (
-            <Action
-              label={more.isFetchingNextPage ? "Loading…" : "Load more"}
-              disabled={more.isFetchingNextPage}
-              onPress={() => void more.fetchNextPage()}
             />
           ) : undefined
         }

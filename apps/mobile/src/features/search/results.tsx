@@ -6,11 +6,8 @@ import { FilterChip } from "../../components/filter-chip";
 import { Icon } from "../../components/icons";
 import { RecordRow } from "../../components/record-row";
 import { useTheme, workspaceColor } from "../../theme";
-import { useWorkspaceSearch } from "./data";
+import { nameList as list, useWorkspaceSearch } from "./data";
 import { searchDestination, searchResultIcon, searchResultPreview } from "./destinations";
-
-const list = (names: string[]) =>
-  names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? "");
 
 /**
  * Header search results, grouped by workspace. Failures are reported by Sonner alone; this
@@ -33,7 +30,11 @@ export function WorkspaceSearchResults({
   const answered = search.groups.filter((group) => group.status === "ready");
   return (
     <View style={[styles.results, { backgroundColor: t.canvas, borderColor: t.line }]}>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        contentContainerStyle={styles.content}
+      >
         <View style={styles.toolbar}>
           <FilterChip
             label="Include archive"

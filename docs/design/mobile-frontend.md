@@ -417,7 +417,8 @@ The header field has two behaviours and never shows sample data. Tasks, Mail and
 filter their own live list in place. Every other page opens a results list under the field, read
 from the workspace search route (`GET /v1/workspaces/:workspace/search`, content only, so agent
 reviews are not listed): Today searches Tasks, Mail, Finances and Calendar; a Calendar or Finances
-page searches its own workspace. Typing is debounced and results for an older query are never shown.
+page searches its own workspace. Typing is debounced, the field accepts 200 characters, and results for an older query are never
+shown.
 
 Results are grouped under a workspace heading in workspace-selector order, each as a shared record
 row with the kind's registry icon in the workspace color, the server preview and any state
@@ -427,8 +428,9 @@ keep typing. There is no paging.
 
 The API admits one search per account at a time and replaces an account's queued search with a newer
 one, so workspaces are asked one after another, never in parallel; groups appear as each answers and
-a spinner stays until the last settles. A workspace that fails says so in one Sonner error and
-leaves the other groups in place. The list itself carries no failure copy: it offers "Search
+a spinner stays until the last settles. Workspaces that fail are named together in one Sonner
+error per search, which blames the connection only when the server did not answer, and the other
+groups stay in place. The list itself carries no failure copy: it offers "Search
 <workspaces> again", which runs one toast from loading to outcome, and "No matches in …" names only
 the workspaces that answered.
 
@@ -441,9 +443,10 @@ tasks, reminders, transactions and accounts open their detail; a list or project
 browser, with every status when it is archived or closed; a calendar or mail rule opens its
 settings page, a finance category Finances settings, a plan the Plan tab and a mailbox the mailbox
 list. Mail has no conversation route, so a conversation opens Mail searched for its subject. That
-list reads inboxes only, so an archived conversation opens the mailbox list instead, and a
-conversation that exists only in Sent or Drafts is not found by the subject search; both need a
-conversation route. Result previews are private: they are not kept in the query cache after the
+list reads inboxes only and accepts 200 characters, so the subject is cut to that length, an
+archived conversation opens the mailbox list instead, and a snoozed conversation or one that exists
+only in Sent or Drafts is not found by the subject search. COO-259 tracks the Mail conversation
+route that removes these limits. Result previews are private: they are not kept in the query cache after the
 list closes.
 
 ### Transparent sticky workspace search

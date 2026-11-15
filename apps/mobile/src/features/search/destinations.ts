@@ -73,7 +73,12 @@ export function searchDestination(
       // Mail has no conversation route. Its list search covers inboxes only, so a conversation
       // outside them (Archived) opens the mailbox list, where its mailbox can be chosen.
       if (result.state) return page("/mail/mailboxes");
-      return page(title.trim() ? { pathname: "/mail", params: { mailSearch: title } } : "/mail");
+      // The mail list rejects a search longer than 200 characters.
+      return page(
+        title.trim()
+          ? { pathname: "/mail", params: { mailSearch: title.trim().slice(0, 200) } }
+          : "/mail",
+      );
     case "Mailbox":
       return page("/mail/mailboxes");
     case "Rule":

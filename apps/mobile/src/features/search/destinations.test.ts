@@ -60,6 +60,10 @@ it("shows every status inside a closed or archived container and opens Mail for 
     href: "/mail/mailboxes",
     open: "navigate",
   });
+  // The mail list accepts at most 200 characters of search.
+  expect(
+    searchDestination("mail", result("Conversation", null, ` ${"s".repeat(300)}`)).href,
+  ).toEqual({ pathname: "/mail", params: { mailSearch: "s".repeat(200) } });
   expect(searchDestination("mail", result("Conversation", null, " "))).toEqual({
     href: "/mail",
     open: "navigate",

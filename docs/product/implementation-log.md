@@ -1393,13 +1393,14 @@ Finances pages search their own workspace.
 - No API, schema or client change. The mobile app calls `GET /v1/workspaces/:workspace/search`
   with `kind: "content"`, one workspace after another because the API admits one search per
   account and replaces a queued one.
-- A failed workspace reports through one Sonner error and the other groups stay; the list offers
-  a retry and carries no failure copy. Empty results name the workspaces that answered.
+- Failed workspaces are named in one Sonner error per search and the other groups stay; the list
+  offers a retry and carries no failure copy. Empty results name the workspaces that answered.
 - Include archive starts from each workspace's search preference and can be overridden per search.
 - Results open existing screens. Mail has no conversation route, so a conversation opens Mail
-  searched for its subject, an archived conversation opens the mailbox list, and a conversation
-  only in Sent or Drafts is not reachable from its result; a mailbox opens the mailbox list, not
-  that mailbox.
+  searched for its subject (cut to 200 characters), an archived conversation opens the mailbox
+  list, and a snoozed conversation or one only in Sent or Drafts is not reachable from its
+  result; a mailbox opens the mailbox list, not that mailbox. COO-259 tracks the conversation
+  route.
 - The sample detail route (`/detail/[id]`), the sample briefing and sample workspace screens and
   their fixtures are removed. The unlinked preview settings and monitoring screens remain.
 - This is a local candidate covered by focused tests. It has not been run on a simulator or

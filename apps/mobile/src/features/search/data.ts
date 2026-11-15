@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { SearchableWorkspace, WorkspaceSearchResult } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -6,6 +7,12 @@ import { useAuth } from "../auth/context";
 
 /** Search owns its failure toast, so the shared read-error toast stays out of the way. */
 const meta = { scopedReadFeedback: true };
+
+/** One toast for search outcomes, so a pass that fails in several workspaces says so once. */
+const feedback = "workspace-search";
+
+export const nameList = (names: string[]) =>
+  names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? "");
 
 /** Display order of result groups; it follows the workspace selector. */
 export const searchWorkspaces = [
@@ -56,19 +63,15 @@ function useWorkspaceResults(
     gcTime: 0,
     meta,
   });
-  const failedAt = results.isError ? results.errorUpdatedAt : 0;
-  useEffect(() => {
-    if (failedAt)
-      toast.error(`Couldn’t search ${workspace}. Check your connection and try again.`, {
-        id: `workspace-search-${workspace}`,
-      });
-  }, [failedAt, workspace]);
   return {
     workspace,
     on,
     includeArchived,
     settled: !active || results.isSuccess || results.isError,
     failed: active && results.isError,
+    failedAt: results.errorUpdatedAt,
+    // The server answered: a busy, rate-limited or rejected search is not a connection problem.
+    answered: results.error instanceof ApiClientError,
     items: active ? (results.data?.items ?? []) : [],
     more: active && results.data?.nextOffset != null,
     refetch: results.refetch,
@@ -79,8 +82,8 @@ function useWorkspaceResults(
  * Real results from each workspace's search route, grouped by workspace.
  *
  * The API admits one search per account at a time and a newer queued search replaces an older
- * one, so workspaces are asked one after another, never in parallel. A failed workspace reports
- * itself through Sonner and leaves the other groups in place.
+ * one, so workspaces are asked one after another, never in parallel. Failed workspaces are named in
+ * one Sonner error per pass and leave the other groups in place.
  */
 export function useWorkspaceSearch(
   scope: readonly SearchableWorkspace[],
@@ -130,19 +133,28 @@ export function useWorkspaceSearch(
     items: current ? slot.items : [],
     more: current && slot.more,
   }));
+  const failed =
+    current && slots.every((slot) => slot.settled) ? slots.filter((s) => s.failed) : [];
+  // One signature per finished pass: it changes when a workspace fails again, not on re-render.
+  const failure = failed.map((slot) => `${slot.workspace}:${slot.failedAt}`).join(" ");
+  const failedNames = nameList(failed.map((slot) => slot.workspace));
+  const advice = failed.every((slot) => slot.answered)
+    ? "Try again shortly."
+    : "Check your connection and try again.";
+  useEffect(() => {
+    if (failure) toast.error(`Couldn’t search ${failedNames}. ${advice}`, { id: feedback });
+  }, [failure, failedNames, advice]);
   return {
     groups,
     searching: !!text && groups.some((group) => group.status === "waiting"),
     includeArchived: slots.every((slot) => slot.includeArchived),
     /** Failed workspaces are asked again in order, for the same one-at-a-time reason. */
     retry: async () => {
-      const id = "workspace-search-retry";
-      toast.loading("Searching again…", { id });
-      let failed = false;
-      for (const slot of slots) if (slot.failed) failed = (await slot.refetch()).isError || failed;
-      // Each workspace that failed again has already said so in its own toast.
-      if (failed) toast.dismiss(id);
-      else toast.success("Search updated", { id });
+      toast.loading("Searching again…", { id: feedback });
+      let again = false;
+      for (const slot of slots) if (slot.failed) again = (await slot.refetch()).isError || again;
+      // A workspace that failed again replaces this toast with the failure above.
+      if (!again) toast.success("Search updated", { id: feedback });
     },
   };
 }

@@ -199,8 +199,8 @@ or put human credentials in browser storage to make local previews work.
 
 Expo export/typecheck and session lifecycle unit tests cover local correctness.
 A real account sign-in, cold restart, foreground expiry and logout on a physical
-phone remain release smoke checks. Domain screens still contain sample data or empty
-shells: authentication does not imply live Mail/Tasks/Finance data integration.
+phone remain release smoke checks. Workspace screens and the header search read live
+account data; only the unlinked preview settings and monitoring screens show example content.
 
 The iOS workspace selector uses an Expo UI SwiftUI Menu with an inline Picker.
 The system supplies its glass presentation, selection checkmark and dismissal; the

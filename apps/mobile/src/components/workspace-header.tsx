@@ -258,6 +258,7 @@ export function WorkspaceHeader({ chromeDark }: { chromeDark?: boolean } = {}) {
             placeholder={`Search ${isFinanceAccounts ? "accounts" : isSettings ? "settings" : current.label}`}
             placeholderTextColor={chromeSecondary ?? t.secondary}
             returnKeyType="search"
+            maxLength={200}
             autoCorrect={false}
             clearButtonMode="while-editing"
             style={[styles.input, { color: chromeInk ?? t.ink }]}

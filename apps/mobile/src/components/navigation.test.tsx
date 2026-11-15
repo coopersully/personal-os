@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import { ApiClientError } from "@personal-os/api-client";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren, Ref } from "react";
 import type {
@@ -386,7 +388,7 @@ it("reports a failed workspace through Sonner alone, keeps the other results and
   expect(h.error).toHaveBeenCalledTimes(1);
   expect(h.error).toHaveBeenCalledWith(
     "Couldn’t search mail. Check your connection and try again.",
-    { id: "workspace-search-mail" },
+    { id: "workspace-search" },
   );
   expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
     "tasks",
@@ -398,14 +400,46 @@ it("reports a failed workspace through Sonner alone, keeps the other results and
   const retry = screen.getByRole("button", { name: "Search mail again" });
   fireEvent.click(retry);
   await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
-  expect(h.loading).toHaveBeenLastCalledWith("Searching again…", { id: "workspace-search-retry" });
-  expect(h.dismiss).toHaveBeenCalledWith("workspace-search-retry");
+  expect(h.loading).toHaveBeenLastCalledWith("Searching again…", { id: "workspace-search" });
+  // The repeated failure replaces the loading toast; nothing claims success.
+  expect(h.error).toHaveBeenLastCalledWith(
+    "Couldn’t search mail. Check your connection and try again.",
+    { id: "workspace-search" },
+  );
   expect(h.success).not.toHaveBeenCalled();
   h.searchWorkspace.mockImplementation(async (workspace: string) => page(workspace));
   fireEvent.click(screen.getByRole("button", { name: "Search mail again" }));
   await screen.findByRole("heading", { name: "mail" });
-  expect(h.success).toHaveBeenCalledWith("Search updated", { id: "workspace-search-retry" });
+  expect(h.success).toHaveBeenCalledWith("Search updated", { id: "workspace-search" });
   expect(screen.queryByRole("button", { name: "Search mail again" })).not.toBeInTheDocument();
+});
+it("names every failed workspace in one toast and does not blame the connection for a server answer", async () => {
+  h.searchWorkspace.mockRejectedValue(new Error("offline"));
+  render(<Shell />);
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText("Search today"), { target: { value: "dentist" } });
+  await screen.findByRole("button", { name: "Search tasks, mail, finances and calendar again" });
+  expect(h.error).toHaveBeenCalledTimes(1);
+  expect(h.error).toHaveBeenCalledWith(
+    "Couldn’t search tasks, mail, finances and calendar. Check your connection and try again.",
+    { id: "workspace-search" },
+  );
+  h.error.mockClear();
+  h.searchWorkspace.mockImplementation(async (workspace: string) => {
+    if (workspace === "finances")
+      throw new ApiClientError({
+        code: "rate_limited",
+        message: "Too many requests.",
+        status: 429,
+      });
+    return page(workspace);
+  });
+  fireEvent.change(screen.getByLabelText("Search today"), { target: { value: "dentists" } });
+  await screen.findByRole("button", { name: "Search finances again" });
+  expect(h.error).toHaveBeenCalledTimes(1);
+  expect(h.error).toHaveBeenCalledWith("Couldn’t search finances. Try again shortly.", {
+    id: "workspace-search",
+  });
 });
 it("offers only the retry when every workspace fails", async () => {
   h.path = "/finances";
@@ -620,7 +654,7 @@ it("keeps shared search chrome around the page stack and uses the dock only on w
   expect(screen.queryByRole("tab", { name: "projects" })).not.toBeInTheDocument();
 });
 
-it("routes Finance account search to the real account list without sample results", () => {
+it("routes Finance account search to the real account list without a results list", async () => {
   h.path = "/finances/accounts";
   render(
     <WorkspaceMotion>
@@ -629,10 +663,14 @@ it("routes Finance account search to the real account list without sample result
   );
   fireEvent.change(screen.getByLabelText("Search accounts"), { target: { value: "Checking" } });
   expect(h.setParams).toHaveBeenCalledWith({ accountSearch: "Checking" });
-  expect(screen.queryByText(/sample results/)).toBeNull();
+  // Accounts filters its own list: no results list opens and the search route is not called.
+  expect(screen.queryByRole("button", { name: "Include archive" })).toBeNull();
+  expect(screen.queryByRole("heading")).toBeNull();
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 300)));
+  expect(h.searchWorkspace).not.toHaveBeenCalled();
 });
 
-it("routes Mail search to the server-backed list without sample results", () => {
+it("routes Mail search to the server-backed list without a results list", async () => {
   for (const path of ["/mail", "/mail/mailboxes"]) {
     h.path = path;
     h.params = {};
@@ -641,11 +679,12 @@ it("routes Mail search to the server-backed list without sample results", () => 
         <WorkspaceHeader />
       </WorkspaceMotion>,
     );
-    expect(screen.queryByLabelText("Search mail sample data")).toBeNull();
     fireEvent.change(screen.getByLabelText("Search mail"), { target: { value: "Maya" } });
     expect(h.setParams).toHaveBeenLastCalledWith({ mailSearch: "Maya" });
-    expect(screen.queryByText(/sample results/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Maya needs a reply" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Include archive" })).toBeNull();
+    expect(screen.queryByRole("heading")).toBeNull();
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(h.searchWorkspace).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Dismiss navigation menu or search" })).toBeNull();
     // The field shows the route's search, so it survives a remount of the header.
     h.params = { mailSearch: "Maya" };

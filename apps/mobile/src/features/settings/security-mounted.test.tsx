@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { MobileDataProvider } from "../tasks/data";
@@ -9,6 +9,7 @@ import {
   SecurityInvitationsScreen,
   SecuritySettingsScreen,
   sessionDeviceName,
+  sessionLastActive,
 } from "./security";
 
 vi.mock("react", async () => {
@@ -52,7 +53,10 @@ vi.mock("../auth/context", () => ({
 vi.mock("sonner-native", () => ({
   toast: { error: h.error, loading: h.loading, success: h.success, dismiss: h.dismiss },
 }));
-vi.mock("../../theme", () => ({ useTheme: () => ({}) }));
+vi.mock("../../theme", () => ({
+  useTheme: () => ({}),
+  spacing: { xs: 4, sm: 8, md: 12, lg: 16 },
+}));
 vi.mock("../../components/forms/use-dirty-dismiss", () => ({ useDirtyDismiss: () => {} }));
 vi.mock("expo-router", () => ({
   router: { push: h.push },
@@ -75,7 +79,27 @@ vi.mock("./settings-row", () => ({
       {value}
     </button>
   ),
-  SettingsIdentity: ({ name }: { name: string }) => <div>{name}</div>,
+  SettingsActionRow: ({
+    label,
+    disabled,
+    destructive,
+    onPress,
+  }: {
+    label: string;
+    disabled?: boolean;
+    destructive?: boolean;
+    onPress: () => void;
+  }) => (
+    <button type="button" disabled={disabled} data-destructive={destructive} onClick={onPress}>
+      {label}
+    </button>
+  ),
+  SettingsIdentity: ({ name, detail }: { name: string; detail?: string }) => (
+    <div data-testid="device-identity">
+      <h2>{name}</h2>
+      <p>{detail}</p>
+    </div>
+  ),
   SettingsDetailRow: ({ label, value }: { label: string; value: string }) => (
     <div>
       {label}
@@ -84,7 +108,19 @@ vi.mock("./settings-row", () => ({
   ),
 }));
 vi.mock("react-native", () => ({
-  Text: ({ children }: PropsWithChildren) => <span>{children}</span>,
+  Platform: { OS: "ios", isPad: false },
+  Pressable: ({
+    children,
+    onPress,
+    accessibilityLabel,
+  }: PropsWithChildren<{ onPress: () => void; accessibilityLabel?: string }>) => (
+    <button type="button" aria-label={accessibilityLabel} onClick={onPress}>
+      {children}
+    </button>
+  ),
+  Text: ({ children, numberOfLines }: PropsWithChildren<{ numberOfLines?: number }>) => (
+    <span data-lines={numberOfLines}>{children}</span>
+  ),
   View: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock("../tasks/ui", () => ({
@@ -154,7 +190,28 @@ beforeEach(() => {
     requestPasswordReset: h.reset,
   };
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+const NOW = "2026-11-14T12:00:00Z";
+const freezeClock = () => vi.useFakeTimers({ toFake: ["Date"], now: new Date(NOW) });
+const NOHMI_APP = "nohmi/10 CFNetwork/3896.100.1.2.1 Darwin/27.0.0";
+const CHROME_MAC =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
+const device = (id: string, userAgent: string | null, lastSeenAt: string, isCurrent = false) => ({
+  id,
+  userAgent,
+  ipAddress: null,
+  createdAt: "2026-10-01T12:00:00Z",
+  lastSeenAt,
+  expiresAt: "2026-12-01T12:00:00Z",
+  isCurrent,
+});
+const rows = (section: string) =>
+  within(screen.getByRole("region", { name: section }))
+    .getAllByRole("button")
+    .map((row) => row.getAttribute("aria-label"));
 const show = (children: React.ReactNode = <SecuritySettingsScreen />) =>
   render(<MobileDataProvider>{children}</MobileDataProvider>);
 const confirmLast = async () => {
@@ -331,14 +388,14 @@ it.each([
   ]);
   const view = show();
   await screen.findByRole("button", { name: /Safari on iPhone/ });
-  expect(screen.queryByText(/Current device/) !== null).toBe(isCurrent === true);
+  expect(screen.queryByText(/This iPhone/) !== null).toBe(isCurrent === true);
   view.rerender(
     <MobileDataProvider>
       <SecurityDeviceScreen />
     </MobileDataProvider>,
   );
   await screen.findByRole("button", { name: "Revoke session" });
-  expect(screen.queryByText(/Current device/) !== null).toBe(isCurrent === true);
+  expect(screen.queryByText(/This iPhone/) !== null).toBe(isCurrent === true);
   fireEvent.click(screen.getByRole("button", { name: "Revoke session" }));
   expect(h.confirm.mock.calls.at(-1)?.[1]).toContain(
     isCurrent === true ? "This is your current session" : "This may be your current session",
@@ -353,7 +410,10 @@ it.each([
   ["Safari/604 Macintosh", "Safari on Mac"],
   ["Safari/604 iPad", "Safari on iPad"],
   ["iPhone native client", "iPhone"],
-  ["unrecognized client", "Signed-in device"],
+  [NOHMI_APP, "nohmi app"],
+  ["curl/8.7.1", "curl"],
+  ["Mozilla/5.0 (compatible)", "Unknown device"],
+  ["unrecognized client", "Unknown device"],
 ] as const)("summarizes actual user agent %s without exposing technical text on the device list", (ua, summary) => {
   expect(sessionDeviceName(ua)).toBe(summary);
 });
@@ -414,4 +474,108 @@ it("retains nonnumeric invitation expiry as a correction draft without transport
   expect(h.error).toHaveBeenCalledOnce();
   expect(h.create).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Expires after days")).toHaveValue("tomorrow");
+});
+
+it("shows a single signed-in device as this iPhone, with nothing listed under other devices", async () => {
+  freezeClock();
+  h.sessions.mockResolvedValue([device("fixture-session", NOHMI_APP, NOW, true)]);
+  show();
+  await screen.findByRole("region", { name: "This device" });
+  expect(rows("This device")).toEqual(["This iPhone, nohmi app, Active now"]);
+  expect(screen.getByText("This iPhone")).toBeTruthy();
+  expect(screen.getByText("nohmi app · Active now")).toBeTruthy();
+  const others = screen.getByRole("region", { name: "Other devices" });
+  expect(within(others).queryAllByRole("button")).toEqual([]);
+  expect(within(others).getByText("No other devices are signed in.")).toBeTruthy();
+  expect(screen.queryByText(/Signed-in device/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /This iPhone/ }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/settings/security/device",
+    params: { id: "fixture-session" },
+  });
+});
+
+it("names several devices apart, this device first and the rest by most recent activity", async () => {
+  freezeClock();
+  h.sessions.mockResolvedValue([
+    device("old-app", NOHMI_APP, "2026-10-19T12:00:00Z"),
+    device("browser", CHROME_MAC, "2026-11-14T09:00:00Z"),
+    device("fixture-session", NOHMI_APP, NOW, true),
+    device("unknown", null, "2026-11-12T12:00:00Z"),
+  ]);
+  show();
+  await screen.findByRole("region", { name: "Other devices" });
+  expect(rows("This device")).toEqual(["This iPhone, nohmi app, Active now"]);
+  const others = rows("Other devices");
+  expect(others).toHaveLength(3);
+  expect(others[0]).toBe("Chrome on Mac, Active 3 hours ago");
+  expect(others[1]).toBe("Unknown device, Active 2 days ago");
+  expect(others[2]).toMatch(/^nohmi app, Last active .*2026$/);
+  expect(screen.queryByText("No other devices are signed in.")).toBeNull();
+  expect(screen.queryByText(/Signed-in device/)).toBeNull();
+  expect(screen.getAllByText(/This iPhone/)).toHaveLength(1);
+});
+
+it("keeps a long device name on one line above its activity and shows it in full on the device page", async () => {
+  freezeClock();
+  const name = "PersonalAutomationBridgeForHomeServer-nightly";
+  h.sessions.mockResolvedValue([
+    device("fixture-session", `${name}/2026.11.3 (linux-arm64)`, "2026-11-13T12:00:00Z"),
+  ]);
+  const view = show();
+  const row = await screen.findByRole("button", { name: `${name}, Active yesterday` });
+  const label = within(row).getByText(name);
+  const activity = within(row).getByText("Active yesterday");
+  expect(label.dataset.lines).toBe("1");
+  expect(activity.dataset.lines).toBe("1");
+  expect(label).not.toBe(activity);
+  expect(label.parentElement).toBe(activity.parentElement);
+  view.rerender(
+    <MobileDataProvider>
+      <SecurityDeviceScreen />
+    </MobileDataProvider>,
+  );
+  const identity = await screen.findByTestId("device-identity");
+  expect(within(identity).getByRole("heading").textContent).toBe(name);
+  expect(screen.getByText(`${name}/2026.11.3 (linux-arm64)`).dataset.lines).toBeUndefined();
+});
+
+it("shows no device sections, counts or empty copy while the device read is pending or failed", async () => {
+  let fail: (error: Error) => void = () => {};
+  h.sessions.mockReturnValueOnce(
+    new Promise((_, reject) => {
+      fail = reject;
+    }),
+  );
+  show();
+  await screen.findByText("Loading");
+  for (const copy of ["This device", "Other devices"])
+    expect(screen.queryByRole("region", { name: copy })).toBeNull();
+  expect(screen.queryByText("No other devices are signed in.")).toBeNull();
+  expect(screen.queryByText("No active sessions returned.")).toBeNull();
+  await act(async () => fail(new Error("Devices offline")));
+  await screen.findByRole("button", { name: "Retry" });
+  expect(screen.queryByRole("region", { name: "Other devices" })).toBeNull();
+  expect(screen.queryByText("No other devices are signed in.")).toBeNull();
+});
+
+it("keeps sign out a separate confirmed destructive action", async () => {
+  show();
+  await screen.findByText("No active sessions returned.");
+  const signOut = screen.getByRole("button", { name: "Sign out" });
+  expect(signOut.dataset.destructive).toBe("true");
+  expect(signOut.closest("section")).not.toBe(
+    screen.getByRole("button", { name: "Send password reset email" }).closest("section"),
+  );
+});
+
+it.each([
+  ["2026-11-14T11:58:00Z", "Active now"],
+  ["2026-11-14T11:20:00Z", "Active 40 minutes ago"],
+  ["2026-11-14T10:30:00Z", "Active 1 hour ago"],
+  ["2026-11-13T11:00:00Z", "Active yesterday"],
+  ["2026-11-09T12:00:00Z", "Active 5 days ago"],
+  ["not a date", "Last active time unavailable"],
+])("describes last activity at %s as %s", (lastSeenAt, summary) => {
+  expect(sessionLastActive(lastSeenAt, new Date(NOW).getTime())).toBe(summary);
 });

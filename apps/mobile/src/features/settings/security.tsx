@@ -1,15 +1,24 @@
+import type { Session } from "@personal-os/api-client";
 import { createInvitationInputSchema } from "@personal-os/domain";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
-import { Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import { toast } from "sonner-native";
+import { formRow } from "../../components/forms/form-row";
+import { SectionNote } from "../../components/forms/section-content";
 import { useDirtyDismiss } from "../../components/forms/use-dirty-dismiss";
 import { Icon } from "../../components/icons";
-import { useTheme } from "../../theme";
+import { SettingDetail, SettingLabel } from "../../components/settings-row-content";
+import { spacing, useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { Action, confirm, Field, FormBody, Section, State, styles } from "../tasks/ui";
 import { useSettingsAction, useSettingsResource } from "./data";
-import { SettingsDetailRow, SettingsIdentity, SettingsRow } from "./settings-row";
+import {
+  SettingsActionRow,
+  SettingsDetailRow,
+  SettingsIdentity,
+  SettingsRow,
+} from "./settings-row";
 export function SecuritySettingsScreen() {
   const { state, session } = useAuth();
   return state.user ? <Security key={`${state.user.id}:${session.epoch()}`} /> : null;
@@ -31,8 +40,14 @@ export function SecurityInvitationCreateScreen() {
   const { state, session } = useAuth();
   return state.user ? <Security key={`${state.user.id}:${session.epoch()}`} page="create" /> : null;
 }
+/**
+ * The session API returns no device name or platform, only the raw user agent. A name is
+ * therefore only what that string supports: a browser and operating system, the nohmi app's
+ * own networking signature, or another client's product name. Anything else stays unknown.
+ */
 export function sessionDeviceName(userAgent: string | null) {
   if (!userAgent) return "Unknown device";
+  if (/^nohmi\/\S+ CFNetwork\//.test(userAgent)) return "nohmi app";
   const browser = /Edg\//.test(userAgent)
     ? "Edge"
     : /Chrome\//.test(userAgent)
@@ -55,7 +70,71 @@ export function sessionDeviceName(userAgent: string | null) {
             : /Linux/.test(userAgent)
               ? "Linux"
               : null;
-  return [browser, device].filter(Boolean).join(" on ") || "Signed-in device";
+  const product = /^([A-Za-z][\w.-]*)\/\d/.exec(userAgent)?.[1];
+  return (
+    [browser, device].filter(Boolean).join(" on ") ||
+    (product && product !== "Mozilla" ? product : "Unknown device")
+  );
+}
+/** Recency in words, so a row never carries a full timestamp. Exact times are on the device page. */
+export function sessionLastActive(lastSeenAt: string, now = Date.now()) {
+  const seen = new Date(lastSeenAt);
+  const minutes = Math.floor((now - seen.getTime()) / 60_000);
+  if (Number.isNaN(minutes)) return "Last active time unavailable";
+  if (minutes < 5) return "Active now";
+  if (minutes < 60) return `Active ${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Active ${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "Active yesterday";
+  if (days < 7) return `Active ${days} days ago`;
+  return `Last active ${seen.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+}
+type Device = Session & { name: string; summary: string };
+/** Only the server's `isCurrent` marks this device; the app then knows what it is running on. */
+function describeDevice(session: Session): Device {
+  const client = sessionDeviceName(session.userAgent);
+  if (session.isCurrent !== true)
+    return { ...session, name: client, summary: sessionLastActive(session.lastSeenAt) };
+  return {
+    ...session,
+    name: Platform.OS === "ios" ? (Platform.isPad ? "This iPad" : "This iPhone") : "This device",
+    summary: client === "Unknown device" ? "Active now" : `${client} · Active now`,
+  };
+}
+/** This device first, then the most recently active. */
+function orderDevices(sessions: Session[]) {
+  return sessions
+    .map(describeDevice)
+    .sort(
+      (a, b) =>
+        Number(b.isCurrent === true) - Number(a.isCurrent === true) ||
+        b.lastSeenAt.localeCompare(a.lastSeenAt),
+    );
+}
+const exactTime = (value: string) =>
+  new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+/** The name keeps the row's full width and the summary sits under it, so neither wraps early. */
+function DeviceRow({ device }: { device: Device }) {
+  const t = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${device.name}, ${device.summary.replace(" · ", ", ")}`}
+      onPress={() =>
+        router.push({ pathname: "/settings/security/device", params: { id: device.id } })
+      }
+      style={({ pressed }) => ({ ...formRow, opacity: pressed ? 0.6 : 1 })}
+    >
+      <View style={{ flex: 1, minWidth: 0, gap: spacing.xs }}>
+        <SettingLabel numberOfLines={1} style={{ flex: 0 }}>
+          {device.name}
+        </SettingLabel>
+        <SettingDetail numberOfLines={1}>{device.summary}</SettingDetail>
+      </View>
+      <Icon name="chevron" color={t.secondary} size={16} />
+    </Pressable>
+  );
 }
 function Security({
   page = "root",
@@ -81,6 +160,10 @@ function Security({
   const [expiry, setExpiry] = useState("14");
   const [code, setCode] = useState<string | null>(null);
   useDirtyDismiss(page === "create" && (!!email || expiry !== "14" || !!code), action.pending);
+  const devices = sessions.data ? orderDevices(sessions.data) : undefined;
+  const current = devices?.find((device) => device.isCurrent === true);
+  const others = devices?.filter((device) => device !== current);
+  const device = devices?.find((item) => item.id === deviceId);
   return (
     <FormBody>
       <Stack.Screen
@@ -95,128 +178,118 @@ function Security({
                   : "Security",
         }}
       />
-      {page === "root" && (
-        <Section title="Account">
-          <Action
-            label="Send password reset email"
-            disabled={action.pending}
-            onPress={() =>
-              confirm(
-                "Reset password?",
-                `Send a reset email to ${state.user?.email}?`,
-                () =>
-                  void action.run(
-                    (api) => api.requestPasswordReset({ email: state.user?.email ?? "" }),
-                    "Password reset email requested",
-                  ),
-              )
-            }
-          />
-          <Action
-            label="Sign out"
-            destructive
-            disabled={action.pending}
-            onPress={() =>
-              confirm(
-                "Sign out?",
-                "You’ll need to sign in again to use nohmi.",
-                () => void action.run(() => session.logout()),
-                true,
-              )
-            }
-          />
+      {page === "root" && current && (
+        <Section title="This device">
+          <DeviceRow device={current} />
         </Section>
       )}
-      {(page === "root" || page === "device") && (
-        <Section title="Signed-in devices">
-          {sessions.data
-            ?.filter((device) => page === "root" || device.id === deviceId)
-            .map((device) =>
-              page === "root" ? (
-                <SettingsRow
-                  key={device.id}
-                  label={sessionDeviceName(device.userAgent)}
-                  value={`${device.isCurrent === true ? "Current device · " : ""}Last active ${new Date(device.lastSeenAt).toLocaleDateString()}`}
-                  icon="profile"
-                  onPress={() =>
-                    router.push({
-                      pathname: "/settings/security/device",
-                      params: { id: device.id },
-                    })
-                  }
-                />
-              ) : (
-                <View key={device.id} style={{ padding: 16, gap: 4 }}>
-                  <SettingsIdentity
-                    name={sessionDeviceName(device.userAgent)}
-                    leading={<Icon name="profile" size={24} color={t.secondary} />}
-                  />
-                  {device.isCurrent === true && (
-                    <SettingsDetailRow label="Session" value="Current device" />
-                  )}
-                  <SettingsDetailRow
-                    label="Device details"
-                    value={device.userAgent || "Unknown device"}
-                  />
-                  <SettingsDetailRow
-                    label="IP address"
-                    value={device.ipAddress ?? "IP address unavailable"}
-                  />
-                  <SettingsDetailRow
-                    label="Created"
-                    value={new Date(device.createdAt).toLocaleString()}
-                  />
-                  <SettingsDetailRow
-                    label="Last active"
-                    value={new Date(device.lastSeenAt).toLocaleString()}
-                  />
-                  <SettingsDetailRow
-                    label="Expires"
-                    value={new Date(device.expiresAt).toLocaleString()}
-                  />
-                  <Action
-                    label="Revoke session"
-                    destructive
-                    disabled={action.pending}
-                    onPress={() =>
-                      confirm(
-                        `Revoke ${sessionDeviceName(device.userAgent)}?`,
-                        device.isCurrent === true
-                          ? "This is your current session. You will need to sign in again on this device."
-                          : `${sessionDeviceName(device.userAgent)} will need to sign in again. This may be your current session.`,
-                        () =>
-                          void action.run(async (api) => {
-                            await api.revokeSession(device.id);
-                            await session.revalidate();
-                            await sessions.refetch();
-                          }, "Session revoked"),
-                        true,
-                      )
-                    }
-                  />
-                </View>
-              ),
-            )}
-          {!sessions.data && (
+      {page === "root" && others && others.length + (current ? 1 : 0) > 0 && (
+        <Section title={current ? "Other devices" : "Signed-in devices"}>
+          {others.map((item) => (
+            <DeviceRow key={item.id} device={item} />
+          ))}
+          {others.length === 0 && <SectionNote>No other devices are signed in.</SectionNote>}
+        </Section>
+      )}
+      {(page === "root" || page === "device") && (!devices || devices.length === 0) && (
+        <Section title={page === "root" ? "Signed-in devices" : undefined}>
+          {devices ? (
+            <State empty="No active sessions returned." />
+          ) : (
             <State loading={sessions.isPending} retry={() => void sessions.refetch()} />
           )}
-          {sessions.data?.length === 0 && <State empty="No active sessions returned." />}
-          {page === "device" &&
-            sessions.data &&
-            sessions.data.length > 0 &&
-            !sessions.data.some((device) => device.id === deviceId) && (
-              <State empty="This session is no longer active." />
-            )}
         </Section>
       )}
-      {page === "root" && state.user?.canManageInvitations === true && (
+      {page === "device" && devices && devices.length > 0 && !device && (
         <Section>
-          <SettingsRow
-            label="Invitations"
-            icon="people"
-            onPress={() => router.push("/settings/security/invitations")}
-          />
+          <State empty="This session is no longer active." />
         </Section>
+      )}
+      {page === "device" && device && (
+        <>
+          <Section>
+            <SettingsIdentity name={device.name} detail={device.summary} leading={null} />
+          </Section>
+          <Section title="Session">
+            <SettingsDetailRow label="Signed in" value={exactTime(device.createdAt)} />
+            <SettingsDetailRow label="Last active" value={exactTime(device.lastSeenAt)} />
+            <SettingsDetailRow label="Expires" value={exactTime(device.expiresAt)} />
+            <SettingsDetailRow
+              label="IP address"
+              value={device.ipAddress ?? "IP address unavailable"}
+            />
+          </Section>
+          <Section title="Device details">
+            <SectionNote ink selectable>
+              {device.userAgent || "Unknown device"}
+            </SectionNote>
+          </Section>
+          <Section>
+            <SettingsActionRow
+              label="Revoke session"
+              destructive
+              disabled={action.pending}
+              onPress={() =>
+                confirm(
+                  `Revoke ${device.name}?`,
+                  device.isCurrent === true
+                    ? "This is your current session. You will need to sign in again on this device."
+                    : `${device.name} will need to sign in again. This may be your current session.`,
+                  () =>
+                    void action.run(async (api) => {
+                      await api.revokeSession(device.id);
+                      await session.revalidate();
+                      await sessions.refetch();
+                    }, "Session revoked"),
+                  true,
+                )
+              }
+            />
+          </Section>
+        </>
+      )}
+      {page === "root" && (
+        <>
+          <Section title="Account">
+            <SettingsActionRow
+              label="Send password reset email"
+              disabled={action.pending}
+              onPress={() =>
+                confirm(
+                  "Reset password?",
+                  `Send a reset email to ${state.user?.email}?`,
+                  () =>
+                    void action.run(
+                      (api) => api.requestPasswordReset({ email: state.user?.email ?? "" }),
+                      "Password reset email requested",
+                    ),
+                )
+              }
+            />
+            {state.user?.canManageInvitations === true && (
+              <SettingsRow
+                label="Invitations"
+                icon="people"
+                onPress={() => router.push("/settings/security/invitations")}
+              />
+            )}
+          </Section>
+          <Section>
+            <SettingsActionRow
+              label="Sign out"
+              destructive
+              disabled={action.pending}
+              onPress={() =>
+                confirm(
+                  "Sign out?",
+                  "You’ll need to sign in again to use nohmi.",
+                  () => void action.run(() => session.logout()),
+                  true,
+                )
+              }
+            />
+          </Section>
+        </>
       )}
       {state.user?.canManageInvitations === true &&
         (page === "invitations" || page === "create") && (

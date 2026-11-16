@@ -13,6 +13,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import InboxRoute from "../../app/(workspaces)/mail/index";
 import MailboxesRoute from "../../app/(workspaces)/mail/mailboxes";
 import { MAIL_PAGE_SIZE } from "./logic";
+import { MailReader } from "./reader";
 import { UNCONFIRMED_RECHECK_MS } from "./triage";
 
 vi.mock("react", async () => {
@@ -1015,4 +1016,17 @@ it("reads Mail a second time a few seconds after an unconfirmed change, never af
   h.epoch += 1;
   await act(async () => vi.advanceTimersByTimeAsync(UNCONFIRMED_RECHECK_MS));
   expect(h.summaries).toHaveBeenCalledTimes(5);
+});
+
+it("reads a conversation without an actions control when its opener offers none", async () => {
+  h.messages.mockResolvedValue([message("m1", { bodyText: "Please review before Thursday." })]);
+  const close = vi.fn();
+  render(wrap(<MailReader thread={summary("two")} close={close} />));
+
+  const reader = await screen.findByRole("dialog");
+  await within(reader).findByText("Please review before Thursday.");
+  expect(within(reader).queryByRole("button", { name: "Conversation actions" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^(Mark as|Archive)/ })).toBeNull();
+  fireEvent.click(within(reader).getByRole("button", { name: "Close" }));
+  expect(close).toHaveBeenCalledOnce();
 });

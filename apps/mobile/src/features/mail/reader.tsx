@@ -14,14 +14,17 @@ import { senderName } from "./logic";
 
 const people = (addresses: MailAddress[]) => addresses.map(senderName).join(", ");
 
-/** Reads one conversation. Its messages live in memory only while this sheet is open. */
+/**
+ * Reads one conversation. Its messages live in memory only while this sheet is open. A caller
+ * that cannot change the conversation passes no `actions`, and the header shows no control.
+ */
 export function MailReader({
   thread,
   actions,
   close,
 }: {
   thread: MailThreadSummary;
-  actions: readonly RowAction[];
+  actions?: readonly RowAction[];
   close: () => void;
 }) {
   const t = useTheme();
@@ -33,7 +36,9 @@ export function MailReader({
           title="Conversation"
           onClose={close}
           trailing={
-            <RowActions placement="header" label="Conversation actions" actions={actions} />
+            actions?.length ? (
+              <RowActions placement="header" label="Conversation actions" actions={actions} />
+            ) : undefined
           }
         />
         <ScrollView

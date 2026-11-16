@@ -202,6 +202,17 @@ export function eventTimes(draft: EventDraft, provider: Calendar["provider"], ti
   };
 }
 
+/** The draft's time as one span, or null while it is not a real, ordered pair of instants. */
+export function draftSpan(draft: EventDraft, provider: Calendar["provider"], timeZone: string) {
+  try {
+    const { startsAt, endsAt } = eventTimes(draft, provider, timeZone);
+    return endsAt > startsAt ? { startsAt, endsAt } : null;
+  } catch {
+    // A date or time field that does not hold a real value yet.
+    return null;
+  }
+}
+
 /**
  * The first instant of a local day. Where clocks skip midnight (Cairo, Beirut), the wall-clock
  * conversion lands on the evening before, so step forward until the day has begun.

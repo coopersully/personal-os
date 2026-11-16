@@ -11,9 +11,10 @@ import type { RowAction } from "../../components/row-action-button";
 import { useTheme } from "../../theme";
 import { useFinance } from "./data";
 import { confirmedRejection } from "./mutations";
+import { isSplit } from "./splits";
 
 /**
- * Top-right transaction actions. Remove is offered only where the server allows it: on a
+ * Top-right transaction actions. Splitting is offered once a transaction has posted. Remove is offered only where the server allows it: on a
  * transaction whose account is known to be manual. Imported records keep their evidence.
  */
 export function TransactionActions({
@@ -100,6 +101,19 @@ export function TransactionActions({
         router.push({ pathname: "/finance-transaction-edit", params: { id: item.id } }),
     },
   ];
+  // The server gives a breakdown only to a posted transaction.
+  if (!item.pending)
+    actions.push({
+      id: "split",
+      label: isSplit(item) ? "Edit splits" : "Split transaction",
+      icon: "categoryLayers",
+      disabled: pending,
+      onPress: () =>
+        router.push({
+          pathname: "/finance-transaction-edit",
+          params: { id: item.id, field: "splits" },
+        }),
+    });
   if (manualAccount)
     actions.push({
       id: "remove",

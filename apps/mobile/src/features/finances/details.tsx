@@ -4,11 +4,12 @@ import { editorActionsOptions } from "../../components/editor-header";
 import { useTheme } from "../../theme";
 import { AccountActions } from "./account-actions";
 import { AccountPreferences } from "./account-preferences";
-import { categoryIcon } from "./category-presentation";
+import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinanceRead } from "./data";
 import { InstitutionLogo } from "./institution-logo";
 import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
 import { Transactions } from "./spending";
+import { activeAllocations, isSplit } from "./splits";
 import { TransactionActions } from "./transaction-actions";
 import { TransactionCategory } from "./transaction-category";
 import { TransactionNotes } from "./transaction-notes";
@@ -99,10 +100,12 @@ export function FinanceTransactionScreen() {
   const accounts = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
   const reviews = useFinanceRead(["reviews"], (api) => api.getFinanceReviewQueue());
   const item = query.data?.data;
+  // One part is an ordinary categorized transaction, not a split.
+  const splits = item && isSplit(item) ? activeAllocations(item) : [];
   const categories = useFinanceRead(
     ["categories"],
     (api) => api.getFinanceCategories(),
-    !!item?.allocations?.length,
+    splits.length > 0,
   );
   const review = reviews.data?.find(
     (entry) => entry.transaction.id === id && entry.status !== "resolved",
@@ -161,21 +164,23 @@ export function FinanceTransactionScreen() {
               />
               <TransactionNotes key={item.id} item={item} />
             </Card>
-            {!!item.allocations?.length && (
+            {splits.length > 0 && (
               <Section title="Splits">
                 <Card rows>
-                  {item.allocations.map((allocation) => (
-                    <FinanceRow
-                      key={allocation.id}
-                      title={financeLabel(allocation.treatment)}
-                      icon={categoryIcon(
-                        categories.data?.find((category) => category.id === allocation.categoryId)
-                          ?.name ?? "Category",
-                      )}
-                      subtitle={financeLabel(allocation.state)}
-                      value={recordAmount(allocation.amount, item.currencyCode)}
-                    />
-                  ))}
+                  {splits.map((allocation) => {
+                    const name = categories.data?.find(
+                      (category) => category.id === allocation.categoryId,
+                    )?.name;
+                    return (
+                      <FinanceRow
+                        key={allocation.id}
+                        title={name ? categoryLabel(name) : "Category"}
+                        icon={categoryIcon(name ?? "Category")}
+                        subtitle={financeLabel(allocation.treatment)}
+                        value={recordAmount(allocation.amount, item.currencyCode)}
+                      />
+                    );
+                  })}
                 </Card>
               </Section>
             )}

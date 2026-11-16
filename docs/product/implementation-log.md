@@ -1399,3 +1399,20 @@ search".
 - The preference notes no longer say the row-detail toggles configure only the web app.
 - No API, schema or shared-component change.
 - Verified by presentation and screen tests only. Not checked on a simulator or device.
+
+## 2026-11-15 — Native Today includes Calendar and Mail (local candidate)
+
+COO-240 — The iPhone Today briefing adds Today’s events and Mail beside Needs you, Coming up
+and Handled for you.
+
+- Today’s events reads the account’s local day from `GET /v1/events` and shows up to three
+  events that are still running or ahead, then all-day events. A row opens the event detail.
+- Mail reads open Mail attention items from `GET /v1/assistant/attention` and shows the three
+  most important. A row tied to a conversation opens it in the Mail reader; other rows open Mail.
+  Unread inbox mail is not listed; its count is a chip that opens Mail.
+- Calendar and Mail join the existing refresh, focus and foreground reads and the one Today
+  refresh toast. Each section states its own loading, empty, not-set-up and unavailable state, so
+  one failed source leaves the rest of the briefing in place.
+- No API, schema or shared-component change. Coming up still combines tasks, reminders and
+  expected Finance occurrences only; events on later days are not in it.
+- This is a local candidate covered by focused tests. It is not a production or TestFlight release.

@@ -7048,6 +7048,8 @@ export const knowledgeRecords = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     revision: integer("revision").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** When the current revision was written; record-state changes (tags, trash) leave it. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     /** Trash is a record state, not a revision status; all three columns move together. */
     trashedAt: timestamp("trashed_at", { withTimezone: true }),
     trashGroupId: uuid("trash_group_id"),

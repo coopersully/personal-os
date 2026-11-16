@@ -20,6 +20,7 @@ import {
   type CreateAttentionItemInput,
   type DomainProfile,
   featureAccessPolicies,
+  type KnowledgeCore,
   type PersonalOsAgentContext,
   type UpdateAttentionItemInput,
   type UpsertDomainProfileInput,
@@ -148,12 +149,15 @@ const setupRecipes: Record<AssistantDomain, SetupRecipe> = {
 export function createAssistantService({
   appBaseUrl = "http://localhost",
   db,
+  knowledgeCore,
   now,
   profileRequiresApproval,
   validateProfileSources,
 }: {
   appBaseUrl?: string;
   db: Database;
+  /** Builds the session-start memory section for callers holding `knowledge:read`. */
+  knowledgeCore: { build(principal: Principal): Promise<KnowledgeCore> };
   now: () => Date;
   profileRequiresApproval: (domain: AssistantDomain) => boolean;
   validateProfileSources: (
@@ -275,7 +279,7 @@ export function createAssistantService({
 
   return {
     async getContext(principal: Principal): Promise<PersonalOsAgentContext> {
-      const [user, readiness] = await Promise.all([
+      const [user, readiness, memory] = await Promise.all([
         db
           .select({ displayName: users.displayName, planningTimezone: users.planningTimezone })
           .from(users)
@@ -283,6 +287,7 @@ export function createAssistantService({
           .limit(1)
           .then(([record]) => record),
         getSetupStatus(principal),
+        principal.scopes.has("knowledge:read") ? knowledgeCore.build(principal) : undefined,
       ]);
       if (!user) throw new AppError("not_found", "The nohmi account was not found.");
       const link = (path: string) => new URL(path, appBaseUrl).href;
@@ -306,6 +311,7 @@ export function createAssistantService({
           recovery: link("/settings?section=connections"),
           today: link("/today"),
         },
+        ...(memory ? { memory } : {}),
         readiness,
         time: { timestamp, timezone: user.planningTimezone },
       };

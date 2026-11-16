@@ -478,11 +478,11 @@ export async function writeKnowledgeRevision(
   if (revision === 1) {
     await tx
       .insert(knowledgeRecords)
-      .values({ id: recordId, userId, revision, createdAt: at, ...record });
+      .values({ id: recordId, userId, revision, createdAt: at, updatedAt: at, ...record });
   } else {
     await tx
       .update(knowledgeRecords)
-      .set({ revision, ...record })
+      .set({ revision, updatedAt: at, ...record })
       .where(and(eq(knowledgeRecords.userId, userId), eq(knowledgeRecords.id, recordId)));
     await tx
       .delete(knowledgeRelationships)

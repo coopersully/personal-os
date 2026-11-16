@@ -3,6 +3,7 @@ import { agentAccountSchema } from "./agent-account.js";
 import { accessScopeSchema } from "./auth.js";
 import { idSchema, isoDateTimeSchema, semanticVersionSchema } from "./common.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
+import { knowledgeCoreSchema } from "./knowledge-core.js";
 
 export const assistantDomains = [
   "mail",
@@ -286,6 +287,8 @@ export const personalOsAgentContextSchema = z.object({
     recovery: z.url(),
     today: z.url(),
   }),
+  /** Present when the caller holds `knowledge:read`: the session-start memory core. */
+  memory: knowledgeCoreSchema.optional(),
   readiness: assistantSetupStatusSchema,
   time: z.object({
     timestamp: isoDateTimeSchema,

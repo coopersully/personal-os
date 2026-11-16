@@ -2,6 +2,7 @@
 CREATE TABLE knowledge_records (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  revision integer NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now(),
+ updated_at timestamptz NOT NULL DEFAULT now(),
  trashed_at timestamptz NULL, trash_group_id uuid NULL, status_before_trash text NULL,
  owner_held boolean NOT NULL DEFAULT false, agent_access text NOT NULL DEFAULT 'allowed',
  core boolean NOT NULL DEFAULT false, last_confirmed_at timestamptz NULL,

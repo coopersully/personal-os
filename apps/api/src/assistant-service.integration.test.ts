@@ -101,6 +101,11 @@ describe.sequential("assistant setup service", () => {
     service = createAssistantService({
       appBaseUrl: "https://app.example.com",
       db: database.db,
+      knowledgeCore: {
+        build: async () => {
+          throw new Error("These callers do not hold knowledge:read.");
+        },
+      },
       now: () => new Date("2026-07-28T15:00:00.000Z"),
       profileRequiresApproval: (domain) => domain === "finances",
       validateProfileSources: async (

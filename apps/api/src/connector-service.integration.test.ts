@@ -6148,6 +6148,11 @@ describe.sequential("connector service", () => {
     });
     const assistant = createAssistantService({
       db: database.db,
+      knowledgeCore: {
+        build: async () => {
+          throw new Error("These callers do not hold knowledge:read.");
+        },
+      },
       now: () => timestamp,
       profileRequiresApproval: () => false,
       validateProfileSources: async (transaction, domain, profileUserId, sourceIds) => {

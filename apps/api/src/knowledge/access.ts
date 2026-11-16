@@ -243,6 +243,7 @@ const revisionSelection = {
   agentAccess: knowledgeRecords.agentAccess,
   core: knowledgeRecords.core,
   lastConfirmedAt: knowledgeRecords.lastConfirmedAt,
+  updatedAt: knowledgeRecords.updatedAt,
   tags: sql<string[]>`coalesce((
     SELECT array_agg(${knowledgeTags.name} ORDER BY ${knowledgeTags.name})
     FROM ${knowledgeRecordTags}
@@ -764,6 +765,38 @@ export async function linkedProposalIds(
       ),
     );
   return [...new Set(rows.map(({ snapshot: proposal }) => proposal.id))];
+}
+
+/** Records a live pending proposal names: the other side of `linkedProposalIds`, batched. */
+export async function knowledgeProposalTargetIds(tx: KnowledgeTransaction, userId: string) {
+  const rows = await tx
+    .selectDistinct({ id: knowledgeDerivations.sourceRecordId })
+    .from(knowledgeDerivations)
+    .innerJoin(
+      knowledgeRecords,
+      and(
+        eq(knowledgeRecords.userId, knowledgeDerivations.userId),
+        eq(knowledgeRecords.id, knowledgeDerivations.recordId),
+        eq(knowledgeRecords.revision, knowledgeDerivations.revision),
+      ),
+    )
+    .innerJoin(
+      knowledgeRevisions,
+      and(
+        eq(knowledgeRevisions.userId, knowledgeRecords.userId),
+        eq(knowledgeRevisions.recordId, knowledgeRecords.id),
+        eq(knowledgeRevisions.revision, knowledgeRecords.revision),
+      ),
+    )
+    .where(
+      and(
+        eq(knowledgeDerivations.userId, userId),
+        eq(knowledgeDerivations.kind, "revision_proposal"),
+        knowledgeNotTrashed,
+        sql`(${knowledgeRevisions.snapshot}->>'status') = 'proposed'`,
+      ),
+    );
+  return new Set(rows.map(({ id }) => id.toLowerCase()));
 }
 
 export function createKnowledgeAccess(now: () => Date) {

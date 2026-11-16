@@ -2,6 +2,7 @@ import {
   type KnowledgeRecord,
   knowledgeClaimKey,
   knowledgeContentSchema,
+  knowledgeSummary,
 } from "@personal-os/domain";
 
 export type MemoryContent = KnowledgeRecord["content"];
@@ -29,49 +30,8 @@ export function memoryContent(record: KnowledgeRecord): MemoryContent {
   return record.content;
 }
 
-export function memorySummary(content: MemoryContent): { title: string; text: string } {
-  switch (content.kind) {
-    case "fact":
-      return {
-        title:
-          content.value.subject === "owner"
-            ? memoryLabel(content.value.predicate)
-            : `${content.value.subject} · ${content.value.predicate}`,
-        text: String(content.value.value.value),
-      };
-    case "preference": {
-      const { subject, key, value } = content.value;
-      const label = memoryLabel(key);
-      return {
-        title: subject === "owner" ? label : `${subject} · ${label}`,
-        text: String(value.value),
-      };
-    }
-    case "relationship":
-      return {
-        title: content.value.relationship,
-        text: `${content.value.subjectId} ${content.value.direction === "directed" ? "→" : "↔"} ${content.value.objectId}`,
-      };
-    case "goal":
-      return { title: "Linked goal", text: content.value.goalId };
-    case "constraint":
-      return {
-        title: content.value.subject,
-        text: `${content.value.condition} · ${content.value.boundary}`,
-      };
-    case "routine":
-      return { title: content.value.subject, text: content.value.recurrence };
-    case "decision":
-      return {
-        title: content.value.subject,
-        text: `${content.value.option} · ${content.value.reason}`,
-      };
-    case "entity_meaning":
-      return { title: "Record meaning", text: content.value.meaning };
-    case "inference":
-      return { title: content.value.subject, text: content.value.proposition };
-  }
-}
+/** The shared readable title and text of a memory. */
+export const memorySummary = knowledgeSummary;
 
 export function memoryAcceptance(record: KnowledgeRecord) {
   if (record.acceptance?.kind === "owner") return "Accepted by you";

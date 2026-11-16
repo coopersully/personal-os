@@ -98,6 +98,7 @@ import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { createKnowledgeContextService } from "./knowledge/context-service.js";
+import { createKnowledgeCoreService } from "./knowledge/core-service.js";
 import { createKnowledgeExportService } from "./knowledge/export-service.js";
 import { createKnowledgeLifecycleService } from "./knowledge/lifecycle-service.js";
 import { createKnowledgePurgeService } from "./knowledge/purge-service.js";
@@ -549,9 +550,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const financePlaybook = createFinancePlaybookService({ finances, now });
+  const knowledgeTags = createKnowledgeTagService({ db: dependencies.db, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
+    knowledgeCore: createKnowledgeCoreService({ db: dependencies.db, now, tags: knowledgeTags }),
     now,
     profileRequiresApproval: (domain) => domain === "finances",
     validateProfileSources: async (
@@ -1615,7 +1618,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     search: createKnowledgeSearchService(knowledgeRetrieval),
     context: createKnowledgeContextService(knowledgeRetrieval),
     export: createKnowledgeExportService(knowledgeRetrieval),
-    tags: createKnowledgeTagService(knowledgePersistence),
+    tags: knowledgeTags,
   });
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
   registerRitualRoutes({

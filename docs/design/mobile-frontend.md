@@ -366,6 +366,35 @@ rows.
 Changing a transaction's date is not available: the API accepts only a category or a note on an
 existing transaction.
 
+A posted transaction's action menu offers Split transaction, or Edit splits once it has more than
+one part. It opens the split editor in the transaction editor sheet, which writes through the
+transaction breakdown endpoint the web Split dialog uses. A pending transaction offers neither,
+because the server gives a breakdown only to a posted one. The editor opens with the saved parts in
+their saved order, or with the whole amount on the transaction's category and one empty part. Each
+part has a Category, an Amount and a Treatment of Mine or Reimbursable; Add part starts a part with
+whatever is still unassigned, and Remove part is offered while more than one part remains; the
+last part left takes the whole amount. The
+amount still to assign, or the amount over-assigned, stays above the parts as field state. Save is
+enabled only once every part has a category and an exact amount, no two parts share a category and
+treatment, and the parts equal the transaction amount to the cent. One part alone assigns the whole
+transaction to that category, which is how a split is removed. Saving sends the revision the editor
+opened with. One toast reports the outcome: a conflict and any other rejection say nothing was
+saved and keep the draft (a conflict that follows an unconfirmed save says the earlier save may
+be why instead), and a save whose outcome is unknown says so, keeps the draft, re-reads
+Finance data and changes the discard prompt so it never claims the splits were not saved. The
+editor closes only on a confirmed save, and transaction details show parts only from what the
+server returned. A split transaction's Category row reads "Split in N parts" and opens the editor
+rather than asking for a category; its parts are listed by category with their treatment. The
+edit transaction form shows the same row in place of the category picker and New category, and
+never sends a category for a split transaction, because the server replaces every part with one
+when it receives a category; notes stay editable there. A transaction with one part is an ordinary
+categorized transaction and has no Splits section. A split transaction that is also awaiting
+review keeps the review's category controls, and resolving the review with one category replaces
+its parts. The
+transaction list read does not return parts, so a list row cannot yet tell a split transaction
+from an uncategorized one. The reusable merchant rule the web dialog offers for a single-category
+breakdown is not offered on iPhone.
+
 ### Transaction conversations and review
 
 - Needs your input cards show merchant, amount and category, and open the canonical transaction details page. Details place attention on the category row itself, with direct selection and approval. Do not duplicate the field with a separate Choose category banner/button. Notes remain optional and never count as a missing required field. This is record state, not action-result feedback.

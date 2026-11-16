@@ -476,11 +476,14 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
               )
           : [];
         const liveIds = live.map(({ id }) => id);
-        // Keep the target where this merge did not add it, or where another merge into the
-        // same target still relies on it.
+        // This merge put the target on the records it did not find carrying it. Where another
+        // active merge into the same target also retagged such a record, that merge took the
+        // target as already present; it now owns it, so its own undo removes it later.
         const kept = new Set(merge.keptIntoRecordIds);
-        for (const other of await tx
+        const added = new Set(liveIds.filter((id) => !kept.has(id)));
+        const others = await tx
           .select({
+            id: knowledgeTagMerges.id,
             recordIds: knowledgeTagMerges.recordIds,
             keptIntoRecordIds: knowledgeTagMerges.keptIntoRecordIds,
           })
@@ -492,8 +495,19 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
               isNull(knowledgeTagMerges.undoneAt),
               ne(knowledgeTagMerges.id, merge.id),
             ),
-          ))
-          for (const id of [...other.recordIds, ...other.keptIntoRecordIds]) kept.add(id);
+          )
+          .for("update");
+        for (const other of others) {
+          for (const id of other.recordIds) kept.add(id);
+          const owned = other.keptIntoRecordIds.filter((id) => !added.has(id));
+          if (owned.length !== other.keptIntoRecordIds.length)
+            await tx
+              .update(knowledgeTagMerges)
+              .set({ keptIntoRecordIds: owned })
+              .where(
+                and(eq(knowledgeTagMerges.userId, userId), eq(knowledgeTagMerges.id, other.id)),
+              );
+        }
         if (liveIds.length) {
           await tx
             .insert(knowledgeRecordTags)

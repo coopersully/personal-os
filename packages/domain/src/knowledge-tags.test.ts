@@ -38,6 +38,11 @@ describe("knowledge tags", () => {
     expect(mark.error?.issues[0]?.message).toContain(JSON.stringify("\u0301"));
   });
 
+  it("keeps the Trash view out of the agent query", () => {
+    expect(knowledgeAgentQuerySchema.safeParse({ status: "trashed" }).success).toBe(false);
+    expect(knowledgeQuerySchema.safeParse({ status: "trashed" }).success).toBe(true);
+  });
+
   it("requires tags for tagMatch", () => {
     for (const schema of [knowledgeQuerySchema, knowledgeAgentQuerySchema]) {
       expect(schema.safeParse({ tagMatch: "all" }).success).toBe(false);

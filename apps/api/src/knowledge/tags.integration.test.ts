@@ -275,12 +275,29 @@ describe("memory tags", () => {
 
   it("undo_keeps_target_needed_by_another_merge", async () => {
     const f = await fixture();
-    const record = await f.save(fact("Rent", ["a", "c"]));
-    const first = await f.merge("a", "b", f.owner);
-    await f.merge("c", "b", f.owner);
-    expect((await f.get(record.id)).tags).toEqual(["b"]);
-    await f.tags.unmerge(f.owner, { mergeId: first.mergeId, mutationKey: randomUUID() });
-    expect((await f.get(record.id)).tags).toEqual(["a", "b"]);
+    const undo = (mergeId: string) =>
+      f.tags.unmerge(f.owner, { mergeId, mutationKey: randomUUID() });
+    for (const order of ["first", "second"] as const) {
+      const [a, b, c] = ["a", "b", "c"].map((name) => `${name}-${order}`) as [
+        string,
+        string,
+        string,
+      ];
+      const record = await f.save(fact("Rent", [a, c]));
+      // A record that carried the target before either merge keeps it throughout.
+      const held = await f.save(fact("Budget", [a, b, c]));
+      const first = await f.merge(a, b, f.owner);
+      const second = await f.merge(c, b, f.owner);
+      expect((await f.get(record.id)).tags).toEqual([b]);
+      expect((await f.get(held.id)).tags).toEqual([b]);
+      const [one, two] = order === "first" ? [first, second] : [second, first];
+      await undo(one.mergeId);
+      expect((await f.get(record.id)).tags).toEqual([order === "first" ? a : c, b].sort());
+      expect((await f.get(held.id)).tags).toEqual([order === "first" ? a : c, b].sort());
+      await undo(two.mergeId);
+      expect((await f.get(record.id)).tags).toEqual([a, c]);
+      expect((await f.get(held.id)).tags).toEqual([a, b, c]);
+    }
   });
 
   it("unmerge_restores_three_step_alias_chain", async () => {

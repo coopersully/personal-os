@@ -69,10 +69,14 @@ export function useSettled(...queries: { data: unknown; isFetching: boolean }[])
   }, [ready]);
   return settled;
 }
-/** A read shown as loading until `settled`. */
-export const until = <T extends { isPending: boolean }>(query: T, settled: boolean): T => ({
+/** A read shown as loading until `settled`, unless it has failed. */
+export const until = <T extends { isPending: boolean; isError: boolean }>(
+  query: T,
+  settled: boolean,
+): T => ({
   ...query,
-  isPending: query.isPending || !settled,
+  // A read that failed is shown as failed, with its retry, not as still loading.
+  isPending: query.isPending || (!settled && !query.isError),
 });
 
 export interface WriteCopy<T = unknown> {

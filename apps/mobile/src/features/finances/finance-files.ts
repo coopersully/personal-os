@@ -50,7 +50,8 @@ export async function shareCsv(name: string, content: string): Promise<"shared" 
     folder.create();
     const file = new File(folder, name);
     file.create();
-    file.write(content);
+    // Writing is asynchronous: the sheet must not open on a file that is still being written.
+    await file.write(content);
     const result = await Share.share({ url: file.uri });
     return result.action === Share.dismissedAction ? "dismissed" : "shared";
   } finally {

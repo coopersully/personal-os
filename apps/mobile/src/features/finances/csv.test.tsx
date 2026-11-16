@@ -40,6 +40,8 @@ const h = vi.hoisted(() => ({
   files: {
     picked: null as null | { name: string; text: string; size?: number },
     read: 0,
+    /** A write settles when this does; reject it to fail the write. */
+    writing: Promise.resolve() as Promise<void>,
     pickError: false,
     written: [] as { uri: string; content: string }[],
     deleted: [] as string[],
@@ -192,7 +194,8 @@ vi.mock("expo-file-system", () => {
     create() {
       h.files.existing.add(this.uri);
     }
-    write(content: string) {
+    async write(content: string) {
+      await h.files.writing;
       h.files.written.push({ uri: this.uri, content });
     }
     delete() {
@@ -285,6 +288,7 @@ beforeEach(() => {
   h.files.picked = null;
   h.files.pickError = false;
   h.files.read = 0;
+  h.files.writing = Promise.resolve();
   h.files.written = [];
   h.files.deleted = [];
   h.files.existing = new Set();
@@ -667,7 +671,7 @@ it("reads every page of a view and stops at the export limit", async () => {
 });
 
 function mountExport(page: (cursor: string | undefined) => Promise<never>, disabled = false) {
-  return mount(<ExportTransactions page={page} disabled={disabled} />);
+  return mount(<ExportTransactions view="v1" page={page} disabled={disabled} />);
 }
 
 it("exports the whole view through the share sheet and reports the count", async () => {
@@ -753,7 +757,7 @@ it("does not share the previous account's transactions after an account change",
   h.owner = "owner-b";
   view.rerender(
     <QueryClientProvider client={new QueryClient()}>
-      <ExportTransactions page={page} disabled={false} />
+      <ExportTransactions view="v1" page={page} disabled={false} />
     </QueryClientProvider>,
   );
   await act(async () => release({ items: [row()], nextCursor: null } as never));
@@ -814,4 +818,61 @@ it("offers no export on a spending category's drill-down list", async () => {
   mount(<Transactions reference={{ groupId: "g" } as never} />);
   await screen.findByText("Corner Shop");
   expect(screen.queryByRole("button", { name: "Export transactions as CSV" })).toBeNull();
+});
+
+it("opens the share sheet only once the file is written, and cleans up when writing fails", async () => {
+  let finish!: () => void;
+  h.files.writing = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const sharing = shareCsv("out.csv", "a,b");
+  await act(async () => {});
+  expect(h.share).not.toHaveBeenCalled();
+  finish();
+  expect(await sharing).toBe("shared");
+  expect(h.files.written).toHaveLength(1);
+  h.files.writing = Promise.reject(new Error("disk full"));
+  await expect(shareCsv("out.csv", "a,b")).rejects.toThrow("disk full");
+  expect(h.share).toHaveBeenCalledTimes(1);
+  expect(h.files.existing.size).toBe(0);
+});
+
+it("stops an export when the view changes while it is being read", async () => {
+  let release!: (value: never) => void;
+  const page = () => new Promise<never>((resolve) => (release = resolve));
+  const client = new QueryClient();
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ExportTransactions view="november" page={page} disabled={false} />
+    </QueryClientProvider>,
+  );
+  press("Export transactions as CSV");
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <ExportTransactions view="november, pending" page={page} disabled={false} />
+    </QueryClientProvider>,
+  );
+  await act(async () => release({ items: [row()], nextCursor: null } as never));
+  await waitFor(() =>
+    expect(h.info).toHaveBeenCalledWith(
+      "The view changed, so nothing was exported. Export again.",
+      { id: "feedback" },
+    ),
+  );
+  expect(h.share).not.toHaveBeenCalled();
+  expect(h.files.written).toEqual([]);
+  expectNoInlineResult();
+});
+
+it("offers a retry when the accounts cannot be read at all", async () => {
+  h.api.listFinanceAccounts.mockRejectedValue(new Error("offline"));
+  h.params = { accountId: "acct-v" };
+  mount(<FinanceTransactionImport />);
+  const retry = await screen.findByRole("button", { name: /Retry/ });
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  h.api.listFinanceAccounts.mockResolvedValue({ accounts: [venmo] });
+  await act(async () => {
+    fireEvent.click(retry);
+  });
+  expect(await screen.findByText("Import transactions")).toBeTruthy();
 });

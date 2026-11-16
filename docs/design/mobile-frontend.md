@@ -584,7 +584,9 @@ one export directory in the app's cache only while the system share sheet is ope
 person chooses its destination. The directory is removed whether they share it, cancel or the
 sheet fails, and is emptied before every export, so a file left behind when the app is closed with
 the sheet open is gone at the next export. One toast reports
-the count exported, a cancelled export or a failure. Export is offered on iPhone only.
+the count exported, a cancelled export or a failure. If the view changes while its pages are
+being read, nothing is exported and the toast says to export again. Export is offered on iPhone
+only.
 
 ### Transaction conversations and review
 

@@ -240,6 +240,7 @@ export function Transactions({
                   onPress={() => setSelection([])}
                 />
                 <ExportTransactions
+                  view={filterKey}
                   disabled={bulk.pending || query.isPending}
                   page={(cursor) =>
                     api.listFinanceTransactions({ ...filters, accountId, cursor, limit: 100 })

@@ -13,8 +13,14 @@ import { collectTransactions, exportLimit, transactionsCsv } from "./transaction
  */
 export function ExportTransactions({
   page,
+  view,
   disabled,
 }: {
+  /**
+   * Identifies the view on screen. An export shares the view it was started for only while
+   * that view is still the one shown; after a filter, search or account change it stops.
+   */
+  view: string;
   /** Reads one page of the current view, exactly as the list does. */
   page: (
     cursor: string | undefined,
@@ -27,6 +33,8 @@ export function ExportTransactions({
   const active = useRef(true);
   const currentOwner = useRef(owner);
   currentOwner.current = owner;
+  const currentView = useRef(view);
+  currentView.current = view;
   useEffect(() => {
     active.current = true;
     return () => {
@@ -40,11 +48,14 @@ export function ExportTransactions({
     lock.current = true;
     setPending(true);
     const id = toast.loading("Preparing export…");
+    const started = view;
     const current = () => active.current && currentOwner.current === owner;
     try {
       const { rows, truncated } = await collectTransactions(page);
       // An account change mid-read must not share the previous account's transactions.
       if (!current()) return void toast.dismiss(id);
+      if (currentView.current !== started)
+        return void toast.info("The view changed, so nothing was exported. Export again.", { id });
       if (rows.length === 0)
         return void toast.info("No transactions to export in this view.", { id });
       const day = timezone ? localToday(timezone) : new Date().toISOString().slice(0, 10);

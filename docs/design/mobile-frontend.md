@@ -551,7 +551,11 @@ from Assistant). A past expected item older than 30 days cannot be opened.
 
 Import is offered in the account's top-right menu as Import CSV, only for a PayPal, Venmo or Zelle
 account: the server imports an export only into an account of the same provider, so the provider
-is not a choice. The import form shows the account, the provider and the chosen file. Choose file
+is not a choice on the import form. A manual or connected account can never take an import. So
+that an import has somewhere to go, Add account has a "Records from" choice: Entered by hand (the
+default), or PayPal, Venmo or Zelle CSV exports. The choice is made when the account is added and
+is not editable afterwards; the form says that a CSV can only be imported into an account of the
+same service. The import form shows the account, the provider and the chosen file. Choose file
 opens the system file picker from the file-system module the app already ships; no new native
 module was added. On iPhone the picker hands the app a temporary copy, which is deleted as soon as
 its text has been read. A file over four megabytes is not read at all and is reported as too

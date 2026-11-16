@@ -920,3 +920,63 @@ it("offers CSV import only on an account whose provider has a CSV export", async
   await screen.findByRole("button", { name: "Edit account" });
   expect(screen.queryByRole("button", { name: "Import CSV" })).toBeNull();
 });
+
+it("adds an account for a service's CSV exports, so an import has somewhere to go", async () => {
+  h.api.createFinanceAccount.mockResolvedValue({ ...manual, id: "venmo-1", provider: "venmo" });
+  mount(<FinanceAccountEditor />);
+  await screen.findByLabelText("Name");
+  expect(screen.getByRole("button", { name: "Records from, Entered by hand" })).toBeTruthy();
+  expect(
+    screen.getByText(/a CSV can only be imported into an account of the same service/),
+  ).toBeTruthy();
+  type("Name", "Venmo");
+  type("Institution", "Venmo");
+  press("Records from, Entered by hand");
+  press("Venmo CSV exports");
+  expect(
+    screen.getByText(/Use Import CSV in this account’s actions to import Venmo exports/),
+  ).toBeTruthy();
+  press("Save changes");
+  await waitFor(() => expect(h.success).toHaveBeenCalledWith("Account added", { id: "feedback" }));
+  expect(h.api.createFinanceAccount).toHaveBeenCalledWith({
+    balance: null,
+    currencyCode: null,
+    institution: "Venmo",
+    kind: "cash",
+    name: "Venmo",
+    provider: "venmo",
+  });
+  expectNoInlineResult();
+});
+
+it("looks for an unconfirmed service account under the service it was sent with", async () => {
+  h.api.createFinanceAccount.mockRejectedValueOnce(new Error("offline"));
+  mount(<FinanceAccountEditor />);
+  await screen.findByLabelText("Name");
+  type("Name", "Venmo");
+  type("Institution", "Venmo");
+  press("Records from, Entered by hand");
+  press("Venmo CSV exports");
+  press("Save changes");
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  // A manual account of the same name is not the earlier attempt; the Venmo one is.
+  h.api.listFinanceAccounts.mockResolvedValue(
+    accounts([
+      manual,
+      { ...manual, id: "other", name: "Venmo", institution: "Venmo", provider: "manual" },
+      { ...manual, id: "venmo-1", name: "Venmo", institution: "Venmo", provider: "venmo" },
+    ]),
+  );
+  press("Save changes");
+  await waitFor(() => expect(h.success).toHaveBeenCalledWith("Account added", { id: "feedback" }));
+  expect(h.api.createFinanceAccount).toHaveBeenCalledTimes(1);
+});
+
+it("does not call a CSV account's balance an institution's", async () => {
+  const venmo = { ...manual, id: "00000000-0000-4000-8000-0000000000c6", provider: "venmo" };
+  h.params = { id: venmo.id };
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([venmo]));
+  mount(<FinanceAccountEditor />);
+  expect(await screen.findByText(/takes CSV imports from its service/)).toBeTruthy();
+  expect(screen.queryByLabelText("Balance")).toBeNull();
+});

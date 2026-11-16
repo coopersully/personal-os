@@ -75,9 +75,10 @@ export const until = <T extends { isPending: boolean }>(query: T, settled: boole
   isPending: query.isPending || !settled,
 });
 
-export interface WriteCopy {
+export interface WriteCopy<T = unknown> {
   loading: string;
-  done: string;
+  /** The confirmed result, in words; a function when it depends on what the server answered. */
+  done: string | ((data: T) => string);
   /** The server answered 409: something this write depends on changed. */
   conflict: string;
   /** The server refused the write: nothing was changed. */
@@ -123,13 +124,14 @@ export function useFinanceWrite() {
     });
   }, [unread, client, owner]);
 
-  async function run(
+  async function run<T = unknown>(
     input: object,
     send: (idempotencyKey: string) => Promise<{
       outcome: string;
+      data?: T;
       communication: { headline: string };
     }>,
-    copy: WriteCopy,
+    copy: WriteCopy<T>,
   ): Promise<boolean> {
     if (lock.current || !owner) return false;
     lock.current = true;
@@ -154,7 +156,9 @@ export function useFinanceWrite() {
         else toast.info(result.communication.headline, { id });
         return false;
       }
-      toast.success(copy.done, { id });
+      toast.success(typeof copy.done === "string" ? copy.done : copy.done(result.data as T), {
+        id,
+      });
       return true;
     } catch (error) {
       if (!current()) return gone();

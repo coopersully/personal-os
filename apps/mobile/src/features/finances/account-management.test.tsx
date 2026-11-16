@@ -903,3 +903,20 @@ it("explains why a duplicate cannot be resolved yet", async () => {
   mount(<FinanceAccountDuplicate />);
   await screen.findByText(`${linked.name} no longer has a possible duplicate.`);
 });
+
+it("offers CSV import only on an account whose provider has a CSV export", async () => {
+  const venmo = { ...manual, id: "00000000-0000-4000-8000-0000000000c5", provider: "venmo" };
+  h.params = { id: venmo.id };
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([venmo, manual]));
+  const view = mount(<FinanceAccountScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: "Import CSV" }));
+  expect(h.push).toHaveBeenCalledWith({
+    pathname: "/finance-import",
+    params: { accountId: venmo.id },
+  });
+  view.unmount();
+  h.params = { id: manual.id };
+  mount(<FinanceAccountScreen />);
+  await screen.findByRole("button", { name: "Edit account" });
+  expect(screen.queryByRole("button", { name: "Import CSV" })).toBeNull();
+});

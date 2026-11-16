@@ -8,6 +8,7 @@ import { toast } from "sonner-native";
 import { editorActionsOptions } from "../../components/editor-header";
 import type { RowAction } from "../../components/row-action-button";
 import { useTheme } from "../../theme";
+import { isCsvProvider } from "./csv-import";
 import { useFinance } from "./data";
 import { confirmedRejection, trackingStopped } from "./mutations";
 
@@ -110,6 +111,15 @@ export function AccountActions({
       disabled: pending,
       onPress: () =>
         router.push({ pathname: "/finance-transaction-edit", params: { accountId: account.id } }),
+    });
+  if (isCsvProvider(account.provider))
+    actions.push({
+      id: "import",
+      label: "Import CSV",
+      icon: "archive",
+      disabled: pending,
+      onPress: () =>
+        router.push({ pathname: "/finance-import", params: { accountId: account.id } }),
     });
   if (tracked && account.status === "connected")
     actions.push({

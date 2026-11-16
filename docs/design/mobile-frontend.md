@@ -583,8 +583,9 @@ the app restarts. The next attempt there reads before it writes:
   the calendar or check it in the provider's app.
 - Otherwise that calendar is read over the event's days. An unlinked copy of a Details block, or
   more than one unlinked Busy copy, would be written again, so nothing is sent and the toast says
-  to remove it first. One unlinked Busy copy is sent on, because the API links it instead of
-  writing another.
+  to remove it first. One unlinked Busy copy at exactly the event's start and end is sent on,
+  because the API links it instead of writing another; an all-day copy a provider dated
+  differently is not.
 - When the failure said the provider took the block but nohmi could not link it, nothing is sent
   until that copy has synced.
 - If either read fails, nothing is sent.

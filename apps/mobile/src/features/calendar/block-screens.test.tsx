@@ -480,6 +480,36 @@ it("lets the API link a single unlinked Busy copy, but not two", async () => {
   expect(h.api.createEventBlock).toHaveBeenCalledTimes(2);
 });
 
+it("does not count on the API linking an all-day Busy copy that a provider dated in UTC", async () => {
+  // nohmi stores this all-day event from local midnight; the provider copy reads back in UTC.
+  serve({
+    ...standup,
+    allDay: true,
+    provider: "local",
+    startsAt: "2026-11-20T05:00:00.000Z",
+    endsAt: "2026-11-21T05:00:00.000Z",
+  });
+  h.api.createEventBlock.mockRejectedValueOnce(offline());
+  await openBlocks();
+  await blockOnPersonal(1);
+  h.api.listEvents.mockResolvedValue([
+    {
+      ...standup,
+      id: "copy",
+      title: "Busy",
+      calendarId: "personal",
+      allDay: true,
+      startsAt: "2026-11-20T00:00:00.000Z",
+      endsAt: "2026-11-21T00:00:00.000Z",
+    },
+  ]);
+  await blockOnPersonal(2);
+  expect(h.api.createEventBlock).toHaveBeenCalledOnce();
+  expect(h.error).toHaveBeenLastCalledWith(expect.stringMatching(/^Personal already has/), {
+    id: "toast-1",
+  });
+});
+
 it("sends nothing when the calendar cannot be read before a repeat block", async () => {
   h.api.createEventBlock.mockRejectedValueOnce(offline());
   await openBlocks();

@@ -533,9 +533,15 @@ export function useEventWrites() {
             ).filter((found) =>
               isUnlinkedCopy(found, current, calendar.id, mode, timeZoneOf(state.user)),
             );
-            // The API links exactly one unlinked Busy copy instead of writing another. Any
-            // other copy would be written a second time.
-            if (mode === "busy" ? copies.length > 1 : copies.length > 0)
+            // The API links exactly one unlinked Busy copy at the very same instants instead
+            // of writing another. Any other copy would be written a second time.
+            const [only] = copies;
+            const linkable =
+              mode === "busy" &&
+              copies.length === 1 &&
+              only?.startsAt === current.startsAt &&
+              only.endsAt === current.endsAt;
+            if (copies.length && !linkable)
               throw new NothingSent(
                 `${name} already has this time from the earlier attempt, but it isn’t linked to the event. Remove it in your calendar app before blocking again.`,
               );

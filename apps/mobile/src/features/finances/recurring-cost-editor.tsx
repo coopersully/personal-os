@@ -1,17 +1,22 @@
 import type { FinanceRecurringObligation } from "@personal-os/domain";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { EnumChoice } from "../../components/forms/enum-choice";
 import { PaddedSurfaceRows, ToggleRow } from "../../components/forms/form-rows";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { DateField } from "../tasks/date-field";
 import { TextRow } from "./account-editor";
-import { useFinanceWrite, useRecurringItem } from "./cashflow-data";
+import { until, useFinanceWrite, useRecurringItem, useSettled } from "./cashflow-data";
 import { CashflowForm } from "./cashflow-form";
-import { cadenceLabel, costStatement, exactCents, isObligation } from "./cashflow-rules";
+import {
+  cadenceLabel,
+  costStatement,
+  exactCents,
+  isObligation,
+  recurringAmount,
+} from "./cashflow-rules";
 import { useFinance } from "./data";
 import { isCalendarDate } from "./goal-progress";
-import { formatMoney } from "./presentation";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState } from "./ui";
 
 const kinds = [
@@ -103,7 +108,7 @@ function CostForm(props: {
           <FinanceRow
             centered
             title="Expected amount"
-            value={formatMoney(item.expectedAmount, account?.currencyCode)}
+            value={recurringAmount(item, account ? [{ ...account, id: item.accountId ?? "" }] : [])}
             icon="receipt"
           />
           <FinanceRow centered title="Repeats" value={cadenceLabel(item.cadence)} icon="refresh" />
@@ -167,6 +172,7 @@ function CostForm(props: {
       <Copy secondary>
         Cost type, Currency and As of are required. State whether this expected payment is fixed or
         variable. This saves your statement and does not change the payment with its provider.
+        Saving starts a new version of this item, so its schedule will need confirming again.
       </Copy>
     </CashflowForm>
   );
@@ -175,26 +181,30 @@ function CostForm(props: {
 /** Records whether the bill or subscription named by `id` has a fixed or a variable cost. */
 export function FinanceRecurringCost() {
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { query, item, account, today } = useRecurringItem("obligation", id);
+  const { query, accounts, item, account, today } = useRecurringItem("obligation", id);
+  const settled = useSettled(query, accounts);
   const open =
     item &&
     isObligation(item) &&
     item.kind !== "savings" &&
     (item.status === "active" || item.status === "needs_review");
   return (
-    <ReadState query={query}>
-      {item && isObligation(item) && open && item.revision ? (
-        <CostForm
-          key={item.id}
-          item={{ ...item, revision: item.revision }}
-          account={account}
-          today={today}
-        />
-      ) : (
-        <FinanceScreen title="Cost">
-          <Copy secondary>This recurring item is unavailable.</Copy>
-        </FinanceScreen>
-      )}
+    <ReadState query={until(query, settled)}>
+      <Stack.Screen options={{ title: "cost" }} />
+      <ReadState query={accounts}>
+        {item && isObligation(item) && open && item.revision ? (
+          <CostForm
+            key={item.id}
+            item={{ ...item, revision: item.revision }}
+            account={account}
+            today={today}
+          />
+        ) : (
+          <FinanceScreen title="Cost">
+            <Copy secondary>This recurring item is unavailable.</Copy>
+          </FinanceScreen>
+        )}
+      </ReadState>
     </ReadState>
   );
 }

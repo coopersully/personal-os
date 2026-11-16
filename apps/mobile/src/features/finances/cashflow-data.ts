@@ -57,6 +57,24 @@ export function useRecurringItem(kind: string | undefined, id: string | undefine
   };
 }
 
+/**
+ * True once a read has answered since this screen opened. A form states its write against the
+ * revisions it opened with, so it must not open on a cached copy that is being re-read.
+ */
+export function useSettled(...queries: { data: unknown; isFetching: boolean }[]) {
+  const [settled, setSettled] = useState(false);
+  const ready = queries.every((query) => query.data !== undefined && !query.isFetching);
+  useEffect(() => {
+    if (ready) setSettled(true);
+  }, [ready]);
+  return settled;
+}
+/** A read shown as loading until `settled`. */
+export const until = <T extends { isPending: boolean }>(query: T, settled: boolean): T => ({
+  ...query,
+  isPending: query.isPending || !settled,
+});
+
 export interface WriteCopy {
   loading: string;
   done: string;

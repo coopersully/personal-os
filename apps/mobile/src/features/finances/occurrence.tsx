@@ -5,7 +5,14 @@ import { Action, Actions, PaddedSurfaceRows } from "../../components/forms/form-
 import { InlineOptions } from "../../components/forms/inline-options";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { TextRow } from "./account-editor";
-import { cashflowPage, useCashflowSources, useFinanceWrite, useOccurrences } from "./cashflow-data";
+import {
+  cashflowPage,
+  until,
+  useCashflowSources,
+  useFinanceWrite,
+  useOccurrences,
+  useSettled,
+} from "./cashflow-data";
 import { CashflowForm } from "./cashflow-form";
 import {
   activeMatches,
@@ -121,7 +128,7 @@ export function FinanceOccurrenceScreen() {
                     <FinanceRow
                       key={event.id}
                       title={formatMoney(event.amountCents / 100, event.currencyCode)}
-                      subtitle={`Matched by ${eventActor(event)} · ${cashflowDate(event.recordedAt.slice(0, 10))} · ${event.rationale}`}
+                      subtitle={`${occurrence.matchIds.includes(event.id) ? "Matched" : "No longer counted, matched"} by ${eventActor(event)} · ${cashflowDate(event.recordedAt.slice(0, 10))} · ${event.rationale}`}
                       icon="check"
                       accessibilityHint="Opens the form that reverses this match"
                       onPress={() => cashflowPage("match", { ...route, match: event.id })}
@@ -434,6 +441,8 @@ export function FinanceOccurrenceMatch() {
       ? { from: shiftDate(occurrence.localDate, -14), to: shiftDate(occurrence.localDate, 14) }
       : null,
   );
+  const settled = useSettled(query);
+  const sourcesSettled = useSettled(sources);
   const unavailable = (
     <FinanceScreen title="Match">
       <Copy secondary>
@@ -446,7 +455,8 @@ export function FinanceOccurrenceMatch() {
     </FinanceScreen>
   );
   return (
-    <ReadState query={query}>
+    <ReadState query={until(query, settled)}>
+      <Stack.Screen options={{ title: "match" }} />
       {occurrence && reversing ? (
         match ? (
           <ReverseForm key={match.id} occurrence={occurrence} match={match} />
@@ -454,7 +464,7 @@ export function FinanceOccurrenceMatch() {
           unavailable
         )
       ) : occurrence && canMatch(occurrence) ? (
-        <ReadState query={sources}>
+        <ReadState query={until(sources, sourcesSettled)}>
           {sources.data && (
             <MatchForm
               key={occurrence.key}

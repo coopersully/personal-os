@@ -453,7 +453,7 @@ often it repeats, its next expected date and its expected amount. Bills & subscr
 obligations under Bills, Subscriptions and Savings and states that changing a pattern does not
 cancel a subscription or change a payment with its provider. An amount takes its currency from the
 item's account; an item without an account uses the product's USD default, as elsewhere in
-Finances. A row opens the recurring item: expected amount, status, kind, cadence, last seen date,
+Finances, and an amount whose account is not known yet is shown without a currency. A row opens the recurring item: expected amount, status, kind, cadence, last seen date,
 account, who found it, whether its schedule is confirmed and, for a bill or subscription, its cost
 statement. A schedule statement and a cost statement each describe one revision of the item; once
 the item changes they read as needing confirmation again, because the server stops using them.
@@ -463,7 +463,10 @@ Edit cost statement (bills and subscriptions only), Pause, Resume or Confirm pat
 that needs confirmation) and, last and destructive, Mark cancelled. Mark cancelled is offered for
 obligations only, because the API rejects it for income, and keeps a confirmation that says
 nothing is cancelled with the provider. Schedule and cost are offered only while the item is
-active or needs confirmation.
+active or needs confirmation; a paused or cancelled item offers Resume, and its page says to
+resume it first. Each of these changes, and each schedule or cost statement, starts a new revision
+of the item, so stating a cost makes the schedule need confirming again and the reverse; both
+forms say so.
 
 Confirm schedule is a form with a floating Save: Repeats, Timezone, First date, Effective from,
 the two days of the month for a twice-monthly schedule, Amount type (Fixed or Variable), Expected
@@ -476,8 +479,9 @@ that cannot be in the future, and needs the "This is my statement" switch.
 
 Recent expected items lists the last 30 days of expected items from confirmed schedules, newest
 first, because that is where posted transactions are. An expected item shows what was expected,
-what is matched and what is still expected, its current matches and, once a match has been
-reversed, its full history. Match opens a form that lists posted transactions in the same account
+what is matched and what is still expected, its matches that have not been reversed and, once a
+match has been reversed, its full history. A match the server no longer counts (for example after
+its transaction changed) is labelled as such and can still be reversed. Match opens a form that lists posted transactions in the same account
 and currency within two weeks of the expected date that the server marks eligible; a pending,
 uncategorized or transfer transaction is not offered. A split transaction also asks which part
 covers the item. The amount matched is at most what is still expected and at most the chosen
@@ -498,8 +502,10 @@ edit.
 Every write here uses one toast from loading to the confirmed result. Finance data is re-read
 before the result is reported, and the item's actions stay disabled until then. A refused write
 (4xx) says nothing was changed or keeps the form open with its entries; a 409 says what changed
-elsewhere; a write with no answer says it could not be confirmed and is retried under the same
-idempotency key, so sending it again cannot act twice.
+elsewhere; a write with no answer says it could not be confirmed, and sending it again from the
+same open form or page reuses its idempotency key, so it cannot act twice. A form that is closed
+and reopened starts a new key. A form opens only on a fresh read of what it states against, never
+on a cached copy that is still being re-read.
 
 Not on iPhone yet: the web outlook's date range and account filters, calendar presentation,
 payday projection and balance statements, and reimbursements inside Cash flow (they are reached

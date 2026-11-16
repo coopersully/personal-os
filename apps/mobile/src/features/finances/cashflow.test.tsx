@@ -12,6 +12,7 @@ import {
   latestSchedule,
   newScenarioDraft,
   parseCents,
+  recurringAmount,
   scenarioInput,
   scheduleState,
   scheduleStatement,
@@ -517,12 +518,12 @@ it("offers only posted transactions the server accepts for an occurrence", () =>
   ]);
 });
 
-it("counts a match only while it is recorded for the occurrence and not reversed", () => {
+it("keeps a match reversible until it is reversed, even once it no longer counts", () => {
   const reversal = { ...partMatch, id: "r-1", kind: "reverse", reversesMatchId: "m-1" };
   expect(activeMatches(rentDue as never, [partMatch] as never)).toHaveLength(1);
   expect(activeMatches(rentDue as never, [partMatch, reversal] as never)).toHaveLength(0);
   expect(activeMatches({ ...rentDue, matchIds: [] } as never, [partMatch] as never)).toHaveLength(
-    0,
+    1,
   );
   expect(activeMatches(payday as never, [partMatch] as never)).toHaveLength(0);
 });
@@ -590,6 +591,7 @@ it("names the first problem with a scenario, or builds the comparison input", ()
   });
   expect(problem([base, { ...other, allocations: [row("", "5")] }])).toMatch(/category/);
   expect(problem([base, { ...other, allocations: [row("c", "")] }])).toMatch(/amount/);
+  expect(problem([base, { ...other, allocations: [row("c", "0")] }])).toMatch(/above 0/);
   expect(problem([base, { ...other, allocations: [row("c", "5"), row("c", "6")] }])).toMatch(
     /only once/,
   );
@@ -673,7 +675,7 @@ it("lists income streams with their status and opens one", async () => {
   press(await screen.findByRole("button", { name: /Acme payroll/ }).then(() => /Acme payroll/));
   const row = button(/Acme payroll/);
   expect(row.textContent).toContain("Needs confirmation · Every two weeks · Next ");
-  expect(row.textContent).toContain("$2,500.00");
+  await waitFor(() => expect(row.textContent).toContain("$2,500.00"));
   expect(h.push).toHaveBeenCalledWith({
     pathname: "/finance-cashflow",
     params: { view: "item", kind: "income", id: "inc-1" },
@@ -1700,4 +1702,78 @@ it("shows an outlook with income, no rows and no timezone without failing", asyn
   h.timezone = undefined;
   mount(<FinanceCashflow />);
   expect(button("Income")).toBeTruthy();
+});
+
+// ── Review follow-ups ────────────────────────────────────────────────────────
+
+it("shows a recurring amount without a currency until its account is known", () => {
+  expect(recurringAmount(rent as never, undefined)).toBe("1,800.00");
+  expect(recurringAmount(rent as never, [{ id: "acct-1", currencyCode: null }])).toBe("1,800.00");
+  expect(recurringAmount(rent as never, [{ id: "acct-1", currencyCode: "EUR" }])).toContain("EUR");
+  expect(recurringAmount(vault as never, undefined)).toBe("$1,800.00");
+});
+
+it("lets a match that no longer counts be reversed", async () => {
+  h.api.manageFinanceOccurrenceMatch.mockResolvedValue(completed({}));
+  h.api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [{ ...rentDue, matchState: "invalidated", matchIds: [], matchedAmountCents: 0 }],
+    matchEvents: [partMatch],
+    unavailableSources: [],
+  });
+  const view = open("occurrence", routeRange);
+  const row = await screen.findByRole("button", { name: /\$500\.00/ });
+  expect(row.textContent).toContain("No longer counted, matched by you");
+  expect(screen.queryByRole("button", { name: "Match a transaction" })).toBeNull();
+  view.unmount();
+  open("match", { ...routeRange, match: "m-1" });
+  await screen.findByText(/reverses the whole match/);
+  type("Reason", "Transaction was recategorized");
+  fireEvent.click(save("Reverse match"));
+  await waitFor(() => expect(h.back).toHaveBeenCalled());
+  expect(h.api.manageFinanceOccurrenceMatch).toHaveBeenCalledWith(
+    expect.objectContaining({ operation: "reverse", matchId: "m-1" }),
+  );
+});
+
+it("opens the match form on a fresh read, never on a cached copy being re-read", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const window = {
+    from: shiftDate(rentDue.localDate, -14),
+    to: shiftDate(rentDue.localDate, 14),
+  };
+  const key = ["finances", "owner-a", "cashflow-sources", window];
+  client.setQueryData(key, {
+    transactions: [],
+    coverage: { truncated: false, transactionLimit: 1000 },
+  });
+  await client.invalidateQueries({ queryKey: key });
+  const fresh = deferred<unknown>();
+  h.api.listFinanceCashflowSources.mockReturnValue(fresh.promise);
+  h.params = { view: "match", ...routeRange };
+  render(
+    <QueryClientProvider client={client}>
+      <FinanceCashflowRoute />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(h.api.listFinanceCashflowSources).toHaveBeenCalled());
+  expect(screen.queryByText("Match a transaction")).toBeNull();
+  expect(screen.queryByText(/No posted transaction/)).toBeNull();
+  await act(async () =>
+    fresh.resolve({
+      transactions: [landlord],
+      coverage: { truncated: false, transactionLimit: 1000 },
+    }),
+  );
+  expect(await screen.findByRole("button", { name: /Landlord LLC/ })).toBeTruthy();
+  expect(h.screen).toHaveBeenCalledWith({ title: "match" });
+  client.clear();
+});
+
+it("says to resume a paused item instead of pointing at actions it does not offer", async () => {
+  h.api.listFinanceRecurringSchedules.mockResolvedValue([
+    { ...rentSchedule, source: { kind: "obligation", id: "ob-2" }, sourceRevision: 1 },
+  ]);
+  open("item", { kind: "obligation", id: "ob-2" });
+  expect(await screen.findByText(/Resume it to revise the schedule\./)).toBeTruthy();
+  expect(screen.getByText(/Resume this item to state whether its payment/)).toBeTruthy();
 });

@@ -1,12 +1,18 @@
 import type { FinanceRecurringSchedule } from "@personal-os/domain";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { EnumChoice } from "../../components/forms/enum-choice";
 import { PaddedSurfaceRows } from "../../components/forms/form-rows";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { DateField } from "../tasks/date-field";
 import { TextRow } from "./account-editor";
-import { useFinanceWrite, useRecurringItem, useRecurringSchedules } from "./cashflow-data";
+import {
+  until,
+  useFinanceWrite,
+  useRecurringItem,
+  useRecurringSchedules,
+  useSettled,
+} from "./cashflow-data";
 import { CashflowForm } from "./cashflow-form";
 import {
   cashflowDate,
@@ -192,7 +198,8 @@ function ScheduleForm(props: {
         State the schedule you know: how often it repeats, the first date it follows and the date
         this statement takes effect. Every field is required except the amount of a variable
         schedule. No date is taken from the next expected payment, and confirming does not schedule
-        a payment with your bank.
+        a payment with your bank. Saving starts a new version of this item, so a cost statement will
+        need confirming again.
         {previous
           ? ` This replaces the schedule in effect since ${cashflowDate(previous.effectiveFrom)}; earlier history is kept, and matched dates on or after the new effective date must be reversed first.`
           : ""}
@@ -204,30 +211,34 @@ function ScheduleForm(props: {
 /** Confirms or revises the schedule of the recurring item named by `kind` and `id`. */
 export function FinanceRecurringScheduleEditor() {
   const { kind, id } = useLocalSearchParams<{ kind?: string; id?: string }>();
-  const { query, item, account, kind: itemKind, timezone } = useRecurringItem(kind, id);
+  const { query, accounts, item, account, kind: itemKind, timezone } = useRecurringItem(kind, id);
   const schedules = useRecurringSchedules();
+  const settled = useSettled(query, schedules, accounts);
   const open = item && (item.status === "active" || item.status === "needs_review");
   return (
-    <ReadState query={query}>
-      <ReadState query={schedules}>
-        {item && open && item.revision && schedules.data ? (
-          <ScheduleForm
-            key={`${itemKind}:${item.id}`}
-            item={{ ...item, revision: item.revision }}
-            kind={itemKind}
-            previous={latestSchedule(schedules.data, { kind: itemKind, id: item.id })}
-            account={account}
-            timezone={timezone}
-          />
-        ) : (
-          <FinanceScreen title="Schedule">
-            <Copy secondary>
-              {item && !open
-                ? "A paused or cancelled item cannot take a schedule. Resume it first."
-                : "This recurring item is unavailable."}
-            </Copy>
-          </FinanceScreen>
-        )}
+    <ReadState query={until(query, settled)}>
+      <Stack.Screen options={{ title: "schedule" }} />
+      <ReadState query={accounts}>
+        <ReadState query={schedules}>
+          {item && open && item.revision && schedules.data ? (
+            <ScheduleForm
+              key={`${itemKind}:${item.id}`}
+              item={{ ...item, revision: item.revision }}
+              kind={itemKind}
+              previous={latestSchedule(schedules.data, { kind: itemKind, id: item.id })}
+              account={account}
+              timezone={timezone}
+            />
+          ) : (
+            <FinanceScreen title="Schedule">
+              <Copy secondary>
+                {item && !open
+                  ? "A paused or cancelled item cannot take a schedule. Resume it first."
+                  : "This recurring item is unavailable."}
+              </Copy>
+            </FinanceScreen>
+          )}
+        </ReadState>
       </ReadState>
     </ReadState>
   );

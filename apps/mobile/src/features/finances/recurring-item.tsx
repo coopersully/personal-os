@@ -17,6 +17,7 @@ import {
   latestSchedule,
   type RecurringItem,
   type RecurringKind,
+  recurringAmount,
   recurringStatusLabel,
   recurringSummary,
   scheduleState,
@@ -24,7 +25,6 @@ import {
 } from "./cashflow-rules";
 import { useFinance } from "./data";
 import { confirmChoice } from "./goal-confirm";
-import { formatMoney } from "./presentation";
 import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Section } from "./ui";
 
 type Change = "pause" | "resume" | "cancel";
@@ -126,7 +126,8 @@ function ItemActions({
 /** One income stream, bill, subscription or savings pattern: its status, schedule and cost. */
 export function FinanceRecurringItemScreen() {
   const { kind, id } = useLocalSearchParams<{ kind?: string; id?: string }>();
-  const { query, item, account, kind: itemKind } = useRecurringItem(kind, id);
+  const { query, accounts, item, account, kind: itemKind } = useRecurringItem(kind, id);
+  const open = item?.status === "active" || item?.status === "needs_review";
   const schedules = useRecurringSchedules(!!item);
   const schedule = item ? latestSchedule(schedules.data, { kind: itemKind, id: item.id }) : null;
   const state = item ? scheduleState(schedule, item) : "none";
@@ -140,7 +141,7 @@ export function FinanceRecurringItemScreen() {
             <ItemActions item={item} kind={itemKind} revising={!!schedule} />
             <Metric
               label="Expected amount"
-              value={formatMoney(item.expectedAmount, account?.currencyCode)}
+              value={recurringAmount(item, accounts.data?.accounts)}
               hint={recurringSummary(item)}
             />
             <Card rows>
@@ -207,7 +208,7 @@ export function FinanceRecurringItemScreen() {
                       </Copy>
                       <Copy secondary>
                         {state === "changed"
-                          ? "This item changed after its schedule was confirmed, so it no longer produces upcoming dates. Use Revise schedule in the actions menu."
+                          ? `This item changed after its schedule was confirmed, so it no longer produces upcoming dates. ${open ? "Use Revise schedule in the actions menu." : "Resume it to revise the schedule."}`
                           : "Upcoming dates come only from a schedule you confirm. Until then this item shows its next expected date and stays out of upcoming money."}
                       </Copy>
                     </>
@@ -226,7 +227,9 @@ export function FinanceRecurringItemScreen() {
                   <Copy secondary>
                     {cost
                       ? `${cost.provenance === "explicit_user" ? "Your statement" : "Recorded by your agent"} as of ${cashflowDate(cost.asOf)}.`
-                      : "State whether this payment is fixed or variable with Confirm cost in the actions menu."}
+                      : open
+                        ? "State whether this payment is fixed or variable with Confirm cost in the actions menu."
+                        : "Resume this item to state whether its payment is fixed or variable."}
                   </Copy>
                 </Card>
               </Section>

@@ -10,6 +10,7 @@ import {
   occurrenceStateLabel,
   type RecurringItem,
   type RecurringKind,
+  recurringAmount,
   recurringStatusLabel,
   recurringSummary,
   shiftDate,
@@ -113,14 +114,8 @@ export function FinanceCashflow() {
   );
 }
 
-function useItemCurrency() {
-  const accounts = useCashflowAccounts();
-  return (item: RecurringItem) =>
-    accounts.data?.accounts.find((account) => account.id === item.accountId)?.currencyCode;
-}
-
 function ItemRows({ items, kind }: { items: readonly RecurringItem[]; kind: RecurringKind }) {
-  const currency = useItemCurrency();
+  const accounts = useCashflowAccounts();
   return (
     <Card rows>
       {items.map((item) => (
@@ -128,7 +123,7 @@ function ItemRows({ items, kind }: { items: readonly RecurringItem[]; kind: Recu
           key={item.id}
           title={item.displayName}
           subtitle={`${recurringStatusLabel(item.status)} · ${recurringSummary(item)}`}
-          value={formatMoney(item.expectedAmount, currency(item))}
+          value={recurringAmount(item, accounts.data?.accounts)}
           valueTone={item.status === "needs_review" ? "attention" : undefined}
           icon={kind === "income" ? "categoryDollar" : "wallet"}
           onPress={() => page("item", { kind, id: item.id })}

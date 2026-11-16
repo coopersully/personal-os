@@ -238,7 +238,10 @@ export function occurrenceEvents(
     .filter((event) => event.occurrenceId === occurrence.occurrenceId)
     .sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
 }
-/** Matches that still count: recorded for this occurrence and not reversed. */
+/**
+ * Matches that have not been reversed. One the server no longer counts (it is missing from
+ * `matchIds`) is kept, because it still holds its transaction and can still be reversed.
+ */
 export function activeMatches(
   occurrence: FinanceRecurringOccurrence,
   events: readonly FinanceOccurrenceMatchEvent[],
@@ -247,8 +250,7 @@ export function activeMatches(
     events.filter((event) => event.kind === "reverse").map((event) => event.reversesMatchId),
   );
   return occurrenceEvents(occurrence, events).filter(
-    (event) =>
-      event.kind === "match" && occurrence.matchIds.includes(event.id) && !reversed.has(event.id),
+    (event) => event.kind === "match" && !reversed.has(event.id),
   );
 }
 
@@ -323,8 +325,10 @@ export function scenarioPlan(
   const budgetAllocations: { categoryId: string; limit: number }[] = [];
   for (const row of draft.allocations) {
     const limit = scenarioAmount(row.limit);
-    if (!row.categoryId || limit === undefined)
-      return { problem: `${label}: give each spending line a category and an amount.` };
+    if (!row.categoryId || !limit)
+      return {
+        problem: `${label}: give each spending line a category and an amount above 0.`,
+      };
     if (budgetAllocations.some((item) => item.categoryId === row.categoryId))
       return { problem: `${label}: include each spending category only once.` };
     budgetAllocations.push({ categoryId: row.categoryId, limit });
@@ -390,4 +394,23 @@ export function exactCents(amount: number): number | undefined {
   return Number.isFinite(amount) && Number(amount.toFixed(2)) === amount
     ? Math.round(amount * 100)
     : undefined;
+}
+
+/**
+ * A recurring item's expected amount. The item carries no currency of its own: it takes its
+ * account's, and an item with no account uses the product's USD default. While its account is
+ * not known the amount is shown without a currency instead of guessing one.
+ */
+export function recurringAmount(
+  item: RecurringItem,
+  accounts: readonly { id: string; currencyCode: string | null }[] | undefined,
+) {
+  if (!item.accountId) return formatMoney(item.expectedAmount, null);
+  const currency = accounts?.find((account) => account.id === item.accountId)?.currencyCode;
+  return currency
+    ? formatMoney(item.expectedAmount, currency)
+    : item.expectedAmount.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
 }

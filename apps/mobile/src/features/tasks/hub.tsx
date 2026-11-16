@@ -1,12 +1,15 @@
 import type { TaskList, TaskProject } from "@personal-os/domain";
-import { router } from "expo-router";
-import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useRef, useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { FilterChip } from "../../components/filter-chip";
 import { Icon, type IconName } from "../../components/icons";
+import { SettingLabel, SettingValue } from "../../components/settings-row-content";
 import { useWorkspaceHeaderInset } from "../../components/workspace-header-inset";
 import { radius, spacing, useTheme, workspaceColor } from "../../theme";
 import {
+  type ContainerRow,
   containerDirectory,
   type ProjectStatus,
   projectEmptyMessage,
@@ -15,9 +18,10 @@ import {
 } from "./container-directory";
 import { ListRow, PinnedContainers, ProjectRow } from "./container-rows";
 import { useTaskAction, useTaskApi, useTaskResources, useTaskSearch } from "./data";
-import { partitionPinned } from "./presentation";
+import { browseScopes, containerScope, type TaskScope, useItemCounts } from "./navigation-counts";
+import { itemCount, partitionPinned } from "./presentation";
 import { TaskListScreen } from "./task-list";
-import { Group, Heading, NavigationRow, SearchField, State } from "./ui";
+import { Group, Heading, NavigationRow, SearchField, State, styles } from "./ui";
 export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "archive" }) {
   const t = useTheme();
   const headerInset = useWorkspaceHeaderInset();
@@ -47,19 +51,13 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
     filtered,
     mode === "archive" ? undefined : preferences,
   );
-  const go = (title: string, params: Record<string, string>) =>
-    router.push({ pathname: "/task-browser", params: { title, ...params } });
+  const go = (title: string, scope: TaskScope) =>
+    router.push({ pathname: "/task-browser", params: { title, ...scope } });
+  // A row opens and counts one scope, so its count is the total of the list it opens (before
+  // any search narrows that list).
+  const scopeOf = (row: ContainerRow) => containerScope(row, mode === "archive");
   const openContainer = (kind: "list" | "project", record: TaskList | TaskProject) =>
-    go(record.name, {
-      view: "all",
-      ...(mode === "archive" || (kind === "project" && (record as TaskProject).lifecycle !== "open")
-        ? { status: "all" }
-        : {}),
-      kind: "task",
-      ...(kind === "list"
-        ? { listId: record.id }
-        : { projectId: record.id, listId: (record as TaskProject).listId }),
-    });
+    go(record.name, scopeOf({ kind, record } as ContainerRow));
   const pin = (kind: "list" | "project", id: string) => {
     if (!resources.settings.data) return;
     const key = kind === "list" ? "pinnedListIds" : "pinnedProjectIds";
@@ -80,34 +78,64 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
       }),
     );
   };
-  const links: { label: string; icon: IconName; press: () => void }[] = [
-    { label: "All tasks & reminders", icon: "views", press: () => go("all", { view: "all" }) },
-    { label: "Upcoming", icon: "clock", press: () => go("upcoming", { view: "upcoming" }) },
-    {
-      label: "Scheduled",
-      icon: "calendar",
-      press: () => go("scheduled", { view: "all", reserved: "scheduled", sort: "reserved" }),
-    },
-    {
-      label: "Reminders",
-      icon: "attention",
-      press: () => go("reminders", { view: "all", kind: "reminder" }),
-    },
-    { label: "Tasks", icon: "tasks", press: () => go("tasks", { view: "all", kind: "task" }) },
-    { label: "Trash", icon: "trash", press: () => go("trash", { view: "trash" }) },
+  const browse: { label: string; icon: IconName; view: keyof typeof browseScopes }[] = [
+    { label: "All tasks & reminders", icon: "views", view: "all" },
+    { label: "Upcoming", icon: "clock", view: "upcoming" },
+    { label: "Scheduled", icon: "calendar", view: "scheduled" },
+    { label: "Reminders", icon: "attention", view: "reminders" },
+    { label: "Tasks", icon: "tasks", view: "tasks" },
+    { label: "Trash", icon: "trash", view: "trash" },
+    { label: "History", icon: "history", view: "history" },
+  ];
+  const searching = mode === "views" && !!search.trim();
+  // Browse reads its seven totals here; a list or project row reads its own, so a long
+  // directory asks only for the rows it has drawn.
+  const totals = useItemCounts(
+    mode === "views" && !searching ? browse.map(({ view }) => browseScopes[view]) : [],
+  );
+  // Coming back to a directory re-reads the counts on screen, and the lists and projects the
+  // Archive count is taken from, so they follow changes made elsewhere. The first focus is the
+  // mount, whose reads are already under way.
+  const client = useQueryClient();
+  const focused = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (focused.current)
+        for (const key of ["count", "lists", "projects"])
+          void client.refetchQueries({ queryKey: ["tasks", key], type: "active" });
+      focused.current = true;
+    }, [client]),
+  );
+  const links: {
+    label: string;
+    icon: IconName;
+    count?: number;
+    unit?: string;
+    press: () => void;
+  }[] = [
+    ...browse.map(({ label, icon, view }, index) => ({
+      label,
+      icon,
+      count: totals[index],
+      press: () => go(view, browseScopes[view]),
+    })),
     {
       label: "Archive",
       icon: "archive",
+      // Archive lists containers, so it counts them, and only once both directories are read.
+      unit: "container",
+      count:
+        resources.lists.data && resources.projects.data
+          ? containerDirectory({ mode: "archive", search: "", lists, projects }).length
+          : undefined,
       press: () => router.push({ pathname: "/task-containers", params: { mode: "archive" } }),
     },
-    { label: "History", icon: "history", press: () => go("history", { view: "history" }) },
   ];
   const loading =
     resources.lists.isPending || resources.projects.isPending || resources.settings.isPending;
   const failed =
     resources.lists.isError || resources.projects.isError || resources.settings.isError;
-  if (mode === "views" && search.trim())
-    return <TaskListScreen title="search" scope={{ view: "all" }} />;
+  if (searching) return <TaskListScreen title="search" scope={{ view: "all" }} />;
   return (
     <View style={{ flex: 1, backgroundColor: t.canvas }}>
       <FlatList
@@ -149,6 +177,10 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
                         key={link.label}
                         accessibilityRole="button"
                         accessibilityLabel={link.label}
+                        accessibilityValue={
+                          link.count === undefined ? undefined : { text: itemCount(link.count) }
+                          // Only Upcoming and History are cards, and both count items.
+                        }
                         onPress={link.press}
                         style={({ pressed }) => ({
                           width: 160,
@@ -160,7 +192,14 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
                           opacity: pressed ? 0.6 : 1,
                         })}
                       >
-                        <Icon name={link.icon} size={24} color={workspaceColor(t, "tasks")} />
+                        <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                          <Icon name={link.icon} size={24} color={workspaceColor(t, "tasks")} />
+                          {link.count !== undefined && (
+                            <Text style={{ color: t.secondary, fontSize: 17 }}>
+                              {link.count.toLocaleString("en-US")}
+                            </Text>
+                          )}
+                        </View>
                         <Text style={{ color: t.ink, fontSize: 17, fontWeight: "600" }}>
                           {link.label}
                         </Text>
@@ -196,14 +235,7 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
                     <Group>
                       {group.labels.map((label) => {
                         const link = links.find((item) => item.label === label);
-                        return link ? (
-                          <NavigationRow
-                            key={label}
-                            label={label}
-                            icon={link.icon}
-                            onPress={link.press}
-                          />
-                        ) : null;
+                        return link ? <CountRow key={label} {...link} /> : null;
                       })}
                     </Group>
                   </View>
@@ -266,6 +298,9 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
                     : undefined
                 }
                 onOpen={(record) => openContainer(mode === "lists" ? "list" : "project", record)}
+                scopeOf={(record) =>
+                  scopeOf({ kind: mode === "lists" ? "list" : "project", record } as ContainerRow)
+                }
               />
             )}
           </>
@@ -297,6 +332,7 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
             first: index === 0,
             last: index === directoryRows.length - 1,
             pinned: !!pinned,
+            scope: scopeOf({ kind, record } as ContainerRow),
             disabled: action.pending || !preferences || mode === "archive",
             onOpen: () => openContainer(kind, record),
             onPin: () => pin(kind, record.id),
@@ -315,5 +351,39 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
         }}
       />
     </View>
+  );
+}
+/**
+ * A Browse destination with its item count before the chevron. The count is the row's value,
+ * so a screen reader hears "Trash, 2 items" while the label stays the destination's name.
+ */
+function CountRow({
+  label,
+  icon,
+  count,
+  unit,
+  press,
+}: {
+  label: string;
+  icon: IconName;
+  count?: number;
+  /** What the count counts when it is not items: Archive counts containers. */
+  unit?: string;
+  press: () => void;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityValue={count === undefined ? undefined : { text: itemCount(count, unit) }}
+      onPress={press}
+      style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}
+    >
+      <Icon name={icon} color={t.secondary} size={22} />
+      <SettingLabel>{label}</SettingLabel>
+      {count !== undefined && <SettingValue>{count.toLocaleString("en-US")}</SettingValue>}
+      <Icon name="chevron" color={t.secondary} size={16} />
+    </Pressable>
   );
 }

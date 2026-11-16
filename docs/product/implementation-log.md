@@ -1438,3 +1438,25 @@ details, and restore a deleted event from the delete toast's Undo.
   not included. This is a local candidate covered by focused tests; the simulator check and a
   write against a real Google or iCloud calendar are outstanding. It is not a production or
   TestFlight release.
+
+## 2026-11-16 — Native Calendar blocks, conflicts and free-time check (local candidate)
+
+COO-242 — On iPhone a person can block an event's time on their other calendars as Busy or
+Details, change that or remove the block, see which events conflict with an event, and see
+whether a proposed time is free while creating or editing.
+
+- The app calls the existing block routes (`POST /v1/events/:id/blocks`,
+  `PATCH /v1/events/:id/blocks/:blockId`, `POST /v1/events/:id/blocks/:blockId/trash`) and
+  `GET /v1/events`. No API, schema or shared-component change; the root stack registers the new
+  `calendar-event-blocks` route inside the signed-in guard.
+- A new block starts from the saved busy-block privacy. Each change is reported as done only
+  after the API confirms it, with the event and block revisions the person saw.
+- After an unconfirmed block attempt the next one reads the event and the destination calendar
+  first, and sends nothing when the block is already there, an unlinked copy would be
+  duplicated, the calendar is hidden, or a read fails.
+- Conflicts and the free-time check are computed on the phone from shown calendars with the
+  Calendar review's overlap rule. The API has no free/busy read, so hidden calendars are not
+  counted and repeating series are not compared. The Calendar review stays read-only and is not
+  shown on iPhone.
+- This is a local candidate covered by focused tests. The simulator check and a block written to
+  a real Google or iCloud calendar are outstanding. It is not a production or TestFlight release.

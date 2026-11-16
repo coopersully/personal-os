@@ -552,6 +552,58 @@ own calendars, and for a provider event only when it has no guests, repeat rule 
 all-day event that nohmi changed since its last sync. Otherwise the confirmation says the delete
 cannot be undone from nohmi.
 
+### Calendar blocks, conflicts and the free-time check
+
+Event details offer Block time in the top-right action control for any event that is not itself
+a block and has another writable calendar to block, including an event on a read-only calendar.
+When the event already blocks time, a row names each calendar and how its block reads, and opens
+the same page.
+
+Block time follows [Mobile settings-style forms](mobile-forms.md). New blocks show starts from
+the saved busy-block privacy (Busy when Calendar guidance is not active) and applies to blocks
+added on this visit; it is not saved back. Each other writable calendar has one switch, Block on
+<calendar>, and a blocked calendar adds <calendar> shows to change that block between Busy and
+Details. Busy shows only that the person is busy; Details copies the event's title, location and
+notes. The event's own calendars and read-only calendars are not offered. The same occurrence
+can sit on several calendars, each with its own linked copy on one destination; a switch or
+choice changes every copy there.
+
+Every switch and choice is one write to a real calendar. It is one Sonner toast from pending to
+its outcome with no result copy on the page, and the control moves only after the API confirms
+the change. Each write carries the event and block revisions the page showed. A change made
+elsewhere is reported as such, sends nothing further and re-reads the event. Once one of several
+copies has changed, a later failure is reported as unconfirmed.
+
+An unconfirmed block attempt (no response, a server or provider failure, or a refusal that
+carried a provider effect) is remembered for that event and calendar until one is confirmed or
+the app restarts. The next attempt there reads before it writes:
+
+- The event is read first. If it now carries the block, that is reported and nothing is sent.
+- A hidden calendar's events cannot be read back, so nothing is sent and the toast says to show
+  the calendar or check it in the provider's app.
+- Otherwise that calendar is read over the event's days. An unlinked copy of a Details block, or
+  more than one unlinked Busy copy, would be written again, so nothing is sent and the toast says
+  to remove it first. One unlinked Busy copy is sent on, because the API links it instead of
+  writing another.
+- When the failure said the provider took the block but nohmi could not link it, nothing is sent
+  until that copy has synced.
+- If either read fails, nothing is sent.
+
+Removing a block or changing what it shows can be tried again after an unconfirmed result: the
+page is re-read first and the next attempt carries the revisions it then shows.
+
+Event details list Conflicts when another event overlaps this one, using the Calendar review's
+rule: timed, busy, not cancelled, not a linked block and not a repeating series, with touching
+ends not counted. Each row opens the other event. Nothing is listed for an event the rule leaves
+out. A failed check shows one retry row and no toast.
+
+The event form states under When whether the time on screen is free: free, or the first
+overlapping event and how many more. It is read again whenever the time changes, shows nothing
+while reading or while the end is not after the start, says that all-day events are not
+compared, and offers Check this time again after a failed read. It never stops a save. Both
+checks see only the calendars the person shows, and say so; the API has no free/busy read that
+includes hidden calendars. The Calendar review itself is not opened or changed on iPhone.
+
 ### Briefings and compact record rows
 
 Today is a short, cross-workspace briefing: Needs you, Coming up, and Handled for you. Bound each preview to three entries and link directly to the existing entity detail or workspace view. Use Tasks' authoritative Auto ordering for today's open work, including overdue tasks; combine upcoming tasks/reminders with expected Finance occurrences using the user's timezone. Label expected amounts rather than implying payment. Only confirmed applied agent actions belong under Handled for you; pending proposals and the user's actions do not. Distinguish partial/unavailable reads from an empty or all-clear state and make freshness and refresh accessible. The native briefing covers Tasks, Calendar, Mail and Finance; complete connection monitoring is not part of it.

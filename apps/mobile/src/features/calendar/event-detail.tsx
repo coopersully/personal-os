@@ -15,6 +15,8 @@ import {
   useCalendars,
   useEventWrites,
 } from "./data";
+import { blockSummary, blockTargets, canBlockEvent } from "./event-blocks";
+import { EventConflicts } from "./event-conflicts";
 import { canChangeEvent, canRestoreFaithfully } from "./event-draft";
 import {
   attendeeLabel,
@@ -36,7 +38,10 @@ function open(url: string) {
   void Linking.openURL(url).catch(() => toast.error("Couldn’t open this link."));
 }
 
-/** Event details. Edit and Delete are offered only where the person may change the event. */
+/**
+ * Event details. Edit and Delete are offered only where the person may change the event;
+ * Block time wherever another calendar can take a block, even for an event that is read only.
+ */
 export function CalendarEventScreen() {
   const t = useTheme();
   const tint = workspaceColor(t, "calendar");
@@ -84,7 +89,13 @@ export function CalendarEventScreen() {
   const reminders = event.reminders ?? [];
   const attendees = event.attendees ?? [];
   // The list's copy may be stale; actions wait for the record the API confirms.
-  const changeable = !query.isPlaceholderData && canChangeEvent(event, calendar);
+  const confirmed = !query.isPlaceholderData;
+  const changeable = confirmed && canChangeEvent(event, calendar);
+  const blockable =
+    confirmed && canBlockEvent(event) && blockTargets(event, calendars.data ?? []).length > 0;
+  const blocks = blockSummary(event, calendars.data ?? []);
+  const openBlocks = () =>
+    router.push({ pathname: "/calendar-event-blocks", params: { id: event.id } });
   const remove = () =>
     confirm(
       "Delete event?",
@@ -108,26 +119,39 @@ export function CalendarEventScreen() {
       <Stack.Screen
         options={editorActionsOptions(
           "Event actions",
-          changeable
-            ? [
-                {
-                  id: "edit",
-                  label: "Edit",
-                  icon: "edit",
-                  disabled: writes.pending,
-                  onPress: () =>
-                    router.push({ pathname: "/calendar-event-edit", params: { id: event.id } }),
-                },
-                {
-                  id: "delete",
-                  label: "Delete",
-                  icon: "trash",
-                  destructive: true,
-                  disabled: writes.pending,
-                  onPress: remove,
-                },
-              ]
-            : [],
+          [
+            ...(blockable
+              ? [
+                  {
+                    id: "block",
+                    label: "Block time",
+                    icon: "calendar" as const,
+                    disabled: writes.pending,
+                    onPress: openBlocks,
+                  },
+                ]
+              : []),
+            ...(changeable
+              ? [
+                  {
+                    id: "edit",
+                    label: "Edit",
+                    icon: "edit" as const,
+                    disabled: writes.pending,
+                    onPress: () =>
+                      router.push({ pathname: "/calendar-event-edit", params: { id: event.id } }),
+                  },
+                  {
+                    id: "delete",
+                    label: "Delete",
+                    icon: "trash" as const,
+                    destructive: true,
+                    disabled: writes.pending,
+                    onPress: remove,
+                  },
+                ]
+              : []),
+          ],
           t,
         )}
       />
@@ -200,6 +224,15 @@ export function CalendarEventScreen() {
               }
             />
           )}
+          {!!blocks && (
+            <RecordRow
+              title="Blocks time on other calendars"
+              subtitle={blocks}
+              leading={icon("calendar")}
+              accessibilityHint={blockable ? "Opens Block time" : undefined}
+              onPress={blockable ? openBlocks : undefined}
+            />
+          )}
           {!!reminders.length && (
             <RecordRow
               title="Reminders"
@@ -208,6 +241,7 @@ export function CalendarEventScreen() {
             />
           )}
         </Card>
+        <EventConflicts event={event} timeZone={timeZone} calendars={calendars.data} />
         {!!attendees.length && (
           <View style={{ gap: spacing.sm }}>
             <SectionTitle>Guests</SectionTitle>

@@ -83,18 +83,18 @@ export function timeCanConflict(
 }
 
 /**
- * Whether a listed record is this event: the record itself, or the one record the list shows
- * for an occurrence that also sits on this event's calendar. The API exposes no occurrence
- * identity, so the other copy is recognised by its calendars, exact time and title.
+ * Whether a record listed under another id could be this event's occurrence on another
+ * calendar: same title and exact time, and its calendars include this event's. The API exposes
+ * no occurrence identity, so this is a likeness, never proof; two meetings can share all of it.
  */
-export function isSameOccurrence(listed: CalendarEvent, event: CalendarEvent) {
+export function looksLikeOccurrence(listed: CalendarEvent, event: CalendarEvent) {
   return (
-    listed.id === event.id ||
-    (!listed.blockSourceEventId &&
-      listed.title === event.title &&
-      listed.startsAt === event.startsAt &&
-      listed.endsAt === event.endsAt &&
-      !!listed.sourceCalendarIds?.includes(event.calendarId))
+    listed.id !== event.id &&
+    !listed.blockSourceEventId &&
+    listed.title === event.title &&
+    listed.startsAt === event.startsAt &&
+    listed.endsAt === event.endsAt &&
+    !!listed.sourceCalendarIds?.includes(event.calendarId)
   );
 }
 
@@ -105,12 +105,20 @@ export function overlapping(
   /** The event the span belongs to, which never conflicts with itself. */
   self?: CalendarEvent,
 ) {
+  // The event is left out by its own id. Only when the list does not hold that id is a single
+  // look-alike taken to be it; with several, hiding one could hide a real conflict.
+  const alike = self ? events.filter((event) => looksLikeOccurrence(event, self)) : [];
+  const own = events.some((event) => event.id === self?.id)
+    ? self?.id
+    : alike.length === 1
+      ? alike[0]?.id
+      : undefined;
   const from = new Date(span.startsAt).getTime();
   const to = new Date(span.endsAt).getTime();
   return events
     .filter(
       (event) =>
-        !(self && isSameOccurrence(event, self)) &&
+        event.id !== own &&
         timeCanConflict(event) &&
         new Date(event.startsAt).getTime() < to &&
         new Date(event.endsAt).getTime() > from,

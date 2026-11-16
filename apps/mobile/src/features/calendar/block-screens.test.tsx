@@ -842,8 +842,8 @@ it("changes every linked copy of an occurrence that sits on several calendars", 
   expect(button("Personal shows, Busy")).toBeVisible();
   cleanup();
 
-  // Opened by the id of the copy the list does not show: the occurrence is matched by its
-  // calendars and time, and a block both reads return is counted once.
+  // Opened by the id of the copy the list does not show: the listed record is this occurrence
+  // because it carries this event's own block, which both reads return and is counted once.
   const own = block("busy", { sourceEventId: "Standup" });
   serve({ ...standup, blocks: [own] });
   h.api.listEvents.mockResolvedValue([
@@ -851,7 +851,7 @@ it("changes every linked copy of an occurrence that sits on several calendars", 
       ...standup,
       id: "Canonical",
       calendarId: "team",
-      blocks: [{ ...own, sourceEventId: "Canonical" }, mirror],
+      blocks: [own, mirror],
       sourceCalendarIds: ["team", "work"],
     },
     { ...standup, id: "Elsewhere", calendarId: "team", blocks: [mirror] },
@@ -866,14 +866,11 @@ it("changes every linked copy of an occurrence that sits on several calendars", 
   await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
   cleanup();
 
-  // Two records fit under other ids, so neither is taken for this event: another meeting's
-  // blocks must never be changed from here.
+  // A single look-alike under another id proves nothing: it may be another meeting with the
+  // same title and time, whose blocks must never be changed from here.
   serve(standup);
   const twin = { ...standup, id: "Twin", calendarId: "team", sourceCalendarIds: ["team", "work"] };
-  h.api.listEvents.mockResolvedValue([
-    { ...twin, blocks: [mirror] },
-    { ...twin, id: "Twin-2", blocks: [mirror] },
-  ]);
+  h.api.listEvents.mockResolvedValue([{ ...twin, blocks: [mirror] }]);
   await openBlocks();
   expect(toggle("Block on Personal").checked).toBe(false);
   expect(toggle("Block on Team").checked).toBe(false);

@@ -121,6 +121,15 @@ it("finds the timed busy events that overlap a span, the way the Calendar review
   expect(
     overlapping(span, [{ ...canonical, title: "Other" }], standup).map(({ id }) => id),
   ).toEqual(["Canonical"]);
+  // A second meeting with the same title, time and calendar is a real conflict, never hidden.
+  const twin = { ...standup, id: "Twin", sourceCalendarIds: ["work"] };
+  expect(overlapping(span, [standup, twin], standup).map(({ id }) => id)).toEqual(["Twin"]);
+  // With two look-alikes and no record of its own, neither is assumed to be the event.
+  expect(
+    overlapping(span, [canonical, { ...canonical, id: "Canonical-2" }], standup).map(
+      ({ id }) => id,
+    ),
+  ).toEqual(["Canonical", "Canonical-2"]);
   // Without an event of its own, a proposed time is compared with everything.
   expect(overlapping(span, [standup, later]).map(({ id }) => id)).toEqual(["Standup"]);
 });

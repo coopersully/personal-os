@@ -599,10 +599,13 @@ notes and link. A calendar with several linked copies reads as Details when any 
 can sit on several calendars, each with its own linked copy on one destination; a switch or
 choice changes every copy there. One event record carries only its own blocks, so the page and
 the details row also read the event list for that time, which names the other calendars and
-their blocks. The list shows one record per occurrence, so when the event was opened
-by another copy's id it is matched by its calendar, exact time and title, and only when exactly
-one listed record fits; the API exposes no occurrence identity. The same match keeps an event
-from being listed as its own conflict. Opened for an event on a
+their blocks. The list shows one record per occurrence, and the API exposes no
+occurrence identity. A record listed under another copy's id is taken for this event only when
+it carries a block linked to this very event; a record that merely has the same title, time and
+calendar could be another meeting, so its blocks are never merged or changed. An event opened
+by a non-listed copy's id that has no block of its own therefore shows only its own record. In
+the conflict checks an event is left out by its own id, or, when the list does not hold that id,
+by a single look-alike; two look-alikes are both listed. Opened for an event on a
 hidden calendar, which the list does not return, the page knows only that record's own blocks.
 
 Every switch and choice is one write to a real calendar. It is one Sonner toast from pending to

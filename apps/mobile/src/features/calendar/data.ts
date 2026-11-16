@@ -24,8 +24,8 @@ import { errorMessage } from "../tasks/data";
 import {
   type BlockTarget,
   blockModeLabels,
-  isSameOccurrence,
   isUnlinkedCopy,
+  looksLikeOccurrence,
 } from "./event-blocks";
 import { canRestoreFaithfully, eventRevision } from "./event-draft";
 import { calendarRange, type WeekStart } from "./logic";
@@ -127,12 +127,18 @@ export function useEventsDuring(span: { startsAt: string; endsAt: string } | nul
  */
 export function useEventOccurrence(event: CalendarEvent | undefined) {
   const read = useEventsDuring(event ? { startsAt: event.startsAt, endsAt: event.endsAt } : null);
-  // The list shows one record per occurrence, which may be its copy on another calendar. With
-  // no occurrence identity from the API, another id is taken only when exactly one record fits.
-  const same = event ? (read.data ?? []).filter((listed) => isSameOccurrence(listed, event)) : [];
+  // The list shows one record per occurrence, which may be its copy on another calendar. A
+  // record under another id is taken for this event only on proof: it carries a block linked
+  // to this very event. A look-alike alone could be another meeting, whose blocks must never
+  // be changed from here.
   const listed =
-    same.find((candidate) => candidate.id === event?.id) ??
-    (same.length === 1 ? same[0] : undefined);
+    event &&
+    (read.data?.find((candidate) => candidate.id === event.id) ??
+      read.data?.find(
+        (candidate) =>
+          looksLikeOccurrence(candidate, event) &&
+          (candidate.blocks ?? []).some((block) => block.sourceEventId === event.id),
+      ));
   const merged = useMemo(() => {
     if (!event || !listed) return event;
     // The record is the newer authority for its own blocks; the list adds the other copies'.

@@ -395,6 +395,51 @@ transaction list read does not return parts, so a list row cannot yet tell a spl
 from an uncategorized one. The reusable merchant rule the web dialog offers for a single-category
 breakdown is not offered on iPhone.
 
+### Finance goal management
+
+Plan › Wealth lists every goal that has not been removed and offers Add as a command above the
+list, for the same reason Spending has no floating plus. A goal row opens the goal's own page,
+which shows its confirmed progress, target, deadline, priority and status. Its top-right action
+menu holds Edit goal, Confirm progress, Pause goal or Resume goal, Mark complete and, last and
+destructive, Remove goal. Pause is offered for an active goal, Resume for a paused one, and Mark
+complete until the goal is completed. Mark complete and Remove goal each keep a native
+confirmation that names the goal; Pause and Resume act at once. In the browser build, where the
+native alert does nothing, these confirmations and the forms' discard prompt use the browser's own
+confirmation. A removed goal leaves the list and its page closes.
+
+Progress is a recorded statement, never an inference: the person's own, or one their agent
+recorded for them, which the goal page labels as such. A goal shows an amount and a
+percentage only when the server returns a statement recorded for exactly the goal version on
+screen, owned by the signed-in person, matching the recorded amount and not dated in the future;
+the app applies the same rule as the domain's planning-evidence check, whose currency lookup is
+unavailable in the app runtime. Otherwise the goal reads "progress not confirmed" and its recorded
+amount is not shown as progress. Every change to a goal starts a new version, so an edit, pause,
+resume or completion returns the goal to "progress not confirmed"; the edit form and the
+completion prompt say so; Pause and Resume do not warn. A goal has no currency of its own: its
+target reads in the currency of its latest progress statement, even one that no longer applies,
+or the product's USD default when it has none.
+
+The add and edit form holds Name, Target, Deadline and Priority and a floating Save. Name and
+Target are required, with Required as their placeholder. The target is at most 21,474,836.47,
+the largest the stored record holds, although the API accepts more;
+an empty Deadline reads as not set. Confirm progress is its own form: Amount (zero is valid), Currency and As of, which
+defaults to today in the account planning timezone and cannot be later. Currency starts from the
+goal's last statement. Each form names its required fields. An invalid Target, Amount or Currency
+states its correction beside the field; a typed Deadline or As of that is not a real calendar
+date holds Save and is corrected in a line under the fields; a future As of date is corrected in a line under the
+fields, and a cleared one only disables Save.
+
+Every goal write carries the version that was on screen and an idempotency key. The key is kept
+while the outcome is unknown and replaced only after a definitive rejection, so repeating the same
+change cannot act twice. A changed goal is a conflict: the toast says to review the latest version
+and nothing is overwritten. After an add whose outcome is unknown, saving the same draft repeats
+it under the same key; saving a corrected draft first looks for a new goal under the earlier name
+and adds nothing when it finds one. An earlier attempt that reaches the server only after that
+look can still leave two goals; closing that gap needs a server-side key shared by both drafts.
+A goal's actions stay disabled until the changed goal is on screen, so a second press cannot send
+the version the first one replaced. One toast runs from loading to the confirmed result; a failed
+or unknown save keeps the draft and the form open and never reads as saved.
+
 ### Transaction conversations and review
 
 - Needs your input cards show merchant, amount and category, and open the canonical transaction details page. Details place attention on the category row itself, with direct selection and approval. Do not duplicate the field with a separate Choose category banner/button. Notes remain optional and never count as a missing required field. This is record state, not action-result feedback.

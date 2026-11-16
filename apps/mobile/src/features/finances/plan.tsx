@@ -4,6 +4,7 @@ import { BalanceAttention, balanceHint, balancesFor } from "./balances";
 import { BudgetOverview } from "./budget-overview";
 import { categoryIcon } from "./category-presentation";
 import { useFinanceRead, useUpcoming } from "./data";
+import { FinanceGoals } from "./goals";
 import { expectedAmount, financeLabel, formatLocalDate, formatMoney } from "./presentation";
 import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Section, Segments } from "./ui";
 import { upcomingCategory, useUpcomingCategories } from "./upcoming-category";
@@ -112,7 +113,6 @@ function Cashflow() {
 function Wealth() {
   const query = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
   const balances = query.data ? balancesFor(query.data) : null;
-  const goals = useFinanceRead(["goals"], (api) => api.listFinanceGoals());
   return (
     <>
       <ReadState query={query}>
@@ -141,29 +141,7 @@ function Wealth() {
           </>
         )}
       </ReadState>
-      <Section title="Goals">
-        <ReadState query={goals}>
-          <Card>
-            {goals.data?.data.length ? (
-              goals.data.data.map((goal) => (
-                <FinanceRow
-                  key={goal.id}
-                  title={goal.name}
-                  subtitle={`${formatMoney(goal.currentAmount, "USD")} of ${formatMoney(goal.targetAmount, "USD")}${goal.deadline ? ` · by ${formatLocalDate(goal.deadline)}` : ""}`}
-                  value={
-                    goal.targetAmount > 0
-                      ? `${Math.round((goal.currentAmount / goal.targetAmount) * 100)}%`
-                      : undefined
-                  }
-                  icon="target"
-                />
-              ))
-            ) : (
-              <Copy secondary>No goals yet.</Copy>
-            )}
-          </Card>
-        </ReadState>
-      </Section>
+      <FinanceGoals />
     </>
   );
 }

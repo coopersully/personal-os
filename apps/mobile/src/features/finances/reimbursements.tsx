@@ -143,16 +143,19 @@ export function ReimbursementDetail({ id }: { id: string }) {
                         subtitle={`${match.rationale} · ${new Date(match.createdAt).toLocaleDateString()}`}
                         icon="receipt"
                       />
-                      <Actions inset={false}>
-                        <Action
-                          label="Remove receipt match"
-                          accessibilityLabel={`Remove receipt match ${index + 1}`}
-                          destructive
-                          onPress={() =>
-                            go({ view: "reimbursement-correct", id: item.id, match: match.id })
-                          }
-                        />
-                      </Actions>
+                      {/* A cancelled claim cannot be corrected, so no correction is offered. */}
+                      {item.status !== "cancelled" && (
+                        <Actions inset={false}>
+                          <Action
+                            label="Remove receipt match"
+                            accessibilityLabel={`Remove receipt match ${index + 1}`}
+                            destructive
+                            onPress={() =>
+                              go({ view: "reimbursement-correct", id: item.id, match: match.id })
+                            }
+                          />
+                        </Actions>
+                      )}
                     </Card>
                   ))
                 ) : (
@@ -329,17 +332,22 @@ function CorrectionForm({
     if (!request) return;
     lock.current = true;
     setPending(true);
+    const retrying = uncertain;
     const id = toast.loading("Saving reimbursement correction…");
     try {
-      const saved = appliedRecord<FinanceReimbursement>(
-        await api.reconcileFinanceReimbursement(request),
-      );
+      const response = await api.reconcileFinanceReimbursement(request);
+      const saved = appliedRecord<FinanceReimbursement>(response);
       if (!current()) return void toast.dismiss(id);
       attempt.current = null;
       setUncertain(false);
       if (saved?.id !== snapshot.id) {
         setSubmitted(true);
-        toast.info("Submitted for review. The correction has not been applied.", { id });
+        toast.info(
+          "status" in response && response.status === "needs_input"
+            ? "Not applied. nohmi needs an answer from you before this correction can go ahead."
+            : "Submitted for review. The correction has not been applied.",
+          { id },
+        );
         return;
       }
       await refresh();
@@ -348,11 +356,27 @@ function CorrectionForm({
       router.back();
     } catch (error) {
       if (!current()) return void toast.dismiss(id);
-      if (confirmedRejection(error)) {
+      const conflict = error instanceof ApiClientError && error.status === 409;
+      if (conflict && retrying && /already in progress/i.test(error.message)) {
+        // The first send is still running on the server; its outcome stays unknown.
+        toast.error(
+          "The earlier attempt is still being processed. Wait a moment, then retry the same correction.",
+          { id },
+        );
+      } else if (conflict && retrying && /previously failed/i.test(error.message)) {
+        // The server recorded the first send as failed and retired its key: nothing was
+        // saved, and the same draft can go again as a new request.
         attempt.current = null;
         setUncertain(false);
         toast.error(
-          error instanceof ApiClientError && error.status === 409
+          "Nothing was saved. The earlier attempt failed on the server. Save again to send your draft as a new correction.",
+          { id },
+        );
+      } else if (confirmedRejection(error)) {
+        attempt.current = null;
+        setUncertain(false);
+        toast.error(
+          conflict
             ? "Nothing was saved. This reimbursement changed. Close and reopen it to see the latest; your draft is still here."
             : "Couldn’t save this correction. Nothing was changed; your draft is still here.",
           { id },

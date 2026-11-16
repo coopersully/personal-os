@@ -427,8 +427,11 @@ Approvals, and a Reviews and checks list. Every page behind that list is the sin
   Correct expectation and Remove receipt match send the revision on screen and one
   idempotency key. After an unknown outcome the form locks and offers Retry same correction,
   which resends that exact request; only a definite rejection frees the form for a new one.
+  That includes the server reporting the earlier attempt as failed: nothing was saved, the
+  draft stays, and Save sends it under a new key. A cancelled claim offers no correction.
 - **Contextual questions** opened from chat take an answer in place. The same text is resent
-  under the same operation id. A `blocked` answer says nothing was saved and closes the form.
+  under the same operation id, and the text is locked while a send is unconfirmed. A
+  `blocked` answer says nothing was saved and closes the form.
 - **A split transaction under review** reads "Split in N parts". Approve splits keeps the
   parts. Choosing one category asks "Replace N parts?" first, because it removes them.
 

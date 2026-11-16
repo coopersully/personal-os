@@ -19,7 +19,9 @@ const reviewTitle = (review: FinanceActionReview) =>
 
 /** Changes an agent prepared that wait for the person's approval, decided outside chat. */
 export function ActionReviews() {
-  const query = useFinanceRead(["action-reviews"], (api) => api.listFinanceActionReviews());
+  // The list holds every status, newest first; the API's largest page keeps an older
+  // pending review from falling behind newer applied and dismissed ones.
+  const query = useFinanceRead(["action-reviews"], (api) => api.listFinanceActionReviews(200));
   const waiting = (query.data ?? []).filter((review) => review.status === "pending");
   return (
     <Section title="Approvals">

@@ -44,6 +44,9 @@ function ContextAnswer({
   const [pending, setPending] = useState(false);
   // The server refused this revision of the question; a reload may still report it open.
   const [refused, setRefused] = useState(false);
+  // An answer whose outcome is unknown may already be recorded; until that is settled the
+  // text stays as sent, so an edit cannot become a second recorded answer.
+  const [unconfirmed, setUnconfirmed] = useState(false);
   // One answer is one operation: the same text is always resent under the same id.
   const command = useRef<FinanceAnswer | null>(null);
   const busy = useRef(false);
@@ -71,11 +74,12 @@ function ContextAnswer({
     busy.current = true;
     setPending(true);
     const id = toast.loading("Saving context…");
-    const unconfirmed =
+    const unconfirmedMessage =
       "Couldn’t confirm the answer. Send it again; the same answer is never recorded twice.";
     try {
       const outcome = await api.answerFinanceContextualQuestion(command.current);
       if (!current()) return void toast.dismiss(id);
+      setUnconfirmed(outcome.state === "pending" || outcome.state === "uncertain");
       if (outcome.state === "accepted" || outcome.state === "applied") {
         toast.success("Context saved", { id });
         reload();
@@ -87,7 +91,7 @@ function ContextAnswer({
         );
         reload();
       } else if (outcome.state === "pending" || outcome.state === "uncertain")
-        toast.error(unconfirmed, { id });
+        toast.error(unconfirmedMessage, { id });
       else {
         command.current = null;
         toast.error(
@@ -102,10 +106,14 @@ function ContextAnswer({
       if (confirmedRejection(error)) {
         // A rejected operation id cannot be reused; the next send is a new operation.
         command.current = null;
+        setUnconfirmed(false);
         toast.error("Couldn’t save this answer. Nothing was saved; your draft is still here.", {
           id,
         });
-      } else toast.error(unconfirmed, { id });
+      } else {
+        setUnconfirmed(true);
+        toast.error(unconfirmedMessage, { id });
+      }
     } finally {
       busy.current = false;
       if (active.current) setPending(false);
@@ -147,7 +155,7 @@ function ContextAnswer({
               maxLength={10_000}
               value={text}
               onChangeText={setText}
-              editable={!pending}
+              editable={!pending && !unconfirmed}
               placeholder="What this was for"
               placeholderTextColor={t.secondary}
               style={{

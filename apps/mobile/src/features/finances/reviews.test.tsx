@@ -590,6 +590,21 @@ it("holds an unconfirmed approval until the latest state is read", async () => {
   expect(h.success).not.toHaveBeenCalled();
 });
 
+it("reports an approval of an already applied review as applied", async () => {
+  // The server replays the stored result when the review was applied before this tap.
+  h.api.listFinanceActionReviews.mockResolvedValueOnce([actionReview]);
+  h.api.listFinanceActionReviews.mockResolvedValue([{ ...actionReview, status: "applied" }]);
+  h.api.approveFinanceActionReview.mockResolvedValue({ status: "applied", result: {} });
+  mount(<FinanceAssistantScreen />);
+  await screen.findByText("Move Corner market to Groceries");
+  expect(h.api.listFinanceActionReviews).toHaveBeenCalledWith(200);
+  press("Approve Categorization");
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Approved and applied", { id: "feedback" }),
+  );
+  expect(await screen.findByText("No changes waiting for your approval.")).toBeTruthy();
+});
+
 it("dismisses an action review", async () => {
   h.api.dismissFinanceActionReview.mockResolvedValue({ ...actionReview, status: "dismissed" });
   mount(<FinanceAssistantScreen />);
@@ -919,6 +934,14 @@ it("offers no correction for a cancelled reimbursement", async () => {
   expect(await screen.findByText("No receipts recorded yet.")).toBeTruthy();
   expect(screen.getAllByText("Payer not set").length).toBeGreaterThan(0);
   expect(screen.queryByRole("button", { name: "Correct expectation" })).toBeNull();
+  cleanup();
+  h.api.listFinanceReimbursements.mockResolvedValue({
+    reimbursements: [{ ...reimbursement, status: "cancelled" }],
+    unmatchedCredits: [],
+  });
+  open("reimbursement", { id: "r-1" });
+  expect(await screen.findByText("Sam paid part back · ", { exact: false })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Remove receipt match 1" })).toBeNull();
 });
 
 it("says when a reimbursement is no longer listed", async () => {
@@ -1066,6 +1089,68 @@ it.each([
   expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
 });
 
+it("lets a retry the server recorded as failed go again under a new key", async () => {
+  h.api.reconcileFinanceReimbursement.mockRejectedValueOnce(new Error("offline"));
+  await openCorrection();
+  fillCorrection();
+  fireEvent.click(saveCorrection());
+  await waitFor(() => expect(button("Retry same correction")).toBeTruthy());
+  h.api.reconcileFinanceReimbursement.mockRejectedValueOnce(
+    new ApiClientError({
+      code: "conflict",
+      message: "That Finance mutation is already in progress.",
+      status: 409,
+    }),
+  );
+  fireEvent.click(button("Retry same correction"));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "The earlier attempt is still being processed. Wait a moment, then retry the same correction.",
+      { id: "feedback" },
+    ),
+  );
+  h.api.reconcileFinanceReimbursement.mockRejectedValueOnce(
+    new ApiClientError({
+      code: "conflict",
+      message: "That Finance mutation previously failed; use a new idempotency key to retry.",
+      status: 409,
+    }),
+  );
+  fireEvent.click(button("Retry same correction"));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Nothing was saved. The earlier attempt failed on the server. Save again to send your draft as a new correction.",
+      { id: "feedback" },
+    ),
+  );
+  // The draft is kept and editable, and Save sends it as a new request.
+  expect((screen.getByLabelText("Expected amount") as HTMLInputElement).value).toBe("75.00");
+  expect((screen.getByLabelText("Expected amount") as HTMLInputElement).disabled).toBe(false);
+  expect(h.back).not.toHaveBeenCalled();
+  h.api.reconcileFinanceReimbursement.mockResolvedValue(reimbursement);
+  fireEvent.click(button("Save correction"));
+  await waitFor(() => expect(h.success).toHaveBeenCalled());
+  const keys = h.api.reconcileFinanceReimbursement.mock.calls.map((call) => call[0].idempotencyKey);
+  expect(keys[1]).toBe(keys[0]);
+  expect(keys[2]).toBe(keys[0]);
+  expect(keys[3]).not.toBe(keys[0]);
+});
+
+it("says when a correction needs an answer rather than a review", async () => {
+  h.api.reconcileFinanceReimbursement.mockResolvedValue({ status: "needs_input", question: {} });
+  await openCorrection();
+  fillCorrection();
+  fireEvent.click(saveCorrection());
+  await waitFor(() =>
+    expect(h.info).toHaveBeenCalledWith(
+      "Not applied. nohmi needs an answer from you before this correction can go ahead.",
+      { id: "feedback" },
+    ),
+  );
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.back).not.toHaveBeenCalled();
+});
+
 it("does not call a correction saved when it was only submitted for review", async () => {
   h.api.reconcileFinanceReimbursement.mockResolvedValue({ status: "pending_review", review: {} });
   await openCorrection();
@@ -1182,6 +1267,8 @@ it("resends an unconfirmed answer as the same operation and a changed one as new
       { id: "feedback" },
     ),
   );
+  // Until the outcome is known the text stays as sent.
+  expect((screen.getByLabelText("Your answer") as HTMLInputElement).disabled).toBe(true);
   h.api.answerFinanceContextualQuestion.mockRejectedValueOnce(rejection(400));
   press("Save context");
   await waitFor(() =>
@@ -1191,6 +1278,7 @@ it("resends an unconfirmed answer as the same operation and a changed one as new
     ),
   );
   h.api.answerFinanceContextualQuestion.mockResolvedValue({ state: "accepted" });
+  expect((screen.getByLabelText("Your answer") as HTMLInputElement).disabled).toBe(false);
   type("Your answer", "Weekly shop, flat");
   press("Save context");
   await waitFor(() => expect(h.success).toHaveBeenCalled());

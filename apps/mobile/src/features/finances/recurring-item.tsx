@@ -59,6 +59,8 @@ function ItemActions({
   const t = useTheme();
   const { api } = useFinance();
   const write = useFinanceWrite();
+  // Disabled while a change is sent and until the item has been re-read after it.
+  const busy = write.pending || write.unread;
   const params = { kind, id: item.id };
   const open = item.status === "active" || item.status === "needs_review";
   const change = (operation: Change) => {
@@ -75,7 +77,7 @@ function ItemActions({
       id: "schedule",
       label: revising ? "Revise schedule" : "Confirm schedule",
       icon: "calendar",
-      disabled: write.pending,
+      disabled: busy,
       onPress: () => cashflowPage("schedule", params),
     });
   if (open && isObligation(item) && item.kind !== "savings")
@@ -83,7 +85,7 @@ function ItemActions({
       id: "cost",
       label: costStatement(item) ? "Edit cost statement" : "Confirm cost",
       icon: "receipt",
-      disabled: write.pending,
+      disabled: busy,
       onPress: () => cashflowPage("cost", { id: item.id }),
     });
   if (item.status === "active")
@@ -91,7 +93,7 @@ function ItemActions({
       id: "pause",
       label: "Pause",
       icon: "clock",
-      disabled: write.pending,
+      disabled: busy,
       onPress: () => change("pause"),
     });
   else
@@ -99,7 +101,7 @@ function ItemActions({
       id: "resume",
       label: item.status === "needs_review" ? "Confirm pattern" : "Resume",
       icon: item.status === "needs_review" ? "check" : "refresh",
-      disabled: write.pending,
+      disabled: busy,
       onPress: () => change("resume"),
     });
   if (kind === "obligation" && item.status !== "cancelled")
@@ -108,7 +110,7 @@ function ItemActions({
       label: "Mark cancelled",
       icon: "cancel",
       destructive: true,
-      disabled: write.pending,
+      disabled: busy,
       onPress: () =>
         confirmChoice({
           title: `Mark ${item.displayName} cancelled?`,
@@ -139,6 +141,7 @@ export function FinanceRecurringItemScreen() {
         {item ? (
           <FinanceScreen title={item.displayName}>
             <ItemActions item={item} kind={itemKind} revising={!!schedule} />
+            {accounts.isError && <ReadState query={accounts}>{null}</ReadState>}
             <Metric
               label="Expected amount"
               value={recurringAmount(item, accounts.data?.accounts)}

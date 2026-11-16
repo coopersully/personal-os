@@ -1506,7 +1506,7 @@ it("compares scenarios, shows the server's result and marks it stale after an ed
   expect(screen.queryByLabelText("Alternative 1 has no other monthly spending")).toBeNull();
   press("Groceries");
   type("Alternative 1 spending 1 amount", "4x");
-  expect(screen.getByText("Enter an amount such as 400.00.")).toBeTruthy();
+  expect(screen.getByText("Enter an amount above 0, such as 400.00.")).toBeTruthy();
   type("Alternative 1 spending 1 amount", "400");
   type("Baseline goal target", "x");
   expect(screen.getByText("Enter an amount such as 1500.00.")).toBeTruthy();
@@ -1776,4 +1776,66 @@ it("says to resume a paused item instead of pointing at actions it does not offe
   open("item", { kind: "obligation", id: "ob-2" });
   expect(await screen.findByText(/Resume it to revise the schedule\./)).toBeTruthy();
   expect(screen.getByText(/Resume this item to state whether its payment/)).toBeTruthy();
+});
+
+it("keeps an item's actions disabled until it is re-read after a change", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  h.api.manageFinanceRecurringItem.mockResolvedValue(completed({ ...rent, status: "paused" }));
+  h.params = { view: "item", kind: "obligation", id: "ob-1" };
+  render(
+    <QueryClientProvider client={client}>
+      <FinanceCashflowRoute />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Schedule confirmed");
+  h.api.listFinanceRecurringItems.mockRejectedValue(new Error("offline"));
+  press("Pause");
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Recurring item paused", { id: "feedback" }),
+  );
+  // The write is confirmed, but the item shown is still the one it replaced.
+  expect(button("Pause")).toHaveProperty("disabled", true);
+  expect(button("Mark cancelled")).toHaveProperty("disabled", true);
+  h.api.listFinanceRecurringItems.mockResolvedValue(items([], [{ ...rent, status: "paused" }]));
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ["finances", "owner-a", "recurring-items"] });
+  });
+  expect(await screen.findByRole("button", { name: "Resume" })).toHaveProperty("disabled", false);
+  expect(h.api.manageFinanceRecurringItem).toHaveBeenCalledTimes(1);
+});
+
+it("keeps an open schedule or cost draft when the item is paused elsewhere", async () => {
+  h.api.listFinanceRecurringSchedules.mockResolvedValue([]);
+  h.api.confirmFinanceRecurringSchedule.mockRejectedValue(rejection(409));
+  const view = open("schedule", { kind: "income", id: "inc-1" });
+  await screen.findByText("Confirm schedule");
+  fillSchedule();
+  h.api.listFinanceRecurringItems.mockResolvedValue(items([{ ...payroll, status: "paused" }]));
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(await screen.findByText(/so a schedule cannot be recorded for\s+it/)).toBeTruthy();
+  expect(screen.getByLabelText("First date (ISO date/time)")).toHaveProperty("value", "2026-01-09");
+  expect(save()).toHaveProperty("disabled", true);
+  view.unmount();
+  h.error.mockClear();
+  h.api.listFinanceRecurringItems.mockResolvedValue(items());
+  h.api.manageFinanceRecurringItem.mockRejectedValue(rejection(409));
+  open("cost", { id: "ob-1" });
+  await screen.findByText("Confirm cost");
+  press("Fixed");
+  fireEvent.click(screen.getByLabelText("This is my statement"));
+  h.api.listFinanceRecurringItems.mockResolvedValue(items([], [{ ...rent, status: "paused" }]));
+  fireEvent.click(save());
+  await waitFor(() => expect(h.error).toHaveBeenCalled());
+  expect(await screen.findByText(/so its cost cannot be stated/)).toBeTruthy();
+  expect(button("Cost type, Fixed")).toBeTruthy();
+  expect(save()).toHaveProperty("disabled", true);
+});
+
+it("corrects a zero spending line beside its field", async () => {
+  open("scenarios");
+  await waitFor(() => expect(button("Add baseline spending")).toHaveProperty("disabled", false));
+  press("Add baseline spending");
+  type("Baseline spending 1 amount", "0");
+  expect(screen.getByText("Enter an amount above 0, such as 400.00.")).toBeTruthy();
 });

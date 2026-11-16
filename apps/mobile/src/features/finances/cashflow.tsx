@@ -118,6 +118,7 @@ function ItemRows({ items, kind }: { items: readonly RecurringItem[]; kind: Recu
   const accounts = useCashflowAccounts();
   return (
     <Card rows>
+      {accounts.isError && <ReadState query={accounts}>{null}</ReadState>}
       {items.map((item) => (
         <FinanceRow
           key={item.id}

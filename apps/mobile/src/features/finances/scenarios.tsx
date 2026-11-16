@@ -106,8 +106,8 @@ function ScenarioFields({
                 onChangeText={(limit) => row(item.id, { limit })}
                 editable={!disabled}
                 correction={
-                  item.limit.trim() && scenarioAmount(item.limit) === undefined
-                    ? "Enter an amount such as 400.00."
+                  item.limit.trim() && !scenarioAmount(item.limit)
+                    ? "Enter an amount above 0, such as 400.00."
                     : undefined
                 }
                 keyboardType="decimal-pad"

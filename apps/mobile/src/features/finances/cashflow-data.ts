@@ -95,6 +95,9 @@ export function useFinanceWrite() {
   const { owner } = useFinance();
   const client = useQueryClient();
   const [pending, setPending] = useState(false);
+  // A re-read can fail without failing the write. Until it succeeds, what is on screen may
+  // be the version the write replaced.
+  const [unread, setUnread] = useState(false);
   const lock = useRef(false);
   const attempt = useRef<{ payload: string; key: string } | null>(null);
   const active = useRef(true);
@@ -106,6 +109,19 @@ export function useFinanceWrite() {
       active.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!unread) return;
+    const cache = client.getQueryCache();
+    const waiting = () =>
+      cache
+        .findAll({ queryKey: ["finances", owner], type: "active" })
+        .some((query) => query.state.isInvalidated);
+    if (!waiting()) return setUnread(false);
+    return cache.subscribe(() => {
+      if (!waiting()) setUnread(false);
+    });
+  }, [unread, client, owner]);
 
   async function run(
     input: object,
@@ -158,8 +174,16 @@ export function useFinanceWrite() {
       return false;
     } finally {
       lock.current = false;
-      if (active.current) setPending(false);
+      if (active.current) {
+        setUnread(
+          client
+            .getQueryCache()
+            .findAll({ queryKey: ["finances", owner], type: "active" })
+            .some((query) => query.state.isInvalidated),
+        );
+        setPending(false);
+      }
     }
   }
-  return { pending, run, locked: lock };
+  return { pending, unread, run, locked: lock };
 }

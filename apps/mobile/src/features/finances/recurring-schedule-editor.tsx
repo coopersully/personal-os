@@ -1,6 +1,6 @@
 import type { FinanceRecurringSchedule } from "@personal-os/domain";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { EnumChoice } from "../../components/forms/enum-choice";
 import { PaddedSurfaceRows } from "../../components/forms/form-rows";
 import { SettingsAccentProvider } from "../../components/settings-accent";
@@ -37,6 +37,8 @@ function ScheduleForm(props: {
   previous: FinanceRecurringSchedule | null;
   account: { name: string; currencyCode: string | null } | undefined;
   timezone: string | undefined;
+  /** The item was paused or cancelled after this form opened. */
+  closed: boolean;
 }) {
   const { api } = useFinance();
   const write = useFinanceWrite();
@@ -90,11 +92,17 @@ function ScheduleForm(props: {
       title={previous ? "Revise schedule" : "Confirm schedule"}
       edited={edited}
       pending={write.pending}
-      invalid={!statement}
+      invalid={!statement || props.closed}
       discard="Your schedule statement has not been recorded."
       onSave={() => void save()}
     >
       <Copy secondary>{item.displayName}</Copy>
+      {props.closed && (
+        <Copy>
+          This item is now paused, cancelled or unavailable, so a schedule cannot be recorded for
+          it. Your entries are still here; close this form and resume the item first.
+        </Copy>
+      )}
       <Card rows>
         <PaddedSurfaceRows>
           <FinanceRow
@@ -215,20 +223,24 @@ export function FinanceRecurringScheduleEditor() {
   const schedules = useRecurringSchedules();
   const settled = useSettled(query, schedules, accounts);
   const open = item && (item.status === "active" || item.status === "needs_review");
+  // Once the form has opened it stays: a re-read that finds the item paused must not discard
+  // the entries. The form then says why it cannot be saved.
+  const opened = useRef<Omit<Parameters<typeof ScheduleForm>[0], "closed"> | null>(null);
+  if (!opened.current && settled && item && open && item.revision && schedules.data)
+    opened.current = {
+      item: { ...item, revision: item.revision },
+      kind: itemKind,
+      previous: latestSchedule(schedules.data, { kind: itemKind, id: item.id }),
+      account,
+      timezone,
+    };
   return (
     <ReadState query={until(query, settled)}>
       <Stack.Screen options={{ title: "schedule" }} />
       <ReadState query={accounts}>
         <ReadState query={schedules}>
-          {item && open && item.revision && schedules.data ? (
-            <ScheduleForm
-              key={`${itemKind}:${item.id}`}
-              item={{ ...item, revision: item.revision }}
-              kind={itemKind}
-              previous={latestSchedule(schedules.data, { kind: itemKind, id: item.id })}
-              account={account}
-              timezone={timezone}
-            />
+          {opened.current ? (
+            <ScheduleForm {...opened.current} closed={!open} />
           ) : (
             <FinanceScreen title="Schedule">
               <Copy secondary>

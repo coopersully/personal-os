@@ -1,6 +1,6 @@
 import type { FinanceRecurringObligation } from "@personal-os/domain";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { EnumChoice } from "../../components/forms/enum-choice";
 import { PaddedSurfaceRows, ToggleRow } from "../../components/forms/form-rows";
 import { SettingsAccentProvider } from "../../components/settings-accent";
@@ -28,6 +28,8 @@ function CostForm(props: {
   item: FinanceRecurringObligation & { revision: number };
   account: { name: string; currencyCode: string | null } | undefined;
   today: string | null;
+  /** The item was paused or cancelled after this form opened. */
+  closed: boolean;
 }) {
   const { api } = useFinance();
   const write = useFinanceWrite();
@@ -98,11 +100,17 @@ function CostForm(props: {
       title="Confirm cost"
       edited={edited}
       pending={write.pending}
-      invalid={invalid}
+      invalid={invalid || props.closed}
       discard="Your cost statement has not been saved."
       onSave={() => void save()}
     >
       <Copy secondary>{item.displayName}</Copy>
+      {props.closed && (
+        <Copy>
+          This item is now paused, cancelled or unavailable, so its cost cannot be stated. Your
+          entries are still here; close this form and resume the item first.
+        </Copy>
+      )}
       <Card rows>
         <PaddedSurfaceRows>
           <FinanceRow
@@ -188,17 +196,17 @@ export function FinanceRecurringCost() {
     isObligation(item) &&
     item.kind !== "savings" &&
     (item.status === "active" || item.status === "needs_review");
+  // Once the form has opened it stays: a re-read that finds the item paused must not discard
+  // the entries. The form then says why it cannot be saved.
+  const opened = useRef<Pick<Parameters<typeof CostForm>[0], "item" | "account"> | null>(null);
+  if (!opened.current && settled && item && isObligation(item) && open && item.revision)
+    opened.current = { item: { ...item, revision: item.revision }, account };
   return (
     <ReadState query={until(query, settled)}>
       <Stack.Screen options={{ title: "cost" }} />
       <ReadState query={accounts}>
-        {item && isObligation(item) && open && item.revision ? (
-          <CostForm
-            key={item.id}
-            item={{ ...item, revision: item.revision }}
-            account={account}
-            today={today}
-          />
+        {opened.current ? (
+          <CostForm {...opened.current} today={today} closed={!open} />
         ) : (
           <FinanceScreen title="Cost">
             <Copy secondary>This recurring item is unavailable.</Copy>

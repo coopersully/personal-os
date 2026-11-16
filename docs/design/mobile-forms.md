@@ -355,7 +355,9 @@ masked connection/consent state, legal material, refresh and named disconnect av
 already requested can still arrive; cancelling local setup never claims to recall it.
 
 Workspace preferences group search, behavior and shared web/desktop presentation. Name choices
-that affect other devices rather than suggesting that they change the iPhone layout. Tasks opens
+that affect other devices rather than suggesting that they change the iPhone layout. Say so when a
+shared choice does change iPhone: Tasks row details and "Include archived in search" apply to
+iPhone task rows and task search as well as the web app, and their notes say what each shows. Tasks opens
 its reviewed preferences editor directly, keeping guidance and device-notification links reachable.
 Mail rules and Calendar sources use compact record rows and native child detail pages. Accepted
 writes update the correct owner's cache; older reads cannot silently replace accepted state.

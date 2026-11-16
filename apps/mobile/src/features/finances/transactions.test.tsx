@@ -671,8 +671,9 @@ it("offers Remove only for a transaction in a manual account", async () => {
   view.unmount();
   h.api.getFinanceTransaction.mockResolvedValue({ data: { ...transaction, accountId: linked.id } });
   mount(<FinanceTransactionScreen />);
-  await screen.findByRole("button", { name: "Edit transaction" });
   await screen.findByText(linked.name);
+  await openActions();
+  expect(screen.getByRole("button", { name: "Edit transaction" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Remove transaction" })).toBeNull();
 });
 
@@ -680,7 +681,8 @@ it("does not offer Remove while the account is unknown", async () => {
   h.api.listFinanceAccounts.mockRejectedValue(new Error("offline"));
   h.params = { id: transaction.id };
   mount(<FinanceTransactionScreen />);
-  await screen.findByRole("button", { name: "Edit transaction" });
+  await openActions();
+  expect(screen.getByRole("button", { name: "Edit transaction" })).toBeTruthy();
   await waitFor(() => expect(h.api.listFinanceAccounts).toHaveBeenCalled());
   expect(screen.queryByRole("button", { name: "Remove transaction" })).toBeNull();
 });

@@ -1405,3 +1405,37 @@ Finances pages search their own workspace.
   their fixtures are removed. The unlinked preview settings and monitoring screens remain.
 - This is a local candidate covered by focused tests. It has not been run on a simulator or
   device against a live API, and it is not a production or TestFlight release.
+
+## 2026-11-15 — Native task row details and archived search (local candidate)
+
+COO-219 — iPhone task rows show reserved time and the owning List / Project, and honor the saved
+row-detail preference for estimate, notes and tags. A task search honors "Include archived in
+search".
+
+- Row lines: title, urgency scan line (unchanged), a context line (reserved time,
+  estimate), the List / Project on its own line, up to two lines of notes, then tag chips (five, then a count). Absent values render
+  nothing. A row does not repeat a container its screen is scoped or filtered to.
+- Search: with the preference on, a search without a fixed or chosen status sends `status: "all"`
+  and, outside a list or project, a second read with `status: "archived"` whose matches are
+  listed last under their own heading. A failed search raises one Sonner error; a failed
+  archived read beside other matches offers its own retry. Cancelled tasks say Cancelled. To-do (fixed open status), History and Trash are unchanged.
+- The preference notes no longer say the row-detail toggles configure only the web app.
+- No API, schema or shared-component change.
+- Verified by presentation and screen tests only. Not checked on a simulator or device.
+
+## 2026-11-15 — Native Today includes Calendar and Mail (local candidate)
+
+COO-240 — The iPhone Today briefing adds Today’s events and Mail beside Needs you, Coming up
+and Handled for you.
+
+- Today’s events reads the account’s local day from `GET /v1/events` and shows up to three
+  events that are still running or ahead, then all-day events. A row opens the event detail.
+- Mail reads open Mail attention items from `GET /v1/assistant/attention` and shows the three
+  most important. A row tied to a conversation opens it in the Mail reader; other rows open Mail.
+  Unread inbox mail is not listed; its count is a chip that opens Mail.
+- Calendar and Mail join the existing refresh, focus and foreground reads and the one Today
+  refresh toast. Each section states its own loading, empty, not-set-up and unavailable state, so
+  one failed source leaves the rest of the briefing in place.
+- No API, schema or shared-component change. Coming up still combines tasks, reminders and
+  expected Finance occurrences only; events on later days are not in it.
+- This is a local candidate covered by focused tests. It is not a production or TestFlight release.

@@ -33,7 +33,9 @@ import {
   shortcutBounds,
 } from "./date-shortcuts";
 import { listOption } from "./list-presentation";
+import { viewStatus } from "./navigation-counts";
 import { OptionsMenu } from "./options-menu";
+import { formatTargetDate, itemCount } from "./presentation";
 import { SearchableChoice } from "./searchable-choice";
 import { TaskRow } from "./task-row";
 import {
@@ -93,11 +95,7 @@ export function TaskListScreen({
     group: scope.group ?? preferences?.taskGroup ?? "none",
     status:
       scope.status ??
-      (widenSearch
-        ? ("all" as const)
-        : preferences?.showCompletedTasks && !lifecycleView
-          ? "open_and_completed"
-          : undefined),
+      (widenSearch ? ("all" as const) : viewStatus(scope, preferences?.showCompletedTasks)),
     ...filters,
     // Lists and projects only hold tasks; narrowing by one never returns reminders.
     ...(filters.listId || filters.projectId ? { kind: "task" as const } : {}),
@@ -203,6 +201,17 @@ export function TaskListScreen({
         )
       : [];
   const items = [...matches, ...archivedMatches];
+  // A selected item the loaded results no longer list leaves the selection, so a stale key
+  // can neither count toward the limit of 100 nor hide the way to cancel.
+  const listed = items.map(itemKey).join("\n");
+  const settled = !!page.data;
+  useEffect(() => {
+    if (!settled) return;
+    const keys = new Set(listed.split("\n"));
+    setSelected((current) =>
+      current.every((key) => keys.has(key)) ? current : current.filter((key) => keys.has(key)),
+    );
+  }, [listed, settled]);
   const archivedStart = archivedMatches.length ? matches.length : -1;
   const total =
     page.data && (!searchArchived || archivedPage.data || archivedFailed)
@@ -313,7 +322,17 @@ export function TaskListScreen({
       );
     else execute();
   };
+  // The selection is what is still listed: a refresh that drops a row drops it from the count
+  // and the actions together.
   const selectedItems = items.filter((item) => selected.includes(itemKey(item)));
+  // Select all takes the loaded items that can change, up to the selection limit of 100; a
+  // read-only item would block each action.
+  const selectable = items
+    .filter((item) => !item.readOnly)
+    .slice(0, 100)
+    .map(itemKey);
+  const allSelected =
+    selectedItems.length === selectable.length && selectable.every((key) => selected.includes(key));
   const canAct = selectedItems.length > 0 && selectedItems.every((item) => !item.readOnly);
   return (
     <View style={{ flex: 1, backgroundColor: t.canvas }}>
@@ -375,6 +394,20 @@ export function TaskListScreen({
                 />
               </View>
             </View>
+            {scopedProject && (scopedProject.why || scopedProject.targetDate) && (
+              <View style={{ gap: spacing.xs, marginBottom: spacing.md }}>
+                {!!scopedProject.why && (
+                  <Text numberOfLines={3} style={{ color: t.secondary, fontSize: 15 }}>
+                    {scopedProject.why}
+                  </Text>
+                )}
+                {!!scopedProject.targetDate && (
+                  <Text style={{ color: t.secondary, fontSize: 13 }}>
+                    Target {formatTargetDate(scopedProject.targetDate)}
+                  </Text>
+                )}
+              </View>
+            )}
             <ActiveFilters
               filters={filters}
               choices={menuChoices}
@@ -398,16 +431,23 @@ export function TaskListScreen({
             )}
             <View style={[styles.toolbar, { marginBottom: spacing.md }]}>
               <Text style={{ color: t.secondary, marginRight: "auto" }}>
-                {total === null ? "" : `${total} items`}
+                {total === null ? "" : itemCount(total)}
                 {` · ${menuChoices.find((choice) => choice.key === "sort")?.options.find((option) => option.value === query.sort)?.label ?? "Recommended"}`}
                 {query.group && query.group !== "none" ? ` · Grouped by ${query.group}` : ""}
               </Text>
             </View>
-            {selected.length > 0 && (
+            {selectedItems.length > 0 && (
               <Section>
                 <View style={styles.toolbar}>
-                  <Text style={{ color: t.ink, padding: 12 }}>{selected.length} selected</Text>
+                  <Text style={{ color: t.ink, padding: 12 }}>{selectedItems.length} selected</Text>
                   <Action label="Cancel" onPress={() => setSelected([])} />
+                  {selectable.length > 0 && !allSelected && (
+                    <Action
+                      label="Select all"
+                      disabled={action.pending}
+                      onPress={() => setSelected(selectable)}
+                    />
+                  )}
                   {canAct && (
                     <>
                       {selectedItems.every((item) => !item.deletedAt && isOpen(item)) && (
@@ -514,7 +554,7 @@ export function TaskListScreen({
                   task?.projectId && !query.projectId ? projectNames.get(task.projectId) : undefined
                 }
                 marked={marked}
-                selecting={selected.length > 0}
+                selecting={selectedItems.length > 0}
                 pending={action.pending}
                 first={starts(index)}
                 last={index === items.length - 1 || starts(index + 1)}

@@ -1423,6 +1423,27 @@ search".
 - No API, schema or shared-component change.
 - Verified by presentation and screen tests only. Not checked on a simulator or device.
 
+## 2026-11-15 — Native task select-all, navigation counts and project header (local candidate)
+
+COO-220 — iPhone bulk selection can select every loaded item that can change; Browse, Lists,
+Projects and Archive show item counts; a project page shows the project's why and target date.
+
+- Select all sits in the selection bar, takes the loaded changeable items up to the existing
+  limit of 100 and drops a read-only pick. The selected count and the actions cover only
+  selected items still listed. Bulk feedback stays one Sonner toast.
+- Counts are the `total` of the query each destination opens, read with `limit: 1` through the
+  existing task workspace route: seven reads for Browse, and one per list or project row or
+  pinned card that the directory has drawn. Browse's Archive row counts containers from the
+  loaded directories. An unread or failed total shows no count; failed totals raise one Sonner
+  error. Counts re-read after a Tasks action, without holding it open, and on returning to a
+  directory.
+- The project header sits under the title, above filters and tasks.
+- No API, schema or shared-component change. The Browse rows use a Tasks-owned row because the
+  shared navigation row has no trailing value.
+- Verified by presentation and screen tests only. The simulator check of bulk complete and trash
+  after Select all is outstanding, and row virtualization bounding the count reads is a property
+  of the device list that jsdom does not exercise. Not a production or TestFlight release.
+
 ## 2026-11-15 — Native Today includes Calendar and Mail (local candidate)
 
 COO-240 — The iPhone Today briefing adds Today’s events and Mail beside Needs you, Coming up

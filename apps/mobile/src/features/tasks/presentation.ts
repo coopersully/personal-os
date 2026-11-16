@@ -118,3 +118,6 @@ export function partitionPinned<T extends { kind: "list" | "project"; record: { 
   );
   return { pinned, directory: rows.filter((row) => !pinned.includes(row)) };
 }
+/** "1 item", "12 items": the count beside a destination, worded as the list it opens words it. */
+export const itemCount = (count: number, unit = "item") =>
+  `${count.toLocaleString("en-US")} ${unit}${count === 1 ? "" : "s"}`;

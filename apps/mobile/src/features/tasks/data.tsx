@@ -96,8 +96,14 @@ export function useTaskAction() {
     await client.refetchQueries({
       queryKey: ["tasks"],
       type: "active",
-      predicate: ({ queryKey }) => queryKey[1] !== "detail" && queryKey[1] !== "container",
+      predicate: ({ queryKey }) =>
+        queryKey[1] !== "detail" && queryKey[1] !== "container" && queryKey[1] !== "count",
     });
+    // Navigation counts are one read per row; they catch up without holding the action open.
+    // A first read still in flight was taken before this action and would otherwise be reused,
+    // so it is dropped before the counts are read again.
+    const counts = { queryKey: ["tasks", "count"], type: "active" } as const;
+    void client.cancelQueries(counts).then(() => client.refetchQueries(counts));
   };
   const lock = useRef(false);
   const [pending, setPending] = useState(false);

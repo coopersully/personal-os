@@ -28,7 +28,9 @@ export function ActionReviews() {
       <ReadState query={query}>
         <View style={{ gap: 12 }}>
           {waiting.length ? (
-            waiting.map((review) => <ActionReviewCard key={review.id} review={review} />)
+            waiting.map((review) => (
+              <ActionReviewCard key={review.id} review={review} readAt={query.dataUpdatedAt} />
+            ))
           ) : (
             <Copy secondary>No changes waiting for your approval.</Copy>
           )}
@@ -38,7 +40,14 @@ export function ActionReviews() {
   );
 }
 
-function ActionReviewCard({ review }: { review: FinanceActionReview }) {
+function ActionReviewCard({
+  review,
+  readAt,
+}: {
+  review: FinanceActionReview;
+  /** When the reviews were last read successfully. */
+  readAt: number;
+}) {
   const { api, owner } = useFinance();
   const client = useQueryClient();
   const [pending, setPending] = useState(false);
@@ -56,6 +65,15 @@ function ActionReviewCard({ review }: { review: FinanceActionReview }) {
   }, []);
   const current = () => active.current && currentOwner.current === owner;
   const title = reviewTitle(review);
+  // Any later successful read that still lists this review as pending settles the doubt,
+  // whether it is the check below or a Retry after that check failed.
+  const uncertainAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (uncertainAt.current !== null && readAt > uncertainAt.current) {
+      uncertainAt.current = null;
+      setUnconfirmed(false);
+    }
+  }, [readAt]);
 
   async function decide(action: "approve" | "dismiss") {
     if (!owner || busy.current || unconfirmed) return;
@@ -101,15 +119,14 @@ function ActionReviewCard({ review }: { review: FinanceActionReview }) {
         );
         void client.invalidateQueries({ queryKey: reviews });
       } else {
+        uncertainAt.current = readAt;
         setUnconfirmed(true);
         toast.error(
           `Couldn’t confirm the ${approving ? "approval" : "dismissal"}. Checking the latest state before you try again.`,
           { id },
         );
-        await client.refetchQueries({ queryKey: reviews });
-        // Only a read that succeeded shows whether the decision landed.
-        if (active.current && client.getQueryState(reviews)?.status === "success")
-          setUnconfirmed(false);
+        // Only a read that succeeds shows whether the decision landed.
+        void client.refetchQueries({ queryKey: reviews });
       }
     } finally {
       busy.current = false;

@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceAnswer, FinanceContextualQuestion } from "@personal-os/domain";
 import { randomUUID } from "expo-crypto";
 import { router } from "expo-router";
@@ -47,6 +48,8 @@ function ContextAnswer({
   // An answer whose outcome is unknown may already be recorded; until that is settled the
   // text stays as sent, so an edit cannot become a second recorded answer.
   const [unconfirmed, setUnconfirmed] = useState(false);
+  // The server confirmed this answer; a failed re-read of the question must not reopen the form.
+  const [answered, setAnswered] = useState(false);
   // One answer is one operation: the same text is always resent under the same id.
   const command = useRef<FinanceAnswer | null>(null);
   const busy = useRef(false);
@@ -73,6 +76,7 @@ function ContextAnswer({
       };
     busy.current = true;
     setPending(true);
+    const retrying = unconfirmed;
     const id = toast.loading("Saving context…");
     const unconfirmedMessage =
       "Couldn’t confirm the answer. Send it again; the same answer is never recorded twice.";
@@ -81,6 +85,7 @@ function ContextAnswer({
       if (!current()) return void toast.dismiss(id);
       setUnconfirmed(outcome.state === "pending" || outcome.state === "uncertain");
       if (outcome.state === "accepted" || outcome.state === "applied") {
+        setAnswered(true);
         toast.success("Context saved", { id });
         reload();
       } else if (outcome.state === "blocked") {
@@ -103,7 +108,14 @@ function ContextAnswer({
       }
     } catch (error) {
       if (!current()) return void toast.dismiss(id);
-      if (confirmedRejection(error)) {
+      // A rejected retry says nothing about the earlier send, which may have been recorded.
+      // Only the server retiring that operation as failed settles it.
+      const settled =
+        !retrying ||
+        (error instanceof ApiClientError &&
+          error.status === 409 &&
+          /previously failed/i.test(error.message));
+      if (settled && confirmedRejection(error)) {
         // A rejected operation id cannot be reused; the next send is a new operation.
         command.current = null;
         setUnconfirmed(false);
@@ -113,6 +125,8 @@ function ContextAnswer({
       } else {
         setUnconfirmed(true);
         toast.error(unconfirmedMessage, { id });
+        // The question itself may already show the answer.
+        if (retrying) reload();
       }
     } finally {
       busy.current = false;
@@ -142,7 +156,7 @@ function ContextAnswer({
           }
         />
       </Card>
-      {question.status === "answered" ? (
+      {question.status === "answered" || answered ? (
         <Copy secondary>Answered. The financial review stays open.</Copy>
       ) : question.status === "stale" || refused ? (
         <Copy secondary>This question can no longer accept context.</Copy>

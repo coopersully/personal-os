@@ -56,12 +56,15 @@ export function LedgerChecks() {
     setDeciding(alert.id);
     const id = toast.loading("Updating alert…");
     try {
-      const saved = appliedRecord<FinanceAlert>(
-        await api.resolveFinanceAlert(alert.id, { action, rationale: null }),
-      );
+      const outcome = await api.resolveFinanceAlert(alert.id, { action, rationale: null });
+      const saved = appliedRecord<FinanceAlert>(outcome);
       if (!current()) return void toast.dismiss(id);
       if (saved?.status === (action === "dismiss" ? "dismissed" : "resolved"))
         toast.success(action === "dismiss" ? "Alert dismissed" : "Alert resolved", { id });
+      else if (!saved && outcome.status === "needs_input")
+        toast.info("Not applied. nohmi needs an answer from you before this change can go ahead.", {
+          id,
+        });
       else toast.info("Not applied. This change is waiting for review.", { id });
     } catch (error) {
       if (!current()) return void toast.dismiss(id);

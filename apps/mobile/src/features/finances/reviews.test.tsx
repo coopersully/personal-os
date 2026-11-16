@@ -20,6 +20,7 @@ vi.mock("@tanstack/react-query", async () => {
 });
 const h = vi.hoisted(() => ({
   owner: "owner-a",
+  platform: { OS: "ios" },
   timezone: "America/New_York" as string | undefined,
   params: {} as Record<string, string>,
   push: vi.fn(),
@@ -78,7 +79,7 @@ vi.mock("react-native", () => {
       <span role="progressbar" aria-label={accessibilityLabel} />
     ),
     Alert: { alert: h.alert },
-    Platform: { OS: "web" },
+    Platform: h.platform,
     useColorScheme: () => "light",
     Pressable: ({
       children,
@@ -464,6 +465,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   for (const mock of Object.values(h.api)) mock.mockReset();
   h.owner = "owner-a";
+  h.platform.OS = "ios";
   h.params = {};
   h.api.listFinanceAccounts.mockResolvedValue({
     accounts: [account],
@@ -603,6 +605,24 @@ it("reports an approval of an already applied review as applied", async () => {
     expect(h.success).toHaveBeenCalledWith("Approved and applied", { id: "feedback" }),
   );
   expect(await screen.findByText("No changes waiting for your approval.")).toBeTruthy();
+});
+
+it("frees an unconfirmed review once a later read still lists it as pending", async () => {
+  h.api.approveFinanceActionReview.mockRejectedValue(new Error("offline"));
+  mount(<FinanceAssistantScreen />);
+  await screen.findByText("Move Corner market to Groceries");
+  // The check that follows the unknown outcome fails too.
+  h.api.listFinanceActionReviews.mockRejectedValueOnce(new Error("offline"));
+  press("Approve Categorization");
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith("Couldn’t load finance data", expect.anything()),
+  );
+  expect(button("Approve Categorization").disabled).toBe(true);
+  h.api.listFinanceActionReviews.mockResolvedValue([actionReview]);
+  const retry = h.error.mock.calls.find(([message]) => message === "Couldn’t load finance data");
+  await act(async () => retry?.[1].action.onClick());
+  await waitFor(() => expect(button("Approve Categorization").disabled).toBe(false));
+  expect(button("Dismiss Categorization").disabled).toBe(false);
 });
 
 it("dismisses an action review", async () => {
@@ -871,6 +891,20 @@ it.each([
   expectNoInlineResult();
 });
 
+it("says when resolving an alert needs an answer first", async () => {
+  h.api.resolveFinanceAlert.mockResolvedValue({ status: "needs_input", question: {} });
+  open("checks");
+  await screen.findByText("Rent went up");
+  press("Mark Rent went up resolved");
+  await waitFor(() =>
+    expect(h.info).toHaveBeenCalledWith(
+      "Not applied. nohmi needs an answer from you before this change can go ahead.",
+      { id: "feedback" },
+    ),
+  );
+  expect(h.success).not.toHaveBeenCalled();
+});
+
 it("does not call an alert resolved when the change awaits review", async () => {
   h.api.resolveFinanceAlert.mockResolvedValue({ status: "pending_review", review: {} });
   open("checks");
@@ -1059,6 +1093,43 @@ it("warns before leaving a correction whose outcome is unknown", async () => {
   );
   confirm("Leave");
   expect(h.back).toHaveBeenCalledTimes(1);
+});
+
+it("asks through the browser's own confirmation where native alerts do nothing", async () => {
+  h.platform.OS = "web";
+  const ask = vi.fn(() => false);
+  vi.stubGlobal("confirm", ask);
+  await openCorrection();
+  fillCorrection();
+  press("Cancel");
+  expect(ask).toHaveBeenCalledWith("Discard changes?\n\nThe correction has not been saved.");
+  expect(h.back).not.toHaveBeenCalled();
+  ask.mockReturnValue(true);
+  press("Cancel");
+  expect(h.back).toHaveBeenCalledTimes(1);
+  expect(h.alert).not.toHaveBeenCalled();
+  cleanup();
+  h.api.resolveFinanceReview.mockResolvedValue({ applied: true, threshold: 1, transaction });
+  await openSplitReview();
+  fireEvent.click(screen.getByText("Split in 2 parts"));
+  ask.mockReturnValue(false);
+  const travel = () =>
+    fireEvent.click(
+      within(screen.getAllByRole("dialog").at(-1) as HTMLElement).getByRole("button", {
+        name: /Travel/,
+      }),
+    );
+  await screen.findAllByRole("dialog");
+  travel();
+  expect(h.api.resolveFinanceReview).not.toHaveBeenCalled();
+  ask.mockReturnValue(true);
+  // Choosing closes the sheet; open it again for the second answer.
+  if (!screen.queryAllByRole("dialog").length)
+    fireEvent.click(screen.getByText("Split in 2 parts"));
+  await screen.findAllByRole("dialog");
+  travel();
+  await waitFor(() => expect(h.api.resolveFinanceReview).toHaveBeenCalled());
+  vi.unstubAllGlobals();
 });
 
 it("closes an untouched correction without asking", async () => {
@@ -1269,7 +1340,24 @@ it("resends an unconfirmed answer as the same operation and a changed one as new
   );
   // Until the outcome is known the text stays as sent.
   expect((screen.getByLabelText("Your answer") as HTMLInputElement).disabled).toBe(true);
-  h.api.answerFinanceContextualQuestion.mockRejectedValueOnce(rejection(400));
+  // A rejected retry does not settle the first send: the operation and the lock are kept.
+  h.api.answerFinanceContextualQuestion.mockRejectedValueOnce(rejection(429));
+  press("Save context");
+  await waitFor(() => expect(h.api.answerFinanceContextualQuestion).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(button("Save context").disabled).toBe(false));
+  expect((screen.getByLabelText("Your answer") as HTMLInputElement).disabled).toBe(true);
+  expect(h.error).not.toHaveBeenCalledWith(
+    "Couldn’t save this answer. Nothing was saved; your draft is still here.",
+    expect.anything(),
+  );
+  // The server retiring the operation as failed does settle it.
+  h.api.answerFinanceContextualQuestion.mockRejectedValueOnce(
+    new ApiClientError({
+      code: "conflict",
+      message: "That Finance mutation previously failed; use a new idempotency key to retry.",
+      status: 409,
+    }),
+  );
   press("Save context");
   await waitFor(() =>
     expect(h.error).toHaveBeenCalledWith(
@@ -1279,14 +1367,18 @@ it("resends an unconfirmed answer as the same operation and a changed one as new
   );
   h.api.answerFinanceContextualQuestion.mockResolvedValue({ state: "accepted" });
   expect((screen.getByLabelText("Your answer") as HTMLInputElement).disabled).toBe(false);
-  type("Your answer", "Weekly shop, flat");
+  // The confirmed answer closes the form even when the question cannot be read again.
+  h.api.getFinanceContextualQuestion.mockRejectedValue(new Error("offline"));
   press("Save context");
   await waitFor(() => expect(h.success).toHaveBeenCalled());
-  const [first, second, third] = h.api.answerFinanceContextualQuestion.mock.calls.map(
+  const [first, second, third, fourth] = h.api.answerFinanceContextualQuestion.mock.calls.map(
     (call) => call[0].operationId,
   );
   expect(second).toBe(first);
-  expect(third).not.toBe(first);
+  expect(third).toBe(first);
+  expect(fourth).not.toBe(first);
+  expect(await screen.findByText("Answered. The financial review stays open.")).toBeTruthy();
+  expect(screen.queryByLabelText("Your answer")).toBeNull();
 });
 
 it.each([

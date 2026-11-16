@@ -2,13 +2,14 @@ import type { FinanceReviewCase, FinanceTransaction } from "@personal-os/domain"
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { toast } from "sonner-native";
 import { EntityPicker } from "../../components/forms/entity-picker";
 import { Icon } from "../../components/icons";
 import { spacing, useTheme } from "../../theme";
 import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
+import { confirmChoice } from "./goal-confirm";
 import { appliedTransaction } from "./mutations";
 import { activeAllocations } from "./splits";
 import { FinanceRow, ReadState } from "./ui";
@@ -178,14 +179,14 @@ export function TransactionCategory({
               if (!split) return void save(value);
               // A review resolved with one category replaces every part; say so first.
               const name = categories.data?.find((entry) => entry.id === value)?.name;
-              Alert.alert(
-                `Replace ${parts} parts?`,
-                `Choosing ${categoryLabel(name)} puts the whole transaction in that category and removes its ${parts} parts.`,
-                [
-                  { text: "Keep splits", style: "cancel" },
-                  { text: "Replace parts", style: "destructive", onPress: () => void save(value) },
-                ],
-              );
+              confirmChoice({
+                title: `Replace ${parts} parts?`,
+                message: `Choosing ${categoryLabel(name)} puts the whole transaction in that category and removes its ${parts} parts.`,
+                cancel: "Keep splits",
+                accept: "Replace parts",
+                destructive: true,
+                onAccept: () => void save(value),
+              });
             }}
             onClose={() => setChoosing(false)}
           />

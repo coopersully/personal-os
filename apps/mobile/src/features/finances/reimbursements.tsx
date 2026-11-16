@@ -8,7 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
 import { router, Stack } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Text, TextInput, View } from "react-native";
+import { Text, TextInput, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
 import { Action, Actions, PaddedSurfaceRows } from "../../components/forms/form-rows";
@@ -17,6 +17,7 @@ import { SettingsAccentProvider } from "../../components/settings-accent";
 import { useTheme } from "../../theme";
 import { TextRow } from "./account-editor";
 import { useFinance, useFinanceRead } from "./data";
+import { confirmChoice } from "./goal-confirm";
 import { appliedRecord, confirmedRejection, parseAmount } from "./mutations";
 import { financeLabel, formatLocalDate, formatMoney } from "./presentation";
 import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Section } from "./ui";
@@ -398,25 +399,26 @@ function CorrectionForm({
   const close = () => {
     if (!edited || submitted) return router.back();
     if (uncertain)
-      return Alert.alert(
-        "Leave this correction?",
-        "The last save may already have gone through. Check the reimbursement before correcting it again.",
-        [
-          { text: "Keep editing", style: "cancel" },
-          {
-            text: "Leave",
-            style: "destructive",
-            onPress: () => {
-              void refresh();
-              router.back();
-            },
-          },
-        ],
-      );
-    Alert.alert("Discard changes?", "The correction has not been saved.", [
-      { text: "Keep editing", style: "cancel" },
-      { text: "Discard", style: "destructive", onPress: () => router.back() },
-    ]);
+      return confirmChoice({
+        title: "Leave this correction?",
+        message:
+          "The last save may already have gone through. Check the reimbursement before correcting it again.",
+        cancel: "Keep editing",
+        accept: "Leave",
+        destructive: true,
+        onAccept: () => {
+          void refresh();
+          router.back();
+        },
+      });
+    confirmChoice({
+      title: "Discard changes?",
+      message: "The correction has not been saved.",
+      cancel: "Keep editing",
+      accept: "Discard",
+      destructive: true,
+      onAccept: () => router.back(),
+    });
   };
 
   const title = match ? "remove receipt match" : "correct expectation";

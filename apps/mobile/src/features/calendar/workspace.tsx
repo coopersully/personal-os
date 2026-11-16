@@ -1,5 +1,5 @@
 import type { CalendarEvent, LocalDate } from "@personal-os/domain";
-import { addLocalDays, sameLocalDate } from "@personal-os/domain";
+import { addLocalDays, localDateToIso, sameLocalDate } from "@personal-os/domain";
 import { router } from "expo-router";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
@@ -30,6 +30,7 @@ import {
   weekDays,
 } from "./logic";
 import {
+  AddEventButton,
   type CalendarsById,
   Card,
   Copy,
@@ -80,180 +81,193 @@ export function CalendarScreen() {
   const shown = calendars.data?.filter((calendar) => calendar.isSelected) ?? [];
   const stale = shown.filter((calendar) => calendarFreshness(calendar, timeZone).attention);
   const isToday = sameLocalDate(day, today);
+  // Until calendars are known the button stays; the editor explains when none can be written to.
+  const canAdd = !calendars.data || calendars.data.some((calendar) => calendar.isWritable);
   return (
-    <Screen chrome onRefresh={refresh}>
-      <View style={{ gap: spacing.lg, paddingTop: 8 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
-          <View style={{ flex: 1 }}>
-            <Text
-              accessibilityRole="header"
-              accessibilityLabel={formatDay(day)}
-              style={{ color: t.ink, fontSize: 28, fontWeight: "700" }}
-            >
-              {formatDay(day, "short")}
-            </Text>
-          </View>
-          <IconButton
-            label="Previous day"
-            flipped
-            onPress={() => setPicked(addLocalDays(day, -1))}
-          />
-          <IconButton label="Next day" onPress={() => setPicked(addLocalDays(day, 1))} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Choose calendars"
-            accessibilityHint="Show or hide calendars"
-            onPress={() => setChoosing(true)}
-            style={styles.iconButton}
-          >
-            <Icon name="calendar" color={tint} />
-          </Pressable>
-        </View>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-          <Segments value={view} options={views} onChange={setView} />
-          {!isToday && (
+    <View style={{ flex: 1 }}>
+      <Screen chrome onRefresh={refresh}>
+        <View style={{ gap: spacing.lg, paddingTop: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
+            <View style={{ flex: 1 }}>
+              <Text
+                accessibilityRole="header"
+                accessibilityLabel={formatDay(day)}
+                style={{ color: t.ink, fontSize: 28, fontWeight: "700" }}
+              >
+                {formatDay(day, "short")}
+              </Text>
+            </View>
+            <IconButton
+              label="Previous day"
+              flipped
+              onPress={() => setPicked(addLocalDays(day, -1))}
+            />
+            <IconButton label="Next day" onPress={() => setPicked(addLocalDays(day, 1))} />
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Go to today"
-              onPress={() => setPicked(null)}
-              style={{
-                minHeight: touchTarget,
-                paddingHorizontal: spacing.lg,
-                justifyContent: "center",
-                borderRadius: radius.panel,
-                backgroundColor: t.surface,
-              }}
+              accessibilityLabel="Choose calendars"
+              accessibilityHint="Show or hide calendars"
+              onPress={() => setChoosing(true)}
+              style={styles.iconButton}
             >
-              <Text style={{ color: tint, fontSize: 15, fontWeight: "600" }}>Today</Text>
+              <Icon name="calendar" color={tint} />
             </Pressable>
-          )}
-        </View>
-        {view === "Day" && (
-          <View style={{ flexDirection: "row" }}>
-            {week.map((date) => {
-              const selected = sameLocalDate(date, day);
-              const current = sameLocalDate(date, today);
-              // Kept events belong to the previous range, so they cannot mark this week's days.
-              const busy =
-                !events.isPlaceholderData &&
-                events.data?.some((event) => eventOccursOnDay(event, date, timeZone));
-              return (
-                <Pressable
-                  key={date.day}
-                  accessibilityRole="button"
-                  accessibilityLabel={[
-                    formatDay(date),
-                    current ? "today" : null,
-                    busy ? "has events" : null,
-                  ]
-                    .filter(Boolean)
-                    .join(", ")}
-                  accessibilityState={{ selected }}
-                  onPress={() => setPicked(date)}
-                  style={{ flex: 1, minHeight: 60, alignItems: "center", gap: spacing.xs }}
-                >
-                  <Text style={{ color: t.secondary, fontSize: 12 }}>
-                    {formatDay(date, "weekday")}
-                  </Text>
-                  <View
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 16,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      backgroundColor: selected ? tint : "transparent",
-                    }}
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+            <Segments value={view} options={views} onChange={setView} />
+            {!isToday && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Go to today"
+                onPress={() => setPicked(null)}
+                style={{
+                  minHeight: touchTarget,
+                  paddingHorizontal: spacing.lg,
+                  justifyContent: "center",
+                  borderRadius: radius.panel,
+                  backgroundColor: t.surface,
+                }}
+              >
+                <Text style={{ color: tint, fontSize: 15, fontWeight: "600" }}>Today</Text>
+              </Pressable>
+            )}
+          </View>
+          {view === "Day" && (
+            <View style={{ flexDirection: "row" }}>
+              {week.map((date) => {
+                const selected = sameLocalDate(date, day);
+                const current = sameLocalDate(date, today);
+                // Kept events belong to the previous range, so they cannot mark this week's days.
+                const busy =
+                  !events.isPlaceholderData &&
+                  events.data?.some((event) => eventOccursOnDay(event, date, timeZone));
+                return (
+                  <Pressable
+                    key={date.day}
+                    accessibilityRole="button"
+                    accessibilityLabel={[
+                      formatDay(date),
+                      current ? "today" : null,
+                      busy ? "has events" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(", ")}
+                    accessibilityState={{ selected }}
+                    onPress={() => setPicked(date)}
+                    style={{ flex: 1, minHeight: 60, alignItems: "center", gap: spacing.xs }}
                   >
-                    <Text
+                    <Text style={{ color: t.secondary, fontSize: 12 }}>
+                      {formatDay(date, "weekday")}
+                    </Text>
+                    <View
                       style={{
-                        color: selected ? t.canvas : current ? tint : t.ink,
-                        fontSize: 16,
-                        fontWeight: selected || current ? "700" : "400",
+                        width: 32,
+                        height: 32,
+                        borderRadius: 16,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: selected ? tint : "transparent",
                       }}
                     >
-                      {date.day}
-                    </Text>
-                  </View>
-                  <View
-                    style={{
-                      width: 4,
-                      height: 4,
-                      borderRadius: 2,
-                      backgroundColor: busy ? t.secondary : "transparent",
-                    }}
-                  />
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-        {!!calendars.data && shown.length < calendars.data.length && (
-          <Copy>
-            {shown.length} of {calendars.data.length} calendars shown
-          </Copy>
-        )}
-        {!!stale.length && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityHint="Shows each calendar and when it was last updated"
-            onPress={() => setChoosing(true)}
-            style={{
-              minHeight: touchTarget,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: spacing.sm,
-            }}
-          >
-            <Icon name="attention" size={18} color={t.secondary} />
-            <Text style={{ flex: 1, color: t.warning, fontSize: 15 }}>
-              {stale.length === 1
-                ? `${stale[0]?.name} may be out of date`
-                : `${stale.length} calendars may be out of date`}
-            </Text>
-          </Pressable>
-        )}
-        {events.isPending ? (
-          <ActivityIndicator
-            color={t.secondary}
-            accessibilityLabel="Loading calendar"
-            style={{ padding: 24 }}
-          />
-        ) : !events.data ? (
-          <RecordRow
-            title="Retry loading"
-            leading={<Icon name="disconnected" color={tint} />}
-            onPress={() => void events.refetch()}
-          />
-        ) : calendars.data && !shown.length ? (
-          <Card>
+                      <Text
+                        style={{
+                          color: selected ? t.canvas : current ? tint : t.ink,
+                          fontSize: 16,
+                          fontWeight: selected || current ? "700" : "400",
+                        }}
+                      >
+                        {date.day}
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        width: 4,
+                        height: 4,
+                        borderRadius: 2,
+                        backgroundColor: busy ? t.secondary : "transparent",
+                      }}
+                    />
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+          {!!calendars.data && shown.length < calendars.data.length && (
             <Copy>
-              {calendars.data.length
-                ? "Every calendar is hidden. Choose calendars to see their events."
-                : "No calendars yet. Connect or create one in Settings."}
+              {shown.length} of {calendars.data.length} calendars shown
             </Copy>
-          </Card>
-        ) : view === "Day" ? (
-          <DayView
-            events={events.data}
-            day={day}
-            timeZone={timeZone}
-            calendars={calendarsById}
-            loading={events.isPlaceholderData}
-          />
-        ) : (
-          <AgendaView
-            events={events.data}
-            from={day}
-            today={today}
-            timeZone={timeZone}
-            calendars={calendarsById}
-            loading={events.isPlaceholderData}
-          />
-        )}
-      </View>
-      {choosing && <CalendarPicker onClose={() => setChoosing(false)} />}
-    </Screen>
+          )}
+          {!!stale.length && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityHint="Shows each calendar and when it was last updated"
+              onPress={() => setChoosing(true)}
+              style={{
+                minHeight: touchTarget,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: spacing.sm,
+              }}
+            >
+              <Icon name="attention" size={18} color={t.secondary} />
+              <Text style={{ flex: 1, color: t.warning, fontSize: 15 }}>
+                {stale.length === 1
+                  ? `${stale[0]?.name} may be out of date`
+                  : `${stale.length} calendars may be out of date`}
+              </Text>
+            </Pressable>
+          )}
+          {events.isPending ? (
+            <ActivityIndicator
+              color={t.secondary}
+              accessibilityLabel="Loading calendar"
+              style={{ padding: 24 }}
+            />
+          ) : !events.data ? (
+            <RecordRow
+              title="Retry loading"
+              leading={<Icon name="disconnected" color={tint} />}
+              onPress={() => void events.refetch()}
+            />
+          ) : calendars.data && !shown.length ? (
+            <Card>
+              <Copy>
+                {calendars.data.length
+                  ? "Every calendar is hidden. Choose calendars to see their events."
+                  : "No calendars yet. Connect or create one in Settings."}
+              </Copy>
+            </Card>
+          ) : view === "Day" ? (
+            <DayView
+              events={events.data}
+              day={day}
+              timeZone={timeZone}
+              calendars={calendarsById}
+              loading={events.isPlaceholderData}
+            />
+          ) : (
+            <AgendaView
+              events={events.data}
+              from={day}
+              today={today}
+              timeZone={timeZone}
+              calendars={calendarsById}
+              loading={events.isPlaceholderData}
+            />
+          )}
+        </View>
+        {/* Keeps the last event clear of the floating add button. */}
+        {canAdd && <View style={{ height: 72 }} />}
+        {choosing && <CalendarPicker onClose={() => setChoosing(false)} />}
+      </Screen>
+      {canAdd && (
+        <AddEventButton
+          onPress={() =>
+            router.push({ pathname: "/calendar-event-edit", params: { day: localDateToIso(day) } })
+          }
+        />
+      )}
+    </View>
   );
 }
 

@@ -600,7 +600,9 @@ can sit on several calendars, each with its own linked copy on one destination; 
 choice changes every copy there. One event record carries only its own blocks, so the page and
 the details row also read the event list for that time, which names the other calendars and
 their blocks. The list shows one record per occurrence, so when the event was opened
-by another copy's id it is matched by its calendar and exact time. Opened for an event on a
+by another copy's id it is matched by its calendar, exact time and title, and only when exactly
+one listed record fits; the API exposes no occurrence identity. The same match keeps an event
+from being listed as its own conflict. Opened for an event on a
 hidden calendar, which the list does not return, the page knows only that record's own blocks.
 
 Every switch and choice is one write to a real calendar. It is one Sonner toast from pending to

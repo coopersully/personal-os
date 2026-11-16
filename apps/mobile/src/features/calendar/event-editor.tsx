@@ -323,7 +323,7 @@ function EventForm({
                 />
               )}
               {!blocked && (
-                <TimeCheck span={span} allDay={draft.allDay} self={event?.id} timeZone={timeZone} />
+                <TimeCheck span={span} allDay={draft.allDay} self={event} timeZone={timeZone} />
               )}
             </Section>
             {!!footnote && <SectionFootnote>{footnote}</SectionFootnote>}

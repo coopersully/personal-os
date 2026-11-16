@@ -108,7 +108,19 @@ it("finds the timed busy events that overlap a span, the way the Calendar review
     event("Busy", standup.startsAt, standup.endsAt, { blockSourceEventId: "Standup" }),
     event("Early", "2026-11-13T13:45:00.000Z", "2026-11-13T14:10:00.000Z"),
   ];
-  expect(overlapping(span, events, "Standup").map(({ id }) => id)).toEqual(["Early", "Dentist"]);
+  expect(overlapping(span, events, standup).map(({ id }) => id)).toEqual(["Early", "Dentist"]);
+  // The list may show this occurrence under its copy on another calendar; that is still itself.
+  const canonical = {
+    ...standup,
+    id: "Canonical",
+    calendarId: "team",
+    sourceCalendarIds: ["team", "work"],
+  };
+  expect(overlapping(span, [canonical, during], standup).map(({ id }) => id)).toEqual(["Dentist"]);
+  // Another meeting at the same time is not, whatever calendars it shares.
+  expect(
+    overlapping(span, [{ ...canonical, title: "Other" }], standup).map(({ id }) => id),
+  ).toEqual(["Canonical"]);
   // Without an event of its own, a proposed time is compared with everything.
   expect(overlapping(span, [standup, later]).map(({ id }) => id)).toEqual(["Standup"]);
 });

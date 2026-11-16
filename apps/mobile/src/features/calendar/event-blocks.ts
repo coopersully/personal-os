@@ -82,18 +82,35 @@ export function timeCanConflict(
   );
 }
 
+/**
+ * Whether a listed record is this event: the record itself, or the one record the list shows
+ * for an occurrence that also sits on this event's calendar. The API exposes no occurrence
+ * identity, so the other copy is recognised by its calendars, exact time and title.
+ */
+export function isSameOccurrence(listed: CalendarEvent, event: CalendarEvent) {
+  return (
+    listed.id === event.id ||
+    (!listed.blockSourceEventId &&
+      listed.title === event.title &&
+      listed.startsAt === event.startsAt &&
+      listed.endsAt === event.endsAt &&
+      !!listed.sourceCalendarIds?.includes(event.calendarId))
+  );
+}
+
 /** The events that overlap a span, earliest first. Ends are exclusive, so touching is not overlap. */
 export function overlapping(
   span: { startsAt: string; endsAt: string },
   events: readonly CalendarEvent[],
-  self?: string,
+  /** The event the span belongs to, which never conflicts with itself. */
+  self?: CalendarEvent,
 ) {
   const from = new Date(span.startsAt).getTime();
   const to = new Date(span.endsAt).getTime();
   return events
     .filter(
       (event) =>
-        event.id !== self &&
+        !(self && isSameOccurrence(event, self)) &&
         timeCanConflict(event) &&
         new Date(event.startsAt).getTime() < to &&
         new Date(event.endsAt).getTime() > from,

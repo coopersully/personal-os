@@ -21,7 +21,12 @@ import { holdReadFeedback } from "../../components/read-feedback-scope";
 import { useAuth } from "../auth/context";
 import { type SettingsApi, useSettingsAction, useSettingsResource } from "../settings/data";
 import { errorMessage } from "../tasks/data";
-import { type BlockTarget, blockModeLabels, isUnlinkedCopy } from "./event-blocks";
+import {
+  type BlockTarget,
+  blockModeLabels,
+  isSameOccurrence,
+  isUnlinkedCopy,
+} from "./event-blocks";
 import { canRestoreFaithfully, eventRevision } from "./event-draft";
 import { calendarRange, type WeekStart } from "./logic";
 
@@ -122,17 +127,12 @@ export function useEventsDuring(span: { startsAt: string; endsAt: string } | nul
  */
 export function useEventOccurrence(event: CalendarEvent | undefined) {
   const read = useEventsDuring(event ? { startsAt: event.startsAt, endsAt: event.endsAt } : null);
-  // The list shows one record per occurrence, which may be its copy on another calendar.
+  // The list shows one record per occurrence, which may be its copy on another calendar. With
+  // no occurrence identity from the API, another id is taken only when exactly one record fits.
+  const same = event ? (read.data ?? []).filter((listed) => isSameOccurrence(listed, event)) : [];
   const listed =
-    event &&
-    (read.data?.find((candidate) => candidate.id === event.id) ??
-      read.data?.find(
-        (candidate) =>
-          !candidate.blockSourceEventId &&
-          candidate.startsAt === event.startsAt &&
-          candidate.endsAt === event.endsAt &&
-          !!candidate.sourceCalendarIds?.includes(event.calendarId),
-      ));
+    same.find((candidate) => candidate.id === event?.id) ??
+    (same.length === 1 ? same[0] : undefined);
   const merged = useMemo(() => {
     if (!event || !listed) return event;
     // The record is the newer authority for its own blocks; the list adds the other copies'.
@@ -541,6 +541,7 @@ export function useEventWrites() {
     block: async (event: CalendarEvent, { calendar }: BlockTarget, mode: EventBlockMode) => {
       const key = `${scope.owner}:${scope.epoch}:${event.id}:${calendar.id}`;
       const earlier = unsettled().get(key);
+      let sent = event;
       const name = calendar.name;
       const result = await run(
         {
@@ -555,6 +556,7 @@ export function useEventWrites() {
         },
         async (api) => {
           let current = event;
+          sent = event;
           if (earlier) {
             const unread = () => {
               throw new NothingSent(unreadable);
@@ -608,6 +610,7 @@ export function useEventWrites() {
                 );
             }
           }
+          sent = current;
           return api.createEventBlock(event.id, {
             calendarId: calendar.id,
             mode,
@@ -619,7 +622,8 @@ export function useEventWrites() {
       if (result.ok) unsettled().delete(key);
       else if (result.reason === "uncertain" || result.reason === "landed") {
         // Recorded at once, so no tap can slip through unchecked while the sync time is read.
-        const attempt: UnsettledBlock = { mode, source: event };
+        // What a copy would look like is what this attempt sent, which a check may have re-read.
+        const attempt: UnsettledBlock = { mode, source: sent };
         unsettled().set(key, attempt);
         // The page's calendars may be minutes old, so only a fresh read counts as the sync
         // time at this attempt. Without one it stays unknown and the next attempt sets it.

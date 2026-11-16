@@ -573,6 +573,33 @@ it("sends nothing when an unlinked copy of the earlier attempt is on the calenda
   expect(h.api.createEventBlock).toHaveBeenCalledTimes(2);
 });
 
+it("looks for the copy of what a repeat attempt sent, after the event changed in between", async () => {
+  h.api.getDomainProfile.mockResolvedValue({
+    status: "active",
+    preferences: { busyBlockPrivacy: "details" },
+  });
+  h.api.createEventBlock.mockRejectedValue(offline());
+  await openBlocks();
+  await blockOnPersonal(1);
+  // The event was renamed elsewhere; the repeat reads it, sends the new title and is lost too.
+  const renamed = { ...standup, title: "Daily sync", updatedAt: "2026-11-13T15:01:00.000Z" };
+  h.api.getEvent.mockImplementation(async () => renamed);
+  synced();
+  await blockOnPersonal(2);
+  expect(h.api.createEventBlock).toHaveBeenLastCalledWith(
+    "Standup",
+    expect.objectContaining({ expectedUpdatedAt: renamed.updatedAt }),
+  );
+
+  synced("2026-11-13T15:10:00.000Z");
+  h.api.listEvents.mockResolvedValue([renamed, { ...renamed, id: "copy", calendarId: "personal" }]);
+  await blockOnPersonal(3);
+  expect(h.api.createEventBlock).toHaveBeenCalledTimes(2);
+  expect(h.error).toHaveBeenLastCalledWith(expect.stringMatching(/^Personal already has/), {
+    id: "toast-1",
+  });
+});
+
 it("lets the API link a single unlinked Busy copy, but not two", async () => {
   const copy = { ...standup, id: "copy", title: "Busy", calendarId: "personal" };
   h.api.createEventBlock.mockRejectedValueOnce(offline());
@@ -832,10 +859,24 @@ it("changes every linked copy of an occurrence that sits on several calendars", 
   h.api.deleteEventBlock.mockReset().mockResolvedValue(standup);
   await openBlocks();
   expect(screen.queryByRole("switch", { name: "Block on Team" })).toBeNull();
+  expect(toggle("Block on Personal").checked).toBe(true);
   fireEvent.click(toggle("Block on Personal"));
   await waitFor(() => expect(h.api.deleteEventBlock).toHaveBeenCalledTimes(2));
   expect(h.api.deleteEventBlock.mock.calls.map(([, id]) => id)).toEqual(["block-1", "block-2"]);
   await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
+  cleanup();
+
+  // Two records fit under other ids, so neither is taken for this event: another meeting's
+  // blocks must never be changed from here.
+  serve(standup);
+  const twin = { ...standup, id: "Twin", calendarId: "team", sourceCalendarIds: ["team", "work"] };
+  h.api.listEvents.mockResolvedValue([
+    { ...twin, blocks: [mirror] },
+    { ...twin, id: "Twin-2", blocks: [mirror] },
+  ]);
+  await openBlocks();
+  expect(toggle("Block on Personal").checked).toBe(false);
+  expect(toggle("Block on Team").checked).toBe(false);
   cleanup();
 
   // A refusal before anything changed is reported as the refusal it is.

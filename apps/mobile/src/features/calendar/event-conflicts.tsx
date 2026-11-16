@@ -30,7 +30,7 @@ export function EventConflicts({
   const read = useEventsDuring(
     timeCanConflict(event) ? { startsAt: event.startsAt, endsAt: event.endsAt } : null,
   );
-  const found = overlapping(event, read.data ?? [], event.id);
+  const found = overlapping(event, read.data ?? [], event);
   if (!read.isError && !found.length) return null;
   const warning = <Icon name="attention" color={t.warning} />;
   return (
@@ -82,7 +82,7 @@ export function TimeCheck({
   span: { startsAt: string; endsAt: string } | null;
   allDay: boolean;
   /** The event being edited, which never conflicts with itself. */
-  self?: string;
+  self?: CalendarEvent;
   timeZone: string;
 }) {
   const read = useEventsDuring(allDay ? null : span);

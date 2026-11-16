@@ -2,12 +2,12 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { BalanceAttention, balanceHint, balancesFor } from "./balances";
 import { BudgetOverview } from "./budget-overview";
+import { FinanceCashflow } from "./cashflow";
 import { categoryIcon } from "./category-presentation";
-import { useFinanceRead, useUpcoming } from "./data";
+import { useFinanceRead } from "./data";
 import { FinanceGoals } from "./goals";
-import { expectedAmount, financeLabel, formatLocalDate, formatMoney } from "./presentation";
+import { financeLabel, formatMoney } from "./presentation";
 import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Section, Segments } from "./ui";
-import { upcomingCategory, useUpcomingCategories } from "./upcoming-category";
 
 function Budget() {
   const query = useFinanceRead(["budget"], (api) => api.getFinanceBudget());
@@ -65,51 +65,6 @@ function Budget() {
     </>
   );
 }
-function Cashflow() {
-  const query = useUpcoming();
-  const categories = useUpcomingCategories(
-    !!query.data?.occurrences.some((item) => item.source?.kind === "obligation"),
-  );
-  const occurrences =
-    query.data?.occurrences
-      .filter(
-        (item) =>
-          item.inCurrentSchedule &&
-          (item.matchState === "expected" || item.matchState === "partially_matched"),
-      )
-      .sort((a, b) => a.localDate.localeCompare(b.localDate)) ?? [];
-  return (
-    <ReadState query={query}>
-      {categories.isError && <ReadState query={categories}>{null}</ReadState>}
-      <Copy secondary>
-        Expected income and bills · next 30 days. This is an upcoming schedule, not a projected
-        account balance.
-      </Copy>
-      <Card>
-        {occurrences.length ? (
-          occurrences.map((item) => (
-            <FinanceRow
-              key={item.key}
-              title={item.displayName}
-              subtitle={`${formatLocalDate(item.localDate)} · ${upcomingCategory(item, categories.data).label} · ${financeLabel(item.matchState)}`}
-              value={expectedAmount(item)}
-              valueTone={item.remainingExpectedCents == null ? "attention" : undefined}
-              icon={upcomingCategory(item, categories.data).icon}
-            />
-          ))
-        ) : (
-          <Copy secondary>No scheduled income or bills in the next 30 days.</Copy>
-        )}
-      </Card>
-      {!!query.data?.unavailableSources.length && (
-        <Copy secondary>
-          {query.data.unavailableSources.length} sources need schedule confirmation before they can
-          appear here.
-        </Copy>
-      )}
-    </ReadState>
-  );
-}
 function Wealth() {
   const query = useFinanceRead(["accounts"], (api) => api.listFinanceAccounts());
   const balances = query.data ? balancesFor(query.data) : null;
@@ -161,7 +116,7 @@ export function FinancePlanScreen() {
           router.setParams({ view: next });
         }}
       />
-      {mode === "Budget" ? <Budget /> : mode === "Cash flow" ? <Cashflow /> : <Wealth />}
+      {mode === "Budget" ? <Budget /> : mode === "Cash flow" ? <FinanceCashflow /> : <Wealth />}
     </FinanceScreen>
   );
 }

@@ -15,6 +15,7 @@ import {
   senderName,
   sortMailboxes,
   withMailChanges,
+  withMailRow,
 } from "./logic";
 
 const thread = { id: "thread", receivedAt: "2026-11-09T12:00:00.000Z" } as MailThreadSummary;
@@ -147,4 +148,33 @@ it("treats only a definitive client rejection as proof that mail was not changed
   expect(mailWriteRejected(error(408))).toBe(false);
   expect(mailWriteRejected(error(500, null))).toBe(false);
   expect(mailWriteRejected(new TypeError("Network request failed"))).toBe(false);
+});
+
+it("puts a conversation back at its place by date", () => {
+  const at = (id: string, minute: string) =>
+    ({ ...thread, id, receivedAt: `2026-11-09T12:${minute}:00.000Z` }) as MailThreadSummary;
+  const ids = (pages: MailThreadSummary[][]) => pages.map((page) => page.map((row) => row.id));
+  const pages = [[at("e", "50"), at("d", "40")], [at("b", "20")]];
+
+  expect(ids(withMailRow(pages, at("c", "30")))).toEqual([
+    ["e", "d"],
+    ["c", "b"],
+  ]);
+  expect(ids(withMailRow(pages, at("f", "55")))).toEqual([["f", "e", "d"], ["b"]]);
+  // The same minute orders by id, newest id first.
+  expect(ids(withMailRow(pages, at("c", "20")))).toEqual([
+    ["e", "d"],
+    ["c", "b"],
+  ]);
+  // Older than everything read: it ends a list that is complete.
+  expect(ids(withMailRow(pages, at("a", "10")))).toEqual([
+    ["e", "d"],
+    ["b", "a"],
+  ]);
+  // Already listed, or nothing read yet: unchanged.
+  expect(withMailRow(pages, at("d", "40"))).toBe(pages);
+  expect(withMailRow([], at("a", "10"))).toEqual([]);
+  // Older than a full last page: it belongs to a page not read yet.
+  const full = [Array.from({ length: MAIL_PAGE_SIZE }, (_, index) => at(`n${index}`, "30"))];
+  expect(withMailRow(full, at("a", "10"))).toBe(full);
 });

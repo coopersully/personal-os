@@ -6,7 +6,13 @@ import { toast } from "sonner-native";
 import type { RowAction } from "../../components/row-action-button";
 import { useAuth } from "../auth/context";
 import { useMail, useMailAccounts } from "./data";
-import { archivedMailboxIds, leftMailTarget, type MailChange, mailWriteRejected } from "./logic";
+import {
+  archivedMailboxIds,
+  leftMailTarget,
+  type MailChange,
+  mailWriteRejected,
+  withMailRow,
+} from "./logic";
 
 type Action = "read" | "unread" | "archive" | "restore";
 
@@ -112,37 +118,37 @@ export function useMailTriage() {
     // From here the write is confirmed, and nothing below may report it as failed.
     // A read that began before the write must not land over the confirmed state.
     await client.cancelQueries({ queryKey: summaries }).catch(() => undefined);
+    // The session can change while that waits; the next person gets neither caches nor a toast.
+    if (!current()) {
+      settle();
+      return void toast.dismiss(id);
+    }
+    // Summaries stay body-free: copy only the fields a summary carries.
+    const fields = {
+      mailboxIds: confirmed.mailboxIds,
+      starred: confirmed.starred,
+      unread: confirmed.unread,
+      updatedAt: confirmed.updatedAt,
+    };
     for (const query of client.getQueryCache().findAll({ queryKey: summaries })) {
-      const left = leftMailTarget(
-        String(query.queryKey[3]),
-        thread.mailboxIds,
-        confirmed.mailboxIds,
-      );
-      client.setQueryData<InfiniteData<MailThreadSummary[]>>(
-        query.queryKey,
-        (data) =>
-          data && {
-            ...data,
-            pages: data.pages.map((page) =>
-              page.flatMap((row) =>
-                row.id !== thread.id
-                  ? [row]
-                  : left
-                    ? []
-                    : // Summaries stay body-free: copy only the fields a summary carries.
-                      [
-                        {
-                          ...row,
-                          mailboxIds: confirmed.mailboxIds,
-                          starred: confirmed.starred,
-                          unread: confirmed.unread,
-                          updatedAt: confirmed.updatedAt,
-                        },
-                      ],
-              ),
-            ),
-          },
-      );
+      const target = String(query.queryKey[3]);
+      const left = leftMailTarget(target, thread.mailboxIds, confirmed.mailboxIds);
+      // The archive took the row out of these lists, so a confirmed restore puts it back
+      // without waiting on the read below. A search is left to that read: it may not match.
+      const back =
+        action === "restore" &&
+        !query.queryKey[4] &&
+        (target === "inbox" ||
+          (confirmed.mailboxIds.includes(target) && !thread.mailboxIds.includes(target)));
+      client.setQueryData<InfiniteData<MailThreadSummary[]>>(query.queryKey, (data) => {
+        if (!data) return data;
+        const pages = data.pages.map((page) =>
+          page.flatMap((row) =>
+            row.id !== thread.id ? [row] : left ? [] : [{ ...row, ...fields }],
+          ),
+        );
+        return { ...data, pages: back ? withMailRow(pages, { ...thread, ...fields }) : pages };
+      });
     }
     settle();
     let undone = false;

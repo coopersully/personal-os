@@ -1030,3 +1030,50 @@ it("reads a conversation without an actions control when its opener offers none"
   fireEvent.click(within(reader).getByRole("button", { name: "Close" }));
   expect(close).toHaveBeenCalledOnce();
 });
+
+it("puts a conversation back in the inbox when the read after a confirmed Undo fails", async () => {
+  h.update.mockResolvedValueOnce(confirmedThread("one", { mailboxIds: [], unread: true }));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  h.summaries.mockResolvedValue([summary("two", { from: { name: null, address: "b@x.test" } })]);
+  choose("Actions for Board packet", "Archive");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.queryByRole("button", unreadRow)).toBeNull());
+
+  h.summaries.mockRejectedValue(new Error("offline"));
+  h.update.mockResolvedValueOnce(
+    confirmedThread("one", { unread: true, updatedAt: "2026-11-09T12:06:00.000Z" }),
+  );
+  await act(async () => h.toast.success.mock.calls[0][1].action.onClick());
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenLastCalledWith(
+      "Conversation moved back to Inbox",
+      expect.anything(),
+    ),
+  );
+  // The confirmed restore is in the list without the read, and still carries no body.
+  expect(await screen.findByRole("button", unreadRow)).toBeTruthy();
+  expect(JSON.stringify(cached("summaries").map((query) => query.state.data))).not.toMatch(
+    /bodyText|remoteThreadId/,
+  );
+  expect(h.toast.error).not.toHaveBeenCalled();
+});
+
+it("reports nothing when the session changes while reads are being cancelled", async () => {
+  h.toast.loading.mockReturnValue("toast-1");
+  h.update.mockResolvedValueOnce(confirmedThread("one"));
+  render(wrap(<InboxRoute />));
+  await screen.findByRole("button", unreadRow);
+  const reads = h.summaries.mock.calls.length;
+  vi.spyOn(client, "cancelQueries").mockImplementationOnce(async () => {
+    h.epoch += 1;
+  });
+
+  choose("Actions for Board packet", "Mark as read");
+  await waitFor(() => expect(h.toast.dismiss).toHaveBeenCalledExactlyOnceWith("toast-1"));
+  expect(h.toast.success).not.toHaveBeenCalled();
+  expect(h.toast.error).not.toHaveBeenCalled();
+  // The earlier person's confirmed state is not written into the caches, and nothing is re-read.
+  expect(screen.getByRole("button", unreadRow)).toBeTruthy();
+  expect(h.summaries).toHaveBeenCalledTimes(reads);
+});

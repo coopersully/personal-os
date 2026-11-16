@@ -92,6 +92,27 @@ export function leftMailTarget(target: string, before: string[], after: string[]
   return after.length < before.length && after.every((id) => before.includes(id));
 }
 
+/**
+ * Puts a conversation back into loaded pages at its place by date. A conversation already listed
+ * is left alone, and one older than a full last page belongs to a page not read yet.
+ */
+export function withMailRow(pages: MailThreadSummary[][], row: MailThreadSummary) {
+  if (pages.some((page) => page.some((thread) => thread.id === row.id))) return pages;
+  const older = (thread: MailThreadSummary) =>
+    thread.receivedAt < row.receivedAt ||
+    (thread.receivedAt === row.receivedAt && thread.id < row.id);
+  const found = pages.findIndex((page) => page.some(older));
+  const last = pages.length - 1;
+  if (found < 0 && (last < 0 || (pages[last] as MailThreadSummary[]).length >= MAIL_PAGE_SIZE))
+    return pages;
+  const at = found < 0 ? last : found;
+  return pages.map((page, index) => {
+    if (index !== at) return page;
+    const before = found < 0 ? page.length : page.findIndex(older);
+    return [...page.slice(0, before), row, ...page.slice(before)];
+  });
+}
+
 /** The list as it reads while changes are in flight: new unread state, archived rows gone. */
 export function withMailChanges(
   rows: MailThreadSummary[],

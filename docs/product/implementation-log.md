@@ -1379,6 +1379,8 @@ server code changed.
   mailboxes. iCloud offers none: the thread update moves the message to Archive but keeps the
   thread's provider identifier pointing at the inbox, so a restore returns success without moving
   anything. Restoring an archived iCloud conversation needs an API change and is not in this work.
+- A confirmed Undo puts the conversation back in the loaded inbox without waiting for the read
+  that follows, and an outcome is dropped if the session changes while pending reads are cancelled.
 - After an unconfirmed outcome Mail is read at once and again five seconds later.
 - Snooze, bulk triage, deletion, drafts and sending are not included. This is a local candidate
   covered by focused tests; it was not run on a simulator or device or against a live Gmail or

@@ -77,6 +77,7 @@ describe.sequential("persistent scoped knowledge", () => {
       },
     },
     scope: { workspace: null },
+    tags: ["fixture"],
     sensitivity: "standard",
     purposes: ["planning"],
     evidence: [{ type: "statement", wording: "I prefer Tuesday." }],

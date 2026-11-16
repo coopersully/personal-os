@@ -6,12 +6,17 @@ import {
   type KnowledgeMutationInput,
   type KnowledgeQuery,
   type KnowledgeReadInput,
+  type KnowledgeTagIndexInput,
+  type KnowledgeTagMergeInput,
+  type KnowledgeTagUnmergeInput,
   knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
   knowledgeMutationResultSchema,
   knowledgePageSchema,
   knowledgeReadResultSchema,
   knowledgeSaveResultSchema,
+  knowledgeTagIndexSchema,
+  knowledgeTagMergeSchema,
 } from "@personal-os/domain";
 
 const knowledgePath = "/v1/knowledge";
@@ -60,6 +65,26 @@ export function createKnowledgeApiClient(
     async explainKnowledgeContext({ contextUseId }: KnowledgeExplainInput) {
       return knowledgeContextExplanationSchema.parse(
         await request(`${knowledgePath}/context/${encodeURIComponent(contextUseId)}`),
+      );
+    },
+    /** The caller's tags with counts it may see, most used first, and their aliases. */
+    async listKnowledgeTags({ limit }: KnowledgeTagIndexInput = {}) {
+      const path = `${knowledgePath}/tags`;
+      return knowledgeTagIndexSchema.parse(
+        await request(
+          limit === undefined ? path : `${path}?${new URLSearchParams({ limit: String(limit) })}`,
+        ),
+      );
+    },
+    async mergeKnowledgeTags(input: KnowledgeTagMergeInput) {
+      return knowledgeTagMergeSchema.parse(
+        await request(`${knowledgePath}/tags/merge`, json("POST", input)),
+      );
+    },
+    /** Person only. */
+    async unmergeKnowledgeTags(input: KnowledgeTagUnmergeInput) {
+      return knowledgeTagMergeSchema.parse(
+        await request(`${knowledgePath}/tags/unmerge`, json("POST", input)),
       );
     },
     async exportKnowledge({ cursor }: KnowledgeExportInput = {}) {

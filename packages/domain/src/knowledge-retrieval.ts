@@ -7,6 +7,7 @@ import {
   knowledgeRecordSchema,
   knowledgeWorkspaceSchema,
 } from "./knowledge.js";
+import { knowledgeTagsInputSchema } from "./knowledge-tags.js";
 
 export const knowledgeRetrievalMaxRecords = 50;
 export const knowledgeContextMaxBytes = 32_768;
@@ -46,6 +47,10 @@ export const knowledgeQuerySchema = z
       .enum(knowledgeContentSchema.options.map((schema) => schema.shape.kind.value))
       .optional(),
     origin: knowledgeOriginSchema.optional(),
+    /** Tags (aliases resolve to their canonical tag). Exact tag matches rank above text. */
+    tags: knowledgeTagsInputSchema.optional(),
+    /** How `tags` combine; omitted means `any`. */
+    tagMatch: z.enum(["any", "all"]).optional(),
     hasConflict: z.boolean().optional(),
     reviewView: z.enum(["accepted", "needs_review"]).optional(),
     limit: z.int().min(1).max(knowledgeRetrievalMaxRecords).optional(),

@@ -57,6 +57,7 @@ const record: KnowledgeRecord = {
   ownerHeld: true,
   agentAccess: "allowed",
   core: false,
+  tags: ["communication"],
   lastConfirmedAt: null,
   supersededBy: null,
   trashedAt: null,
@@ -154,6 +155,34 @@ it("owner_can_correct_inferred_memory", async () => {
   const history = await within(detail).findByRole("region", { name: "Revision history" });
   expect(await within(history).findByText("Inferred", { exact: true })).toBeVisible();
   expect(within(history).getAllByText("Accepted by you")).toHaveLength(2);
+});
+
+it("revises tags from the editor without changing content", async () => {
+  vi.mocked(api.updateKnowledge).mockResolvedValue({
+    receiptId: id,
+    recordId: id,
+    outcome: "readable",
+    record: { ...record, revision: 4, tags: ["communication", "family"] },
+  });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*concise/i }));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit memory" }));
+  const tags = screen.getByLabelText("Tags", { exact: true });
+  expect(tags).toHaveValue("communication");
+  fireEvent.change(tags, { target: { value: "!!!" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
+  expect(await screen.findByText("Enter 1 to 8 tags, separated by commas.")).toBeVisible();
+  expect(api.updateKnowledge).not.toHaveBeenCalled();
+  fireEvent.change(tags, { target: { value: "Communication, Family" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
+  await waitFor(() => expect(api.updateKnowledge).toHaveBeenCalledOnce());
+  expect(api.updateKnowledge).toHaveBeenCalledWith(
+    expect.objectContaining({
+      action: "revise",
+      content: preference("concise"),
+      tags: ["communication", "family"],
+    }),
+  );
 });
 
 it("treats a deleted memory as no longer available", async () => {

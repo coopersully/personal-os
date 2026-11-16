@@ -47,6 +47,7 @@ function fact(value: string, overrides?: Partial<KnowledgeMutationInput>): Knowl
       },
     },
     scope: { workspace: null },
+    tags: ["fixture"],
     sensitivity: "standard",
     purposes: ["planning", "review"],
     evidence: [{ type: "statement", wording: "The owner stated this explicitly." }],

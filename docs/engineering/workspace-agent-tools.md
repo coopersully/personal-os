@@ -6090,6 +6090,21 @@ Fetch bounded memory for the current intent; an optional purpose ranks matching 
         "inferred"
       ]
     },
+    "tags": {
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tagMatch": {
+      "type": "string",
+      "enum": [
+        "any",
+        "all"
+      ]
+    },
     "hasConflict": {
       "type": "boolean"
     },
@@ -10743,6 +10758,41 @@ Merge duplicate merchant identities after evidence shows they are the same real 
     "targetMerchantId"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## merge_knowledge_tags
+
+Merge duplicate memory tag `from` into tag `into` with a stable mutation UUID. Every memory tagged `from` is retagged without changing its content, and `from` keeps resolving to `into` for later saves and searches. The owner can undo a merge.
+
+- Domain: knowledge; stage: commit; policy: approved_rule.
+- Grants (all): knowledge:read, knowledge:write.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/knowledge.ts); typed API methods: `mergeKnowledgeTags`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "from": {
+      "type": "string"
+    },
+    "into": {
+      "type": "string"
+    },
+    "mutationKey": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "from",
+    "into",
+    "mutationKey"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 
@@ -16196,7 +16246,7 @@ Save reviewed Finance setup dispositions using exact question IDs and the curren
 
 ## save_knowledge
 
-Search for existing knowledge before saving. Save typed account knowledge with original evidence and a stable mutation UUID; it is active at once. Agent statements require original wording plus session/message references; unsourced assertions are saved as inferred. Purposes are optional relevance hints. Read the receipt outcome before using record content: a forgotten receipt contains IDs only.
+Search for existing knowledge before saving. Save typed account knowledge with original evidence, 1-8 tags and a stable mutation UUID; it is active at once. Reuse tags from the tag index; the server files a merged tag or a trailing-s plural under the existing tag. Agent statements require original wording plus session/message references; unsourced assertions are saved as inferred. Purposes are optional relevance hints. Read the receipt outcome before using record content: a forgotten receipt contains IDs only.
 
 - Domain: knowledge; stage: commit; policy: approved_rule.
 - Grants (all): knowledge:read, knowledge:write.
@@ -16854,6 +16904,14 @@ Search for existing knowledge before saving. Save typed account knowledge with o
       "default": false,
       "type": "boolean"
     },
+    "tags": {
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "evidence": {
       "default": [],
       "maxItems": 20,
@@ -17032,6 +17090,7 @@ Search for existing knowledge before saving. Save typed account knowledge with o
   "required": [
     "content",
     "scope",
+    "tags",
     "mutationKey"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -17237,7 +17296,7 @@ Search owned tasks content and reviews. Follow returned pagination metadata; ret
 
 ## search_user_knowledge
 
-Find permitted memory; an optional purpose ranks matching records first. Search before creating a duplicate, follow any returned cursor with the same filters, and cite the record and supporting sources you use.
+Find permitted memory by text and tags (match any or all; aliases resolve); exact tag matches rank first and an optional purpose ranks matching records next. Search before creating a duplicate, follow any returned cursor with the same filters, and cite the record and supporting sources you use.
 
 - Domain: knowledge; stage: inspect; policy: read_only.
 - Grants (all): knowledge:read.
@@ -17348,6 +17407,21 @@ Find permitted memory; an optional purpose ranks matching records first. Search 
       "enum": [
         "stated",
         "inferred"
+      ]
+    },
+    "tags": {
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "tagMatch": {
+      "type": "string",
+      "enum": [
+        "any",
+        "all"
       ]
     },
     "hasConflict": {
@@ -20250,7 +20324,7 @@ Update a goal's title, context, progress, target date, or lifecycle status.
 
 ## update_knowledge
 
-Revise, dispute, supersede, archive, unarchive, restrict to a workspace, or mark sensitive a knowledge record using its current revision and a stable mutation UUID. Revising or superseding memory the owner holds creates a proposal for the owner instead. Fetch fresh context after the mutation.
+Revise (content, and optionally its tags), dispute, supersede, archive, unarchive, restrict to a workspace, or mark sensitive a knowledge record using its current revision and a stable mutation UUID. Revising or superseding memory the owner holds creates a proposal for the owner instead. Fetch fresh context after the mutation.
 
 - Domain: knowledge; stage: commit; policy: approved_rule.
 - Grants (all): knowledge:read, knowledge:write.
@@ -21049,6 +21123,14 @@ Revise, dispute, supersede, archive, unarchive, restrict to a workspace, or mark
         },
         "core": {
           "type": "boolean"
+        },
+        "tags": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

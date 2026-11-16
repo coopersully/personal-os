@@ -7138,6 +7138,103 @@ export const knowledgeRelationships = pgTable(
     }).onDelete("cascade"),
   ],
 );
+/** Owner-scoped canonical memory tags. A merged tag keeps its row so undo can restore it. */
+export const knowledgeTags = pgTable(
+  "knowledge_tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_tags_owner_name_idx").on(table.userId, table.name),
+    uniqueIndex("knowledge_tags_owner_id_idx").on(table.userId, table.id),
+  ],
+);
+/** Record tags are record state, not revision content; purge removes them with the record. */
+export const knowledgeRecordTags = pgTable(
+  "knowledge_record_tags",
+  {
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    tagId: uuid("tag_id").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.recordId, table.tagId] }),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId, table.tagId],
+      foreignColumns: [knowledgeTags.userId, knowledgeTags.id],
+    }).onDelete("cascade"),
+    index("knowledge_record_tags_owner_tag_idx").on(table.userId, table.tagId),
+  ],
+);
+/**
+ * One merge of tag `from_name` into a canonical tag. `record_ids` carried `from` at merge time;
+ * `kept_into_record_ids` already carried the target too, so undo leaves the target on them.
+ */
+export const knowledgeTagMerges = pgTable(
+  "knowledge_tag_merges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fromName: text("from_name").notNull(),
+    intoTagId: uuid("into_tag_id").notNull(),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    actorId: uuid("actor_id").notNull(),
+    recordIds: uuid("record_ids").array().notNull(),
+    keptIntoRecordIds: uuid("kept_into_record_ids").array().notNull(),
+    mutationKey: uuid("mutation_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    undoMutationKey: uuid("undo_mutation_key"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("knowledge_tag_merges_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("knowledge_tag_merges_owner_key_idx").on(table.userId, table.mutationKey),
+    uniqueIndex("knowledge_tag_merges_owner_undo_key_idx").on(table.userId, table.undoMutationKey),
+    foreignKey({
+      columns: [table.userId, table.intoTagId],
+      foreignColumns: [knowledgeTags.userId, knowledgeTags.id],
+    }).onDelete("cascade"),
+    check("knowledge_tag_merges_actor_check", sql`${table.actorType} IN ('user', 'agent')`),
+    check(
+      "knowledge_tag_merges_undo_state",
+      sql`(${table.undoneAt} IS NULL) = (${table.undoMutationKey} IS NULL)`,
+    ),
+  ],
+);
+/** A merged tag name resolving to its canonical tag; never across owners. */
+export const knowledgeTagAliases = pgTable(
+  "knowledge_tag_aliases",
+  {
+    userId: uuid("user_id").notNull(),
+    alias: text("alias").notNull(),
+    tagId: uuid("tag_id").notNull(),
+    mergeId: uuid("merge_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.alias] }),
+    foreignKey({
+      columns: [table.userId, table.tagId],
+      foreignColumns: [knowledgeTags.userId, knowledgeTags.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId, table.mergeId],
+      foreignColumns: [knowledgeTagMerges.userId, knowledgeTagMerges.id],
+    }).onDelete("cascade"),
+  ],
+);
 /** Operational receipts retain hashes and references, never knowledge values. They outlive
  * a purged record so a retried mutation stays content-free. */
 export const knowledgeReceipts = pgTable(

@@ -17,6 +17,7 @@ import {
   knowledgeContextPackSchema,
   knowledgePageSchema,
   knowledgeReceiptSchema,
+  knowledgeTagMergeSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
@@ -128,6 +129,7 @@ describe.sequential("registered memory lifecycle", () => {
       mutationKey: randomUUID(),
       content: content(value),
       scope: { workspace: null },
+      tags: ["fixture"],
       sensitivity: sensitive ? "sensitive" : "standard",
       purposes: ["planning"],
       evidence: [
@@ -171,6 +173,7 @@ describe.sequential("registered memory lifecycle", () => {
         "explain_context",
         "get_context_for_intent",
         "get_knowledge",
+        "merge_knowledge_tags",
         "save_knowledge",
         "search_user_knowledge",
         "update_knowledge",
@@ -236,6 +239,33 @@ describe.sequential("registered memory lifecycle", () => {
         }),
       );
       expect(page.items).toMatchObject([{ id: savedId, content: original.content }]);
+      // Tags merge through MCP; the person reads the index and undoes the merge over HTTP.
+      const merge = knowledgeTagMergeSchema.parse(
+        await tool(second.client, "merge_knowledge_tags", {
+          from: "Fixture",
+          into: "meetings",
+          mutationKey: randomUUID(),
+        }),
+      );
+      expect(merge).toMatchObject({ from: "fixture", into: "meetings", undoneAt: null });
+      const tagged = knowledgePageSchema.parse(
+        await tool(second.client, "search_user_knowledge", { tags: ["fixture"] }),
+      );
+      expect(tagged.items).toMatchObject([{ id: savedId, tags: ["meetings"] }]);
+      expect(await b.api.listKnowledgeTags()).toEqual({
+        tags: [{ name: "meetings", count: 1 }],
+        aliases: [{ alias: "fixture", name: "meetings", mergeId: merge.mergeId }],
+      });
+      expect(await f.owner.listKnowledgeTags()).toMatchObject({
+        tags: [{ name: "meetings", count: 2 }],
+      });
+      const undo = { mergeId: merge.mergeId, mutationKey: randomUUID() };
+      await expect(b.api.unmergeKnowledgeTags(undo)).rejects.toMatchObject({ status: 403 });
+      expect(await f.owner.unmergeKnowledgeTags(undo)).toMatchObject({
+        from: "fixture",
+        into: "meetings",
+      });
+      expect(await f.owner.getKnowledge({ id: savedId })).toMatchObject({ tags: ["fixture"] });
       const prior = knowledgeContextPackSchema.parse(
         await tool(second.client, "get_context_for_intent", planning),
       );

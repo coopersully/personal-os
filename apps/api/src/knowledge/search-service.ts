@@ -6,6 +6,7 @@ import {
   knowledgeClaimContent,
   knowledgeHistoryInputSchema,
   knowledgeQuerySchema,
+  normalizeKnowledgeTag,
 } from "@personal-os/domain";
 import { sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
@@ -27,6 +28,7 @@ import {
   knowledgeQueryFilter,
   pageRecords,
 } from "./retrieval-session.js";
+import { lookupKnowledgeTags } from "./tag-service.js";
 
 function sourcePriority(record: KnowledgeRecord) {
   let priority = 0;
@@ -88,9 +90,16 @@ async function validateEntityRefs(
   }
 }
 
+/** At most this many words of a text query are checked as exact tags. */
+const textTagCandidates = 20;
+
 type Candidate = {
   record: KnowledgeRecord;
   content: KnowledgeRecord["content"];
+  /** Requested tags the record carries. */
+  requestedTags: number;
+  /** Tags the record carries that the text names exactly; these rank above text-only matches. */
+  textTags: number;
   /** 1 when the record was saved for the requested purpose; purpose only ranks. */
   purpose: number;
   exact: number;
@@ -112,11 +121,13 @@ async function fullTextRanks(
     const documents = candidates.slice(i, i + 100).map(({ record, content }) => ({
       id: record.id,
       value: content.value,
+      tags: record.tags.join(" "),
     }));
     const { rows } = await tx.execute<{ id: string; score: number }>(sql`
       WITH query AS (SELECT websearch_to_tsquery('english', ${text}) AS words),
       documents AS (
         SELECT document->>'id' AS id,
+          setweight(to_tsvector('english', document->>'tags'), 'A') ||
           jsonb_to_tsvector('english', document->'value', '["string","numeric","boolean"]'::jsonb) AS terms
         FROM jsonb_array_elements(${JSON.stringify(documents)}::jsonb) AS document
       )
@@ -145,6 +156,21 @@ export async function selectKnowledgeCandidates(
   const status = query.status === "trashed" ? undefined : query.status;
   const refs = new Set(query.entityRefs);
   await validateEntityRefs(session, principal, refs);
+  // Requested tags resolve through aliases and plurals; so do the words of the text, which
+  // rank a record above text-only matches when one of them is exactly a tag it carries.
+  const requested = query.tags ? await lookupKnowledgeTags(tx, principal.userId, query.tags) : [];
+  const textWords = query.text
+    ? [
+        ...new Set(
+          [query.text, ...query.text.split(/\s+/u)].flatMap(
+            (word) => normalizeKnowledgeTag(word) ?? [],
+          ),
+        ),
+      ].slice(0, textTagCandidates)
+    : [];
+  const textTags = new Set(
+    textWords.length ? await lookupKnowledgeTags(tx, principal.userId, textWords) : [],
+  );
   const rows = await currentKnowledgeForRetrieval(tx, principal, query, authorizedScopes);
   const candidates: Candidate[] = [];
   let unavailable = false;
@@ -178,8 +204,11 @@ export async function selectKnowledgeCandidates(
     const { record } = projection;
     const content = knowledgeClaimContent(record, metadata.generatedInference);
     const { exact, related } = entityMatches(record, content, refs);
+    const carried = requested.filter((tag) => record.tags.includes(tag)).length;
     if (
       (refs.size && !exact && !related) ||
+      (requested.length &&
+        (query.tagMatch === "all" ? carried < requested.length : carried === 0)) ||
       // Archived memory is left out unless the caller asks for it.
       (status ? status !== record.status : record.status === "archived") ||
       (query.origin && query.origin !== record.origin) ||
@@ -190,6 +219,8 @@ export async function selectKnowledgeCandidates(
     candidates.push({
       record,
       content,
+      requestedTags: carried,
+      textTags: record.tags.filter((tag) => textTags.has(tag)).length,
       purpose: Number(query.purpose !== undefined && record.purposes.includes(query.purpose)),
       exact,
       related,
@@ -200,9 +231,12 @@ export async function selectKnowledgeCandidates(
   }
 
   const ranks = query.text ? await fullTextRanks(session, candidates, query.text) : null;
-  const matches = ranks ? candidates.filter(({ record }) => ranks.has(record.id)) : candidates;
+  const matches = ranks
+    ? candidates.filter(({ record, textTags }) => textTags > 0 || ranks.has(record.id))
+    : candidates;
   matches.sort(
     (a, b) =>
+      b.requestedTags + b.textTags - (a.requestedTags + a.textTags) ||
       b.purpose - a.purpose ||
       (ranks?.get(b.record.id) ?? 0) - (ranks?.get(a.record.id) ?? 0) ||
       b.exact - a.exact ||

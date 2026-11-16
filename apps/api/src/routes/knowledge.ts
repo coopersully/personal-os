@@ -12,6 +12,11 @@ import {
   knowledgeReadInputSchema,
   knowledgeReadResultSchema,
   knowledgeSaveResultSchema,
+  knowledgeTagIndexInputSchema,
+  knowledgeTagIndexSchema,
+  knowledgeTagMergeInputSchema,
+  knowledgeTagMergeSchema,
+  knowledgeTagUnmergeInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
@@ -21,6 +26,7 @@ import type { createKnowledgeExportService } from "../knowledge/export-service.j
 import type { createKnowledgeLifecycleService } from "../knowledge/lifecycle-service.js";
 import type { createKnowledgeRecordService } from "../knowledge/record-service.js";
 import type { createKnowledgeSearchService } from "../knowledge/search-service.js";
+import type { createKnowledgeTagService } from "../knowledge/tag-service.js";
 import type { AppEnv } from "../types.js";
 import { parseBody } from "./support.js";
 
@@ -39,11 +45,21 @@ const knowledgeSearchQuerySchema = knowledgeQuerySchema.omit({ timeWindow: true 
     .optional(),
 });
 
-function queryParameters(context: Context, repeated?: string) {
+const knowledgeTagIndexQuerySchema = z
+  .object({
+    limit: z
+      .string()
+      .regex(/^\d{1,3}$/)
+      .transform(Number)
+      .optional(),
+  })
+  .strict();
+
+function queryParameters(context: Context, repeated: readonly string[] = []) {
   return Object.fromEntries(
     Object.entries(context.req.queries()).map(([key, values]) => [
       key,
-      key === repeated || values.length > 1 ? values : values[0],
+      repeated.includes(key) || values.length > 1 ? values : values[0],
     ]),
   );
 }
@@ -68,6 +84,7 @@ export function registerKnowledgeRoutes({
   search,
   context: contextService,
   export: exportService,
+  tags,
 }: {
   app: Hono<AppEnv>;
   knowledge: ReturnType<typeof createKnowledgeRecordService>;
@@ -75,6 +92,7 @@ export function registerKnowledgeRoutes({
   search: ReturnType<typeof createKnowledgeSearchService>;
   context: ReturnType<typeof createKnowledgeContextService>;
   export: ReturnType<typeof createKnowledgeExportService>;
+  tags: ReturnType<typeof createKnowledgeTagService>;
 }) {
   app.post("/v1/knowledge", async (context) => {
     const result = await knowledge.create(
@@ -87,7 +105,7 @@ export function registerKnowledgeRoutes({
   });
   app.get("/v1/knowledge", async (context) => {
     const { from, to, ...query } = knowledgeSearchQuerySchema.parse(
-      queryParameters(context, "entityRefs"),
+      queryParameters(context, ["entityRefs", "tags"]),
     );
     const input = knowledgeQuerySchema.parse({
       ...query,
@@ -126,6 +144,36 @@ export function registerKnowledgeRoutes({
       parseKnowledgeResponse(
         knowledgeContextExplanationSchema,
         await contextService.explain(context.get("principal"), input),
+      ),
+    );
+  });
+  app.get("/v1/knowledge/tags", async (context) => {
+    const input = knowledgeTagIndexInputSchema.parse(
+      knowledgeTagIndexQuerySchema.parse(queryParameters(context)),
+    );
+    return context.json(
+      parseKnowledgeResponse(
+        knowledgeTagIndexSchema,
+        await tags.index(context.get("principal"), input),
+      ),
+    );
+  });
+  app.post("/v1/knowledge/tags/merge", async (context) => {
+    const input = await parseBody(context, knowledgeTagMergeInputSchema);
+    return context.json(
+      parseKnowledgeResponse(
+        knowledgeTagMergeSchema,
+        await tags.merge(context.get("principal"), input),
+      ),
+    );
+  });
+  // Person only: the service refuses agents.
+  app.post("/v1/knowledge/tags/unmerge", async (context) => {
+    const input = await parseBody(context, knowledgeTagUnmergeInputSchema);
+    return context.json(
+      parseKnowledgeResponse(
+        knowledgeTagMergeSchema,
+        await tags.unmerge(context.get("principal"), input),
       ),
     );
   });

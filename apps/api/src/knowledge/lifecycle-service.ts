@@ -229,6 +229,7 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
                 sensitivity: snapshot.sensitivity,
                 purposes: snapshot.purposes,
                 core: input.core ?? current.core,
+                tags: input.tags ?? current.tags,
                 evidence: input.evidence ?? [],
                 relatedRecordIds: input.relatedRecordIds ?? snapshot.relatedRecordIds,
                 ...(input.validity ? { validity: input.validity } : {}),

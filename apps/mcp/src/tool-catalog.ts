@@ -400,6 +400,10 @@ export const personalOsToolCatalog = {
     destructive: true,
   }),
   search_user_knowledge: read("knowledge", ["knowledge:read"]),
+  merge_knowledge_tags: write("knowledge", ["knowledge:read", "knowledge:write"], {
+    policy: "approved_rule",
+    idempotent: true,
+  }),
   get_context_for_intent: read("knowledge", ["knowledge:read"], "context"),
   explain_context: read("knowledge", ["knowledge:read"], "verify"),
   list_goals: read("goals", ["goals:read"]),

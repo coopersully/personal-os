@@ -103,6 +103,7 @@ import { createKnowledgeLifecycleService } from "./knowledge/lifecycle-service.j
 import { createKnowledgePurgeService } from "./knowledge/purge-service.js";
 import { createKnowledgeRecordService } from "./knowledge/record-service.js";
 import { createKnowledgeSearchService } from "./knowledge/search-service.js";
+import { createKnowledgeTagService } from "./knowledge/tag-service.js";
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
@@ -1614,6 +1615,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     search: createKnowledgeSearchService(knowledgeRetrieval),
     context: createKnowledgeContextService(knowledgeRetrieval),
     export: createKnowledgeExportService(knowledgeRetrieval),
+    tags: createKnowledgeTagService(knowledgePersistence),
   });
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
   registerRitualRoutes({

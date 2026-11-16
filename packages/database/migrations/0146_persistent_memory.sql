@@ -36,6 +36,46 @@ CREATE TABLE knowledge_relationships (
  FOREIGN KEY(user_id,related_record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE
 );
 --> statement-breakpoint
+-- Tags are owner-scoped; a merged tag keeps its row so undo can restore it.
+CREATE TABLE knowledge_tags (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ name text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+ CONSTRAINT knowledge_tags_owner_name_idx UNIQUE(user_id,name),
+ CONSTRAINT knowledge_tags_owner_id_idx UNIQUE(user_id,id)
+);
+--> statement-breakpoint
+-- Owner-composite cascading keys: purging a record removes its tag links.
+CREATE TABLE knowledge_record_tags (
+ user_id uuid NOT NULL, record_id uuid NOT NULL, tag_id uuid NOT NULL,
+ PRIMARY KEY (user_id, record_id, tag_id),
+ FOREIGN KEY(user_id,record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE,
+ FOREIGN KEY(user_id,tag_id) REFERENCES knowledge_tags(user_id,id) ON DELETE CASCADE
+);
+--> statement-breakpoint
+CREATE INDEX knowledge_record_tags_owner_tag_idx ON knowledge_record_tags (user_id, tag_id);
+--> statement-breakpoint
+CREATE TABLE knowledge_tag_merges (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ from_name text NOT NULL, into_tag_id uuid NOT NULL, actor_type text NOT NULL, actor_id uuid NOT NULL,
+ record_ids uuid[] NOT NULL, kept_into_record_ids uuid[] NOT NULL,
+ mutation_key uuid NOT NULL, request_hash text NOT NULL, undo_mutation_key uuid NULL,
+ created_at timestamptz NOT NULL, undone_at timestamptz NULL,
+ CONSTRAINT knowledge_tag_merges_owner_id_idx UNIQUE(user_id,id),
+ CONSTRAINT knowledge_tag_merges_owner_key_idx UNIQUE(user_id,mutation_key),
+ CONSTRAINT knowledge_tag_merges_owner_undo_key_idx UNIQUE(user_id,undo_mutation_key),
+ FOREIGN KEY(user_id,into_tag_id) REFERENCES knowledge_tags(user_id,id) ON DELETE CASCADE,
+ CONSTRAINT knowledge_tag_merges_actor_check CHECK (actor_type IN ('user', 'agent')),
+ CONSTRAINT knowledge_tag_merges_undo_state CHECK ((undone_at IS NULL) = (undo_mutation_key IS NULL))
+);
+--> statement-breakpoint
+CREATE TABLE knowledge_tag_aliases (
+ user_id uuid NOT NULL, alias text NOT NULL, tag_id uuid NOT NULL, merge_id uuid NOT NULL,
+ created_at timestamptz NOT NULL,
+ PRIMARY KEY (user_id, alias),
+ FOREIGN KEY(user_id,tag_id) REFERENCES knowledge_tags(user_id,id) ON DELETE CASCADE,
+ FOREIGN KEY(user_id,merge_id) REFERENCES knowledge_tag_merges(user_id,id) ON DELETE CASCADE
+);
+--> statement-breakpoint
 -- Receipts outlive a purged record so a retried mutation stays content-free.
 CREATE TABLE knowledge_receipts (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,

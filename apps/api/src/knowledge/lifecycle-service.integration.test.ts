@@ -99,6 +99,7 @@ describe("knowledge lifecycle", () => {
       value: { subject: "Person", predicate: "preferred day", value: { type: "string", value } },
     },
     scope: { workspace: null },
+    tags: ["fixture"],
     sensitivity: "standard",
     purposes: ["planning", "review"],
     evidence: [{ type: "statement", wording: `I prefer ${value}.` }],

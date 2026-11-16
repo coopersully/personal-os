@@ -180,6 +180,7 @@ export function knowledgeRecordVisibility(record: KnowledgeRecord) {
     record.conflictRecordIds,
     record.relatedRecordIds,
     record.supersededBy,
+    record.tags,
     record.sources.map(({ id, availability }) => [id, availability ?? null]),
   ];
 }
@@ -216,5 +217,6 @@ export function knowledgeQueryFilter(input: KnowledgeQuery) {
     input.hasConflict ?? null,
     input.limit ?? 20,
     ...(input.reviewView ? [input.reviewView] : []),
+    ...(input.tags ? [[...input.tags].sort(), input.tagMatch ?? "any"] : []),
   ];
 }

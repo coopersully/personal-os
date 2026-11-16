@@ -49,6 +49,7 @@ import {
   knowledgeSourceReferences,
   ownedKnowledgeRevision,
 } from "./access.js";
+import { replaceKnowledgeRecordTags, resolveKnowledgeTagRows } from "./tag-service.js";
 
 type KnowledgeAccess = ReturnType<typeof createKnowledgeAccess>;
 type StoredReceipt = typeof knowledgeReceipts.$inferSelect;
@@ -62,6 +63,8 @@ export type RevisionWrite = {
   derivations: KnowledgeDerivation[];
   newSources: KnowledgeSource[];
   record: KnowledgeRecordWriteState;
+  /** Canonical tag IDs to set on the record; omitted leaves its tags as they are. */
+  tagIds?: string[];
 };
 
 export const knowledgeWriteScopes: AccessScope[] = ["knowledge:read", "knowledge:write"];
@@ -416,9 +419,11 @@ export async function prepareKnowledgeRevision({
     relatedRecordIds: input.relatedRecordIds,
     createdAt: asProposal ? at.toISOString() : (snapshot?.createdAt ?? at.toISOString()),
   });
+  const tags = await resolveKnowledgeTagRows(tx, principal.userId, input.tags);
   return {
     snapshot: record,
     metadata,
+    tagIds: tags.map(({ id }) => id),
     claimKey: knowledgeClaimKey(input.scope.workspace, submitted),
     derivations: uniqueDerivations(derivations),
     newSources,
@@ -467,7 +472,7 @@ export async function writeKnowledgeRevision(
   write: RevisionWrite,
   at: Date,
 ) {
-  const { snapshot, metadata, claimKey, derivations, newSources, record } = write;
+  const { snapshot, metadata, claimKey, derivations, newSources, record, tagIds } = write;
   const { userId } = principal;
   const { id: recordId, revision } = snapshot;
   if (revision === 1) {
@@ -488,6 +493,7 @@ export async function writeKnowledgeRevision(
         ),
       );
   }
+  if (tagIds) await replaceKnowledgeRecordTags(tx, userId, recordId, tagIds);
   await tx.insert(knowledgeRevisions).values({ userId, recordId, revision, snapshot });
   await saveKnowledgeSidecar(tx, userId, { snapshot, metadata, claimKey }, derivations);
   if (newSources.length)

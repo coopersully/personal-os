@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { accessScopeSchema } from "./auth.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
+import { knowledgeTagsInputSchema } from "./knowledge-tags.js";
 
 // PostgreSQL JSONB rejects NUL and unpaired UTF-16 surrogates. Validate before
 // persistence rather than replacing or truncating accepted personal knowledge.
@@ -200,6 +201,8 @@ export const knowledgeMutationInputSchema = z
     purposes: knowledgePurposesSchema.optional(),
     /** Lasting preferences, standing constraints and identity-level facts load at session start. */
     core: z.boolean().default(false),
+    /** 1–8 tags. Reuse tags from the index; the API files aliases and plurals under them. */
+    tags: knowledgeTagsInputSchema,
     evidence: knowledgeEvidenceListSchema.default([]),
     relatedRecordIds: knowledgeRelatedIdsSchema.default([]),
     validity: knowledgeValiditySchema.optional(),
@@ -277,6 +280,8 @@ export const knowledgeRecordSchema = knowledgeRecordSnapshotSchema.extend({
   /** `blocked` hides the record from every agent read; only the person may change it. */
   agentAccess: knowledgeAgentAccessSchema,
   core: z.boolean(),
+  /** Canonical tag names, sorted. Merges change them without a new revision. */
+  tags: z.array(z.string()),
   lastConfirmedAt: isoDateTimeSchema.nullable(),
   supersededBy: idSchema.nullable(),
   /** Set only on records in the owner's Trash; agents never receive a trashed record. */

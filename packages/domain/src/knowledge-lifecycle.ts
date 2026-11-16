@@ -12,6 +12,7 @@ import {
   knowledgeWorkspaceSchema,
   knowledgeWriteContentSchema,
 } from "./knowledge.js";
+import { knowledgeTagsInputSchema } from "./knowledge-tags.js";
 import { unicodeCaseFold } from "./unicode-case-folding.js";
 
 const mutationIdentity = {
@@ -30,6 +31,8 @@ const agentKnowledgeActions = [
       relatedRecordIds: knowledgeRelatedIdsSchema.optional(),
       validity: knowledgeValiditySchema.optional(),
       core: z.boolean().optional(),
+      /** Replaces the record's tags; omitted keeps them. */
+      tags: knowledgeTagsInputSchema.optional(),
     })
     .strict(),
   z.object({ ...mutationIdentity, action: z.literal("dispute") }).strict(),

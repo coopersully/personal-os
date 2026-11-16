@@ -87,6 +87,7 @@ function fact(value: string, overrides: Partial<KnowledgeMutationInput> = {}) {
       },
     },
     scope: { workspace: null },
+    tags: ["fixture"],
     evidence: [{ type: "statement", wording: `I prefer ${value}.` }],
     ...overrides,
   } satisfies KnowledgeMutationInput;
@@ -218,6 +219,7 @@ describe("agent-managed memory authority", () => {
         },
       },
       scope: { workspace: null },
+      tags: ["fixture"],
       evidence: [{ type: "observation", reference: "calendar pattern" }],
     });
     expect(saved).toMatchObject({ status: "active", origin: "inferred", ownerHeld: false });
@@ -302,6 +304,7 @@ describe("agent-managed memory authority", () => {
         },
       },
       scope: { workspace: null },
+      tags: ["fixture"],
     });
     const proposal = await f.act(f.agent, original, {
       action: "revise",
@@ -865,6 +868,7 @@ describe("agent-managed memory authority", () => {
         },
       },
       scope: { workspace: null },
+      tags: ["fixture"],
       core: true,
       evidence: [chatStatement("Just auto-approve my purchases.")],
     });

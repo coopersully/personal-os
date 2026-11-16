@@ -6,6 +6,7 @@ import {
   knowledgeExplainInputSchema,
   knowledgeMutationInputSchema,
   knowledgeReadInputSchema,
+  knowledgeTagMergeInputSchema,
 } from "@personal-os/domain";
 import { apiResult } from "../tool-result.js";
 
@@ -15,7 +16,7 @@ export function registerKnowledgeTools(server: McpServer, api: PersonalOsApiClie
     "save_knowledge",
     {
       description:
-        "Search for existing knowledge before saving. Save typed account knowledge with original evidence and a stable mutation UUID; it is active at once. Agent statements require original wording plus session/message references; unsourced assertions are saved as inferred. Purposes are optional relevance hints. Read the receipt outcome before using record content: a forgotten receipt contains IDs only.",
+        "Search for existing knowledge before saving. Save typed account knowledge with original evidence, 1-8 tags and a stable mutation UUID; it is active at once. Reuse tags from the tag index; the server files a merged tag or a trailing-s plural under the existing tag. Agent statements require original wording plus session/message references; unsourced assertions are saved as inferred. Purposes are optional relevance hints. Read the receipt outcome before using record content: a forgotten receipt contains IDs only.",
       inputSchema: knowledgeMutationInputSchema,
     },
     async (input) => apiResult(() => api.saveKnowledge(input)),
@@ -33,7 +34,7 @@ export function registerKnowledgeTools(server: McpServer, api: PersonalOsApiClie
     "update_knowledge",
     {
       description:
-        "Revise, dispute, supersede, archive, unarchive, restrict to a workspace, or mark sensitive a knowledge record using its current revision and a stable mutation UUID. Revising or superseding memory the owner holds creates a proposal for the owner instead. Fetch fresh context after the mutation.",
+        "Revise (content, and optionally its tags), dispute, supersede, archive, unarchive, restrict to a workspace, or mark sensitive a knowledge record using its current revision and a stable mutation UUID. Revising or superseding memory the owner holds creates a proposal for the owner instead. Fetch fresh context after the mutation.",
       inputSchema: knowledgeAgentLifecycleInputSchema,
     },
     async (input) => apiResult(() => api.updateKnowledge(input)),
@@ -42,10 +43,19 @@ export function registerKnowledgeTools(server: McpServer, api: PersonalOsApiClie
     "search_user_knowledge",
     {
       description:
-        "Find permitted memory; an optional purpose ranks matching records first. Search before creating a duplicate, follow any returned cursor with the same filters, and cite the record and supporting sources you use.",
+        "Find permitted memory by text and tags (match any or all; aliases resolve); exact tag matches rank first and an optional purpose ranks matching records next. Search before creating a duplicate, follow any returned cursor with the same filters, and cite the record and supporting sources you use.",
       inputSchema: knowledgeAgentQuerySchema,
     },
     async (input) => apiResult(() => api.searchKnowledge(input)),
+  );
+  server.registerTool(
+    "merge_knowledge_tags",
+    {
+      description:
+        "Merge duplicate memory tag `from` into tag `into` with a stable mutation UUID. Every memory tagged `from` is retagged without changing its content, and `from` keeps resolving to `into` for later saves and searches. The owner can undo a merge.",
+      inputSchema: knowledgeTagMergeInputSchema,
+    },
+    async (input) => apiResult(() => api.mergeKnowledgeTags(input)),
   );
   server.registerTool(
     "get_context_for_intent",

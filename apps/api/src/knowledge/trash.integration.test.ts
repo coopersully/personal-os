@@ -7,6 +7,7 @@ import {
   knowledgeDerivations,
   knowledgeReceipts,
   knowledgeRecords,
+  knowledgeRecordTags,
   knowledgeRelationships,
   knowledgeRevisionMetadata,
   knowledgeRevisions,
@@ -47,6 +48,7 @@ function fact(value: string, overrides?: Partial<KnowledgeMutationInput>): Knowl
       },
     },
     scope: { workspace: null },
+    tags: ["fixture"],
     sensitivity: "standard",
     purposes: ["planning", "review"],
     evidence: [{ type: "statement", wording: "The owner stated this explicitly." }],
@@ -588,6 +590,10 @@ describe("memory trash and purge", () => {
     const b = await f.save(derivedFrom(a, "purge-derived-value"));
     const linked = await f.save(fact("linked-value", { relatedRecordIds: [a.id] }));
     const trashedAt = new Date("2026-11-12T12:00:00Z");
+    const { db } = database;
+    const tagLinks = (id: string) =>
+      db.select().from(knowledgeRecordTags).where(eq(knowledgeRecordTags.recordId, id));
+    expect(await tagLinks(a.id)).toHaveLength(1);
     await f.act("trash", a);
 
     f.advance(knowledgeTrashRetentionMs);
@@ -595,8 +601,9 @@ describe("memory trash and purge", () => {
     f.advance(1);
     expect(await f.purge.purgeExpired({ limit: 100 })).toMatchObject({ purged: 2 });
 
-    const { db } = database;
     for (const id of [a.id, b.id]) {
+      // Owner-composite cascading keys remove a purged record's tag links (R2).
+      expect(await tagLinks(id)).toEqual([]);
       expect(await db.select().from(knowledgeRecords).where(eq(knowledgeRecords.id, id))).toEqual(
         [],
       );

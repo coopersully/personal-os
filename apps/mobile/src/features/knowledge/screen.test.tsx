@@ -101,6 +101,7 @@ const inferred: KnowledgeRecord = {
   ownerHeld: true,
   agentAccess: "allowed",
   core: false,
+  tags: ["communication"],
   lastConfirmedAt: null,
   schemaVersion: 1,
   claimKey: '[null,"preference","owner","communication_style"]',

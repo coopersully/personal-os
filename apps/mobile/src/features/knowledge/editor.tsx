@@ -5,6 +5,7 @@ import {
   knowledgeLifecycleInputSchema,
   knowledgeMutationInputSchema,
   knowledgePurposeSchema,
+  knowledgeTagsInputSchema,
   knowledgeWorkspaceSchema,
 } from "@personal-os/domain";
 import { randomUUID } from "expo-crypto";
@@ -29,6 +30,21 @@ type Scope = KnowledgeRecord["scope"]["workspace"];
 type Sensitivity = KnowledgeRecord["sensitivity"];
 export type EditMode = "edit" | "restrict" | "supersede";
 const visibilityLabels = { standard: "Standard", sensitive: "Sensitive" };
+
+/** Tags typed as a comma-separated list; the API normalizes and files them. */
+function tagsDraft(text: string, record?: KnowledgeRecord) {
+  const parsed = knowledgeTagsInputSchema.safeParse(
+    text
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean),
+  );
+  const changed =
+    !record ||
+    !parsed.success ||
+    JSON.stringify([...parsed.data].sort()) !== JSON.stringify([...record.tags].sort());
+  return { tags: parsed.success ? parsed.data : undefined, changed };
+}
 
 type PermissionDraft = {
   workspace: Scope;
@@ -134,9 +150,11 @@ export function MemoryEditor({
   const [draft, setDraft] = useState(() => fieldDraft(original));
   const [permissions, setPermissions] = useState(() => permissionDraft(record, purpose));
   const [replacementId, setReplacementId] = useState("");
+  const [tagText, setTagText] = useState(record?.tags.join(", ") ?? "");
   const [dirty, setDirty] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const parsed = contentDraft(kind, draft, original);
+  const tags = tagsDraft(tagText, record);
   // Restricting only narrows the workspace of the just-reviewed revision.
   const restricted = {
     ...permissions,
@@ -144,7 +162,7 @@ export function MemoryEditor({
   };
   const unchanged =
     mode === "edit"
-      ? parsed.success && JSON.stringify(parsed.data) === JSON.stringify(original)
+      ? parsed.success && JSON.stringify(parsed.data) === JSON.stringify(original) && !tags.changed
       : mode === "restrict"
         ? restricted.workspace === (record?.scope.workspace ?? null)
         : false;
@@ -175,8 +193,8 @@ export function MemoryEditor({
               action: "restrict",
               workspace: restricted.workspace,
             })
-          : parsed.success
-            ? claimInput(parsed.data, permissions, mutationKey, identity)
+          : parsed.success && tags.tags
+            ? claimInput(parsed.data, permissions, tags, mutationKey, identity)
             : undefined;
     if (!input?.success) {
       setInvalid(true);
@@ -270,6 +288,13 @@ export function MemoryEditor({
                 )}
               </>
             )}
+            <Field
+              label="Tags"
+              value={tagText}
+              onChange={(value) => change(() => setTagText(value))}
+              disabled={disabled}
+              placeholder="family, planning"
+            />
           </Section>
         )
       )}
@@ -285,6 +310,9 @@ export function MemoryEditor({
       {invalid && mode === "add" && !permissions.purposes.length && (
         <MemoryText>Select at least one allowed use.</MemoryText>
       )}
+      {invalid && mode !== "supersede" && mode !== "restrict" && !tags.tags && (
+        <MemoryText>Enter 1 to 8 tags, separated by commas.</MemoryText>
+      )}
     </>,
     <FormSave disabled={disabled || !dirty || unchanged} onPress={submit} />,
   );
@@ -293,6 +321,7 @@ export function MemoryEditor({
 function claimInput(
   content: KnowledgeRecord["content"],
   permissions: PermissionDraft,
+  { tags, changed }: ReturnType<typeof tagsDraft>,
   mutationKey: string,
   identity: { recordId: string; expectedRevision: number; mutationKey: string } | null,
 ) {
@@ -308,11 +337,13 @@ function claimInput(
         action: "revise",
         content,
         ...(evidence.length ? { evidence } : {}),
+        ...(changed ? { tags } : {}),
       })
     : knowledgeMutationInputSchema.safeParse({
         mutationKey,
         content,
         scope: { workspace: permissions.workspace },
+        tags,
         evidence,
         purposes: permissions.purposes,
         sensitivity: permissions.sensitivity,

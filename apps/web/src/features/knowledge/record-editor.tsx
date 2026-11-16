@@ -5,6 +5,7 @@ import {
   knowledgeLifecycleInputSchema,
   knowledgeMutationInputSchema,
   knowledgePurposeSchema,
+  knowledgeTagsInputSchema,
   knowledgeWorkspaceSchema,
   knowledgeWriteContentSchema,
 } from "@personal-os/domain";
@@ -77,6 +78,21 @@ const contentFields: Record<Kind, readonly FieldSpec[]> = {
   ],
 };
 const valueTypes = ["string", "boolean", "integer", "date"] as const;
+
+/** Tags typed as a comma-separated list; the API normalizes and files them. */
+function tagsDraft(text: string, record?: KnowledgeRecord) {
+  const parsed = knowledgeTagsInputSchema.safeParse(
+    text
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean),
+  );
+  const changed =
+    !record ||
+    !parsed.success ||
+    JSON.stringify([...parsed.data].sort()) !== JSON.stringify([...record.tags].sort());
+  return { parsed, changed };
+}
 
 function fieldDraft(content?: MemoryContent): Record<string, string> {
   if (!content) return { subject: "owner", valueType: "string" };
@@ -292,6 +308,7 @@ export function RecordEditor({
   const [workspace, setWorkspace] = useState(record?.scope.workspace ?? "");
   const [purposes, setPurposes] = useState(record?.purposes ?? [purpose]);
   const [sensitive, setSensitive] = useState(record?.sensitivity === "sensitive");
+  const [tagText, setTagText] = useState(record?.tags.join(", ") ?? "");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [purposeInvalid, setPurposeInvalid] = useState(false);
 
@@ -299,8 +316,12 @@ export function RecordEditor({
     setDraft((previous) => ({ ...previous, [key]: value }));
 
   const parsed = contentDraft(kind, draft, original);
+  const tags = tagsDraft(tagText, record);
   const unchanged = Boolean(
-    record && parsed.success && JSON.stringify(parsed.data) === JSON.stringify(original),
+    record &&
+      parsed.success &&
+      JSON.stringify(parsed.data) === JSON.stringify(original) &&
+      !tags.changed,
   );
 
   function submit(event: FormEvent) {
@@ -315,6 +336,11 @@ export function RecordEditor({
           ]),
         ),
       );
+      onInvalid();
+      return;
+    }
+    if (!tags.parsed.success) {
+      setErrors({ tags: "Enter 1 to 8 tags, separated by commas." });
       onInvalid();
       return;
     }
@@ -336,12 +362,14 @@ export function RecordEditor({
           ...(JSON.stringify(content) !== JSON.stringify(original) && evidence.length
             ? { evidence }
             : {}),
+          ...(tags.changed ? { tags: tags.parsed.data } : {}),
         })
       : knowledgeMutationInputSchema.safeParse({
           mutationKey,
           content,
           evidence,
           scope: { workspace: workspace || null },
+          tags: tags.parsed.data,
           purposes,
           sensitivity: sensitive ? "sensitive" : "standard",
         });
@@ -453,6 +481,19 @@ export function RecordEditor({
             </Field>
           </>
         ) : null}
+        <Field data-invalid={Boolean(errors.tags)}>
+          <FieldLabel htmlFor={`${id}-tags`}>Tags</FieldLabel>
+          <Input
+            id={`${id}-tags`}
+            value={tagText}
+            disabled={disabled}
+            placeholder="family, planning"
+            aria-invalid={Boolean(errors.tags)}
+            aria-describedby={errors.tags ? `${id}-tags-error` : undefined}
+            onChange={(event) => setTagText(event.target.value)}
+          />
+          {errors.tags ? <FieldError id={`${id}-tags-error`}>{errors.tags}</FieldError> : null}
+        </Field>
         {!record ? (
           <>
             <Field>

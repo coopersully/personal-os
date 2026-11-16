@@ -105,7 +105,7 @@ describe("knowledge scope discovery", () => {
       "get_knowledge",
       "search_user_knowledge",
     ];
-    const writes = ["save_knowledge", "update_knowledge"];
+    const writes = ["merge_knowledge_tags", "save_knowledge", "update_knowledge"];
     const knowledgeTools = (scopes: Parameters<typeof availableToolNames>[0], readOnly: boolean) =>
       availableToolNames(scopes, readOnly)
         .filter((name) => personalOsToolCatalog[name].domain === "knowledge")

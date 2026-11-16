@@ -23,6 +23,7 @@ async function addFact(page: Page, title: string, value: string) {
   const editor = page.getByRole("dialog", { name: "Add memory" });
   await editor.getByLabel("Fact", { exact: true }).fill(title);
   await editor.getByLabel("Value", { exact: true }).fill(value);
+  await editor.getByLabel("Tags", { exact: true }).fill("e2e");
   await editor.getByRole("button", { name: "Save memory" }).click();
   await expect(toast(page, "Memory saved.")).toBeVisible();
   const row = page.getByRole("button", { name: new RegExp(title, "i") });

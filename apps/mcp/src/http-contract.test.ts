@@ -172,6 +172,7 @@ await import("./apps/mcp/src/http.ts");`,
         "explain_context",
         "get_context_for_intent",
         "get_knowledge",
+        "merge_knowledge_tags",
         "save_knowledge",
         "search_user_knowledge",
         "update_knowledge",
@@ -193,7 +194,9 @@ await import("./apps/mcp/src/http.ts");`,
       );
       expect(tools.map((tool) => tool.name).sort()).toEqual(expected);
       for (const tool of tools) {
-        const write = tool.name === "save_knowledge" || tool.name === "update_knowledge";
+        const write = ["merge_knowledge_tags", "save_knowledge", "update_knowledge"].includes(
+          tool.name,
+        );
         expect(tool.annotations?.readOnlyHint).toBe(!write);
         expect(tool.outputSchema?.properties).toHaveProperty("_ilo");
       }

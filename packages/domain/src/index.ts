@@ -34,6 +34,7 @@ export * from "./goals.js";
 export * from "./knowledge.js";
 export * from "./knowledge-lifecycle.js";
 export * from "./knowledge-retrieval.js";
+export * from "./knowledge-tags.js";
 export * from "./mail.js";
 export * from "./mail-stewardship.js";
 export * from "./maintenance.js";

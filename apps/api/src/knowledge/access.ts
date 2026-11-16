@@ -5,9 +5,11 @@ import {
   knowledgeDerivations,
   knowledgeOwnerEpochs,
   knowledgeRecords,
+  knowledgeRecordTags,
   knowledgeRevisionMetadata,
   knowledgeRevisions,
   knowledgeSources,
+  knowledgeTags,
   sessions,
   textInboundClaims,
   users,
@@ -42,6 +44,8 @@ export type KnowledgeRecordState = {
   agentAccess: KnowledgeAgentAccess;
   core: boolean;
   lastConfirmedAt: Date | null;
+  /** Canonical tag names, sorted. Tags are record state; merges change them in place. */
+  tags: string[];
 };
 export type KnowledgeRevision = KnowledgeRecordState & {
   snapshot: KnowledgeRecordSnapshot;
@@ -239,6 +243,15 @@ const revisionSelection = {
   agentAccess: knowledgeRecords.agentAccess,
   core: knowledgeRecords.core,
   lastConfirmedAt: knowledgeRecords.lastConfirmedAt,
+  tags: sql<string[]>`coalesce((
+    SELECT array_agg(${knowledgeTags.name} ORDER BY ${knowledgeTags.name})
+    FROM ${knowledgeRecordTags}
+    INNER JOIN ${knowledgeTags}
+      ON ${knowledgeTags.userId} = ${knowledgeRecordTags.userId}
+      AND ${knowledgeTags.id} = ${knowledgeRecordTags.tagId}
+    WHERE ${knowledgeRecordTags.userId} = ${knowledgeRecords.userId}
+      AND ${knowledgeRecordTags.recordId} = ${knowledgeRecords.id}
+  ), '{}'::text[])`,
 };
 
 /**
@@ -266,6 +279,7 @@ export const detachedKnowledgeRecordState: KnowledgeRecordState = {
   agentAccess: "allowed",
   core: false,
   lastConfirmedAt: null,
+  tags: [],
 };
 /** SQL twin of `isKnowledgeVisibleToAgent`; requires the current revision to be joined. */
 export function knowledgeVisibleToAgent(scopes: readonly AccessScope[]) {
@@ -476,6 +490,7 @@ export function projectKnowledgeRevision(
     agentAccess: row.agentAccess,
     core: row.core,
     lastConfirmedAt: row.lastConfirmedAt,
+    tags: row.tags,
     claimKey: knowledgeClaimKey(
       snapshot.scope.workspace,
       knowledgeClaimContent(snapshot, metadata.generatedInference),
@@ -1097,6 +1112,7 @@ export function createKnowledgeAccess(now: () => Date) {
       ownerHeld: revision.ownerHeld,
       agentAccess: revision.agentAccess,
       core: revision.core,
+      tags: revision.tags,
       lastConfirmedAt: revision.lastConfirmedAt?.toISOString() ?? null,
       trashedAt: revision.trashedAt?.toISOString() ?? null,
       trashGroupId: revision.trashGroupId,

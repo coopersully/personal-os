@@ -68,7 +68,10 @@ export function calendarRange(from: LocalDate, count: number, timeZone: string) 
 }
 
 /** Provider all-day events are date-only; local ones are instants in the account timezone. */
-function allDaySpan(event: CalendarEvent, timeZone: string): { first: LocalDate; last: LocalDate } {
+export function allDaySpan(
+  event: CalendarEvent,
+  timeZone: string,
+): { first: LocalDate; last: LocalDate } {
   if (event.provider !== "local") {
     return {
       first: parseLocalDate(event.startsAt.slice(0, 10)),

@@ -57,7 +57,7 @@ CREATE INDEX knowledge_record_tags_owner_tag_idx ON knowledge_record_tags (user_
 CREATE TABLE knowledge_tag_merges (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  from_name text NOT NULL, into_tag_id uuid NOT NULL, actor_type text NOT NULL, actor_id uuid NOT NULL,
- record_ids uuid[] NOT NULL, kept_into_record_ids uuid[] NOT NULL,
+ record_ids uuid[] NOT NULL, kept_into_record_ids uuid[] NOT NULL, carried_aliases text[] NOT NULL,
  mutation_key uuid NOT NULL, request_hash text NOT NULL, undo_mutation_key uuid NULL,
  created_at timestamptz NOT NULL, undone_at timestamptz NULL,
  CONSTRAINT knowledge_tag_merges_owner_id_idx UNIQUE(user_id,id),

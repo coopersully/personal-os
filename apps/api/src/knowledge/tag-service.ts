@@ -20,7 +20,7 @@ import {
   knowledgeTagUnmergeInputSchema,
   normalizeKnowledgeTag,
 } from "@personal-os/domain";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError, isUniqueViolation } from "../errors.js";
 import type { Principal } from "../types.js";
@@ -193,23 +193,20 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
   /**
    * Agents count only records that pass the same disclosure as a read by ID (trash, agent
    * access, workspace and inherited scopes, and effective narrowing), so `disclose` stays the
-   * one source of truth and a hidden record never moves a count. With `onlyTag`, stops at the
-   * first visible record carrying it: a non-empty result means the agent can see that tag.
+   * one source of truth and a hidden record never moves a count.
    */
   async function agentCounts(
     tx: KnowledgeTransaction,
     principal: Principal,
     access: ReturnType<typeof createKnowledgeAccess>,
     authorizedScopes: AccessScope[],
-    onlyTag?: string,
   ) {
     const counts = new Map<string, number>();
     for (const row of await currentKnowledgeForRetrieval(tx, principal, {}, authorizedScopes)) {
-      if (row.tags.length === 0 || (onlyTag !== undefined && !row.tags.includes(onlyTag))) continue;
+      if (row.tags.length === 0) continue;
       const revision = projectKnowledgeRevision(row);
       if (!(await access.isDisclosable(tx, principal, revision))) continue;
       for (const tag of revision.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
-      if (onlyTag !== undefined) break;
     }
     return counts;
   }
@@ -260,7 +257,10 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
       );
     },
 
-    /** Canonical tags most used first, with the aliases that resolve to them. */
+    /**
+     * Canonical tags most used first. The person also gets the aliases that resolve to them;
+     * agents never do, since an alias can name a tag that only hidden memory ever carried (R14).
+     */
     async index(
       principal: Principal,
       raw: KnowledgeTagIndexInput = {},
@@ -278,29 +278,30 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
           .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
           .slice(0, limit);
         const listed = tags.map(({ name }) => name);
-        const aliases = listed.length
-          ? await tx
-              .select({
-                alias: knowledgeTagAliases.alias,
-                name: knowledgeTags.name,
-                mergeId: knowledgeTagAliases.mergeId,
-              })
-              .from(knowledgeTagAliases)
-              .innerJoin(
-                knowledgeTags,
-                and(
-                  eq(knowledgeTags.userId, knowledgeTagAliases.userId),
-                  eq(knowledgeTags.id, knowledgeTagAliases.tagId),
-                ),
-              )
-              .where(
-                and(
-                  eq(knowledgeTagAliases.userId, principal.userId),
-                  inArray(knowledgeTags.name, listed),
-                ),
-              )
-              .orderBy(knowledgeTagAliases.alias)
-          : [];
+        const aliases =
+          listed.length && principal.actorType === "user"
+            ? await tx
+                .select({
+                  alias: knowledgeTagAliases.alias,
+                  name: knowledgeTags.name,
+                  mergeId: knowledgeTagAliases.mergeId,
+                })
+                .from(knowledgeTagAliases)
+                .innerJoin(
+                  knowledgeTags,
+                  and(
+                    eq(knowledgeTags.userId, knowledgeTagAliases.userId),
+                    eq(knowledgeTags.id, knowledgeTagAliases.tagId),
+                  ),
+                )
+                .where(
+                  and(
+                    eq(knowledgeTagAliases.userId, principal.userId),
+                    inArray(knowledgeTags.name, listed),
+                  ),
+                )
+                .orderBy(knowledgeTagAliases.alias)
+            : [];
         return { tags, aliases };
       });
     },
@@ -329,31 +330,37 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
             throw new AppError("conflict", "This mutation key was used for another request.");
           return presentMerge(tx, prior);
         }
+        const notFound = new AppError("not_found", "The memory tag was not found.");
+        // Visibility first (R14): an agent learns nothing about aliases, cycles or tags that
+        // only hidden memory carries. Both tags must be on a memory this agent can read; a
+        // target that does not exist yet is created.
+        if (principal.actorType === "agent") {
+          const visible = await agentCounts(
+            tx,
+            principal,
+            createKnowledgeAccess(() => at),
+            authority.scopes,
+          );
+          const target = await resolveTag(tx, userId, input.into, false);
+          if (!visible.has(input.from) || (target.id !== null && !visible.has(target.name)))
+            throw notFound;
+        }
         if (input.from === input.into) throw unprocessable("A tag cannot be merged into itself.");
         if (await findAliasTarget(tx, userId, input.from))
           throw unprocessable("This tag is already merged into another tag.");
         const from = await findTag(tx, userId, input.from);
-        const notFound = new AppError("not_found", "The memory tag was not found.");
         if (!from) throw notFound;
-        // An agent may only merge a tag it can see on at least one memory.
-        if (
-          principal.actorType === "agent" &&
-          !(
-            await agentCounts(
-              tx,
-              principal,
-              createKnowledgeAccess(() => at),
-              authority.scopes,
-              from.name,
-            )
-          ).size
-        )
-          throw notFound;
         const into = await resolveKnowledgeTagRows(tx, userId, [input.into]).then(([tag]) => tag);
         if (!into) throw new AppError("internal_error", "The target tag was not resolved.");
         if (into.id === from.id) throw unprocessable("Merging these tags would form a cycle.");
 
         const recordIds = await recordIdsTagged(tx, userId, from.id);
+        const carried = await tx
+          .select({ alias: knowledgeTagAliases.alias })
+          .from(knowledgeTagAliases)
+          .where(
+            and(eq(knowledgeTagAliases.userId, userId), eq(knowledgeTagAliases.tagId, from.id)),
+          );
         const intoRecordIds = new Set(await recordIdsTagged(tx, userId, into.id));
         if (recordIds.length)
           await tx
@@ -375,6 +382,7 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
             actorId: principal.actorId,
             recordIds,
             keptIntoRecordIds: recordIds.filter((id) => intoRecordIds.has(id)),
+            carriedAliases: carried.map(({ alias }) => alias).sort(),
             mutationKey: input.mutationKey,
             requestHash,
             createdAt: at,
@@ -468,7 +476,24 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
               )
           : [];
         const liveIds = live.map(({ id }) => id);
+        // Keep the target where this merge did not add it, or where another merge into the
+        // same target still relies on it.
         const kept = new Set(merge.keptIntoRecordIds);
+        for (const other of await tx
+          .select({
+            recordIds: knowledgeTagMerges.recordIds,
+            keptIntoRecordIds: knowledgeTagMerges.keptIntoRecordIds,
+          })
+          .from(knowledgeTagMerges)
+          .where(
+            and(
+              eq(knowledgeTagMerges.userId, userId),
+              eq(knowledgeTagMerges.intoTagId, targetId),
+              isNull(knowledgeTagMerges.undoneAt),
+              ne(knowledgeTagMerges.id, merge.id),
+            ),
+          ))
+          for (const id of [...other.recordIds, ...other.keptIntoRecordIds]) kept.add(id);
         if (liveIds.length) {
           await tx
             .insert(knowledgeRecordTags)
@@ -491,29 +516,18 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
           .where(
             and(eq(knowledgeTagAliases.userId, userId), eq(knowledgeTagAliases.mergeId, merge.id)),
           );
-        // Aliases this merge carried along (merged into `from` earlier) resolve to `from` again.
-        await tx
-          .update(knowledgeTagAliases)
-          .set({ tagId: from.id })
-          .where(
-            and(
-              eq(knowledgeTagAliases.userId, userId),
-              eq(knowledgeTagAliases.tagId, targetId),
-              inArray(
-                knowledgeTagAliases.mergeId,
-                tx
-                  .select({ id: knowledgeTagMerges.id })
-                  .from(knowledgeTagMerges)
-                  .where(
-                    and(
-                      eq(knowledgeTagMerges.userId, userId),
-                      eq(knowledgeTagMerges.intoTagId, from.id),
-                      isNull(knowledgeTagMerges.undoneAt),
-                    ),
-                  ),
+        // Exactly the aliases this merge carried along resolve to `from` again.
+        if (merge.carriedAliases.length)
+          await tx
+            .update(knowledgeTagAliases)
+            .set({ tagId: from.id })
+            .where(
+              and(
+                eq(knowledgeTagAliases.userId, userId),
+                eq(knowledgeTagAliases.tagId, targetId),
+                inArray(knowledgeTagAliases.alias, merge.carriedAliases),
               ),
-            ),
-          );
+            );
         let undone: typeof merge | undefined;
         try {
           [undone] = await tx

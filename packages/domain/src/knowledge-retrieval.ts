@@ -27,7 +27,8 @@ const timeWindow = z
     message: "The time window must end after it begins.",
   });
 
-export const knowledgeQuerySchema = z
+/** Query fields without cross-field checks, for adapters that reshape them. */
+export const knowledgeQueryObjectSchema = z
   .object({
     /** Ranks records saved for this purpose first; it never hides a record. */
     purpose: knowledgePurposeSchema.optional(),
@@ -57,11 +58,25 @@ export const knowledgeQuerySchema = z
     cursor: cursor.optional(),
   })
   .strict();
+function tagMatchNeedsTags({
+  tags,
+  tagMatch,
+}: {
+  tags?: string[] | undefined;
+  tagMatch?: string | undefined;
+}) {
+  return tagMatch === undefined || tags !== undefined;
+}
+const tagMatchMessage = { path: ["tagMatch"], message: "tagMatch requires tags." };
+export const knowledgeQuerySchema = knowledgeQueryObjectSchema.refine(
+  tagMatchNeedsTags,
+  tagMatchMessage,
+);
 export type KnowledgeQuery = z.infer<typeof knowledgeQuerySchema>;
 /** Agents never see Trash, so their query surface omits the owner-only `trashed` view. */
-export const knowledgeAgentQuerySchema = knowledgeQuerySchema.extend({
-  status: knowledgeRecordSchema.shape.status.optional(),
-});
+export const knowledgeAgentQuerySchema = knowledgeQueryObjectSchema
+  .extend({ status: knowledgeRecordSchema.shape.status.optional() })
+  .refine(tagMatchNeedsTags, tagMatchMessage);
 
 export const knowledgeHistoryInputSchema = z
   .object({

@@ -8,6 +8,7 @@ import {
   knowledgeMutationInputSchema,
   knowledgeMutationResultSchema,
   knowledgePageSchema,
+  knowledgeQueryObjectSchema,
   knowledgeQuerySchema,
   knowledgeReadInputSchema,
   knowledgeReadResultSchema,
@@ -31,7 +32,7 @@ import type { AppEnv } from "../types.js";
 import { parseBody } from "./support.js";
 
 const object = z.record(z.string(), z.unknown());
-const knowledgeSearchQuerySchema = knowledgeQuerySchema.omit({ timeWindow: true }).extend({
+const knowledgeSearchQuerySchema = knowledgeQueryObjectSchema.omit({ timeWindow: true }).extend({
   from: z.string().optional(),
   to: z.string().optional(),
   limit: z

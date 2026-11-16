@@ -273,6 +273,88 @@ describe("memory tags", () => {
     expect(await aliases()).toEqual([]);
   });
 
+  it("undo_keeps_target_needed_by_another_merge", async () => {
+    const f = await fixture();
+    const record = await f.save(fact("Rent", ["a", "c"]));
+    const first = await f.merge("a", "b", f.owner);
+    await f.merge("c", "b", f.owner);
+    expect((await f.get(record.id)).tags).toEqual(["b"]);
+    await f.tags.unmerge(f.owner, { mergeId: first.mergeId, mutationKey: randomUUID() });
+    expect((await f.get(record.id)).tags).toEqual(["a", "b"]);
+  });
+
+  it("unmerge_restores_three_step_alias_chain", async () => {
+    const f = await fixture();
+    const record = await f.save(fact("Rent", ["z"]));
+    await f.merge("z", "y", f.owner);
+    await f.merge("y", "a", f.owner);
+    const last = await f.merge("a", "b", f.owner);
+    for (const name of ["z", "y", "a"])
+      expect((await f.save(fact(`Via ${name}`, [name]))).tags).toEqual(["b"]);
+    await f.tags.unmerge(f.owner, { mergeId: last.mergeId, mutationKey: randomUUID() });
+    expect((await f.get(record.id)).tags).toEqual(["a"]);
+    for (const name of ["z", "y", "a"])
+      expect((await f.save(fact(`Back ${name}`, [name]))).tags).toEqual(["a"]);
+  });
+
+  it("agent_index_has_no_aliases", async () => {
+    const f = await fixture();
+    await f.save(fact("Rent", ["money"]));
+    const merge = await f.merge("money", "finances");
+    expect(await f.tags.index(f.agent)).toEqual({
+      tags: [{ name: "finances", count: 1 }],
+      aliases: [],
+    });
+    expect((await f.tags.index(f.owner)).aliases).toEqual([
+      { alias: "money", name: "finances", mergeId: merge.mergeId },
+    ]);
+  });
+
+  it("agent_merge_of_alias_or_hidden_tag_is_404", async () => {
+    const f = await fixture();
+    const visible = await f.save(fact("Steps", ["health"]));
+    const hidden = await f.save(fact("Session", ["therapy"]));
+    await f.act(hidden, { action: "set_access", agentAccess: "blocked" });
+    await f.save(fact("Rent", ["money"]));
+    await f.merge("money", "health", f.owner);
+    for (const [from, into] of [
+      ["therapy", "health"],
+      ["money", "anything"],
+      ["unknown", "health"],
+    ] as const)
+      await expect(f.merge(from, into)).rejects.toMatchObject({ status: 404 });
+    expect((await f.get(hidden.id)).tags).toEqual(["therapy"]);
+    expect((await f.get(visible.id)).tags).toEqual(["health"]);
+  });
+
+  it("agent_merge_into_alias_of_hidden_tag_is_404", async () => {
+    const f = await fixture();
+    const visible = await f.save(fact("Steps", ["x"]));
+    const hidden = await f.save(fact("Session", ["bar", "foo"]));
+    await f.act(hidden, { action: "set_access", agentAccess: "blocked" });
+    await f.merge("foo", "bar", f.owner);
+    for (const into of ["bar", "bars", "foo"])
+      await expect(f.merge("x", into)).rejects.toMatchObject({ status: 404 });
+    expect((await f.get(visible.id)).tags).toEqual(["x"]);
+    // A target that does not exist yet is created.
+    expect(await f.merge("x", "fresh")).toMatchObject({ from: "x", into: "fresh" });
+  });
+
+  it("concurrent_saves_share_a_new_tag", async () => {
+    const f = await fixture();
+    const [first, second] = await Promise.all([
+      f.save(fact("One", ["brand-new"])),
+      f.save(fact("Two", ["Brand New"])),
+    ]);
+    expect(first?.tags).toEqual(["brand-new"]);
+    expect(second?.tags).toEqual(["brand-new"]);
+    const rows = await database.db
+      .select({ id: knowledgeTags.id })
+      .from(knowledgeTags)
+      .where(eq(knowledgeTags.userId, f.owner.userId));
+    expect(rows).toHaveLength(1);
+  });
+
   it("rejects_tag_merge_cycles", async () => {
     const f = await fixture();
     const a = await f.save(fact("First", ["a"]));
@@ -283,7 +365,7 @@ describe("memory tags", () => {
     await f.merge("a", "b");
     await expect(f.merge("b", "a")).rejects.toMatchObject({ status: 422 });
     // A merged name is an alias now; it cannot be merged again.
-    await expect(f.merge("a", "c")).rejects.toMatchObject({ status: 422 });
+    await expect(f.merge("a", "c", f.owner)).rejects.toMatchObject({ status: 422 });
     expect((await f.get(a.id)).tags).toEqual(["b"]);
     expect((await f.get(b.id)).tags).toEqual(["b"]);
     expect(

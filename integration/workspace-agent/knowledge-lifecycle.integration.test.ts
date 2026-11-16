@@ -252,12 +252,14 @@ describe.sequential("registered memory lifecycle", () => {
         await tool(second.client, "search_user_knowledge", { tags: ["fixture"] }),
       );
       expect(tagged.items).toMatchObject([{ id: savedId, tags: ["meetings"] }]);
+      // Agents get canonical tags and counts only; the person also sees aliases.
       expect(await b.api.listKnowledgeTags()).toEqual({
         tags: [{ name: "meetings", count: 1 }],
-        aliases: [{ alias: "fixture", name: "meetings", mergeId: merge.mergeId }],
+        aliases: [],
       });
-      expect(await f.owner.listKnowledgeTags()).toMatchObject({
+      expect(await f.owner.listKnowledgeTags()).toEqual({
         tags: [{ name: "meetings", count: 2 }],
+        aliases: [{ alias: "fixture", name: "meetings", mergeId: merge.mergeId }],
       });
       const undo = { mergeId: merge.mergeId, mutationKey: randomUUID() };
       await expect(b.api.unmergeKnowledgeTags(undo)).rejects.toMatchObject({ status: 403 });

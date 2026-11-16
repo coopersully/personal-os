@@ -1,3 +1,4 @@
+import { knowledgeAgentQuerySchema, knowledgeQuerySchema } from "./knowledge-retrieval.js";
 import {
   knowledgeTagMaxLength,
   knowledgeTagMergeInputSchema,
@@ -27,6 +28,21 @@ describe("knowledge tags", () => {
     expect(
       knowledgeTagsInputSchema.safeParse(Array.from({ length: 9 }, (_, i) => `tag-${i}`)).success,
     ).toBe(false);
+  });
+
+  it("rejects a tag with no letter or number", () => {
+    expect(normalizeKnowledgeTag("\u0301")).toBeNull();
+    expect(normalizeKnowledgeTag(" - _ ")).toBeNull();
+    const mark = knowledgeTagsInputSchema.safeParse(["\u0301"]);
+    expect(mark.success).toBe(false);
+    expect(mark.error?.issues[0]?.message).toContain(JSON.stringify("\u0301"));
+  });
+
+  it("requires tags for tagMatch", () => {
+    for (const schema of [knowledgeQuerySchema, knowledgeAgentQuerySchema]) {
+      expect(schema.safeParse({ tagMatch: "all" }).success).toBe(false);
+      expect(schema.safeParse({ tags: ["a"], tagMatch: "all" }).success).toBe(true);
+    }
   });
 
   it("dedupes tags after normalization", () => {

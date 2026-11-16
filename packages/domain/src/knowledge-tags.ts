@@ -25,7 +25,8 @@ export function normalizeKnowledgeTag(raw: string): string | null {
     .join("")
     .replace(/-+$/u, "")
     .normalize("NFC");
-  return tag || null;
+  // A tag needs a letter or number; a lone combining mark or hyphen is not a tag.
+  return /[\p{L}\p{N}]/u.test(tag) ? tag : null;
 }
 
 /** One tag as a caller writes it; parses to its normalized form. */

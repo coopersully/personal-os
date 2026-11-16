@@ -171,6 +171,11 @@ export async function selectKnowledgeCandidates(
   const textTags = new Set(
     textWords.length ? await lookupKnowledgeTags(tx, principal.userId, textWords) : [],
   );
+  const carriedTags = (tags: readonly string[]) =>
+    requested.filter((tag) => tags.includes(tag)).length;
+  const matchesTags = (tags: readonly string[]) =>
+    !requested.length ||
+    (query.tagMatch === "all" ? carriedTags(tags) === requested.length : carriedTags(tags) > 0);
   const rows = await currentKnowledgeForRetrieval(tx, principal, query, authorizedScopes);
   const candidates: Candidate[] = [];
   let unavailable = false;
@@ -192,6 +197,7 @@ export async function selectKnowledgeCandidates(
       if (
         projection.state === "unavailable" &&
         !refs.size &&
+        matchesTags(revision.tags) &&
         (status
           ? status === snapshot.status || status === "disputed"
           : snapshot.status !== "archived") &&
@@ -204,11 +210,9 @@ export async function selectKnowledgeCandidates(
     const { record } = projection;
     const content = knowledgeClaimContent(record, metadata.generatedInference);
     const { exact, related } = entityMatches(record, content, refs);
-    const carried = requested.filter((tag) => record.tags.includes(tag)).length;
     if (
       (refs.size && !exact && !related) ||
-      (requested.length &&
-        (query.tagMatch === "all" ? carried < requested.length : carried === 0)) ||
+      !matchesTags(record.tags) ||
       // Archived memory is left out unless the caller asks for it.
       (status ? status !== record.status : record.status === "archived") ||
       (query.origin && query.origin !== record.origin) ||
@@ -219,7 +223,7 @@ export async function selectKnowledgeCandidates(
     candidates.push({
       record,
       content,
-      requestedTags: carried,
+      requestedTags: carriedTags(record.tags),
       textTags: record.tags.filter((tag) => textTags.has(tag)).length,
       purpose: Number(query.purpose !== undefined && record.purposes.includes(query.purpose)),
       exact,

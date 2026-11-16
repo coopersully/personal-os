@@ -7178,6 +7178,7 @@ export const knowledgeRecordTags = pgTable(
 /**
  * One merge of tag `from_name` into a canonical tag. `record_ids` carried `from` at merge time;
  * `kept_into_record_ids` already carried the target too, so undo leaves the target on them.
+ * `carried_aliases` resolved to `from` before the merge and are restored to it on undo.
  */
 export const knowledgeTagMerges = pgTable(
   "knowledge_tag_merges",
@@ -7192,6 +7193,8 @@ export const knowledgeTagMerges = pgTable(
     actorId: uuid("actor_id").notNull(),
     recordIds: uuid("record_ids").array().notNull(),
     keptIntoRecordIds: uuid("kept_into_record_ids").array().notNull(),
+    /** Aliases of `from` this merge re-pointed to the target; undo points them back. */
+    carriedAliases: text("carried_aliases").array().notNull(),
     mutationKey: uuid("mutation_key").notNull(),
     requestHash: text("request_hash").notNull(),
     undoMutationKey: uuid("undo_mutation_key"),

@@ -1,5 +1,6 @@
 import type { KnowledgeContextPack, KnowledgePurpose } from "@personal-os/domain";
-import type { Principal } from "../types.js";
+import { AppError } from "../errors.js";
+import type { Principal, RequestLog } from "../types.js";
 import type { createKnowledgeContextService } from "./context-service.js";
 
 /** The purpose each maintenance workflow ranks first; other memory may still appear. */
@@ -9,13 +10,6 @@ const workflowPurposes = {
 } as const satisfies Record<string, KnowledgePurpose>;
 
 export type KnowledgeWorkflowWorkspace = keyof typeof workflowPurposes;
-export type KnowledgeWorkflowMemoryFailure = {
-  workspace: KnowledgeWorkflowWorkspace;
-  requestId: string;
-  durationMs: number;
-  message: string;
-  stack: string | undefined;
-};
 /** Memory for a maintenance start, or null when the caller cannot read it or it failed. */
 export type KnowledgeWorkflowMemory = (
   principal: Principal,
@@ -24,15 +18,38 @@ export type KnowledgeWorkflowMemory = (
 ) => Promise<KnowledgeContextPack | null>;
 
 /**
+ * Only the stack's frame lines. Every message line is dropped: a parse error can echo the memory
+ * value it rejected, and a message may span several lines.
+ */
+function stackFrames(stack: string | undefined) {
+  const frames = stack
+    ?.split("\n")
+    .filter((line) => /^\s+at /u.test(line))
+    .join("\n");
+  return frames || undefined;
+}
+
+/** A failure's identity and location, never its message, which may carry memory content. */
+function failureFields(error: unknown) {
+  if (!(error instanceof Error)) return { errorName: "NonError" };
+  const errorStack = stackFrames(error.stack);
+  return {
+    errorName: error.name,
+    ...(error instanceof AppError ? { errorCode: error.code } : {}),
+    ...(errorStack ? { errorStack } : {}),
+  };
+}
+
+/**
  * Builds a workflow's memory section without ever failing the maintenance it accompanies. A
- * failure is reported to `onFailure` and the section reads as null.
+ * failure is logged and the section reads as null.
  */
 export function createKnowledgeWorkflowMemory({
   context,
-  onFailure,
+  log,
 }: {
   context: Pick<ReturnType<typeof createKnowledgeContextService>, "workflowSection">;
-  onFailure: (failure: KnowledgeWorkflowMemoryFailure) => void;
+  log: ((entry: RequestLog) => void) | undefined;
 }): KnowledgeWorkflowMemory {
   return async (principal, workspace, requestId) => {
     const startedAt = performance.now();
@@ -42,12 +59,15 @@ export function createKnowledgeWorkflowMemory({
         purpose: workflowPurposes[workspace],
       });
     } catch (error) {
-      onFailure({
+      log?.({
+        event: "knowledge_workflow_memory_failed",
         workspace,
-        requestId,
+        ...failureFields(error),
         durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
+        method: "POST",
+        path: `/v1/${workspace}/maintenance`,
+        requestId,
+        status: 200,
       });
       return null;
     }

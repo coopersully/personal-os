@@ -1595,21 +1595,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     workItems: agentAccessWorkItems,
   });
   const knowledgeContext = createKnowledgeContextService(knowledgeRetrieval);
-  // A memory failure never fails maintenance: the section reads as null and is logged here.
+  // A memory failure never fails maintenance: the section reads as null and is logged.
   const workflowMemory = createKnowledgeWorkflowMemory({
     context: knowledgeContext,
-    onFailure: ({ workspace, requestId, durationMs, message, stack }) =>
-      dependencies.log?.({
-        event: "knowledge_workflow_memory_failed",
-        workspace,
-        errorMessage: message,
-        errorStack: stack,
-        durationMs,
-        method: "POST",
-        path: `/v1/${workspace}/maintenance`,
-        requestId,
-        status: 200,
-      }),
+    log: dependencies.log,
   });
   registerMailRoutes({ app, db: dependencies.db, mail, mutationContext });
   registerMailStewardshipRoutes({

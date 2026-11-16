@@ -64,9 +64,10 @@ export type RequestLog = TransportDiagnostics & {
   code?: string | undefined;
   disposition?: ConnectorSyncRecovery;
   durationMs: number;
-  /** A failure's own message and stack, for internal failures with no provider detail. */
-  errorMessage?: string;
-  errorStack?: string | undefined;
+  /** An internal failure's name, AppError code and stack frames; never its message. */
+  errorName?: string;
+  errorCode?: string;
+  errorStack?: string;
   claimCount?: number;
   hostOutcome?: "accepted" | "uncertain" | "unavailable";
   eligibleAccountCount?: number;

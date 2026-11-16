@@ -21,7 +21,7 @@ import { type Context, Hono } from "hono";
 import { vi } from "vitest";
 import { createApp } from "../app.js";
 import { loadConfig } from "../config.js";
-import { errorResponse } from "../errors.js";
+import { AppError, errorResponse } from "../errors.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
@@ -215,7 +215,7 @@ describe("workspace workflow memory", () => {
     ]);
     const routes = maintenanceRoutes(
       host,
-      createKnowledgeWorkflowMemory({ context: f.context, onFailure: vi.fn() }),
+      createKnowledgeWorkflowMemory({ context: f.context, log: vi.fn() }),
     );
 
     const started = await routes.post("/v1/finances/maintenance", { operation: "start" });
@@ -250,7 +250,7 @@ describe("workspace workflow memory", () => {
     const host = await f.agent(["mail:read", "mail:write", "finances:read", "knowledge:read"]);
     const routes = maintenanceRoutes(
       host,
-      createKnowledgeWorkflowMemory({ context: f.context, onFailure: vi.fn() }),
+      createKnowledgeWorkflowMemory({ context: f.context, log: vi.fn() }),
     );
 
     const response = await routes.post("/v1/mail/maintenance", {});
@@ -321,10 +321,10 @@ describe("workspace workflow memory", () => {
     const f = await setUp();
     await f.save(fact("Rent is split", { scope: { workspace: "finances" } }));
     const host = await f.agent(["finances:maintain", "finances:read"]);
-    const onFailure = vi.fn();
+    const log = vi.fn();
     const routes = maintenanceRoutes(
       host,
-      createKnowledgeWorkflowMemory({ context: f.context, onFailure }),
+      createKnowledgeWorkflowMemory({ context: f.context, log }),
     );
     const started = await routes.post("/v1/finances/maintenance", { operation: "start" });
     expect(started.status).toBe(200);
@@ -332,7 +332,7 @@ describe("workspace workflow memory", () => {
     expect(
       await f.context.workflowSection(host, { workspace: "finances", purpose: "bookkeeping" }),
     ).toBeNull();
-    expect(onFailure).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
   });
 
   it("workflow_memory_fits_16_kib_without_cutting_records", async () => {
@@ -360,6 +360,11 @@ describe("workspace workflow memory", () => {
 
   it("a_memory_failure_still_starts_maintenance_with_null_memory", async () => {
     const f = await setUp();
+    // A unique value in a real record's content, echoed by the failures below the way a parse
+    // error can echo the value it rejected. It must never reach the log.
+    const secret = `fixture-${randomUUID()}`;
+    const record = await f.save(fact(secret, { scope: { workspace: "finances" } }));
+    expect(JSON.stringify(record.content)).toContain(secret);
     const host = await f.agent([
       "finances:maintain",
       "finances:read",
@@ -367,25 +372,31 @@ describe("workspace workflow memory", () => {
       "mail:write",
       "knowledge:read",
     ]);
-    const onFailure = vi.fn();
+    const log = vi.fn();
     const failing = {
       workflowSection: vi
         .fn()
-        .mockRejectedValueOnce(new Error("Memory store unavailable."))
+        .mockRejectedValueOnce(new AppError("conflict", `Memory changed: ${secret}`))
+        // A multi-line message, like a formatted Zod error, keeps every line out of the stack.
+        .mockRejectedValueOnce(
+          new Error(`Invalid memory:\n${JSON.stringify(record.content, null, 2)}`),
+        )
         // Anything thrown is still reported, without a stack.
-        .mockRejectedValueOnce("offline"),
+        .mockRejectedValueOnce(secret),
     };
     const routes = maintenanceRoutes(
       host,
-      createKnowledgeWorkflowMemory({ context: failing, onFailure }),
+      createKnowledgeWorkflowMemory({ context: failing, log }),
     );
 
     const started = await routes.post("/v1/finances/maintenance", { operation: "start" });
     expect(started.status).toBe(200);
     expect(await started.json()).toHaveProperty("data.memory", null);
-    const mail = await routes.post("/v1/mail/maintenance", {});
-    expect(mail.status).toBe(200);
-    expect(await mail.json()).toHaveProperty("memory", null);
+    for (let i = 0; i < 2; i++) {
+      const mail = await routes.post("/v1/mail/maintenance", {});
+      expect(mail.status).toBe(200);
+      expect(await mail.json()).toHaveProperty("memory", null);
+    }
 
     expect(failing.workflowSection).toHaveBeenCalledWith(host, {
       workspace: "finances",
@@ -395,17 +406,33 @@ describe("workspace workflow memory", () => {
       workspace: "mail",
       purpose: "communication",
     });
-    expect(onFailure).toHaveBeenCalledTimes(2);
-    expect(onFailure).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspace: "finances",
-        requestId: "workflow-memory-test",
-        message: "Memory store unavailable.",
-        stack: expect.stringContaining("Memory store unavailable."),
-      }),
-    );
-    expect(onFailure).toHaveBeenCalledWith(
-      expect.objectContaining({ workspace: "mail", message: "offline", stack: undefined }),
-    );
+    expect(log).toHaveBeenCalledTimes(3);
+    const [appError, parseError, thrown] = log.mock.calls.map(([entry]) => entry);
+    expect(appError).toEqual({
+      event: "knowledge_workflow_memory_failed",
+      workspace: "finances",
+      errorName: "AppError",
+      errorCode: "conflict",
+      errorStack: expect.stringMatching(/^\s+at /u),
+      durationMs: expect.any(Number),
+      method: "POST",
+      path: "/v1/finances/maintenance",
+      requestId: "workflow-memory-test",
+      status: 200,
+    });
+    expect(parseError).toMatchObject({
+      workspace: "mail",
+      errorName: "Error",
+      errorStack: expect.stringMatching(/^\s+at /u),
+      path: "/v1/mail/maintenance",
+    });
+    expect(parseError).not.toHaveProperty("errorCode");
+    expect(thrown).toMatchObject({ workspace: "mail", errorName: "NonError" });
+    expect(thrown).not.toHaveProperty("errorStack");
+    for (const entry of [appError, parseError, thrown]) {
+      expect(entry).not.toHaveProperty("errorMessage");
+      expect(JSON.stringify(entry)).not.toContain(secret);
+      expect(JSON.stringify(entry)).not.toContain("Invalid memory");
+    }
   });
 });

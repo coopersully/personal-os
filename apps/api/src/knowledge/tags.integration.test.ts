@@ -241,6 +241,38 @@ describe("memory tags", () => {
     expect((await f.save(fact("Change", ["cash"]))).tags).toEqual(["money"]);
   });
 
+  it("unmerge_refuses_while_later_merge_depends_on_it", async () => {
+    const f = await fixture();
+    const only = await f.save(fact("Rent", ["a"]));
+    const both = await f.save(fact("Budget", ["a", "b"]));
+    const first = await f.merge("a", "b");
+    const second = await f.merge("b", "c");
+    const aliases = () =>
+      database.db
+        .select({ alias: knowledgeTagAliases.alias, tagId: knowledgeTagAliases.tagId })
+        .from(knowledgeTagAliases)
+        .where(eq(knowledgeTagAliases.userId, f.owner.userId))
+        .orderBy(knowledgeTagAliases.alias);
+    const before = await aliases();
+
+    await expect(
+      f.tags.unmerge(f.owner, { mergeId: first.mergeId, mutationKey: randomUUID() }),
+    ).rejects.toMatchObject({
+      status: 409,
+      details: { blockingMergeIds: [second.mergeId] },
+    });
+    expect((await f.get(only.id)).tags).toEqual(["c"]);
+    expect((await f.get(both.id)).tags).toEqual(["c"]);
+    expect(await aliases()).toEqual(before);
+
+    await f.tags.unmerge(f.owner, { mergeId: second.mergeId, mutationKey: randomUUID() });
+    expect((await f.get(only.id)).tags).toEqual(["b"]);
+    await f.tags.unmerge(f.owner, { mergeId: first.mergeId, mutationKey: randomUUID() });
+    expect((await f.get(only.id)).tags).toEqual(["a"]);
+    expect((await f.get(both.id)).tags).toEqual(["a", "b"]);
+    expect(await aliases()).toEqual([]);
+  });
+
   it("rejects_tag_merge_cycles", async () => {
     const f = await fixture();
     const a = await f.save(fact("First", ["a"]));

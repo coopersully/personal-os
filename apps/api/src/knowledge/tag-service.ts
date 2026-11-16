@@ -423,14 +423,32 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
           if (merge.undoMutationKey === input.mutationKey) return presentMerge(tx, merge);
           throw new AppError("conflict", "This tag merge was already undone.");
         }
-        const [alias] = await tx
-          .select({ tagId: knowledgeTagAliases.tagId })
-          .from(knowledgeTagAliases)
+        // Undo never strips a tag a later merge added (R13): while a later merge still files
+        // this merge's target under another tag, the person undoes that one first.
+        const blocking = await tx
+          .select({ id: knowledgeTagMerges.id })
+          .from(knowledgeTagMerges)
+          .innerJoin(
+            knowledgeTags,
+            and(
+              eq(knowledgeTags.userId, knowledgeTagMerges.userId),
+              eq(knowledgeTags.id, merge.intoTagId),
+            ),
+          )
           .where(
-            and(eq(knowledgeTagAliases.userId, userId), eq(knowledgeTagAliases.mergeId, merge.id)),
-          );
-        // A later merge may have filed the target further; the alias follows it.
-        const targetId = alias?.tagId ?? merge.intoTagId;
+            and(
+              eq(knowledgeTagMerges.userId, userId),
+              eq(knowledgeTagMerges.fromName, knowledgeTags.name),
+              isNull(knowledgeTagMerges.undoneAt),
+            ),
+          )
+          .orderBy(knowledgeTagMerges.id);
+        if (blocking.length)
+          throw new AppError("conflict", "Undo the later merge of this tag first.", {
+            blockingMergeIds: blocking.map(({ id }) => id),
+          });
+        // With no later merge of the target, the alias still resolves to it.
+        const targetId = merge.intoTagId;
         await tx
           .insert(knowledgeTags)
           .values({ userId, name: merge.fromName })
@@ -457,7 +475,7 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
             .values(liveIds.map((recordId) => ({ userId, recordId, tagId: from.id })))
             .onConflictDoNothing();
           const retagged = liveIds.filter((id) => !kept.has(id));
-          if (retagged.length && targetId !== from.id)
+          if (retagged.length)
             await tx
               .delete(knowledgeRecordTags)
               .where(

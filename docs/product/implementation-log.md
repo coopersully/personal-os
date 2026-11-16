@@ -1416,3 +1416,25 @@ and Handled for you.
 - No API, schema or shared-component change. Coming up still combines tasks, reminders and
   expected Finance occurrences only; events on later days are not in it.
 - This is a local candidate covered by focused tests. It is not a production or TestFlight release.
+
+## 2026-11-15 — Native Calendar event create, edit and delete (local candidate)
+
+COO-239 — On iPhone a person can create an event from the agenda, edit it and delete it from its
+details, and restore a deleted event from the delete toast's Undo.
+
+- The app calls the existing event routes (`POST /v1/events`, `PATCH /v1/events/:id`,
+  `POST /v1/events/:id/trash`, `POST /v1/events/:id/restore`). No API, schema or shared-component
+  change; the root stack registers the new `calendar-event-edit` route inside the signed-in guard.
+- Edit and Delete appear only for an event on a writable calendar that is not a mirrored busy
+  block. Edits and deletes carry the event and busy-block revisions the person reviewed.
+- Times are entered and saved in the account planning timezone. All-day events are sent as whole
+  calendar days in the form each provider reads back.
+- A write is reported as done only after the API confirms it. An unconfirmed result re-reads the
+  calendar and is never shown as saved; an unconfirmed create is not retried without the person's
+  confirmation because event creation is not yet idempotent on the server (COO-27).
+- Undo after delete is offered only when restoring returns the same event; provider events with
+  guests, a repeat rule or a meeting link are deleted without Undo and the confirmation says so.
+- Guests, reminders, repeat rules, meeting links, blocking time and conflict review (COO-242) are
+  not included. This is a local candidate covered by focused tests; the simulator check and a
+  write against a real Google or iCloud calendar are outstanding. It is not a production or
+  TestFlight release.

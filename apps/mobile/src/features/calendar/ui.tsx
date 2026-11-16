@@ -1,7 +1,9 @@
 import type { Calendar, CalendarEvent, LocalDate } from "@personal-os/domain";
 import { router } from "expo-router";
 import type { PropsWithChildren } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { FormSave } from "../../components/forms/form-save";
 import { RecordRow } from "../../components/record-row";
 import { radius, spacing, touchTarget, useTheme, workspaceColor } from "../../theme";
 import { eventTimeLabel, fallbackEventColor } from "./logic";
@@ -141,6 +143,31 @@ export function Segments<T extends string>({
           </Text>
         </Pressable>
       ))}
+    </View>
+  );
+}
+
+/** Calendar's capture button: the shared floating plus, lifted clear of the native tab bar. */
+export function AddEventButton({ onPress }: { onPress: () => void }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: Platform.OS === "ios" ? 96 - Math.max(insets.bottom, 16) : 0,
+      }}
+    >
+      <FormSave
+        workspace="calendar"
+        keyboardOffset={0}
+        label="Add event"
+        icon="add"
+        disabled={false}
+        onPress={onPress}
+      />
     </View>
   );
 }

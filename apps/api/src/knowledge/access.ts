@@ -799,6 +799,32 @@ export async function knowledgeProposalTargetIds(tx: KnowledgeTransaction, userI
   return new Set(rows.map(({ id }) => id.toLowerCase()));
 }
 
+type LiveToken = typeof accessTokens.$inferSelect | undefined;
+/**
+ * The agent's token row, read once per transaction. The first read takes a share lock, so the
+ * row cannot change until the transaction ends; later checks in the same transaction reuse it.
+ * Keyed by the transaction object, never by service or access instance, so a later request (a
+ * new transaction) always reads revocation and narrowing afresh.
+ */
+const liveTokens = new WeakMap<KnowledgeTransaction, Map<string, LiveToken>>();
+
+async function liveAgentToken(tx: KnowledgeTransaction, principal: Principal): Promise<LiveToken> {
+  const key = `${principal.userId}:${principal.actorId}`;
+  let tokens = liveTokens.get(tx);
+  if (tokens?.has(key)) return tokens.get(key);
+  const [token] = await tx
+    .select()
+    .from(accessTokens)
+    .where(and(eq(accessTokens.id, principal.actorId), eq(accessTokens.userId, principal.userId)))
+    .for("share");
+  if (!tokens) {
+    tokens = new Map();
+    liveTokens.set(tx, tokens);
+  }
+  tokens.set(key, token);
+  return token;
+}
+
 export function createKnowledgeAccess(now: () => Date) {
   async function authorize(
     tx: KnowledgeTransaction,
@@ -807,11 +833,8 @@ export function createKnowledgeAccess(now: () => Date) {
   ) {
     // Content admission checks human sessions. Source scopes narrow agent grants.
     if (principal.actorType === "user") return { scopes: [], connectionId: null };
-    const [token] = await tx
-      .select()
-      .from(accessTokens)
-      .where(and(eq(accessTokens.id, principal.actorId), eq(accessTokens.userId, principal.userId)))
-      .for("share");
+    // Expiry and the required scopes are checked on every call; only the row read is shared.
+    const token = await liveAgentToken(tx, principal);
     if (!token || token.revokedAt || (token.expiresAt && token.expiresAt <= now()))
       throw new AppError("forbidden", "The knowledge credential is no longer active.");
     if (required.some((scope) => !principal.scopes.has(scope) || !token.scopes.includes(scope)))

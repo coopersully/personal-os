@@ -119,8 +119,13 @@ export function createKnowledgeCoreService({
         revision: projectKnowledgeRevision(row),
         updatedAt: row.updatedAt,
       }));
-      // Only a record sharing a claim with another readable record, or on either side of a
-      // pending proposal, can list conflicts; only those pay for full presentation.
+      // Only records that can list conflicts pay for full presentation. This mirrors every
+      // source of `conflictRecordIds` in `presentProjection` (access.ts); a new source there
+      // must be added here, or its conflicts drop out of `counts.conflicts`:
+      //   1. claim partners: another readable, live record with the same claim key
+      //      (`knowledgeClaimRevisions`), counted below from the caller's own rows;
+      //   2. linked proposals (`linkedProposalIds`): a `proposed` record names its original,
+      //      and an original is named by a live proposal (`knowledgeProposalTargetIds`).
       const claims = new Map<string, number>();
       for (const { revision } of revisions)
         if (revision.claimKey)

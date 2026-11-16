@@ -21,6 +21,7 @@ import {
   knowledgeReceiptSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
 import { createApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { hashToken } from "../security.js";
@@ -286,6 +287,30 @@ describe("session-start memory core", () => {
     // Once the person blocks the original, it leaves this agent's counts entirely.
     await f.act(f.owner, original, { action: "set_access", agentAccess: "blocked" });
     expect((await f.core.build(f.agent)).counts).toEqual({ active: 0, conflicts: 0, archived: 0 });
+  });
+
+  it("token_narrowed_between_sessions_is_enforced", async () => {
+    const f = await setUp();
+    const agent = await f.newAgent(["knowledge:read", "finances:read"]);
+    const general = await f.save(f.owner, fact("General"));
+    const finance = await f.save(f.owner, fact("Budget", { scope: { workspace: "finances" } }));
+    expect(new Set(ids(await f.core.build(agent)))).toEqual(new Set([general.id, finance.id]));
+    // The person narrows the token between two sessions; the same service and principal
+    // (whose cached grant still lists finances:read) must not see Finance memory again.
+    await database.db
+      .update(accessTokens)
+      .set({ scopes: ["knowledge:read"] })
+      .where(eq(accessTokens.id, agent.actorId));
+    const memory = await f.core.build(agent);
+    expect(ids(memory)).toEqual([general.id]);
+    expect(memory.counts).toEqual({ active: 1, conflicts: 0, archived: 0 });
+    expect(memory.tagIndex).toEqual([{ name: "fixture", count: 1 }]);
+    // Revocation applies to the next session too.
+    await database.db
+      .update(accessTokens)
+      .set({ revokedAt: now() })
+      .where(eq(accessTokens.id, agent.actorId));
+    await expect(f.core.build(agent)).rejects.toMatchObject({ status: 403 });
   });
 
   it("orders_owner_held_then_stated_then_inferred_by_freshness", async () => {

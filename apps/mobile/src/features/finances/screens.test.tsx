@@ -643,7 +643,10 @@ it("shows transaction notes, splits, and provenance with the USD default", async
       pending: true,
       notes: "Shared lunch",
       categoryRationale: "Confirmed by owner",
-      allocations: [{ id: "split", treatment: "personal", state: "active", amount: 20 }],
+      allocations: [
+        { id: "split", treatment: "personal", state: "active", amount: 20, allocationOrder: 0 },
+        { id: "rest", treatment: "reimbursable", state: "active", amount: 5, allocationOrder: 1 },
+      ],
     },
   });
   mount(<FinanceTransactionScreen />);
@@ -3448,6 +3451,7 @@ it("preserves transaction details when its account is missing and uses split cat
       ...transaction,
       allocations: [
         { id: "split", treatment: "personal", state: "active", amount: 20, categoryId: "travel" },
+        { id: "rest", treatment: "reimbursable", state: "active", amount: 5, categoryId: "other" },
       ],
     },
   });

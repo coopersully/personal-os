@@ -1,5 +1,6 @@
 import type { FinanceReviewCase, FinanceTransaction } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
+import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import { toast } from "sonner-native";
@@ -9,6 +10,7 @@ import { spacing, useTheme } from "../../theme";
 import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
 import { appliedTransaction } from "./mutations";
+import { activeAllocations } from "./splits";
 import { FinanceRow, ReadState } from "./ui";
 
 /** Attention belongs to the editable field, and clears only on a confirmed server receipt. */
@@ -98,6 +100,27 @@ export function TransactionCategory({
     }
   }
   const color = needsInput ? t.warning : t.ink;
+  const parts = activeAllocations(item).length;
+  // Split across categories and not awaiting review: the parts are the categorization.
+  if (parts > 1 && !review)
+    return (
+      <FinanceRow
+        centered
+        title="Category"
+        value={`Split in ${parts} parts`}
+        icon="categoryLayers"
+        accessibilityHint="Edit splits"
+        onPress={
+          item.pending
+            ? undefined
+            : () =>
+                router.push({
+                  pathname: "/finance-transaction-edit",
+                  params: { id: item.id, field: "splits" },
+                })
+        }
+      />
+    );
   return (
     <>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>

@@ -173,7 +173,10 @@ function Preferences({
           />
         </Section>
         <Section title="Task row details">
-          <SectionNote>These row-detail preferences configure the web app.</SectionNote>
+          <SectionNote>
+            Shown under each task on iPhone and in the web app. Reserved time and the List or
+            Project always show.
+          </SectionNote>
           {(["estimate", "tags", "notes"] as const).map((detail) => (
             <ToggleRow
               key={detail}
@@ -198,6 +201,10 @@ function Preferences({
           ))}
         </Section>
         <Section title="Search">
+          <SectionNote>
+            When on, a search also finds completed and cancelled items and items in archived or
+            finished Lists and Projects.
+          </SectionNote>
           <ToggleRow
             label="Include archived in search"
             value={draft.includeArchivedInSearch}

@@ -107,6 +107,37 @@ active chips and effective sorting/grouping beside results. Preserve fixed desti
 distinguish filter reset from view reset, and make saved defaults explicit. See the detailed form
 contract for geometry, state and reset behavior. Do not scatter configuration through result lists.
 
+### Task row details
+
+A task row keeps its full title, wrapping rather than truncating, then quieter lines below it.
+The scan line stays about urgency: Read-only, Reminder, Cancelled, High priority and the due
+date, with the overdue treatment unchanged. A one-line context line follows with reserved time
+and the estimate, then the owning List / Project on a line of its own, so neither a long
+reservation nor a long container name can push the other out of view. Reserved time
+and the container always show when the task has them; a row inside a list or project browser, or
+under a List or Project filter, does not repeat that container. Estimate, notes and tags follow
+the saved row-detail preference shared with the web app: notes take at most two lines, tags wrap
+as small chips and a row shows five before counting the rest (+2 more). Nothing optional shows
+until the preference has loaded. An absent value, or a container that cannot be named, renders
+nothing; never a placeholder. Reminders have only notes. The row's accessibility value carries
+the same lines in reading order.
+
+### Archived items in task search
+
+"Include archived in search" (on by default) widens a task search to completed and cancelled
+items and to items in archived Lists and archived or finished Projects, the same intent as the
+web search toggle. Those container matches are read separately and listed last under "In
+archived or finished lists and projects", after
+every other match has loaded; the item count covers both. The preference applies wherever a
+search has no status of its own: it leaves alone a destination with a fixed status (To-do is open
+items), a Status the person chose, History and Trash. Inside a list or project one read with
+every status already covers its archived work. With the preference off a search keeps the view's
+own status. Until the preference has loaded a search is not widened. One search that
+fails raises one Sonner error even though it makes two reads; if only the archived read fails
+while other matches are showing, the list offers "Retry loading archived matches" and counts the
+matches it has. A cancelled task names itself Cancelled on the scan line, since it is otherwise
+drawn like a completed one.
+
 ## Accessibility and verification
 
 Preserve Dynamic Type, meaningful accessible labels, checked/selected/disabled states, keyboard
@@ -335,6 +366,80 @@ rows.
 Changing a transaction's date is not available: the API accepts only a category or a note on an
 existing transaction.
 
+A posted transaction's action menu offers Split transaction, or Edit splits once it has more than
+one part. It opens the split editor in the transaction editor sheet, which writes through the
+transaction breakdown endpoint the web Split dialog uses. A pending transaction offers neither,
+because the server gives a breakdown only to a posted one. The editor opens with the saved parts in
+their saved order, or with the whole amount on the transaction's category and one empty part. Each
+part has a Category, an Amount and a Treatment of Mine or Reimbursable; Add part starts a part with
+whatever is still unassigned, and Remove part is offered while more than one part remains; the
+last part left takes the whole amount. The
+amount still to assign, or the amount over-assigned, stays above the parts as field state. Save is
+enabled only once every part has a category and an exact amount, no two parts share a category and
+treatment, and the parts equal the transaction amount to the cent. One part alone assigns the whole
+transaction to that category, which is how a split is removed. Saving sends the revision the editor
+opened with. One toast reports the outcome: a conflict and any other rejection say nothing was
+saved and keep the draft (a conflict that follows an unconfirmed save says the earlier save may
+be why instead), and a save whose outcome is unknown says so, keeps the draft, re-reads
+Finance data and changes the discard prompt so it never claims the splits were not saved. The
+editor closes only on a confirmed save, and transaction details show parts only from what the
+server returned. A split transaction's Category row reads "Split in N parts" and opens the editor
+rather than asking for a category; its parts are listed by category with their treatment. The
+edit transaction form shows the same row in place of the category picker and New category, and
+never sends a category for a split transaction, because the server replaces every part with one
+when it receives a category; notes stay editable there. A transaction with one part is an ordinary
+categorized transaction and has no Splits section. A split transaction that is also awaiting
+review keeps the review's category controls, and resolving the review with one category replaces
+its parts. The
+transaction list read does not return parts, so a list row cannot yet tell a split transaction
+from an uncategorized one. The reusable merchant rule the web dialog offers for a single-category
+breakdown is not offered on iPhone.
+
+### Finance goal management
+
+Plan › Wealth lists every goal that has not been removed and offers Add as a command above the
+list, for the same reason Spending has no floating plus. A goal row opens the goal's own page,
+which shows its confirmed progress, target, deadline, priority and status. Its top-right action
+menu holds Edit goal, Confirm progress, Pause goal or Resume goal, Mark complete and, last and
+destructive, Remove goal. Pause is offered for an active goal, Resume for a paused one, and Mark
+complete until the goal is completed. Mark complete and Remove goal each keep a native
+confirmation that names the goal; Pause and Resume act at once. In the browser build, where the
+native alert does nothing, these confirmations and the forms' discard prompt use the browser's own
+confirmation. A removed goal leaves the list and its page closes.
+
+Progress is a recorded statement, never an inference: the person's own, or one their agent
+recorded for them, which the goal page labels as such. A goal shows an amount and a
+percentage only when the server returns a statement recorded for exactly the goal version on
+screen, owned by the signed-in person, matching the recorded amount and not dated in the future;
+the app applies the same rule as the domain's planning-evidence check, whose currency lookup is
+unavailable in the app runtime. Otherwise the goal reads "progress not confirmed" and its recorded
+amount is not shown as progress. Every change to a goal starts a new version, so an edit, pause,
+resume or completion returns the goal to "progress not confirmed"; the edit form and the
+completion prompt say so; Pause and Resume do not warn. A goal has no currency of its own: its
+target reads in the currency of its latest progress statement, even one that no longer applies,
+or the product's USD default when it has none.
+
+The add and edit form holds Name, Target, Deadline and Priority and a floating Save. Name and
+Target are required, with Required as their placeholder. The target is at most 21,474,836.47,
+the largest the stored record holds, although the API accepts more;
+an empty Deadline reads as not set. Confirm progress is its own form: Amount (zero is valid), Currency and As of, which
+defaults to today in the account planning timezone and cannot be later. Currency starts from the
+goal's last statement. Each form names its required fields. An invalid Target, Amount or Currency
+states its correction beside the field; a typed Deadline or As of that is not a real calendar
+date holds Save and is corrected in a line under the fields; a future As of date is corrected in a line under the
+fields, and a cleared one only disables Save.
+
+Every goal write carries the version that was on screen and an idempotency key. The key is kept
+while the outcome is unknown and replaced only after a definitive rejection, so repeating the same
+change cannot act twice. A changed goal is a conflict: the toast says to review the latest version
+and nothing is overwritten. After an add whose outcome is unknown, saving the same draft repeats
+it under the same key; saving a corrected draft first looks for a new goal under the earlier name
+and adds nothing when it finds one. An earlier attempt that reaches the server only after that
+look can still leave two goals; closing that gap needs a server-side key shared by both drafts.
+A goal's actions stay disabled until the changed goal is on screen, so a second press cannot send
+the version the first one replaced. One toast runs from loading to the confirmed result; a failed
+or unknown save keeps the draft and the form open and never reads as saved.
+
 ### Transaction conversations and review
 
 - Needs your input cards show merchant, amount and category, and open the canonical transaction details page. Details place attention on the category row itself, with direct selection and approval. Do not duplicate the field with a separate Choose category banner/button. Notes remain optional and never count as a missing required field. This is record state, not action-result feedback.
@@ -449,7 +554,11 @@ cannot be undone from nohmi.
 
 ### Briefings and compact record rows
 
-Today is a short, cross-workspace briefing: Needs you, Coming up, and Handled for you. Bound each preview to three entries and link directly to the existing entity detail or workspace view. Use Tasks' authoritative Auto ordering for today's open work, including overdue tasks; combine upcoming tasks/reminders with expected Finance occurrences using the user's timezone. Label expected amounts rather than implying payment. Only confirmed applied agent actions belong under Handled for you; pending proposals and the user's actions do not. Distinguish partial/unavailable reads from an empty or all-clear state and make freshness and refresh accessible. The current native slice covers Tasks and Finance, not Mail/Calendar or complete connection monitoring.
+Today is a short, cross-workspace briefing: Needs you, Coming up, and Handled for you. Bound each preview to three entries and link directly to the existing entity detail or workspace view. Use Tasks' authoritative Auto ordering for today's open work, including overdue tasks; combine upcoming tasks/reminders with expected Finance occurrences using the user's timezone. Label expected amounts rather than implying payment. Only confirmed applied agent actions belong under Handled for you; pending proposals and the user's actions do not. Distinguish partial/unavailable reads from an empty or all-clear state and make freshness and refresh accessible. The native briefing covers Tasks, Calendar, Mail and Finance; complete connection monitoring is not part of it.
+
+Today’s events lists what is left of the day in the account timezone: events still running or ahead by start time, then all-day events; ended and cancelled events are left out. A row carries the time on this day, Tentative and the location, marks a running event Now, and opens the event’s detail. Mail lists open Mail attention items (the first 100 the API returns), most important first; expired items and run summaries are left out. A row tied to a conversation opens that conversation in the Mail reader over Today, and any other row opens Mail. Opening a conversation keeps only its body-free summary; the reader loads and discards message text as it does in Mail. Both sections keep the three-row limit and say how many more there are; the summary chips carry the count of events left (opens Calendar) and, when there is any, unread inbox mail (opens Mail).
+
+Each source fails alone: an unavailable Calendar or Mail read is named in its own section while the others stay on screen, and a failed refresh keeps the last results marked Partial or cached. No calendars, every calendar hidden and no connected mail account are each stated as a row that opens the place to fix it, never as an empty day or a clear inbox. The freshness line names the workspaces the briefing actually read.
 
 Record-row trailing values and disclosure/actions occupy the heading line only. Descriptions below it use the full available content width, aligned with the title; do not reserve an empty trailing column beside every description line. Leading identity icons remain top-left and actions top-right. Use the shared `RecordRow` for informational rows; preserve vertically centered settings rows for editable label/value fields.
 

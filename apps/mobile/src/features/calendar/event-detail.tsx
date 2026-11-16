@@ -13,6 +13,7 @@ import {
   useCalendarEvent,
   useCalendarScope,
   useCalendars,
+  useEventOccurrence,
   useEventWrites,
 } from "./data";
 import { blockSummary, blockTargets, canBlockEvent } from "./event-blocks";
@@ -58,7 +59,8 @@ export function CalendarEventScreen() {
       shown.current = false;
     };
   }, []);
-  const event = query.data;
+  // Blocks linked to the same occurrence on another calendar come with the list read.
+  const { event } = useEventOccurrence(query.data);
   if (!event) {
     const gone = !id || isNotFound(query.error);
     return (

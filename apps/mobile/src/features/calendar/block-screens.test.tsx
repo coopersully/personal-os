@@ -156,6 +156,15 @@ const press = (name: string | RegExp) => fireEvent.click(button(name));
 const toggle = (name: string) => screen.getByRole("switch", { name }) as HTMLInputElement;
 const field = (name: string) => screen.getByRole("textbox", { name }) as HTMLInputElement;
 const type = (name: string, value: string) => fireEvent.change(field(name), { target: { value } });
+/** Reads of one calendar made before a repeat block; other reads cover every shown calendar. */
+const calendarChecks = () =>
+  h.api.listEvents.mock.calls.filter(
+    ([query]) => (query as { calendarIds?: string[] }).calendarIds,
+  );
+/** Personal has synced again since the page loaded. */
+function synced(at: string | null = "2026-11-13T15:05:00.000Z") {
+  h.api.listCalendars.mockResolvedValue([work, { ...personal, lastSyncedAt: at }, holidays]);
+}
 /** No toast text may also be rendered on the page. */
 function expectNoInlineResult() {
   const calls = [...h.error.mock.calls, ...h.success.mock.calls, ...h.loading.mock.calls];
@@ -410,41 +419,79 @@ it("reads the event before repeating an unconfirmed block and sends nothing when
   expect(toggle("Block on Personal").checked).toBe(false);
   expectNoInlineResult();
 
-  // The first attempt did work: the record now carries the block.
+  // The first attempt did work, which only the next read of the record shows.
   serve(blocked());
-  // The page's own re-read may land first; either way nothing more is created.
-  if (!toggle("Block on Personal").checked) fireEvent.click(toggle("Block on Personal"));
-  await waitFor(() => expect(toggle("Block on Personal").checked).toBe(true));
+  h.api.listEvents.mockClear();
+  h.api.listCalendars.mockClear();
+  await blockOnPersonal(2);
+  expect(h.success).toHaveBeenCalledExactlyOnceWith("Time blocked on Personal", { id: "toast-1" });
   expect(h.api.createEventBlock).toHaveBeenCalledOnce();
+  expect(calendarChecks()).toEqual([]);
+  await waitFor(() => expect(toggle("Block on Personal").checked).toBe(true));
 });
 
-it("repeats an unconfirmed block only after the calendar shows no copy of it", async () => {
+it("repeats an unconfirmed block only after the calendar has synced and shows no copy", async () => {
   h.api.createEventBlock.mockRejectedValueOnce(offline());
   await openBlocks();
   await blockOnPersonal(1);
+
+  // Until Personal syncs again, nohmi cannot see whether the provider took the first attempt.
   h.api.listEvents.mockClear();
   await blockOnPersonal(2);
+  expect(h.error).toHaveBeenLastCalledWith(
+    "Personal hasn’t synced since the earlier attempt, so nothing was sent. Try again after it syncs.",
+    { id: "toast-1" },
+  );
+  expect(h.api.createEventBlock).toHaveBeenCalledOnce();
+  expect(calendarChecks()).toEqual([]);
+  expectNoInlineResult();
 
-  expect(h.api.listEvents).toHaveBeenCalledWith({
-    from: "2026-11-12T14:00:00.000Z",
-    to: "2026-11-14T14:30:00.000Z",
-    calendarIds: ["personal"],
-  });
+  synced();
+  await blockOnPersonal(3);
+  expect(calendarChecks()).toEqual([
+    [
+      {
+        from: "2026-11-12T14:00:00.000Z",
+        to: "2026-11-14T14:30:00.000Z",
+        calendarIds: ["personal"],
+      },
+    ],
+  ]);
   expect(h.api.createEventBlock).toHaveBeenCalledTimes(2);
   expect(h.success).toHaveBeenCalledExactlyOnceWith("Time blocked on Personal", { id: "toast-1" });
+
   // Confirmed, so after the block is removed the next attempt is sent without a check.
   await waitFor(() => expect(toggle("Block on Personal").checked).toBe(true));
+  await waitFor(() => expect(toggle("Block on Personal")).toBeEnabled());
   fireEvent.click(toggle("Block on Personal"));
   await waitFor(() => expect(toggle("Block on Personal").checked).toBe(false));
   await waitFor(() => expect(toggle("Block on Personal")).toBeEnabled());
   h.api.listEvents.mockClear();
-  await blockOnPersonal(4);
-  expect(h.api.listEvents).not.toHaveBeenCalledWith(
-    expect.objectContaining({ calendarIds: ["personal"] }),
-  );
+  await blockOnPersonal(5);
+  expect(calendarChecks()).toEqual([]);
+  expect(h.api.createEventBlock).toHaveBeenCalledTimes(3);
 });
 
-it("sends nothing when an unlinked copy of a Details block is already on the calendar", async () => {
+it("takes the calendar's sync time when the attempt failed, not when the page loaded", async () => {
+  h.api.createEventBlock.mockRejectedValueOnce(offline());
+  await openBlocks();
+  // Personal synced after the page loaded but before the attempt: that sync saw nothing of it.
+  synced("2026-11-13T14:50:00.000Z");
+  await blockOnPersonal(1);
+  await blockOnPersonal(2);
+  expect(h.error).toHaveBeenLastCalledWith(
+    expect.stringMatching(/^Personal hasn’t synced since the earlier attempt/),
+    { id: "toast-1" },
+  );
+  expect(h.api.createEventBlock).toHaveBeenCalledOnce();
+
+  // A calendar that has never synced cannot have shown a copy either.
+  synced(null);
+  await blockOnPersonal(3);
+  expect(h.api.createEventBlock).toHaveBeenCalledOnce();
+});
+
+it("sends nothing when an unlinked copy of the earlier attempt is on the calendar", async () => {
   h.api.getDomainProfile.mockResolvedValue({
     status: "active",
     preferences: { busyBlockPrivacy: "details" },
@@ -452,7 +499,8 @@ it("sends nothing when an unlinked copy of a Details block is already on the cal
   h.api.createEventBlock.mockRejectedValueOnce(refused(503, "The provider did not answer."));
   await openBlocks();
   await blockOnPersonal(1);
-  h.api.listEvents.mockResolvedValue([{ ...standup, id: "copy", calendarId: "personal" }]);
+  synced();
+  h.api.listEvents.mockResolvedValue([standup, { ...standup, id: "copy", calendarId: "personal" }]);
   await blockOnPersonal(2);
 
   expect(h.api.createEventBlock).toHaveBeenCalledOnce();
@@ -461,6 +509,20 @@ it("sends nothing when an unlinked copy of a Details block is already on the cal
     { id: "toast-1" },
   );
   expectNoInlineResult();
+
+  // The copy is what the earlier attempt sent: choosing Busy now does not make it go away.
+  press("New blocks show, Details");
+  fireEvent.click(screen.getByRole("radio", { name: "Busy" }));
+  await blockOnPersonal(3);
+  expect(h.api.createEventBlock).toHaveBeenCalledOnce();
+  expect(h.error).toHaveBeenLastCalledWith(expect.stringMatching(/^Personal already has/), {
+    id: "toast-1",
+  });
+
+  // Once the person has removed it, the block can be made.
+  h.api.listEvents.mockResolvedValue([standup]);
+  await blockOnPersonal(4);
+  expect(h.api.createEventBlock).toHaveBeenCalledTimes(2);
 });
 
 it("lets the API link a single unlinked Busy copy, but not two", async () => {
@@ -468,31 +530,36 @@ it("lets the API link a single unlinked Busy copy, but not two", async () => {
   h.api.createEventBlock.mockRejectedValueOnce(offline());
   await openBlocks();
   await blockOnPersonal(1);
-  h.api.listEvents.mockResolvedValue([copy, { ...copy, id: "copy-2" }]);
+  synced();
+  h.api.listEvents.mockResolvedValue([standup, copy, { ...copy, id: "copy-2" }]);
   await blockOnPersonal(2);
   expect(h.api.createEventBlock).toHaveBeenCalledOnce();
   expect(h.error).toHaveBeenLastCalledWith(expect.stringMatching(/^Personal already has/), {
     id: "toast-1",
   });
 
-  h.api.listEvents.mockResolvedValue([copy]);
+  h.api.listEvents.mockResolvedValue([standup, copy]);
   await blockOnPersonal(3);
   expect(h.api.createEventBlock).toHaveBeenCalledTimes(2);
 });
 
 it("does not count on the API linking an all-day Busy copy that a provider dated in UTC", async () => {
   // nohmi stores this all-day event from local midnight; the provider copy reads back in UTC.
-  serve({
+  const offsite = {
     ...standup,
     allDay: true,
     provider: "local",
     startsAt: "2026-11-20T05:00:00.000Z",
     endsAt: "2026-11-21T05:00:00.000Z",
-  });
+  } as CalendarEvent;
+  serve(offsite);
+  h.api.listEvents.mockResolvedValue([offsite]);
   h.api.createEventBlock.mockRejectedValueOnce(offline());
   await openBlocks();
   await blockOnPersonal(1);
+  synced();
   h.api.listEvents.mockResolvedValue([
+    offsite,
     {
       ...standup,
       id: "copy",
@@ -510,23 +577,25 @@ it("does not count on the API linking an all-day Busy copy that a provider dated
   });
 });
 
-it("sends nothing when the calendar cannot be read before a repeat block", async () => {
+it("sends nothing when a read fails before a repeat block", async () => {
+  const unread = "Couldn’t check your calendar, so nothing was sent. Try again in a moment.";
   h.api.createEventBlock.mockRejectedValueOnce(offline());
   await openBlocks();
   await blockOnPersonal(1);
+  synced();
   h.api.listEvents.mockRejectedValue(offline());
   await blockOnPersonal(2);
-  expect(h.error).toHaveBeenLastCalledWith(
-    "Couldn’t check your calendar, so nothing was sent. Try again in a moment.",
-    { id: "toast-1" },
-  );
-  h.api.listEvents.mockResolvedValue([]);
-  h.api.getEvent.mockRejectedValue(offline());
+  expect(h.error).toHaveBeenLastCalledWith(unread, { id: "toast-1" });
+
+  h.api.listEvents.mockResolvedValue([standup]);
+  h.api.listCalendars.mockRejectedValue(offline());
   await blockOnPersonal(3);
-  expect(h.error).toHaveBeenLastCalledWith(
-    "Couldn’t check your calendar, so nothing was sent. Try again in a moment.",
-    { id: "toast-1" },
-  );
+  expect(h.error).toHaveBeenLastCalledWith(unread, { id: "toast-1" });
+
+  synced();
+  h.api.getEvent.mockRejectedValue(offline());
+  await blockOnPersonal(4);
+  expect(h.error).toHaveBeenLastCalledWith(unread, { id: "toast-1" });
   expect(h.api.createEventBlock).toHaveBeenCalledOnce();
   expectNoInlineResult();
 });
@@ -543,16 +612,34 @@ it("offers no repeat block on a hidden calendar, which nohmi cannot check", asyn
   await blockOnPersonal(2);
 
   expect(h.api.createEventBlock).toHaveBeenCalledOnce();
-  expect(h.api.listEvents).not.toHaveBeenCalledWith(
-    expect.objectContaining({ calendarIds: ["personal"] }),
-  );
+  expect(calendarChecks()).toEqual([]);
   expect(h.error).toHaveBeenLastCalledWith(
     "nohmi can’t check Personal while it is hidden, so nothing was sent. Show it in Calendar, or check it in your calendar app.",
     { id: "toast-1" },
   );
 });
 
+it("repeats an unconfirmed block on a nohmi calendar after reading the event alone", async () => {
+  // A nohmi calendar has no provider that could hold a copy nohmi cannot see.
+  h.api.listCalendars.mockResolvedValue([
+    work,
+    calendar("personal", "Personal", { provider: "local", isSelected: false, lastSyncedAt: null }),
+  ]);
+  h.api.createEventBlock.mockRejectedValueOnce(offline());
+  await openBlocks();
+  await blockOnPersonal(1);
+  h.api.getEvent.mockClear();
+  await blockOnPersonal(2);
+  expect(h.api.getEvent).toHaveBeenCalled();
+  expect(h.api.createEventBlock).toHaveBeenCalledTimes(2);
+  expect(h.success).toHaveBeenCalledExactlyOnceWith("Time blocked on Personal", { id: "toast-1" });
+});
+
 it("waits for a sync when the provider took the block but nohmi could not link it", async () => {
+  h.api.getDomainProfile.mockResolvedValue({
+    status: "active",
+    preferences: { busyBlockPrivacy: "details" },
+  });
   h.api.createEventBlock.mockRejectedValueOnce(
     refused(409, "The calendar event changed since it was loaded.", {
       partialEffect: "provider_event_created",
@@ -561,7 +648,7 @@ it("waits for a sync when the provider took the block but nohmi could not link i
   await openBlocks();
   await blockOnPersonal(1);
   expect(h.error).toHaveBeenCalledExactlyOnceWith(
-    "Personal has this time, but nohmi couldn’t link it to the event. Try again after Personal next syncs.",
+    "Personal has this time, but nohmi couldn’t link it to the event. Check Personal after it next syncs.",
     { id: "toast-1" },
   );
   expectNoInlineResult();
@@ -570,27 +657,85 @@ it("waits for a sync when the provider took the block but nohmi could not link i
   await blockOnPersonal(2);
   expect(h.api.createEventBlock).toHaveBeenCalledOnce();
   expect(h.error).toHaveBeenLastCalledWith(
-    "Personal hasn’t synced the earlier attempt yet, so nothing was sent. Try again after it syncs.",
+    expect.stringMatching(/^Personal hasn’t synced since the earlier attempt/),
     { id: "toast-1" },
   );
 
-  h.api.listEvents.mockResolvedValue([
-    { ...standup, id: "copy", title: "Busy", calendarId: "personal" },
-  ]);
+  synced();
+  h.api.listEvents.mockResolvedValue([standup, { ...standup, id: "copy", calendarId: "personal" }]);
   await blockOnPersonal(3);
+  expect(h.api.createEventBlock).toHaveBeenCalledOnce();
+  expect(h.error).toHaveBeenLastCalledWith(expect.stringMatching(/^Personal already has/), {
+    id: "toast-1",
+  });
+
+  // The person removed the copy as the toast asked, so the block is no longer held back.
+  h.api.listEvents.mockResolvedValue([standup]);
+  await blockOnPersonal(4);
   expect(h.api.createEventBlock).toHaveBeenCalledTimes(2);
+  expect(h.success).toHaveBeenCalledExactlyOnceWith("Time blocked on Personal", { id: "toast-1" });
 });
 
-it("changes every linked copy on a calendar and reports a partial change as unconfirmed", async () => {
-  const mirrored = {
-    ...standup,
-    blocks: [block("busy"), block("busy", { eventId: "block-2", sourceEventId: "Mirror" })],
-  };
-  serve(mirrored);
+it("keeps an unconfirmed attempt to its own event, calendar and session", async () => {
+  h.api.listCalendars.mockResolvedValue([work, personal, calendar("home", "Home")]);
+  h.api.createEventBlock.mockRejectedValueOnce(offline());
+  await openBlocks();
+  await blockOnPersonal(1);
+  // Another calendar is blocked without a check first.
+  h.api.listCalendars.mockClear();
+  fireEvent.click(toggle("Block on Home"));
+  await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
+  expect(h.api.createEventBlock).toHaveBeenLastCalledWith(
+    "Standup",
+    expect.objectContaining({ calendarId: "home" }),
+  );
+  await waitFor(() => expect(toggle("Block on Personal")).toBeEnabled());
+
+  // After signing in again the earlier attempt is not this session's to check.
+  h.epoch = 2;
+  cleanup();
+  serve(standup);
+  await openBlocks();
+  h.api.createEventBlock.mockClear();
+  await blockOnPersonal(3);
+  expect(h.api.createEventBlock).toHaveBeenCalledOnce();
+});
+
+it("drops the result of a block when the session changes while it is being sent", async () => {
+  let settle: (event: CalendarEvent) => void = () => {};
+  h.api.createEventBlock.mockReturnValue(
+    new Promise<CalendarEvent>((resolve) => {
+      settle = resolve;
+    }),
+  );
+  await openBlocks();
+  fireEvent.click(toggle("Block on Personal"));
+  await waitFor(() => expect(h.loading).toHaveBeenCalledOnce());
+  h.epoch = 2;
+  settle(blocked());
+  await waitFor(() => expect(h.dismiss).toHaveBeenCalledWith("toast-1"));
+  expect(h.success).not.toHaveBeenCalled();
+  expect(h.error).not.toHaveBeenCalled();
+});
+
+it("changes every linked copy of an occurrence that sits on several calendars", async () => {
+  // The record carries only its own block; the list read adds the other copy's and its calendar.
+  const mirror = block("busy", { eventId: "block-2", sourceEventId: "Mirror" });
+  serve({ ...standup, blocks: [block("busy", { sourceEventId: "Standup" })] });
+  h.api.listCalendars.mockResolvedValue([work, personal, calendar("team", "Team")]);
+  h.api.listEvents.mockResolvedValue([
+    {
+      ...standup,
+      blocks: [block("busy", { sourceEventId: "Standup" }), mirror],
+      sourceCalendarIds: ["work", "team"],
+    },
+  ]);
   h.api.deleteEventBlock
-    .mockResolvedValueOnce({ ...standup, blocks: [mirrored.blocks[1]] })
+    .mockResolvedValueOnce(standup)
     .mockRejectedValueOnce(refused(404, "The linked calendar block was not found."));
   await openBlocks();
+  // The other calendar holding this occurrence is not somewhere to block it.
+  expect(screen.queryByRole("switch", { name: "Block on Team" })).toBeNull();
   fireEvent.click(toggle("Block on Personal"));
 
   await waitFor(() => expect(h.error).toHaveBeenCalledOnce());
@@ -608,9 +753,20 @@ it("changes every linked copy on a calendar and reports a partial change as unco
   );
   cleanup();
 
+  // A block linked only to the other copy still reads as blocked, and stays so after a re-read.
+  serve(standup);
+  h.api.listEvents.mockResolvedValue([
+    { ...standup, blocks: [mirror], sourceCalendarIds: ["work", "team"] },
+  ]);
+  await openBlocks();
+  expect(toggle("Block on Personal").checked).toBe(true);
+  expect(button("Personal shows, Busy")).toBeVisible();
+  cleanup();
+
   // A refusal before anything changed is reported as the refusal it is.
   h.error.mockClear();
   serve(blocked());
+  h.api.listEvents.mockResolvedValue([blocked()]);
   h.api.updateEventBlock.mockRejectedValueOnce(refused(403, "This calendar is read only."));
   await openBlocks();
   press("Personal shows, Busy");
@@ -696,10 +852,15 @@ it("shows no conflicts for a free time, and does not compare events the review l
   expect(screen.queryByRole("heading", { name: "Conflicts" })).toBeNull();
   cleanup();
 
-  h.api.listEvents.mockClear();
+  // An all-day event is not compared, whatever shares its day.
+  h.api.listEvents.mockResolvedValue([
+    { ...standup, allDay: true },
+    other("Dentist", "2026-11-13T14:15:00.000Z", "2026-11-13T15:00:00.000Z"),
+  ]);
   serve({ ...standup, allDay: true });
   await openDetails();
-  expect(h.api.listEvents).not.toHaveBeenCalled();
+  await waitFor(() => expect(h.api.listEvents).toHaveBeenCalled());
+  await screen.findByRole("button", { name: "Event actions" });
   expect(screen.queryByRole("heading", { name: "Conflicts" })).toBeNull();
 });
 
@@ -745,6 +906,9 @@ it("previews whether a proposed time is free before the event is created", async
 
   type("End time", "13:00");
   expect(screen.queryByText(/on the calendars you show/)).toBeNull();
+  type("End time", "nope");
+  expect(screen.queryByText(/on the calendars you show/)).toBeNull();
+  type("End time", "13:00");
   fireEvent.click(screen.getByRole("switch", { name: "All day" }));
   expect(screen.getByText("All-day events aren’t compared with other events.")).toBeVisible();
 });

@@ -13,6 +13,7 @@ import {
   useCalendarEvent,
   useCalendarScope,
   useCalendars,
+  useEventOccurrence,
   useEventWrites,
   useSavedBlockMode,
 } from "./data";
@@ -55,11 +56,13 @@ export function CalendarEventBlocksScreen() {
         <SectionNote>{text}</SectionNote>
       </Section>,
     );
-  if (!id || isNotFound(query.error)) return note("This event is no longer available.");
   // The list's copy may be stale; blocks are changed only from the record the API confirms.
-  const event = query.isPlaceholderData ? undefined : query.data;
-  if (!event || !calendars.data || !saved.ready) {
-    const failed = query.isError ? query : calendars.isError ? calendars : null;
+  const record = query.isPlaceholderData ? undefined : query.data;
+  // The list read adds the blocks and calendars of the same occurrence on other calendars.
+  const { read, event } = useEventOccurrence(record);
+  if (!id || isNotFound(query.error)) return note("This event is no longer available.");
+  if (!event || !calendars.data || !saved.ready || !read.data) {
+    const failed = [query, calendars, read].find((needed) => needed.isError);
     return page(
       failed ? (
         <View style={{ flexDirection: "row" }}>
@@ -79,6 +82,8 @@ export function CalendarEventBlocksScreen() {
   const targets = blockTargets(event, calendars.data);
   if (!targets.length) return note("You have no other calendar that can take a block.");
   const mode = chosen ?? saved.mode;
+  // While the page is being re-read after a change, what it shows may be a moment behind.
+  const busy = writes.pending || read.isFetching || query.isFetching;
   const named = (name: string) => targets.filter((target) => target.calendar.name === name);
   return page(
     <>
@@ -88,7 +93,7 @@ export function CalendarEventBlocksScreen() {
           icon="calendar"
           value={mode}
           options={modes}
-          disabled={writes.pending}
+          disabled={busy}
           onChange={(value) => setChosen(value as EventBlockMode)}
         />
       </Section>
@@ -108,7 +113,7 @@ export function CalendarEventBlocksScreen() {
               <ToggleRow
                 label={`Block on ${name}`}
                 value={!!target.mode}
-                disabled={writes.pending}
+                disabled={busy}
                 onChange={(on) =>
                   void (on ? writes.block(event, target, mode) : writes.unblock(event, target))
                 }
@@ -119,7 +124,7 @@ export function CalendarEventBlocksScreen() {
                   icon="calendar"
                   value={target.mode}
                   options={modes}
-                  disabled={writes.pending}
+                  disabled={busy}
                   onChange={(value) =>
                     void writes.setBlockMode(event, target, value as EventBlockMode)
                   }

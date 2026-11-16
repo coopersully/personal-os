@@ -566,7 +566,10 @@ added on this visit; it is not saved back. Each other writable calendar has one 
 Details. Busy shows only that the person is busy; Details copies the event's title, location and
 notes. The event's own calendars and read-only calendars are not offered. The same occurrence
 can sit on several calendars, each with its own linked copy on one destination; a switch or
-choice changes every copy there.
+choice changes every copy there. One event record carries only its own blocks, so the page and
+the details row also read the event list for that time, which names the other calendars and
+their blocks. Opened for an event on a hidden calendar, which the list does not return, the
+page knows only that record's own blocks.
 
 Every switch and choice is one write to a real calendar. It is one Sonner toast from pending to
 its outcome with no result copy on the page, and the control moves only after the API confirms
@@ -575,20 +578,22 @@ elsewhere is reported as such, sends nothing further and re-reads the event. Onc
 copies has changed, a later failure is reported as unconfirmed.
 
 An unconfirmed block attempt (no response, a server or provider failure, or a refusal that
-carried a provider effect) is remembered for that event and calendar until one is confirmed or
-the app restarts. The next attempt there reads before it writes:
+carried a provider effect) is remembered for that event and calendar, with what was sent and the
+calendar's last sync time, until one is confirmed or the app restarts. The next attempt there
+reads before it writes:
 
 - The event is read first. If it now carries the block, that is reported and nothing is sent.
+- A nohmi calendar has no provider, so the event read is enough and the block is sent.
 - A hidden calendar's events cannot be read back, so nothing is sent and the toast says to show
   the calendar or check it in the provider's app.
-- Otherwise that calendar is read over the event's days. An unlinked copy of a Details block, or
-  more than one unlinked Busy copy, would be written again, so nothing is sent and the toast says
-  to remove it first. One unlinked Busy copy at exactly the event's start and end is sent on,
-  because the API links it instead of writing another; an all-day copy a provider dated
-  differently is not.
-- When the failure said the provider took the block but nohmi could not link it, nothing is sent
-  until that copy has synced.
-- If either read fails, nothing is sent.
+- nohmi sees a provider calendar only as of its last sync. Until that calendar has synced again
+  since the attempt, nothing is sent and the toast says to try again after it syncs.
+- Then that calendar is read over the event's days for an unlinked copy of what the earlier
+  attempt sent (its privacy, title and time, not what is chosen now). If one is there, nothing
+  is sent and the toast says to remove it first. The one exception is a single unlinked Busy
+  copy at exactly the event's start and end when Busy is chosen again: it is sent on, because
+  the API links it instead of writing another.
+- If any of these reads fails, nothing is sent.
 
 Removing a block or changing what it shows can be tried again after an unconfirmed result: the
 page is re-read first and the next attempt carries the revisions it then shows.

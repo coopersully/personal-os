@@ -115,6 +115,29 @@ export function useEventsDuring(span: { startsAt: string; endsAt: string } | nul
   });
 }
 
+/**
+ * An event with everything that bears on blocking it. One record carries only the blocks linked
+ * to itself and its own calendar; when the same occurrence sits on several calendars, the list
+ * read is what names those calendars and the blocks linked to the other copies.
+ */
+export function useEventOccurrence(event: CalendarEvent | undefined) {
+  const read = useEventsDuring(event ? { startsAt: event.startsAt, endsAt: event.endsAt } : null);
+  const listed = event && read.data?.find((candidate) => candidate.id === event.id);
+  const merged = useMemo(() => {
+    if (!event || !listed) return event;
+    // The record is the newer authority for its own blocks; the list adds the other copies'.
+    const others = (listed.blocks ?? []).filter(
+      (block) => block.sourceEventId && block.sourceEventId !== event.id,
+    );
+    return {
+      ...event,
+      blocks: [...(event.blocks ?? []), ...others],
+      sourceCalendarIds: listed.sourceCalendarIds ?? event.sourceCalendarIds,
+    };
+  }, [event, listed]);
+  return { read, event: merged };
+}
+
 /** One bounded read of `days` local days; the server returns only shown calendars. */
 export function useCalendarEvents(from: LocalDate | null, days: number) {
   const { api, epoch, owner, timeZone } = useCalendarScope();
@@ -262,11 +285,13 @@ type WriteCopy = {
 };
 
 /**
- * Block attempts whose result was never confirmed, per cache (so per signed-in app). The next
- * attempt on the same calendar reads it first. "landed" means the provider is known to have
- * the copy although nohmi has no link to it.
+ * A block attempt whose result was never confirmed: what was sent, and when the destination
+ * calendar had last synced. Until that calendar syncs again nohmi cannot see whether the
+ * provider took the copy, so nothing is sent again before then.
  */
-const unsettledBlocks = new WeakMap<object, Map<string, "uncertain" | "landed">>();
+type UnsettledBlock = { mode: EventBlockMode; source: CalendarEvent; syncedAt: string | null };
+/** Kept per cache, so per signed-in app, and keyed by owner, session, event and calendar. */
+const unsettledBlocks = new WeakMap<object, Map<string, UnsettledBlock>>();
 
 /**
  * Event writes change the person's real calendar, so each one is a single Sonner toast that
@@ -416,7 +441,7 @@ export function useEventWrites() {
       { captured, retry: (within) => restore(event, revision, within) },
     );
   const unsettled = () => {
-    const known = unsettledBlocks.get(cache) ?? new Map<string, "uncertain" | "landed">();
+    const known = unsettledBlocks.get(cache) ?? new Map<string, UnsettledBlock>();
     unsettledBlocks.set(cache, known);
     return known;
   };
@@ -503,52 +528,60 @@ export function useEventWrites() {
           pending: "Blocking time…",
           done: `Time blocked on ${name}`,
           unconfirmed: `Couldn’t confirm the time was blocked on ${name}. nohmi will check ${name} before blocking again.`,
-          landed: `${name} has this time, but nohmi couldn’t link it to the event. Try again after ${name} next syncs.`,
+          landed: `${name} has this time, but nohmi couldn’t link it to the event. Check ${name} after it next syncs.`,
           conflict: changedElsewhere,
         },
         async (api) => {
           let current = event;
           if (earlier) {
-            current = await api.getEvent(event.id).catch(() => {
+            const unread = () => {
               throw new NothingSent(unreadable);
-            });
+            };
+            current = await api.getEvent(event.id).catch(unread);
             if (current.blocks.some((block) => block.calendarId === calendar.id)) return current;
-            // Events are read from shown calendars only, so a hidden one cannot be checked.
-            if (!calendar.isSelected)
-              throw new NothingSent(
-                `nohmi can’t check ${name} while it is hidden, so nothing was sent. Show it in Calendar, or check it in your calendar app.`,
+            // A nohmi calendar has no provider that could hold a copy nohmi cannot see.
+            if (calendar.provider !== "local") {
+              // Events are read from shown calendars only, so a hidden one cannot be checked.
+              if (!calendar.isSelected)
+                throw new NothingSent(
+                  `nohmi can’t check ${name} while it is hidden, so nothing was sent. Show it in Calendar, or check it in your calendar app.`,
+                );
+              const latest = (await api.listCalendars().catch(unread)).find(
+                (candidate) => candidate.id === calendar.id,
               );
-            const day = 86_400_000;
-            const copies = (
-              await api
-                .listEvents({
-                  // A day either side covers all-day events, which providers date in UTC.
-                  from: new Date(new Date(event.startsAt).getTime() - day).toISOString(),
-                  to: new Date(new Date(event.endsAt).getTime() + day).toISOString(),
-                  calendarIds: [calendar.id],
-                })
-                .catch(() => {
-                  throw new NothingSent(unreadable);
-                })
-            ).filter((found) =>
-              isUnlinkedCopy(found, current, calendar.id, mode, timeZoneOf(state.user)),
-            );
-            // The API links exactly one unlinked Busy copy at the very same instants instead
-            // of writing another. Any other copy would be written a second time.
-            const [only] = copies;
-            const linkable =
-              mode === "busy" &&
-              copies.length === 1 &&
-              only?.startsAt === current.startsAt &&
-              only.endsAt === current.endsAt;
-            if (copies.length && !linkable)
-              throw new NothingSent(
-                `${name} already has this time from the earlier attempt, but it isn’t linked to the event. Remove it in your calendar app before blocking again.`,
+              if (!latest?.lastSyncedAt || latest.lastSyncedAt === earlier.syncedAt)
+                throw new NothingSent(
+                  `${name} hasn’t synced since the earlier attempt, so nothing was sent. Try again after it syncs.`,
+                );
+              const day = 86_400_000;
+              const { source } = earlier;
+              const copies = (
+                await api
+                  .listEvents({
+                    // A day either side covers all-day events, which providers date in UTC.
+                    from: new Date(new Date(source.startsAt).getTime() - day).toISOString(),
+                    to: new Date(new Date(source.endsAt).getTime() + day).toISOString(),
+                    calendarIds: [calendar.id],
+                  })
+                  .catch(unread)
+              ).filter((found) =>
+                // The copy is whatever the earlier attempt sent, not what is chosen now.
+                isUnlinkedCopy(found, source, calendar.id, earlier.mode, timeZoneOf(state.user)),
               );
-            if (earlier === "landed" && !copies.length)
-              throw new NothingSent(
-                `${name} hasn’t synced the earlier attempt yet, so nothing was sent. Try again after it syncs.`,
-              );
+              // The API links exactly one unlinked Busy copy at the very same instants instead
+              // of writing another. Any other copy would be left beside a second one.
+              const [only] = copies;
+              const linkable =
+                mode === "busy" &&
+                earlier.mode === "busy" &&
+                copies.length === 1 &&
+                only?.startsAt === current.startsAt &&
+                only.endsAt === current.endsAt;
+              if (copies.length && !linkable)
+                throw new NothingSent(
+                  `${name} already has this time from the earlier attempt, but it isn’t linked to the event. Remove it in your calendar app before blocking again.`,
+                );
+            }
           }
           return api.createEventBlock(event.id, {
             calendarId: calendar.id,
@@ -559,8 +592,20 @@ export function useEventWrites() {
         keepAndReread,
       );
       if (result.ok) unsettled().delete(key);
-      else if (result.reason === "uncertain" || result.reason === "landed")
-        unsettled().set(key, result.reason);
+      else if (result.reason === "uncertain" || result.reason === "landed") {
+        // The calendar's sync time is read now if it can be, so a sync that finished before
+        // this attempt is not mistaken for one that could have seen its copy.
+        const latest = await session
+          .api()
+          .listCalendars()
+          .then((all) => all.find((candidate) => candidate.id === calendar.id))
+          .catch(() => undefined);
+        unsettled().set(key, {
+          mode,
+          source: event,
+          syncedAt: (latest ?? calendar).lastSyncedAt ?? null,
+        });
+      }
       return result;
     },
     /** Changes whether a block shows Busy or the event's details on its calendar. */

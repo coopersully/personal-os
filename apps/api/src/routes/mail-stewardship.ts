@@ -70,7 +70,13 @@ export function registerMailStewardshipRoutes({
       principal.userId,
       await parseOptionalBody(context, maintenanceRequestSchema),
     );
-    const memory = (await workflowMemory?.(principal, "mail", context.get("requestId"))) ?? null;
+    const memory =
+      (await workflowMemory?.(principal, "mail", {
+        requestId: context.get("requestId"),
+        method: context.req.method,
+        path: context.req.path,
+        status: 200,
+      })) ?? null;
     return context.json({ ...result, memory });
   });
   app.get("/v1/mail/maintenance/:id", async (context) =>

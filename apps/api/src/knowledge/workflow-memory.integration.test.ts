@@ -12,6 +12,7 @@ import {
   type AccessScope,
   type KnowledgeContextPack,
   type KnowledgeMutationInput,
+  type KnowledgeRecord,
   knowledgeContextPackSchema,
   knowledgeReceiptSchema,
   knowledgeWorkflowMemoryMaxBytes,
@@ -30,6 +31,7 @@ import { registerMailStewardshipRoutes } from "../routes/mail-stewardship.js";
 import { hashToken } from "../security.js";
 import type { AppEnv, Principal } from "../types.js";
 import { createKnowledgeContextService } from "./context-service.js";
+import { createKnowledgeLifecycleService } from "./lifecycle-service.js";
 import { createKnowledgeRecordService } from "./record-service.js";
 import { createKnowledgeWorkflowMemory } from "./workflow-memory.js";
 
@@ -99,6 +101,7 @@ async function setUp() {
     scopes: new Set(),
   };
   const records = createKnowledgeRecordService(config());
+  const lifecycle = createKnowledgeLifecycleService(config());
   return {
     owner,
     context: createKnowledgeContextService(config()),
@@ -117,7 +120,36 @@ async function setUp() {
     async save(input: KnowledgeMutationInput) {
       return knowledgeReceiptSchema.parse(await records.create(owner, input)).record;
     },
+    /** A record the person blocked from agents, and one in Trash. */
+    async hidden(workspace: "finances" | "mail") {
+      const blocked = await this.save(fact("Blocked", { scope: { workspace } }));
+      await lifecycle.mutate(owner, {
+        action: "set_access",
+        agentAccess: "blocked",
+        recordId: blocked.id,
+        expectedRevision: blocked.revision,
+        mutationKey: randomUUID(),
+      });
+      const trashed = await this.save(fact("Trashed", { scope: { workspace } }));
+      await lifecycle.mutate(owner, {
+        action: "trash",
+        recordId: trashed.id,
+        expectedRevision: trashed.revision,
+        mutationKey: randomUUID(),
+      });
+      return [blocked.id, trashed.id];
+    },
   };
+}
+
+/** An unscoped record derived from `source`: it inherits the source's workspace. */
+function citing(source: Pick<KnowledgeRecord, "id" | "revision">, value: string) {
+  return fact(value, {
+    purposes: ["planning"],
+    evidence: [
+      { type: "domain_record", domain: "knowledge", id: source.id, revision: source.revision },
+    ],
+  });
 }
 
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
@@ -207,6 +239,11 @@ describe("workspace workflow memory", () => {
       }),
     );
     const mail = await f.save(fact("Newsletters are skimmed", { scope: { workspace: "mail" } }));
+    // Unscoped, but derived from Mail memory: effectively Mail's, so not Finance's.
+    const fromMail = await f.save(citing(mail, "Newsletter senders bill monthly"));
+    // Unscoped and derived from Finance memory only: it belongs here.
+    const fromFinance = await f.save(citing(finance, "Sarah pays by transfer"));
+    const hidden = await f.hidden("finances");
     const host = await f.agent([
       "finances:maintain",
       "finances:read",
@@ -222,9 +259,11 @@ describe("workspace workflow memory", () => {
     expect(started.status).toBe(200);
     const body = (await started.json()) as { data: { memory: KnowledgeContextPack | null } };
     const memory = knowledgeContextPackSchema.parse(body.data.memory);
-    // Purpose ranks the bookkeeping record first; unscoped memory is included; Mail's is not.
-    expect(ids(memory)).toEqual([finance.id, general.id]);
-    expect(ids(memory)).not.toContain(mail.id);
+    // Purpose ranks the bookkeeping record first; unscoped memory is included; Mail's, directly
+    // or through a source, is not, even though this host may read Mail.
+    expect(ids(memory)[0]).toBe(finance.id);
+    expect(ids(memory).toSorted()).toEqual([finance.id, general.id, fromFinance.id].toSorted());
+    for (const id of [mail.id, fromMail.id, ...hidden]) expect(ids(memory)).not.toContain(id);
     expect(memory.truncated).toBe(false);
     expect(bytes(body.data.memory)).toBeLessThanOrEqual(knowledgeWorkflowMemoryMaxBytes);
 
@@ -247,6 +286,9 @@ describe("workspace workflow memory", () => {
       }),
     );
     const finance = await f.save(fact("Rent is split", { scope: { workspace: "finances" } }));
+    const fromFinance = await f.save(citing(finance, "Rent is due on the first"));
+    const fromMail = await f.save(citing(mail, "The landlord prefers email"));
+    const hidden = await f.hidden("mail");
     const host = await f.agent(["mail:read", "mail:write", "finances:read", "knowledge:read"]);
     const routes = maintenanceRoutes(
       host,
@@ -257,8 +299,9 @@ describe("workspace workflow memory", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as { memory: KnowledgeContextPack | null };
     const memory = knowledgeContextPackSchema.parse(body.memory);
-    expect(ids(memory)).toEqual([mail.id, general.id]);
-    expect(ids(memory)).not.toContain(finance.id);
+    expect(ids(memory)[0]).toBe(mail.id);
+    expect(ids(memory).toSorted()).toEqual([mail.id, general.id, fromMail.id].toSorted());
+    for (const id of [finance.id, fromFinance.id, ...hidden]) expect(ids(memory)).not.toContain(id);
     expect(bytes(body.memory)).toBeLessThanOrEqual(knowledgeWorkflowMemoryMaxBytes);
   });
 

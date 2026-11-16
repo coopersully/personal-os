@@ -10,11 +10,13 @@ const workflowPurposes = {
 } as const satisfies Record<string, KnowledgePurpose>;
 
 export type KnowledgeWorkflowWorkspace = keyof typeof workflowPurposes;
+/** The request a section accompanies, as its failure log reports it. */
+export type KnowledgeWorkflowRequest = Pick<RequestLog, "requestId" | "method" | "path" | "status">;
 /** Memory for a maintenance start, or null when the caller cannot read it or it failed. */
 export type KnowledgeWorkflowMemory = (
   principal: Principal,
   workspace: KnowledgeWorkflowWorkspace,
-  requestId: string,
+  request: KnowledgeWorkflowRequest,
 ) => Promise<KnowledgeContextPack | null>;
 
 /**
@@ -51,7 +53,7 @@ export function createKnowledgeWorkflowMemory({
   context: Pick<ReturnType<typeof createKnowledgeContextService>, "workflowSection">;
   log: ((entry: RequestLog) => void) | undefined;
 }): KnowledgeWorkflowMemory {
-  return async (principal, workspace, requestId) => {
+  return async (principal, workspace, request) => {
     const startedAt = performance.now();
     try {
       return await context.workflowSection(principal, {
@@ -64,10 +66,7 @@ export function createKnowledgeWorkflowMemory({
         workspace,
         ...failureFields(error),
         durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
-        method: "POST",
-        path: `/v1/${workspace}/maintenance`,
-        requestId,
-        status: 200,
+        ...request,
       });
       return null;
     }

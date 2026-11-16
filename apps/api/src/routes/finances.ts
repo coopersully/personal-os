@@ -466,7 +466,12 @@ export function registerFinanceRoutes({
     // Only a start loads memory; resume and continue keep their established responses.
     if (input.operation !== "start") return context.json(result);
     const memory =
-      (await workflowMemory?.(principal, "finances", context.get("requestId"))) ?? null;
+      (await workflowMemory?.(principal, "finances", {
+        requestId: context.get("requestId"),
+        method: context.req.method,
+        path: context.req.path,
+        status: 200,
+      })) ?? null;
     return context.json({ ...result, data: { ...result.data, memory } });
   });
   app.get("/v1/finances/maintenance/:id", async (context) =>

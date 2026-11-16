@@ -1218,6 +1218,7 @@ export function createKnowledgeAccess(now: () => Date) {
         state: "available";
         record: KnowledgeRecord;
         effectiveSensitivity: KnowledgeEffectiveDisclosure["effectiveSensitivity"];
+        effectiveWorkspaces: KnowledgeEffectiveDisclosure["effectiveWorkspaces"];
       }
   > {
     const disclosure = await retrievalDisclosure(tx, principal, revision);
@@ -1233,6 +1234,7 @@ export function createKnowledgeAccess(now: () => Date) {
       state: "available",
       record,
       effectiveSensitivity: disclosure.projection.effectiveSensitivity,
+      effectiveWorkspaces: disclosure.projection.effectiveWorkspaces,
     };
   }
 

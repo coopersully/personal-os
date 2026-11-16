@@ -149,8 +149,11 @@ export async function selectKnowledgeCandidates(
   session: KnowledgeRetrievalSession,
   principal: Principal,
   query: KnowledgeQuery,
-  /** Leaves out records that are sensitive themselves or through a source. */
-  { excludeSensitive = false }: { excludeSensitive?: boolean } = {},
+  /**
+   * A maintenance workflow's section: leaves out records that are sensitive, or that belong to
+   * another workspace, either themselves or through a source.
+   */
+  { workflow }: { workflow?: { workspace: NonNullable<KnowledgeQuery["workspace"]> } } = {},
 ) {
   const { tx, access, at, authorizedScopes } = session;
   // `trashed` selects the owner's Trash (row selection enforces owner-only); it is a record
@@ -209,7 +212,12 @@ export async function selectKnowledgeCandidates(
         unavailable = true;
       continue;
     }
-    if (excludeSensitive && projection.effectiveSensitivity === "sensitive") continue;
+    if (
+      workflow &&
+      (projection.effectiveSensitivity === "sensitive" ||
+        projection.effectiveWorkspaces.some((workspace) => workspace !== workflow.workspace))
+    )
+      continue;
     const { record } = projection;
     const content = knowledgeClaimContent(record, metadata.generatedInference);
     const { exact, related } = entityMatches(record, content, refs);

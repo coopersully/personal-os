@@ -53,7 +53,13 @@ function contextPage(
       ranked.map(({ record, reason }) => [knowledgeRecordVisibility(record), reason]),
     ]),
   );
-  return packContext(session, ranked, unavailable, limit, page, knowledgeContextMaxBytes);
+  return packContext(session, {
+    ranked,
+    unavailable,
+    limit,
+    page,
+    maxBytes: knowledgeContextMaxBytes,
+  });
 }
 
 /**
@@ -62,11 +68,19 @@ function contextPage(
  */
 function packContext(
   session: KnowledgeRetrievalSession,
-  ranked: RankedContext,
-  unavailable: boolean,
-  limit: number,
-  page: ContextPaging,
-  maxBytes: number,
+  {
+    ranked,
+    unavailable,
+    limit,
+    page,
+    maxBytes,
+  }: {
+    ranked: RankedContext;
+    unavailable: boolean;
+    limit: number;
+    page: ContextPaging;
+    maxBytes: number;
+  },
 ) {
   const pack: KnowledgeContextPack = {
     schemaVersion: 1,
@@ -132,9 +146,10 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
       );
     },
     /**
-     * The memory a maintenance workflow loads when it starts: records scoped to `workspace` plus
-     * unscoped ones, ranked with `purpose` first, without sensitive records, within 16 KiB. Null
-     * when the caller cannot read memory.
+     * The memory a maintenance workflow loads when it starts, ranked with `purpose` first,
+     * within 16 KiB. A record qualifies when its effective workspaces (its own scope plus every
+     * source's) are a subset of `{ workspace }` and it is not effectively sensitive. Null when
+     * the caller cannot read memory.
      */
     async workflowSection(
       principal: Principal,
@@ -156,16 +171,15 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
             session,
             principal,
             input,
-            { excludeSensitive: true },
+            { workflow: { workspace } },
           );
-          return packContext(
-            session,
-            rankContext(session, records),
+          return packContext(session, {
+            ranked: rankContext(session, records),
             unavailable,
-            knowledgeRetrievalMaxRecords,
-            unpaged,
-            knowledgeWorkflowMemoryMaxBytes,
-          );
+            limit: knowledgeRetrievalMaxRecords,
+            page: unpaged,
+            maxBytes: knowledgeWorkflowMemoryMaxBytes,
+          });
         },
       );
     },

@@ -98,8 +98,8 @@ export function CalendarEventBlocksScreen() {
         />
       </Section>
       <SectionFootnote>
-        Busy shows only that you’re busy. Details copies this event’s title, location and notes to
-        the other calendar.
+        Busy shows only that you’re busy. Details copies this event’s title, location, notes and
+        link to the other calendar.
       </SectionFootnote>
       <Section title="Other calendars">
         {targets.map((target) => {

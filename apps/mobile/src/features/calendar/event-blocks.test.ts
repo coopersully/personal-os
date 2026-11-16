@@ -62,12 +62,12 @@ it("offers every other writable calendar as a place to block, with what is alrea
       (target) => target.calendar.id,
     ),
   ).toEqual(["personal"]);
-  // Linked copies on one calendar read as Busy unless every one shows details.
+  // Linked copies on one calendar read as Details as soon as one of them shows details.
   expect(
     blockTargets({ ...standup, blocks: [block("home", "details"), block("home", "busy")] }, [
       home,
     ])[0]?.mode,
-  ).toBe("busy");
+  ).toBe("details");
 });
 
 it("blocks from a real event only, never from a block that follows another event", () => {

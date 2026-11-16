@@ -10,6 +10,9 @@ import { overlapping, timeCanConflict } from "./event-blocks";
 import { eventWhenLabel } from "./logic";
 import { Card, Copy, openEvent, SectionTitle } from "./ui";
 
+/** Both checks follow the Calendar review's rule, and say what that rule leaves out. */
+const unchecked = " Repeating and all-day events aren’t checked.";
+
 /**
  * The events that overlap this one, by the Calendar review's rule. The section appears only
  * when there is something to see or the check itself failed.
@@ -59,7 +62,9 @@ export function EventConflicts({
           ))
         )}
       </Card>
-      {!read.isError && <Copy>Compared with timed events on the calendars you show.</Copy>}
+      {!read.isError && (
+        <Copy>{`Compared with one-off timed events on the calendars you show.${unchecked}`}</Copy>
+      )}
     </View>
   );
 }
@@ -92,10 +97,15 @@ export function TimeCheck({
   // Until the read lands nothing is claimed about the time, free or not.
   if (!read.data) return null;
   const [first, ...rest] = overlapping(span, read.data, self);
-  if (!first) return <SectionNote>This time is free on the calendars you show.</SectionNote>;
+  if (!first)
+    return (
+      <SectionNote>
+        {`No overlap with one-off timed events on the calendars you show.${unchecked}`}
+      </SectionNote>
+    );
   return (
     <SectionNote warning>
-      {`Overlaps ${first.title} (${eventWhenLabel(first, timeZone)})${rest.length ? ` and ${rest.length} more` : ""} on the calendars you show.`}
+      {`Overlaps ${first.title} (${eventWhenLabel(first, timeZone)})${rest.length ? ` and ${rest.length} more` : ""} on the calendars you show.${unchecked}`}
     </SectionNote>
   );
 }

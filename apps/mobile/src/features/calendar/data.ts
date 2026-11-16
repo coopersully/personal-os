@@ -527,7 +527,7 @@ export function useEventWrites() {
         {
           pending: "Blocking time…",
           done: `Time blocked on ${name}`,
-          unconfirmed: `Couldn’t confirm the time was blocked on ${name}. nohmi will check ${name} before blocking again.`,
+          unconfirmed: `Couldn’t confirm the time was blocked on ${name}. nohmi re-reads the event, and ${name} once it has synced, before blocking there again.`,
           landed: `${name} has this time, but nohmi couldn’t link it to the event. Check ${name} after it next syncs.`,
           conflict: changedElsewhere,
         },

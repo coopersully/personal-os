@@ -563,8 +563,8 @@ Block time follows [Mobile settings-style forms](mobile-forms.md). New blocks sh
 the saved busy-block privacy (Busy when Calendar guidance is not active) and applies to blocks
 added on this visit; it is not saved back. Each other writable calendar has one switch, Block on
 <calendar>, and a blocked calendar adds <calendar> shows to change that block between Busy and
-Details. Busy shows only that the person is busy; Details copies the event's title, location and
-notes. The event's own calendars and read-only calendars are not offered. The same occurrence
+Details. Busy shows only that the person is busy; Details copies the event's title, location,
+notes and link. A calendar with several linked copies reads as Details when any copy does. The event's own calendars and read-only calendars are not offered. The same occurrence
 can sit on several calendars, each with its own linked copy on one destination; a switch or
 choice changes every copy there. One event record carries only its own blocks, so the page and
 the details row also read the event list for that time, which names the other calendars and
@@ -603,8 +603,9 @@ rule: timed, busy, not cancelled, not a linked block and not a repeating series,
 ends not counted. Each row opens the other event. Nothing is listed for an event the rule leaves
 out. A failed check shows one retry row and no toast.
 
-The event form states under When whether the time on screen is free: free, or the first
-overlapping event and how many more. It is read again whenever the time changes, shows nothing
+The event form states under When what the time on screen overlaps: no one-off timed event, or
+the first overlapping event and how many more. That note and the Conflicts list both say that
+repeating and all-day events are not checked. It is read again whenever the time changes, shows nothing
 while reading or while the end is not after the start, says that all-day events are not
 compared, and offers Check this time again after a failed read. It never stops a save. Both
 checks see only the calendars the person shows, and say so; the API has no free/busy read that

@@ -165,6 +165,8 @@ const calendarChecks = () =>
 function synced(at: string | null = "2026-11-13T15:05:00.000Z") {
   h.api.listCalendars.mockResolvedValue([work, { ...personal, lastSyncedAt: at }, holidays]);
 }
+const free =
+  "No overlap with one-off timed events on the calendars you show. Repeating and all-day events aren’t checked.";
 /** No toast text may also be rendered on the page. */
 function expectNoInlineResult() {
   const calls = [...h.error.mock.calls, ...h.success.mock.calls, ...h.loading.mock.calls];
@@ -413,7 +415,7 @@ it("reads the event before repeating an unconfirmed block and sends nothing when
   await openBlocks();
   await blockOnPersonal(1);
   expect(h.error).toHaveBeenCalledExactlyOnceWith(
-    "Couldn’t confirm the time was blocked on Personal. nohmi will check Personal before blocking again.",
+    "Couldn’t confirm the time was blocked on Personal. nohmi re-reads the event, and Personal once it has synced, before blocking there again.",
     { id: "toast-1" },
   );
   expect(toggle("Block on Personal").checked).toBe(false);
@@ -840,7 +842,11 @@ it("shows the events that conflict with an event and opens them", async () => {
   await openDetails();
   expect(await screen.findByRole("heading", { name: "Conflicts" })).toBeVisible();
   expect(h.api.listEvents).toHaveBeenCalledWith({ from: standup.startsAt, to: standup.endsAt });
-  expect(screen.getByText("Compared with timed events on the calendars you show.")).toBeVisible();
+  expect(
+    screen.getByText(
+      "Compared with one-off timed events on the calendars you show. Repeating and all-day events aren’t checked.",
+    ),
+  ).toBeVisible();
   expect(screen.queryByRole("button", { name: /^Lunch/ })).toBeNull();
   press(/^Dentist Friday, November 13 · 9:15 AM – 10:00 AM · Personal/);
   expect(h.push).toHaveBeenCalledWith({ pathname: "/calendar-event", params: { id: "Dentist" } });
@@ -879,14 +885,20 @@ it("offers a retry when conflicts could not be checked", async () => {
 it("previews whether a proposed time is free before the event is created", async () => {
   h.params = { day: "2026-11-13" };
   h.api.listEvents.mockImplementation(async ({ from, to }: { from: string; to: string }) =>
-    [standup, other("Review", "2026-11-13T19:15:00.000Z", "2026-11-13T19:45:00.000Z")].filter(
-      (event) => event.startsAt < to && event.endsAt > from,
-    ),
+    [
+      standup,
+      other("Review", "2026-11-13T19:15:00.000Z", "2026-11-13T19:45:00.000Z"),
+      // Neither a repeating series nor an all-day event is compared, and the page says so.
+      other("Weekly", "2026-11-13T16:00:00.000Z", "2026-11-13T16:30:00.000Z", {
+        recurrence: ["RRULE:FREQ=WEEKLY"],
+      }),
+      other("Holiday", "2026-11-13T05:00:00.000Z", "2026-11-14T05:00:00.000Z", { allDay: true }),
+    ].filter((event) => event.startsAt < to && event.endsAt > from),
   );
   mount(<CalendarEventEditRoute />);
   await screen.findByRole("textbox", { name: "Event title" });
   // 11:00 – 11:30 AM is clear.
-  expect(await screen.findByText("This time is free on the calendars you show.")).toBeVisible();
+  expect(await screen.findByText(free)).toBeVisible();
   expect(h.api.listEvents).toHaveBeenCalledWith({
     from: "2026-11-13T16:00:00.000Z",
     to: "2026-11-13T16:30:00.000Z",
@@ -895,10 +907,10 @@ it("previews whether a proposed time is free before the event is created", async
   type("Start time", "14:00");
   expect(
     await screen.findByText(
-      "Overlaps Review (Friday, November 13 · 2:15 PM – 2:45 PM) on the calendars you show.",
+      "Overlaps Review (Friday, November 13 · 2:15 PM – 2:45 PM) on the calendars you show. Repeating and all-day events aren’t checked.",
     ),
   ).toBeVisible();
-  expect(screen.queryByText("This time is free on the calendars you show.")).toBeNull();
+  expect(screen.queryByText(free)).toBeNull();
   // Looking is not a write: nothing was sent and nothing was announced.
   expect(h.api.createEvent).not.toHaveBeenCalled();
   expect(h.loading).not.toHaveBeenCalled();
@@ -925,7 +937,7 @@ it("counts several overlaps, leaves out the event being edited, and retries a fa
   await screen.findByRole("textbox", { name: "Event title" });
   expect(
     await screen.findByText(
-      "Overlaps Call (Friday, November 13 · 9:00 AM – 9:10 AM) and 2 more on the calendars you show.",
+      "Overlaps Call (Friday, November 13 · 9:00 AM – 9:10 AM) and 2 more on the calendars you show. Repeating and all-day events aren’t checked.",
     ),
   ).toBeVisible();
   cleanup();
@@ -933,5 +945,5 @@ it("counts several overlaps, leaves out the event being edited, and retries a fa
   h.api.listEvents.mockRejectedValueOnce(offline()).mockResolvedValue([standup]);
   mount(<CalendarEventEditRoute />);
   fireEvent.click(await screen.findByRole("button", { name: "Check this time again" }));
-  expect(await screen.findByText("This time is free on the calendars you show.")).toBeVisible();
+  expect(await screen.findByText(free)).toBeVisible();
 });

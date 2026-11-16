@@ -43,7 +43,7 @@ export function blockTargets(event: CalendarEvent, calendars: readonly Calendar[
         blocks,
         mode: !blocks.length
           ? null
-          : blocks.every((block) => block.mode === "details")
+          : blocks.some((block) => block.mode === "details")
             ? "details"
             : "busy",
       };

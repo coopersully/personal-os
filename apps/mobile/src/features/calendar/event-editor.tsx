@@ -28,11 +28,13 @@ import {
   useEventDefaults,
   useEventWrites,
 } from "./data";
+import { TimeCheck } from "./event-conflicts";
 import {
   canChangeEvent,
   createInput,
   draftFromEvent,
   draftProblem,
+  draftSpan,
   type EventDraft,
   matchesDraft,
   newEventDraft,
@@ -240,6 +242,8 @@ function EventForm({
     sent.current = null;
     setBlocked(null);
   };
+  // The time on screen, once it is a real span; the provider only shapes all-day dates.
+  const span = draftSpan(draft, calendar?.provider ?? "local", timeZone);
   const names = calendars.map((candidate) => candidate.name);
   const footnote = [
     draft.allDay ? null : `Times are in ${timeZoneName(timeZone, `${draft.startDate}T12:00:00Z`)}.`,
@@ -317,6 +321,9 @@ function EventForm({
                   disabled={locked}
                   onChange={(endTime) => edit({ endTime })}
                 />
+              )}
+              {!blocked && (
+                <TimeCheck span={span} allDay={draft.allDay} self={event} timeZone={timeZone} />
               )}
             </Section>
             {!!footnote && <SectionFootnote>{footnote}</SectionFootnote>}

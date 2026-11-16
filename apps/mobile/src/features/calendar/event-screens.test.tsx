@@ -135,6 +135,11 @@ const field = (name: string) => screen.getByRole("textbox", { name }) as HTMLInp
 const type = (name: string, value: string) => fireEvent.change(field(name), { target: { value } });
 const undoAction = () =>
   (h.success.mock.calls[0] as unknown as [string, { action: { onClick: () => void } }])[1].action;
+/** Reads of one calendar made before a repeat create; the free-time preview reads every shown one. */
+const calendarChecks = () =>
+  h.api.listEvents.mock.calls.filter(
+    ([query]) => (query as { calendarIds?: string[] }).calendarIds,
+  );
 /** No toast text may also be rendered on the page. */
 function expectNoInlineResult() {
   for (const call of [...h.error.mock.calls, ...h.success.mock.calls, ...h.loading.mock.calls])
@@ -376,11 +381,15 @@ it("never shows an unconfirmed create as saved, and re-reads the calendar before
   );
   await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
   // The calendar was read first, on the event's own calendar, and did not have the event.
-  expect(h.api.listEvents).toHaveBeenCalledExactlyOnceWith({
-    from: "2026-11-12T16:00:00.000Z",
-    to: "2026-11-14T16:30:00.000Z",
-    calendarIds: ["personal"],
-  });
+  expect(calendarChecks()).toEqual([
+    [
+      {
+        from: "2026-11-12T16:00:00.000Z",
+        to: "2026-11-14T16:30:00.000Z",
+        calendarIds: ["personal"],
+      },
+    ],
+  ]);
   expect(h.api.createEvent).toHaveBeenCalledTimes(2);
   expect(h.api.createEvent.mock.calls[1]).toEqual(h.api.createEvent.mock.calls[0]);
   expect(h.success).toHaveBeenCalledExactlyOnceWith("Event created", { id: "toast-1" });
@@ -438,7 +447,7 @@ it("offers no second create on a hidden calendar, whose events cannot be read ba
   expect(screen.queryByRole("button", { name: "Check calendar and create again" })).toBeNull();
   expect(button("Create event")).toBeDisabled();
   expect(h.api.createEvent).toHaveBeenCalledOnce();
-  expect(h.api.listEvents).not.toHaveBeenCalled();
+  expect(calendarChecks()).toEqual([]);
 });
 
 it("recognises a provider all-day event as the one first sent", async () => {
@@ -464,11 +473,9 @@ it("recognises a provider all-day event as the one first sent", async () => {
   ]);
   press("Check calendar and create again");
   await waitFor(() => expect(h.back).toHaveBeenCalledOnce());
-  expect(h.api.listEvents).toHaveBeenCalledExactlyOnceWith({
-    from: "2026-11-19T05:00:00.000Z",
-    to: "2026-11-23T05:00:00.000Z",
-    calendarIds: ["work"],
-  });
+  expect(calendarChecks()).toEqual([
+    [{ from: "2026-11-19T05:00:00.000Z", to: "2026-11-23T05:00:00.000Z", calendarIds: ["work"] }],
+  ]);
   expect(h.api.createEvent).toHaveBeenCalledOnce();
   expect(h.success).toHaveBeenCalledExactlyOnceWith("Event created", { id: "toast-1" });
 });

@@ -215,7 +215,11 @@ vi.mock("@tanstack/react-query", async () => {
     useQueryClient: () => {
       const useSelectedClient = h.liveQueries
         ? real.useQueryClient
-        : () => ({ invalidateQueries: vi.fn(), refetchQueries: vi.fn() });
+        : () => ({
+            invalidateQueries: vi.fn(),
+            refetchQueries: vi.fn(),
+            cancelQueries: vi.fn(async () => {}),
+          });
       return useSelectedClient();
     },
   };

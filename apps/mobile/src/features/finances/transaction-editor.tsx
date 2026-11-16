@@ -14,7 +14,9 @@ import { CategoryCreate } from "./category-create";
 import { categoryIcon, categoryLabel } from "./category-presentation";
 import { useFinance, useFinanceRead } from "./data";
 import { appliedTransaction } from "./mutations";
+import { activeAllocations } from "./splits";
 import { TransactionCreateForm } from "./transaction-new";
+import { TransactionSplitForm } from "./transaction-splits";
 import { Card, Copy, FinanceRow, FinanceScreen, ReadState, Section } from "./ui";
 
 function TransactionForm({ record, field }: { record: FinanceTransaction; field?: string }) {
@@ -27,7 +29,10 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
   const [notes, setNotes] = useState(record.notes ?? "");
   const [category, setCategory] = useState(record.category);
   const [edited, setEdited] = useState(false);
-  const [choosing, setChoosing] = useState(field === "category");
+  // Sending a category replaces every part with one, so a split is changed only in its editor.
+  const parts = activeAllocations(snapshot).length;
+  const split = parts > 1;
+  const [choosing, setChoosing] = useState(field === "category" && !split);
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const lock = useRef(false);
@@ -51,7 +56,7 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
   async function save() {
     if (lock.current || !edited || submitted) return;
     const noteValue = notes.trim() || null;
-    const changedCategory = category !== snapshot.category;
+    const changedCategory = !split && category !== snapshot.category;
     const changedNotes = noteValue !== snapshot.notes;
     if (!changedCategory && !changedNotes) {
       toast.info("No changes to save");
@@ -120,47 +125,68 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
       />
       <FinanceScreen title={record.merchant}>
         <Card rows>
-          <FinanceRow
-            centered
-            title="Category"
-            icon={categoryIcon(category ?? "Uncategorized")}
-            value={categoryLabel(category)}
-            valueTone={!category ? "attention" : undefined}
-            accessibilityHint={!category ? "Needs your input. Choose a category." : undefined}
-            onPress={pending || submitted ? undefined : () => setChoosing(!choosing)}
-          />
-          {choosing && (
-            <ReadState query={categories}>
-              <EntityPicker
-                title="Categories"
-                icon="grid"
-                value={category}
-                options={[
-                  { label: "Uncategorized", value: null, icon: categoryIcon("Uncategorized") },
-                  ...(categories.data ?? []).map((item) => ({
-                    label: categoryLabel(item.name),
-                    icon: categoryIcon(item.name),
-                    value: item.name,
-                  })),
-                ]}
-                onChange={(value) => {
-                  if (pending || submitted) return;
-                  setCategory(value);
-                  setEdited(true);
-                }}
-                onClose={() => setChoosing(false)}
-              />
-            </ReadState>
-          )}
-          {categories.data && (
-            <CategoryCreate
-              categories={categories.data}
-              disabled={pending || submitted}
-              onCreated={(created) => {
-                setCategory(created.name);
-                setEdited(true);
-              }}
+          {split ? (
+            <FinanceRow
+              centered
+              title="Category"
+              icon="categoryLayers"
+              value={`Split in ${parts} parts`}
+              accessibilityHint="Edit splits"
+              onPress={
+                pending || submitted || snapshot.pending
+                  ? undefined
+                  : () =>
+                      router.push({
+                        pathname: "/finance-transaction-edit",
+                        params: { id: snapshot.id, field: "splits" },
+                      })
+              }
             />
+          ) : (
+            <>
+              <FinanceRow
+                centered
+                title="Category"
+                icon={categoryIcon(category ?? "Uncategorized")}
+                value={categoryLabel(category)}
+                valueTone={!category ? "attention" : undefined}
+                accessibilityHint={!category ? "Needs your input. Choose a category." : undefined}
+                onPress={pending || submitted ? undefined : () => setChoosing(!choosing)}
+              />
+              {choosing && (
+                <ReadState query={categories}>
+                  <EntityPicker
+                    title="Categories"
+                    icon="grid"
+                    value={category}
+                    options={[
+                      { label: "Uncategorized", value: null, icon: categoryIcon("Uncategorized") },
+                      ...(categories.data ?? []).map((item) => ({
+                        label: categoryLabel(item.name),
+                        icon: categoryIcon(item.name),
+                        value: item.name,
+                      })),
+                    ]}
+                    onChange={(value) => {
+                      if (pending || submitted) return;
+                      setCategory(value);
+                      setEdited(true);
+                    }}
+                    onClose={() => setChoosing(false)}
+                  />
+                </ReadState>
+              )}
+              {categories.data && (
+                <CategoryCreate
+                  categories={categories.data}
+                  disabled={pending || submitted}
+                  onCreated={(created) => {
+                    setCategory(created.name);
+                    setEdited(true);
+                  }}
+                />
+              )}
+            </>
           )}
         </Card>
         <Section title="Notes">
@@ -183,8 +209,9 @@ function TransactionForm({ record, field }: { record: FinanceTransaction; field?
           </Card>
         </Section>
         <Copy secondary>
-          Changes apply to this transaction. Split allocations retain their existing category
-          assignments.
+          {split
+            ? "Changes apply to this transaction. Its categories are set by its splits, which keep their assignments."
+            : "Changes apply to this transaction."}
         </Copy>
         <View style={{ height: 80 }} />
       </FinanceScreen>
@@ -213,7 +240,11 @@ export function FinanceTransactionEditor() {
       {id ? (
         <ReadState query={query}>
           {query.data?.data ? (
-            <TransactionForm key={id} record={query.data.data} field={field} />
+            field === "splits" ? (
+              <TransactionSplitForm key={id} record={query.data.data} />
+            ) : (
+              <TransactionForm key={id} record={query.data.data} field={field} />
+            )
           ) : null}
         </ReadState>
       ) : (

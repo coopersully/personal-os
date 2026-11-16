@@ -115,7 +115,8 @@ change, up to the selection limit of 100, and replaces the current selection, so
 pick that was blocking the actions is dropped. It is not offered when nothing loaded can change
 or everything that can is already selected. It never reaches items that have not been loaded:
 Load more first. The number selected and the actions both cover only selected items that are
-still listed, so a refresh that drops a row drops it from the selection.
+still listed, and a refresh that drops a row removes it from the selection, so it no longer
+counts toward the limit.
 
 Browse, Lists, Projects and Archive show how many items each destination lists. A count is the
 `total` of the same query the destination opens, read with a one-item page, so it equals the
@@ -129,8 +130,10 @@ one per row or per screen. Counts ignore the search, which finds containers rath
 narrowing what they hold. Counts read after the Tasks preferences answer. Each list or project
 row and pinned card reads its own count, so a long directory asks only for the rows it has
 drawn; Browse reads its seven together. A Tasks action refreshes the counts on mounted screens
-in the background: the action finishes, and its controls unlock, without waiting for them.
-Returning to a directory re-reads them, so they follow changes made elsewhere.
+in the background: the action finishes, and its controls unlock, without waiting for them. A
+count read still in flight when the action lands is dropped and read again.
+Returning to a directory re-reads them, and the lists and projects behind the Archive count, so
+they follow changes made elsewhere.
 
 A project's page shows its why (three lines at most) and "Target" with the short calendar date
 under the title and above the filters and tasks. A project with neither shows nothing there.

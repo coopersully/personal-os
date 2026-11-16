@@ -201,6 +201,17 @@ export function TaskListScreen({
         )
       : [];
   const items = [...matches, ...archivedMatches];
+  // A selected item the loaded results no longer list leaves the selection, so a stale key
+  // can neither count toward the limit of 100 nor hide the way to cancel.
+  const listed = items.map(itemKey).join("\n");
+  const settled = !!page.data;
+  useEffect(() => {
+    if (!settled) return;
+    const keys = new Set(listed.split("\n"));
+    setSelected((current) =>
+      current.every((key) => keys.has(key)) ? current : current.filter((key) => keys.has(key)),
+    );
+  }, [listed, settled]);
   const archivedStart = archivedMatches.length ? matches.length : -1;
   const total =
     page.data && (!searchArchived || archivedPage.data || archivedFailed)

@@ -2122,3 +2122,57 @@ it("does not read the counts a second time on the first focus", async () => {
   await within(screen.getByRole("button", { name: "Trash" })).findByText("1");
   expect(h.listTaskWorkspace).toHaveBeenCalledTimes(7);
 });
+it("lets a new selection start after a refresh removes every selected item", async () => {
+  h.items = Array.from({ length: 100 }, (_, index) => task(`t${index}`));
+  show();
+  fireEvent.contextMenu(await screen.findByRole("button", { name: "Open task: Task t0" }));
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(screen.getByText("100 selected")).toBeVisible();
+  h.items = [task("one"), task("two")];
+  fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
+  const row = await loaded();
+  expect(screen.queryByText(/selected$/)).not.toBeInTheDocument();
+  fireEvent.contextMenu(row);
+  expect(screen.getByText("1 selected")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible();
+});
+it("replaces a count read still in flight when a task action lands", async () => {
+  h.lists = [list("inbox", "Inbox", { kind: "inbox" })];
+  let release = () => {};
+  let counts = 0;
+  h.listTaskWorkspace.mockImplementation(async (query) => {
+    if (query.limit !== 1) return { items: h.items, total: h.items.length, nextCursor: null };
+    counts += 1;
+    if (counts > 1) return { items: [], total: 1, nextCursor: null };
+    // The first total was taken before the action and answers after it.
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { items: [], total: 2, nextCursor: null };
+  });
+  render(
+    <MobileDataProvider>
+      <TasksHub mode="lists" />
+      <TaskListScreen title="to-do" scope={{ view: "all" }} />
+    </MobileDataProvider>,
+  );
+  const row = await screen.findByRole("button", { name: "Open Inbox" });
+  await waitFor(() => expect(counts).toBe(1));
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Complete Task one" }));
+  await within(row).findByText("1 item");
+  await act(async () => release());
+  expect(within(row).getByText("1 item")).toBeVisible();
+  expect(within(row).queryByText("2 items")).not.toBeInTheDocument();
+  expect(h.error).not.toHaveBeenCalled();
+});
+it("re-reads the lists and projects behind the Archive count on return to Browse", async () => {
+  totals(() => 0);
+  h.lists = [list("inbox", "Inbox", { kind: "inbox" })];
+  hub("views");
+  const archive = await screen.findByRole("button", { name: "Archive" });
+  await within(archive).findByText("0");
+  h.lists = [...h.lists, list("old", "Old list", { availability: "archived" })];
+  act(() => h.focus());
+  await within(archive).findByText("1");
+  expect(h.listTaskProjects).toHaveBeenCalledTimes(2);
+});

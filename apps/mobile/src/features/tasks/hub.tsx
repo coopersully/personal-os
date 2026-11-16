@@ -93,14 +93,16 @@ export function TasksHub({ mode }: { mode: "views" | "lists" | "projects" | "arc
   const totals = useItemCounts(
     mode === "views" && !searching ? browse.map(({ view }) => browseScopes[view]) : [],
   );
-  // Coming back to a directory re-reads the counts on screen, so they follow changes made
-  // elsewhere. The first focus is the mount, whose reads are already under way.
+  // Coming back to a directory re-reads the counts on screen, and the lists and projects the
+  // Archive count is taken from, so they follow changes made elsewhere. The first focus is the
+  // mount, whose reads are already under way.
   const client = useQueryClient();
   const focused = useRef(false);
   useFocusEffect(
     useCallback(() => {
       if (focused.current)
-        void client.refetchQueries({ queryKey: ["tasks", "count"], type: "active" });
+        for (const key of ["count", "lists", "projects"])
+          void client.refetchQueries({ queryKey: ["tasks", key], type: "active" });
       focused.current = true;
     }, [client]),
   );

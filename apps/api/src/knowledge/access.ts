@@ -1237,11 +1237,29 @@ export function createKnowledgeAccess(now: () => Date) {
     return { effectiveWorkspaces, effectiveSensitivity };
   }
 
+  /**
+   * Effective disclosure for a record the caller may read, or null when `disclose` hides it.
+   * One disclosure answers both whether a record counts and whether it is effectively sensitive.
+   */
+  async function visibleDisclosure(
+    tx: KnowledgeTransaction,
+    principal: Principal,
+    revision: KnowledgeRevision,
+  ): Promise<KnowledgeEffectiveDisclosure | null> {
+    try {
+      return await effectiveDisclosure(tx, principal, revision);
+    } catch (error) {
+      if (isKnowledgeDisclosureError(error)) return null;
+      throw error;
+    }
+  }
+
   return {
     admit,
     authorize,
     disclose,
     effectiveDisclosure,
+    visibleDisclosure,
     goalAvailable,
     isDisclosable,
     liveSource,

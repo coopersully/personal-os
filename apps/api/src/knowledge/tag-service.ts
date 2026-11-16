@@ -191,21 +191,25 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
   }
 
   /**
-   * Agents count only records that pass the same disclosure as a read by ID (trash, agent
-   * access, workspace and inherited scopes, and effective narrowing), so `disclose` stays the
-   * one source of truth and a hidden record never moves a count.
+   * Counts only records that pass the same disclosure as a read by ID (trash, agent access,
+   * workspace and inherited scopes, and effective narrowing), so `disclose` stays the one source
+   * of truth and a hidden record never moves a count. `excludeSensitive` also leaves out records
+   * that disclosure finds effectively sensitive, for indexes that load automatically.
    */
-  async function agentCounts(
+  async function disclosedCounts(
     tx: KnowledgeTransaction,
     principal: Principal,
     access: ReturnType<typeof createKnowledgeAccess>,
     authorizedScopes: AccessScope[],
+    excludeSensitive = false,
   ) {
     const counts = new Map<string, number>();
     for (const row of await currentKnowledgeForRetrieval(tx, principal, {}, authorizedScopes)) {
       if (row.tags.length === 0) continue;
       const revision = projectKnowledgeRevision(row);
-      if (!(await access.isDisclosable(tx, principal, revision))) continue;
+      const disclosure = await access.visibleDisclosure(tx, principal, revision);
+      if (!disclosure) continue;
+      if (excludeSensitive && disclosure.effectiveSensitivity !== "standard") continue;
       for (const tag of revision.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
     }
     return counts;
@@ -260,19 +264,22 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
     /**
      * Canonical tags most used first. The person also gets the aliases that resolve to them;
      * agents never do, since an alias can name a tag that only hidden memory ever carried (R14).
+     * `excludeSensitive` is for the session-start core, which never loads sensitive memory
+     * automatically (R16): a tag only effectively sensitive memory carries is left out.
      */
     async index(
       principal: Principal,
       raw: KnowledgeTagIndexInput = {},
+      { excludeSensitive = false }: { excludeSensitive?: boolean } = {},
     ): Promise<KnowledgeTagIndex> {
       const { limit = defaultIndexLimit } = knowledgeTagIndexInputSchema.parse(raw);
       return db.transaction(async (tx) => {
         const { at, authority } = await admission.admit(tx, principal, ["knowledge:read"], "read");
         const access = createKnowledgeAccess(() => at);
         const counts =
-          principal.actorType === "user"
+          principal.actorType === "user" && !excludeSensitive
             ? await ownerCounts(tx, principal.userId)
-            : await agentCounts(tx, principal, access, authority.scopes);
+            : await disclosedCounts(tx, principal, access, authority.scopes, excludeSensitive);
         const tags = [...counts]
           .map(([name, count]) => ({ name, count }))
           .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
@@ -335,7 +342,7 @@ export function createKnowledgeTagService({ db, now }: { db: Database; now: () =
         // only hidden memory carries. Both tags must be on a memory this agent can read; a
         // target that does not exist yet is created.
         if (principal.actorType === "agent") {
-          const visible = await agentCounts(
+          const visible = await disclosedCounts(
             tx,
             principal,
             createKnowledgeAccess(() => at),

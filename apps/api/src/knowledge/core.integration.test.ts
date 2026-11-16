@@ -86,6 +86,7 @@ type Action = DistributiveOmit<
 async function setUp() {
   const userId = randomUUID();
   const sessionId = randomUUID();
+  const sessionToken = randomUUID();
   await database.db.insert(users).values({
     id: userId,
     email: `${userId}@example.test`,
@@ -96,7 +97,7 @@ async function setUp() {
   await database.db.insert(sessions).values({
     id: sessionId,
     userId,
-    tokenHash: hashToken(randomUUID()),
+    tokenHash: hashToken(sessionToken),
     expiresAt: new Date(now().getTime() + 60 * 60_000),
   });
   const owner: Principal = {
@@ -122,13 +123,16 @@ async function setUp() {
   }
   const records = createKnowledgeRecordService(config());
   const lifecycle = createKnowledgeLifecycleService(config());
+  const tags = createKnowledgeTagService(config());
   const core = createKnowledgeCoreService({
     db: database.db,
     now,
-    tags: createKnowledgeTagService(config()),
+    tags,
   });
   return {
     owner,
+    sessionToken,
+    tags,
     agent: await newAgent(),
     newAgent,
     core,
@@ -143,9 +147,10 @@ async function setUp() {
         mutationKey: randomUUID(),
       } as KnowledgeLifecycleInput);
     },
-    async context(token: string) {
+    /** An agent token by default; `Session` sends the owner's signed-in session. */
+    async context(token: string, scheme: "Bearer" | "Session" = "Bearer") {
       const response = await app().request("https://api.example.com/v1/assistant/context", {
-        headers: { authorization: `Bearer ${token}` },
+        headers: { authorization: `${scheme} ${token}` },
       });
       expect(response.status).toBe(200);
       return ((await response.json()) as { context: { memory?: KnowledgeCore } }).context;
@@ -289,6 +294,55 @@ describe("session-start memory core", () => {
     expect((await f.core.build(f.agent)).counts).toEqual({ active: 0, conflicts: 0, archived: 0 });
   });
 
+  it("core_tag_index_omits_tags_only_on_sensitive_memory", async () => {
+    const f = await setUp();
+    const sensitive = await f.save(
+      f.owner,
+      fact("Weekly session", { sensitivity: "sensitive", core: false, tags: ["therapy"] }),
+    );
+    // Standard on its own; its sensitive source makes it effectively sensitive.
+    await f.save(
+      f.owner,
+      fact("Follow-up plan", {
+        core: false,
+        tags: ["diagnosis"],
+        evidence: [
+          {
+            type: "domain_record",
+            domain: "knowledge",
+            id: sensitive.id,
+            revision: sensitive.revision,
+          },
+        ],
+      }),
+    );
+    await f.save(f.owner, fact("Everyday", { tags: ["fixture"] }));
+    for (const principal of [f.agent, f.owner]) {
+      const memory = await f.core.build(principal);
+      expect(memory.tagIndex).toEqual([{ name: "fixture", count: 1 }]);
+      expect(memory.truncated.tags).toBe(false);
+      // Counts are numbers only and still include sensitive memory (§5.2).
+      expect(memory.counts.active).toBe(3);
+    }
+    // An explicit tag listing is a request, not automatic loading: it still lists both.
+    const reader = await f.newAgent(["knowledge:read"]);
+    const response = await app().request("https://api.example.com/v1/knowledge/tags", {
+      headers: { authorization: `Bearer ${reader.token}` },
+    });
+    expect(response.status).toBe(200);
+    const listed = (await response.json()) as { tags: { name: string }[] };
+    expect(listed.tags.map(({ name }) => name).sort()).toEqual(["diagnosis", "fixture", "therapy"]);
+  });
+
+  it("owner_session_receives_memory_over_http", async () => {
+    const f = await setUp();
+    const saved = await f.save(f.owner, fact("Owner session"));
+    const context = await f.context(f.sessionToken, "Session");
+    expect(context).toMatchObject({ identity: { actorType: "user" } });
+    const memory = knowledgeCoreSchema.parse(context.memory);
+    expect(memory.records).toEqual([expect.objectContaining({ id: saved.id, ownerHeld: true })]);
+  });
+
   it("token_narrowed_between_sessions_is_enforced", async () => {
     const f = await setUp();
     const agent = await f.newAgent(["knowledge:read", "finances:read"]);
@@ -392,6 +446,24 @@ describe("session-start memory core", () => {
     });
     const memory = await f.core.build(f.agent);
     expect(memory.records).toEqual([{ id: saved.id, label: "Travel notes" }]);
+    expect(memory.truncated.records).toBe(false);
+  });
+
+  it("oversized_record_with_huge_title_keeps_a_short_label", async () => {
+    const f = await setUp();
+    const subject = "🧭 compass\n\nheading ".repeat(90);
+    const saved = await f.save(f.owner, fact("value", { tags: ["navigation"] }, subject));
+    const memory = await f.core.build(f.agent);
+    const [entry] = memory.records;
+    if (!entry || !("label" in entry)) throw new Error("Expected a label entry.");
+    expect(entry.id).toBe(saved.id);
+    const characters = Array.from(entry.label);
+    expect(characters).toHaveLength(120);
+    expect(entry.label.endsWith("…")).toBe(true);
+    expect(entry.label.startsWith("🧭 compass heading 🧭 compass heading")).toBe(true);
+    expect(entry.label).not.toMatch(/\n/u);
+    // Cut on a code point: no lone surrogate survives a UTF-8 round trip.
+    expect(Buffer.from(entry.label, "utf8").toString("utf8")).toBe(entry.label);
     expect(memory.truncated.records).toBe(false);
   });
 

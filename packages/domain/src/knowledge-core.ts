@@ -10,6 +10,8 @@ export const knowledgeCoreMaxRecords = 30;
 export const knowledgeCoreMaxTags = 100;
 /** A core record whose text exceeds this many bytes is listed by ID and label instead. */
 export const knowledgeCoreRecordMaxBytes = 1024;
+/** Such a record's one-line label is cut, on a code point, to this many characters. */
+export const knowledgeCoreLabelMaxChars = 120;
 export const knowledgeCoreHint =
   "Search memory with search_user_knowledge for anything not listed here.";
 

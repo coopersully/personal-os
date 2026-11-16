@@ -4,6 +4,7 @@ import {
   type KnowledgeCoreEntry,
   knowledgeClaimContent,
   knowledgeCoreHint,
+  knowledgeCoreLabelMaxChars,
   knowledgeCoreMaxBytes,
   knowledgeCoreMaxRecords,
   knowledgeCoreMaxTags,
@@ -34,6 +35,14 @@ function coreRank({ revision }: CoreCandidate) {
   return revision.metadata.origin === "stated" ? 1 : 2;
 }
 
+/** One line of at most `knowledgeCoreLabelMaxChars` code points, so an oversized record stays listed. */
+function coreLabel(title: string) {
+  const characters = Array.from(title.replace(/\s+/gu, " ").trim());
+  return characters.length > knowledgeCoreLabelMaxChars
+    ? `${characters.slice(0, knowledgeCoreLabelMaxChars - 1).join("")}…`
+    : characters.join("");
+}
+
 function coreEntry({ revision, updatedAt }: CoreCandidate): KnowledgeCoreEntry {
   const { snapshot, metadata } = revision;
   const { title, text } = knowledgeSummary(
@@ -41,7 +50,7 @@ function coreEntry({ revision, updatedAt }: CoreCandidate): KnowledgeCoreEntry {
   );
   const readable = `${title}: ${text}`;
   if (Buffer.byteLength(readable, "utf8") > knowledgeCoreRecordMaxBytes)
-    return { id: snapshot.id, label: title.replace(/\s+/gu, " ").trim() };
+    return { id: snapshot.id, label: coreLabel(title) };
   return {
     id: snapshot.id,
     text: readable,
@@ -138,11 +147,11 @@ export function createKnowledgeCoreService({
         // The same disclosure as search: hidden or unsupported memory never counts.
         const disclosure = await access.retrievalDisclosure(tx, principal, revision);
         if (disclosure.state !== "available") continue;
-        const live = !["superseded", "expired"].includes(snapshot.status);
+        const claimLive = !["superseded", "expired"].includes(snapshot.status);
         const mayConflict =
           snapshot.status === "proposed" ||
-          (live && proposalTargets.has(snapshot.id.toLowerCase())) ||
-          (live && revision.claimKey !== null && (claims.get(revision.claimKey) ?? 0) > 1);
+          (snapshot.status !== "superseded" && proposalTargets.has(snapshot.id.toLowerCase())) ||
+          (claimLive && revision.claimKey !== null && (claims.get(revision.claimKey) ?? 0) > 1);
         let conflicted = false;
         if (mayConflict) {
           const presented = await access.projectForRetrieval(tx, principal, revision);
@@ -171,8 +180,9 @@ export function createKnowledgeCoreService({
     async build(principal: Principal): Promise<KnowledgeCore> {
       const [{ counts, candidates }, index] = await Promise.all([
         select(principal),
-        // One more than the cap shows whether the index overflowed it.
-        tags.index(principal, { limit: knowledgeCoreMaxTags + 1 }),
+        // One more than the cap shows whether the index overflowed it. Tags only sensitive
+        // memory carries never load automatically.
+        tags.index(principal, { limit: knowledgeCoreMaxTags + 1 }, { excludeSensitive: true }),
       ]);
       return packKnowledgeCore(
         index.tags.map(({ name, count }) => ({ name, count })),

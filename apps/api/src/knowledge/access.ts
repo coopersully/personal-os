@@ -33,7 +33,6 @@ import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 
 export type KnowledgeTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-type Disclosure = Pick<KnowledgeRecordSnapshot, "scope" | "sensitivity">;
 /** Record-level state that is not part of an immutable revision. */
 export type KnowledgeRecordState = {
   /** Trash state; a trashed record is never disclosed to an agent. */
@@ -162,15 +161,6 @@ export async function bumpKnowledgeEpoch(tx: KnowledgeTransaction, userId: strin
     .returning({ epoch: knowledgeOwnerEpochs.epoch });
   if (!row) throw new AppError("internal_error", "The knowledge epoch was not updated.");
   return row.epoch;
-}
-
-export function preserveKnowledgeDisclosure(input: Disclosure, source: Disclosure) {
-  if (
-    (source.scope.workspace && input.scope.workspace !== source.scope.workspace) ||
-    (source.sensitivity === "sensitive" && input.sensitivity !== "sensitive")
-  ) {
-    throw new AppError("forbidden", "A derived record cannot broaden source disclosure.");
-  }
 }
 
 /** Recognize the old writer's envelope for restriction checks only. */
@@ -865,6 +855,11 @@ export function createKnowledgeAccess(now: () => Date) {
     const content = knowledgeClaimContent(snapshot, metadata.generatedInference);
     if (content.kind === "goal") scopes.push("goals:read");
     if (snapshot.scope.workspace) scopes.push(`${snapshot.scope.workspace}:read`);
+    // A record needing a scope this agent was never granted (a workspace, goals, texting,
+    // directly or inherited from a source) is invisible to it, not forbidden. Live narrowing of
+    // the credential below its cached grant still answers 403 from `authorize`.
+    if (principal.actorType === "agent" && scopes.some((scope) => !principal.scopes.has(scope)))
+      throw new AppError("not_found", "The knowledge record was not found.");
     await authorize(tx, principal, scopes);
 
     const inherited = metadata.inheritedSourceIds.length
@@ -947,8 +942,10 @@ export function createKnowledgeAccess(now: () => Date) {
       throw new AppError("not_found", "The knowledge record was not found.");
 
     // Historical sources keep their live disclosure restrictions. Only this
-    // revision's supporting sources decide whether the claim remains eligible.
-    const activeEdges = edges;
+    // revision's supporting sources decide whether the claim remains eligible. A pending
+    // proposal's link to its original narrows disclosure (above) but is not evidence: it tracks
+    // the original's current revision, so a later change to the original never makes it stale.
+    const activeEdges = edges.filter((edge) => edge.kind !== "revision_proposal");
     const implicitCopies = copiedRecordIds(content, snapshot.relatedRecordIds).filter(
       (id) => !activeEdges.some((edge) => edge.sourceRecordId === id),
     );

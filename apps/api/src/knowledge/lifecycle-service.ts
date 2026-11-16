@@ -120,10 +120,8 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
     tx: KnowledgeTransaction,
     principal: Principal,
     current: KnowledgeRevision,
-    replacementId: string,
+    replacement: KnowledgeRevision,
   ): Promise<RevisionWrite> {
-    const replacement = await ownedKnowledgeRevision(tx, principal, replacementId, true);
-    await access.disclose(tx, principal, replacement);
     if (heldByOwner(replacement))
       throw new AppError("forbidden", "The account owner must supersede memory they hold.");
     if (replacement.snapshot.status !== "active")
@@ -260,11 +258,17 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
             break;
           case "supersede": {
             // Disclose first: a replacement hidden from this caller is not found, never a cycle.
-            const replacement = await ownedKnowledgeRevision(tx, principal, input.replacementId);
+            // Locked, since proposing it writes a new revision of the replacement.
+            const replacement = await ownedKnowledgeRevision(
+              tx,
+              principal,
+              input.replacementId,
+              true,
+            );
             await access.disclose(tx, principal, replacement);
             await validateSupersession(tx, principal, snapshot.id, input.replacementId);
             if (agent && heldByOwner(current)) {
-              write = await proposeReplacement(tx, principal, current, input.replacementId);
+              write = await proposeReplacement(tx, principal, current, replacement);
               break;
             }
             write.snapshot.status = "superseded";

@@ -48,7 +48,6 @@ import {
   knowledgeRevisionDerivations,
   knowledgeSourceReferences,
   ownedKnowledgeRevision,
-  preserveKnowledgeDisclosure,
 } from "./access.js";
 
 type KnowledgeAccess = ReturnType<typeof createKnowledgeAccess>;
@@ -231,9 +230,10 @@ export async function prepareKnowledgeRevision({
     let source = references.get(id);
     if (!source) {
       source = await ownedKnowledgeRevision(tx, principal, id);
-      if (snapshot) await assertReferenceAcyclic(tx, principal.userId, source, snapshot.id);
-      preserveKnowledgeDisclosure(input, source.snapshot);
+      // Disclose first, so a record hidden from this caller is not found rather than forbidden.
+      // A narrower source needs no write-time check: it narrows this record when it is read.
       await access.disclose(tx, principal, source);
+      if (snapshot) await assertReferenceAcyclic(tx, principal.userId, source, snapshot.id);
       references.set(id, source);
     }
     if (exactRevision !== undefined && source.snapshot.revision !== exactRevision)

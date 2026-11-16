@@ -7,6 +7,7 @@ import {
   executionPolicySettings,
   financeAgentSettings,
   financeAutomationSettings,
+  goals,
   knowledgeRecords,
   migrateDatabase,
   sessions,
@@ -612,6 +613,121 @@ describe("agent-managed memory authority", () => {
       expect(response.status, body.action).toBe(403);
     }
     expect(await f.get(f.owner, saved.id)).toMatchObject({ revision: 1, agentAccess: "allowed" });
+  });
+
+  it("owner_can_revise_relationship_after_agent_narrows_endpoint", async () => {
+    const subject = await f.save(f.owner, fact("Alex"));
+    const object = await f.save(f.owner, fact("Sam"));
+    const relationship = (label: string) =>
+      ({
+        kind: "relationship",
+        value: {
+          subjectId: subject.id,
+          objectId: object.id,
+          relationship: label,
+          direction: "directed",
+        },
+      }) as const;
+    const saved = await f.save(f.owner, {
+      ...fact("unused"),
+      content: relationship("works with"),
+    });
+    await f.mutate(f.agent, subject, { action: "restrict", workspace: "finances" });
+    await f.act(f.agent, object, { action: "raise_sensitivity" });
+    const revised = await f.act(f.owner, saved, {
+      action: "revise",
+      content: relationship("manages"),
+      evidence: [ownerStatement],
+    });
+    expect(revised).toMatchObject({
+      revision: 2,
+      scope: { workspace: null },
+      content: relationship("manages"),
+    });
+    // The narrowed endpoint still narrows it for agents without its scope.
+    await expect(f.records.get(f.agent, { id: saved.id })).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it("agent_citing_hidden_record_gets_404", async () => {
+    const hidden = await f.save(f.owner, fact("Budget day", { scope: { workspace: "finances" } }));
+    await expect(
+      f.save(f.agent, fact("Copy", { evidence: [citing(hidden)] })),
+    ).rejects.toMatchObject({ status: 404 });
+    await expect(
+      f.save(f.agent, fact("Link", { evidence: [], relatedRecordIds: [hidden.id] })),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("pending_proposal_stays_listed_after_original_changes", async () => {
+    const original = await f.save(f.owner, fact("Tuesday"));
+    const proposal = await f.act(f.agent, original, {
+      action: "revise",
+      content: {
+        ...original.content,
+        value: { ...original.content.value, value: { type: "string", value: "Friday" } },
+      } as KnowledgeRecord["content"],
+      evidence: [chatStatement("Friday instead.")],
+    });
+    // Each change gives the original a new revision; none makes the proposal stale.
+    const raised = await f.act(f.agent, original, { action: "raise_sensitivity" });
+    const conflicted = { hasConflict: true } as const;
+    const listed = async (principal: Principal) => (await f.ids(principal, conflicted)).sort();
+    const both = [original.id, proposal.id].sort();
+    expect(await listed(f.owner)).toEqual(both);
+    expect(await listed(f.agent)).toEqual(both);
+    expect(await f.get(f.owner, proposal.id)).toMatchObject({
+      status: "proposed",
+      evidenceAvailable: true,
+    });
+
+    await f.act(f.owner, raised, { action: "set_access", agentAccess: "blocked" });
+    expect(await listed(f.owner)).toEqual(both);
+    const pack = await f.context.context(f.owner, {});
+    expect(pack.conflicts.map(({ id }) => id).sort()).toEqual(both);
+    expect((await f.get(f.owner, original.id)).conflictRecordIds).toEqual([proposal.id]);
+    // Agents still lose the proposal with its blocked original (R10).
+    expect(await listed(f.agent)).toEqual([]);
+    await expect(f.records.get(f.agent, { id: proposal.id })).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it("inherited_scope_missing_is_invisible_not_forbidden", async () => {
+    const [goal] = await database.db
+      .insert(goals)
+      .values({ userId: f.owner.userId, title: "Run a marathon" })
+      .returning();
+    if (!goal) throw new Error("Expected the goal fixture.");
+    const goalRecord = await f.save(f.owner, {
+      ...fact("unused"),
+      content: { kind: "goal", value: { goalId: goal.id } },
+    });
+    const request = fact("Training day", { evidence: [chatStatement("Training on Sundays.")] });
+    const agentRecord = await f.save(f.agent, request);
+    // The owner adds the goal-scoped record as evidence; the agent was never granted goals.
+    const revised = await f.act(f.owner, agentRecord, {
+      action: "revise",
+      content: agentRecord.content,
+      evidence: [ownerStatement, citing(goalRecord)],
+    });
+    expect(revised.requiredReadScopes).toContain("goals:read");
+
+    for (const id of [goalRecord.id, agentRecord.id]) {
+      await expect(f.records.get(f.agent, { id })).rejects.toMatchObject({ status: 404 });
+      await expect(f.search.history(f.agent, { recordId: id })).rejects.toMatchObject({
+        status: 404,
+      });
+    }
+    expect(await f.ids(f.agent)).toEqual([]);
+    expect(await f.records.create(f.agent, request)).toEqual({
+      receiptId: expect.any(String),
+      recordId: agentRecord.id,
+      outcome: "forgotten",
+    });
+    const withGoals = await f.newAgent(["knowledge:read", "knowledge:write", "goals:read"]);
+    expect(await f.get(withGoals, agentRecord.id)).toMatchObject({ revision: 2 });
   });
 
   it("sensitive_is_readable_by_agents", async () => {

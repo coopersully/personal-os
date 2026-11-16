@@ -310,15 +310,19 @@ describe.sequential("persistent scoped knowledge", () => {
     expect(linked.record.relatedRecordIds).toEqual([own.record.id]);
     expect(await database.db.select().from(knowledgeRelationships)).toHaveLength(1);
   });
-  it("preserves source disclosure on derived knowledge and rechecks inherited scopes", async () => {
+  it("narrows derived knowledge by its source and rechecks inherited scopes", async () => {
     const f = await fixture(["knowledge:read", "knowledge:write", "finances:read"]);
+    const unscoped: Principal = {
+      ...f.agent,
+      scopes: new Set(["knowledge:read", "knowledge:write"]),
+    };
     const source = await save(
       f.human,
       input({ scope: { workspace: "finances" }, purposes: ["planning"] }),
     );
-    await expect(
-      save(f.human, input({ relatedRecordIds: [source.record.id] })),
-    ).rejects.toMatchObject({ status: 403 });
+    // An ordinary link to a restricted record is allowed; readers without its scope lose the link.
+    const linked = await save(f.human, input({ relatedRecordIds: [source.record.id] }));
+    expect(linked.record.relatedRecordIds).toEqual([source.record.id]);
     const derived = await save(
       f.agent,
       input({
@@ -335,17 +339,23 @@ describe.sequential("persistent scoped knowledge", () => {
     await expect(
       service().get(f.agent, { id: derived.record.id, purpose: "planning" }),
     ).rejects.toMatchObject({ status: 403 });
-    await expect(
-      save(
-        f.human,
-        input({
-          scope: { workspace: null },
-          evidence: [
-            { type: "domain_record", domain: "knowledge", id: source.record.id, revision: 1 },
-          ],
-        }),
-      ),
-    ).rejects.toMatchObject({ status: 403 });
+    expect(await service().get(unscoped, { id: linked.record.id })).toMatchObject({
+      relatedRecordIds: [],
+    });
+    // A broader copy may be saved; its source keeps narrowing it for every reader but the owner.
+    const copy = await save(
+      f.human,
+      input({
+        scope: { workspace: null },
+        evidence: [
+          { type: "domain_record", domain: "knowledge", id: source.record.id, revision: 1 },
+        ],
+      }),
+    );
+    expect(copy.record.scope).toEqual({ workspace: null });
+    await expect(service().get(unscoped, { id: copy.record.id })).rejects.toMatchObject({
+      status: 404,
+    });
     // Purposes no longer limit disclosure, so a derived record may name others.
     expect(
       await save(
@@ -360,7 +370,7 @@ describe.sequential("persistent scoped knowledge", () => {
       ),
     ).toMatchObject({ outcome: "readable", record: { purposes: ["review"] } });
   });
-  it("persists owned relationship endpoints and rejects foreign or broader disclosure", async () => {
+  it("persists owned relationship endpoints and rejects foreign ones", async () => {
     const f = await fixture();
     const other = await fixture();
     const subject = await save(f.human, input({ scope: { workspace: "finances" } }));
@@ -408,10 +418,12 @@ describe.sequential("persistent scoped knowledge", () => {
         ),
       ).rejects.toMatchObject({ status: 404 });
     }
-    await expect(save(f.human, input({ content }))).rejects.toMatchObject({
-      status: 403,
-    });
     expect(await persistedKnowledge()).toEqual(before);
+    // A relationship broader than its endpoints is saved; the endpoints narrow it on read.
+    expect(await save(f.human, input({ content }))).toMatchObject({
+      outcome: "readable",
+      record: { scope: { workspace: null } },
+    });
   });
   it("inherits entity-meaning source scopes without changing canonical goals", async () => {
     const f = await fixture();
@@ -434,9 +446,10 @@ describe.sequential("persistent scoped knowledge", () => {
     expect(saved.record.content).toEqual(content);
     expect(saved.record.scope).toEqual({ workspace: null });
     expect(saved.record.requiredReadScopes).toEqual(["goals:read", "knowledge:read"]);
+    // Never granted goals: the record is invisible, not forbidden.
     await expect(
       service().get(f.agent, { id: saved.record.id, purpose: "planning" }),
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({ status: 404 });
     const scopes: AccessScope[] = ["knowledge:read", "knowledge:write", "goals:read"];
     await database.db
       .update(accessTokens)

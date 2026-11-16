@@ -81,8 +81,8 @@ export interface WriteCopy<T = unknown> {
   done: string | ((data: T) => string);
   /** The server answered 409: something this write depends on changed. */
   conflict: string;
-  /** The server refused the write: nothing was changed. */
-  rejected: string;
+  /** The server refused the write: nothing was changed. A function may add the server's reason. */
+  rejected: string | ((error: ApiClientError) => string);
   /** No answer arrived: the write may or may not have been recorded. */
   unknown: string;
 }
@@ -171,7 +171,9 @@ export function useFinanceWrite() {
         error instanceof ApiClientError && error.status === 409
           ? copy.conflict
           : rejected
-            ? copy.rejected
+            ? typeof copy.rejected === "string"
+              ? copy.rejected
+              : copy.rejected(error)
             : copy.unknown,
         { id },
       );

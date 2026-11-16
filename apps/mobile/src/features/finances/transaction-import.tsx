@@ -6,7 +6,13 @@ import { SettingsAccentProvider } from "../../components/settings-accent";
 import { until, useFinanceWrite, useSettled } from "./cashflow-data";
 import { CashflowForm } from "./cashflow-form";
 import { cashflowDate } from "./cashflow-rules";
-import { type CsvProvider, csvProviders, isCsvProvider, previewCsv } from "./csv-import";
+import {
+  type CsvProvider,
+  csvProviders,
+  csvTooLarge,
+  isCsvProvider,
+  previewCsv,
+} from "./csv-import";
 import { useFinance, useFinanceRead } from "./data";
 import { pickCsv } from "./finance-files";
 import { formatMoney } from "./presentation";
@@ -23,10 +29,14 @@ function ImportForm(props: {
   const { api } = useFinance();
   const write = useFinanceWrite();
   const [{ account, provider }] = useState(props);
-  const [file, setFile] = useState<{ name: string; text: string } | null>(null);
+  const [file, setFile] = useState<{ name: string; text: string | null } | null>(null);
   const [choosing, setChoosing] = useState(false);
   const picking = useRef(false);
-  const preview = file ? previewCsv(provider, file.text) : null;
+  const preview = !file
+    ? null
+    : file.text === null
+      ? { problem: csvTooLarge }
+      : previewCsv(provider, file.text);
   const ready = preview && "rows" in preview ? preview : null;
   const amount = (value: number) =>
     account.currencyCode
@@ -48,7 +58,7 @@ function ImportForm(props: {
     }
   }
   async function save() {
-    if (!file || !ready) return;
+    if (!file?.text || !ready) return;
     const input = { accountId: account.id, provider, csv: file.text };
     const saved = await write.run<{ imported: number; skipped: number }>(
       input,
@@ -61,7 +71,7 @@ function ImportForm(props: {
       {
         loading: "Importing transactions…",
         done: (data) =>
-          !data
+          !data || !Number.isInteger(data.imported) || !Number.isInteger(data.skipped)
             ? "Import complete"
             : data.imported === 0
               ? `Nothing new to import: all ${counted(data.skipped)} were already in this account.`
@@ -70,7 +80,9 @@ function ImportForm(props: {
                 : `Imported ${counted(data.imported)}; ${data.skipped} already in this account ${data.skipped === 1 ? "was" : "were"} skipped.`,
         conflict:
           "An earlier import of this file is still being processed, or it failed. Check the account’s transactions, then import again if they are missing; rows already there are skipped.",
-        rejected: "Couldn’t import this file. Nothing was imported.",
+        // The server reads the whole file before writing and says what it could not read.
+        rejected: (error) =>
+          `Couldn’t import this file. Nothing was imported.${error.message ? ` ${error.message}` : ""}`,
         unknown:
           "Couldn’t confirm the import. Check the account’s transactions. Importing this same file again is safe: rows already in the account are skipped.",
       },

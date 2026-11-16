@@ -554,31 +554,36 @@ account: the server imports an export only into an account of the same provider,
 is not a choice. The import form shows the account, the provider and the chosen file. Choose file
 opens the system file picker from the file-system module the app already ships; no new native
 module was added. On iPhone the picker hands the app a temporary copy, which is deleted as soon as
-its text has been read.
+its text has been read. A file over four megabytes is not read at all and is reported as too
+large.
 
 Nothing is sent until the person chooses Import. Before that the form shows what will be
 imported: the number of transactions, their date range and the first 50 rows with date, name, note
 and signed amount, read by the same rules the server uses. A file that cannot be read in full
-says which line and why, shows no rows and cannot be imported; like the server, the app never
-imports part of a file. The server reads the file again and is the authority. The API has no
-preview route and reports only how many rows were imported and how many were skipped because they
-were already in the account, so the result names those two counts and cannot list rejected rows.
+says which line and why, shows no rows and cannot be imported. The server reads the file again
+and is the authority. The API imports all or nothing: one row it cannot read fails the whole file
+and nothing is written. It has no preview route and reports only how many rows were imported and
+how many were skipped because they were already in the account, so the result names those two
+counts; there is no per-row rejection list to show.
 A file with no transaction ID column says that an already imported row is recognized only while
 the file keeps the same rows in the same order.
 
 The import uses one toast from loading to the confirmed result. It is done only when the API
 confirms it: "Imported 12 transactions; 3 already in this account were skipped." A refusal says
-nothing was imported and keeps the form. An unanswered import says it could not be confirmed and
+nothing was imported, adds the server's own reason and keeps the form. An unanswered import says it could not be confirmed and
 is sent again from the open form under the same idempotency key, which the server answers once;
 importing the same file again is also safe because rows already in the account are skipped.
 
-Export is a command beside Select and Filters on every transaction list. It exports the view that
+Export is a command beside Select and Filters on every transaction list that has those commands;
+the list under a spending category, which has none, has no export. It exports the view that
 is on screen (its account, dates, search, status, category, review state and order), reading every
 page of it up to 5,000 transactions, and says so when a view is longer. The CSV has Date,
 Merchant, Amount (signed, plain number), Currency, Type, Status, Category and Notes; every cell is
 quoted and text that a spreadsheet would run as a formula is neutralized. The file is written to
-the app's cache only while the system share sheet is open, where the person chooses its
-destination, and is deleted whether they share it, cancel or the sheet fails. One toast reports
+one export directory in the app's cache only while the system share sheet is open, where the
+person chooses its destination. The directory is removed whether they share it, cancel or the
+sheet fails, and is emptied before every export, so a file left behind when the app is closed with
+the sheet open is gone at the next export. One toast reports
 the count exported, a cancelled export or a failure. Export is offered on iPhone only.
 
 ### Transaction conversations and review

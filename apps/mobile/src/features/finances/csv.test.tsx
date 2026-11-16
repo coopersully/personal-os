@@ -6,6 +6,7 @@ import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { previewCsv } from "./csv-import";
 import { pickCsv, shareCsv } from "./finance-files";
+import { Transactions } from "./spending";
 import { collectTransactions, exportLimit, transactionsCsv } from "./transaction-csv";
 import { ExportTransactions } from "./transaction-export";
 import { FinanceTransactionImport } from "./transaction-import";
@@ -37,7 +38,8 @@ const h = vi.hoisted(() => ({
   loading: vi.fn(() => "feedback"),
   share: vi.fn(),
   files: {
-    picked: null as null | { name: string; text: string },
+    picked: null as null | { name: string; text: string; size?: number },
+    read: 0,
     pickError: false,
     written: [] as { uri: string; content: string }[],
     deleted: [] as string[],
@@ -45,6 +47,9 @@ const h = vi.hoisted(() => ({
   },
   api: {
     listFinanceAccounts: vi.fn(),
+    listFinanceTransactions: vi.fn(),
+    listFinanceSpendingTransactions: vi.fn(),
+    getFinanceCategories: vi.fn(),
     importFinanceTransactions: vi.fn(),
   },
 }));
@@ -194,7 +199,11 @@ vi.mock("expo-file-system", () => {
       h.files.existing.delete(this.uri);
       h.files.deleted.push(this.uri);
     }
+    get size() {
+      return h.files.picked?.size ?? h.files.picked?.text.length ?? 0;
+    }
     async text() {
+      h.files.read += 1;
       return h.files.picked?.text ?? "";
     }
     static async pickFileAsync() {
@@ -205,7 +214,25 @@ vi.mock("expo-file-system", () => {
       return { canceled: false, result: file };
     }
   }
-  return { File, Paths: { cache: { uri: "file:///cache" } } };
+  class Directory {
+    uri: string;
+    constructor(...parts: (string | { uri: string })[]) {
+      this.uri = parts.map((part) => (typeof part === "string" ? part : part.uri)).join("/");
+    }
+    get exists() {
+      return h.files.existing.has(this.uri);
+    }
+    create() {
+      h.files.existing.add(this.uri);
+    }
+    /** Removes the directory and everything under it. */
+    delete() {
+      for (const uri of [...h.files.existing])
+        if (uri === this.uri || uri.startsWith(`${this.uri}/`)) h.files.existing.delete(uri);
+      h.files.deleted.push(this.uri);
+    }
+  }
+  return { Directory, File, Paths: { cache: { uri: "file:///cache" } } };
 });
 
 const venmo = { id: "acct-v", name: "Venmo", provider: "venmo", currencyCode: "USD" };
@@ -257,6 +284,7 @@ beforeEach(() => {
   h.platform = "ios";
   h.files.picked = null;
   h.files.pickError = false;
+  h.files.read = 0;
   h.files.written = [];
   h.files.deleted = [];
   h.files.existing = new Set();
@@ -414,6 +442,7 @@ it("words the other confirmed results exactly", async () => {
       "Imported 1 transaction; 2 already in this account were skipped.",
     ],
     [undefined, "Import complete"],
+    [{ imported: "3" } as never, "Import complete"],
   ];
   for (const [data, message] of results) {
     const view = await openImport(valid);
@@ -448,9 +477,10 @@ it("never reads an unconfirmed or refused import as done", async () => {
   h.api.importFinanceTransactions.mockRejectedValueOnce(rejection(400));
   fireEvent.click(button("Import"));
   await waitFor(() =>
-    expect(h.error).toHaveBeenCalledWith("Couldn’t import this file. Nothing was imported.", {
-      id: "feedback",
-    }),
+    expect(h.error).toHaveBeenCalledWith(
+      "Couldn’t import this file. Nothing was imported. rejected",
+      { id: "feedback" },
+    ),
   );
   h.api.importFinanceTransactions.mockResolvedValueOnce({
     outcome: "failed",
@@ -538,21 +568,48 @@ it("deletes the picked copy on iPhone only, where it is the app's own copy", asy
 });
 
 it("leaves no export behind, whether it is shared, cancelled or fails", async () => {
-  const uri = "file:///cache/out.csv";
+  const folder = "file:///cache/finance-export";
+  const uri = `${folder}/out.csv`;
   expect(await shareCsv("out.csv", "a,b")).toBe("shared");
   expect(h.share).toHaveBeenCalledWith({ url: uri });
   expect(h.files.written).toEqual([{ uri, content: "a,b" }]);
-  expect(h.files.existing.has(uri)).toBe(false);
+  expect(h.files.existing.size).toBe(0);
   h.share.mockResolvedValueOnce({ action: "dismissedAction" });
   expect(await shareCsv("out.csv", "a,b")).toBe("dismissed");
-  expect(h.files.existing.has(uri)).toBe(false);
+  expect(h.files.existing.size).toBe(0);
   h.share.mockRejectedValueOnce(new Error("sheet failed"));
   await expect(shareCsv("out.csv", "a,b")).rejects.toThrow("sheet failed");
-  expect(h.files.existing.has(uri)).toBe(false);
-  // A copy left by an interrupted export is replaced, not kept.
-  h.files.existing.add(uri);
-  await shareCsv("out.csv", "c");
-  expect(h.files.deleted.filter((item) => item === uri)).toHaveLength(5);
+  expect(h.files.existing.size).toBe(0);
+});
+
+it("clears an export left by an app that was closed with the share sheet open", async () => {
+  const folder = "file:///cache/finance-export";
+  h.files.existing.add(folder);
+  h.files.existing.add(`${folder}/nohmi-transactions-2026-11-01.csv`);
+  let duringShare: string[] = [];
+  h.share.mockImplementationOnce(async () => {
+    duringShare = [...h.files.existing];
+    return { action: "sharedAction" };
+  });
+  await shareCsv("new.csv", "a,b");
+  // Only the new file existed while the sheet was open, and nothing is left afterwards.
+  expect(duringShare.sort()).toEqual([folder, `${folder}/new.csv`]);
+  expect(h.files.existing.size).toBe(0);
+});
+
+it("never reads a file that is too large, and still deletes its copy", async () => {
+  h.files.picked = { name: "huge.csv", text: "Date,Amount", size: 4_000_001 };
+  expect(await pickCsv()).toEqual({ name: "huge.csv", text: null });
+  expect(h.files.read).toBe(0);
+  expect(h.files.deleted).toEqual(["file:///tmp/picked/huge.csv"]);
+  await openImport("Date,Amount\n2026-11-01,5", "huge.csv");
+  h.files.picked = { name: "huge.csv", text: "Date,Amount\n2026-11-01,5", size: 4_000_001 };
+  await choose();
+  expect(await screen.findByText("This file cannot be imported")).toBeTruthy();
+  expect(screen.getByText(/This file is too large to import\./)).toBeTruthy();
+  expect(button("Import")).toHaveProperty("disabled", true);
+  fireEvent.click(button("Import"));
+  expect(h.api.importFinanceTransactions).not.toHaveBeenCalled();
 });
 
 // ── Export ───────────────────────────────────────────────────────────────────
@@ -584,7 +641,7 @@ it("writes transactions as CSV a spreadsheet reads safely", () => {
     }),
     row({ merchant: "-Minus Co", direction: "transfer", amount: 7 }),
   ] as never);
-  expect(csv.startsWith("﻿")).toBe(true);
+  expect(csv.startsWith(String.fromCharCode(0xfeff))).toBe(true);
   expect(csv.slice(1).split("\r\n")).toEqual([
     '"Date","Merchant","Amount","Currency","Type","Status","Category","Notes"',
     '"2026-11-03","Corner Shop","-12.50","USD","Expense","Posted","Groceries",""',
@@ -628,7 +685,9 @@ it("exports the whole view through the share sheet and reports the count", async
   );
   expect(page).toHaveBeenCalledTimes(2);
   const [written] = h.files.written;
-  expect(written?.uri).toMatch(/^file:\/\/\/cache\/nohmi-transactions-\d{4}-\d{2}-\d{2}\.csv$/);
+  expect(written?.uri).toMatch(
+    /^file:\/\/\/cache\/finance-export\/nohmi-transactions-\d{4}-\d{2}-\d{2}\.csv$/,
+  );
   expect(written?.content).toContain('"Second"');
   expect(h.share).toHaveBeenCalledWith({ url: written?.uri });
   expect(h.files.existing.size).toBe(0);
@@ -701,4 +760,58 @@ it("does not share the previous account's transactions after an account change",
   await waitFor(() => expect(h.dismiss).toHaveBeenCalledWith("feedback"));
   expect(h.share).not.toHaveBeenCalled();
   expect(h.files.written).toEqual([]);
+});
+
+it("tells the person why the server refused a file the preview accepted", async () => {
+  await openImport(valid);
+  await choose();
+  await screen.findByText("venmo.csv");
+  h.api.importFinanceTransactions.mockRejectedValueOnce(
+    new ApiClientError({
+      code: "invalid_request",
+      message: "Choose a venmo account before importing that export.",
+      status: 400,
+    }),
+  );
+  fireEvent.click(button("Import"));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Couldn’t import this file. Nothing was imported. Choose a venmo account before importing that export.",
+      { id: "feedback" },
+    ),
+  );
+  expect(h.back).not.toHaveBeenCalled();
+  expectNoInlineResult();
+});
+
+it("exports the list's own view: its account, dates and filters, page after page", async () => {
+  h.api.listFinanceTransactions.mockImplementation(async (query: { cursor?: string }) =>
+    query.cursor
+      ? { items: [row({ id: "b", merchant: "Second" })], nextCursor: null }
+      : { items: [row({ id: "a" })], nextCursor: query.cursor === undefined ? "next" : null },
+  );
+  mount(<Transactions accountId="acct-v" from="2026-11-01" through="2026-11-30" />);
+  await screen.findByText("Corner Shop");
+  h.api.listFinanceTransactions.mockClear();
+  press("Export transactions as CSV");
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Exported 2 transactions", { id: "feedback" }),
+  );
+  expect(h.api.listFinanceTransactions.mock.calls.map((call) => call[0])).toEqual([
+    expect.objectContaining({
+      accountId: "acct-v",
+      from: "2026-11-01",
+      to: "2026-11-30",
+      cursor: undefined,
+      limit: 100,
+    }),
+    expect.objectContaining({ accountId: "acct-v", from: "2026-11-01", cursor: "next" }),
+  ]);
+});
+
+it("offers no export on a spending category's drill-down list", async () => {
+  h.api.listFinanceSpendingTransactions.mockResolvedValue({ items: [row()], nextCursor: null });
+  mount(<Transactions reference={{ groupId: "g" } as never} />);
+  await screen.findByText("Corner Shop");
+  expect(screen.queryByRole("button", { name: "Export transactions as CSV" })).toBeNull();
 });

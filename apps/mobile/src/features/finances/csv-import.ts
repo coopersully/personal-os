@@ -4,10 +4,18 @@ export const csvProviders: Record<CsvProvider, string> = {
   venmo: "Venmo",
   zelle: "Zelle",
 };
-export const isCsvProvider = (value: string): value is CsvProvider => value in csvProviders;
+export const isCsvProvider = (value: string): value is CsvProvider =>
+  Object.hasOwn(csvProviders, value);
 
 /** The server accepts at most this many characters of CSV in one import. */
 export const csvLimit = 1_000_000;
+
+export const csvTooLarge = "This file is too large to import. Split it into smaller exports.";
+/**
+ * A file larger than this is not read into memory at all. A million characters of CSV are at
+ * most four megabytes of UTF-8.
+ */
+export const csvByteLimit = 4_000_000;
 
 export interface CsvPreviewRow {
   date: string;
@@ -76,8 +84,7 @@ function parseDate(text: string): string | null {
  */
 export function previewCsv(provider: CsvProvider, csv: string): CsvPreview {
   if (!csv.trim()) return { problem: "This file is empty." };
-  if (csv.length > csvLimit)
-    return { problem: "This file is too large to import. Split it into smaller exports." };
+  if (csv.length > csvLimit) return { problem: csvTooLarge };
   const parsed = parseRows(csv);
   if (!parsed) return { problem: "This file has a quoted value that is never closed." };
   const [header, ...body] = parsed;

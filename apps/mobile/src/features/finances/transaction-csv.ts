@@ -37,8 +37,11 @@ export function transactionsCsv(rows: readonly Row[]): string {
       row.notes ?? "",
     ]),
   ];
-  return `﻿${lines.map((line) => line.map(cell).join(",")).join("\r\n")}\r\n`;
+  return `${byteOrderMark}${lines.map((line) => line.map(cell).join(",")).join("\r\n")}\r\n`;
 }
+
+/** Tells a spreadsheet the file is UTF-8. Written as a code point so it is visible in source. */
+const byteOrderMark = String.fromCharCode(0xfeff);
 
 /** Reads every page of a transaction view, up to the export limit. */
 export async function collectTransactions<T>(

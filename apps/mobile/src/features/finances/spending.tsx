@@ -242,9 +242,7 @@ export function Transactions({
                 <ExportTransactions
                   disabled={bulk.pending || query.isPending}
                   page={(cursor) =>
-                    reference
-                      ? api.listFinanceSpendingTransactions(reference, cursor)
-                      : api.listFinanceTransactions({ ...filters, accountId, cursor, limit: 100 })
+                    api.listFinanceTransactions({ ...filters, accountId, cursor, limit: 100 })
                   }
                 />
                 <Action

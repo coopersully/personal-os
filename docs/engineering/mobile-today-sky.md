@@ -29,7 +29,7 @@ briefing drawer follows the app theme; the sky follows local solar time, indepen
   invalidate the user's in-flight request. Location watches remain bounded even if permission is lost.
 - **Recovery/feedback:** the hero caption is the explicit retry/location action. User-triggered reads
   use one Sonner loading/outcome ID. Automatic decorative fallback is silent and never blocks the
-  Tasks/Finance briefing. A denied OS permission can be changed in system Settings.
+  Tasks, Calendar, Mail and Finance briefing. A denied OS permission can be changed in system Settings.
 - **Observation/limits:** native builds must include ExpoLocation and the purpose string. Fresh API
   success, native authorization, and actual simulator coordinates are separate acceptance checks.
   Simulated coordinates verify the native path, not GPS accuracy or physical-iPhone acceptance.

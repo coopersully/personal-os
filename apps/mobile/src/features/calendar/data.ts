@@ -122,16 +122,30 @@ export function useEventsDuring(span: { startsAt: string; endsAt: string } | nul
  */
 export function useEventOccurrence(event: CalendarEvent | undefined) {
   const read = useEventsDuring(event ? { startsAt: event.startsAt, endsAt: event.endsAt } : null);
-  const listed = event && read.data?.find((candidate) => candidate.id === event.id);
+  // The list shows one record per occurrence, which may be its copy on another calendar.
+  const listed =
+    event &&
+    (read.data?.find((candidate) => candidate.id === event.id) ??
+      read.data?.find(
+        (candidate) =>
+          !candidate.blockSourceEventId &&
+          candidate.startsAt === event.startsAt &&
+          candidate.endsAt === event.endsAt &&
+          !!candidate.sourceCalendarIds?.includes(event.calendarId),
+      ));
   const merged = useMemo(() => {
     if (!event || !listed) return event;
     // The record is the newer authority for its own blocks; the list adds the other copies'.
+    const own = event.blocks ?? [];
     const others = (listed.blocks ?? []).filter(
-      (block) => block.sourceEventId && block.sourceEventId !== event.id,
+      (block) =>
+        block.sourceEventId &&
+        block.sourceEventId !== event.id &&
+        !own.some((mine) => mine.eventId === block.eventId),
     );
     return {
       ...event,
-      blocks: [...(event.blocks ?? []), ...others],
+      blocks: [...own, ...others],
       sourceCalendarIds: listed.sourceCalendarIds ?? event.sourceCalendarIds,
     };
   }, [event, listed]);
@@ -289,7 +303,12 @@ type WriteCopy = {
  * calendar had last synced. Until that calendar syncs again nohmi cannot see whether the
  * provider took the copy, so nothing is sent again before then.
  */
-type UnsettledBlock = { mode: EventBlockMode; source: CalendarEvent; syncedAt: string | null };
+type UnsettledBlock = {
+  mode: EventBlockMode;
+  source: CalendarEvent;
+  /** Undefined while the sync time at the attempt is not known; null for never synced. */
+  syncedAt?: string | null;
+};
 /** Kept per cache, so per signed-in app, and keyed by owner, session, event and calendar. */
 const unsettledBlocks = new WeakMap<object, Map<string, UnsettledBlock>>();
 
@@ -527,7 +546,10 @@ export function useEventWrites() {
         {
           pending: "Blocking time…",
           done: `Time blocked on ${name}`,
-          unconfirmed: `Couldn’t confirm the time was blocked on ${name}. nohmi re-reads the event, and ${name} once it has synced, before blocking there again.`,
+          unconfirmed:
+            calendar.provider === "local"
+              ? `Couldn’t confirm the time was blocked on ${name}. nohmi re-reads the event before blocking there again.`
+              : `Couldn’t confirm the time was blocked on ${name}. nohmi re-reads the event, and ${name} once it has synced, before blocking there again.`,
           landed: `${name} has this time, but nohmi couldn’t link it to the event. Check ${name} after it next syncs.`,
           conflict: changedElsewhere,
         },
@@ -549,7 +571,10 @@ export function useEventWrites() {
               const latest = (await api.listCalendars().catch(unread)).find(
                 (candidate) => candidate.id === calendar.id,
               );
-              if (!latest?.lastSyncedAt || latest.lastSyncedAt === earlier.syncedAt)
+              // With no sync time from the attempt, this one becomes the mark to get past.
+              const unknown = earlier.syncedAt === undefined;
+              if (unknown) earlier.syncedAt = latest?.lastSyncedAt ?? null;
+              if (unknown || !latest?.lastSyncedAt || latest.lastSyncedAt === earlier.syncedAt)
                 throw new NothingSent(
                   `${name} hasn’t synced since the earlier attempt, so nothing was sent. Try again after it syncs.`,
                 );
@@ -593,18 +618,19 @@ export function useEventWrites() {
       );
       if (result.ok) unsettled().delete(key);
       else if (result.reason === "uncertain" || result.reason === "landed") {
-        // The calendar's sync time is read now if it can be, so a sync that finished before
-        // this attempt is not mistaken for one that could have seen its copy.
-        const latest = await session
+        // Recorded at once, so no tap can slip through unchecked while the sync time is read.
+        const attempt: UnsettledBlock = { mode, source: event };
+        unsettled().set(key, attempt);
+        // The page's calendars may be minutes old, so only a fresh read counts as the sync
+        // time at this attempt. Without one it stays unknown and the next attempt sets it.
+        await session
           .api()
           .listCalendars()
-          .then((all) => all.find((candidate) => candidate.id === calendar.id))
-          .catch(() => undefined);
-        unsettled().set(key, {
-          mode,
-          source: event,
-          syncedAt: (latest ?? calendar).lastSyncedAt ?? null,
-        });
+          .then((all) => {
+            const latest = all.find((candidate) => candidate.id === calendar.id);
+            if (attempt.syncedAt === undefined) attempt.syncedAt = latest?.lastSyncedAt ?? null;
+          })
+          .catch(() => {});
       }
       return result;
     },

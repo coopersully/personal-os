@@ -599,8 +599,9 @@ notes and link. A calendar with several linked copies reads as Details when any 
 can sit on several calendars, each with its own linked copy on one destination; a switch or
 choice changes every copy there. One event record carries only its own blocks, so the page and
 the details row also read the event list for that time, which names the other calendars and
-their blocks. Opened for an event on a hidden calendar, which the list does not return, the
-page knows only that record's own blocks.
+their blocks. The list shows one record per occurrence, so when the event was opened
+by another copy's id it is matched by its calendar and exact time. Opened for an event on a
+hidden calendar, which the list does not return, the page knows only that record's own blocks.
 
 Every switch and choice is one write to a real calendar. It is one Sonner toast from pending to
 its outcome with no result copy on the page, and the control moves only after the API confirms
@@ -624,7 +625,14 @@ reads before it writes:
   is sent and the toast says to remove it first. The one exception is a single unlinked Busy
   copy at exactly the event's start and end when Busy is chosen again: it is sent on, because
   the API links it instead of writing another.
+- The sync time at the attempt comes only from a read made right after the failure. If that
+  read fails too, the time is unknown: the next attempt records the calendar's sync time then
+  and sends nothing, so only a later sync opens the way.
 - If any of these reads fails, nothing is sent.
+
+What can still go wrong: a sync that fetched from the provider before the copy landed but
+finished after the attempt counts as "synced since" and would not show the copy, so a repeat
+could write a second one. The API does not expose when a sync began.
 
 Removing a block or changing what it shows can be tried again after an unconfirmed result: the
 page is re-read first and the next attempt carries the revisions it then shows.

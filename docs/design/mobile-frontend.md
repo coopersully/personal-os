@@ -210,8 +210,8 @@ when the action has a more informative name. Do not duplicate the same toast in 
 
 The approved mobile Finance map uses Overview, Spending, Plan, Accounts, and Assistant
 as five stable native tabs. Spending owns Summary and Transactions; Plan owns Budget,
-Cash flow, and Wealth. Assistant presents the existing conversation, review queue,
-and recorded activity; it does not create a second decision store. Preserve the native
+Cash flow, and Wealth. Assistant presents the existing conversation, review queue, approvals,
+review and correction pages, and recorded activity; it does not create a second decision store. Preserve the native
 system tab bar, selected workspace tint and filled icons.
 
 Finance summaries must preserve the server's currency, contribution basis, coverage,
@@ -401,6 +401,36 @@ breakdown is not offered on iPhone.
 - Money uses a currency prefix, with `$` for USD and legacy records without a currency. Explicit non-USD source currencies remain identified; missing amounts remain unavailable and mixed-currency totals are not combined.
 - Message nohmi from transaction details opens the workspace conversation with a removable transaction attachment. Show merchant and amount before sending. Attachment removal preserves the draft; confirmed delivery clears it. Unavailable references block sending until removed, and uncertain retries retain both the reference and delivery key.
 - Sent references remain accessible in conversation history. Chat context is distinct from a transaction note and does not itself confirm a categorization change.
+
+### Finance reviews and corrections
+
+Assistant › For you carries the review work that does not need chat: Needs your input,
+Approvals, and a Reviews and checks list. Every page behind that list is the single
+`/finance-reviews` route; its `view` parameter names the page.
+
+- **Approvals** lists agent-prepared changes still `pending`. Approve reports "Approved and
+  applied" only for an `applied` outcome; `pending_review` and `needs_input` say the change
+  was not applied. A 404 or 409 says nothing was applied. After an outcome nobody confirmed,
+  the card stays locked until the reviews have been read again. Dismiss reports the status
+  the server returned, so an already applied review is never called dismissed.
+- **Period review** opens the latest saved review named by Finance status. It is read-only;
+  an amount the review did not record shows Unavailable, never zero.
+- **Review backlog** shows flag and review counts without adding them together, then the
+  records of one group. A record opens its transaction, where it is worked. Pages belong to
+  one snapshot: a 409 on a further page restarts the list from the top with one toast.
+- **Review history** pages resolved and deferred reviews and opens the recorded outcome of
+  one. An archived review has no transaction to open.
+- **Ledger checks** shows the ledger counts and the open alerts. Run checks again is an
+  explicit command with the full Sonner lifecycle. An alert is resolved or dismissed, and is
+  reported only in the status the server returned.
+- **Reimbursements** lists claims, then one claim with its receipts and past corrections.
+  Correct expectation and Remove receipt match send the revision on screen and one
+  idempotency key. After an unknown outcome the form locks and offers Retry same correction,
+  which resends that exact request; only a definite rejection frees the form for a new one.
+- **Contextual questions** opened from chat take an answer in place. The same text is resent
+  under the same operation id. A `blocked` answer says nothing was saved and closes the form.
+- **A split transaction under review** reads "Split in N parts". Approve splits keeps the
+  parts. Choosing one category asks "Replace N parts?" first, because it removes them.
 
 ### Workspace conversations
 

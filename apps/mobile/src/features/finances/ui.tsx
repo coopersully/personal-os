@@ -23,7 +23,14 @@ const refreshKeys: Record<string, readonly string[]> = {
   Spending: ["spending", "transactions"],
   Accounts: ["accounts"],
   Plan: ["budget-status", "budget", "upcoming", "accounts", "goals"],
-  Assistant: ["conversation-readiness", "reviews", "activity", "conversation"],
+  Assistant: [
+    "conversation-readiness",
+    "reviews",
+    "action-reviews",
+    "status",
+    "activity",
+    "conversation",
+  ],
 };
 const noKeys: readonly string[] = [];
 export function FinanceScreen({

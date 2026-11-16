@@ -471,6 +471,82 @@ A goal's actions stay disabled until the changed goal is on screen, so a second 
 the version the first one replaced. One toast runs from loading to the confirmed result; a failed
 or unknown save keeps the draft and the form open and never reads as saved.
 
+### Finance cash flow, recurring items and income
+
+Plan › Cash flow keeps the outlook: expected income and bills for the next 30 days, read from
+confirmed schedules and described as an upcoming schedule, not a projected account balance. Each
+outlook row opens its expected item. Under it, Recurring leads to four pages on one route
+(`/finance-cashflow`, named by `view`): Income, Bills & subscriptions, Recent expected items and
+Scenarios. The Plan tab reads nothing for those pages until one is opened.
+
+Income lists every income stream with its status (Needs confirmation, Active or Paused), how
+often it repeats, its next expected date and its expected amount. Bills & subscriptions lists
+obligations under Bills, Subscriptions and Savings and states that changing a pattern does not
+cancel a subscription or change a payment with its provider. An amount takes its currency from the
+item's account; an item without an account uses the product's USD default, as elsewhere in
+Finances, and an amount whose account is not known yet is shown without a currency. A row opens the recurring item: expected amount, status, kind, cadence, last seen date,
+account, who found it, whether its schedule is confirmed and, for a bill or subscription, its cost
+statement. A schedule statement and a cost statement each describe one revision of the item; once
+the item changes they read as needing confirmation again, because the server stops using them.
+
+The recurring item's top-right menu holds Confirm schedule or Revise schedule, Confirm cost or
+Edit cost statement (bills and subscriptions only), Pause, Resume or Confirm pattern (for an item
+that needs confirmation) and, last and destructive, Mark cancelled. Mark cancelled is offered for
+obligations only, because the API rejects it for income, and keeps a confirmation that says
+nothing is cancelled with the provider. Schedule and cost are offered only while the item is
+active or needs confirmation; a paused or cancelled item offers Resume, and its page says to
+resume it first. Each of these changes, and each schedule or cost statement, starts a new revision
+of the item, so stating a cost makes the schedule need confirming again and the reverse; both
+forms say so.
+
+Confirm schedule is a form with a floating Save: Repeats, Timezone, First date, Effective from,
+the two days of the month for a twice-monthly schedule, Amount type (Fixed or Variable), Expected
+amount and Currency. The account is shown but not chosen: the server accepts a schedule only for
+the item's own account. Timezone starts from the account planning timezone and Currency from the
+account; a revision also starts from the previous statement. Cadence, dates and amount are never
+taken from the detected pattern. A revision needs an effective date after the previous one. Confirm
+cost records whether the expected payment is fixed or variable, its currency and an as-of date
+that cannot be in the future, and needs the "This is my statement" switch.
+
+Recent expected items lists the last 30 days of expected items from confirmed schedules, newest
+first, because that is where posted transactions are. An expected item shows what was expected,
+what is matched and what is still expected, its matches that have not been reversed and, once a
+match has been reversed, its full history. A match the server no longer counts (for example after
+its transaction changed) is labelled as such and can still be reversed. Match opens a form that lists posted transactions in the same account
+and currency within two weeks of the expected date that the server marks eligible; a pending,
+uncategorized or transfer transaction is not offered. A split transaction also asks which part
+covers the item. The amount matched is at most what is still expected and at most the chosen
+transaction or part, and a reason is required. Opening a match reverses the whole match with a
+reason; the original stays in the history. An item from an earlier schedule can only have an
+existing match reversed. Matching never creates or changes a payment.
+
+Scenarios compares a baseline with up to five alternatives over a horizon of 1 to 120 months.
+Each scenario needs a name, starting cash, monthly income, housing, debt payment and reserve
+contribution, and either category spending lines or the "no other monthly spending" switch; debt
+balance, goal target, goal savings and assumptions are optional. The first thing still missing is
+named above the Compare button, which stays disabled until the comparison can be sent. Results
+are the server's: monthly cash flow, projected lowest balance, reserve runway, debt payoff, goal
+effects, warnings and assumptions. Scenario amounts carry no currency, so none is shown. Results
+are read only, never change the plan, and are marked as belonging to the previous entries after an
+edit.
+
+Every write here uses one toast from loading to the confirmed result. Finance data is re-read
+before the result is reported, and the item's actions stay disabled until that re-read has
+succeeded: if it fails after a confirmed write, the write is reported and the actions wait for the
+read to be retried. A schedule or cost form that is open when the item is paused elsewhere stays
+open with its entries, cannot be saved and says why. A match or reverse form likewise stays
+open through the re-read its own write causes, so it always reports the result and closes. The
+day a match was recorded is shown in the account planning timezone. A refused write
+(4xx) says nothing was changed or keeps the form open with its entries; a 409 says what changed
+elsewhere; a write with no answer says it could not be confirmed, and sending it again from the
+same open form or page reuses its idempotency key, so it cannot act twice. A form that is closed
+and reopened starts a new key. A form opens only on a fresh read of what it states against, never
+on a cached copy that is still being re-read.
+
+Not on iPhone yet: the web outlook's date range and account filters, calendar presentation,
+payday projection and balance statements, and reimbursements inside Cash flow (they are reached
+from Assistant). A past expected item older than 30 days cannot be opened.
+
 ### Transaction conversations and review
 
 - Needs your input cards show merchant, amount and category, and open the canonical transaction details page. Details place attention on the category row itself, with direct selection and approval. Do not duplicate the field with a separate Choose category banner/button. Notes remain optional and never count as a missing required field. This is record state, not action-result feedback.

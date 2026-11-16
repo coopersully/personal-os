@@ -210,7 +210,7 @@ function ScenarioResult({
           />
           <FinanceRow
             centered
-            title="Lowest cash balance"
+            title="Projected lowest balance"
             value={plainAmount(projection.projectedLowestBalance)}
             icon="finances"
           />

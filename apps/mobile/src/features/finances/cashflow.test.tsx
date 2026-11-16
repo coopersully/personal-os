@@ -1839,3 +1839,106 @@ it("corrects a zero spending line beside its field", async () => {
   type("Baseline spending 1 amount", "0");
   expect(screen.getByText("Enter an amount above 0, such as 400.00.")).toBeTruthy();
 });
+
+// ── Independent review ───────────────────────────────────────────────────────
+
+/** The second Finance read on a match page: resolves when the test says so. */
+function slowSecondRead(first: unknown) {
+  const later = deferred<unknown>();
+  h.api.listFinanceCashflowSources.mockResolvedValueOnce(first).mockReturnValue(later.promise);
+  return later;
+}
+const noSources = { transactions: [], coverage: { truncated: false, transactionLimit: 1000 } };
+
+it("reports a full match and closes even though the item then takes no more matches", async () => {
+  h.api.manageFinanceOccurrenceMatch.mockResolvedValue(completed({}));
+  const later = slowSecondRead({ ...noSources, transactions: [landlord] });
+  open("match", routeRange);
+  await screen.findByText("Match a transaction");
+  press(/Landlord LLC/);
+  type("Amount matched", "1300");
+  type("Reason", "Rent for November");
+  // The re-read after the write returns the item fully matched while another read is pending.
+  h.api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [
+      { ...rentDue, matchState: "matched", matchedAmountCents: 180_000, remainingExpectedCents: 0 },
+    ],
+    matchEvents: [partMatch],
+    unavailableSources: [],
+  });
+  fireEvent.click(save("Record match"));
+  await waitFor(() => expect(h.api.listFinanceRecurringOccurrences).toHaveBeenCalledTimes(2));
+  await act(async () => {});
+  expect(screen.queryByText("This expected item cannot take a match.")).toBeNull();
+  expect(screen.getByLabelText("Reason")).toHaveProperty("value", "Rent for November");
+  await act(async () => later.resolve(noSources));
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Transaction matched", { id: "feedback" }),
+  );
+  expect(h.success).toHaveBeenCalledTimes(1);
+  expect(h.back).toHaveBeenCalledTimes(1);
+  // Only a read's own toast may be dismissed; the write's toast ends in its result.
+  expect(h.dismiss).not.toHaveBeenCalledWith("feedback");
+});
+
+it("reports a reversal and closes even though the match is then gone", async () => {
+  const answer = deferred<unknown>();
+  h.api.manageFinanceOccurrenceMatch.mockReturnValue(answer.promise);
+  open("match", { ...routeRange, match: "m-1" });
+  await screen.findByText(/reverses the whole match/);
+  type("Reason", "Wrong transaction");
+  fireEvent.click(save("Reverse match"));
+  h.api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [{ ...rentDue, matchState: "expected", matchIds: [], matchedAmountCents: 0 }],
+    matchEvents: [partMatch, { ...partMatch, id: "r-1", kind: "reverse", reversesMatchId: "m-1" }],
+    unavailableSources: [],
+  });
+  await act(async () => answer.resolve(completed({})));
+  await waitFor(() => expect(h.success).toHaveBeenCalledWith("Match reversed", { id: "feedback" }));
+  expect(screen.queryByText(/This match is unavailable/)).toBeNull();
+  expect(h.success).toHaveBeenCalledTimes(1);
+  expect(h.back).toHaveBeenCalledTimes(1);
+  expect(h.dismiss).not.toHaveBeenCalledWith("feedback");
+});
+
+it("shows the day a match was recorded in the planning timezone", async () => {
+  h.api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [rentDue],
+    // 03:00 UTC on the 11th is still the 10th in New York.
+    matchEvents: [{ ...partMatch, recordedAt: "2026-11-11T03:00:00Z" }],
+    unavailableSources: [],
+  });
+  const view = open("occurrence", routeRange);
+  expect((await screen.findByRole("button", { name: /\$500\.00/ })).textContent).toContain(
+    "Nov 10, 2026",
+  );
+  view.unmount();
+  h.timezone = undefined;
+  h.params = { view: "match", ...routeRange, match: "m-1" };
+  mount(<FinanceCashflowRoute />);
+  expect(await screen.findByText("Nov 11, 2026")).toBeTruthy();
+});
+
+it("does not reuse an unanswered change's key once the item has changed", async () => {
+  open("item", { kind: "obligation", id: "ob-1" });
+  await screen.findByText("Schedule confirmed");
+  h.api.manageFinanceRecurringItem.mockRejectedValueOnce(new Error("offline"));
+  press("Pause");
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(1));
+  h.api.manageFinanceRecurringItem.mockRejectedValueOnce(new Error("offline"));
+  press("Pause");
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(2));
+  // The item is re-read at a new revision, still active: the same change is a new attempt.
+  h.api.listFinanceRecurringItems.mockResolvedValue(items([], [{ ...rent, revision: 3 }]));
+  h.api.manageFinanceRecurringItem.mockRejectedValueOnce(new Error("offline"));
+  press("Pause");
+  await waitFor(() => expect(h.error).toHaveBeenCalledTimes(3));
+  h.api.manageFinanceRecurringItem.mockResolvedValueOnce(completed(rent));
+  await waitFor(() => expect(button("Pause")).toHaveProperty("disabled", false));
+  press("Pause");
+  await waitFor(() => expect(h.success).toHaveBeenCalledTimes(1));
+  const calls = h.api.manageFinanceRecurringItem.mock.calls.map((call) => call[0]);
+  expect(calls[1].idempotencyKey).toBe(calls[0].idempotencyKey);
+  expect(calls[3].idempotencyKey).not.toBe(calls[0].idempotencyKey);
+  expect(calls[3]).not.toHaveProperty("revision");
+});

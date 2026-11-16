@@ -1,6 +1,6 @@
 import type { FinanceOccurrenceMatchEvent, FinanceRecurringOccurrence } from "@personal-os/domain";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Action, Actions, PaddedSurfaceRows } from "../../components/forms/form-rows";
 import { InlineOptions } from "../../components/forms/inline-options";
 import { SettingsAccentProvider } from "../../components/settings-accent";
@@ -27,6 +27,7 @@ import {
 } from "./cashflow-rules";
 import { useFinance } from "./data";
 import { isCalendarDate } from "./goal-progress";
+import { localToday } from "./mutations";
 import { formatMoney } from "./presentation";
 import { Card, Copy, FinanceRow, FinanceScreen, Metric, ReadState, Section } from "./ui";
 
@@ -59,12 +60,19 @@ const canMatch = (occurrence: FinanceRecurringOccurrence) =>
   occurrence.matchState !== "invalidated" &&
   occurrence.accountId !== null &&
   (occurrence.remainingExpectedCents ?? 0) > 0;
+/** The day something was recorded, in the account planning timezone when it is known. */
+function useRecordedDay() {
+  const { timezone } = useFinance();
+  return (recordedAt: string) =>
+    cashflowDate(timezone ? localToday(timezone, new Date(recordedAt)) : recordedAt.slice(0, 10));
+}
 const eventActor = (event: FinanceOccurrenceMatchEvent) =>
   event.approvalActor ? "your agent" : "you";
 
 /** One expected item: what was expected, what has been matched to it, and its history. */
 export function FinanceOccurrenceScreen() {
   const { query, occurrence, events, params } = useOccurrence();
+  const recordedDay = useRecordedDay();
   const history = occurrence ? occurrenceEvents(occurrence, events) : [];
   const matches = occurrence ? activeMatches(occurrence, events) : [];
   const route = { key: params.key ?? "", from: params.from ?? "", to: params.to ?? "" };
@@ -128,7 +136,7 @@ export function FinanceOccurrenceScreen() {
                     <FinanceRow
                       key={event.id}
                       title={formatMoney(event.amountCents / 100, event.currencyCode)}
-                      subtitle={`${occurrence.matchIds.includes(event.id) ? "Matched" : "No longer counted, matched"} by ${eventActor(event)} · ${cashflowDate(event.recordedAt.slice(0, 10))} · ${event.rationale}`}
+                      subtitle={`${occurrence.matchIds.includes(event.id) ? "Matched" : "No longer counted, matched"} by ${eventActor(event)} · ${recordedDay(event.recordedAt)} · ${event.rationale}`}
                       icon="check"
                       accessibilityHint="Opens the form that reverses this match"
                       onPress={() => cashflowPage("match", { ...route, match: event.id })}
@@ -156,7 +164,7 @@ export function FinanceOccurrenceScreen() {
                     <FinanceRow
                       key={event.id}
                       title={event.kind === "reverse" ? "Match reversed" : "Matched"}
-                      subtitle={`By ${eventActor(event)} · ${cashflowDate(event.recordedAt.slice(0, 10))} · ${event.rationale}`}
+                      subtitle={`By ${eventActor(event)} · ${recordedDay(event.recordedAt)} · ${event.rationale}`}
                       value={formatMoney(event.amountCents / 100, event.currencyCode)}
                       icon="history"
                     />
@@ -369,6 +377,7 @@ function ReverseForm(props: {
   const { api } = useFinance();
   const write = useFinanceWrite();
   const [{ occurrence, match }] = useState(props);
+  const recordedDay = useRecordedDay();
   const [rationale, setRationale] = useState("");
   async function save() {
     if (!rationale.trim()) return;
@@ -405,7 +414,7 @@ function ReverseForm(props: {
           <FinanceRow
             centered
             title="Recorded"
-            value={cashflowDate(match.recordedAt.slice(0, 10))}
+            value={recordedDay(match.recordedAt)}
             icon="history"
           />
           <TextRow
@@ -435,47 +444,63 @@ export function FinanceOccurrenceMatch() {
   const match = occurrence
     ? activeMatches(occurrence, events).find((event) => event.id === params.match)
     : undefined;
+  // Once a form has opened it stays. Its own write re-reads the expected item, which then no
+  // longer takes a match or no longer has the match: that must not unmount the form before it
+  // has reported the write and closed.
+  const opened = useRef<
+    | { reverse: Parameters<typeof ReverseForm>[0] }
+    | { match: Parameters<typeof MatchForm>[0] }
+    | null
+  >(null);
+  const subject = opened.current
+    ? "match" in opened.current
+      ? opened.current.match.occurrence
+      : null
+    : occurrence && !reversing && canMatch(occurrence)
+      ? occurrence
+      : null;
   // Transactions are read around the expected date, where its actual movement posts.
   const sources = useCashflowSources(
-    occurrence && !reversing && canMatch(occurrence)
-      ? { from: shiftDate(occurrence.localDate, -14), to: shiftDate(occurrence.localDate, 14) }
+    subject
+      ? { from: shiftDate(subject.localDate, -14), to: shiftDate(subject.localDate, 14) }
       : null,
   );
   const settled = useSettled(query);
   const sourcesSettled = useSettled(sources);
-  const unavailable = (
-    <FinanceScreen title="Match">
-      <Copy secondary>
-        {occurrence
-          ? reversing
-            ? "This match is unavailable. It may already be reversed."
-            : "This expected item cannot take a match."
-          : "This expected item is unavailable."}
-      </Copy>
-    </FinanceScreen>
-  );
+  if (!opened.current && settled && occurrence) {
+    if (reversing) {
+      if (match) opened.current = { reverse: { occurrence, match } };
+    } else if (canMatch(occurrence) && sourcesSettled && sources.data)
+      opened.current = {
+        match: {
+          occurrence,
+          candidates: eligibleTransactions(occurrence, sources.data.transactions),
+          truncated: sources.data.coverage.truncated,
+        },
+      };
+  }
+  const form = opened.current;
   return (
     <ReadState query={until(query, settled)}>
       <Stack.Screen options={{ title: "match" }} />
-      {occurrence && reversing ? (
-        match ? (
-          <ReverseForm key={match.id} occurrence={occurrence} match={match} />
+      {form ? (
+        "match" in form ? (
+          <MatchForm {...form.match} />
         ) : (
-          unavailable
+          <ReverseForm {...form.reverse} />
         )
-      ) : occurrence && canMatch(occurrence) ? (
-        <ReadState query={until(sources, sourcesSettled)}>
-          {sources.data && (
-            <MatchForm
-              key={occurrence.key}
-              occurrence={occurrence}
-              candidates={eligibleTransactions(occurrence, sources.data.transactions)}
-              truncated={sources.data.coverage.truncated}
-            />
-          )}
-        </ReadState>
+      ) : occurrence && !reversing && canMatch(occurrence) ? (
+        <ReadState query={until(sources, sourcesSettled)}>{null}</ReadState>
       ) : (
-        unavailable
+        <FinanceScreen title="Match">
+          <Copy secondary>
+            {occurrence
+              ? reversing
+                ? "This match is unavailable. It may already be reversed."
+                : "This expected item cannot take a match."
+              : "This expected item is unavailable."}
+          </Copy>
+        </FinanceScreen>
       )}
     </ReadState>
   );

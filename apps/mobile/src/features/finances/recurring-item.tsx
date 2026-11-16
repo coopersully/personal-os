@@ -66,7 +66,9 @@ function ItemActions({
   const change = (operation: Change) => {
     const input = { operation, itemId: item.id, itemType: kind };
     void write.run(
-      input,
+      // The item's revision is part of what identifies the attempt, not of what is sent: a
+      // key kept for an unanswered change is never reused once the item has changed.
+      { ...input, revision: item.revision },
       (idempotencyKey) => api.manageFinanceRecurringItem({ ...input, idempotencyKey }),
       changeCopy(operation, item.status === "needs_review"),
     );

@@ -494,7 +494,7 @@ Each scenario needs a name, starting cash, monthly income, housing, debt payment
 contribution, and either category spending lines or the "no other monthly spending" switch; debt
 balance, goal target, goal savings and assumptions are optional. The first thing still missing is
 named above the Compare button, which stays disabled until the comparison can be sent. Results
-are the server's: monthly cash flow, lowest cash balance, reserve runway, debt payoff, goal
+are the server's: monthly cash flow, projected lowest balance, reserve runway, debt payoff, goal
 effects, warnings and assumptions. Scenario amounts carry no currency, so none is shown. Results
 are read only, never change the plan, and are marked as belonging to the previous entries after an
 edit.
@@ -503,7 +503,9 @@ Every write here uses one toast from loading to the confirmed result. Finance da
 before the result is reported, and the item's actions stay disabled until that re-read has
 succeeded: if it fails after a confirmed write, the write is reported and the actions wait for the
 read to be retried. A schedule or cost form that is open when the item is paused elsewhere stays
-open with its entries, cannot be saved and says why. A refused write
+open with its entries, cannot be saved and says why. A match or reverse form likewise stays
+open through the re-read its own write causes, so it always reports the result and closes. The
+day a match was recorded is shown in the account planning timezone. A refused write
 (4xx) says nothing was changed or keeps the form open with its entries; a 409 says what changed
 elsewhere; a write with no answer says it could not be confirmed, and sending it again from the
 same open form or page reuses its idempotency key, so it cannot act twice. A form that is closed

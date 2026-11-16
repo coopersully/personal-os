@@ -402,9 +402,14 @@ describe("knowledge lifecycle", () => {
       mutationKey: randomUUID(),
       workspace: "tasks",
     });
-    // The corrected record still copied the restricted record once, so it cannot be wider.
+    // The corrected record once copied the restricted record, so that record still narrows
+    // it: an agent without the workspace scope cannot see it, and the owner always can.
     await expect(records().get(agent, { id: record.recordId })).rejects.toMatchObject({
-      status: 403,
+      status: 404,
+    });
+    expect(await records().get(human, { id: record.recordId })).toMatchObject({
+      revision: 2,
+      scope: { workspace: null },
     });
   });
 
@@ -568,10 +573,11 @@ describe("knowledge lifecycle", () => {
       records().get(agent, { id: owned.recordId, purpose: "planning" }),
       records().create(agent, agentRequest),
     ]);
+    // Replay of a record the agent can no longer read is content-free.
     expect(outcomes).toMatchObject([
       { status: "fulfilled", value: { status: "disputed", evidenceAvailable: false } },
       { status: "rejected", reason: { status: 404 } },
-      { status: "rejected", reason: { status: 404 } },
+      { status: "fulfilled", value: { outcome: "forgotten", recordId: contributed.recordId } },
     ]);
   });
 
@@ -733,7 +739,10 @@ describe("knowledge lifecycle", () => {
       workspace: "tasks",
     });
     await expect(records().get(agent, { id: derived.recordId })).rejects.toMatchObject({
-      status: 403,
+      status: 404,
+    });
+    expect(await records().get(human, { id: derived.recordId })).toMatchObject({
+      revision: 2,
     });
   });
 
@@ -805,8 +814,9 @@ describe("knowledge lifecycle", () => {
       mutationKey: randomUUID(),
       workspace: "tasks",
     });
+    // Replay of a copy narrowed by its source reads as gone to an agent without the scope.
     for (const request of requests)
-      await expect(records().create(agent, request)).rejects.toMatchObject({ status: 403 });
+      expect(await records().create(agent, request)).toMatchObject({ outcome: "forgotten" });
   });
 
   it("checks live goals referenced in legacy generated envelopes", async () => {
@@ -829,7 +839,7 @@ describe("knowledge lifecycle", () => {
       status: "disputed",
       evidenceAvailable: false,
     });
-    await expect(records().create(agent, request)).rejects.toMatchObject({ status: 404 });
+    expect(await records().create(agent, request)).toMatchObject({ outcome: "forgotten" });
   });
 
   it("does not attribute a correction to the old wording or invent legacy acceptance", async () => {

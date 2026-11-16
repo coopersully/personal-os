@@ -201,4 +201,49 @@ await import("./apps/mcp/src/http.ts");`,
       await client.close();
     }
   });
+
+  it("update_knowledge offers agents only the agent actions", async () => {
+    const client = new Client({ name: "knowledge-actions", version: "1" });
+    const transport = new StreamableHTTPClientTransport(new URL("/mcp", origin), {
+      requestInit: { headers: { authorization: "Bearer knowledge-test" } },
+    });
+    try {
+      await client.connect(transport);
+      const tool = (await client.listTools()).tools.find(({ name }) => name === "update_knowledge");
+      const actions = new Set<string>();
+      const visit = (node: unknown) => {
+        if (Array.isArray(node)) return node.forEach(visit);
+        if (!node || typeof node !== "object") return;
+        const action = (node as { properties?: { action?: { const?: unknown } } }).properties
+          ?.action?.const;
+        if (typeof action === "string") actions.add(action);
+        Object.values(node).forEach(visit);
+      };
+      visit(tool?.inputSchema);
+      expect([...actions].sort()).toEqual(
+        [
+          "archive",
+          "dispute",
+          "raise_sensitivity",
+          "restrict",
+          "revise",
+          "supersede",
+          "unarchive",
+        ].sort(),
+      );
+      for (const action of [
+        "confirm",
+        "set_access",
+        "widen",
+        "set_sensitivity",
+        "resolve_conflict",
+        "trash",
+        "restore",
+        "delete_now",
+      ])
+        expect(actions).not.toContain(action);
+    } finally {
+      await client.close();
+    }
+  });
 });

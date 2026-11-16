@@ -27,6 +27,7 @@ import { createApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { hashToken } from "../security.js";
 import type { Principal } from "../types.js";
+import { createKnowledgeAccess, findOwnedKnowledgeRevision } from "./access.js";
 import { createKnowledgeContextService } from "./context-service.js";
 import { createKnowledgeLifecycleService } from "./lifecycle-service.js";
 import { createKnowledgeRecordService } from "./record-service.js";
@@ -38,12 +39,40 @@ let database: DatabaseClient;
 const now = () => new Date("2026-11-15T12:00:00Z");
 const encryptionKey = Buffer.alloc(32, 7).toString("base64");
 const config = () => ({ db: database.db, now, encryptionKey });
+/** Keeps a copy supported after its source gains a revision. */
+const ownerStatement = { type: "statement" as const, wording: "I said this myself." };
 const chatStatement = (wording: string) => ({
   type: "statement" as const,
   wording,
   sessionRef: "chat-session",
   messageRef: "chat-message",
 });
+
+function app() {
+  return createApp({
+    db: database.db,
+    now,
+    config: loadConfig({
+      APP_BASE_URL: "https://app.example.com",
+      API_BASE_URL: "https://api.example.com",
+      APP_ENCRYPTION_KEY: encryptionKey,
+      MCP_INTERNAL_SECRET: "knowledge-test-internal-secret-32-chars",
+      DATABASE_URL: container.getConnectionUri(),
+      GOOGLE_REDIRECT_URI: "https://api.example.com/v1/connectors/google/callback",
+      X_REDIRECT_URI: "https://api.example.com/v1/x-bookmarks/callback",
+    }),
+  });
+}
+
+/** Knowledge evidence naming another record at its current revision. */
+function citing(source: Pick<KnowledgeRecord, "id" | "revision">) {
+  return {
+    type: "domain_record" as const,
+    domain: "knowledge" as const,
+    id: source.id,
+    revision: source.revision,
+  };
+}
 
 function fact(value: string, overrides: Partial<KnowledgeMutationInput> = {}) {
   return {
@@ -129,6 +158,22 @@ async function setUp() {
         mutationKey: randomUUID(),
       } as KnowledgeLifecycleInput);
       return knowledgeReceiptSchema.parse(result).record;
+    },
+    /** Runs an action whose receipt may be content-free for this caller. */
+    async mutate(
+      principal: Principal,
+      record: Pick<KnowledgeRecord, "id" | "revision">,
+      action: DistributiveOmit<
+        KnowledgeLifecycleInput,
+        "recordId" | "expectedRevision" | "mutationKey"
+      >,
+    ) {
+      return lifecycle.mutate(principal, {
+        ...action,
+        recordId: record.id,
+        expectedRevision: record.revision,
+        mutationKey: randomUUID(),
+      } as KnowledgeLifecycleInput);
     },
     async get(principal: Principal, id: string) {
       const result = await records.get(principal, { id });
@@ -380,29 +425,193 @@ describe("agent-managed memory authority", () => {
     });
   });
 
-  it("owner_widen_and_lower_respect_sources", async () => {
+  it("owner_widen_and_lower_follow_effective_disclosure", async () => {
     const source = await f.save(f.owner, fact("Tuesday", { scope: { workspace: "finances" } }));
     const derived = await f.save(
       f.owner,
       fact("Tuesday copy", {
         scope: { workspace: "finances" },
         sensitivity: "sensitive",
-        evidence: [
-          { type: "domain_record", domain: "knowledge", id: source.id, revision: source.revision },
-        ],
+        evidence: [citing(source)],
       }),
     );
-    await expect(
-      f.act(f.owner, derived, { action: "widen", workspace: null }),
-    ).rejects.toMatchObject({ status: 403 });
-    const lowered = await f.act(f.owner, derived, {
+    // Widening and lowering always succeed for the owner; the narrower source still narrows
+    // what agents see.
+    const widened = await f.act(f.owner, derived, { action: "widen", workspace: null });
+    expect(widened).toMatchObject({ scope: { workspace: null }, sensitivity: "sensitive" });
+    expect(widened.requiredReadScopes).not.toContain("finances:read");
+    const lowered = await f.act(f.owner, widened, {
       action: "set_sensitivity",
       sensitivity: "standard",
     });
     expect(lowered.sensitivity).toBe("standard");
-    const widened = await f.act(f.owner, source, { action: "widen", workspace: null });
-    expect(widened.scope.workspace).toBeNull();
-    expect(widened.requiredReadScopes).not.toContain("finances:read");
+    await expect(f.records.get(f.agent, { id: derived.id })).rejects.toMatchObject({
+      status: 404,
+    });
+    const finance = await f.newAgent(["knowledge:read", "knowledge:write", "finances:read"]);
+    expect(await f.get(finance, derived.id)).toMatchObject({ scope: { workspace: null } });
+  });
+
+  it("agent_restrict_of_source_never_locks_owner_out", async () => {
+    const source = await f.save(f.owner, fact("Tuesday"));
+    const derived = await f.save(
+      f.owner,
+      fact("Tuesday copy", { evidence: [ownerStatement, citing(source)] }),
+    );
+    // The agent narrows the source past its own reach, so its receipt is content-free.
+    expect(
+      await f.mutate(f.agent, source, { action: "restrict", workspace: "finances" }),
+    ).toMatchObject({ outcome: "forgotten" });
+    await f.act(f.owner, await f.get(f.owner, source.id), { action: "raise_sensitivity" });
+
+    expect(await f.get(f.owner, derived.id)).toMatchObject({
+      status: "active",
+      scope: { workspace: null },
+      sensitivity: "standard",
+    });
+    expect(await f.ids(f.owner)).toEqual(expect.arrayContaining([source.id, derived.id]));
+    const pack = await f.context.context(f.owner, {});
+    expect(pack.stated.map(({ id }) => id)).toEqual(expect.arrayContaining([derived.id]));
+    // The record keeps its own values; its effective disclosure carries the source's.
+    const effective = await database.db.transaction(async (tx) => {
+      const revision = await findOwnedKnowledgeRevision(tx, f.owner.userId, derived.id);
+      if (!revision) throw new Error("Expected the derived record.");
+      return createKnowledgeAccess(now).effectiveDisclosure(tx, f.owner, revision);
+    });
+    expect(effective).toEqual({
+      effectiveWorkspaces: ["finances"],
+      effectiveSensitivity: "sensitive",
+    });
+  });
+
+  it("narrowed_source_hides_dependent_from_unscoped_agent", async () => {
+    const finance = await f.newAgent(["knowledge:read", "knowledge:write", "finances:read"]);
+    const both = await f.newAgent([
+      "knowledge:read",
+      "knowledge:write",
+      "finances:read",
+      "mail:read",
+    ]);
+    const source = await f.save(f.owner, fact("Budget day"));
+    const other = await f.save(f.owner, fact("Mail day"));
+    const request = fact("Derived day", { evidence: [citing(source)] });
+    const derived = await f.save(f.agent, request);
+    const ownerCopy = await f.save(
+      f.owner,
+      fact("Owner copy", { evidence: [ownerStatement, citing(source)] }),
+    );
+    const twice = await f.save(
+      f.owner,
+      fact("Derived from both", { evidence: [ownerStatement, citing(source), citing(other)] }),
+    );
+    await f.act(f.owner, source, { action: "restrict", workspace: "finances" });
+    await f.act(f.owner, other, { action: "restrict", workspace: "mail" });
+
+    // Unscoped agent: the dependent is invisible everywhere.
+    await expect(f.records.get(f.agent, { id: derived.id })).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(f.search.history(f.agent, { recordId: derived.id })).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(await f.ids(f.agent)).toEqual([]);
+    expect(JSON.stringify(await f.context.context(f.agent, {}))).not.toContain(derived.id);
+    expect(await f.records.create(f.agent, request)).toEqual({
+      receiptId: expect.any(String),
+      recordId: derived.id,
+      outcome: "forgotten",
+    });
+    // A caller holding the source's scope sees it; two sources need both scopes.
+    expect(await f.get(finance, derived.id)).toMatchObject({ id: derived.id });
+    expect(await f.ids(f.agent)).not.toContain(ownerCopy.id);
+    expect(await f.ids(finance)).toEqual(expect.arrayContaining([source.id, ownerCopy.id]));
+    await expect(f.records.get(finance, { id: twice.id })).rejects.toMatchObject({ status: 404 });
+    expect(await f.ids(finance)).not.toContain(twice.id);
+    expect(await f.get(both, twice.id)).toMatchObject({ id: twice.id });
+    expect(await f.ids(both)).toContain(twice.id);
+  });
+
+  it("owner_resolves_proposal_after_agent_narrows_original", async () => {
+    const original = await f.save(f.owner, fact("Tuesday"));
+    const proposal = await f.act(f.agent, original, {
+      action: "revise",
+      content: {
+        ...original.content,
+        value: { ...original.content.value, value: { type: "string", value: "Friday" } },
+      } as KnowledgeRecord["content"],
+      evidence: [chatStatement("Friday instead.")],
+    });
+    expect(
+      await f.mutate(f.agent, original, { action: "restrict", workspace: "finances" }),
+    ).toMatchObject({ outcome: "forgotten" });
+    // The pending proposal follows its original, so the unscoped agent loses it.
+    await expect(f.records.get(f.agent, { id: proposal.id })).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(await f.get(f.owner, proposal.id)).toMatchObject({ id: proposal.id });
+    expect((await f.get(f.owner, original.id)).conflictRecordIds).toContain(proposal.id);
+
+    const accepted = await f.act(f.owner, proposal, {
+      action: "resolve_conflict",
+      keep: "proposed",
+    });
+    expect(accepted).toMatchObject({ status: "active", ownerHeld: true });
+    expect(await f.get(f.owner, original.id)).toMatchObject({
+      status: "superseded",
+      supersededBy: proposal.id,
+    });
+    // Accepted, it stands alone with its own disclosure.
+    expect(await f.get(f.agent, proposal.id)).toMatchObject({ status: "active" });
+  });
+
+  it("accepted_proposal_readable_after_original_blocked", async () => {
+    const original = await f.save(f.owner, fact("Tuesday"));
+    const proposal = await f.act(f.agent, original, {
+      action: "revise",
+      content: {
+        ...original.content,
+        value: { ...original.content.value, value: { type: "string", value: "Monday" } },
+      } as KnowledgeRecord["content"],
+      evidence: [chatStatement("Monday instead.")],
+    });
+    await f.act(f.owner, original, { action: "set_access", agentAccess: "blocked" });
+    await expect(f.records.get(f.agent, { id: proposal.id })).rejects.toMatchObject({
+      status: 404,
+    });
+    await f.act(f.owner, proposal, { action: "resolve_conflict", keep: "proposed" });
+    expect(await f.get(f.agent, proposal.id)).toMatchObject({
+      status: "active",
+      ownerHeld: true,
+      supersededBy: null,
+    });
+    expect(await f.ids(f.agent)).toEqual([proposal.id]);
+  });
+
+  it("agent_tokens_cannot_use_owner_actions_over_http", async () => {
+    const saved = await f.save(f.owner, fact("Tuesday"));
+    const api = app();
+    for (const body of [
+      { action: "confirm" },
+      { action: "set_access", agentAccess: "blocked" },
+      { action: "widen", workspace: null },
+      { action: "set_sensitivity", sensitivity: "standard" },
+      { action: "resolve_conflict", keep: "current" },
+      { action: "trash" },
+    ]) {
+      const response = await api.request(
+        `https://api.example.com/v1/knowledge/${saved.id}/actions`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${f.agent.token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ ...body, expectedRevision: 1, mutationKey: randomUUID() }),
+        },
+      );
+      expect(response.status, body.action).toBe(403);
+    }
+    expect(await f.get(f.owner, saved.id)).toMatchObject({ revision: 1, agentAccess: "allowed" });
   });
 
   it("sensitive_is_readable_by_agents", async () => {
@@ -519,7 +728,16 @@ describe("agent-managed memory authority", () => {
           .from(accessTokens)
           .where(and(eq(accessTokens.userId, f.owner.userId), eq(accessTokens.id, f.agent.actorId)))
       )[0]?.scopes;
+    // Seed every policy so an unwanted change would show in the comparison.
+    await database.db.insert(financeAutomationSettings).values({ userId: f.owner.userId });
+    await database.db.insert(financeAgentSettings).values({ userId: f.owner.userId });
+    await database.db.insert(executionPolicySettings).values({ userId: f.owner.userId });
     const before = { policy: await policyRows(), scopes: await tokenScopes() };
+    expect(before.policy).toEqual({
+      automation: [expect.objectContaining({ reviewBypassEnabled: false })],
+      agent: [expect.objectContaining({ reviewBypassEnabled: false, version: 1 })],
+      execution: [expect.objectContaining({ reviewBypassEnabled: false, version: 1 })],
+    });
     await f.save(f.agent, {
       mutationKey: randomUUID(),
       content: {
@@ -541,20 +759,7 @@ describe("agent-managed memory authority", () => {
   it("an_active_inferred_record_is_in_the_inferred_section_of_the_context_route", async () => {
     const saved = await f.save(f.agent, fact("Mornings", { evidence: [] }));
     expect(saved).toMatchObject({ status: "active", origin: "inferred" });
-    const app = createApp({
-      db: database.db,
-      now,
-      config: loadConfig({
-        APP_BASE_URL: "https://app.example.com",
-        API_BASE_URL: "https://api.example.com",
-        APP_ENCRYPTION_KEY: encryptionKey,
-        MCP_INTERNAL_SECRET: "knowledge-test-internal-secret-32-chars",
-        DATABASE_URL: container.getConnectionUri(),
-        GOOGLE_REDIRECT_URI: "https://api.example.com/v1/connectors/google/callback",
-        X_REDIRECT_URI: "https://api.example.com/v1/x-bookmarks/callback",
-      }),
-    });
-    const response = await app.request("https://api.example.com/v1/knowledge/context", {
+    const response = await app().request("https://api.example.com/v1/knowledge/context", {
       method: "POST",
       headers: { authorization: `Bearer ${f.agent.token}`, "content-type": "application/json" },
       body: JSON.stringify({}),

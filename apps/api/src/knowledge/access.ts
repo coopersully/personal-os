@@ -524,6 +524,23 @@ export async function ownedKnowledgeRevision(
   return record;
 }
 
+/**
+ * Only a pending proposal depends on the record it proposes to change (R9/R11). Once accepted
+ * or rejected, its `revision_proposal` edge is history, not a disclosure source.
+ */
+export function isPendingKnowledgeProposal({ snapshot }: Pick<KnowledgeRevision, "snapshot">) {
+  return snapshot.status === "proposed";
+}
+
+/** Edges that make a revision depend on another record for disclosure and support. */
+export function knowledgeDisclosureEdges(
+  revision: KnowledgeRevision,
+  edges: KnowledgeDerivation[],
+) {
+  const pending = isPendingKnowledgeProposal(revision);
+  return edges.filter((edge) => edge.kind !== "revision_proposal" || pending);
+}
+
 export function knowledgeSourceReferences(revision: KnowledgeRevision) {
   return new Set([...directSourceReferences(revision), ...revision.metadata.inheritedRecordIds]);
 }
@@ -566,6 +583,9 @@ async function historicalCopyReferences(
         eq(knowledgeDerivations.recordId, id),
         lte(knowledgeDerivations.revision, revisionNumber),
         inArray(knowledgeDerivations.sourceRecordId, ids),
+        isPendingKnowledgeProposal(revision)
+          ? undefined
+          : ne(knowledgeDerivations.kind, "revision_proposal"),
       ),
     );
   const sources = new Set(edges.map((edge) => edge.id));
@@ -663,6 +683,14 @@ type DisclosureProjection = {
   structuralAvailable: boolean;
   evidenceAvailable: boolean;
   supportStale: boolean;
+} & KnowledgeEffectiveDisclosure;
+/**
+ * A record's own workspace and sensitivity, narrowed by every live source: it needs every
+ * workspace scope any source needs, and it is sensitive when any source is (R10).
+ */
+export type KnowledgeEffectiveDisclosure = {
+  effectiveWorkspaces: NonNullable<KnowledgeRecordSnapshot["scope"]["workspace"]>[];
+  effectiveSensitivity: KnowledgeRecordSnapshot["sensitivity"];
 };
 type ReferenceState = { revision: KnowledgeRevision; projection: DisclosureProjection };
 
@@ -858,7 +886,10 @@ export function createKnowledgeAccess(now: () => Date) {
       if (source.evidence.type === "domain_record" && source.evidence.domain === "knowledge")
         sourcesById.add(source.evidence.id.toLowerCase());
     }
-    const edges = await knowledgeRevisionDerivations(tx, principal.userId, revision);
+    const edges = knowledgeDisclosureEdges(
+      revision,
+      await knowledgeRevisionDerivations(tx, principal.userId, revision),
+    );
     for (const edge of edges) sourcesById.add(edge.sourceRecordId.toLowerCase());
     for (const id of await historicalCopyReferences(tx, principal.userId, revision, sourcesById))
       sourcesById.add(id);
@@ -886,8 +917,9 @@ export function createKnowledgeAccess(now: () => Date) {
         forgotten.add(id);
         continue;
       }
+      // A narrower source never denies this record; it narrows it (below). An agent that
+      // cannot see the source cannot see this record either.
       try {
-        preserveKnowledgeDisclosure(snapshot, source.snapshot);
         const projection = await disclose(tx, principal, source, {
           ancestors,
           checked,
@@ -900,11 +932,23 @@ export function createKnowledgeAccess(now: () => Date) {
       }
     }
 
+    const effectiveWorkspaces = new Set(snapshot.scope.workspace ? [snapshot.scope.workspace] : []);
+    let effectiveSensitivity = snapshot.sensitivity;
+    for (const id of sourcesById) {
+      const source = referenceStates.get(id)?.projection;
+      if (!source) continue;
+      for (const workspace of source.effectiveWorkspaces) effectiveWorkspaces.add(workspace);
+      if (source.effectiveSensitivity === "sensitive") effectiveSensitivity = "sensitive";
+    }
+    if (
+      principal.actorType === "agent" &&
+      [...effectiveWorkspaces].some((workspace) => !principal.scopes.has(`${workspace}:read`))
+    )
+      throw new AppError("not_found", "The knowledge record was not found.");
+
     // Historical sources keep their live disclosure restrictions. Only this
     // revision's supporting sources decide whether the claim remains eligible.
-    const activeEdges = edges.filter(
-      (edge) => edge.kind !== "revision_proposal" || metadata.acceptance?.kind !== "owner",
-    );
+    const activeEdges = edges;
     const implicitCopies = copiedRecordIds(content, snapshot.relatedRecordIds).filter(
       (id) => !activeEdges.some((edge) => edge.sourceRecordId === id),
     );
@@ -976,6 +1020,8 @@ export function createKnowledgeAccess(now: () => Date) {
         structuralAvailable &&
         (independentlyStated || (!supportStale && (!needsSupport || availableSupport))),
       supportStale: !independentlyStated && supportStale,
+      effectiveWorkspaces: [...effectiveWorkspaces].sort(),
+      effectiveSensitivity,
     };
     checked.set(snapshot.id, result);
     return result;
@@ -1112,10 +1158,21 @@ export function createKnowledgeAccess(now: () => Date) {
     return { state: "available", record };
   }
 
+  /** Effective disclosure, e.g. to keep effectively sensitive memory out of the core. */
+  async function effectiveDisclosure(
+    tx: KnowledgeTransaction,
+    principal: Principal,
+    revision: KnowledgeRevision,
+  ): Promise<KnowledgeEffectiveDisclosure> {
+    const { effectiveWorkspaces, effectiveSensitivity } = await disclose(tx, principal, revision);
+    return { effectiveWorkspaces, effectiveSensitivity };
+  }
+
   return {
     admit,
     authorize,
     disclose,
+    effectiveDisclosure,
     goalAvailable,
     isDisclosable,
     liveSource,

@@ -124,15 +124,27 @@ export async function presentKnowledgeReceipt(
   }
   const revision = await ownedKnowledgeRevision(tx, principal, receipt.recordId);
   // A record hidden from this agent (blocked by the person, or restricted to a workspace the
-  // agent cannot read) replays like one that is gone, so the agent learns nothing about it.
-  if (principal.actorType === "agent" && !isKnowledgeVisibleToAgent(revision, principal.scopes))
-    return { receiptId: receipt.id, recordId: receipt.recordId, outcome: "forgotten" };
-  return {
+  // agent cannot read, directly or through a narrower source) replays like one that is gone,
+  // so the agent learns nothing about it.
+  const forgotten = {
     receiptId: receipt.id,
     recordId: receipt.recordId,
-    outcome: "readable",
-    record: await access.present(tx, principal, revision),
-  };
+    outcome: "forgotten",
+  } as const;
+  if (principal.actorType === "agent" && !isKnowledgeVisibleToAgent(revision, principal.scopes))
+    return forgotten;
+  try {
+    return {
+      receiptId: receipt.id,
+      recordId: receipt.recordId,
+      outcome: "readable",
+      record: await access.present(tx, principal, revision),
+    };
+  } catch (error) {
+    if (principal.actorType === "agent" && error instanceof AppError && error.status === 404)
+      return forgotten;
+    throw error;
+  }
 }
 
 export function ownerKnowledgeAcceptance(

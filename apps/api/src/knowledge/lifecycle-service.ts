@@ -92,20 +92,6 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
   const access = createKnowledgeAccess(now);
   const trash = createKnowledgeTrashService({ db, now });
 
-  /** A wider or lower disclosure must not expose more than the record's sources allow. */
-  async function assertSourcesAllow(
-    tx: KnowledgeTransaction,
-    principal: Principal,
-    current: KnowledgeRevision,
-    { scope, sensitivity }: Pick<KnowledgeRecordSnapshot, "scope" | "sensitivity">,
-  ) {
-    // Disclose the current revision with the new disclosure: its sources still apply.
-    await access.disclose(tx, principal, {
-      ...current,
-      snapshot: { ...current.snapshot, scope, sensitivity },
-    });
-  }
-
   function rescope(
     write: RevisionWrite,
     current: KnowledgeRevision,
@@ -273,13 +259,14 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
             write.snapshot.status = metadata.disputedBy ? "disputed" : "active";
             break;
           case "supersede": {
+            // Disclose first: a replacement hidden from this caller is not found, never a cycle.
+            const replacement = await ownedKnowledgeRevision(tx, principal, input.replacementId);
+            await access.disclose(tx, principal, replacement);
             await validateSupersession(tx, principal, snapshot.id, input.replacementId);
             if (agent && heldByOwner(current)) {
               write = await proposeReplacement(tx, principal, current, input.replacementId);
               break;
             }
-            const replacement = await ownedKnowledgeRevision(tx, principal, input.replacementId);
-            await access.disclose(tx, principal, replacement);
             write.snapshot.status = "superseded";
             write.metadata.supersededBy = input.replacementId;
             break;
@@ -293,15 +280,14 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
             rescope(write, current, input.workspace);
             break;
           case "widen":
+            // A narrower source keeps narrowing this record at read time (effective disclosure).
             rescope(write, current, input.workspace);
-            await assertSourcesAllow(tx, principal, current, write.snapshot);
             break;
           case "raise_sensitivity":
             write.snapshot.sensitivity = "sensitive";
             break;
           case "set_sensitivity":
             write.snapshot.sensitivity = input.sensitivity;
-            await assertSourcesAllow(tx, principal, current, write.snapshot);
             break;
           case "set_access":
             write.record = { ...write.record, agentAccess: input.agentAccess };
@@ -314,6 +300,14 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
             const [kept] = originalIds;
             if (!kept)
               throw new AppError("conflict", "This memory is not a pending proposal to resolve.");
+            // Resolved, the proposal no longer derives from the record it proposed to change:
+            // accepted it stands alone, linked by supersession; rejected it is superseded.
+            write.derivations = write.derivations.filter(
+              (edge) => edge.kind !== "revision_proposal",
+            );
+            write.metadata.inheritedRecordIds = write.metadata.inheritedRecordIds.filter(
+              (id) => !originalIds.includes(id.toLowerCase()),
+            );
             if (input.keep === "proposed") {
               related = await acceptProposal(tx, principal, current, originalIds, write, at);
             } else {

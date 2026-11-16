@@ -95,6 +95,28 @@ describe("purpose-bound memory retrieval", () => {
     });
   }
 
+  /** A revision whose knowledge evidence names its own record forms a dependency cycle. */
+  function selfCiting<T extends { id: string; sources: { evidence: object }[] }>(snapshot: T): T {
+    return {
+      ...snapshot,
+      sources: snapshot.sources.map((source) => ({
+        ...source,
+        evidence: { ...source.evidence, id: snapshot.id },
+      })),
+    };
+  }
+  async function citeItself(recordId: string) {
+    const [first] = await database.db
+      .select({ snapshot: knowledgeRevisions.snapshot })
+      .from(knowledgeRevisions)
+      .where(eq(knowledgeRevisions.recordId, recordId));
+    if (!first) throw new Error("Expected the fixture revision.");
+    await database.db
+      .update(knowledgeRevisions)
+      .set({ snapshot: selfCiting(first.snapshot) })
+      .where(eq(knowledgeRevisions.recordId, recordId));
+  }
+
   async function fixture() {
     const userId = randomUUID();
     fixtureIds.push(userId);
@@ -515,11 +537,11 @@ describe("purpose-bound memory retrieval", () => {
       mutationKey: randomUUID(),
       workspace: "finances",
     });
+    // The restricted source narrows its copies: hidden from this agent, never from the owner.
     expect(await f.search.search(f.agent, query)).toMatchObject({ state: "available", items: [] });
-    expect(await f.context.context(f.owner, query)).toMatchObject({
-      stated: [],
-      missingInputs: ["no_current_memory"],
-    });
+    expect((await f.context.context(f.owner, query)).stated.map(({ id }) => id)).toEqual([
+      independent.id,
+    ]);
   });
 
   it("prefers an exact owned entity match over a related record on a relevance tie", async () => {
@@ -625,28 +647,39 @@ describe("purpose-bound memory retrieval", () => {
       mutationKey: randomUUID(),
       workspace: "finances",
     });
-    for (const principal of [f.agent, f.owner]) {
-      const page = await f.search.search(principal, { ...planning, text: "orchard" });
-      expect(page.items.map(({ id, relatedRecordIds }) => ({ id, relatedRecordIds }))).toEqual([
-        { id: ordinary.id, relatedRecordIds: [] },
-      ]);
-      expect(await f.records.get(principal, { ...planning, id: ordinary.id })).toMatchObject({
-        id: ordinary.id,
-        relatedRecordIds: [],
-      });
-      await expect(f.records.get(principal, { ...planning, id: copy.id })).rejects.toMatchObject({
-        status: 403,
-      });
-      expect(
-        (await f.search.history(principal, { ...planning, recordId: ordinary.id })).items,
-      ).toMatchObject([
-        { id: ordinary.id, revision: 2, relatedRecordIds: [] },
-        { id: ordinary.id, revision: 1, relatedRecordIds: [] },
-      ]);
-      await expect(
-        f.search.history(principal, { ...planning, recordId: copy.id }),
-      ).rejects.toMatchObject({ status: 403 });
-    }
+    // The agent lacks the finances scope: the link is redacted and the copy is invisible.
+    const page = await f.search.search(f.agent, { ...planning, text: "orchard" });
+    expect(page.items.map(({ id, relatedRecordIds }) => ({ id, relatedRecordIds }))).toEqual([
+      { id: ordinary.id, relatedRecordIds: [] },
+    ]);
+    expect(await f.records.get(f.agent, { ...planning, id: ordinary.id })).toMatchObject({
+      id: ordinary.id,
+      relatedRecordIds: [],
+    });
+    await expect(f.records.get(f.agent, { ...planning, id: copy.id })).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(
+      (await f.search.history(f.agent, { ...planning, recordId: ordinary.id })).items,
+    ).toMatchObject([
+      { id: ordinary.id, revision: 2, relatedRecordIds: [] },
+      { id: ordinary.id, revision: 1, relatedRecordIds: [] },
+    ]);
+    await expect(
+      f.search.history(f.agent, { ...planning, recordId: copy.id }),
+    ).rejects.toMatchObject({ status: 404 });
+    // The owner is never denied their own memory by a narrower source.
+    expect(await f.records.get(f.owner, { ...planning, id: ordinary.id })).toMatchObject({
+      relatedRecordIds: [source.id],
+    });
+    expect(await f.records.get(f.owner, { ...planning, id: copy.id })).toMatchObject({
+      id: copy.id,
+    });
+    expect(
+      (await f.search.search(f.owner, { ...planning, text: "orchard" })).items
+        .map(({ id }) => id)
+        .sort(),
+    ).toEqual([ordinary.id, copy.id].sort());
   });
 
   it("redacts an ordinary goal link for a reader without goal scope", async () => {
@@ -764,19 +797,13 @@ describe("purpose-bound memory retrieval", () => {
         evidence: [{ type: "domain_record", domain: "knowledge", id: source.id, revision: 1 }],
       }),
     );
+    // A dependency cycle is the disclosure denial the owner can still meet.
+    await citeItself(copy.id);
     await extendFixtureHistory(f.owner.userId, copy.id);
-    await f.lifecycle.mutate(f.owner, {
-      action: "restrict",
-      recordId: source.id,
-      expectedRevision: 1,
-      mutationKey: randomUUID(),
-      workspace: "finances",
-    });
     const page = await f.exporter.exportPage(f.owner, {});
     expect(page.nextCursor).toBeNull();
     expect(page.state).toBe("available");
     expect(page.items.map(({ id, revision }) => ({ id, revision }))).toEqual([
-      { id: source.id, revision: 2 },
       { id: source.id, revision: 1 },
     ]);
     expect(JSON.stringify(page)).not.toContain("denied copy fixture");
@@ -794,22 +821,15 @@ describe("purpose-bound memory retrieval", () => {
         evidence: [{ type: "domain_record", domain: "knowledge", id: source.id, revision: 1 }],
       }),
     );
+    await citeItself(seed.id);
     const [revision] = await database.db
       .select({ snapshot: knowledgeRevisions.snapshot })
       .from(knowledgeRevisions)
       .where(eq(knowledgeRevisions.recordId, seed.id));
     if (!revision) throw new Error("Expected the original copy revision.");
 
-    await f.lifecycle.mutate(f.owner, {
-      action: "restrict",
-      recordId: source.id,
-      expectedRevision: 1,
-      mutationKey: randomUUID(),
-      workspace: "finances",
-    });
     const baseline = await f.exporter.exportPage(f.owner, {});
     expect(baseline.items.map(({ id, revision }) => ({ id, revision }))).toEqual([
-      { id: source.id, revision: 2 },
       { id: source.id, revision: 1 },
     ]);
     const ids = Array.from({ length: 101 }, () => randomUUID());
@@ -820,7 +840,7 @@ describe("purpose-bound memory retrieval", () => {
           userId: f.owner.userId,
           recordId,
           revision: 1,
-          snapshot: { ...revision.snapshot, id: recordId },
+          snapshot: selfCiting({ ...revision.snapshot, id: recordId }),
         })),
       );
     });

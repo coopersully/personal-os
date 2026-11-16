@@ -258,8 +258,11 @@ export function createKnowledgeSearchService(dependencies: KnowledgeRetrievalDep
           )
             throw new AppError("not_found", "The knowledge record was not found.");
           const disclosure = await access.retrievalDisclosure(tx, principal, current);
+          // An agent that cannot read the record (e.g. through a narrower source) finds nothing.
           if (disclosure.state === "denied")
-            throw new AppError("forbidden", "The memory history is unavailable to this caller.");
+            throw principal.actorType === "agent"
+              ? new AppError("not_found", "The knowledge record was not found.")
+              : new AppError("forbidden", "The memory history is unavailable to this caller.");
           return pageKnowledgeHistory(
             session,
             principal.userId,

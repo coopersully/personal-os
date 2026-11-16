@@ -99,12 +99,7 @@ it("exposes SMS work only with all Texting grants and removes it in read-only mo
 
 describe("knowledge scope discovery", () => {
   it("requires both write grants and makes only reads visible in read-only sessions", () => {
-    const reads = [
-      "explain_context",
-      "get_context_for_intent",
-      "get_knowledge",
-      "search_user_knowledge",
-    ];
+    const reads = ["get_context_for_intent", "get_knowledge", "search_user_knowledge"];
     const writes = ["merge_knowledge_tags", "save_knowledge", "update_knowledge"];
     const knowledgeTools = (scopes: Parameters<typeof availableToolNames>[0], readOnly: boolean) =>
       availableToolNames(scopes, readOnly)

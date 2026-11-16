@@ -5754,33 +5754,6 @@ Apply at most ten pending corrections from the exact preview fingerprint. Author
 }
 ```
 
-## explain_context
-
-Check which references from a previous context use remain available to this caller. Changed or unavailable references call for a fresh context fetch.
-
-- Domain: knowledge; stage: verify; policy: read_only.
-- Grants (all): knowledge:read.
-- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
-- [Adapter source](../../apps/mcp/src/tools/knowledge.ts); typed API methods: `explainKnowledgeContext`.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "contextUseId": {
-      "type": "string",
-      "format": "uuid",
-      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-    }
-  },
-  "required": [
-    "contextUseId"
-  ],
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false
-}
-```
-
 ## export_finance_data
 
 Export the user's nohmi-owned Finance ledger, accounts, categories, and projections.

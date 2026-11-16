@@ -44,8 +44,6 @@ import type {
   FinanceProvider,
   GoogleConnectionService,
   HomeLocation,
-  KnowledgeContextReference,
-  KnowledgeQuery,
   LegacyMailRuleAction,
   MailAddress,
   MailAttachment,
@@ -7356,40 +7354,5 @@ export const knowledgeDerivations = pgTable(
       sql`${table.kind} IN ('source_record', 'entity_meaning', 'content_evidence', 'revision_proposal')`,
     ),
     check("knowledge_derivations_no_self", sql`${table.recordId} <> ${table.sourceRecordId}`),
-  ],
-);
-
-/** Context receipts carry only the authorized references selected for disclosure. */
-export const knowledgeContextUses = pgTable(
-  "knowledge_context_uses",
-  {
-    id: uuid("id").primaryKey(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    actorId: uuid("actor_id").notNull(),
-    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
-    purpose: text("purpose").$type<NonNullable<KnowledgeQuery["purpose"]>>(),
-    workspace: text("workspace").$type<NonNullable<KnowledgeQuery["workspace"]>>(),
-    epoch: bigint("epoch", { mode: "number" }).notNull(),
-    references: jsonb("references").$type<KnowledgeContextReference[]>().notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
-  },
-  (table) => [
-    index("knowledge_context_uses_owner_idx").on(table.userId),
-    check("knowledge_context_uses_actor_check", sql`${table.actorType} IN ('user', 'agent')`),
-    check(
-      "knowledge_context_uses_purpose_check",
-      sql`${table.purpose} IN ('setup', 'bookkeeping', 'planning', 'review', 'communication', 'recovery')`,
-    ),
-    check(
-      "knowledge_context_uses_workspace_check",
-      sql`${table.workspace} IN ('tasks', 'calendar', 'mail', 'finances')`,
-    ),
-    check("knowledge_context_uses_epoch_check", sql`${table.epoch} >= 0`),
-    check(
-      "knowledge_context_uses_refs_check",
-      sql`jsonb_typeof(${table.references}) = 'array' AND jsonb_array_length(${table.references}) <= 50`,
-    ),
   ],
 );

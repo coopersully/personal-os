@@ -13,7 +13,6 @@ import {
 import {
   type AccessScope,
   type KnowledgeMutationInput,
-  knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
   knowledgePageSchema,
   knowledgeReceiptSchema,
@@ -170,7 +169,6 @@ describe.sequential("registered memory lifecycle", () => {
           .map(({ name }) => name)
           .sort(),
       ).toEqual([
-        "explain_context",
         "get_context_for_intent",
         "get_knowledge",
         "merge_knowledge_tags",
@@ -229,7 +227,6 @@ describe.sequential("registered memory lifecycle", () => {
     }
 
     const second = await b.connect();
-    let previousContextId: string;
     try {
       const page = knowledgePageSchema.parse(
         await tool(second.client, "search_user_knowledge", {
@@ -273,15 +270,6 @@ describe.sequential("registered memory lifecycle", () => {
       );
       expect(prior.stated).toMatchObject([{ id: savedId, content: original.content }]);
       expect(JSON.stringify(prior)).not.toContain("private appointment detail");
-      previousContextId = prior.contextUseId;
-      expect(
-        knowledgeContextExplanationSchema.parse(
-          await tool(second.client, "explain_context", { contextUseId: previousContextId }),
-        ),
-      ).toMatchObject({
-        state: "available",
-        references: [{ recordId: savedId, revision: 1, origin: "stated" }],
-      });
     } finally {
       await second.close();
     }
@@ -378,9 +366,6 @@ describe.sequential("registered memory lifecycle", () => {
     }
     const afterDeletion = await b.connect();
     try {
-      expect(
-        await tool(afterDeletion.client, "explain_context", { contextUseId: previousContextId }),
-      ).toEqual({ contextUseId: previousContextId, state: "unavailable" });
       const after = knowledgeContextPackSchema.parse(
         await tool(afterDeletion.client, "get_context_for_intent", planning),
       );

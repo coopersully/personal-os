@@ -169,7 +169,6 @@ await import("./apps/mcp/src/http.ts");`,
     [
       "/mcp",
       [
-        "explain_context",
         "get_context_for_intent",
         "get_knowledge",
         "merge_knowledge_tags",
@@ -178,10 +177,7 @@ await import("./apps/mcp/src/http.ts");`,
         "update_knowledge",
       ],
     ],
-    [
-      "/mcp/readonly",
-      ["explain_context", "get_context_for_intent", "get_knowledge", "search_user_knowledge"],
-    ],
+    ["/mcp/readonly", ["get_context_for_intent", "get_knowledge", "search_user_knowledge"]],
   ])("discovers the permitted knowledge tools at %s", async (path, expected) => {
     const client = new Client({ name: "knowledge-discovery", version: "1" });
     const transport = new StreamableHTTPClientTransport(new URL(path, origin), {

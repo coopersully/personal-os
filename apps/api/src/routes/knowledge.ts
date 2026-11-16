@@ -1,7 +1,5 @@
 import {
-  knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
-  knowledgeExplainInputSchema,
   knowledgeExportInputSchema,
   knowledgeHistoryInputSchema,
   knowledgeLifecycleInputSchema,
@@ -134,17 +132,6 @@ export function registerKnowledgeRoutes({
       parseKnowledgeResponse(
         knowledgeContextPackSchema,
         await contextService.context(context.get("principal"), input),
-      ),
-    );
-  });
-  app.get("/v1/knowledge/context/:id", async (context) => {
-    const input = knowledgeExplainInputSchema.parse(
-      pathInput(queryParameters(context), "contextUseId", context.req.param("id")),
-    );
-    return context.json(
-      parseKnowledgeResponse(
-        knowledgeContextExplanationSchema,
-        await contextService.explain(context.get("principal"), input),
       ),
     );
   });

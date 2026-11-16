@@ -5,7 +5,6 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   goals,
-  knowledgeContextUses,
   knowledgeOwnerEpochs,
   knowledgeRecords,
   knowledgeRevisionMetadata,
@@ -16,7 +15,6 @@ import {
 } from "@personal-os/database";
 import {
   type KnowledgeMutationInput,
-  knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
   knowledgePageSchema,
   knowledgeQuerySchema,
@@ -254,24 +252,9 @@ describe("purpose-bound memory retrieval", () => {
     const context = await f.context.context(f.agent, { ...planning, text: "river" });
     const next = await f.context.context(f.agent, { ...planning, text: "river", limit: 1 });
     if (!next.nextCursor) throw new Error("Expected a context cursor.");
-    const explain = { contextUseId: context.contextUseId };
-    const receipt = await database.db
-      .select()
-      .from(knowledgeContextUses)
-      .where(eq(knowledgeContextUses.id, context.contextUseId));
-    expect(receipt).toHaveLength(1);
-    expect(JSON.stringify(receipt)).not.toMatch(/secret-river|restricted-river|"river"/);
-    expect(
-      knowledgeContextExplanationSchema.parse(await f.context.explain(f.agent, explain)),
-    ).toMatchObject({
-      state: "available",
-      references: expect.arrayContaining([
-        expect.objectContaining({ recordId: forgotten.id, revision: 1 }),
-      ]),
-    });
-    expect(await f.context.explain(await f.newAgent(), explain)).toMatchObject({
-      state: "unavailable",
-    });
+    expect(context.stated.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([forgotten.id, restricted.id]),
+    );
     await f.lifecycle.mutate(f.owner, {
       action: "restrict",
       recordId: restricted.id,
@@ -292,7 +275,9 @@ describe("purpose-bound memory retrieval", () => {
       mutationKey: randomUUID(),
     });
     expect(deleted.outcome).toBe("forgotten");
-    expect(await f.context.explain(f.agent, explain)).toMatchObject({ state: "unavailable" });
+    expect(
+      JSON.stringify(await f.context.context(f.agent, { ...planning, text: "river" })),
+    ).not.toContain("secret-river-fixture");
     await expect(
       f.search.history(f.owner, { ...planning, recordId: forgotten.id }),
     ).rejects.toMatchObject({ status: 404 });
@@ -484,9 +469,6 @@ describe("purpose-bound memory retrieval", () => {
       stated: [],
       missingInputs: expect.arrayContaining(["source_unavailable", "no_current_memory"]),
     });
-    expect(await f.context.explain(f.agent, { contextUseId: initial.contextUseId })).toMatchObject({
-      state: "unavailable",
-    });
     await database.db
       .update(accessTokens)
       .set({ scopes: ["knowledge:read"] })
@@ -585,23 +567,13 @@ describe("purpose-bound memory retrieval", () => {
     });
   });
 
-  it("places an active inferred record in the inferred section and explains it", async () => {
+  it("places an active inferred record in the inferred section", async () => {
     const f = await fixture();
     const record = await f.save(fact("inferred orchard", { evidence: [] }), f.agent);
     expect(record).toMatchObject({ status: "active", origin: "inferred" });
     const pack = await f.context.context(f.agent, planning);
     expect(pack.inferred.map(({ id }) => id)).toEqual([record.id]);
     expect(pack.tentative).toEqual([]);
-    expect(
-      knowledgeContextExplanationSchema.parse(
-        await f.context.explain(f.agent, {
-          contextUseId: pack.contextUseId,
-        }),
-      ),
-    ).toMatchObject({
-      state: "available",
-      references: [{ recordId: record.id, reason: "inferred", origin: "inferred" }],
-    });
   });
 
   it("redacts a restricted ordinary link and still withholds a true copy", async () => {
@@ -771,7 +743,7 @@ describe("purpose-bound memory retrieval", () => {
     expect(nextExport.nextCursor).toBeNull();
   });
 
-  it("persists and explains a context receipt with an epoch greater than a 32-bit integer", async () => {
+  it("returns a context pack with an epoch greater than a 32-bit integer", async () => {
     const f = await fixture();
     const record = await f.save(fact("wide epoch"));
     await database.db
@@ -780,10 +752,7 @@ describe("purpose-bound memory retrieval", () => {
       .where(eq(knowledgeOwnerEpochs.userId, f.owner.userId));
     const pack = await f.context.context(f.agent, planning);
     expect(pack.epoch).toBe(2_147_483_648);
-    expect(await f.context.explain(f.agent, { contextUseId: pack.contextUseId })).toMatchObject({
-      state: "available",
-      references: [{ recordId: record.id }],
-    });
+    expect(pack.stated.map(({ id }) => id)).toEqual([record.id]);
   });
 
   it("does not expose a continuation for more than 100 denied export revisions", async () => {

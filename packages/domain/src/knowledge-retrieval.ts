@@ -111,16 +111,11 @@ export const knowledgeContextReasonSchema = z.enum([
   "conflicts",
 ]);
 export type KnowledgeContextReason = z.infer<typeof knowledgeContextReasonSchema>;
-export const knowledgeContextReferenceSchema = knowledgeRecordReferenceSchema.extend({
-  reason: knowledgeContextReasonSchema,
-});
-export type KnowledgeContextReference = z.infer<typeof knowledgeContextReferenceSchema>;
 
 const section = z.array(knowledgeRecordSchema).max(knowledgeRetrievalMaxRecords);
 export const knowledgeContextPackSchema = z
   .object({
     schemaVersion: z.literal(1),
-    contextUseId: idSchema,
     stated: section,
     inferred: section,
     tentative: section,
@@ -143,23 +138,3 @@ export const knowledgeContextPackSchema = z
     "A context pack cannot exceed 32 KiB.",
   );
 export type KnowledgeContextPack = z.infer<typeof knowledgeContextPackSchema>;
-
-export const knowledgeExplainInputSchema = z.object({ contextUseId: idSchema }).strict();
-export type KnowledgeExplainInput = z.infer<typeof knowledgeExplainInputSchema>;
-const explainedRecord = knowledgeContextReferenceSchema.extend({ origin: knowledgeOriginSchema });
-export const knowledgeContextExplanationSchema = z.discriminatedUnion("state", [
-  z
-    .object({
-      contextUseId: idSchema,
-      state: z.enum(["available", "changed"]),
-      references: z.array(explainedRecord).max(knowledgeRetrievalMaxRecords),
-    })
-    .strict(),
-  z
-    .object({
-      contextUseId: idSchema,
-      state: z.literal("unavailable"),
-    })
-    .strict(),
-]);
-export type KnowledgeContextExplanation = z.infer<typeof knowledgeContextExplanationSchema>;

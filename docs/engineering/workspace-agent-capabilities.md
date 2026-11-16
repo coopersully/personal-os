@@ -66,8 +66,7 @@ Begin with `get_ilo_context`. When it lists `search_user_knowledge`, search for 
 purpose before saving a duplicate. Use `get_knowledge` to inspect a specific record and
 `get_context_for_intent` to fetch bounded evidence. Cite the supporting sources and distinguish
 stated knowledge from inference. Carry forward conflicts, tentative material, and missing inputs
-as shown. `explain_context` checks the current availability of references from a previous
-context use. Fetch fresh context after a mutation. Memory provides evidence; action authority
+as shown. Fetch fresh context after a mutation. Memory provides evidence; action authority
 comes from the API's current policy and grants.
 
 The four read tools require `knowledge:read`. `save_knowledge` and `update_knowledge` also

@@ -144,27 +144,3 @@ CREATE TRIGGER knowledge_invalidate_signed_source AFTER DELETE ON "text_inbound_
 --> statement-breakpoint
 CREATE TRIGGER knowledge_invalidate_goal_source AFTER DELETE ON "goals"
   FOR EACH ROW EXECUTE FUNCTION knowledge_invalidate_external_source();
---> statement-breakpoint
--- from branch 0144_knowledge_context_receipts.sql
-CREATE TABLE "knowledge_context_uses" (
-  "id" uuid PRIMARY KEY NOT NULL,
-  "user_id" uuid NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
-  "actor_id" uuid NOT NULL,
-  "actor_type" text NOT NULL,
-  "purpose" text,
-  "workspace" text,
-  "epoch" integer NOT NULL,
-  "references" jsonb NOT NULL,
-  "created_at" timestamp with time zone NOT NULL,
-  CONSTRAINT "knowledge_context_uses_actor_check" CHECK ("actor_type" IN ('user', 'agent')),
-  CONSTRAINT "knowledge_context_uses_purpose_check" CHECK ("purpose" IN ('setup', 'bookkeeping', 'planning', 'review', 'communication', 'recovery')),
-  CONSTRAINT "knowledge_context_uses_workspace_check" CHECK ("workspace" IN ('tasks', 'calendar', 'mail', 'finances')),
-  CONSTRAINT "knowledge_context_uses_epoch_check" CHECK ("epoch" >= 0),
-  CONSTRAINT "knowledge_context_uses_refs_check" CHECK (jsonb_typeof("references") = 'array' AND jsonb_array_length("references") <= 50)
-);
---> statement-breakpoint
-CREATE INDEX "knowledge_context_uses_owner_idx" ON "knowledge_context_uses" ("user_id");
---> statement-breakpoint
--- from branch 0145_knowledge_context_selection_refs.sql
-ALTER TABLE "knowledge_context_uses"
-  ALTER COLUMN "epoch" TYPE bigint;

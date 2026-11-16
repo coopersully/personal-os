@@ -405,7 +405,6 @@ export const personalOsToolCatalog = {
     idempotent: true,
   }),
   get_context_for_intent: read("knowledge", ["knowledge:read"], "context"),
-  explain_context: read("knowledge", ["knowledge:read"], "verify"),
   list_goals: read("goals", ["goals:read"]),
   create_goal: write("goals", ["goals:write"]),
   update_goal: write("goals", ["goals:write"]),

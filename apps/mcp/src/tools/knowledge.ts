@@ -3,7 +3,6 @@ import type { PersonalOsApiClient } from "@personal-os/api-client";
 import {
   knowledgeAgentLifecycleInputSchema,
   knowledgeAgentQuerySchema,
-  knowledgeExplainInputSchema,
   knowledgeMutationInputSchema,
   knowledgeReadInputSchema,
   knowledgeTagMergeInputSchema,
@@ -65,14 +64,5 @@ export function registerKnowledgeTools(server: McpServer, api: PersonalOsApiClie
       inputSchema: knowledgeAgentQuerySchema,
     },
     async (input) => apiResult(() => api.getKnowledgeContext(input)),
-  );
-  server.registerTool(
-    "explain_context",
-    {
-      description:
-        "Check which references from a previous context use remain available to this caller. Changed or unavailable references call for a fresh context fetch.",
-      inputSchema: knowledgeExplainInputSchema,
-    },
-    async (input) => apiResult(() => api.explainKnowledgeContext(input)),
   );
 }

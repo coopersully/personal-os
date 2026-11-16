@@ -74,7 +74,7 @@ function cursorCodec(encryptionKey: string) {
 }
 
 type RetrievalAdmission = {
-  operation: "search" | "context" | "history" | "export" | "explain";
+  operation: "search" | "context" | "history" | "export";
   filter?: unknown;
   cursor?: string | undefined;
   workspace?: KnowledgeQuery["workspace"];

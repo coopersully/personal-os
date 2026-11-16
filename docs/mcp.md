@@ -137,8 +137,7 @@ The registered shared tools use the credential's live grants and one declared re
 - `get_context_for_intent` returns a bounded context pack for a declared purpose and optional target;
 - `search_user_knowledge` and `get_knowledge` for precise inspection;
 - `save_knowledge` for sourced statements and proposals, and `update_knowledge` for authorized
-  revision, dispute, or supersession;
-- `explain_context` rechecks which references from an earlier context use are still available.
+  revision, dispute, or supersession.
 
 Search before saving. Cite the supporting sources, distinguish stated knowledge from inference, and
 fetch fresh context after changing a record. Retrieval enforces scope, purpose, sensitivity, and

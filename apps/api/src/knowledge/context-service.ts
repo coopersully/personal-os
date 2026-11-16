@@ -1,21 +1,13 @@
-import { randomUUID } from "node:crypto";
-import { knowledgeContextUses } from "@personal-os/database";
 import {
-  type KnowledgeContextExplanation,
   type KnowledgeContextPack,
   type KnowledgeContextReason,
-  type KnowledgeContextReference,
-  type KnowledgeExplainInput,
   type KnowledgeQuery,
   type KnowledgeRecord,
   knowledgeContextMaxBytes,
-  knowledgeContextReferenceSchema,
-  knowledgeExplainInputSchema,
   knowledgeQuerySchema,
 } from "@personal-os/domain";
-import { and, eq } from "drizzle-orm";
 import type { Principal } from "../types.js";
-import { findOwnedKnowledgeRevision, revisionIsCurrent } from "./access.js";
+import { revisionIsCurrent } from "./access.js";
 import {
   createKnowledgeRetrievalSession,
   type KnowledgeRetrievalDependencies,
@@ -51,7 +43,6 @@ function contextPage(
   );
   const pack: KnowledgeContextPack = {
     schemaVersion: 1,
-    contextUseId: randomUUID(),
     stated: [],
     inferred: [],
     tentative: [],
@@ -64,7 +55,6 @@ function contextPage(
     nextFetchRefs: [],
     epoch: session.epoch,
   };
-  const references: KnowledgeContextReference[] = [];
   const end = Math.min(ranked.length, page.offset + limit);
   for (let i = page.offset; i < end; i++) {
     const item = ranked[i];
@@ -85,11 +75,10 @@ function contextPage(
       pack.nextCursor = i > page.offset ? page.encode(i) : next ? page.encode(i + 1) : null;
       break;
     }
-    references.push({ ...reference(record), reason });
   }
   if (pack.stated.length || pack.inferred.length)
     pack.missingInputs = pack.missingInputs.filter((input) => input !== "no_current_memory");
-  return { pack, references };
+  return pack;
 }
 
 export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDependencies) {
@@ -111,91 +100,9 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
             principal,
             input,
           );
-          const { pack, references } = contextPage(
-            session,
-            records,
-            unavailable,
-            input.limit ?? 20,
-          );
-          await session.tx.insert(knowledgeContextUses).values({
-            id: pack.contextUseId,
-            userId: principal.userId,
-            actorId: principal.actorId,
-            actorType: principal.actorType,
-            purpose: input.purpose ?? null,
-            workspace: input.workspace ?? null,
-            epoch: session.epoch,
-            references,
-            createdAt: session.at,
-          });
-          return pack;
+          return contextPage(session, records, unavailable, input.limit ?? 20);
         },
       );
-    },
-
-    async explain(
-      principal: Principal,
-      raw: KnowledgeExplainInput,
-    ): Promise<KnowledgeContextExplanation> {
-      const { contextUseId } = knowledgeExplainInputSchema.parse(raw);
-      const unavailable = { contextUseId, state: "unavailable" } as const;
-      return run(principal, { operation: "explain" }, async (session) => {
-        const { tx, access, epoch, authorizedScopes, at } = session;
-        const [receipt] = await tx
-          .select()
-          .from(knowledgeContextUses)
-          .where(
-            and(
-              eq(knowledgeContextUses.id, contextUseId),
-              eq(knowledgeContextUses.userId, principal.userId),
-              eq(knowledgeContextUses.actorId, principal.actorId),
-              eq(knowledgeContextUses.actorType, principal.actorType),
-            ),
-          );
-        if (
-          !receipt ||
-          (receipt.workspace &&
-            principal.actorType === "agent" &&
-            !authorizedScopes.includes(`${receipt.workspace}:read`))
-        )
-          return unavailable;
-        let changed = receipt.epoch !== epoch;
-        let visible = false;
-        const references: (KnowledgeContextReference & { origin: KnowledgeRecord["origin"] })[] =
-          [];
-        for (const saved of receipt.references) {
-          const selected = knowledgeContextReferenceSchema.parse(saved);
-          const revision = await findOwnedKnowledgeRevision(
-            tx,
-            principal.userId,
-            selected.recordId,
-          );
-          if (!revision) {
-            changed = true;
-            continue;
-          }
-          const projection = await access.projectForRetrieval(tx, principal, revision);
-          if (projection.state !== "available") {
-            changed = true;
-            continue;
-          }
-          visible = true;
-          if (
-            projection.record.revision !== selected.revision ||
-            contextReason(projection.record, at) !== selected.reason
-          ) {
-            changed = true;
-            continue;
-          }
-          references.push({ ...selected, origin: projection.record.origin });
-        }
-        if (!visible && receipt.references.length) return unavailable;
-        return {
-          contextUseId,
-          state: changed ? "changed" : "available",
-          references,
-        };
-      });
     },
   };
 }

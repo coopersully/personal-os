@@ -217,8 +217,7 @@ The target agent interface includes:
 - `propose_knowledge`: record a typed, sourced hypothesis without treating it as active fact;
 - `update_knowledge`: user-authorized correction or scope change;
 - `promote_knowledge`: explicit user promotion or a recorded domain-owned safe-promotion outcome;
-- `supersede_knowledge`: preserve history while replacing an outdated belief; and
-- `explain_context`: show why knowledge was selected, omitted, or considered missing for one run.
+- `supersede_knowledge`: preserve history while replacing an outdated belief.
 
 High-level workspace tools assemble bounded evidence and expose applicable workflows and next
 actions. Callers also use surgical knowledge tools to retrieve, contribute, correct, dispute, and

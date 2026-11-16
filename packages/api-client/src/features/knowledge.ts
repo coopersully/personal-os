@@ -1,5 +1,4 @@
 import {
-  type KnowledgeExplainInput,
   type KnowledgeExportInput,
   type KnowledgeHistoryInput,
   type KnowledgeLifecycleInput,
@@ -9,7 +8,6 @@ import {
   type KnowledgeTagIndexInput,
   type KnowledgeTagMergeInput,
   type KnowledgeTagUnmergeInput,
-  knowledgeContextExplanationSchema,
   knowledgeContextPackSchema,
   knowledgeMutationResultSchema,
   knowledgePageSchema,
@@ -60,11 +58,6 @@ export function createKnowledgeApiClient(
     async getKnowledgeContext(input: KnowledgeQuery) {
       return knowledgeContextPackSchema.parse(
         await request(`${knowledgePath}/context`, json("POST", input)),
-      );
-    },
-    async explainKnowledgeContext({ contextUseId }: KnowledgeExplainInput) {
-      return knowledgeContextExplanationSchema.parse(
-        await request(`${knowledgePath}/context/${encodeURIComponent(contextUseId)}`),
       );
     },
     /** The caller's tags with counts it may see, most used first, and their aliases. */

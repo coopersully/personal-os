@@ -123,6 +123,29 @@ it("removed_learning_and_forgetting_routes_are_gone", async () => {
   }
 });
 
+it("explain_context_route_is_gone", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const app = new Hono<AppEnv>();
+  app.use("*", async (context, next) => {
+    context.set("principal", { actorId: id, actorType: "user", scopes: new Set(), userId: id });
+    context.set("requestId", "explain-context-route-test");
+    await next();
+  });
+  app.onError(errorResponse);
+  type Routes = Parameters<typeof registerKnowledgeRoutes>[0];
+  registerKnowledgeRoutes({
+    app,
+    knowledge: {} as Routes["knowledge"],
+    lifecycle: {} as Routes["lifecycle"],
+    search: {} as Routes["search"],
+    context: {} as Routes["context"],
+    export: {} as Routes["export"],
+    tags: {} as Routes["tags"],
+  });
+  const response = await app.request(`/v1/knowledge/context/${id}`);
+  expect(response.status).toBe(404);
+});
+
 it("adapts tag index, merge, unmerge and tag search requests", async () => {
   const id = "11111111-1111-4111-8111-111111111111";
   const app = new Hono<AppEnv>();

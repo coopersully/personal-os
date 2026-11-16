@@ -1213,7 +1213,12 @@ export function createKnowledgeAccess(now: () => Date) {
     principal: Principal,
     revision: KnowledgeRevision,
   ): Promise<
-    { state: "denied" | "unavailable" } | { state: "available"; record: KnowledgeRecord }
+    | { state: "denied" | "unavailable" }
+    | {
+        state: "available";
+        record: KnowledgeRecord;
+        effectiveSensitivity: KnowledgeEffectiveDisclosure["effectiveSensitivity"];
+      }
   > {
     const disclosure = await retrievalDisclosure(tx, principal, revision);
     if (disclosure.state !== "available") return disclosure;
@@ -1224,7 +1229,11 @@ export function createKnowledgeAccess(now: () => Date) {
       (record.status === "active" || record.status === "proposed")
     )
       record.status = "expired";
-    return { state: "available", record };
+    return {
+      state: "available",
+      record,
+      effectiveSensitivity: disclosure.projection.effectiveSensitivity,
+    };
   }
 
   /** Effective disclosure, e.g. to keep effectively sensitive memory out of the core. */

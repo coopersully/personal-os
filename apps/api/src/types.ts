@@ -64,6 +64,9 @@ export type RequestLog = TransportDiagnostics & {
   code?: string | undefined;
   disposition?: ConnectorSyncRecovery;
   durationMs: number;
+  /** A failure's own message and stack, for internal failures with no provider detail. */
+  errorMessage?: string;
+  errorStack?: string | undefined;
   claimCount?: number;
   hostOutcome?: "accepted" | "uncertain" | "unavailable";
   eligibleAccountCount?: number;
@@ -95,6 +98,7 @@ export type RequestLog = TransportDiagnostics & {
     | "finance_onboarding_chat_unavailable"
     | "workspace_review_search_source_failed"
     | "mail_attachment_download_failed"
+    | "knowledge_workflow_memory_failed"
     | "request";
   section?: "profile" | "preferences" | "income" | "budget" | "accounts" | "guidance" | "execution";
   failureCount?: number;

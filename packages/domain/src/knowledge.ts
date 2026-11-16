@@ -30,6 +30,7 @@ export const knowledgePurposeSchema = z.enum([
   "communication",
   "recovery",
 ]);
+export type KnowledgePurpose = z.infer<typeof knowledgePurposeSchema>;
 export const knowledgeWorkspaceSchema = z.enum(["tasks", "calendar", "mail", "finances"]);
 export const knowledgeScopeSchema = z
   .object({ workspace: knowledgeWorkspaceSchema.nullable().default(null) })

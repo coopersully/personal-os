@@ -149,6 +149,8 @@ export async function selectKnowledgeCandidates(
   session: KnowledgeRetrievalSession,
   principal: Principal,
   query: KnowledgeQuery,
+  /** Leaves out records that are sensitive themselves or through a source. */
+  { excludeSensitive = false }: { excludeSensitive?: boolean } = {},
 ) {
   const { tx, access, at, authorizedScopes } = session;
   // `trashed` selects the owner's Trash (row selection enforces owner-only); it is a record
@@ -207,6 +209,7 @@ export async function selectKnowledgeCandidates(
         unavailable = true;
       continue;
     }
+    if (excludeSensitive && projection.effectiveSensitivity === "sensitive") continue;
     const { record } = projection;
     const content = knowledgeClaimContent(record, metadata.generatedInference);
     const { exact, related } = entityMatches(record, content, refs);

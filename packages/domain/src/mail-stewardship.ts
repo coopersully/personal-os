@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema, semanticVersionSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
+import { knowledgeWorkflowMemorySchema } from "./knowledge-retrieval.js";
 import {
   maintenanceRunSchema,
   maintenanceScopeSchema,
@@ -328,5 +329,7 @@ export const mailMaintenanceDispatchResultSchema = z.object({
   run: maintenanceRunSchema,
   summary: z.string().trim().min(1).max(4_000),
   verification: maintenanceVerificationSchema.nullable(),
+  /** Mail memory for the agent running this turn; null without `knowledge:read`. */
+  memory: knowledgeWorkflowMemorySchema.nullable().optional(),
 });
 export type MailMaintenanceDispatchResult = z.infer<typeof mailMaintenanceDispatchResultSchema>;

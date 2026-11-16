@@ -78,6 +78,8 @@ describe("Mail stewardship routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       run: { domain: "mail", status: "completed_with_questions" },
       verification: { status: "questions" },
+      // Without a memory service the memory section reads as null.
+      memory: null,
     });
     expect(maintenance.maintain).toHaveBeenCalledOnce();
   });

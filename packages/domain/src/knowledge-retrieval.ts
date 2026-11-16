@@ -11,6 +11,8 @@ import { knowledgeTagsInputSchema } from "./knowledge-tags.js";
 
 export const knowledgeRetrievalMaxRecords = 50;
 export const knowledgeContextMaxBytes = 32_768;
+/** A maintenance workflow's memory section, as UTF-8 bytes of its JSON. */
+export const knowledgeWorkflowMemoryMaxBytes = 16_384;
 const cursor = z.string().min(1).max(2_048);
 const epoch = z.int().nonnegative();
 const entityRefs = z
@@ -138,3 +140,12 @@ export const knowledgeContextPackSchema = z
     "A context pack cannot exceed 32 KiB.",
   );
 export type KnowledgeContextPack = z.infer<typeof knowledgeContextPackSchema>;
+/**
+ * The memory a maintenance start loads for its workspace: a context pack without sensitive
+ * records, capped at 16 KiB. It is not a page; agents search for anything left out.
+ */
+export const knowledgeWorkflowMemorySchema = knowledgeContextPackSchema.refine(
+  (pack) =>
+    new TextEncoder().encode(JSON.stringify(pack)).byteLength <= knowledgeWorkflowMemoryMaxBytes,
+  "A workflow memory section cannot exceed 16 KiB.",
+);

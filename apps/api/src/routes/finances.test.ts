@@ -851,7 +851,11 @@ describe("finance routes", () => {
     grantedScopes = new Set(["finances:maintain"]);
     const started = await post({ operation: "start" });
     expect(started.status).toBe(200);
-    await expect(started.json()).resolves.toEqual(envelope);
+    // Without a memory service the start's memory section reads as null.
+    await expect(started.json()).resolves.toEqual({
+      ...envelope,
+      data: { ...payload, memory: null },
+    });
     expect(canonicalFinanceMaintenance.maintainFinances).toHaveBeenCalledWith(
       { operation: "start", scope: { type: "all_outstanding" } },
       { actorId: id, actorType: "agent", scopes: grantedScopes, userId: id },
@@ -862,7 +866,9 @@ describe("finance routes", () => {
     expect(canonicalFinanceMaintenance.history).not.toHaveBeenCalled();
 
     grantedScopes = new Set(["finances:read", "finances:maintain", "finances:write"]);
-    expect((await post({ operation: "resume", runId: id })).status).toBe(200);
+    const resumed = await post({ operation: "resume", runId: id });
+    expect(resumed.status).toBe(200);
+    await expect(resumed.json()).resolves.toEqual(envelope);
     expect(canonicalFinanceMaintenance.maintainFinances).toHaveBeenLastCalledWith(
       { operation: "resume", runId: id },
       expect.objectContaining({ userId: id }),

@@ -105,6 +105,7 @@ import { createKnowledgePurgeService } from "./knowledge/purge-service.js";
 import { createKnowledgeRecordService } from "./knowledge/record-service.js";
 import { createKnowledgeSearchService } from "./knowledge/search-service.js";
 import { createKnowledgeTagService } from "./knowledge/tag-service.js";
+import { createKnowledgeWorkflowMemory } from "./knowledge/workflow-memory.js";
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
@@ -1593,6 +1594,23 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     mutationContext,
     workItems: agentAccessWorkItems,
   });
+  const knowledgeContext = createKnowledgeContextService(knowledgeRetrieval);
+  // A memory failure never fails maintenance: the section reads as null and is logged here.
+  const workflowMemory = createKnowledgeWorkflowMemory({
+    context: knowledgeContext,
+    onFailure: ({ workspace, requestId, durationMs, message, stack }) =>
+      dependencies.log?.({
+        event: "knowledge_workflow_memory_failed",
+        workspace,
+        errorMessage: message,
+        errorStack: stack,
+        durationMs,
+        method: "POST",
+        path: `/v1/${workspace}/maintenance`,
+        requestId,
+        status: 200,
+      }),
+  });
   registerMailRoutes({ app, db: dependencies.db, mail, mutationContext });
   registerMailStewardshipRoutes({
     app,
@@ -1600,6 +1618,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance: mailMaintenance,
     mutationContext,
     stewardship: mailStewardship,
+    workflowMemory,
   });
 
   registerAssistantRoutes({
@@ -1616,7 +1635,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     knowledge: createKnowledgeRecordService(knowledgePersistence),
     lifecycle: createKnowledgeLifecycleService(knowledgePersistence),
     search: createKnowledgeSearchService(knowledgeRetrieval),
-    context: createKnowledgeContextService(knowledgeRetrieval),
+    context: knowledgeContext,
     export: createKnowledgeExportService(knowledgeRetrieval),
     tags: knowledgeTags,
   });
@@ -1652,6 +1671,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     financeStatus,
     finances,
     mutationContext,
+    workflowMemory,
   });
 
   registerFinanceConversationRoutes({ app, conversation: financeConversation });

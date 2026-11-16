@@ -1,10 +1,13 @@
 import {
   type KnowledgeContextPack,
   type KnowledgeContextReason,
+  type KnowledgePurpose,
   type KnowledgeQuery,
   type KnowledgeRecord,
   knowledgeContextMaxBytes,
   knowledgeQuerySchema,
+  knowledgeRetrievalMaxRecords,
+  knowledgeWorkflowMemoryMaxBytes,
 } from "@personal-os/domain";
 import type { Principal } from "../types.js";
 import { revisionIsCurrent } from "./access.js";
@@ -28,19 +31,43 @@ function reference(record: KnowledgeRecord) {
   return { recordId: record.id, revision: record.revision };
 }
 
+type RankedContext = { record: KnowledgeRecord; reason: KnowledgeContextReason }[];
+/** Where a pack starts and how it names its continuation; a workflow section has none. */
+type ContextPaging = { offset: number; encode(offset: number): string | null };
+const unpaged: ContextPaging = { offset: 0, encode: () => null };
+
+function rankContext(session: KnowledgeRetrievalSession, records: KnowledgeRecord[]) {
+  return records.map((record) => ({ record, reason: contextReason(record, session.at) }));
+}
+
 function contextPage(
   session: KnowledgeRetrievalSession,
   records: KnowledgeRecord[],
   unavailable: boolean,
   limit: number,
 ) {
-  const ranked = records.map((record) => ({ record, reason: contextReason(record, session.at) }));
+  const ranked = rankContext(session, records);
   const page = session.cursor(
     retrievalFingerprint([
       unavailable,
       ranked.map(({ record, reason }) => [knowledgeRecordVisibility(record), reason]),
     ]),
   );
+  return packContext(session, ranked, unavailable, limit, page, knowledgeContextMaxBytes);
+}
+
+/**
+ * Fills the pack in ranked order until `limit` records or `maxBytes` of UTF-8 JSON. The first
+ * record that does not fit ends the pack whole; nothing is cut mid-record.
+ */
+function packContext(
+  session: KnowledgeRetrievalSession,
+  ranked: RankedContext,
+  unavailable: boolean,
+  limit: number,
+  page: ContextPaging,
+  maxBytes: number,
+) {
   const pack: KnowledgeContextPack = {
     schemaVersion: 1,
     stated: [],
@@ -66,7 +93,7 @@ function contextPage(
     pack.truncated = next !== undefined;
     pack.nextCursor = next ? page.encode(i + 1) : null;
     pack.nextFetchRefs = next ? [reference(next.record)] : [];
-    if (Buffer.byteLength(JSON.stringify(pack), "utf8") > knowledgeContextMaxBytes) {
+    if (Buffer.byteLength(JSON.stringify(pack), "utf8") > maxBytes) {
       pack[reason].pop();
       pack.truncated = true;
       pack.nextFetchRefs = [reference(record)];
@@ -101,6 +128,44 @@ export function createKnowledgeContextService(dependencies: KnowledgeRetrievalDe
             input,
           );
           return contextPage(session, records, unavailable, input.limit ?? 20);
+        },
+      );
+    },
+    /**
+     * The memory a maintenance workflow loads when it starts: records scoped to `workspace` plus
+     * unscoped ones, ranked with `purpose` first, without sensitive records, within 16 KiB. Null
+     * when the caller cannot read memory.
+     */
+    async workflowSection(
+      principal: Principal,
+      { workspace, purpose }: { workspace: "finances" | "mail"; purpose: KnowledgePurpose },
+    ): Promise<KnowledgeContextPack | null> {
+      if (!principal.scopes.has("knowledge:read")) return null;
+      const input = knowledgeQuerySchema.parse({
+        workspace,
+        purpose,
+        limit: knowledgeRetrievalMaxRecords,
+      });
+      // Admission needs only `knowledge:read`; per-record visibility still hides memory scoped
+      // to a workspace this caller cannot read.
+      return run(
+        principal,
+        { operation: "context", filter: ["workflow", ...knowledgeQueryFilter(input)] },
+        async (session) => {
+          const { records, unavailable } = await selectKnowledgeCandidates(
+            session,
+            principal,
+            input,
+            { excludeSensitive: true },
+          );
+          return packContext(
+            session,
+            rankContext(session, records),
+            unavailable,
+            knowledgeRetrievalMaxRecords,
+            unpaged,
+            knowledgeWorkflowMemoryMaxBytes,
+          );
         },
       );
     },

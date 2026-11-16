@@ -603,7 +603,10 @@ their blocks. The list shows one record per occurrence, and the API exposes no
 occurrence identity. A record listed under another copy's id is taken for this event only when
 it carries a block linked to this very event; a record that merely has the same title, time and
 calendar could be another meeting, so its blocks are never merged or changed. An event opened
-by a non-listed copy's id that has no block of its own therefore shows only its own record. In
+by a non-listed copy's id that has no block of its own therefore shows only its own record. Which
+records are one occurrence is the API's decision: it groups provider events from different
+accounts that share a title and exact time, and the page shows and changes the blocks of the
+whole group, as the web app does. In
 the conflict checks an event is left out by its own id, or, when the list does not hold that id,
 by a single look-alike; two look-alikes are both listed. Opened for an event on a
 hidden calendar, which the list does not return, the page knows only that record's own blocks.

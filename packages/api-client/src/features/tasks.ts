@@ -107,7 +107,7 @@ export function createTaskApiClient(request: TaskApiRequest, toQuery: (query: ob
       return response.taskProject;
     },
     async getTask(id: string): Promise<Task> {
-      const response = await request<{ task: Task }>(`/v1/tasks/${id}`);
+      const response = await request<{ task: Task }>(`/v1/tasks/${encodeURIComponent(id)}`);
       return response.task;
     },
     async getTaskList(id: string): Promise<TaskList> {

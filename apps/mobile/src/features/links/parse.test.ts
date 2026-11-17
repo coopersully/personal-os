@@ -27,6 +27,12 @@ describe("nativeLink", () => {
   ])("opens %s on its native screen", (path, href) => {
     expect(nativeLink(`${origin}${path}`, origin)).toEqual({ kind: "screen", href });
   });
+  it("keeps ids that merely contain dots", () => {
+    expect(nativeLink(`${origin}/calendar?event=series.2026-11-17`, origin)).toEqual({
+      kind: "screen",
+      href: { pathname: "/calendar-event", params: { id: "series.2026-11-17" } },
+    });
+  });
   it("opens a mail conversation link in the reader", () => {
     expect(nativeLink(`${origin}/mail?view=all&thread=${id}`, origin)).toEqual({
       kind: "conversation",
@@ -44,6 +50,9 @@ describe("nativeLink", () => {
     ["an empty id", `${origin}/tasks?task=`],
     ["a repeated id", `${origin}/tasks?task=${id}&task=other`],
     ["an id that is not a record id", `${origin}/tasks?task=..%2F..%2Fsettings`],
+    ["a parent-directory id", `${origin}/mail?thread=..`],
+    ["a current-directory id", `${origin}/calendar?event=.`],
+    ["an id of only dots", `${origin}/reminders?reminder=...`],
     ["an overlong id", `${origin}/tasks?task=${"a".repeat(201)}`],
     ["text that is not a URL", "https://"],
   ])("rejects %s", (_case, url) => {

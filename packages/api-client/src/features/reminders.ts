@@ -39,7 +39,9 @@ export function createReminderApiClient(
       await request<void>(`/v1/reminders/${id}`, { method: "DELETE" });
     },
     async getReminder(id: string): Promise<Reminder> {
-      const response = await request<{ reminder: Reminder }>(`/v1/reminders/${id}`);
+      const response = await request<{ reminder: Reminder }>(
+        `/v1/reminders/${encodeURIComponent(id)}`,
+      );
       return response.reminder;
     },
     async listReminders(query: Partial<ReminderListQuery> = {}): Promise<{

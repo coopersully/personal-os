@@ -35,8 +35,12 @@ export const linkRoutes: readonly LinkRoute[] = [
   { path: "/mail", param: "thread", open: (id) => ({ kind: "conversation", id }) },
 ];
 
-/** Record ids are opaque; anything that could not be one is not passed to a screen. */
-const recordId = /^[\w.:-]{1,200}$/;
+/**
+ * Record ids are opaque; anything that could not be one is not passed to a screen. An id made
+ * only of dots is a path segment ("." or ".."), which would move a record read to another
+ * endpoint, so it is never an id.
+ */
+const recordId = /^(?!\.+$)[\w.:-]{1,200}$/;
 
 /**
  * Links that only bring the person back to a flow already open in the app, such as a bank

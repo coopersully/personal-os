@@ -61,8 +61,6 @@ export function MailComposer({ start, close }: { start: ComposeStart; close: () 
   const stage = draft ? draftStage(draft) : "editable";
   const locked = unknown || stage !== "editable";
   const dirty = !locked && !same(form, saved ?? opened);
-  const account = accounts.find((candidate) => candidate.accountId === form.accountId);
-  const from = account ? (account.email ?? account.label) : "This account is not connected";
   const edit = (change: Partial<DraftForm>) => setForm((current) => ({ ...current, ...change }));
 
   const adopt = (record: MailDraft) => {
@@ -82,7 +80,7 @@ export function MailComposer({ start, close }: { start: ComposeStart; close: () 
   const settle = (result: SendResult | undefined) => {
     if (!result) return;
     setReviewing(false);
-    if (result.state === "sent") return close();
+    if (result.state === "sent" || result.state === "gone") return close();
     if (result.draft) adopt(result.draft);
     setUnknown(result.state === "unknown");
   };
@@ -93,7 +91,10 @@ export function MailComposer({ start, close }: { start: ComposeStart; close: () 
     else close();
   };
 
+  // A review or a locked message shows the saved record, sender included, not the form.
   const shown = draft && (reviewing || locked) ? formFromDraft(draft) : form;
+  const account = accounts.find((candidate) => candidate.accountId === shown.accountId);
+  const from = account ? (account.email ?? account.label) : "This account is not connected";
   const line = (label: string, value: string) => (
     <View style={{ paddingHorizontal: spacing.lg, paddingVertical: spacing.md, gap: 2 }}>
       <Text style={{ color: t.secondary, fontSize: 13 }}>{label}</Text>
@@ -137,6 +138,26 @@ export function MailComposer({ start, close }: { start: ComposeStart; close: () 
                         disabled={writes.pending || !draft}
                         onPress={() => draft && void writes.check(draft).then(settle)}
                       />
+                      {stage === "editable" && draft && (
+                        // The record reads unsent but another send cannot be made safe. Deleting
+                        // the draft sends nothing and is the one way out that never can.
+                        <Action
+                          label="Discard draft"
+                          destructive
+                          disabled={writes.pending}
+                          onPress={() =>
+                            confirm(
+                              "Discard this message?",
+                              "It may already have been sent. Discarding deletes the draft from nohmi and can’t be undone. It does not unsend anything.",
+                              () =>
+                                void writes.discard(draft).then((gone) => {
+                                  if (gone) close();
+                                }),
+                              true,
+                            )
+                          }
+                        />
+                      )}
                       {stage === "review" && draft && (
                         <>
                           <Action

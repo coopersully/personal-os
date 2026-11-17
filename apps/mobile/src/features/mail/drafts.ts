@@ -70,11 +70,7 @@ async function restoreMarks(owner: string) {
   }
 }
 
-/**
- * Writes this person's marks to the device; false when the device could not store them. The
- * stored marks are read back first, so a write never replaces marks this run has not seen.
- */
-async function storeMarks(owner: string) {
+async function writeMarks(owner: string) {
   if (!(await restoreMarks(owner))) return false;
   const ids = [...unconfirmedSends]
     .filter((key) => key.startsWith(`${owner}:`))
@@ -87,6 +83,19 @@ async function storeMarks(owner: string) {
   } catch {
     return false;
   }
+}
+
+let writing: Promise<unknown> = Promise.resolve();
+
+/**
+ * Writes this person's marks to the device; false when the device could not store them. The
+ * stored marks are read back first, so a write never replaces marks this run has not seen, and
+ * writes run one after another, so a slow earlier write never lands on top of a later one.
+ */
+function storeMarks(owner: string) {
+  const written = writing.then(() => writeMarks(owner));
+  writing = written;
+  return written;
 }
 
 /**
@@ -124,11 +133,13 @@ export function forgetUnconfirmedSends() {
 }
 
 /**
- * What a send came to. Anything but `sent` and `unsent` means delivery is not known: the
+ * What a send came to. `unknown` means delivery is not known: the
  * composer locks, and nothing is sent again until the person has checked.
  */
 export type SendResult =
   | { state: "sent" }
+  /** The draft no longer exists, so there is nothing left to lock or send. */
+  | { state: "gone" }
   | { state: "unsent"; draft: MailDraft }
   | { state: "unknown"; draft?: MailDraft };
 
@@ -181,16 +192,22 @@ export function useDraftWrites() {
     }
   }
 
+  const unmark = (draft: MailDraft) => {
+    if (owner && unconfirmedSends.delete(sendKey(owner, draft.id))) void storeMarks(owner);
+  };
   /** Lifts a draft's mark once a result settles what happened; an unknown result keeps it. */
   const track =
     (draft: MailDraft) =>
     (result: SendResult | undefined): SendResult | undefined => {
-      if (owner && result && result.state !== "unknown") {
-        unconfirmedSends.delete(sendKey(owner, draft.id));
-        void storeMarks(owner);
-      }
+      if (result && result.state !== "unknown") unmark(draft);
       return result;
     };
+  /** A sent message changes the lists and, for a reply, the conversation it belongs to. */
+  const delivered = (draft: MailDraft) => {
+    void client.invalidateQueries({ queryKey: ["mail", owner, "summaries"] });
+    if (draft.threadId)
+      void client.invalidateQueries({ queryKey: ["mail", owner, "messages", draft.threadId] });
+  };
   const find = async (id: string) => (await api.listMailDrafts()).find((draft) => draft.id === id);
 
   return {
@@ -284,11 +301,15 @@ export function useDraftWrites() {
       });
     },
 
-    /** Deletes an unsent draft. Returns true only when the API confirms it is gone. */
+    /**
+     * Deletes an unsent draft. Returns true only when the API confirms it is gone, which also
+     * ends any lock on it: a draft that does not exist cannot be sent again.
+     */
     discard(draft: MailDraft) {
       return run("Discarding draft…", async ({ done, failed }) => {
         try {
           await api.deleteMailDraft(draft.id);
+          unmark(draft);
           done("Draft discarded");
           return true;
         } catch (error) {
@@ -314,19 +335,27 @@ export function useDraftWrites() {
         // Without the stored mark a restart could lift the lock, so nothing is sent.
         if (owner) {
           const key = sendKey(owner, draft.id);
-          const marked = unconfirmedSends.has(key);
+          const unprepared = () => {
+            failed("Couldn’t prepare this iPhone to send safely, so nothing was sent. Try again.");
+            return { state: "unsent" as const, draft };
+          };
+          if (!(await restoreMarks(owner))) return unprepared();
+          // An earlier send of this draft is still unconfirmed: only a check can lift that.
+          if (unconfirmedSends.has(key)) {
+            failed("Check whether this message was sent before sending it again.");
+            return { state: "unknown", draft };
+          }
           unconfirmedSends.add(key);
           if (!(await storeMarks(owner))) {
-            if (!marked) unconfirmedSends.delete(key);
-            failed("Couldn’t prepare this iPhone to send safely, so nothing was sent. Try again.");
-            return { state: "unsent", draft };
+            unconfirmedSends.delete(key);
+            return unprepared();
           }
         }
         let fault: unknown;
         try {
           await api.sendMailDraft({ draftId: draft.id, confirmedUpdatedAt: draft.updatedAt });
           done("Message sent");
-          void client.invalidateQueries({ queryKey: ["mail", owner, "summaries"] });
+          delivered(draft);
           return { state: "sent" };
         } catch (error) {
           fault = error;
@@ -341,6 +370,7 @@ export function useDraftWrites() {
         const stage = found ? draftStage(found) : "missing";
         if (found && stage === "sent") {
           done("Message sent");
+          delivered(draft);
           return { state: "sent" };
         }
         // Only a refusal the API vouches for proves nothing left; an unsent record alone does
@@ -370,12 +400,14 @@ export function useDraftWrites() {
           return { state: "unknown" };
         }
         if (!found) {
+          // Nothing is left to send again, so the lock ends with the draft.
           failed("This draft is no longer available. Check Sent mail to see whether it was sent.");
-          return { state: "unknown" };
+          return { state: "gone" };
         }
         const stage = draftStage(found);
         if (stage === "sent") {
           done("Message sent");
+          delivered(draft);
           return { state: "sent" };
         }
         if (stage === "editable") {
@@ -413,6 +445,7 @@ export function useDraftWrites() {
         try {
           const saved = await api.reconcileMailDraft(draft.id, { outcome });
           done(outcome === "sent" ? "Recorded as sent" : "Recorded as not sent");
+          if (outcome === "sent") delivered(draft);
           return outcome === "sent" ? { state: "sent" } : { state: "unsent", draft: saved };
         } catch (error) {
           failed(

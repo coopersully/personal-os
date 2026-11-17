@@ -12,7 +12,7 @@ import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import InboxRoute from "../../app/(workspaces)/mail/index";
 import MailboxesRoute from "../../app/(workspaces)/mail/mailboxes";
-import { forgetUnconfirmedSends } from "./drafts";
+import { forgetUnconfirmedSends, useDraftWrites } from "./drafts";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -38,6 +38,7 @@ const h = vi.hoisted(() => ({
   store: new Map<string, string>(),
   storeFails: false,
   storeReadFails: false,
+  storeDeleteGate: null as Promise<void> | null,
   toast: { error: vi.fn(), loading: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
 }));
 vi.mock("react-native", async () => import("../../../test/native"));
@@ -61,6 +62,7 @@ vi.mock("expo-secure-store", () => {
     },
     deleteItemAsync: async (key: string) => {
       guard();
+      await h.storeDeleteGate;
       h.store.delete(key);
     },
   };
@@ -155,6 +157,7 @@ beforeEach(() => {
   h.store.clear();
   h.storeFails = false;
   h.storeReadFails = false;
+  h.storeDeleteGate = null;
   h.owner = "owner";
   h.epoch = 0;
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -797,15 +800,6 @@ it("checks an unconfirmed send again without sending", async () => {
   );
   expect(screen.getByRole("button", { name: "It was sent" })).toBeTruthy();
 
-  h.drafts.mockResolvedValue([]);
-  press("Check again");
-  await waitFor(() =>
-    expect(h.toast.error).toHaveBeenLastCalledWith(
-      "This draft is no longer available. Check Sent mail to see whether it was sent.",
-      { id: "toast-1" },
-    ),
-  );
-
   // Recorded as unsent, but the revision cannot be retired: a late send could still land.
   h.drafts.mockResolvedValue([draft({ updatedAt: "2026-11-16T10:07:00.000Z" })]);
   h.update.mockRejectedValueOnce(fault(409));
@@ -1279,7 +1273,7 @@ it("keeps an earlier draft's mark when a new message is sent after a restart", a
   await writeNew();
   press("Send message");
   await waitFor(() => expect(h.send).toHaveBeenCalledTimes(1));
-  expect(stored).toEqual([["new", "draft-1"]]);
+  expect(stored).toEqual([["draft-1", "new"]]);
 
   await act(async () => confirm());
   await waitFor(() => expect(marks()).toEqual([["draft-1"]]));
@@ -1305,4 +1299,175 @@ it("sends nothing when stored marks cannot be read, even if they could be writte
   expect(marks()).toEqual([["draft-1"]]);
   // Nothing left the device, so the new draft is not locked.
   expect(field("Subject").value).toBe("Hello");
+});
+
+/** Leaves the saved draft locked: its send was interrupted and its record still reads unsent. */
+const interrupt = async () => {
+  h.send.mockRejectedValueOnce(offline());
+  await review();
+  press("Send message");
+  await screen.findByRole("button", { name: "Check again" });
+};
+
+it("lets a locked draft be discarded when its revision cannot be retired", async () => {
+  await interrupt();
+  // The account was disconnected, so the save that would make another send safe is refused.
+  h.update.mockRejectedValue(fault(400));
+  press("Check again");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith(
+      "Couldn’t confirm this message is safe to send again. Check again.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(screen.queryByRole("button", { name: "Review and send" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+
+  h.confirm.mockImplementationOnce(() => {});
+  press("Discard draft");
+  expect(h.confirm).toHaveBeenLastCalledWith(
+    "Discard this message?",
+    "It may already have been sent. Discarding deletes the draft from nohmi and can’t be undone. It does not unsend anything.",
+    expect.any(Function),
+    true,
+  );
+  expect(h.remove).not.toHaveBeenCalled();
+
+  h.remove.mockResolvedValueOnce(undefined);
+  press("Discard draft");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Draft discarded", { id: "toast-1" }),
+  );
+  expect(h.remove).toHaveBeenCalledExactlyOnceWith("draft-1");
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Check again" })).toBeNull());
+  await waitFor(() => expect(marks()).toEqual([]));
+  expect(h.send).toHaveBeenCalledTimes(1);
+  noInlineResult();
+});
+
+it("keeps a locked draft locked and marked when the discard is not confirmed", async () => {
+  await interrupt();
+  h.remove.mockRejectedValueOnce(offline());
+  press("Discard draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith(
+      "Couldn’t confirm the draft was discarded. Check Drafts before trying again.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+  expect(marks()).toEqual([["draft-1"]]);
+});
+
+it("offers no discard while the API is reviewing the message", async () => {
+  h.send.mockRejectedValueOnce(offline());
+  await review();
+  h.drafts.mockResolvedValue([draft({ sendStatus: "reconcile" })]);
+  press("Send message");
+  await screen.findByRole("button", { name: "It was sent" });
+  expect(screen.queryByRole("button", { name: "Discard draft" })).toBeNull();
+});
+
+it("lifts the lock and closes a draft that no longer exists", async () => {
+  await interrupt();
+  expect(marks()).toEqual([["draft-1"]]);
+  h.drafts.mockResolvedValue([]);
+  press("Check again");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith(
+      "This draft is no longer available. Check Sent mail to see whether it was sent.",
+      { id: "toast-1" },
+    ),
+  );
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Check again" })).toBeNull());
+  await waitFor(() => expect(marks()).toEqual([]));
+  expect(h.send).toHaveBeenCalledTimes(1);
+});
+
+/** Drives the writes directly, for orders of events the composer never allows. */
+function Writes() {
+  const writes = useDraftWrites();
+  return (
+    <>
+      <button type="button" onClick={() => void writes.send(draft())}>
+        send one
+      </button>
+      <button type="button" onClick={() => void writes.send(draft({ id: "draft-2" }))}>
+        send two
+      </button>
+    </>
+  );
+}
+
+it("never sends a draft whose earlier send is still unconfirmed", async () => {
+  h.send.mockRejectedValueOnce(offline());
+  render(wrap(<Writes />));
+  press("send one");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+  expect(marks()).toEqual([["draft-1"]]);
+
+  // Even with the device unable to store anything, the earlier lock stays.
+  h.storeFails = true;
+  press("send one");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith(
+      "Check whether this message was sent before sending it again.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(h.send).toHaveBeenCalledTimes(1);
+  h.storeFails = false;
+  press("send one");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(3));
+  expect(h.send).toHaveBeenCalledTimes(1);
+  expect(marks()).toEqual([["draft-1"]]);
+});
+
+it("stores a new mark after an earlier unmark has finished writing", async () => {
+  let release: () => void = () => {};
+  h.send.mockResolvedValueOnce(undefined).mockRejectedValueOnce(offline());
+  render(wrap(<Writes />));
+  // The first send is confirmed; removing its mark from the device is slow.
+  h.storeDeleteGate = new Promise((resolve) => (release = resolve));
+  press("send one");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+
+  h.drafts.mockRejectedValue(offline());
+  press("send two");
+  await act(async () => {});
+  // The second mark waits its turn, so the slow write cannot land on top of it.
+  expect(h.send).toHaveBeenCalledTimes(1);
+  await act(async () => release());
+  await waitFor(() => expect(h.send).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+  expect(marks()).toEqual([["draft-2"]]);
+});
+
+it("reads the conversation again after a reply is sent", async () => {
+  h.drafts.mockResolvedValue([]);
+  h.create.mockImplementation(async (input) => draft({ ...input, id: "new" }));
+  h.send.mockResolvedValueOnce(undefined);
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: /^Maya Chen/ }));
+  const reader = await screen.findByRole("dialog");
+  await within(reader).findByText("Please review before Thursday.");
+  fireEvent.click(within(reader).getByRole("button", { name: "Conversation actions" }));
+  press("Reply");
+  type("Message", "Looks good.");
+  press("Review and send");
+  fireEvent.click(await screen.findByRole("button", { name: "Send message" }));
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenLastCalledWith("Message sent", { id: "toast-1" }),
+  );
+  await waitFor(() => expect(h.messages).toHaveBeenCalledTimes(2));
+});
+
+it("shows the sender of the saved draft on the review", async () => {
+  h.accounts.mockResolvedValue({
+    accounts: [account("personal", "me@example.test"), account("work", "me@work.test")],
+  });
+  h.drafts.mockResolvedValue([draft({ accountId: "work" })]);
+  await review();
+  expect(screen.getByText("me@work.test")).toBeTruthy();
+  expect(screen.queryByText("me@example.test")).toBeNull();
 });

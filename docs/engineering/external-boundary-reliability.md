@@ -149,6 +149,34 @@ idempotent replay. Production-equivalent evidence must separately prove runtime 
 outbound HTTPS reachability, Link configuration, callback correctness, and successful transition
 from a handoff to connected accounts. Green mock tests do not prove any of those runtime facts.
 
+### iPhone Plaid Link
+
+The iPhone app presents Plaid's native Link (`react-native-plaid-link-sdk`, which vendors
+`LinkKit.xcframework`) for a link token issued by the existing human-session routes
+`POST /v1/finances/plaid/link-token`, `/v1/finances/plaid/exchange` and
+`/v1/finances/accounts/:id/reconnect`. The app holds no Plaid client identity or secret. Bank
+credentials go from Plaid's screens to Plaid over its own HTTPS/443 transport; nohmi receives only
+the public token, institution and account names and masks. Link runs for as long as the person
+needs, so it is outside the API's 15-second request bound; each API call on either side of it is
+an ordinary bounded request.
+
+The commit point of a new connection is the exchange response. The public token is single-use and
+the exchange route takes no idempotency key, so the app never repeats an exchange whose outcome is
+unknown; an Item created by a lost response appears when accounts are next read. Reconnect
+completion is idempotent by key and may be retried. Cancel, a Plaid error and a module that cannot
+load each end in a stated "nothing connected" or "nothing changed" result.
+
+Link tokens do not yet carry a `redirect_uri`. Plaid requires one on iOS for institutions that
+sign in through OAuth, in update mode too: an HTTPS universal link allowed in the Plaid dashboard,
+served with an `apple-app-site-association` file and matched by the app's Associated Domains
+entitlement. Until the API sends it and those three are in place, OAuth institutions are not
+expected to complete on iPhone. This is a declared gap, not a verified failure mode.
+
+Component tests replace the native module and prove the app's handling of success, cancel, provider
+error, refusal and unknown outcomes. They do not prove that the pod links, that Link presents, that
+a token issued by the deployed API is accepted by the SDK, or that any institution completes. Those
+need a native build, a sandbox institution in the simulator and a real institution on a phone.
+
 ## Ritual optional-step follow-ups
 
 The ritual API owns acceptance of optional follow-ups. A human-session completion action authorizes

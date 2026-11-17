@@ -73,6 +73,13 @@ Build commands never upload automatically, and there is no OTA update channel. T
 when adding cryptographic capabilities. Native SDK privacy
 manifests are generated during prebuild; reassess declared collection on every added SDK.
 
+Plaid Link (`react-native-plaid-link-sdk` 13.5, an autolinked Expo module with no config plugin)
+vendors LinkKit 7.4 and that framework's own `PrivacyInfo.xcprivacy`: UserDefaults access (reason
+CA92.1) and a User ID collected for app functionality, linked to the person and not used for
+tracking. The App Store Connect privacy answers must be reassessed against that before the next
+upload; the release owner does this, and it is not automated. The module needs iOS 15.1 and a
+regenerated native project with `pod install`; a build made before it was added cannot open Link.
+
 ## External boundary
 
 The release owner operates Xcode → Apple signing/provisioning → App Store Connect → TestFlight.

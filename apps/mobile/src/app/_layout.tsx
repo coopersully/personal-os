@@ -95,7 +95,6 @@ function AuthenticatedLayout() {
               options={{ title: "organize", presentation: "modal" }}
             />
             <Stack.Screen name="reminders" options={{ title: "reminders" }} />
-            <Stack.Screen name="detail/[id]" options={{ title: "sample details" }} />
             <Stack.Screen
               name="profile"
               options={{ title: "preview settings", presentation: "modal" }}

@@ -1423,6 +1423,29 @@ shortcut range is one chip.
   outstanding, so the List and Project pickers opening over the filter sheet have not been seen
   on a device or simulator. It is not a production or TestFlight release.
 
+## 2026-11-15 — Native header search across workspaces (local candidate)
+
+COO-232 — The iPhone header search no longer shows sample results. Outside the pages that filter
+their own list (Tasks, Mail, Finances Accounts), it lists real matches from the workspace search
+route: Today searches Tasks, Mail, Finances and Calendar, grouped by workspace; Calendar and
+Finances pages search their own workspace.
+
+- No API, schema or client change. The mobile app calls `GET /v1/workspaces/:workspace/search`
+  with `kind: "content"`, one workspace after another because the API admits one search per
+  account and replaces a queued one.
+- Failed workspaces are named in one Sonner error per search and the other groups stay; the list
+  offers a retry and carries no failure copy. Empty results name the workspaces that answered.
+- Include archive starts from each workspace's search preference and can be overridden per search.
+- Results open existing screens. Mail has no conversation route, so a conversation opens Mail
+  searched for its subject (cut to 200 characters), an archived conversation opens the mailbox
+  list, and a snoozed conversation or one only in Sent or Drafts is not reachable from its
+  result; a mailbox opens the mailbox list, not that mailbox. COO-259 tracks the conversation
+  route.
+- The sample detail route (`/detail/[id]`), the sample briefing and sample workspace screens and
+  their fixtures are removed. The unlinked preview settings and monitoring screens remain.
+- This is a local candidate covered by focused tests. It has not been run on a simulator or
+  device against a live API, and it is not a production or TestFlight release.
+
 ## 2026-11-15 — Native task row details and archived search (local candidate)
 
 COO-219 — iPhone task rows show reserved time and the owning List / Project, and honor the saved

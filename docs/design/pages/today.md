@@ -237,7 +237,7 @@ settings. The header remains fixed above scrolling content, and every control ha
 larger touch target. Native Liquid Glass belongs to the picker, with readable fallback surfaces.
 
 This is a local Fast Refresh prototype, not a new TestFlight release or completed live search.
-Search uses explicitly labeled sample results. The later contextual-navigation decision below replaces the original global bottom tabs. Physical gesture/haptic and accessibility acceptance remain
+Search used explicitly labeled sample results in that prototype; header search now reads live results (see [mobile frontend](../mobile-frontend.md#header-search-results)). The later contextual-navigation decision below replaces the original global bottom tabs. Physical gesture/haptic and accessibility acceptance remain
 separate from the native rendering and tap-navigation checks.
 
 

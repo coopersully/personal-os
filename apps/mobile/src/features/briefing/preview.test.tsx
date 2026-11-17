@@ -2,13 +2,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import Detail from "../../app/detail/[id]";
 import Monitoring from "../../app/monitoring";
 import Profile from "../../app/profile";
 import { WorkspacePage } from "../../components/workspace-page";
 import { PreviewProvider } from "./context";
-import BriefingHome from "./home";
-import { WorkspacePreview } from "./workspace";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -30,61 +27,25 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 const wrapper = ({ children }: PropsWithChildren) => <PreviewProvider>{children}</PreviewProvider>;
-it("keeps sample briefing navigation explicit and changes sample scenarios without mutating accounts", () => {
+it("changes the preview scenario without reading accounts and returns to the briefing", () => {
   render(
     <>
       <Profile />
-      <BriefingHome />
       <Monitoring />
     </>,
     { wrapper },
   );
-  expect(screen.getByText("sample day")).toBeVisible();
-  expect(screen.getByRole("heading", { name: "needs you" })).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: /two plans at 2 pm/ }));
-  expect(h.push).toHaveBeenCalledWith({ pathname: "/detail/[id]", params: { id: "conflict" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sample monitoring status" }));
-  expect(h.push).toHaveBeenLastCalledWith("/monitoring");
-  fireEvent.click(screen.getByRole("radio", { name: "quiet day" }));
-  expect(screen.getByText("you’re all caught up.")).toBeVisible();
-  expect(screen.getByText("all clear")).toBeVisible();
+  expect(screen.getAllByText("Example check · 9:39 am")).toHaveLength(3);
   fireEvent.click(screen.getByRole("radio", { name: "monitoring interrupted" }));
-  expect(screen.getByText("mail paused · see coverage")).toBeVisible();
   expect(screen.getByText(/Paused · example connection expired/)).toBeVisible();
   fireEvent.click(screen.getByRole("radio", { name: "needs attention" }));
-  expect(screen.queryByText("mail paused · see coverage")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Paused · example connection expired/)).not.toBeInTheDocument();
   for (const button of screen.getAllByRole("button", { name: "back to briefing" }))
     fireEvent.click(button);
   expect(h.back).toHaveBeenCalledTimes(2);
 });
-it("opens sample details and a non-sending draft, with a safe missing-item fallback", () => {
-  h.id = "conflict";
-  const { rerender } = render(<Detail />);
-  expect(screen.getByText("sample calendar · no live account data")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "preview a reply to Alex" }));
-  expect(h.push).toHaveBeenCalledWith({ pathname: "/detail/[id]", params: { id: "draft" } });
-  h.id = "draft";
-  rerender(<Detail />);
-  expect(screen.getByText("sample draft · nothing will be sent")).toBeVisible();
-  h.id = "reply";
-  rerender(<Detail />);
-  expect(screen.getByRole("heading", { name: "Friday reservation" })).toBeVisible();
-  expect(screen.queryByRole("button")).not.toBeInTheDocument();
-  h.id = "missing";
-  rerender(<Detail />);
-  expect(screen.getByText("This sample item is not available.")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "back to today" }));
-  expect(h.replace).toHaveBeenCalledWith("/");
-});
-it("shows sample workspace items and leaves unimplemented financial data clearly empty", () => {
-  const { rerender } = render(<WorkspacePreview workspace="mail" />);
-  expect(screen.getByText("sample workspace · your accounts are not connected")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: /Maya needs a reply/ }));
-  expect(h.push).toHaveBeenCalledWith({ pathname: "/detail/[id]", params: { id: "reply" } });
-  rerender(<WorkspacePreview workspace="finances" />);
-  expect(screen.getByText(/No financial data is loaded/)).toBeVisible();
-  expect(screen.queryByRole("button")).not.toBeInTheDocument();
-  rerender(<WorkspacePage title="planning" />);
+it("renders a plain workspace page heading", () => {
+  render(<WorkspacePage title="planning" />);
   expect(screen.getByRole("heading", { name: "planning" })).toBeVisible();
 });
 

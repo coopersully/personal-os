@@ -66,6 +66,11 @@ vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock("sonner-native", () => ({ toast: h.toast }));
+vi.mock("expo-secure-store", () => ({
+  getItemAsync: async () => null,
+  setItemAsync: async () => {},
+  deleteItemAsync: async () => {},
+}));
 vi.mock("expo-router", () => ({
   router: { setParams: h.setParams },
   useLocalSearchParams: () => h.params,

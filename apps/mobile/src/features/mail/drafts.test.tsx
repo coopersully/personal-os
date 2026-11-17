@@ -35,6 +35,8 @@ const h = vi.hoisted(() => ({
   send: vi.fn(),
   reconcile: vi.fn(),
   confirm: vi.fn(),
+  store: new Map<string, string>(),
+  storeFails: false,
   toast: { error: vi.fn(), loading: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
 }));
 vi.mock("react-native", async () => import("../../../test/native"));
@@ -42,6 +44,16 @@ vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock("sonner-native", () => ({ toast: h.toast }));
+vi.mock("expo-secure-store", () => {
+  const guard = () => {
+    if (h.storeFails) throw new Error("Keychain unavailable");
+  };
+  return {
+    getItemAsync: async (key: string) => (guard(), h.store.get(key) ?? null),
+    setItemAsync: async (key: string, value: string) => (guard(), void h.store.set(key, value)),
+    deleteItemAsync: async (key: string) => (guard(), void h.store.delete(key)),
+  };
+});
 vi.mock("expo-router", () => ({
   router: { setParams: vi.fn() },
   useLocalSearchParams: () => ({}),
@@ -129,6 +141,8 @@ let client: QueryClient;
 beforeEach(() => {
   vi.clearAllMocks();
   forgetUnconfirmedSends();
+  h.store.clear();
+  h.storeFails = false;
   h.owner = "owner";
   h.epoch = 0;
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -389,17 +403,43 @@ it("does not create a second draft after a create the API never confirmed", asyn
   );
   expect(h.create).toHaveBeenCalledTimes(1);
 
-  // The first create had landed: it is adopted, and the newer text updates it.
+  // The first create had landed and still holds this text: it is adopted without a write,
+  // and later edits update it.
   h.drafts.mockResolvedValue([first]);
+  press("Save draft");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.create).toHaveBeenCalledTimes(1);
   h.update.mockResolvedValueOnce({ ...first, body: "More" });
   type("Message", "More");
   press("Save draft");
-  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(2));
   expect(h.create).toHaveBeenCalledTimes(1);
   expect(h.update).toHaveBeenCalledExactlyOnceWith(
     "landed",
     expect.objectContaining({ body: "More", expectedUpdatedAt: first.updatedAt }),
   );
+});
+
+it("never writes over a draft that appeared while a create was unconfirmed", async () => {
+  // The create never landed. Meanwhile an agent wrote a draft with the same text.
+  h.drafts.mockResolvedValueOnce([draft()]);
+  h.create.mockRejectedValueOnce(offline());
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("Subject", "Hello");
+  press("Save draft");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+
+  const agents = draft({ id: "agents", subject: "Hello", body: "", to: [] });
+  h.drafts.mockResolvedValue([draft(), agents]);
+  h.create.mockResolvedValueOnce(draft({ id: "mine", subject: "Hello", body: "More", to: [] }));
+  type("Message", "More");
+  press("Save draft");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  // The changed text is a new draft; nothing can tell the agent's draft from the person's.
+  expect(h.create).toHaveBeenCalledTimes(2);
+  expect(h.create.mock.calls[1]?.[0]).toMatchObject({ subject: "Hello", body: "More" });
+  expect(h.update).not.toHaveBeenCalled();
 });
 
 it("adopts an unconfirmed create as it is, and creates when none landed", async () => {
@@ -567,6 +607,7 @@ it("sends only from the review, once, at the revision that was reviewed", async 
 
   press("Send message");
   press("Send message");
+  await waitFor(() => expect(h.send).toHaveBeenCalledTimes(1));
   expect(h.send).toHaveBeenCalledExactlyOnceWith({
     draftId: "draft-1",
     confirmedUpdatedAt: "2026-11-16T10:00:00.000Z",
@@ -1080,4 +1121,80 @@ it("offers Forward but no Reply when the account's own address is unknown", asyn
   fireEvent.click(within(reader).getByRole("button", { name: "Conversation actions" }));
   expect(screen.getByRole("button", { name: "Forward" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+});
+
+const marks = () => [...h.store.values()].map((value) => JSON.parse(value));
+
+it("marks a draft on the device before its send leaves and lifts it once confirmed", async () => {
+  let confirm: () => void = () => {};
+  let stored: unknown[] = [];
+  h.send.mockImplementationOnce(() => {
+    stored = marks();
+    return new Promise<void>((resolve) => (confirm = resolve));
+  });
+  await review();
+  press("Send message");
+  await waitFor(() => expect(h.send).toHaveBeenCalledTimes(1));
+  expect(stored).toEqual([["draft-1"]]);
+
+  await act(async () => confirm());
+  await waitFor(() => expect(marks()).toEqual([]));
+  expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Message sent", { id: "toast-1" });
+});
+
+it("opens a draft locked after a restart that interrupted its send", async () => {
+  h.send.mockRejectedValueOnce(offline());
+  await review();
+  press("Send message");
+  await screen.findByRole("button", { name: "Check again" });
+  expect(marks()).toEqual([["draft-1"]]);
+
+  // The app restarts: nothing is left in memory, and the API still reports an unsent draft.
+  cleanup();
+  client.clear();
+  forgetUnconfirmedSends();
+  render(wrap(<MailboxesRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: /Thursday/ }));
+  expect(screen.getByText("Needs review")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Review and send" })).toBeNull();
+  expect(composer()).toBeNull();
+
+  // A successful check retires the revision, lifts the mark and opens the draft.
+  h.update.mockResolvedValueOnce(draft({ updatedAt: "2026-11-16T10:08:00.000Z" }));
+  press("Check again");
+  await waitFor(() => expect(composer()).toBeTruthy());
+  await waitFor(() => expect(marks()).toEqual([]));
+  expect(h.send).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the lock in memory when the device cannot store it", async () => {
+  h.storeFails = true;
+  h.send.mockRejectedValueOnce(offline());
+  await review();
+  press("Send message");
+  await screen.findByRole("button", { name: "Check again" });
+  fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1) as HTMLElement);
+  fireEvent.click(await screen.findByRole("button", { name: /Thursday/ }));
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+});
+
+it("lists drafts even when stored marks cannot be read", async () => {
+  h.store.set("personal-os.mail.unconfirmed-sends.v1.owner", "not json");
+  render(wrap(<MailboxesRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: /Thursday/ }));
+  expect(composer()).toBeTruthy();
+  cleanup();
+  client.clear();
+  forgetUnconfirmedSends();
+  h.store.set("personal-os.mail.unconfirmed-sends.v1.owner", JSON.stringify({ id: 1 }));
+  render(wrap(<MailboxesRoute />));
+  expect(await screen.findByRole("button", { name: /Thursday/ })).toBeTruthy();
+  cleanup();
+  client.clear();
+  forgetUnconfirmedSends();
+  h.store.set("personal-os.mail.unconfirmed-sends.v1.owner", JSON.stringify([7, "draft-1"]));
+  render(wrap(<MailboxesRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: /Thursday/ }));
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
 });

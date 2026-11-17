@@ -8,9 +8,15 @@ import { Screen } from "../../components/screen";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { spacing, useTheme, workspaceColor } from "../../theme";
 import { MailComposer } from "./composer";
-import { confirmMailRead, retryMailRead, useMailAccounts, useMailRevalidation } from "./data";
+import {
+  confirmMailRead,
+  retryMailRead,
+  useMail,
+  useMailAccounts,
+  useMailRevalidation,
+} from "./data";
 import { type ComposeStart, draftRecipients, draftStage, draftStart } from "./draft-logic";
-import { useMailDrafts } from "./drafts";
+import { sendUnconfirmed, useMailDrafts, useUnconfirmedSendsRestored } from "./drafts";
 import { inboxScope, type MailScope, mailboxIcon, mailboxLabel, sortMailboxes } from "./logic";
 import { MailThreadList } from "./thread-list";
 
@@ -24,6 +30,9 @@ export function MailboxesScreen() {
   useMailRevalidation();
   const [scope, setScope] = useState<MailScope | null>(null);
   const drafts = useMailDrafts();
+  const { owner } = useMail();
+  // A draft is not opened until the device's record of unsettled sends is back.
+  const restored = useUnconfirmedSendsRestored();
   const [composing, setComposing] = useState<ComposeStart | null>(null);
   // Sent drafts are history the mailbox already shows; only unsent ones need the person.
   const unsent = drafts.data?.filter((draft) => draftStage(draft) !== "sent");
@@ -86,7 +95,7 @@ export function MailboxesScreen() {
               </SectionItem>
             </Section>
             <Section title="Drafts">
-              {drafts.isPending ? (
+              {drafts.isPending || !restored ? (
                 <ActivityIndicator accessibilityLabel="Loading drafts" />
               ) : !unsent ? (
                 <SettingsAccentProvider workspace="mail">
@@ -105,13 +114,17 @@ export function MailboxesScreen() {
                       subtitle={draftRecipients(draft)}
                       subtitleLines={1}
                       value={
-                        draftStage(draft) === "review"
+                        draftStage(draft) === "review" || sendUnconfirmed(owner, draft.id)
                           ? "Needs review"
                           : draftStage(draft) === "sending"
                             ? "Sending"
                             : undefined
                       }
-                      valueTone={draftStage(draft) === "review" ? "attention" : undefined}
+                      valueTone={
+                        draftStage(draft) === "review" || sendUnconfirmed(owner, draft.id)
+                          ? "attention"
+                          : undefined
+                      }
                       leading={<Icon name="edit" color={accent} />}
                       accessibilityHint="Opens this draft."
                       onPress={() => setComposing(draftStart(draft))}

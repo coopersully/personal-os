@@ -1,7 +1,7 @@
 import type { ApiClientError } from "@personal-os/api-client";
 import type { CreateMailDraftInput, MailDraft } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner-native";
 import { useAuth } from "../auth/context";
 import { useMail } from "./data";
@@ -36,20 +36,75 @@ export type SaveResult =
   | { ok: false; unconfirmed?: UnconfirmedSave };
 
 /**
- * Drafts whose send this device could not confirm. It outlives a composer, so closing and
- * reopening a draft cannot skip the check that makes another send safe. In memory only.
+ * Drafts with a send this device started and has not seen settled. A draft is marked before
+ * its send leaves and unmarked only by a confirmed outcome or a successful check, and the marks
+ * are stored on the device, so neither reopening the draft nor restarting the app can skip the
+ * check that makes another send safe. Only draft ids are stored, never message text.
  */
 const unconfirmedSends = new Set<string>();
+const restored = new Set<string>();
 const sendKey = (owner: string | undefined, draftId: string) => `${owner}:${draftId}`;
+const storeKey = (owner: string) =>
+  `personal-os.mail.unconfirmed-sends.v1.${owner.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+
+/** Loaded on first use, so screens that only read a conversation never load device storage. */
+const storage = () => import("expo-secure-store");
 
 /** Whether this person's draft still has a send this device could not confirm. */
 export function sendUnconfirmed(owner: string | undefined, draftId: string) {
   return unconfirmedSends.has(sendKey(owner, draftId));
 }
 
-/** For tests: forget every unconfirmed send. */
+/** Writes this person's marks to the device. A storage fault leaves the in-memory marks. */
+async function storeMarks(owner: string) {
+  const ids = [...unconfirmedSends]
+    .filter((key) => key.startsWith(`${owner}:`))
+    .map((key) => key.slice(owner.length + 1));
+  try {
+    const store = await storage();
+    if (ids.length) await store.setItemAsync(storeKey(owner), JSON.stringify(ids));
+    else await store.deleteItemAsync(storeKey(owner));
+  } catch {
+    // The lock still holds for as long as the app runs.
+  }
+}
+
+/**
+ * True once this person's stored marks are back in memory. Drafts are not opened before then,
+ * so a draft marked before a restart opens locked.
+ */
+export function useUnconfirmedSendsRestored() {
+  const { owner } = useMail();
+  const [ready, setReady] = useState(() => !!owner && restored.has(owner));
+  useEffect(() => {
+    if (!owner) return;
+    if (restored.has(owner)) return setReady(true);
+    let live = true;
+    void storage()
+      .then((store) => store.getItemAsync(storeKey(owner)))
+      .then((stored) => {
+        const ids: unknown = stored ? JSON.parse(stored) : [];
+        if (Array.isArray(ids))
+          for (const id of ids)
+            if (typeof id === "string") unconfirmedSends.add(sendKey(owner, id));
+      })
+      // Unreadable marks cannot be recovered; the API's own draft state still applies.
+      .catch(() => undefined)
+      .then(() => {
+        restored.add(owner);
+        if (live) setReady(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [owner]);
+  return ready;
+}
+
+/** For tests: forget what is in memory, as a restart does. Stored marks are kept. */
 export function forgetUnconfirmedSends() {
   unconfirmedSends.clear();
+  restored.clear();
 }
 
 /**
@@ -110,14 +165,14 @@ export function useDraftWrites() {
     }
   }
 
-  /** Keeps the lock for a send this device could not confirm until a result settles it. */
+  /** Lifts a draft's mark once a result settles what happened; an unknown result keeps it. */
   const track =
-    (draft: MailDraft, lock: boolean) =>
+    (draft: MailDraft) =>
     (result: SendResult | undefined): SendResult | undefined => {
-      const key = sendKey(owner, draft.id);
-      if (result?.state === "unknown") {
-        if (lock) unconfirmedSends.add(key);
-      } else if (result) unconfirmedSends.delete(key);
+      if (owner && result && result.state !== "unknown") {
+        unconfirmedSends.delete(sendKey(owner, draft.id));
+        void storeMarks(owner);
+      }
       return result;
     };
   const find = async (id: string) => (await api.listMailDrafts()).find((draft) => draft.id === id);
@@ -127,8 +182,8 @@ export function useDraftWrites() {
 
     /**
      * Saves the form. A write the API never confirmed may have landed, so the next save reads
-     * the drafts first. A create is recognised only in a draft that did not exist before it:
-     * the same text in an older draft is someone else's and is never taken over.
+     * the drafts first. A create is recognised only in a draft that did not exist before it and
+     * still holds exactly this text; no other draft is ever taken over or written to.
      */
     save(
       input: CreateMailDraftInput,
@@ -154,11 +209,14 @@ export function useDraftWrites() {
                 draftStage(found) === "editable" &&
                 sameDraft(found, unconfirmed.input),
             );
-            target = landed ?? target;
             if (landed && sameDraft(landed, input)) {
               done("Draft saved");
               return { ok: true, draft: landed };
             }
+            // An update continues from its own draft's record. A create has no identity to
+            // recognise its draft by, so text that has since changed is saved as a new draft:
+            // a draft that only looks like the interrupted one is never written over.
+            if (draft) target = landed ?? target;
           } else known = drafts.map((found) => found.id);
         }
         try {
@@ -228,6 +286,12 @@ export function useDraftWrites() {
      */
     send(draft: MailDraft): Promise<SendResult | undefined> {
       return run("Sending message…", async ({ done, failed }): Promise<SendResult> => {
+        // Marked and stored before the request leaves, so even an app that is closed mid-send
+        // comes back with this draft locked.
+        if (owner) {
+          unconfirmedSends.add(sendKey(owner, draft.id));
+          await storeMarks(owner);
+        }
         let fault: unknown;
         try {
           await api.sendMailDraft({ draftId: draft.id, confirmedUpdatedAt: draft.updatedAt });
@@ -262,7 +326,7 @@ export function useDraftWrites() {
         }
         failed(UNCONFIRMED_SEND);
         return { state: "unknown", ...(found ? { draft: found } : {}) };
-      }).then(track(draft, true));
+      }).then(track(draft));
     },
 
     /** Reads the draft's recorded state again after an unconfirmed send. Sends nothing. */
@@ -310,7 +374,7 @@ export function useDraftWrites() {
             : "Delivery is still unconfirmed. Check Sent mail, then record what happened.",
         );
         return { state: "unknown", draft: found };
-      }).then(track(draft, false));
+      }).then(track(draft));
     },
 
     /** Records what the person found in Sent mail for a send the API could not confirm. */
@@ -328,7 +392,7 @@ export function useDraftWrites() {
           );
           return { state: "unknown", draft };
         }
-      }).then(track(draft, false));
+      }).then(track(draft));
     },
   };
 }

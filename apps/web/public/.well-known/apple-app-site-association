@@ -12,7 +12,8 @@
             "comment": "A transaction"
           },
           { "/": "/calendar", "?": { "event": "?*" }, "comment": "A calendar event" },
-          { "/": "/mail", "?": { "thread": "?*" }, "comment": "A mail conversation" }
+          { "/": "/mail", "?": { "thread": "?*" }, "comment": "A mail conversation" },
+          { "/": "/plaid/return", "comment": "Bank sign-in returning to the app" }
         ]
       }
     ]

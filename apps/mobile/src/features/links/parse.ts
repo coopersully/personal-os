@@ -38,6 +38,29 @@ export const linkRoutes: readonly LinkRoute[] = [
 /** Record ids are opaque; anything that could not be one is not passed to a screen. */
 const recordId = /^[\w.:-]{1,200}$/;
 
+/**
+ * Links that only bring the person back to a flow already open in the app, such as a bank
+ * sign-in returning to the Plaid SDK (COO-234). The app opens no screen for them and never
+ * reads, stores or logs their parameters; the native SDK that started the flow resumes it.
+ */
+export const handoffPaths: readonly string[] = ["/plaid/return"];
+
+function ownLink(url: string, appOrigin: string) {
+  let link: URL;
+  try {
+    link = new URL(url);
+  } catch {
+    return null;
+  }
+  return link.origin === appOrigin && !link.username && !link.password ? link : null;
+}
+const pathOf = (link: URL) => link.pathname.replace(/\/+$/, "") || "/";
+
+export function isHandoffLink(url: string, appOrigin: string) {
+  const link = ownLink(url, appOrigin);
+  return !!link && handoffPaths.includes(pathOf(link));
+}
+
 export const isWebLink = (url: string) => /^https?:\/\//i.test(url);
 
 /**
@@ -45,14 +68,9 @@ export const isWebLink = (url: string) => /^https?:\/\//i.test(url);
  * opens: another origin, credentials in the URL, an unknown path, or a missing or malformed id.
  */
 export function nativeLink(url: string, appOrigin: string): NativeLink | null {
-  let link: URL;
-  try {
-    link = new URL(url);
-  } catch {
-    return null;
-  }
-  if (link.origin !== appOrigin || link.username || link.password) return null;
-  const path = link.pathname.replace(/\/+$/, "") || "/";
+  const link = ownLink(url, appOrigin);
+  if (!link) return null;
+  const path = pathOf(link);
   const route = linkRoutes.find((candidate) => candidate.path === path);
   if (!route) return null;
   const ids = link.searchParams.getAll(route.param);

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import appConfig from "../../../app.json";
 import { redirectLink } from "./intent";
-import { isWebLink, linkRoutes, nativeLink } from "./parse";
+import { handoffPaths, isHandoffLink, isWebLink, linkRoutes, nativeLink } from "./parse";
 import { offerLink, pendingLink, subscribeToLinks, takeLink } from "./pending";
 
 const origin = "https://nohmi.example";
@@ -64,7 +64,7 @@ describe("the hosted association file", () => {
     ),
   ) as {
     applinks: {
-      details: { appIDs: string[]; components: { "/": string; "?": Record<string, string> }[] }[];
+      details: { appIDs: string[]; components: { "/": string; "?"?: Record<string, string> }[] }[];
     };
   };
   const [detail] = file.applinks.details;
@@ -73,13 +73,15 @@ describe("the hosted association file", () => {
     expect(file.applinks.details).toHaveLength(1);
     expect(detail?.appIDs).toEqual([`${appleTeamId}.${bundleIdentifier}`]);
   });
-  it("claims exactly the record links the app opens, each with a required id", () => {
-    expect(detail?.components.map((component) => [component["/"], component["?"]])).toEqual(
-      linkRoutes.map((route) => [route.path, { [route.param]: "?*" }]),
-    );
+  it("claims exactly the record links, each with a required id, and the return paths", () => {
+    expect(detail?.components.map((component) => [component["/"], component["?"]])).toEqual([
+      ...linkRoutes.map((route) => [route.path, { [route.param]: "?*" }]),
+      ...handoffPaths.map((path) => [path, undefined]),
+    ]);
     for (const component of detail?.components ?? []) {
-      const [param] = Object.keys(component["?"]);
-      expect(nativeLink(`${origin}${component["/"]}?${param}=${id}`, origin)).not.toBeNull();
+      const [param] = Object.keys(component["?"] ?? {});
+      const url = `${origin}${component["/"]}${param ? `?${param}=${id}` : ""}`;
+      expect(nativeLink(url, origin) !== null || isHandoffLink(url, origin)).toBe(true);
     }
   });
 });
@@ -102,6 +104,17 @@ describe("redirectLink", () => {
   it("stays on the current screen for a link that arrives while the app is open", () => {
     expect(redirectLink(`${origin}/mail?thread=${id}`, false, origin)).toBeNull();
     expect(takeLink()).toEqual({ kind: "conversation", id });
+  });
+  it("drops a bank sign-in return link without queuing or routing its parameters", () => {
+    const back = `${origin}/plaid/return/?oauth_state_id=secret-state`;
+    expect(isHandoffLink(back, origin)).toBe(true);
+    expect(nativeLink(back, origin)).toBeNull();
+    expect(redirectLink(back, false, origin)).toBeNull();
+    expect(redirectLink(back, true, origin)).toBe("/");
+    expect(pendingLink()).toBeNull();
+    expect(isHandoffLink("https://elsewhere.test/plaid/return", origin)).toBe(false);
+    expect(isHandoffLink(`${origin}/plaid/return/extra`, origin)).toBe(false);
+    expect(isHandoffLink("https://", origin)).toBe(false);
   });
   it("queues an unsupported web link as unsupported and never routes it", () => {
     expect(redirectLink(`${origin}/settings?section=security`, false, origin)).toBeNull();

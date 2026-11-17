@@ -821,6 +821,11 @@ claims only these links on its web origin; every other nohmi page stays in the b
   screen.
 - A conversation is read by id and shown in the shared reader without actions. Opening,
   a conversation that no longer exists and a failed read are reported by Sonner only.
+- `/plaid/return` is reserved as the return link for a bank sign-in started in the app (Plaid
+  OAuth, COO-234). The association file claims it with any parameters, so iOS brings the app
+  back to the front; the link handler opens no screen for it and never reads, stores or logs
+  its parameters. The native SDK that started the flow resumes it. Nothing serves this path
+  on the web: without the app it shows the web app's unknown-page state.
 - Custom-scheme paths (`personal-os://`) keep the router's own handling and still prompt in iOS.
 - iOS does not hand over a link followed inside Safari on the same site, a link typed into the
   address bar, or one the person chose to open in the browser; those stay on the web.

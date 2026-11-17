@@ -361,7 +361,8 @@ the HTTPS `EXPO_PUBLIC_APP_URL` of the build; archives bind it to production) an
 owns the proof (`/.well-known/apple-app-site-association`, built from `apps/web/public` and served
 by `deploy/nginx.conf` as `application/json`, without a redirect). The file names the App ID
 `7J7HDVDCKQ.app.personal-os.mobile` and the record links listed in
-`docs/design/mobile-frontend.md`. The Apple App ID needs the Associated Domains capability and a
+`docs/design/mobile-frontend.md`, plus `/plaid/return`, reserved as the bank sign-in return link
+for COO-234; the app drops that link's parameters and opens nothing. The Apple App ID needs the Associated Domains capability and a
 provisioning profile that carries it; archive builds use automatic signing with provisioning
 updates, which is expected to add it but is not proven until an archive succeeds.
 

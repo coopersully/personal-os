@@ -1518,6 +1518,8 @@ event or mail conversation and open the matching screen (Universal Links).
 - Production configuration: the web app now ships
   `/.well-known/apple-app-site-association`, nginx serves it as JSON, and signed builds carry the
   `applinks:` associated-domains entitlement for their HTTPS web origin.
+- `/plaid/return` is reserved in the association file as the bank sign-in return link for
+  COO-234. The app drops it without reading its parameters; nothing uses it yet.
 - Not in effect until three things happen outside the repository: the web change is deployed, a
   new signed build is installed, and the Apple App ID has the Associated Domains capability. See
   "iPhone Universal Links" in `docs/engineering/external-boundary-reliability.md`.

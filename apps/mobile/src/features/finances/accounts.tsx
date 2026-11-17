@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
+import { csvFed } from "./csv-import";
 import { useFinanceRead } from "./data";
 import { InstitutionLogo } from "./institution-logo";
 import { formatMoney } from "./presentation";
@@ -52,18 +53,24 @@ function AccountList() {
                 subtitle={[
                   account.institution,
                   account.accountMask ? `••${account.accountMask}` : null,
-                  account.status === "needs_reauth"
-                    ? "Reconnect needed"
-                    : account.status === "manual"
-                      ? "Manual"
-                      : account.lastSyncedAt
-                        ? `Updated ${new Date(account.lastSyncedAt).toLocaleDateString()}`
-                        : "Not synced",
+                  csvFed(account)
+                    ? "CSV imports"
+                    : account.status === "needs_reauth"
+                      ? "Reconnect needed"
+                      : account.status === "manual"
+                        ? "Manual"
+                        : account.lastSyncedAt
+                          ? `Updated ${new Date(account.lastSyncedAt).toLocaleDateString()}`
+                          : "Not synced",
                   !account.includeInPlanning ? "Excluded from planning" : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-                value={formatMoney(account.balance, account.currencyCode)}
+                value={
+                  csvFed(account) && account.balance == null
+                    ? "Not set"
+                    : formatMoney(account.balance, account.currencyCode)
+                }
                 leading={<InstitutionLogo account={account} />}
                 onPress={() =>
                   router.push({ pathname: "/finance-account", params: { id: account.id } })

@@ -57,7 +57,9 @@ export function CashflowForm({
       />
       <FinanceScreen title={title}>
         {children}
-        <View style={{ height: 80 }} />
+        {/* Clears the floating action, also when it rides above the keyboard, so the last
+            row can always be scrolled into full view. */}
+        <View style={{ height: 120 + keyboardOffset }} />
       </FinanceScreen>
       <FormSave
         workspace="finances"

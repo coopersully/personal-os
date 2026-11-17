@@ -980,3 +980,39 @@ it("does not call a CSV account's balance an institution's", async () => {
   expect(await screen.findByText(/takes CSV imports from its service/)).toBeTruthy();
   expect(screen.queryByLabelText("Balance")).toBeNull();
 });
+
+it("presents a CSV account as kept by hand, never as needing a reconnect", async () => {
+  const venmo = {
+    ...manual,
+    id: "00000000-0000-4000-8000-0000000000c7",
+    name: "Venmo wallet",
+    institution: "Venmo",
+    provider: "venmo",
+    // The server files a CSV account under a connection status it can never leave.
+    status: "needs_reauth",
+    balance: null,
+    lastSyncedAt: null,
+  };
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([venmo]));
+  const list = mount(<FinanceAccountsScreen />);
+  const row = await screen.findByRole("button", { name: /Venmo wallet/ });
+  expect(row.textContent).toContain("CSV imports");
+  expect(row.textContent).toContain("Not set");
+  expect(row.textContent).not.toContain("Reconnect needed");
+  expect(row.textContent).not.toContain("Unavailable");
+  list.unmount();
+  h.params = { id: venmo.id };
+  const page = mount(<FinanceAccountScreen />);
+  expect(await screen.findByText("Venmo CSV imports")).toBeTruthy();
+  expect(screen.getByText("Added by CSV import")).toBeTruthy();
+  expect(screen.getByText("Not set")).toBeTruthy();
+  for (const absent of ["Reconnect needed", "Not synced", "Status", "Updated", "Unavailable"])
+    expect(screen.queryByText(absent)).toBeNull();
+  page.unmount();
+  // A balance that was entered is shown as usual.
+  h.api.listFinanceAccounts.mockResolvedValue(
+    accounts([{ ...venmo, balance: 42.17, currencyCode: "USD" }]),
+  );
+  mount(<FinanceAccountScreen />);
+  expect(await screen.findByText("$42.17")).toBeTruthy();
+});

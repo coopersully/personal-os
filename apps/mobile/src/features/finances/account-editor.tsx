@@ -344,7 +344,8 @@ function AccountForm({ record, known }: { record: FinanceAccount | null; known: 
                 ? "Balances for a connected account come from its institution."
                 : "This account takes CSV imports from its service. Its balance is not edited here."}
         </Copy>
-        <View style={{ height: 80 }} />
+        {/* Clears the floating Save, also when it rides above the keyboard. */}
+        <View style={{ height: 120 + keyboardOffset }} />
       </FinanceScreen>
       <FormSave
         workspace="finances"

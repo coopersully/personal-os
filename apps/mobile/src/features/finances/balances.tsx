@@ -4,6 +4,7 @@ import {
   financeAccountBalances,
 } from "@personal-os/domain";
 import { router } from "expo-router";
+import { csvFed } from "./csv-import";
 import { Card, FinanceRow } from "./ui";
 
 export function balancesFor(value: FinanceAccountList) {
@@ -36,11 +37,16 @@ export function BalanceAttention({ data }: { data: FinanceAccountList }) {
             key={account.id}
             title={account.name}
             icon="attention"
-            subtitle={balanceHint({
-              amount: null,
-              currency: null,
-              issues: issues.filter((issue) => issue.accountIds.includes(account.id)),
-            })}
+            subtitle={
+              // A CSV account cannot be reconnected; say what it is instead.
+              csvFed(account)
+                ? "CSV account · not counted in this total"
+                : balanceHint({
+                    amount: null,
+                    currency: null,
+                    issues: issues.filter((issue) => issue.accountIds.includes(account.id)),
+                  })
+            }
             onPress={() =>
               router.push({ pathname: "/finance-account", params: { id: account.id } })
             }

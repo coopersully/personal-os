@@ -96,7 +96,7 @@ function ImportForm(props: {
       pending={write.pending}
       invalid={!ready}
       saveLabel="Import"
-      saveIcon="add"
+      saveIcon="check"
       discard="Nothing has been imported."
       onSave={() => void save()}
     >

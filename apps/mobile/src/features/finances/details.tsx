@@ -5,6 +5,7 @@ import { useTheme } from "../../theme";
 import { AccountActions } from "./account-actions";
 import { AccountPreferences } from "./account-preferences";
 import { categoryIcon, categoryLabel } from "./category-presentation";
+import { csvFed, csvSourceLabel } from "./csv-import";
 import { useFinanceRead } from "./data";
 import { InstitutionLogo } from "./institution-logo";
 import { financeLabel, formatLocalDate, formatMoney, recordAmount } from "./presentation";
@@ -30,7 +31,11 @@ export function FinanceAccountScreen() {
             <AccountActions account={account} duplicate={!!duplicates} />
             <Metric
               label={account.institution}
-              value={formatMoney(account.balance, account.currencyCode)}
+              value={
+                csvFed(account) && account.balance == null
+                  ? "Not set"
+                  : formatMoney(account.balance, account.currencyCode)
+              }
               hint={account.accountMask ? `••${account.accountMask}` : undefined}
             >
               <InstitutionLogo account={account} />
@@ -39,38 +44,49 @@ export function FinanceAccountScreen() {
               <FinanceRow
                 centered
                 title="Source"
-                value={financeLabel(account.provider)}
+                value={
+                  csvFed(account)
+                    ? csvSourceLabel(account.provider)
+                    : financeLabel(account.provider)
+                }
                 icon="finances"
               />
-              <FinanceRow
-                centered
-                title="Status"
-                value={financeLabel(account.status)}
-                valueTone={account.status === "needs_reauth" ? "attention" : undefined}
-                accessibilityHint={
-                  account.status === "needs_reauth"
-                    ? "Reconnect this account to refresh its data."
-                    : undefined
-                }
-                icon="attention"
-              />
-              <FinanceRow
-                centered
-                title="Updated"
-                valueTone={
-                  account.status !== "manual" &&
-                  (!account.lastSyncedAt ||
-                    (account.synchronization && account.synchronization.state !== "current"))
-                    ? "attention"
-                    : undefined
-                }
-                value={
-                  account.lastSyncedAt
-                    ? new Date(account.lastSyncedAt).toLocaleString()
-                    : "Not synced"
-                }
-                icon="clock"
-              />
+              {csvFed(account) ? (
+                // Kept by hand: there is no connection whose status or sync time could be shown.
+                <FinanceRow centered title="Records" value="Added by CSV import" icon="receipt" />
+              ) : (
+                <>
+                  <FinanceRow
+                    centered
+                    title="Status"
+                    value={financeLabel(account.status)}
+                    valueTone={account.status === "needs_reauth" ? "attention" : undefined}
+                    accessibilityHint={
+                      account.status === "needs_reauth"
+                        ? "Reconnect this account to refresh its data."
+                        : undefined
+                    }
+                    icon="attention"
+                  />
+                  <FinanceRow
+                    centered
+                    title="Updated"
+                    valueTone={
+                      account.status !== "manual" &&
+                      (!account.lastSyncedAt ||
+                        (account.synchronization && account.synchronization.state !== "current"))
+                        ? "attention"
+                        : undefined
+                    }
+                    value={
+                      account.lastSyncedAt
+                        ? new Date(account.lastSyncedAt).toLocaleString()
+                        : "Not synced"
+                    }
+                    icon="clock"
+                  />
+                </>
+              )}
               {duplicates ? (
                 <FinanceRow
                   title="Review possible duplicate"

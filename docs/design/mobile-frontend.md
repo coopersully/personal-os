@@ -555,7 +555,11 @@ is not a choice on the import form. A manual or connected account can never take
 that an import has somewhere to go, Add account has a "Records from" choice: Entered by hand (the
 default), or PayPal, Venmo or Zelle CSV exports. The choice is made when the account is added and
 is not editable afterwards; the form says that a CSV can only be imported into an account of the
-same service. The import form shows the account, the provider and the chosen file. Choose file
+same service. A PayPal, Venmo or Zelle account is kept by hand: the Accounts list labels it
+"CSV imports", its page shows its source as "Venmo CSV imports" and its records as added by CSV
+import, with no connection status or sync time, and a balance that was never entered reads "Not
+set". It is never shown as needing a reconnect, although the server files it under that status;
+for the same reason the server leaves it out of net worth, and Plan › Wealth says so. The import form shows the account, the provider and the chosen file. Choose file
 opens the system file picker from the file-system module the app already ships; no new native
 module was added. On iPhone the picker hands the app a temporary copy, which is deleted as soon as
 its text has been read. A file over four megabytes is not read at all and is reported as too
@@ -563,7 +567,7 @@ large.
 
 Nothing is sent until the person chooses Import. Before that the form shows what will be
 imported: the number of transactions, their date range and the first 50 rows with date, name, note
-and signed amount, read by the same rules the server uses. A file that cannot be read in full
+and signed amount (in the account's currency when it has one, otherwise as a plain number), read by the same rules the server uses. A file that cannot be read in full
 says which line and why, shows no rows and cannot be imported. The server reads the file again
 and is the authority. The API imports all or nothing: one row it cannot read fails the whole file
 and nothing is written. It has no preview route and reports only how many rows were imported and

@@ -7,6 +7,14 @@ export const csvProviders: Record<CsvProvider, string> = {
 export const isCsvProvider = (value: string): value is CsvProvider =>
   Object.hasOwn(csvProviders, value);
 
+/**
+ * A PayPal, Venmo or Zelle account is kept by hand and fed by CSV imports. The server files it
+ * under a status meant for connected accounts, but there is nothing to connect or reconnect.
+ */
+export const csvFed = (account: { provider: string }) => isCsvProvider(account.provider);
+export const csvSourceLabel = (provider: string) =>
+  isCsvProvider(provider) ? `${csvProviders[provider]} CSV imports` : provider;
+
 /** The server accepts at most this many characters of CSV in one import. */
 export const csvLimit = 1_000_000;
 

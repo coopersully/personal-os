@@ -375,6 +375,8 @@ it("shows what a valid file holds, then imports it and reports the exact counts"
   await openImport(valid);
   expect(h.screen.mock.lastCall?.[0]).toMatchObject({ title: "", headerBackVisible: false });
   expect(button("Import")).toHaveProperty("disabled", true);
+  // The confirm control is the check other forms use, named for what it does.
+  expect(button("Import").querySelector('[data-icon="check"]')).toBeTruthy();
   expect(screen.getByText("None chosen")).toBeTruthy();
   await choose();
   expect(await screen.findByText("venmo.csv")).toBeTruthy();

@@ -37,6 +37,7 @@ const h = vi.hoisted(() => ({
   confirm: vi.fn(),
   store: new Map<string, string>(),
   storeFails: false,
+  storeReadFails: false,
   toast: { error: vi.fn(), loading: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
 }));
 vi.mock("react-native", async () => import("../../../test/native"));
@@ -51,6 +52,7 @@ vi.mock("expo-secure-store", () => {
   return {
     getItemAsync: async (key: string) => {
       guard();
+      if (h.storeReadFails) throw new Error("Keychain read failed");
       return h.store.get(key) ?? null;
     },
     setItemAsync: async (key: string, value: string) => {
@@ -152,6 +154,7 @@ beforeEach(() => {
   forgetUnconfirmedSends();
   h.store.clear();
   h.storeFails = false;
+  h.storeReadFails = false;
   h.owner = "owner";
   h.epoch = 0;
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -1252,4 +1255,54 @@ it("confirms an interrupted save from the draft's record without writing again",
     expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Draft saved", { id: "toast-1" }),
   );
   expect(h.update).toHaveBeenCalledTimes(1);
+});
+
+const writeNew = async () => {
+  h.create.mockResolvedValueOnce(draft({ id: "new", subject: "Hello" }));
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("To", "maya@example.test");
+  type("Subject", "Hello");
+  press("Review and send");
+  await screen.findByRole("button", { name: "Send message" });
+};
+
+it("keeps an earlier draft's mark when a new message is sent after a restart", async () => {
+  // A restart left one unsettled send stored; the inbox composer never opens Drafts.
+  h.store.set("personal-os.mail.unconfirmed-sends.v1.owner", JSON.stringify(["draft-1"]));
+  let confirm: () => void = () => {};
+  let stored: unknown[] = [];
+  h.send.mockImplementationOnce(() => {
+    stored = marks();
+    return new Promise<void>((resolve) => (confirm = resolve));
+  });
+  await writeNew();
+  press("Send message");
+  await waitFor(() => expect(h.send).toHaveBeenCalledTimes(1));
+  expect(stored).toEqual([["new", "draft-1"]]);
+
+  await act(async () => confirm());
+  await waitFor(() => expect(marks()).toEqual([["draft-1"]]));
+  // The earlier draft still opens locked.
+  cleanup();
+  render(wrap(<MailboxesRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: /Thursday/ }));
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+});
+
+it("sends nothing when stored marks cannot be read, even if they could be written", async () => {
+  h.store.set("personal-os.mail.unconfirmed-sends.v1.owner", JSON.stringify(["draft-1"]));
+  h.storeReadFails = true;
+  await writeNew();
+  press("Send message");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t prepare this iPhone to send safely, so nothing was sent. Try again.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(h.send).not.toHaveBeenCalled();
+  expect(marks()).toEqual([["draft-1"]]);
+  // Nothing left the device, so the new draft is not locked.
+  expect(field("Subject").value).toBe("Hello");
 });

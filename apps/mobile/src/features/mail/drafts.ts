@@ -55,21 +55,6 @@ export function sendUnconfirmed(owner: string | undefined, draftId: string) {
   return unconfirmedSends.has(sendKey(owner, draftId));
 }
 
-/** Writes this person's marks to the device; false when the device could not store them. */
-async function storeMarks(owner: string) {
-  const ids = [...unconfirmedSends]
-    .filter((key) => key.startsWith(`${owner}:`))
-    .map((key) => key.slice(owner.length + 1));
-  try {
-    const store = await storage();
-    if (ids.length) await store.setItemAsync(storeKey(owner), JSON.stringify(ids));
-    else await store.deleteItemAsync(storeKey(owner));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Puts this person's stored marks back in memory; false when they could not be read. */
 async function restoreMarks(owner: string) {
   if (restored.has(owner)) return true;
@@ -79,6 +64,25 @@ async function restoreMarks(owner: string) {
     if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) return false;
     for (const id of ids) unconfirmedSends.add(sendKey(owner, id));
     restored.add(owner);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Writes this person's marks to the device; false when the device could not store them. The
+ * stored marks are read back first, so a write never replaces marks this run has not seen.
+ */
+async function storeMarks(owner: string) {
+  if (!(await restoreMarks(owner))) return false;
+  const ids = [...unconfirmedSends]
+    .filter((key) => key.startsWith(`${owner}:`))
+    .map((key) => key.slice(owner.length + 1));
+  try {
+    const store = await storage();
+    if (ids.length) await store.setItemAsync(storeKey(owner), JSON.stringify(ids));
+    else await store.deleteItemAsync(storeKey(owner));
     return true;
   } catch {
     return false;
@@ -309,8 +313,11 @@ export function useDraftWrites() {
         // comes back with this draft locked.
         // Without the stored mark a restart could lift the lock, so nothing is sent.
         if (owner) {
-          unconfirmedSends.add(sendKey(owner, draft.id));
+          const key = sendKey(owner, draft.id);
+          const marked = unconfirmedSends.has(key);
+          unconfirmedSends.add(key);
           if (!(await storeMarks(owner))) {
+            if (!marked) unconfirmedSends.delete(key);
             failed("Couldn’t prepare this iPhone to send safely, so nothing was sent. Try again.");
             return { state: "unsent", draft };
           }

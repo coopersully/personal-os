@@ -166,11 +166,20 @@ unknown; an Item created by a lost response appears when accounts are next read.
 completion is idempotent by key and may be retried. Cancel, a Plaid error and a module that cannot
 load each end in a stated "nothing connected" or "nothing changed" result.
 
-Link tokens do not yet carry a `redirect_uri`. Plaid requires one on iOS for institutions that
-sign in through OAuth, in update mode too: an HTTPS universal link allowed in the Plaid dashboard,
-served with an `apple-app-site-association` file and matched by the app's Associated Domains
-entitlement. Until the API sends it and those three are in place, OAuth institutions are not
-expected to complete on iPhone. This is a declared gap, not a verified failure mode.
+Plaid requires a `redirect_uri` on the link token for institutions that sign in through OAuth on
+iOS, in update mode too. The iPhone app names itself (`client: "ios"`) when it asks for a token,
+and the API adds the optional `PLAID_IOS_REDIRECT_URI` to that token only. The setting must be an
+HTTPS URL without credentials, query or fragment; startup fails otherwise. Unset, or for any other
+caller, the request to Plaid is byte-for-byte what it was, so web is unaffected. The intended value
+is `https://<app origin>/plaid/oauth`.
+
+The setting is Declared only. Three things outside this boundary record must be true before it is
+set in production, or Plaid will reject the token or return to a page instead of the app: the same
+URI is in the Plaid dashboard's allowed redirect URIs; that origin serves an
+`apple-app-site-association` file covering `/plaid/oauth` for `app.personal-os.mobile`; and the app
+is built with the matching Associated Domains entitlement (the last two belong to COO-233). The app
+must also not treat the returning link as a page to navigate to. Until then OAuth institutions are
+not expected to complete on iPhone. That is a declared gap, not a verified failure mode.
 
 Component tests replace the native module and prove the app's handling of success, cancel, provider
 error, refusal and unknown outcomes. They do not prove that the pod links, that Link presents, that

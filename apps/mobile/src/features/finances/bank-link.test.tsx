@@ -272,7 +272,7 @@ it("connects a bank through Plaid Link and reports the accounts the server confi
     expect(h.success).toHaveBeenCalledWith("Connected 2 accounts.", { id: "feedback" }),
   );
   // A new connection asks for a token that is not tied to an account.
-  expect(h.api.getPlaidLinkToken).toHaveBeenCalledWith(undefined);
+  expect(h.api.getPlaidLinkToken).toHaveBeenCalledWith(undefined, "ios");
   expect(h.link.config?.token).toBe("link-sandbox-token");
   // Only the public token, institution and account names and masks leave the device.
   expect(h.api.exchangePlaidToken).toHaveBeenCalledExactlyOnceWith({
@@ -454,7 +454,7 @@ it("signs in again for an account that needs it and verifies with the server", a
     }),
   );
   // The token is issued for this account, which puts Link in update mode.
-  expect(h.api.getPlaidLinkToken).toHaveBeenCalledWith(linked.id);
+  expect(h.api.getPlaidLinkToken).toHaveBeenCalledWith(linked.id, "ios");
   expect(h.api.completePlaidReconnect).toHaveBeenCalledExactlyOnceWith(
     linked.id,
     expect.stringMatching(/^[0-9a-f-]{36}$/),

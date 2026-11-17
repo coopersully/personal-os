@@ -3524,25 +3524,26 @@ describe.sequential("finance service", () => {
         officialName: null,
       },
     ]);
+    const plaid = {
+      createLinkToken,
+      validateCredentials: async () => undefined,
+      exchangePublicToken,
+      getItem,
+      getAccounts,
+      syncTransactions: async () => ({
+        added: [],
+        modified: [],
+        removed: [],
+        hasMore: false,
+        nextCursor: "unused",
+        transactionsUpdateStatus: null,
+      }),
+    };
     const service = createFinanceService({
       db: database.db,
       encryptionKey: key,
       now: () => now,
-      plaid: {
-        createLinkToken,
-        validateCredentials: async () => undefined,
-        exchangePublicToken,
-        getItem,
-        getAccounts,
-        syncTransactions: async () => ({
-          added: [],
-          modified: [],
-          removed: [],
-          hasMore: false,
-          nextCursor: "unused",
-          transactionsUpdateStatus: null,
-        }),
-      },
+      plaid,
     });
     const context = { principal: financePrincipal(userId), requestId: "update-mode" };
     const [account] = await service.exchangePlaidToken(
@@ -3572,6 +3573,33 @@ describe.sequential("finance service", () => {
     expect(createLinkToken).toHaveBeenCalledWith(
       expect.objectContaining({ accessToken: "existing-access" }),
     );
+    // Without the iPhone redirect setting, naming the iPhone app changes nothing in the request.
+    const unset = createLinkToken.mock.calls.at(-1)?.[0];
+    await service.createPlaidLinkToken(userId, account.id, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unset);
+    await service.createPlaidLinkToken(userId);
+    const unsetConnect = createLinkToken.mock.calls.at(-1)?.[0];
+    await service.createPlaidLinkToken(userId, undefined, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unsetConnect);
+    expect(unset).not.toHaveProperty("redirectUri");
+    expect(unsetConnect).not.toHaveProperty("redirectUri");
+    // With it, only the iPhone app's tokens carry the redirect, in connect and update mode.
+    const redirectUri = "https://app.example.com/plaid/oauth";
+    const configured = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid,
+      plaidIosRedirectUri: redirectUri,
+    });
+    await configured.createPlaidLinkToken(userId, account.id);
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unset);
+    await configured.createPlaidLinkToken(userId);
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual(unsetConnect);
+    await configured.createPlaidLinkToken(userId, account.id, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual({ ...unset, redirectUri });
+    await configured.createPlaidLinkToken(userId, undefined, "ios");
+    expect(createLinkToken.mock.calls.at(-1)?.[0]).toEqual({ ...unsetConnect, redirectUri });
     await expect(
       service.createPlaidLinkToken(crypto.randomUUID(), account.id),
     ).rejects.toMatchObject({ code: "not_found" });

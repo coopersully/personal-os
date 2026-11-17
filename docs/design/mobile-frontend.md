@@ -348,8 +348,8 @@ On iPhone, Connect a bank sits under the Accounts list and Reconnect account app
 of a connected account whose bank sign-in has lapsed. Neither is offered once tracking has
 stopped, or outside the iPhone build. Both present Plaid's native Link over the app; bank
 credentials are typed into Plaid's screens and never reach nohmi. The app asks the API for a link
-token (for one account when reconnecting, which puts Link in update mode), and sends back only the
-public token, the institution and the chosen account names and masks.
+token as the iPhone app (for one account when reconnecting, which puts Link in update mode), and
+sends back only the public token, the institution and the chosen account names and masks.
 
 One toast follows the attempt: opening, then connecting or verifying, then the outcome the API
 confirmed. Closing Link is a neutral notice that nothing was connected or changed. A Plaid or bank

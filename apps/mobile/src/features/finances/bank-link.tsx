@@ -99,7 +99,7 @@ export function useBankLink() {
           return void toast.error(`Bank connections aren’t set up on this server. ${unchanged}`, {
             id,
           });
-        token = await api.getPlaidLinkToken(account?.id);
+        token = await api.getPlaidLinkToken(account?.id, "ios");
       } catch (error) {
         if (active.current !== owner) return void toast.dismiss(id);
         return void toast.error(

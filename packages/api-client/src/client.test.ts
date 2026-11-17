@@ -1623,6 +1623,25 @@ describe("Personal OS API client", () => {
     expect(fetch.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
   });
 
+  it("sends a Plaid link-token body only for an account or a named native client", async () => {
+    const bodies: unknown[] = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (_input, init) => {
+        bodies.push(init?.body ? JSON.parse(String(init.body)) : null);
+        return json({ linkToken: "link-token" });
+      },
+    });
+    const accountId = "018f6f2e-0000-7000-8000-000000000001";
+
+    await api.getPlaidLinkToken();
+    await api.getPlaidLinkToken(accountId);
+    await api.getPlaidLinkToken(undefined, "ios");
+    await api.getPlaidLinkToken(accountId, "ios");
+
+    expect(bodies).toEqual([null, { accountId }, { client: "ios" }, { accountId, client: "ios" }]);
+  });
+
   it("serializes budget bucket routes with and without a month", async () => {
     const requests: Array<{ body: unknown; method: string; path: string }> = [];
     const api = createApiClient({

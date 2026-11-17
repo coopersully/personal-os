@@ -303,6 +303,27 @@ describe("API configuration", () => {
     ).toThrow();
   });
 
+  it("keeps the iPhone Plaid redirect unset unless it is a plain HTTPS URL", () => {
+    expect(loadConfig(required)).not.toHaveProperty("plaidIosRedirectUri");
+    expect(loadConfig({ ...required, PLAID_IOS_REDIRECT_URI: "  " })).not.toHaveProperty(
+      "plaidIosRedirectUri",
+    );
+    expect(
+      loadConfig({ ...required, PLAID_IOS_REDIRECT_URI: " https://app.example.com/plaid/oauth " }),
+    ).toMatchObject({ plaidIosRedirectUri: "https://app.example.com/plaid/oauth" });
+    for (const invalid of [
+      "http://app.example.com/plaid/oauth",
+      "personal-os://plaid/oauth",
+      "https://user:pass@app.example.com/plaid/oauth",
+      "https://app.example.com/plaid/oauth?state=1",
+      "https://app.example.com/plaid/oauth#return",
+      "not a URL",
+    ])
+      expect(() => loadConfig({ ...required, PLAID_IOS_REDIRECT_URI: invalid })).toThrow(
+        "PLAID_IOS_REDIRECT_URI must be an HTTPS URL",
+      );
+  });
+
   it("normalizes production overrides and de-duplicates origins", () => {
     expect(
       loadConfig({

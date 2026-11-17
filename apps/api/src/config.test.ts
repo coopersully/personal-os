@@ -309,14 +309,14 @@ describe("API configuration", () => {
       "plaidIosRedirectUri",
     );
     expect(
-      loadConfig({ ...required, PLAID_IOS_REDIRECT_URI: " https://app.example.com/plaid/oauth " }),
-    ).toMatchObject({ plaidIosRedirectUri: "https://app.example.com/plaid/oauth" });
+      loadConfig({ ...required, PLAID_IOS_REDIRECT_URI: " https://app.example.com/plaid/return " }),
+    ).toMatchObject({ plaidIosRedirectUri: "https://app.example.com/plaid/return" });
     for (const invalid of [
-      "http://app.example.com/plaid/oauth",
-      "personal-os://plaid/oauth",
-      "https://user:pass@app.example.com/plaid/oauth",
-      "https://app.example.com/plaid/oauth?state=1",
-      "https://app.example.com/plaid/oauth#return",
+      "http://app.example.com/plaid/return",
+      "personal-os://plaid/return",
+      "https://user:pass@app.example.com/plaid/return",
+      "https://app.example.com/plaid/return?state=1",
+      "https://app.example.com/plaid/return#return",
       "not a URL",
     ])
       expect(() => loadConfig({ ...required, PLAID_IOS_REDIRECT_URI: invalid })).toThrow(

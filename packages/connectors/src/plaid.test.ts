@@ -488,7 +488,7 @@ describe("Plaid connector", () => {
       },
       secret: "connector-secret",
     });
-    const redirectUri = "https://app.example.com/plaid/oauth";
+    const redirectUri = "https://app.example.com/plaid/return";
 
     await plaid.createLinkToken(linkInput);
     await plaid.createLinkToken({ ...linkInput, redirectUri });

@@ -171,16 +171,19 @@ iOS, in update mode too. The iPhone app names itself (`client: "ios"`) when it a
 and the API adds the optional `PLAID_IOS_REDIRECT_URI` to that token only. The setting must be an
 HTTPS URL without credentials, query or fragment; startup fails otherwise. Unset, or for any other
 caller, the request to Plaid is byte-for-byte what it was, so web is unaffected. The intended value
-is `https://<app origin>/plaid/oauth`. The Mac mini stack forwards the variable; the retained ECS
-task definition does not.
+is `https://<production web origin>/plaid/return`, the path COO-233 reserves. The Mac mini stack
+forwards the variable; the retained ECS task definition does not.
 
 The setting is Declared only. Three things outside this boundary record must be true before it is
 set in production, or Plaid will reject the token or return to a page instead of the app: the same
 URI is in the Plaid dashboard's allowed redirect URIs; that origin serves an
-`apple-app-site-association` file covering `/plaid/oauth` for `app.personal-os.mobile`; and the app
-is built with the matching Associated Domains entitlement (the last two belong to COO-233). The app
-must also not treat the returning link as a page to navigate to. Until then OAuth institutions are
-not expected to complete on iPhone. That is a declared gap, not a verified failure mode.
+`apple-app-site-association` file covering `/plaid/return` for `app.personal-os.mobile`; and the
+app is built with the matching Associated Domains entitlement (the last two belong to COO-233).
+The app drops the returning link without reading or logging it (COO-233); whether Link then
+resumes by itself has not been checked on a device. Nothing serves `/plaid/return` on the web, so
+if iOS does not hand the link to the app the person lands on the web shell; that is a known gap.
+Until all of this is in place OAuth institutions are not expected to complete on iPhone. That is a
+declared gap, not a verified failure mode.
 
 Component tests replace the native module and prove the app's handling of success, cancel, provider
 error, refusal and unknown outcomes. They do not prove that the pod links, that Link presents, that

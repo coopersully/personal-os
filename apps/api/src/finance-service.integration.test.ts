@@ -3584,7 +3584,7 @@ describe.sequential("finance service", () => {
     expect(unset).not.toHaveProperty("redirectUri");
     expect(unsetConnect).not.toHaveProperty("redirectUri");
     // With it, only the iPhone app's tokens carry the redirect, in connect and update mode.
-    const redirectUri = "https://app.example.com/plaid/oauth";
+    const redirectUri = "https://app.example.com/plaid/return";
     const configured = createFinanceService({
       db: database.db,
       encryptionKey: key,

@@ -6384,7 +6384,7 @@ describe.sequential("ilo API", () => {
       (await plaidRequest("/v1/finances/plaid/link-token", { client: "android" })).status,
     ).toBe(400);
     const redirectApp = createApp({
-      config: { ...plaidConfig, plaidIosRedirectUri: "https://app.example.com/plaid/oauth" },
+      config: { ...plaidConfig, plaidIosRedirectUri: "https://app.example.com/plaid/return" },
       ...plaidDependencies,
     });
     expect(
@@ -6396,7 +6396,7 @@ describe.sequential("ilo API", () => {
     ).toBe(200);
     expect(linkTokenBody()).toEqual({
       ...webLinkBody,
-      redirect_uri: "https://app.example.com/plaid/oauth",
+      redirect_uri: "https://app.example.com/plaid/return",
     });
     const plaidExchange = await plaidRequest("/v1/finances/plaid/exchange", {
       institution: "Integration Bank",

@@ -1,0 +1,1002 @@
+// @vitest-environment jsdom
+import { ApiClientError } from "@personal-os/api-client";
+import type {
+  MailDraft,
+  MailMessage,
+  MailSetupAccount,
+  MailThreadSummary,
+} from "@personal-os/domain";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { PropsWithChildren } from "react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import InboxRoute from "../../app/(workspaces)/mail/index";
+import MailboxesRoute from "../../app/(workspaces)/mail/mailboxes";
+
+vi.mock("react", async () => {
+  const { createRequire } = await import("node:module");
+  return createRequire(`${process.cwd()}/package.json`)("react");
+});
+vi.mock("@tanstack/react-query", async () => {
+  const { createRequire } = await import("node:module");
+  return createRequire(`${process.cwd()}/apps/web/package.json`)("@tanstack/react-query");
+});
+const h = vi.hoisted(() => ({
+  owner: "owner" as string | undefined,
+  epoch: 0,
+  summaries: vi.fn(),
+  accounts: vi.fn(),
+  messages: vi.fn(),
+  drafts: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  remove: vi.fn(),
+  send: vi.fn(),
+  reconcile: vi.fn(),
+  confirm: vi.fn(),
+  toast: { error: vi.fn(), loading: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
+}));
+vi.mock("react-native", async () => import("../../../test/native"));
+vi.mock("react-native-safe-area-context", () => ({
+  SafeAreaView: ({ children }: PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock("sonner-native", () => ({ toast: h.toast }));
+vi.mock("expo-router", () => ({
+  router: { setParams: vi.fn() },
+  useLocalSearchParams: () => ({}),
+  useFocusEffect: () => {},
+}));
+vi.mock("../../components/icons", () => ({
+  Icon: ({ name }: { name: string }) => <span data-testid={`icon-${name}`} />,
+}));
+vi.mock("../../components/screen", () => ({
+  Screen: ({ children }: PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock("../tasks/ui", () => ({ confirm: h.confirm }));
+vi.mock("../auth/context", () => ({
+  useOptionalAuth: () => null,
+  useAuth: () => ({
+    state: { user: h.owner ? { id: h.owner } : null },
+    session: {
+      epoch: () => h.epoch,
+      api: () => ({
+        listMailThreadSummaries: h.summaries,
+        getMailSetupContext: h.accounts,
+        listMailMessages: h.messages,
+        listMailDrafts: h.drafts,
+        createMailDraft: h.create,
+        updateMailDraft: h.update,
+        deleteMailDraft: h.remove,
+        sendMailDraft: h.send,
+        reconcileMailDraft: h.reconcile,
+        updateMailThread: vi.fn(),
+      }),
+    },
+  }),
+}));
+
+const account = (accountId: string, email: string) =>
+  ({ accountId, label: accountId, email, mailboxes: [] }) as unknown as MailSetupAccount;
+const draft = (patch: Partial<MailDraft> = {}): MailDraft => ({
+  accountId: "personal",
+  body: "See you at ten.",
+  cc: [],
+  createdAt: "2026-11-16T10:00:00.000Z",
+  id: "draft-1",
+  reconciliationState: "none",
+  sendClaimedAt: null,
+  sendStatus: "draft",
+  sentAt: null,
+  subject: "Thursday",
+  threadId: null,
+  to: [{ address: "maya@example.test", name: null }],
+  updatedAt: "2026-11-16T10:00:00.000Z",
+  ...patch,
+});
+const thread = {
+  accountId: "personal",
+  from: { name: "Maya Chen", address: "maya@example.test" },
+  id: "thread-1",
+  mailboxIds: [],
+  messageCount: 1,
+  provider: "google",
+  receivedAt: "2026-11-09T12:00:00.000Z",
+  snippet: "The updated agenda is attached",
+  starred: false,
+  subject: "Board packet",
+  unread: false,
+  updatedAt: "2026-11-09T12:00:00.000Z",
+} as MailThreadSummary;
+const received = {
+  attachments: [],
+  bodyText: "Please review before Thursday.",
+  cc: [],
+  from: thread.from,
+  id: "m1",
+  messageId: null,
+  receivedAt: thread.receivedAt,
+  references: [],
+  replyTo: [],
+  threadId: thread.id,
+  to: [{ name: null, address: "me@example.test" }],
+} as MailMessage;
+const fault = (status: number, details?: unknown) =>
+  new ApiClientError({ code: "fault", message: "Fault", status, details });
+const offline = () => new TypeError("Network request failed");
+
+let client: QueryClient;
+beforeEach(() => {
+  vi.clearAllMocks();
+  h.owner = "owner";
+  h.epoch = 0;
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  h.summaries.mockResolvedValue([thread]);
+  h.accounts.mockResolvedValue({ accounts: [account("personal", "me@example.test")] });
+  h.messages.mockResolvedValue([received]);
+  h.drafts.mockResolvedValue([draft()]);
+  h.toast.loading.mockReturnValue("toast-1");
+  // The person accepts every confirmation unless a test says otherwise.
+  h.confirm.mockImplementation((_title: string, _message: string, accept: () => void) => accept());
+});
+afterEach(() => {
+  cleanup();
+  client.clear();
+});
+const wrap = (node: React.ReactNode) => (
+  <QueryClientProvider client={client}>{node}</QueryClientProvider>
+);
+const field = (label: string) => screen.getByRole("textbox", { name: label }) as HTMLInputElement;
+const type = (label: string, value: string) =>
+  fireEvent.change(field(label), { target: { value } });
+const press = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
+const composer = () => screen.queryByRole("textbox", { name: "Message" });
+/** Action results reach the person only as a toast, never as copy on the screen. */
+const noInlineResult = () =>
+  expect(
+    screen.queryByText(
+      /Draft saved|Saving draft|Message sent|Sending message|Couldn’t|Draft discarded|Recorded as|not sent, and/,
+    ),
+  ).toBeNull();
+const openDraft = async (name = /Thursday/) => {
+  render(wrap(<MailboxesRoute />));
+  fireEvent.click(await screen.findByRole("button", { name }));
+};
+/** Opens the saved draft and takes it to the review step without changing it. */
+const review = async () => {
+  await openDraft();
+  press("Review and send");
+  await screen.findByRole("button", { name: "Send message" });
+};
+
+it("lists unsent drafts with their state and leaves sent ones out", async () => {
+  h.drafts.mockResolvedValue([
+    draft(),
+    draft({ id: "agent", subject: "", to: [] }),
+    draft({ id: "review", subject: "Invoice", sendStatus: "reconcile" }),
+    draft({ id: "busy", subject: "Hello", sendStatus: "sending" }),
+    draft({ id: "sent", subject: "Already out", sendStatus: "sent" }),
+  ]);
+  render(wrap(<MailboxesRoute />));
+
+  expect(await screen.findByRole("button", { name: /Thursday/ })).toBeTruthy();
+  expect(screen.getAllByText("maya@example.test")).toHaveLength(3);
+  expect(screen.getByText("No subject")).toBeTruthy();
+  expect(screen.getByText("No recipients")).toBeTruthy();
+  expect(screen.getByText("Needs review")).toBeTruthy();
+  expect(screen.getByText("Sending")).toBeTruthy();
+  expect(screen.queryByText("Already out")).toBeNull();
+});
+
+it("says when there are no drafts and offers a retry when they cannot be read", async () => {
+  h.drafts.mockResolvedValueOnce([]);
+  const view = render(wrap(<MailboxesRoute />));
+  expect(await screen.findByText(/No drafts\./)).toBeTruthy();
+  view.unmount();
+  client.clear();
+
+  h.drafts.mockRejectedValueOnce(offline()).mockResolvedValue([draft()]);
+  render(wrap(<MailboxesRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "Load drafts" }));
+  expect(await screen.findByRole("button", { name: /Thursday/ })).toBeTruthy();
+  expect(h.toast.success).toHaveBeenCalledWith("Mail loaded", { id: "mail-read-retry" });
+});
+
+it("saves a new message as a draft with one toast and no inline result", async () => {
+  let confirm: (saved: MailDraft) => void = () => {};
+  h.create.mockReturnValueOnce(new Promise((resolve) => (confirm = resolve)));
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("To", "Maya Chen <maya@example.test>, sam@example.test");
+  type("Cc", "lee@example.test");
+  type("Subject", " Thursday ");
+  type("Message", "See you at ten.");
+
+  press("Save draft");
+  press("Save draft");
+  expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Saving draft…");
+  expect(h.create).toHaveBeenCalledExactlyOnceWith({
+    accountId: "personal",
+    to: [
+      { address: "maya@example.test", name: "Maya Chen" },
+      { address: "sam@example.test", name: null },
+    ],
+    cc: [{ address: "lee@example.test", name: null }],
+    subject: "Thursday",
+    body: "See you at ten.",
+    threadId: null,
+  });
+  expect(h.toast.success).not.toHaveBeenCalled();
+
+  await act(async () => confirm(draft({ id: "new", subject: "Thursday" })));
+  expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Draft saved", { id: "toast-1" });
+  // The saved record is what the form now holds, and a further save updates it.
+  expect(field("Subject").value).toBe("Thursday");
+  noInlineResult();
+  h.update.mockResolvedValueOnce(draft({ id: "new", body: "Changed" }));
+  type("Message", "Changed");
+  press("Save draft");
+  await waitFor(() => expect(h.update).toHaveBeenCalledTimes(1));
+  expect(h.update.mock.calls[0]).toEqual([
+    "new",
+    expect.objectContaining({ body: "Changed", expectedUpdatedAt: "2026-11-16T10:00:00.000Z" }),
+  ]);
+  expect(h.create).toHaveBeenCalledTimes(1);
+  expect(h.send).not.toHaveBeenCalled();
+});
+
+it("refuses to save an address that is not one, without calling the API", async () => {
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("To", "maya");
+  press("Save draft");
+  expect(h.toast.error).toHaveBeenCalledExactlyOnceWith("“maya” is not an email address.");
+  press("Review and send");
+  expect(h.toast.error).toHaveBeenCalledTimes(2);
+  type("To", "");
+  press("Review and send");
+  expect(h.toast.error).toHaveBeenLastCalledWith("Add at least one recipient.");
+  expect(h.create).not.toHaveBeenCalled();
+  expect(h.toast.loading).not.toHaveBeenCalled();
+  noInlineResult();
+});
+
+it("chooses the sending account when more than one is connected", async () => {
+  h.accounts.mockResolvedValue({
+    accounts: [account("personal", "me@example.test"), account("work", "work@example.test")],
+  });
+  h.create.mockResolvedValueOnce(draft({ accountId: "work" }));
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  press("From, me@example.test");
+  fireEvent.click(screen.getByRole("radio", { name: "work@example.test" }));
+  type("To", "maya@example.test");
+  press("Save draft");
+  await waitFor(() => expect(h.create).toHaveBeenCalledTimes(1));
+  expect(h.create.mock.calls[0]?.[0]).toMatchObject({ accountId: "work" });
+});
+
+it("edits a draft an agent prepared against the revision it opened with", async () => {
+  h.update.mockResolvedValueOnce(
+    draft({ subject: "Thursday at ten", updatedAt: "2026-11-16T10:05:00.000Z" }),
+  );
+  await openDraft();
+  expect(field("To").value).toBe("maya@example.test");
+  expect(field("Message").value).toBe("See you at ten.");
+
+  type("Subject", "Thursday at ten");
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Draft saved", { id: "toast-1" }),
+  );
+  expect(h.update).toHaveBeenCalledExactlyOnceWith("draft-1", {
+    accountId: "personal",
+    to: [{ address: "maya@example.test", name: null }],
+    cc: [],
+    subject: "Thursday at ten",
+    body: "See you at ten.",
+    threadId: null,
+    expectedUpdatedAt: "2026-11-16T10:00:00.000Z",
+  });
+  expect(h.create).not.toHaveBeenCalled();
+  noInlineResult();
+});
+
+it("keeps what was typed when the draft changed somewhere else", async () => {
+  h.update.mockRejectedValueOnce(fault(409));
+  h.drafts.mockResolvedValue([draft({ body: "Edited on the web", updatedAt: "later" })]);
+  await openDraft();
+  type("Message", "Edited here");
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+      "This draft changed somewhere else. Close it and open it again to continue.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(field("Message").value).toBe("Edited here");
+  expect(h.update).toHaveBeenCalledTimes(1);
+  noInlineResult();
+});
+
+it.each([
+  ["refused", () => fault(422), "Couldn’t save the draft. Check the recipients and try again."],
+  ["interrupted", offline, "Couldn’t confirm the draft was saved. Try again."],
+])("reports a %s save of an existing draft", async (_name, error, text) => {
+  h.update.mockRejectedValueOnce(error());
+  await openDraft();
+  type("Message", "Edited here");
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(text, { id: "toast-1" }),
+  );
+  expect(field("Message").value).toBe("Edited here");
+});
+
+it("treats an interrupted save as saved once the draft holds that text", async () => {
+  h.update.mockRejectedValueOnce(offline());
+  await openDraft();
+  h.drafts.mockResolvedValue([
+    draft({ body: "Edited here", updatedAt: "2026-11-16T10:05:00.000Z" }),
+  ]);
+  type("Message", "Edited here");
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Draft saved", { id: "toast-1" }),
+  );
+  expect(h.toast.error).not.toHaveBeenCalled();
+  expect(h.update).toHaveBeenCalledTimes(1);
+});
+
+it("says a draft is gone when it was deleted elsewhere", async () => {
+  h.update.mockRejectedValueOnce(fault(404));
+  await openDraft();
+  h.drafts.mockResolvedValue([]);
+  type("Message", "Edited here");
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith("This draft is no longer available.", {
+      id: "toast-1",
+    }),
+  );
+});
+
+it("does not create a second draft after a create the API never confirmed", async () => {
+  const first = draft({ id: "landed", subject: "Hello", body: "", to: [] });
+  h.create.mockRejectedValueOnce(offline());
+  h.drafts.mockResolvedValue([]);
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("Subject", "Hello");
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t confirm the draft was saved. Try again; nohmi checks first.",
+      { id: "toast-1" },
+    ),
+  );
+
+  // The drafts cannot be read: nothing is written.
+  h.drafts.mockRejectedValueOnce(offline());
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith(
+      "Couldn’t check your drafts, so nothing was saved. Try again.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(h.create).toHaveBeenCalledTimes(1);
+
+  // The first create had landed: it is adopted, and the newer text updates it.
+  h.drafts.mockResolvedValue([first]);
+  h.update.mockResolvedValueOnce({ ...first, body: "More" });
+  type("Message", "More");
+  press("Save draft");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.create).toHaveBeenCalledTimes(1);
+  expect(h.update).toHaveBeenCalledExactlyOnceWith(
+    "landed",
+    expect.objectContaining({ body: "More", expectedUpdatedAt: first.updatedAt }),
+  );
+});
+
+it("adopts an unconfirmed create as it is, and creates when none landed", async () => {
+  const first = draft({ id: "landed", subject: "Hello", body: "", to: [] });
+  h.create.mockRejectedValueOnce(offline());
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("Subject", "Hello");
+  press("Save draft");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+
+  h.drafts.mockResolvedValue([first]);
+  press("Save draft");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.create).toHaveBeenCalledTimes(1);
+  expect(h.update).not.toHaveBeenCalled();
+  cleanup();
+
+  h.create.mockRejectedValueOnce(offline()).mockResolvedValueOnce(first);
+  h.drafts.mockResolvedValue([]);
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("Subject", "Hello");
+  press("Save draft");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(2));
+  press("Save draft");
+  await waitFor(() => expect(h.create).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(2));
+});
+
+it("says a refused create was not saved", async () => {
+  h.create.mockRejectedValueOnce(fault(400));
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("Subject", "Hello");
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t save the draft. Check the recipients and try again.",
+      { id: "toast-1" },
+    ),
+  );
+  // Nothing may have landed, so the next save creates without reading drafts first.
+  const reads = h.drafts.mock.calls.length;
+  h.create.mockResolvedValueOnce(draft());
+  press("Save draft");
+  await waitFor(() => expect(h.create).toHaveBeenCalledTimes(2));
+  expect(h.drafts).toHaveBeenCalledTimes(reads);
+});
+
+it("discards a draft only after the person confirms", async () => {
+  h.confirm.mockImplementationOnce(() => {});
+  h.remove.mockResolvedValueOnce(undefined);
+  await openDraft();
+  press("Discard draft");
+  expect(h.confirm).toHaveBeenCalledExactlyOnceWith(
+    "Discard this draft?",
+    "The draft is deleted. This can’t be undone.",
+    expect.any(Function),
+    true,
+  );
+  expect(h.remove).not.toHaveBeenCalled();
+
+  press("Discard draft");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Draft discarded", { id: "toast-1" }),
+  );
+  expect(h.remove).toHaveBeenCalledExactlyOnceWith("draft-1");
+  expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Discarding draft…");
+  await waitFor(() => expect(composer()).toBeNull());
+  noInlineResult();
+});
+
+it.each([
+  ["refused", () => fault(404), "This draft can no longer be discarded."],
+  [
+    "interrupted",
+    offline,
+    "Couldn’t confirm the draft was discarded. Check Drafts before trying again.",
+  ],
+])("keeps the draft open when a discard is %s", async (_name, error, text) => {
+  h.remove.mockRejectedValueOnce(error());
+  await openDraft();
+  press("Discard draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(text, { id: "toast-1" }),
+  );
+  expect(composer()).toBeTruthy();
+  noInlineResult();
+});
+
+it("asks before closing over unsaved text, and closes a clean draft at once", async () => {
+  h.confirm.mockImplementationOnce(() => {});
+  await openDraft();
+  type("Message", "Edited here");
+  press("Cancel");
+  expect(h.confirm).toHaveBeenCalledExactlyOnceWith(
+    "Discard changes?",
+    "What you typed since the last save will be lost.",
+    expect.any(Function),
+    true,
+  );
+  expect(composer()).toBeTruthy();
+  press("Cancel");
+  expect(composer()).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: /Thursday/ }));
+  press("Close");
+  expect(composer()).toBeNull();
+  expect(h.confirm).toHaveBeenCalledTimes(2);
+  expect(h.remove).not.toHaveBeenCalled();
+});
+
+it("sends only from the review, once, at the revision that was reviewed", async () => {
+  let confirm: () => void = () => {};
+  h.send.mockReturnValueOnce(new Promise<void>((resolve) => (confirm = resolve)));
+  await openDraft();
+  press("Review and send");
+
+  // The review shows who it goes to and what it says before anything is sent.
+  const sheet = screen.getAllByRole("dialog").at(-1) as HTMLElement;
+  expect(within(sheet).getByText("Review message")).toBeTruthy();
+  expect(within(sheet).getByText("me@example.test")).toBeTruthy();
+  expect(within(sheet).getByText("maya@example.test")).toBeTruthy();
+  expect(within(sheet).getByText("Thursday")).toBeTruthy();
+  expect(within(sheet).getByText("See you at ten.")).toBeTruthy();
+  expect(h.send).not.toHaveBeenCalled();
+  expect(h.update).not.toHaveBeenCalled();
+
+  press("Send message");
+  press("Send message");
+  expect(h.send).toHaveBeenCalledExactlyOnceWith({
+    draftId: "draft-1",
+    confirmedUpdatedAt: "2026-11-16T10:00:00.000Z",
+  });
+  expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Sending message…");
+  expect(h.toast.success).not.toHaveBeenCalled();
+  expect(composer() ?? screen.queryByText("Review message")).toBeTruthy();
+
+  await act(async () => confirm());
+  expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Message sent", { id: "toast-1" });
+  await waitFor(() => expect(screen.queryByText("Review message")).toBeNull());
+  expect(h.send).toHaveBeenCalledTimes(1);
+  noInlineResult();
+});
+
+it("saves edits before the review and sends the saved revision", async () => {
+  h.update.mockResolvedValueOnce(
+    draft({ body: "See you at eleven.", updatedAt: "2026-11-16T10:05:00.000Z" }),
+  );
+  h.send.mockResolvedValueOnce(undefined);
+  await openDraft();
+  type("Message", "See you at eleven.");
+  press("Review and send");
+  await screen.findByRole("button", { name: "Send message" });
+  expect(screen.getByText("See you at eleven.")).toBeTruthy();
+  expect(h.send).not.toHaveBeenCalled();
+
+  press("Keep editing");
+  expect(field("Message").value).toBe("See you at eleven.");
+  press("Review and send");
+  press("Send message");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenLastCalledWith("Message sent", expect.anything()),
+  );
+  expect(h.update).toHaveBeenCalledTimes(1);
+  expect(h.send).toHaveBeenCalledExactlyOnceWith({
+    draftId: "draft-1",
+    confirmedUpdatedAt: "2026-11-16T10:05:00.000Z",
+  });
+});
+
+it("does not open the review when the draft could not be saved", async () => {
+  h.update.mockRejectedValueOnce(fault(422));
+  await openDraft();
+  type("Message", "See you at eleven.");
+  press("Review and send");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+  expect(h.send).not.toHaveBeenCalled();
+});
+
+it.each([
+  [
+    "the provider refused it",
+    () => fault(503, { retrySafe: true, partialEffect: false }),
+    "Couldn’t send the message. It was not sent, and your draft is saved.",
+  ],
+  [
+    "the API refused it",
+    () => fault(403),
+    "Couldn’t send the message. It was not sent, and your draft is saved.",
+  ],
+  [
+    "the draft changed after the review",
+    () => fault(409),
+    "This draft changed after you reviewed it. Review it again before sending.",
+  ],
+])("leaves the draft intact when %s", async (_name, error, text) => {
+  h.send.mockRejectedValueOnce(error());
+  await review();
+  h.drafts.mockResolvedValue([draft({ updatedAt: "2026-11-16T10:06:00.000Z" })]);
+  press("Send message");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(text, { id: "toast-1" }),
+  );
+  // Back to the draft, text intact; nothing is sent again without a new review.
+  expect(field("Message").value).toBe("See you at ten.");
+  expect(h.send).toHaveBeenCalledTimes(1);
+  expect(h.toast.success).not.toHaveBeenCalled();
+  noInlineResult();
+
+  h.send.mockResolvedValueOnce(undefined);
+  press("Review and send");
+  press("Send message");
+  await waitFor(() => expect(h.send).toHaveBeenCalledTimes(2));
+  expect(h.send).toHaveBeenLastCalledWith({
+    draftId: "draft-1",
+    confirmedUpdatedAt: "2026-11-16T10:06:00.000Z",
+  });
+});
+
+it.each([
+  ["a lost connection", offline, [draft()]],
+  ["a server fault", () => fault(500), [draft({ sendStatus: "sending" })]],
+  [
+    "a provider effect",
+    () => fault(503, { partialEffect: true }),
+    [draft({ sendStatus: "reconcile" })],
+  ],
+  ["a refusal with the draft gone", () => fault(404), []],
+  // A refusal that carries a provider effect proves nothing, even over an unsent record.
+  ["a conflict with a provider effect", () => fault(409, { partialEffect: true }), [draft()]],
+  ["a conflict while another send runs", () => fault(409), [draft({ sendStatus: "sending" })]],
+  ["a conflict awaiting review", () => fault(409), [draft({ sendStatus: "reconcile" })]],
+  ["a claim the API could not release", () => fault(503, { retrySafe: false }), [draft()]],
+  ["a request timeout", () => fault(408), [draft()]],
+])("locks the message after an interrupted send: %s", async (_name, error, after) => {
+  h.send.mockRejectedValueOnce(error());
+  await review();
+  h.drafts.mockResolvedValue(after);
+  press("Send message");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t confirm whether this message was sent. Check Sent mail before sending again.",
+      { id: "toast-1" },
+    ),
+  );
+  // Nothing is sent again and nothing offers to: only a check, or the person's own record.
+  expect(h.send).toHaveBeenCalledTimes(1);
+  expect(h.toast.success).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Review and send" })).toBeNull();
+  expect(composer()).toBeNull();
+  expect(screen.getByText("See you at ten.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+  noInlineResult();
+});
+
+it("locks the message when the drafts cannot be read after an interrupted send", async () => {
+  h.send.mockRejectedValueOnce(offline());
+  await review();
+  h.drafts.mockRejectedValue(offline());
+  press("Send message");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+
+  press("Check again");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith("Couldn’t check this message. Try again.", {
+      id: "toast-1",
+    }),
+  );
+  expect(h.toast.loading).toHaveBeenLastCalledWith("Checking this message…");
+  expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+  expect(h.send).toHaveBeenCalledTimes(1);
+});
+
+it("reports an interrupted send as sent once the draft's record says so", async () => {
+  h.send.mockRejectedValueOnce(offline());
+  await review();
+  h.drafts.mockResolvedValue([draft({ sendStatus: "sent", sentAt: "2026-11-16T10:06:00.000Z" })]);
+  press("Send message");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Message sent", { id: "toast-1" }),
+  );
+  expect(h.toast.error).not.toHaveBeenCalled();
+  await waitFor(() => expect(screen.queryByText("Review message")).toBeNull());
+  expect(h.send).toHaveBeenCalledTimes(1);
+});
+
+it("checks an unconfirmed send again without sending", async () => {
+  h.send.mockRejectedValueOnce(offline());
+  await review();
+  h.drafts.mockResolvedValue([draft({ sendStatus: "sending" })]);
+  press("Send message");
+  await screen.findByRole("button", { name: "Check again" });
+  expect(screen.getByText(/doesn’t know whether this message was sent/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "It was sent" })).toBeNull();
+
+  press("Check again");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith(
+      "This message is still being sent. Check again in a moment.",
+      { id: "toast-1" },
+    ),
+  );
+
+  h.drafts.mockResolvedValue([draft({ sendStatus: "reconcile" })]);
+  press("Check again");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith(
+      "Delivery is still unconfirmed. Check Sent mail, then record what happened.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(screen.getByRole("button", { name: "It was sent" })).toBeTruthy();
+
+  h.drafts.mockResolvedValue([]);
+  press("Check again");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith(
+      "This draft is no longer available. Check Sent mail to see whether it was sent.",
+      { id: "toast-1" },
+    ),
+  );
+
+  // Recorded as unsent, but the revision cannot be retired: a late send could still land.
+  h.drafts.mockResolvedValue([draft({ updatedAt: "2026-11-16T10:07:00.000Z" })]);
+  h.update.mockRejectedValueOnce(fault(409));
+  press("Check again");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenLastCalledWith(
+      "Couldn’t confirm this message is safe to send again. Check again.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(composer()).toBeNull();
+
+  // The draft is saved again unchanged, so the revision that was sent can no longer send;
+  // the draft opens at the new revision and sending needs a new review.
+  h.update.mockResolvedValueOnce(draft({ updatedAt: "2026-11-16T10:08:00.000Z" }));
+  press("Check again");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith(
+      "This message is recorded as not sent. Review it before sending.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(h.update).toHaveBeenLastCalledWith("draft-1", {
+    accountId: "personal",
+    to: [{ address: "maya@example.test", name: null }],
+    cc: [],
+    subject: "Thursday",
+    body: "See you at ten.",
+    threadId: null,
+    expectedUpdatedAt: "2026-11-16T10:07:00.000Z",
+  });
+  expect(field("Message").value).toBe("See you at ten.");
+  expect(h.send).toHaveBeenCalledTimes(1);
+  h.send.mockResolvedValueOnce(undefined);
+  press("Review and send");
+  press("Send message");
+  await waitFor(() => expect(h.send).toHaveBeenCalledTimes(2));
+  expect(h.send).toHaveBeenLastCalledWith({
+    draftId: "draft-1",
+    confirmedUpdatedAt: "2026-11-16T10:08:00.000Z",
+  });
+});
+
+it("closes a checked message the record shows as sent", async () => {
+  h.drafts.mockResolvedValue([draft({ sendStatus: "reconcile" })]);
+  await openDraft();
+  h.drafts.mockResolvedValue([draft({ sendStatus: "sent" })]);
+  press("Check again");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Message sent", { id: "toast-1" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Check again" })).toBeNull());
+  expect(h.send).not.toHaveBeenCalled();
+});
+
+it("records what the person found for a send that needs review", async () => {
+  h.drafts.mockResolvedValue([draft({ sendStatus: "reconcile" })]);
+  h.reconcile.mockResolvedValueOnce(draft({ updatedAt: "2026-11-16T10:08:00.000Z" }));
+  await openDraft();
+  // A draft awaiting review opens locked: it shows the message and cannot be edited or sent.
+  expect(composer()).toBeNull();
+  expect(screen.getByText("See you at ten.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Review and send" })).toBeNull();
+
+  press("It was not sent");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Recorded as not sent", {
+      id: "toast-1",
+    }),
+  );
+  expect(h.reconcile).toHaveBeenCalledExactlyOnceWith("draft-1", { outcome: "not_sent" });
+  expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Recording…");
+  expect(field("Message").value).toBe("See you at ten.");
+  expect(h.send).not.toHaveBeenCalled();
+  noInlineResult();
+});
+
+it("records a reviewed send as sent and closes the message", async () => {
+  h.drafts.mockResolvedValue([draft({ sendStatus: "reconcile" })]);
+  h.reconcile.mockResolvedValueOnce(draft({ sendStatus: "sent" }));
+  await openDraft();
+  press("It was sent");
+  await waitFor(() =>
+    expect(h.toast.success).toHaveBeenCalledExactlyOnceWith("Recorded as sent", { id: "toast-1" }),
+  );
+  expect(h.reconcile).toHaveBeenCalledExactlyOnceWith("draft-1", { outcome: "sent" });
+  await waitFor(() => expect(screen.queryByRole("button", { name: "It was sent" })).toBeNull());
+  expect(h.send).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["refused", () => fault(409), "Couldn’t record that for this draft. Check it again."],
+  ["interrupted", offline, "Couldn’t confirm that was recorded. Check this message again."],
+])("stays locked when recording the outcome is %s", async (_name, error, text) => {
+  h.drafts.mockResolvedValue([draft({ sendStatus: "reconcile" })]);
+  h.reconcile.mockRejectedValueOnce(error());
+  await openDraft();
+  press("It was sent");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(text, { id: "toast-1" }),
+  );
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+  expect(composer()).toBeNull();
+});
+
+it("shows a draft that is being sent as locked", async () => {
+  h.drafts.mockResolvedValue([draft({ sendStatus: "sending" })]);
+  await openDraft();
+  expect(screen.getByText("This message is being sent.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "It was sent" })).toBeNull();
+});
+
+it("reports nothing to the next person when the session changes during a send", async () => {
+  let fail: (error: unknown) => void = () => {};
+  h.send.mockReturnValueOnce(new Promise((_resolve, reject) => (fail = reject)));
+  await review();
+  press("Send message");
+  h.epoch += 1;
+  await act(async () => fail(offline()));
+  await waitFor(() => expect(h.toast.dismiss).toHaveBeenCalledWith("toast-1"));
+  expect(h.toast.success).not.toHaveBeenCalled();
+  expect(h.toast.error).not.toHaveBeenCalled();
+});
+
+it("replies inside the conversation and forwards outside it", async () => {
+  h.drafts.mockResolvedValue([]);
+  h.create.mockImplementation(async (input) => draft({ ...input, id: "new" }));
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: /^Maya Chen/ }));
+  const reader = await screen.findByRole("dialog");
+  await within(reader).findByText("Please review before Thursday.");
+
+  fireEvent.click(within(reader).getByRole("button", { name: "Conversation actions" }));
+  press("Reply");
+  expect(field("To").value).toBe("Maya Chen <maya@example.test>");
+  expect(field("Subject").value).toBe("Re: Board packet");
+  type("Message", "Looks good.");
+  press("Save draft");
+  await waitFor(() => expect(h.create).toHaveBeenCalledTimes(1));
+  expect(h.create.mock.calls[0]?.[0]).toMatchObject({
+    accountId: "personal",
+    threadId: "thread-1",
+    to: [{ address: "maya@example.test", name: "Maya Chen" }],
+    subject: "Re: Board packet",
+    body: "Looks good.",
+  });
+  // Closing the composer returns to the conversation.
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1) as HTMLElement);
+  expect(composer()).toBeNull();
+  expect(within(reader).getByText("Please review before Thursday.")).toBeTruthy();
+
+  fireEvent.click(within(reader).getByRole("button", { name: "Conversation actions" }));
+  press("Forward");
+  expect(field("To").value).toBe("");
+  expect(field("Subject").value).toBe("Fwd: Board packet");
+  expect(field("Message").value).toContain("Please review before Thursday.");
+  type("To", "sam@example.test");
+  press("Save draft");
+  await waitFor(() => expect(h.create).toHaveBeenCalledTimes(2));
+  expect(h.create.mock.calls[1]?.[0]).toMatchObject({ threadId: null });
+  expect(h.send).not.toHaveBeenCalled();
+});
+
+it("offers no reply before the conversation has loaded", async () => {
+  h.messages.mockReturnValue(new Promise(() => {}));
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: /^Maya Chen/ }));
+  const reader = await screen.findByRole("dialog");
+  // Only the read-state action is there, so it is a single button rather than a menu.
+  expect(within(reader).getByRole("button", { name: "Mark as unread" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Conversation actions" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Forward" })).toBeNull();
+});
+
+it("writes nothing while no one is signed in", async () => {
+  await openDraft();
+  h.owner = undefined;
+  type("Message", "Edited here");
+  press("Save draft");
+  expect(h.toast.loading).not.toHaveBeenCalled();
+  expect(h.update).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["a confirmed send", async () => {}],
+  [
+    "a send confirmed by the record",
+    async () => {
+      throw offline();
+    },
+  ],
+])("reports %s to no one once the session has changed", async (_name, outcome) => {
+  let settle: () => void = () => {};
+  h.send.mockReturnValueOnce(
+    new Promise<void>((resolve, reject) => {
+      settle = () => outcome().then(resolve, reject);
+    }),
+  );
+  await review();
+  h.drafts.mockResolvedValue([draft({ sendStatus: "sent" })]);
+  press("Send message");
+  h.epoch += 1;
+  await act(async () => settle());
+  await waitFor(() => expect(h.toast.dismiss).toHaveBeenCalledWith("toast-1"));
+  expect(h.toast.success).not.toHaveBeenCalled();
+  expect(h.toast.error).not.toHaveBeenCalled();
+});
+
+it("reports a check to no one once the session has changed", async () => {
+  h.drafts.mockResolvedValue([draft({ sendStatus: "reconcile" })]);
+  await openDraft();
+  let read: (drafts: MailDraft[]) => void = () => {};
+  h.drafts.mockReturnValueOnce(new Promise((resolve) => (read = resolve)));
+  press("Check again");
+  h.epoch += 1;
+  await act(async () => read([draft({ sendStatus: "sent" })]));
+  await waitFor(() => expect(h.toast.dismiss).toHaveBeenCalledWith("toast-1"));
+  expect(h.toast.success).not.toHaveBeenCalled();
+});
+
+it("looks for an interrupted save before saving over it again", async () => {
+  h.update.mockRejectedValueOnce(offline());
+  await openDraft();
+  // The save landed, but neither it nor the read after it could be confirmed.
+  h.drafts.mockRejectedValueOnce(offline());
+  type("Message", "Edited here");
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t confirm the draft was saved. Try again.",
+      { id: "toast-1" },
+    ),
+  );
+
+  // The next save starts from the revision that landed, so more typing is not a conflict.
+  const landed = draft({ body: "Edited here", updatedAt: "2026-11-16T10:05:00.000Z" });
+  h.drafts.mockResolvedValue([landed]);
+  h.update.mockResolvedValueOnce({ ...landed, body: "Edited here, twice" });
+  type("Message", "Edited here, twice");
+  press("Save draft");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.update).toHaveBeenLastCalledWith(
+    "draft-1",
+    expect.objectContaining({
+      body: "Edited here, twice",
+      expectedUpdatedAt: "2026-11-16T10:05:00.000Z",
+    }),
+  );
+});
+
+it("keeps a recipient whose name holds a comma as one recipient", async () => {
+  h.drafts.mockResolvedValue([
+    draft({ to: [{ address: "jane@example.test", name: "Doe, Jane" }] }),
+  ]);
+  h.send.mockResolvedValueOnce(undefined);
+  await openDraft();
+  expect(field("To").value).toBe('"Doe, Jane" <jane@example.test>');
+  press("Review and send");
+  press("Send message");
+  await waitFor(() => expect(h.send).toHaveBeenCalledTimes(1));
+  expect(h.toast.error).not.toHaveBeenCalled();
+  expect(h.update).not.toHaveBeenCalled();
+});
+
+it("offers no reply until the person's own address is known", async () => {
+  h.accounts.mockReturnValue(new Promise(() => {}));
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: /^Maya Chen/ }));
+  const reader = await screen.findByRole("dialog");
+  await within(reader).findByText("Please review before Thursday.");
+  expect(screen.queryByRole("button", { name: "Conversation actions" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+});

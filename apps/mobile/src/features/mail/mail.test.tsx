@@ -37,6 +37,7 @@ const h = vi.hoisted(() => ({
   messages: vi.fn(),
   fullThreads: vi.fn(),
   update: vi.fn(),
+  drafts: vi.fn(),
   toast: { error: vi.fn(), loading: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
 }));
 vi.mock("react-native", async () => {
@@ -90,6 +91,7 @@ vi.mock("../auth/context", () => ({
         listMailMessages: h.messages,
         listMailThreads: h.fullThreads,
         updateMailThread: h.update,
+        listMailDrafts: h.drafts,
       }),
     },
   }),
@@ -171,6 +173,7 @@ beforeEach(() => {
     }),
   ]);
   h.accounts.mockResolvedValue({ accounts });
+  h.drafts.mockResolvedValue([]);
   h.messages.mockResolvedValue([message("m1")]);
 });
 afterEach(() => {

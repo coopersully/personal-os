@@ -1,4 +1,5 @@
 import type { MailAddress, MailThreadSummary } from "@personal-os/domain";
+import { useState } from "react";
 import { ActivityIndicator, Modal, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Action, Actions } from "../../components/forms/form-rows";
@@ -9,7 +10,9 @@ import { RowActions } from "../../components/row-actions";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SheetHeader } from "../../components/sheet-header";
 import { spacing, useTheme } from "../../theme";
-import { confirmMailRead, retryMailRead, useMailMessages } from "./data";
+import { MailComposer } from "./composer";
+import { confirmMailRead, retryMailRead, useMailAccounts, useMailMessages } from "./data";
+import { type ComposeStart, forwardStart, replyStart } from "./draft-logic";
 import { senderName } from "./logic";
 
 const people = (addresses: MailAddress[]) => addresses.map(senderName).join(", ");
@@ -17,18 +20,47 @@ const people = (addresses: MailAddress[]) => addresses.map(senderName).join(", "
 /**
  * Reads one conversation. Its messages live in memory only while this sheet is open. A caller
  * that cannot change the conversation passes no `actions`, and the header shows no control.
+ * With `compose`, the loaded conversation also offers Reply and Forward; the composer opens
+ * inside this sheet, so closing it returns to the conversation.
  */
 export function MailReader({
   thread,
   actions,
+  compose = false,
   close,
 }: {
   thread: MailThreadSummary;
   actions?: readonly RowAction[];
+  compose?: boolean;
   close: () => void;
 }) {
   const t = useTheme();
   const messages = useMailMessages(thread.id);
+  const accounts = useMailAccounts();
+  const [composing, setComposing] = useState<ComposeStart | null>(null);
+  const loaded = messages.data;
+  const own = accounts.data?.find((account) => account.accountId === thread.accountId)?.email;
+  // Replying needs the latest message and the person's own address, so the commands wait
+  // for the conversation and the accounts to load.
+  const offered: readonly RowAction[] = [
+    ...(compose && loaded?.length && accounts.data
+      ? [
+          {
+            id: "reply",
+            label: "Reply",
+            icon: "reply" as const,
+            onPress: () => setComposing(replyStart(thread, loaded, own)),
+          },
+          {
+            id: "forward",
+            label: "Forward",
+            icon: "send" as const,
+            onPress: () => setComposing(forwardStart(thread, loaded)),
+          },
+        ]
+      : []),
+    ...(actions ?? []),
+  ];
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
@@ -36,8 +68,8 @@ export function MailReader({
           title="Conversation"
           onClose={close}
           trailing={
-            actions?.length ? (
-              <RowActions placement="header" label="Conversation actions" actions={actions} />
+            offered.length ? (
+              <RowActions placement="header" label="Conversation actions" actions={offered} />
             ) : undefined
           }
         />
@@ -120,6 +152,7 @@ export function MailReader({
             </View>
           ))}
         </ScrollView>
+        {composing && <MailComposer start={composing} close={() => setComposing(null)} />}
       </SafeAreaView>
     </Modal>
   );

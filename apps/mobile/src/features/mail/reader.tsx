@@ -40,10 +40,10 @@ export function MailReader({
   const [composing, setComposing] = useState<ComposeStart | null>(null);
   const loaded = messages.data;
   const own = accounts.data?.find((account) => account.accountId === thread.accountId)?.email;
-  // Replying needs the latest message and the person's own address, so the commands wait
-  // for the conversation and the accounts to load.
+  // A reply needs the person's own address to tell their messages from the other party's, so
+  // it waits for that; a forward needs only the loaded conversation.
   const offered: readonly RowAction[] = [
-    ...(compose && loaded?.length && accounts.data
+    ...(compose && loaded?.length && own
       ? [
           {
             id: "reply",
@@ -51,6 +51,10 @@ export function MailReader({
             icon: "reply" as const,
             onPress: () => setComposing(replyStart(thread, loaded, own)),
           },
+        ]
+      : []),
+    ...(compose && loaded?.length
+      ? [
           {
             id: "forward",
             label: "Forward",

@@ -12,6 +12,7 @@ import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import InboxRoute from "../../app/(workspaces)/mail/index";
 import MailboxesRoute from "../../app/(workspaces)/mail/mailboxes";
+import { forgetUnconfirmedSends } from "./drafts";
 
 vi.mock("react", async () => {
   const { createRequire } = await import("node:module");
@@ -127,6 +128,7 @@ const offline = () => new TypeError("Network request failed");
 let client: QueryClient;
 beforeEach(() => {
   vi.clearAllMocks();
+  forgetUnconfirmedSends();
   h.owner = "owner";
   h.epoch = 0;
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -214,6 +216,7 @@ it("saves a new message as a draft with one toast and no inline result", async (
   press("Save draft");
   press("Save draft");
   expect(h.toast.loading).toHaveBeenCalledExactlyOnceWith("Saving draft…");
+  await waitFor(() => expect(h.create).toHaveBeenCalledTimes(1));
   expect(h.create).toHaveBeenCalledExactlyOnceWith({
     accountId: "personal",
     to: [
@@ -439,12 +442,48 @@ it("says a refused create was not saved", async () => {
       { id: "toast-1" },
     ),
   );
-  // Nothing may have landed, so the next save creates without reading drafts first.
-  const reads = h.drafts.mock.calls.length;
+  // Nothing landed, so the next save creates again rather than looking for a draft to adopt.
+  h.drafts.mockResolvedValue([draft({ subject: "Hello", body: "", to: [] })]);
   h.create.mockResolvedValueOnce(draft());
   press("Save draft");
   await waitFor(() => expect(h.create).toHaveBeenCalledTimes(2));
-  expect(h.drafts).toHaveBeenCalledTimes(reads);
+  expect(h.update).not.toHaveBeenCalled();
+});
+
+it("writes no new draft when the existing drafts cannot be read first", async () => {
+  h.drafts.mockRejectedValue(offline());
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("Subject", "Hello");
+  press("Save draft");
+  await waitFor(() =>
+    expect(h.toast.error).toHaveBeenCalledExactlyOnceWith(
+      "Couldn’t check your drafts, so nothing was saved. Try again.",
+      { id: "toast-1" },
+    ),
+  );
+  expect(h.create).not.toHaveBeenCalled();
+});
+
+it("never takes over an older draft that holds the same text", async () => {
+  // An agent's draft already says exactly what this new message says.
+  const older = draft({ id: "older", subject: "Hello", body: "", to: [] });
+  h.drafts.mockResolvedValue([older]);
+  h.create.mockRejectedValueOnce(offline());
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: "New message" }));
+  type("Subject", "Hello");
+  press("Save draft");
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalledTimes(1));
+
+  // The interrupted create never landed. The changed text becomes a new draft; the older
+  // draft is neither adopted nor overwritten.
+  h.create.mockResolvedValueOnce(draft({ id: "new", subject: "Hello", body: "More", to: [] }));
+  type("Message", "More");
+  press("Save draft");
+  await waitFor(() => expect(h.toast.success).toHaveBeenCalledTimes(1));
+  expect(h.create).toHaveBeenCalledTimes(2);
+  expect(h.update).not.toHaveBeenCalled();
 });
 
 it("discards a draft only after the person confirms", async () => {
@@ -997,6 +1036,48 @@ it("offers no reply until the person's own address is known", async () => {
   fireEvent.click(await screen.findByRole("button", { name: /^Maya Chen/ }));
   const reader = await screen.findByRole("dialog");
   await within(reader).findByText("Please review before Thursday.");
-  expect(screen.queryByRole("button", { name: "Conversation actions" })).toBeNull();
+  fireEvent.click(within(reader).getByRole("button", { name: "Conversation actions" }));
+  expect(screen.getByRole("button", { name: "Forward" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+});
+
+it("keeps an unconfirmed send locked when the draft is closed and opened again", async () => {
+  h.send.mockRejectedValueOnce(offline());
+  await review();
+  // The record still reads unsent, which alone proves nothing after a lost connection.
+  press("Send message");
+  await screen.findByRole("button", { name: "Check again" });
+
+  fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1) as HTMLElement);
+  expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+  fireEvent.click(await screen.findByRole("button", { name: /Thursday/ }));
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Review and send" })).toBeNull();
+  expect(composer()).toBeNull();
+
+  // Only the check, which retires the sent revision, opens it again; then it stays open.
+  h.update.mockResolvedValueOnce(draft({ updatedAt: "2026-11-16T10:08:00.000Z" }));
+  press("Check again");
+  await waitFor(() => expect(composer()).toBeTruthy());
+  fireEvent.click(screen.getAllByRole("button", { name: "Close" }).at(-1) as HTMLElement);
+  fireEvent.click(await screen.findByRole("button", { name: /Thursday/ }));
+  expect(composer()).toBeTruthy();
+  expect(h.send).toHaveBeenCalledTimes(1);
+});
+
+it("offers Forward but no Reply when the account's own address is unknown", async () => {
+  h.accounts.mockResolvedValue({
+    accounts: [{ ...account("personal", "me@example.test"), email: null }],
+  });
+  // The latest message is the person's own; without their address it would look incoming.
+  h.messages.mockResolvedValue([
+    { ...received, from: { name: null, address: "me@example.test" }, to: [thread.from] },
+  ]);
+  render(wrap(<InboxRoute />));
+  fireEvent.click(await screen.findByRole("button", { name: /^Maya Chen/ }));
+  const reader = await screen.findByRole("dialog");
+  await within(reader).findByText("Please review before Thursday.");
+  fireEvent.click(within(reader).getByRole("button", { name: "Conversation actions" }));
+  expect(screen.getByRole("button", { name: "Forward" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
 });

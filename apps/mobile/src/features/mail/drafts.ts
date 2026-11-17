@@ -24,10 +24,33 @@ export function useMailDrafts() {
   });
 }
 
+/**
+ * A save the API never confirmed: what was sent, and for a create the drafts that already
+ * existed, so only a draft that appeared afterwards can be taken for the one it made.
+ */
+export type UnconfirmedSave = { input: CreateMailDraftInput; known: readonly string[] };
+
 export type SaveResult =
   | { ok: true; draft: MailDraft }
-  /** `unconfirmed` keeps what was sent, so the next save looks for it before writing again. */
-  | { ok: false; unconfirmed?: CreateMailDraftInput };
+  /** `unconfirmed` is kept so the next save looks for that write before writing again. */
+  | { ok: false; unconfirmed?: UnconfirmedSave };
+
+/**
+ * Drafts whose send this device could not confirm. It outlives a composer, so closing and
+ * reopening a draft cannot skip the check that makes another send safe. In memory only.
+ */
+const unconfirmedSends = new Set<string>();
+const sendKey = (owner: string | undefined, draftId: string) => `${owner}:${draftId}`;
+
+/** Whether this person's draft still has a send this device could not confirm. */
+export function sendUnconfirmed(owner: string | undefined, draftId: string) {
+  return unconfirmedSends.has(sendKey(owner, draftId));
+}
+
+/** For tests: forget every unconfirmed send. */
+export function forgetUnconfirmedSends() {
+  unconfirmedSends.clear();
+}
 
 /**
  * What a send came to. Anything but `sent` and `unsent` means delivery is not known: the
@@ -87,42 +110,56 @@ export function useDraftWrites() {
     }
   }
 
+  /** Keeps the lock for a send this device could not confirm until a result settles it. */
+  const track =
+    (draft: MailDraft, lock: boolean) =>
+    (result: SendResult | undefined): SendResult | undefined => {
+      const key = sendKey(owner, draft.id);
+      if (result?.state === "unknown") {
+        if (lock) unconfirmedSends.add(key);
+      } else if (result) unconfirmedSends.delete(key);
+      return result;
+    };
   const find = async (id: string) => (await api.listMailDrafts()).find((draft) => draft.id === id);
 
   return {
     pending,
 
     /**
-     * Saves the form. A create the API never confirmed may have landed, so the next save reads
-     * the drafts and adopts the one holding that text instead of creating a second copy.
+     * Saves the form. A write the API never confirmed may have landed, so the next save reads
+     * the drafts first. A create is recognised only in a draft that did not exist before it:
+     * the same text in an older draft is someone else's and is never taken over.
      */
     save(
       input: CreateMailDraftInput,
       draft: MailDraft | null,
-      unconfirmed?: CreateMailDraftInput,
+      unconfirmed?: UnconfirmedSave,
     ): Promise<SaveResult | undefined> {
       return run("Saving draft…", async ({ done, failed }): Promise<SaveResult> => {
         let target = draft;
-        if (unconfirmed) {
-          // The earlier write may have landed: its record decides what this save starts from.
+        let known = unconfirmed?.known ?? [];
+        if (unconfirmed || !draft) {
           let drafts: MailDraft[];
           try {
             drafts = await api.listMailDrafts();
           } catch {
             failed("Couldn’t check your drafts, so nothing was saved. Try again.");
-            return { ok: false, unconfirmed };
+            return { ok: false, ...(unconfirmed ? { unconfirmed } : {}) };
           }
-          const landed = drafts.find(
-            (found) =>
-              (draft ? found.id === draft.id : true) &&
-              draftStage(found) === "editable" &&
-              sameDraft(found, unconfirmed),
-          );
-          target = landed ?? target;
-          if (landed && sameDraft(landed, input)) {
-            done("Draft saved");
-            return { ok: true, draft: landed };
-          }
+          if (unconfirmed) {
+            // The earlier write may have landed: its record decides what this save starts from.
+            const landed = drafts.find(
+              (found) =>
+                (draft ? found.id === draft.id : !known.includes(found.id)) &&
+                draftStage(found) === "editable" &&
+                sameDraft(found, unconfirmed.input),
+            );
+            target = landed ?? target;
+            if (landed && sameDraft(landed, input)) {
+              done("Draft saved");
+              return { ok: true, draft: landed };
+            }
+          } else known = drafts.map((found) => found.id);
         }
         try {
           const saved = target
@@ -140,7 +177,7 @@ export function useDraftWrites() {
               return { ok: false };
             }
             failed("Couldn’t confirm the draft was saved. Try again; nohmi checks first.");
-            return { ok: false, unconfirmed: input };
+            return { ok: false, unconfirmed: { input, known } };
           }
           // The save may have landed, or the draft may have moved on: its record decides.
           const found = await find(target.id).catch(() => null);
@@ -159,7 +196,9 @@ export function useDraftWrites() {
                   : "Couldn’t confirm the draft was saved. Try again.",
           );
           // Neither confirmed nor read back: the next save looks for it before writing again.
-          return found === null && !rejected ? { ok: false, unconfirmed: input } : { ok: false };
+          return found === null && !rejected
+            ? { ok: false, unconfirmed: { input, known: [] } }
+            : { ok: false };
         }
       });
     },
@@ -223,7 +262,7 @@ export function useDraftWrites() {
         }
         failed(UNCONFIRMED_SEND);
         return { state: "unknown", ...(found ? { draft: found } : {}) };
-      });
+      }).then(track(draft, true));
     },
 
     /** Reads the draft's recorded state again after an unconfirmed send. Sends nothing. */
@@ -271,7 +310,7 @@ export function useDraftWrites() {
             : "Delivery is still unconfirmed. Check Sent mail, then record what happened.",
         );
         return { state: "unknown", draft: found };
-      });
+      }).then(track(draft, false));
     },
 
     /** Records what the person found in Sent mail for a send the API could not confirm. */
@@ -289,7 +328,7 @@ export function useDraftWrites() {
           );
           return { state: "unknown", draft };
         }
-      });
+      }).then(track(draft, false));
     },
   };
 }

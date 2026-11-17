@@ -1,4 +1,4 @@
-import type { CreateMailDraftInput, MailDraft } from "@personal-os/domain";
+import type { MailDraft } from "@personal-os/domain";
 import { useRef, useState } from "react";
 import { Modal, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -16,7 +16,7 @@ import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SheetHeader } from "../../components/sheet-header";
 import { spacing, useTheme } from "../../theme";
 import { confirm } from "../tasks/ui";
-import { useMailAccounts } from "./data";
+import { useMail, useMailAccounts } from "./data";
 import {
   type ComposeStart,
   type DraftForm,
@@ -26,7 +26,7 @@ import {
   saveProblem,
   sendProblem,
 } from "./draft-logic";
-import { type SendResult, useDraftWrites } from "./drafts";
+import { type SendResult, sendUnconfirmed, type UnconfirmedSave, useDraftWrites } from "./drafts";
 
 const same = (a: DraftForm, b: DraftForm) =>
   a.accountId === b.accountId &&
@@ -52,8 +52,12 @@ export function MailComposer({ start, close }: { start: ComposeStart; close: () 
   const [saved, setSaved] = useState(start.draft ? start.form : null);
   const [reviewing, setReviewing] = useState(false);
   // Delivery is not known: set by an unconfirmed send, cleared only by a check or a record.
-  const [unknown, setUnknown] = useState(false);
-  const unconfirmed = useRef<CreateMailDraftInput | undefined>(undefined);
+  // It starts from what this device remembers, so reopening a draft cannot skip the check.
+  const { owner } = useMail();
+  const [unknown, setUnknown] = useState(
+    () => !!start.draft && sendUnconfirmed(owner, start.draft.id),
+  );
+  const unconfirmed = useRef<UnconfirmedSave | undefined>(undefined);
   const stage = draft ? draftStage(draft) : "editable";
   const locked = unknown || stage !== "editable";
   const dirty = !locked && !same(form, saved ?? opened);

@@ -312,6 +312,31 @@ rules; a transaction's top-level category is insufficient. Limit edits retain th
 bind to the displayed revision, and preserve server approval/input outcomes. Use the standard
 Close/Cancel, discard confirmation, floating Save and above-sheet Sonner feedback.
 
+### Budget plan revision
+
+Plan › Budget links to four pages behind one route, `/finance-budget-plan`, whose `view`
+parameter names the page. The budget pace graph sits on the Budget tab itself.
+
+- **Revise plan** edits the effective month, resources, allocations, rationale and assumptions of
+  the version on screen and saves it as a proposal bound to that version. With no plan it creates
+  the first proposal. Save stays disabled until every cent is assigned, names are unique and each
+  debt or goal allocation names its record. A saved proposal opens the existing proposal review,
+  which owns approval; the editor never activates a budget.
+- **Stale revision:** a conflict keeps the draft, disables Save and offers Reload latest version,
+  which asks before replacing the draft. Bucket edits recover the same way. A taken bucket name is
+  a correction, not a stale record.
+- **Uncertain writes:** an unchanged draft is resent under the same idempotency key. Only a
+  definite rejection, or the server recording the earlier attempt as failed, frees a new key.
+- **Budget buckets** shows the month's totals by bucket (never summed) and edits a bucket's name,
+  description and categories against its version. Turning on a category held by another bucket
+  says that it moves.
+- **Budget scope** confirms the approved version, accounts and currency a month is compared with:
+  choose each explicitly, preview the exact scope, then confirm that preview. Any change to the
+  selection or its source records discards the preview. Confirming a scope never approves or
+  rewrites a budget, and a later confirmation of a past month is labelled as such.
+- **Budget pace** shows one cell per day for the week, month or year, with the latest evaluated
+  day summarised in words. Status is never carried by colour alone: each cell has a spoken label.
+
 Account identities use validated provider institution artwork without recoloring it. Missing or
 failed artwork falls back to institution initials, never a fabricated company logo. Reuse the same
 identity component in account rows and details.

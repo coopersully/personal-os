@@ -798,6 +798,33 @@ only in Sent or Drafts is not found by the subject search. COO-259 tracks the Ma
 route that removes these limits. Result previews are private: they are not kept in the query cache after the
 list closes.
 
+### nohmi web links
+
+A nohmi web link to one record opens that record in the app (Universal Links, COO-233). The app
+claims only these links on its web origin; every other nohmi page stays in the browser.
+
+| Web link | Opens |
+| --- | --- |
+| `/tasks?task=<id>` | the task editor |
+| `/reminders?reminder=<id>` | the reminder editor |
+| `/finances/transactions?transactionId=<id>` | the transaction |
+| `/calendar?…&event=<id>` | the event |
+| `/mail?…&thread=<id>` | the conversation in the Mail reader, read-only |
+
+- `features/links/parse.ts` is the one list of supported links. The hosted association file
+  (`apps/web/public/.well-known/apple-app-site-association`) must claim exactly that list; a test
+  compares them. Adding a link means changing both.
+- A web link is never routed by its web path. `+native-intent` validates it (configured web
+  origin, known path, one well-formed id), queues it, and the signed-in shell opens it above the
+  current screen, the way a notification tap does. A link that arrives signed out waits in memory
+  for sign-in. A link the app is handed but cannot open raises one Sonner error and changes no
+  screen.
+- A conversation is read by id and shown in the shared reader without actions. Opening,
+  a conversation that no longer exists and a failed read are reported by Sonner only.
+- Custom-scheme paths (`personal-os://`) keep the router's own handling and still prompt in iOS.
+- iOS does not hand over a link followed inside Safari on the same site, a link typed into the
+  address bar, or one the person chose to open in the browser; those stay on the web.
+
 ### Mail read state and archive
 
 A conversation offers Mark as read or Mark as unread, whichever changes it, and Archive when it is in an inbox. Archive removes it from every inbox and keeps its other mailboxes; a conversation that is in no inbox, or whose mailboxes have not loaded, offers no Archive. The actions sit in the action slot at the trailing end of the row's first line, where the disclosure chevron was, and in the conversation's header: a menu when there are two, a single control when there is one. Opening a conversation does not mark it read, as on web. Snooze, bulk selection, deletion, compose and reply are separate work (COO-241, COO-237).

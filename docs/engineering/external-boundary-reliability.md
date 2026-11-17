@@ -352,3 +352,40 @@ verification. The owner can inspect current delivery summaries, and the original
 receipt history. Actual unattended permission, external bootstrap adoption, next scheduled
 invocation and successful causal Chat reply remain post-deploy evidence requirements. API tests and
 an issued prompt alone cannot establish them.
+
+## iPhone Universal Links
+
+iOS decides whether a nohmi web link opens the app. The app owns the claim (the
+`applinks:<web host>` associated-domains entitlement, written by `apps/mobile/app.config.ts` from
+the HTTPS `EXPO_PUBLIC_APP_URL` of the build; archives bind it to production) and the web origin
+owns the proof (`/.well-known/apple-app-site-association`, built from `apps/web/public` and served
+by `deploy/nginx.conf` as `application/json`, without a redirect). The file names the App ID
+`7J7HDVDCKQ.app.personal-os.mobile` and the record links listed in
+`docs/design/mobile-frontend.md`. The Apple App ID needs the Associated Domains capability and a
+provisioning profile that carries it; archive builds use automatic signing with provisioning
+updates, which is expected to add it but is not proven until an archive succeeds.
+
+Apple's servers fetch the file over public HTTPS/443 through Cloudflare and the gateway, not the
+phone, and cache it; a device reads Apple's copy at install or update and periodically after. A
+changed file can therefore take a day or more to reach phones, and a bot rule or challenge at the
+edge that blocks Apple's fetcher disables the feature without any error in nohmi. There is no
+request, credential, timeout or retry in nohmi's own runtime on this path, and nothing durable is
+written: a link carries only a record id, and every read it triggers passes the normal session
+and owner checks. The link is not an authority; a signed-out or different account sees sign-in or
+"no longer available".
+
+Degraded behaviour is the browser: when the file is missing, stale, blocked, or the entitlement
+is absent, the link opens the web app as before. Rollback is removing the file or the
+entitlement; removing the file takes effect only after Apple's cache expires. The AWS web path
+(`infra/web.tf`, S3 behind CloudFront) does not set a content type for this extensionless file
+and is not covered by this change.
+
+Tests prove link parsing and rejection, that the file and the parser agree, that the file names
+this app, and that the production nginx image serves it as JSON with 200 and a missing file as
+404. A local web build was checked by hand to contain the file. None of this can prove that Apple fetched and accepted the
+file, that the signed build carries the entitlement, or that iOS opens the app. After the web
+deploy and a signed build, the deployment owner must check
+`https://<web host>/.well-known/apple-app-site-association` from outside the network (200,
+`application/json`, no redirect), Apple's copy at
+`https://app-site-association.cdn-apple.com/a/v1/<web host>`, and on a phone that a record link
+tapped in Notes or Messages opens the right screen without a prompt.

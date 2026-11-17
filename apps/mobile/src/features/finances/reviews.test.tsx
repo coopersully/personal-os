@@ -499,7 +499,11 @@ beforeEach(() => {
   });
   h.api.getFinanceContextualQuestion.mockResolvedValue(question());
 });
-afterEach(cleanup);
+afterEach(() => {
+  // Every test, action or not: no rendered copy may repeat a toast message.
+  expectNoInlineResult();
+  cleanup();
+});
 
 // Assistant: where reviews are reached
 
@@ -1160,6 +1164,32 @@ it.each([
   expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
 });
 
+it.each([
+  401, 429,
+])("keeps an unconfirmed correction when its retry is refused with %i", async (status) => {
+  h.api.reconcileFinanceReimbursement.mockRejectedValueOnce(new Error("offline"));
+  await openCorrection();
+  fillCorrection();
+  fireEvent.click(saveCorrection());
+  await waitFor(() => expect(button("Retry same correction")).toBeTruthy());
+  h.api.reconcileFinanceReimbursement.mockRejectedValueOnce(rejection(status));
+  fireEvent.click(button("Retry same correction"));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(expect.stringContaining("still unconfirmed"), {
+      id: "feedback",
+    }),
+  );
+  // Still the same request under the same key, and the draft stays locked to it.
+  expect((screen.getByLabelText("Expected amount") as HTMLInputElement).disabled).toBe(true);
+  h.api.reconcileFinanceReimbursement.mockResolvedValue({ ...reimbursement, expectedAmount: 75 });
+  fireEvent.click(button("Retry same correction"));
+  await waitFor(() => expect(h.success).toHaveBeenCalled());
+  const keys = h.api.reconcileFinanceReimbursement.mock.calls.map(
+    ([input]) => input.idempotencyKey,
+  );
+  expect(new Set(keys).size).toBe(1);
+});
+
 it("lets a retry the server recorded as failed go again under a new key", async () => {
   h.api.reconcileFinanceReimbursement.mockRejectedValueOnce(new Error("offline"));
   await openCorrection();
@@ -1511,7 +1541,12 @@ it("names a maintained update and summarises a long list of changes", async () =
   expect(await screen.findByText("Maintained finances")).toBeTruthy();
   expect(screen.getByText("Change 5")).toBeTruthy();
   expect(screen.queryByText("Change 6")).toBeNull();
-  expect(screen.getByText("And 2 more.")).toBeTruthy();
+  // Approve applies all seven, so the rest can be opened before deciding.
+  press("Show 2 more changes in Maintained finances");
+  expect(screen.getByText("Change 6")).toBeTruthy();
+  expect(screen.getByText("Change 7")).toBeTruthy();
+  press("Show fewer changes in Maintained finances");
+  expect(screen.queryByText("Change 6")).toBeNull();
   expect(screen.queryByText(/^Assumes/)).toBeNull();
   press("Approve Maintained finances");
   await waitFor(() =>

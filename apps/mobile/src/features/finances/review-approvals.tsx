@@ -65,15 +65,20 @@ function ActionReviewCard({
   }, []);
   const current = () => active.current && currentOwner.current === owner;
   const title = reviewTitle(review);
-  // Any later successful read that still lists this review as pending settles the doubt,
-  // whether it is the check below or a Retry after that check failed.
-  const uncertainAt = useRef<number | null>(null);
-  useEffect(() => {
-    if (uncertainAt.current !== null && readAt > uncertainAt.current) {
-      uncertainAt.current = null;
+  const [showAll, setShowAll] = useState(false);
+  const reviews = ["finances", owner, "action-reviews"];
+  // How many reads had succeeded when the outcome was found unconfirmed. Only a read that
+  // succeeds after that settles the doubt: the check below, or a Retry after it failed.
+  const uncertainAfter = useRef<number | null>(null);
+  const settle = () => {
+    const reads = client.getQueryState(reviews)?.dataUpdateCount ?? 0;
+    if (uncertainAfter.current !== null && reads > uncertainAfter.current) {
+      uncertainAfter.current = null;
       setUnconfirmed(false);
     }
-  }, [readAt]);
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a newer successful read is the trigger.
+  useEffect(settle, [readAt]);
 
   async function decide(action: "approve" | "dismiss") {
     if (!owner || busy.current || unconfirmed) return;
@@ -81,7 +86,6 @@ function ActionReviewCard({
     setPending(true);
     const approving = action === "approve";
     const id = toast.loading(approving ? "Approving…" : "Dismissing…");
-    const reviews = ["finances", owner, "action-reviews"];
     try {
       if (approving) {
         const outcome = await api.approveFinanceActionReview(review.id);
@@ -119,14 +123,17 @@ function ActionReviewCard({
         );
         void client.invalidateQueries({ queryKey: reviews });
       } else {
-        uncertainAt.current = readAt;
+        uncertainAfter.current = client.getQueryState(reviews)?.dataUpdateCount ?? 0;
         setUnconfirmed(true);
         toast.error(
           `Couldn’t confirm the ${approving ? "approval" : "dismissal"}. Checking the latest state before you try again.`,
           { id },
         );
-        // Only a read that succeeds shows whether the decision landed.
-        void client.refetchQueries({ queryKey: reviews });
+        // Only a read that starts now and succeeds shows whether the decision landed; a read
+        // already under way is cancelled and replaced, so it cannot release the card.
+        void client.refetchQueries({ queryKey: reviews }).then(() => {
+          if (current()) settle();
+        });
       }
     } finally {
       busy.current = false;
@@ -141,13 +148,28 @@ function ActionReviewCard({
       <Copy>{title}</Copy>
       <Copy secondary>{review.rationale}</Copy>
       <View style={{ gap: 4 }}>
-        {review.changes.slice(0, shownChanges).map((change, index) => (
+        {review.changes.slice(0, showAll ? undefined : shownChanges).map((change, index) => (
           // Summaries are free text and may repeat; their order is the stable identity.
           // biome-ignore lint/suspicious/noArrayIndexKey: the list is never reordered
           <Copy key={index}>{change.summary}</Copy>
         ))}
-        {more > 0 && <Copy secondary>{`And ${more} more.`}</Copy>}
       </View>
+      {more > 0 && (
+        // Approve applies every change, so every change can be read first.
+        <SettingsAccentProvider workspace="finances">
+          <Actions inset={false}>
+            <Action
+              label={
+                showAll
+                  ? "Show fewer changes"
+                  : `Show ${more} more ${more === 1 ? "change" : "changes"}`
+              }
+              accessibilityLabel={`${showAll ? "Show fewer changes" : `Show ${more} more ${more === 1 ? "change" : "changes"}`} in ${title}`}
+              onPress={() => setShowAll((value) => !value)}
+            />
+          </Actions>
+        </SettingsAccentProvider>
+      )}
       {review.assumptions.length > 0 && (
         <Copy secondary>{`Assumes: ${review.assumptions.join(" ")}`}</Copy>
       )}

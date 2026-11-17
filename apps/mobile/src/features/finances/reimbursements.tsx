@@ -373,6 +373,12 @@ function CorrectionForm({
           "Nothing was saved. The earlier attempt failed on the server. Save again to send your draft as a new correction.",
           { id },
         );
+      } else if (retrying && confirmedRejection(error)) {
+        // Refusing the retry says nothing about the first send, which may have been saved.
+        toast.error(
+          "This retry was refused, so the earlier attempt is still unconfirmed. Check the reimbursement before sending anything else.",
+          { id },
+        );
       } else if (confirmedRejection(error)) {
         attempt.current = null;
         setUncertain(false);

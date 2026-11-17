@@ -4,6 +4,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Action, Actions } from "../../components/forms/form-rows";
 import { Icon } from "../../components/icons";
 import { PageRefreshControl } from "../../components/page-refresh";
+import type { RowAction } from "../../components/row-action-button";
+import { RowActions } from "../../components/row-actions";
 import { SettingsAccentProvider } from "../../components/settings-accent";
 import { SheetHeader } from "../../components/sheet-header";
 import { spacing, useTheme } from "../../theme";
@@ -12,14 +14,33 @@ import { senderName } from "./logic";
 
 const people = (addresses: MailAddress[]) => addresses.map(senderName).join(", ");
 
-/** Reads one conversation. Its messages live in memory only while this sheet is open. */
-export function MailReader({ thread, close }: { thread: MailThreadSummary; close: () => void }) {
+/**
+ * Reads one conversation. Its messages live in memory only while this sheet is open. A caller
+ * that cannot change the conversation passes no `actions`, and the header shows no control.
+ */
+export function MailReader({
+  thread,
+  actions,
+  close,
+}: {
+  thread: MailThreadSummary;
+  actions?: readonly RowAction[];
+  close: () => void;
+}) {
   const t = useTheme();
   const messages = useMailMessages(thread.id);
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
       <SafeAreaView style={{ flex: 1, backgroundColor: t.canvas }}>
-        <SheetHeader title="Conversation" onClose={close} />
+        <SheetHeader
+          title="Conversation"
+          onClose={close}
+          trailing={
+            actions?.length ? (
+              <RowActions placement="header" label="Conversation actions" actions={actions} />
+            ) : undefined
+          }
+        />
         <ScrollView
           alwaysBounceVertical
           refreshControl={

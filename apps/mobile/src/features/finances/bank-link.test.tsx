@@ -542,3 +542,85 @@ it("offers reconnecting only for a connected bank account that needs sign-in", a
   await screen.findByRole("button", { name: "Edit account" });
   expect(screen.queryByText("Reconnect account")).toBeNull();
 });
+
+it("reports the connection even when the screen is left while accounts are connecting", async () => {
+  let settle: (value: unknown[]) => void = () => undefined;
+  h.api.exchangePlaidToken.mockReturnValue(new Promise((resolve) => (settle = resolve)));
+  const view = mount(<FinanceAccountsScreen />);
+  await screen.findByRole("button", { name: /Everyday checking/ });
+  press(/Connect a bank/);
+  await finishLink("success");
+  await waitFor(() => expect(h.api.exchangePlaidToken).toHaveBeenCalledOnce());
+  view.unmount();
+  await act(async () => settle([linked]));
+  await waitFor(() =>
+    expect(h.success).toHaveBeenCalledWith("Connected 1 account.", { id: "feedback" }),
+  );
+  expect(h.dismiss).not.toHaveBeenCalledWith("feedback");
+});
+
+it("reports a reconnect after the screen is left and keeps its key for the next visit", async () => {
+  h.params = { id: linked.id };
+  h.api.listFinanceAccounts.mockResolvedValue(accounts([lapsed]));
+  let fail: (error: Error) => void = () => undefined;
+  h.api.completePlaidReconnect
+    .mockReturnValueOnce(new Promise((_resolve, reject) => (fail = reject)))
+    .mockResolvedValueOnce({});
+  const view = mount(<FinanceAccountScreen />);
+  await screen.findByText("Reconnect account");
+  press(/Reconnect account/);
+  await finishLink("success");
+  await waitFor(() => expect(h.api.completePlaidReconnect).toHaveBeenCalledOnce());
+  view.unmount();
+  await act(async () => fail(new Error("network")));
+  await waitFor(() =>
+    expect(h.error).toHaveBeenCalledWith(
+      "Couldn’t confirm the bank sign-in was verified. Check the account’s status before trying again.",
+      { id: "feedback" },
+    ),
+  );
+  expect(h.dismiss).not.toHaveBeenCalledWith("feedback");
+  // Coming back to the account retries under the same key, so the server verifies once.
+  mount(<FinanceAccountScreen />);
+  await screen.findByText("Reconnect account");
+  h.link.open.mockClear();
+  press(/Reconnect account/);
+  await finishLink("success");
+  await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
+  const keys = h.api.completePlaidReconnect.mock.calls.map(([, key]) => key);
+  expect(keys[1]).toBe(keys[0]);
+});
+
+it("sends only names the server accepts, so a linked bank is not refused for its label", async () => {
+  h.api.exchangePlaidToken.mockResolvedValue([linked]);
+  mount(<FinanceAccountsScreen />);
+  await screen.findByRole("button", { name: /Everyday checking/ });
+  press(/Connect a bank/);
+  await waitFor(() => expect(h.link.open).toHaveBeenCalledOnce());
+  await act(async () =>
+    h.link.config?.onSuccess({
+      publicToken: "public-sandbox-token",
+      metadata: {
+        institution: { id: "ins_1", name: "   " },
+        accounts: [
+          { id: "a", name: "N".repeat(300), mask: "9".repeat(40) },
+          { id: "b", name: "  " },
+          ...Array.from({ length: 120 }, (_, index) => ({ id: `x${index}`, name: `A${index}` })),
+        ],
+        linkSessionId: "session",
+      },
+    }),
+  );
+  await waitFor(() => expect(h.success).toHaveBeenCalledOnce());
+  const [input] = h.api.exchangePlaidToken.mock.calls[0] as [
+    {
+      institution: string | null;
+      metadata: { institutionId: string | null; accounts: { name: string; mask: string | null }[] };
+    },
+  ];
+  expect(input.institution).toBeNull();
+  expect(input.metadata.institutionId).toBe("ins_1");
+  expect(input.metadata.accounts).toHaveLength(100);
+  expect(input.metadata.accounts[0]).toEqual({ name: "N".repeat(240), mask: "9".repeat(32) });
+  expect(input.metadata.accounts[1]).toEqual({ name: "A0", mask: null });
+});

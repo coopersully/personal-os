@@ -357,8 +357,11 @@ error says the sign-in did not finish; Plaid's error text and codes are not show
 A new connection counts the accounts the API returned. A public token is exchanged once, so an
 exchange with an unknown outcome is never sent again and the person is told to check Accounts. A
 reconnect verifies with an idempotency key that is kept while the outcome is unknown and renewed
-after a definitive refusal, whose reason from the server is shown. Accounts are re-read after every
-attempt, and the result is dropped if the signed-in person changed while Link was open.
+after a definitive refusal, whose reason from the server is shown. The key is held per person and
+account outside the screen, and the toast reaches its outcome even if the person leaves the screen
+first. Accounts are re-read after every attempt. The result is dropped only if the signed-in
+person changed. Names sent with the exchange are trimmed to the API's limits so a linked bank is
+not refused for its label.
 
 ### Finance transaction management
 

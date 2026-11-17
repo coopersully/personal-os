@@ -171,7 +171,8 @@ iOS, in update mode too. The iPhone app names itself (`client: "ios"`) when it a
 and the API adds the optional `PLAID_IOS_REDIRECT_URI` to that token only. The setting must be an
 HTTPS URL without credentials, query or fragment; startup fails otherwise. Unset, or for any other
 caller, the request to Plaid is byte-for-byte what it was, so web is unaffected. The intended value
-is `https://<app origin>/plaid/oauth`.
+is `https://<app origin>/plaid/oauth`. The Mac mini stack forwards the variable; the retained ECS
+task definition does not.
 
 The setting is Declared only. Three things outside this boundary record must be true before it is
 set in production, or Plaid will reject the token or return to a page instead of the app: the same

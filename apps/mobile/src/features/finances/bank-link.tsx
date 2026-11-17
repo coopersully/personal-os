@@ -4,6 +4,7 @@ import { randomUUID } from "expo-crypto";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner-native";
 import { Action, Actions } from "../../components/forms/form-rows";
+import { useAuth } from "../auth/context";
 import { useFinance } from "./data";
 import { confirmedRejection, trackingStopped } from "./mutations";
 import { canLinkBank, type LinkedBank, openBankLink } from "./plaid-link";
@@ -16,36 +17,42 @@ function reason(error: { message?: string }) {
 }
 
 /**
+ * A reconnect whose outcome is unknown keeps its key, so a retry cannot verify twice. Keys live
+ * outside the screen, per person and account, because the screen may be left mid-attempt.
+ */
+const reconnectKeys = new Map<string, string>();
+
+/**
  * Connects a bank, or signs in again for one account, through Plaid's native Link. One Sonner
- * toast follows the attempt from opening to the outcome the server confirmed.
+ * toast follows the attempt from opening to the outcome the server confirmed, whether or not the
+ * screen that started it is still open.
  */
 export function useBankLink() {
+  const { session } = useAuth();
   const { api, owner } = useFinance();
   const client = useQueryClient();
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
-  /** A reconnect whose outcome is unknown keeps its key, so a retry cannot verify twice. */
-  const reconnectKey = useRef<{ accountId: string; key: string } | null>(null);
-  const active = useRef(owner);
+  const mounted = useRef(true);
   useEffect(() => {
-    active.current = owner;
+    mounted.current = true;
     return () => {
-      active.current = undefined;
+      mounted.current = false;
     };
-  }, [owner]);
+  }, []);
+  /** The session the attempt began in; a result for someone who has since signed out is dropped. */
+  const began = useRef(session.epoch());
+  const stale = () => session.epoch() !== began.current;
 
   async function exchange(id: string | number, bank: LinkedBank) {
     try {
       // A public token is exchanged once. An unconfirmed exchange is never sent again.
       const accounts = await api.exchangePlaidToken({
         publicToken: bank.publicToken,
-        institution: bank.institution?.name.slice(0, 160) ?? null,
-        metadata: {
-          institutionId: bank.institution?.id ?? null,
-          accounts: bank.accounts.slice(0, 100),
-        },
+        institution: bank.institution,
+        metadata: { institutionId: bank.institutionId, accounts: bank.accounts },
       });
-      if (active.current !== owner) return void toast.dismiss(id);
+      if (stale()) return void toast.dismiss(id);
       toast.success(
         accounts.length
           ? `Connected ${accounts.length} ${accounts.length === 1 ? "account" : "accounts"}.`
@@ -53,7 +60,7 @@ export function useBankLink() {
         { id },
       );
     } catch (error) {
-      if (active.current !== owner) return void toast.dismiss(id);
+      if (stale()) return void toast.dismiss(id);
       toast.error(
         confirmedRejection(error)
           ? `Nothing was connected.${reason(error)}`
@@ -64,16 +71,17 @@ export function useBankLink() {
   }
 
   async function verify(id: string | number, account: FinanceAccount) {
-    if (reconnectKey.current?.accountId !== account.id)
-      reconnectKey.current = { accountId: account.id, key: randomUUID() };
+    const slot = `${owner}:${account.id}`;
+    const key = reconnectKeys.get(slot) ?? randomUUID();
+    reconnectKeys.set(slot, key);
     try {
-      await api.completePlaidReconnect(account.id, reconnectKey.current.key);
-      reconnectKey.current = null;
-      if (active.current !== owner) return void toast.dismiss(id);
+      await api.completePlaidReconnect(account.id, key);
+      reconnectKeys.delete(slot);
+      if (stale()) return void toast.dismiss(id);
       toast.success("Bank sign-in verified. A sync is scheduled.", { id });
     } catch (error) {
-      if (confirmedRejection(error)) reconnectKey.current = null;
-      if (active.current !== owner) return void toast.dismiss(id);
+      if (confirmedRejection(error)) reconnectKeys.delete(slot);
+      if (stale()) return void toast.dismiss(id);
       toast.error(
         confirmedRejection(error)
           ? `Couldn’t verify this bank sign-in.${reason(error)}`
@@ -87,6 +95,7 @@ export function useBankLink() {
   async function start(account?: FinanceAccount) {
     if (!owner || busy.current) return;
     busy.current = true;
+    began.current = session.epoch();
     setPending(true);
     const unchanged = account ? "Nothing changed." : "Nothing was connected.";
     const id = toast.loading("Opening bank sign-in…");
@@ -94,14 +103,14 @@ export function useBankLink() {
       let token: string;
       try {
         const status = await api.getPlaidStatus();
-        if (active.current !== owner) return void toast.dismiss(id);
+        if (stale()) return void toast.dismiss(id);
         if (!status.available)
           return void toast.error(`Bank connections aren’t set up on this server. ${unchanged}`, {
             id,
           });
         token = await api.getPlaidLinkToken(account?.id, "ios");
       } catch (error) {
-        if (active.current !== owner) return void toast.dismiss(id);
+        if (stale()) return void toast.dismiss(id);
         return void toast.error(
           confirmedRejection(error)
             ? `Couldn’t start bank sign-in.${reason(error)}`
@@ -109,15 +118,15 @@ export function useBankLink() {
           { id },
         );
       }
-      if (active.current !== owner) return void toast.dismiss(id);
+      if (stale()) return void toast.dismiss(id);
       let outcome: Awaited<ReturnType<typeof openBankLink>>;
       try {
         outcome = await openBankLink(token);
       } catch {
-        if (active.current !== owner) return void toast.dismiss(id);
+        if (stale()) return void toast.dismiss(id);
         return void toast.error(`Bank sign-in couldn’t open on this iPhone. ${unchanged}`, { id });
       }
-      if (active.current !== owner) return void toast.dismiss(id);
+      if (stale()) return void toast.dismiss(id);
       if (outcome.kind === "cancelled")
         return void toast.info(`Bank sign-in cancelled. ${unchanged}`, { id });
       if (outcome.kind === "failed")
@@ -127,7 +136,7 @@ export function useBankLink() {
       else await exchange(id, outcome.bank);
     } finally {
       busy.current = false;
-      if (active.current === owner) setPending(false);
+      if (mounted.current) setPending(false);
       // Accounts, status and freshness are re-read whatever the outcome was.
       void client.invalidateQueries({ queryKey: ["finances", owner] });
     }

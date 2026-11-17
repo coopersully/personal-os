@@ -3,7 +3,9 @@ import { Platform } from "react-native";
 /** What Plaid Link hands back once a person has signed in with their bank. */
 export interface LinkedBank {
   publicToken: string;
-  institution: { id: string; name: string } | null;
+  /** Either part may be missing; a blank or over-long value is never sent. */
+  institution: string | null;
+  institutionId: string | null;
   accounts: { name: string; mask: string | null }[];
 }
 export type BankLinkOutcome =
@@ -12,6 +14,9 @@ export type BankLinkOutcome =
   | { kind: "cancelled" }
   /** Plaid or the bank ended the session with an error. */
   | { kind: "failed" };
+
+/** The exchange route's limits; a longer or blank value would be refused after the bank is linked. */
+const clamp = (text: string | undefined, max: number) => text?.trim().slice(0, max).trim() || null;
 
 /** Plaid's native Link exists only in the iPhone build. */
 export function canLinkBank() {
@@ -33,17 +38,14 @@ export async function openBankLink(token: string): Promise<BankLinkOutcome> {
           kind: "linked",
           bank: {
             publicToken: success.publicToken,
-            institution: success.metadata.institution
-              ? {
-                  id: success.metadata.institution.id,
-                  name: success.metadata.institution.name,
-                }
-              : null,
-            accounts: success.metadata.accounts.flatMap((account) =>
-              account.name?.trim()
-                ? [{ name: account.name.trim(), mask: account.mask?.trim() || null }]
-                : [],
-            ),
+            institution: clamp(success.metadata.institution?.name, 160),
+            institutionId: clamp(success.metadata.institution?.id, 256),
+            accounts: success.metadata.accounts
+              .flatMap((account) => {
+                const name = clamp(account.name, 240);
+                return name ? [{ name, mask: clamp(account.mask, 32) }] : [];
+              })
+              .slice(0, 100),
           },
         }),
       // Plaid's error text and codes stay on the device; only the outcome is used.

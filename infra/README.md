@@ -97,7 +97,10 @@ Before the first task starts, create every required parameter under the configur
 is ready and `plaid_enabled = true`; `PLAID_CLIENT_ID` is also read from
 Parameter Store in that mode. Plaid-enabled production stacks must use
 `plaid_environment = "production"` with production credentials and endpoints;
-they must never use sandbox credentials or endpoints. When `x_enabled = true`,
+they must never use sandbox credentials or endpoints. The optional `PLAID_IOS_REDIRECT_URI`
+(iPhone bank sign-in return link) is not wired into this task definition; production runs on the
+Mac mini stack, which forwards it. Add it to `infra/compute.tf` before serving the iPhone app from
+this stack. When `x_enabled = true`,
 add `X_CLIENT_ID` and `X_CLIENT_SECRET`. Disabled connectors inject no connector
 credentials. When `texting_enabled = true`, add `TWILIO_ACCOUNT_SID`,
 `TWILIO_AUTH_TOKEN`, `TWILIO_MESSAGING_SERVICE_SID`, and

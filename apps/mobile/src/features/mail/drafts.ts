@@ -55,7 +55,7 @@ export function sendUnconfirmed(owner: string | undefined, draftId: string) {
   return unconfirmedSends.has(sendKey(owner, draftId));
 }
 
-/** Writes this person's marks to the device. A storage fault leaves the in-memory marks. */
+/** Writes this person's marks to the device; false when the device could not store them. */
 async function storeMarks(owner: string) {
   const ids = [...unconfirmedSends]
     .filter((key) => key.startsWith(`${owner}:`))
@@ -64,41 +64,53 @@ async function storeMarks(owner: string) {
     const store = await storage();
     if (ids.length) await store.setItemAsync(storeKey(owner), JSON.stringify(ids));
     else await store.deleteItemAsync(storeKey(owner));
+    return true;
   } catch {
-    // The lock still holds for as long as the app runs.
+    return false;
+  }
+}
+
+/** Puts this person's stored marks back in memory; false when they could not be read. */
+async function restoreMarks(owner: string) {
+  if (restored.has(owner)) return true;
+  try {
+    const stored = await (await storage()).getItemAsync(storeKey(owner));
+    const ids: unknown = stored ? JSON.parse(stored) : [];
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) return false;
+    for (const id of ids) unconfirmedSends.add(sendKey(owner, id));
+    restored.add(owner);
+    return true;
+  } catch {
+    return false;
   }
 }
 
 /**
- * True once this person's stored marks are back in memory. Drafts are not opened before then,
- * so a draft marked before a restart opens locked.
+ * Whether this person's stored marks are back in memory. Drafts are not opened before they
+ * are, so a draft marked before a restart opens locked; marks that cannot be read keep drafts
+ * closed until `retry` reads them.
  */
 export function useUnconfirmedSendsRestored() {
   const { owner } = useMail();
-  const [ready, setReady] = useState(() => !!owner && restored.has(owner));
+  const [state, setState] = useState<"pending" | "ready" | "failed">(() =>
+    owner && restored.has(owner) ? "ready" : "pending",
+  );
+  const live = useRef(true);
+  const read = async () => {
+    if (!owner) return false;
+    const ok = await restoreMarks(owner);
+    if (live.current) setState(ok ? "ready" : "failed");
+    return ok;
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read once per signed-in person.
   useEffect(() => {
-    if (!owner) return;
-    if (restored.has(owner)) return setReady(true);
-    let live = true;
-    void storage()
-      .then((store) => store.getItemAsync(storeKey(owner)))
-      .then((stored) => {
-        const ids: unknown = stored ? JSON.parse(stored) : [];
-        if (Array.isArray(ids))
-          for (const id of ids)
-            if (typeof id === "string") unconfirmedSends.add(sendKey(owner, id));
-      })
-      // Unreadable marks cannot be recovered; the API's own draft state still applies.
-      .catch(() => undefined)
-      .then(() => {
-        restored.add(owner);
-        if (live) setReady(true);
-      });
+    live.current = true;
+    void read();
     return () => {
-      live = false;
+      live.current = false;
     };
   }, [owner]);
-  return ready;
+  return { state, retry: read };
 }
 
 /** For tests: forget what is in memory, as a restart does. Stored marks are kept. */
@@ -182,8 +194,8 @@ export function useDraftWrites() {
 
     /**
      * Saves the form. A write the API never confirmed may have landed, so the next save reads
-     * the drafts first. A create is recognised only in a draft that did not exist before it and
-     * still holds exactly this text; no other draft is ever taken over or written to.
+     * the drafts first. An interrupted create is never adopted, because nothing identifies the
+     * draft it made: this composer only ever writes to a draft the API handed it.
      */
     save(
       input: CreateMailDraftInput,
@@ -209,14 +221,21 @@ export function useDraftWrites() {
                 draftStage(found) === "editable" &&
                 sameDraft(found, unconfirmed.input),
             );
-            if (landed && sameDraft(landed, input)) {
-              done("Draft saved");
-              return { ok: true, draft: landed };
+            if (draft) {
+              // An update continues from its own draft's record.
+              if (landed && sameDraft(landed, input)) {
+                done("Draft saved");
+                return { ok: true, draft: landed };
+              }
+              target = landed ?? target;
+            } else if (landed && sameDraft(landed, input)) {
+              // A create has no identity to recognise its draft by. A new draft with this text
+              // may be the interrupted one or someone else's, so it is neither adopted nor
+              // copied: the person opens it from Drafts, where its record is its identity.
+              failed("A draft with this text is already in Drafts. Open it there to continue.");
+              return { ok: false, unconfirmed };
             }
-            // An update continues from its own draft's record. A create has no identity to
-            // recognise its draft by, so text that has since changed is saved as a new draft:
-            // a draft that only looks like the interrupted one is never written over.
-            if (draft) target = landed ?? target;
+            // Text that has since changed is saved as a new draft below.
           } else known = drafts.map((found) => found.id);
         }
         try {
@@ -288,9 +307,13 @@ export function useDraftWrites() {
       return run("Sending message…", async ({ done, failed }): Promise<SendResult> => {
         // Marked and stored before the request leaves, so even an app that is closed mid-send
         // comes back with this draft locked.
+        // Without the stored mark a restart could lift the lock, so nothing is sent.
         if (owner) {
           unconfirmedSends.add(sendKey(owner, draft.id));
-          await storeMarks(owner);
+          if (!(await storeMarks(owner))) {
+            failed("Couldn’t prepare this iPhone to send safely, so nothing was sent. Try again.");
+            return { state: "unsent", draft };
+          }
         }
         let fault: unknown;
         try {

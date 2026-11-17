@@ -95,14 +95,22 @@ export function MailboxesScreen() {
               </SectionItem>
             </Section>
             <Section title="Drafts">
-              {drafts.isPending || !restored ? (
+              {drafts.isPending || restored.state === "pending" ? (
                 <ActivityIndicator accessibilityLabel="Loading drafts" />
-              ) : !unsent ? (
+              ) : !unsent || restored.state === "failed" ? (
                 <SettingsAccentProvider workspace="mail">
                   <View style={{ flexDirection: "row", paddingHorizontal: spacing.sm }}>
                     <Action
                       label="Load drafts"
-                      onPress={() => void retryMailRead(() => drafts.refetch())}
+                      onPress={() =>
+                        void retryMailRead(async () => {
+                          const [read, marks] = await Promise.all([
+                            drafts.refetch(),
+                            restored.retry(),
+                          ]);
+                          return { isError: read.isError || !marks };
+                        })
+                      }
                     />
                   </View>
                 </SettingsAccentProvider>

@@ -59,6 +59,14 @@ const allocationKinds = [
   { value: "buffer", label: "Buffer" },
 ] as const;
 
+/** Says plainly whether the version being revised is the approved budget or not. */
+const versionStatus: Record<FinanceBudgetVersion["status"], string> = {
+  active: "the approved budget",
+  proposed: "a proposal that is not approved",
+  incomplete: "an incomplete draft that is not approved",
+  retired: "a retired budget",
+};
+
 let rows = 0;
 const nextRow = () => {
   rows += 1;
@@ -329,18 +337,16 @@ function PlanForm({
       <SettingsAccentProvider workspace="finances">
         <FinanceScreen title={snapshot ? "Revise plan" : "Create plan"}>
           <Copy secondary>
-            {snapshot ? `Current version ${snapshot.version}. ` : ""}
+            {snapshot
+              ? `Revising version ${snapshot.version} · ${versionStatus[snapshot.status]}. `
+              : ""}
             Saving creates a proposal. It takes effect only after you approve it.
           </Copy>
           {stale && (
-            <Card>
-              <Copy>
-                A newer version of this plan exists. Reloading replaces this draft with it.
-              </Copy>
-              <Actions inset={false}>
-                <Action label="Reload latest version" disabled={pending} onPress={reload} />
-              </Actions>
-            </Card>
+            // The toast reports the conflict; only its recovery control stays on the page.
+            <Actions inset={false}>
+              <Action label="Reload latest version" disabled={pending} onPress={reload} />
+            </Actions>
           )}
           <Card rows>
             <PaddedSurfaceRows>

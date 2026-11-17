@@ -63,16 +63,23 @@ function Cells({ data }: { data: FinanceBudgetPace }) {
       ),
     ),
   ];
-  if (data.period === "year")
+  if (data.period === "year") {
+    // One column per week: wrapped columns would not widen the scroll content.
+    const weeks = Array.from({ length: Math.ceil(cells.length / 7) }, (_, week) =>
+      cells.slice(week * 7, week * 7 + 7),
+    );
     return (
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <View
-          style={{ height: 7 * size + 6 * gap, flexDirection: "column", flexWrap: "wrap", gap }}
-        >
-          {cells}
+        <View style={{ flexDirection: "row", gap }}>
+          {weeks.map((week) => (
+            <View key={week[0]?.key} testID="pace-week" style={{ gap }}>
+              {week}
+            </View>
+          ))}
         </View>
       </ScrollView>
     );
+  }
   return (
     <View style={{ gap }}>
       {data.period === "month" && (

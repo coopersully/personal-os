@@ -440,6 +440,7 @@ async function editor() {
 
 it("closes an untouched plan without a prompt and keeps Save disabled", async () => {
   await editor();
+  expect(screen.getByText(/Revising version 2 · the approved budget\./)).toBeTruthy();
   expect(field("Allocation 1 amount").value).toBe("600.00");
   expect(saveButton().hasAttribute("disabled")).toBe(true);
   press("Close");
@@ -604,6 +605,14 @@ it("reports a save the server answered without completing as not saved", async (
   expect(h.replace).not.toHaveBeenCalled();
   expect(field("Rationale").value).toBe("Updated reasoning.");
   expectNoInlineResult();
+});
+
+it("says when the version being revised is an unapproved proposal", async () => {
+  h.api.getFinanceBudget.mockResolvedValue(
+    read({ ...plan, id: V3, version: 3, status: "proposed", approvedAt: null }),
+  );
+  await editor();
+  expect(screen.getByText(/Revising version 3 · a proposal that is not approved\./)).toBeTruthy();
 });
 
 it("asks before discarding an edited plan", async () => {
@@ -1263,10 +1272,19 @@ it("lays out the year from its first weekday", async () => {
     cells: [
       { date: "2026-01-01", planned: 10, spent: 5, status: "ahead" },
       { date: "2026-01-02", planned: 20, spent: 20, status: "neutral" },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        date: `2026-01-${String(index + 3).padStart(2, "0")}`,
+        planned: 20,
+        spent: 0,
+        status: "blank",
+      })),
     ],
   });
   mount(<BudgetPace />);
   press("Year");
   expect(await screen.findByTitle(/January 1, 2026: Ahead of pace/)).toBeTruthy();
+  // 1 January 2026 is a Thursday: four leading days, then eleven cells, in weeks of seven.
+  const weeks = screen.getAllByTestId("pace-week");
+  expect(weeks.map((week) => week.children.length)).toEqual([7, 7, 1]);
   expect(screen.getByText("On pace")).toBeTruthy();
 });

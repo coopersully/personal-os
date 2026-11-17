@@ -242,12 +242,10 @@ function BucketForm({
       <SettingsAccentProvider workspace="finances">
         <FinanceScreen title={snapshot ? "Edit bucket" : "Add bucket"}>
           {stale && (
-            <Card>
-              <Copy>This bucket was changed elsewhere. Reloading replaces this draft with it.</Copy>
-              <Actions inset={false}>
-                <Action label="Reload latest version" disabled={pending} onPress={reload} />
-              </Actions>
-            </Card>
+            // The toast reports the conflict; only its recovery control stays on the page.
+            <Actions inset={false}>
+              <Action label="Reload latest version" disabled={pending} onPress={reload} />
+            </Actions>
           )}
           <Card rows>
             <PaddedSurfaceRows>

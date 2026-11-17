@@ -16,9 +16,10 @@ import {
   useMailRevalidation,
   useMailThreads,
 } from "./data";
-import { type MailScope, mergeMailPages, scopeTitle } from "./logic";
+import { type MailScope, mergeMailPages, scopeTitle, withMailChanges } from "./logic";
 import { MailReader } from "./reader";
 import { ThreadRow } from "./thread-row";
+import { useMailTriage } from "./triage";
 
 /** A mailbox's conversations with server search, paging and the reader. */
 export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: () => void }) {
@@ -28,8 +29,15 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
   const { threads, query, searching } = useMailThreads(scope, mailSearch);
   const accounts = useMailAccounts();
   useMailRevalidation();
-  const [open, setOpen] = useState<MailThreadSummary | null>(null);
-  const rows = mergeMailPages(threads.data?.pages);
+  const triage = useMailTriage();
+  const [opened, setOpen] = useState<MailThreadSummary | null>(null);
+  const rows = withMailChanges(
+    mergeMailPages(threads.data?.pages),
+    triage.changes,
+    scope.kind === "inbox" ? "inbox" : scope.mailboxId,
+  );
+  // The reader follows the listed conversation, so its actions act on the current state.
+  const open = opened && (rows.find((thread) => thread.id === opened.id) ?? opened);
   const title = scopeTitle(scope);
   const unconnected = scope.kind === "inbox" && accounts.data?.length === 0;
   const link = (label: string, onPress: () => void) => (
@@ -83,7 +91,9 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
             )}
           </View>
         }
-        renderItem={({ item }) => <ThreadRow thread={item} onOpen={() => setOpen(item)} />}
+        renderItem={({ item }) => (
+          <ThreadRow thread={item} actions={triage.actions(item)} onOpen={() => setOpen(item)} />
+        )}
         ItemSeparatorComponent={() => (
           <View style={{ marginLeft: 28, height: 0.5, backgroundColor: t.line }} />
         )}
@@ -140,7 +150,14 @@ export function MailThreadList({ scope, onBack }: { scope: MailScope; onBack?: (
           ) : undefined
         }
       />
-      {open && <MailReader key={open.id} thread={open} close={() => setOpen(null)} />}
+      {open && (
+        <MailReader
+          key={open.id}
+          thread={open}
+          actions={triage.actions(open, () => setOpen(null))}
+          close={() => setOpen(null)}
+        />
+      )}
     </View>
   );
 }

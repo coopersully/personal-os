@@ -12,6 +12,7 @@ import { sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import {
+  createKnowledgeDisclosureCache,
   currentKnowledgeForRetrieval,
   findOwnedKnowledgeRevision,
   isKnowledgeVisibleToAgent,
@@ -202,6 +203,8 @@ export async function selectKnowledgeCandidates(
   const rows = await currentKnowledgeForRetrieval(tx, principal, query, authorizedScopes);
   const candidates: Candidate[] = [];
   let unavailable = false;
+  // One pass shares disclosure work: a record many candidates cite is disclosed once.
+  const checked = createKnowledgeDisclosureCache();
   for (const row of rows) {
     const revision = projectKnowledgeRevision(row);
     const { snapshot, metadata } = revision;
@@ -213,7 +216,7 @@ export async function selectKnowledgeCandidates(
       })
     )
       continue;
-    const projection = await access.projectForRetrieval(tx, principal, revision);
+    const projection = await access.projectForRetrieval(tx, principal, revision, checked);
     if (projection.state !== "available") {
       // We cannot text-match or inspect an unavailable body. Report an
       // incomplete source result only after current authorization passed.

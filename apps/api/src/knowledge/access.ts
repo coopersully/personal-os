@@ -706,6 +706,15 @@ export type KnowledgeEffectiveDisclosure = {
   effectiveSensitivity: KnowledgeRecordSnapshot["sensitivity"];
 };
 type ReferenceState = { revision: KnowledgeRevision; projection: DisclosureProjection };
+/**
+ * Disclosure results one caller may reuse within one transaction, for example across every
+ * candidate of a core or search pass. Entries are keyed by record and by the options that
+ * change the result, so a cached answer is always the one a fresh call would compute.
+ */
+export type KnowledgeDisclosureCache = Map<string, DisclosureProjection>;
+export function createKnowledgeDisclosureCache(): KnowledgeDisclosureCache {
+  return new Map();
+}
 
 function supportsClaim(
   reference: ReferenceState | undefined,
@@ -915,7 +924,7 @@ export function createKnowledgeAccess(now: () => Date) {
       retrieval?: boolean;
       includeOrdinaryLinks?: boolean;
       ancestors?: ReadonlySet<string>;
-      checked?: Map<string, DisclosureProjection>;
+      checked?: KnowledgeDisclosureCache;
     } = {},
   ): Promise<DisclosureProjection> {
     const { snapshot, metadata } = revision;
@@ -925,8 +934,14 @@ export function createKnowledgeAccess(now: () => Date) {
     const trashVisibility = trashReferenceVisibility(principal, revision);
     if (options.ancestors?.has(snapshot.id))
       throw new AppError("conflict", "Knowledge disclosure dependencies cannot form a cycle.");
-    const checked = options.checked ?? new Map();
-    const prior = checked.get(snapshot.id);
+    const checked = options.checked ?? createKnowledgeDisclosureCache();
+    // Ordinary links change only the listed links; retrieval changes how support is dated.
+    const cacheKey = [
+      snapshot.id.toLowerCase(),
+      options.includeOrdinaryLinks === false ? "sources" : "links",
+      options.retrieval ? "retrieval" : "read",
+    ].join("|");
+    const prior = checked.get(cacheKey);
     if (prior) return prior;
     const ancestors = new Set([...(options.ancestors ?? []), snapshot.id]);
     const scopes: AccessScope[] = ["knowledge:read", ...snapshot.requiredReadScopes];
@@ -1110,7 +1125,7 @@ export function createKnowledgeAccess(now: () => Date) {
       effectiveWorkspaces: [...effectiveWorkspaces].sort(),
       effectiveSensitivity,
     };
-    checked.set(snapshot.id, result);
+    checked.set(cacheKey, result);
     return result;
   }
 
@@ -1128,6 +1143,7 @@ export function createKnowledgeAccess(now: () => Date) {
     revision: KnowledgeRevision,
     { sources, relatedRecordIds, evidenceAvailable }: DisclosureProjection,
     retrieval = false,
+    checked?: KnowledgeDisclosureCache,
   ): Promise<KnowledgeRecord> {
     const { snapshot, metadata, claimKey } = revision;
     const conflictRecordIds = new Set<string>();
@@ -1148,13 +1164,13 @@ export function createKnowledgeAccess(now: () => Date) {
           ) === value
         )
           continue;
-        if (await isDisclosable(tx, principal, other, retrieval))
+        if (await isDisclosable(tx, principal, other, retrieval, checked))
           conflictRecordIds.add(other.snapshot.id);
       }
     }
     for (const id of await linkedProposalIds(tx, principal.userId, revision)) {
       const linked = await findOwnedKnowledgeRevision(tx, principal.userId, id);
-      if (linked && (await isDisclosable(tx, principal, linked, retrieval)))
+      if (linked && (await isDisclosable(tx, principal, linked, retrieval, checked)))
         conflictRecordIds.add(linked.snapshot.id);
     }
     const replacement = metadata.supersededBy
@@ -1167,7 +1183,7 @@ export function createKnowledgeAccess(now: () => Date) {
         )
       : null;
     const supersededBy =
-      replacement && (await isDisclosable(tx, principal, replacement, retrieval))
+      replacement && (await isDisclosable(tx, principal, replacement, retrieval, checked))
         ? replacement.snapshot.id
         : null;
     return {
@@ -1199,9 +1215,13 @@ export function createKnowledgeAccess(now: () => Date) {
     principal: Principal,
     revision: KnowledgeRevision,
     retrieval = false,
+    checked?: KnowledgeDisclosureCache,
   ) {
     try {
-      const projection = await disclose(tx, principal, revision, { retrieval });
+      const projection = await disclose(tx, principal, revision, {
+        retrieval,
+        ...(checked ? { checked } : {}),
+      });
       return (
         !retrieval || (projection.evidenceAvailable && revisionIsCurrent(revision.snapshot, now()))
       );
@@ -1215,9 +1235,13 @@ export function createKnowledgeAccess(now: () => Date) {
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
+    checked?: KnowledgeDisclosureCache,
   ) {
     try {
-      const projection = await disclose(tx, principal, revision, { retrieval: true });
+      const projection = await disclose(tx, principal, revision, {
+        retrieval: true,
+        ...(checked ? { checked } : {}),
+      });
       return projection.evidenceAvailable
         ? { state: "available" as const, projection }
         : { state: "unavailable" as const };
@@ -1231,6 +1255,7 @@ export function createKnowledgeAccess(now: () => Date) {
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
+    checked?: KnowledgeDisclosureCache,
   ): Promise<
     | { state: "denied" | "unavailable" }
     | {
@@ -1240,9 +1265,16 @@ export function createKnowledgeAccess(now: () => Date) {
         effectiveWorkspaces: KnowledgeEffectiveDisclosure["effectiveWorkspaces"];
       }
   > {
-    const disclosure = await retrievalDisclosure(tx, principal, revision);
+    const disclosure = await retrievalDisclosure(tx, principal, revision, checked);
     if (disclosure.state !== "available") return disclosure;
-    const record = await presentProjection(tx, principal, revision, disclosure.projection, true);
+    const record = await presentProjection(
+      tx,
+      principal,
+      revision,
+      disclosure.projection,
+      true,
+      checked,
+    );
     if (
       record.validUntil &&
       Date.parse(record.validUntil) <= now().getTime() &&

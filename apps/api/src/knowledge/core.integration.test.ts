@@ -394,6 +394,57 @@ describe("session-start memory core", () => {
     expect(memory.records[2]).toMatchObject({ origin: "inferred", ownerHeld: false });
   });
 
+  it("core_discloses_a_source_chain_in_linear_work", async () => {
+    /** Statements a core build runs, counted on the transaction it opens. */
+    async function buildQueries(length: number) {
+      const f = await setUp();
+      let previous: KnowledgeRecord | undefined;
+      for (let i = 0; i < length; i++) {
+        const evidence = previous
+          ? [
+              {
+                type: "domain_record" as const,
+                domain: "knowledge" as const,
+                id: previous.id,
+                revision: 1,
+              },
+            ]
+          : [{ type: "statement" as const, wording: "I said this myself." }];
+        previous = await f.save(f.owner, fact(`Chain ${i}`, { evidence }));
+      }
+      let queries = 0;
+      const counted = new Set(["select", "selectDistinct", "execute"]);
+      const db = new Proxy(database.db, {
+        get(target, property, receiver) {
+          if (property !== "transaction") return Reflect.get(target, property, receiver);
+          return (run: (tx: unknown) => Promise<unknown>) =>
+            target.transaction((tx) =>
+              run(
+                new Proxy(tx, {
+                  get(inner, name) {
+                    const value = Reflect.get(inner, name);
+                    if (typeof value !== "function") return value;
+                    return (...args: unknown[]) => {
+                      if (typeof name === "string" && counted.has(name)) queries += 1;
+                      return value.apply(inner, args);
+                    };
+                  },
+                }),
+              ),
+            );
+        },
+      });
+      const core = createKnowledgeCoreService({ db, now, tags: f.tags });
+      expect((await core.build(f.agent)).counts.active).toBe(length);
+      return queries;
+    }
+    const short = await buildQueries(8);
+    const long = await buildQueries(16);
+    // Twice the chain costs at most twice the statements (here 32 and 64). Walking every prefix
+    // again, as each record did before, cost 68 and 260.
+    expect(long).toBeLessThanOrEqual(2 * short);
+  });
+
   it("core_budget_counts_utf8_bytes", async () => {
     const f = await setUp();
     const texts = new Map<string, string>();

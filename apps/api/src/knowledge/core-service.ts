@@ -15,6 +15,7 @@ import {
 import type { Principal } from "../types.js";
 import {
   createKnowledgeAccess,
+  createKnowledgeDisclosureCache,
   currentKnowledgeForRetrieval,
   type KnowledgeRevision,
   knowledgeProposalTargetIds,
@@ -142,10 +143,12 @@ export function createKnowledgeCoreService({
       const proposalTargets = await knowledgeProposalTargetIds(tx, principal.userId);
       const counts = { active: 0, conflicts: 0, archived: 0 };
       const candidates: CoreCandidate[] = [];
+      // One pass shares disclosure work: a record many others cite is disclosed once.
+      const checked = createKnowledgeDisclosureCache();
       for (const { revision, updatedAt } of revisions) {
         const { snapshot } = revision;
         // The same disclosure as search: hidden or unsupported memory never counts.
-        const disclosure = await access.retrievalDisclosure(tx, principal, revision);
+        const disclosure = await access.retrievalDisclosure(tx, principal, revision, checked);
         if (disclosure.state !== "available") continue;
         const claimLive = !["superseded", "expired"].includes(snapshot.status);
         const mayConflict =
@@ -154,7 +157,7 @@ export function createKnowledgeCoreService({
           (claimLive && revision.claimKey !== null && (claims.get(revision.claimKey) ?? 0) > 1);
         let conflicted = false;
         if (mayConflict) {
-          const presented = await access.projectForRetrieval(tx, principal, revision);
+          const presented = await access.projectForRetrieval(tx, principal, revision, checked);
           conflicted =
             presented.state === "available" && presented.record.conflictRecordIds.length > 0;
         }

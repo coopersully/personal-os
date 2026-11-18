@@ -1079,6 +1079,13 @@
       "when": 1794585600006,
       "tag": "0146_persistent_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1794585600007,
+      "tag": "0147_memory_trash_version",
+      "breakpoints": true
     }
   ]
 }

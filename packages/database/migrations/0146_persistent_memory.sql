@@ -4,12 +4,10 @@ CREATE TABLE knowledge_records (
  revision integer NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now(),
  updated_at timestamptz NOT NULL DEFAULT now(),
  trashed_at timestamptz NULL, trash_group_id uuid NULL, status_before_trash text NULL,
- trash_version integer NOT NULL DEFAULT 0,
  owner_held boolean NOT NULL DEFAULT false, agent_access text NOT NULL DEFAULT 'allowed',
  core boolean NOT NULL DEFAULT false, last_confirmed_at timestamptz NULL,
  CONSTRAINT knowledge_records_owner_id_idx UNIQUE(user_id,id),
  CONSTRAINT knowledge_records_agent_access CHECK (agent_access IN ('allowed', 'blocked')),
- CONSTRAINT knowledge_records_trash_version CHECK (trash_version >= 0),
  CONSTRAINT knowledge_records_status_before_trash CHECK (
   status_before_trash IN ('proposed', 'active', 'disputed', 'superseded', 'archived', 'expired')
  ),
@@ -32,18 +30,12 @@ CREATE TABLE knowledge_sources (
  FOREIGN KEY(user_id,record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE
 );
 --> statement-breakpoint
--- Disclosure reads a record's sources, and purge and cascades delete them, by record.
-CREATE INDEX knowledge_sources_owner_record_idx ON knowledge_sources (user_id, record_id);
---> statement-breakpoint
 CREATE TABLE knowledge_relationships (
  user_id uuid NOT NULL, record_id uuid NOT NULL, related_record_id uuid NOT NULL,
  CONSTRAINT knowledge_relationships_pair_idx UNIQUE(user_id,record_id,related_record_id),
  FOREIGN KEY(user_id,record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE,
  FOREIGN KEY(user_id,related_record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE
 );
---> statement-breakpoint
--- Purge and the cascade from a deleted record find links pointing at it by the related record.
-CREATE INDEX knowledge_relationships_owner_related_idx ON knowledge_relationships (user_id, related_record_id);
 --> statement-breakpoint
 -- Tags are owner-scoped; a merged tag keeps its row so undo can restore it.
 CREATE TABLE knowledge_tags (
@@ -159,8 +151,6 @@ CREATE TRIGGER knowledge_invalidate_goal_source AFTER DELETE ON "goals"
 -- audit row each. An OAuth access token stays live while the refresh token issued with it is,
 -- because refresh copies that row's scopes; this mirrors activeHostConnectionGrant. A credential
 -- that already holds either memory scope keeps the person's choice, so a second run changes nothing.
--- It runs once, with this migration: a credential the previous API process issues after it gets
--- memory only when the person re-authorizes that connection.
 -- scope-backfill.integration.test.ts runs exactly the statement between these markers.
 -- memory-scope-backfill:begin
 WITH workspace_scopes AS (

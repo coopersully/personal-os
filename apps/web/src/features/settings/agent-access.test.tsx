@@ -860,6 +860,12 @@ describe("agent access settings", () => {
     await browser.click(await screen.findByRole("button", { name: "Set up a local token" }));
     expect(screen.getByRole("radio", { name: /Mail setup/ })).toBeChecked();
     await browser.click(screen.getByText(/Fine-tune permissions · 4 selected/));
+    const memoryGroup = screen
+      .getByText("Memory: read and save what nohmi knows about you")
+      .closest("fieldset");
+    expect(memoryGroup).not.toBeNull();
+    expect(within(memoryGroup as HTMLElement).getByLabelText("Read memory")).toBeChecked();
+    expect(within(memoryGroup as HTMLElement).getByLabelText("Save memory")).toBeChecked();
     expect(screen.getByLabelText("Read memory")).toBeChecked();
     expect(screen.getByLabelText("Save memory")).toBeChecked();
     await browser.click(screen.getByLabelText("Save memory"));

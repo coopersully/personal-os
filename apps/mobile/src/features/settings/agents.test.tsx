@@ -532,14 +532,15 @@ it("keeps sending texts tied to reading them so a token the server would refuse 
   fireEvent.click(screen.getByRole("button", { name: "Create token" }));
   expect(h.confirm).toHaveBeenLastCalledWith(
     "Grant agent access?",
-    "Text helper will receive these permissions:\n• Read text conversation\n• Send text messages. Needs “Read text conversation”, so that is turned on with it.\nKeep its token private.",
+    "Text helper will receive these permissions:\n• Read memory\n• Save memory\n• Read text conversation\n• Send text messages. Needs “Read text conversation”, so that is turned on with it.\nKeep its token private.",
     expect.any(Function),
   );
   await approve();
   // The request passes validation and reaches the server; nothing is reported as a failure.
   expect(h.createToken).toHaveBeenCalledWith({
     name: "Text helper",
-    scopes: ["texting:read", "texting:write"],
+    // Memory is preselected for every new token.
+    scopes: ["knowledge:read", "knowledge:write", "texting:read", "texting:write"],
   });
   expect(h.error).not.toHaveBeenCalled();
 });
@@ -713,6 +714,29 @@ it.each([
   render(<Page />);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Retry loading" })));
   expect(h.refresh).toHaveBeenCalledWith(key);
+});
+
+it("preselects both memory scopes for a new token without marking the form dirty", async () => {
+  h.createToken.mockResolvedValue({ token: "memory-secret" });
+  render(<AgentAccessScreen />);
+  expect(screen.getByLabelText("Read memory")).toBeChecked();
+  expect(screen.getByLabelText("Save memory")).toBeChecked();
+  expect(screen.getByText("Memory: read and save what nohmi knows about you")).toBeVisible();
+  expect(h.dirtyGuard).toHaveBeenLastCalledWith(false, false);
+  fireEvent.click(screen.getByLabelText("Save memory"));
+  expect(screen.getByLabelText("Save memory")).not.toBeChecked();
+  expect(h.dirtyGuard).toHaveBeenLastCalledWith(true, false);
+  fireEvent.click(screen.getByLabelText("Save memory"));
+  expect(h.dirtyGuard).toHaveBeenLastCalledWith(false, false);
+  fireEvent.click(screen.getByLabelText("Save memory"));
+  fireEvent.change(screen.getByLabelText("Token name"), { target: { value: "Reader" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+  await act(async () => h.confirm.mock.calls.at(-1)?.[2]());
+  expect(h.createToken).toHaveBeenCalledWith({ name: "Reader", scopes: ["knowledge:read"] });
+  // The next token starts from the same default.
+  fireEvent.click(screen.getByRole("button", { name: "I saved the token" }));
+  expect(screen.getByLabelText("Read memory")).toBeChecked();
+  expect(screen.getByLabelText("Save memory")).toBeChecked();
 });
 
 it("matches web permission presets, changes only draft scopes, and keeps custom toggles behind explicit grant confirmation", async () => {

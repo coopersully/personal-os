@@ -19,7 +19,9 @@ import { confirmedRejection } from "../finances/mutations";
 import { errorMessage } from "../tasks/data";
 import { Choice, confirm, State } from "../tasks/ui";
 import {
+  areaNotes,
   dateTime,
+  memoryScopes,
   permissionRecap,
   scopeDetails,
   scopeGroups,
@@ -34,9 +36,6 @@ import {
   useSettingsResource,
 } from "./data";
 import { SettingsActionRow, SettingsDetailRow } from "./settings-row";
-
-/** Memory is on by default for new tokens (spec §5.11); the person can still switch it off. */
-const memoryScopes: AccessScope[] = ["knowledge:read", "knowledge:write"];
 
 export const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
@@ -246,7 +245,9 @@ export function AgentAccess() {
   const tokens = useSettingsResource("agent-tokens", (api) => api.listAccessTokens());
   const clients = useSettingsResource("agent-oauth-clients", (api) => api.listOAuthClients());
   const [name, setName] = useState("");
-  const [scopes, setScopes] = useState<AccessScope[]>([]);
+  // Memory is on by default for new tokens (spec §5.11). The preselection is the form's initial
+  // state, so it never counts as an unsaved draft; the person can still switch it off.
+  const [scopes, setScopes] = useState<AccessScope[]>(() => [...memoryScopes]);
   const [secret, setSecret] = useState<string | null>(null);
   const selectedPreset =
     tokenPresets.find(
@@ -254,7 +255,9 @@ export function AgentAccess() {
         preset.scopes.length === scopes.length &&
         preset.scopes.every((scope) => scopes.includes(scope)),
     )?.name ?? "custom";
-  useDirtyDismiss(!!secret || !!name.trim() || scopes.length > 0, action.pending);
+  const scopesChanged =
+    scopes.length !== memoryScopes.length || !memoryScopes.every((scope) => scopes.includes(scope));
+  useDirtyDismiss(!!secret || !!name.trim() || scopesChanged, action.pending);
   const revoke = (
     label: string,
     operation: (api: SettingsApi) => Promise<unknown>,
@@ -383,6 +386,7 @@ export function AgentAccess() {
           </Section>
           {selectableGroups.map((group) => (
             <Section key={group.area} title={`${group.label} permissions`}>
+              {areaNotes[group.area] && <SectionNote>{areaNotes[group.area]}</SectionNote>}
               {group.scopes.map((scope) => (
                 <ToggleRow
                   key={scope}
@@ -413,7 +417,7 @@ export function AgentAccess() {
                       const created = await api.createAccessToken(tokenInput(name, scopes));
                       setSecret(created.token);
                       setName("");
-                      setScopes([]);
+                      setScopes([...memoryScopes]);
                       await tokens.refetch();
                     }, "Access token created"),
                 )

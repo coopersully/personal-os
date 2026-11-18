@@ -1,4 +1,8 @@
 import type { AccessScope } from "@personal-os/domain";
+
+/** Spec §5.11 names the memory pair with one line; each switch keeps its short verb name. */
+export const memoryScopesSummary = "Memory: read and save what nohmi knows about you";
+export const memoryScopes: AccessScope[] = ["knowledge:read", "knowledge:write"];
 export const scopeLabels: Record<AccessScope, string> = {
   "knowledge:read": "Read memory",
   "knowledge:write": "Save memory",

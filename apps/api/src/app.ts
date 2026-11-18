@@ -1943,8 +1943,8 @@ function escapeHtml(value: string): string {
 }
 
 const oauthScopeLabels: Record<string, string> = {
-  "knowledge:read": "Memory: read what nohmi knows about you",
-  "knowledge:write": "Memory: save what nohmi knows about you",
+  "knowledge:read": "Read memory",
+  "knowledge:write": "Save memory",
   "mail:execute":
     "With review bypass enabled, send exact saved drafts, activate reviewed rules, reconcile delivery, and manage Mail stewardship and preferences. Combined Mail, Calendar, and Tasks execution grants also permit source sync and disconnection. Sending cannot be undone.",
   "finances:execute":

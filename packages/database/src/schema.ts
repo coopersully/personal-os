@@ -7112,6 +7112,7 @@ export const knowledgeSources = pgTable(
     source: jsonb("source").$type<import("@personal-os/domain").KnowledgeSource>().notNull(),
   },
   (table) => [
+    index("knowledge_sources_owner_record_idx").on(table.userId, table.recordId),
     foreignKey({
       columns: [table.userId, table.recordId],
       foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
@@ -7131,6 +7132,7 @@ export const knowledgeRelationships = pgTable(
       table.recordId,
       table.relatedRecordId,
     ),
+    index("knowledge_relationships_owner_related_idx").on(table.userId, table.relatedRecordId),
     foreignKey({
       columns: [table.userId, table.recordId],
       foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],

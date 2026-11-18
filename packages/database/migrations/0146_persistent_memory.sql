@@ -32,12 +32,18 @@ CREATE TABLE knowledge_sources (
  FOREIGN KEY(user_id,record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE
 );
 --> statement-breakpoint
+-- Disclosure reads a record's sources, and purge and cascades delete them, by record.
+CREATE INDEX knowledge_sources_owner_record_idx ON knowledge_sources (user_id, record_id);
+--> statement-breakpoint
 CREATE TABLE knowledge_relationships (
  user_id uuid NOT NULL, record_id uuid NOT NULL, related_record_id uuid NOT NULL,
  CONSTRAINT knowledge_relationships_pair_idx UNIQUE(user_id,record_id,related_record_id),
  FOREIGN KEY(user_id,record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE,
  FOREIGN KEY(user_id,related_record_id) REFERENCES knowledge_records(user_id,id) ON DELETE CASCADE
 );
+--> statement-breakpoint
+-- Purge and the cascade from a deleted record find links pointing at it by the related record.
+CREATE INDEX knowledge_relationships_owner_related_idx ON knowledge_relationships (user_id, related_record_id);
 --> statement-breakpoint
 -- Tags are owner-scoped; a merged tag keeps its row so undo can restore it.
 CREATE TABLE knowledge_tags (

@@ -520,6 +520,16 @@ describe("memory tags", () => {
     expect(page.items.map(({ id }) => id)).toEqual([regular.id]);
   });
 
+  it("excluded_word_follows_an_alias_to_its_target", async () => {
+    const f = await fixture();
+    const regular = await f.save(fact("Morning coffee", ["coffee"]));
+    await f.save(fact("Evening coffee", ["decaf"]));
+    // The record now carries only the target, so its text and tags never say "decaf".
+    await f.merge("decaf", "caffeine-free", f.owner);
+    const page = await f.search.search(f.agent, { text: "coffee -decaf" });
+    expect(page.items.map(({ id }) => id)).toEqual([regular.id]);
+  });
+
   it("revise_sets_tags_and_agent_changes_to_owner_memory_are_proposals", async () => {
     const f = await fixture();
     const held = await f.save(fact("Owner value", ["home"]));

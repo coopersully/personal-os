@@ -1194,11 +1194,11 @@ export function createKnowledgeAccess(now: () => Date) {
       replacement && (await isDisclosable(tx, principal, replacement, retrieval, checked))
         ? replacement.snapshot.id
         : null;
-    const pending = snapshot.status === "active" || snapshot.status === "proposed";
+    const live = snapshot.status === "active" || snapshot.status === "proposed";
     return {
       ...snapshot,
       // Unsupported memory reads as disputed; supported memory past its validity, as expired.
-      status: !pending
+      status: !live
         ? snapshot.status
         : !evidenceAvailable
           ? "disputed"
@@ -1301,8 +1301,14 @@ export function createKnowledgeAccess(now: () => Date) {
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
+    checked?: KnowledgeDisclosureCache,
   ): Promise<KnowledgeEffectiveDisclosure> {
-    const { effectiveWorkspaces, effectiveSensitivity } = await disclose(tx, principal, revision);
+    const { effectiveWorkspaces, effectiveSensitivity } = await disclose(
+      tx,
+      principal,
+      revision,
+      checked ? { checked } : {},
+    );
     return { effectiveWorkspaces, effectiveSensitivity };
   }
 
@@ -1314,9 +1320,10 @@ export function createKnowledgeAccess(now: () => Date) {
     tx: KnowledgeTransaction,
     principal: Principal,
     revision: KnowledgeRevision,
+    checked?: KnowledgeDisclosureCache,
   ): Promise<KnowledgeEffectiveDisclosure | null> {
     try {
-      return await effectiveDisclosure(tx, principal, revision);
+      return await effectiveDisclosure(tx, principal, revision, checked);
     } catch (error) {
       if (isKnowledgeDisclosureError(error)) return null;
       throw error;

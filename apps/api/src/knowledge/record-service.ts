@@ -37,6 +37,7 @@ import type { Principal } from "../types.js";
 import {
   bumpKnowledgeEpoch,
   createKnowledgeAccess,
+  createKnowledgeDisclosureCache,
   emptyKnowledgeMetadata,
   findOwnedKnowledgeRevision,
   isKnowledgeVisibleToAgent,
@@ -240,13 +241,15 @@ export async function prepareKnowledgeRevision({
     : [];
   const derivations = retainSupport ? [...inheritedEdges] : [];
   const references = new Map<string, KnowledgeRevision>();
+  // One write shares disclosure work: references and the alias gate reuse the same answers.
+  const checked = createKnowledgeDisclosureCache();
   async function reference(id: string, kind?: KnowledgeDerivation["kind"], exactRevision?: number) {
     let source = references.get(id);
     if (!source) {
       source = await ownedKnowledgeRevision(tx, principal, id);
       // Disclose first, so a record hidden from this caller is not found rather than forbidden.
       // A narrower source needs no write-time check: it narrows this record when it is read.
-      await access.disclose(tx, principal, source);
+      await access.disclose(tx, principal, source, { checked });
       if (snapshot) await assertReferenceAcyclic(tx, principal.userId, source, snapshot.id);
       references.set(id, source);
     }
@@ -445,6 +448,7 @@ export async function prepareKnowledgeRevision({
     principal,
     access,
     (await access.authorize(tx, principal, ["knowledge:read"])).scopes,
+    checked,
   );
   const tags = await resolveKnowledgeTagRows(tx, principal.userId, input.tags, followAlias);
   return {

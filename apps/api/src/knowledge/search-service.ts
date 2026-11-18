@@ -168,7 +168,9 @@ export async function selectKnowledgeCandidates(
   // Requested tags resolve through aliases and plurals; so do the words of the text, which
   // rank a record above text-only matches when one of them is exactly a tag it carries.
   // An agent follows an alias only to a tag it can see, so a hidden target reads as unknown.
-  const followAlias = knowledgeAliasGate(tx, principal, access, authorizedScopes);
+  // One pass shares disclosure work: a record many candidates cite is disclosed once.
+  const checked = createKnowledgeDisclosureCache();
+  const followAlias = knowledgeAliasGate(tx, principal, access, authorizedScopes, checked);
   const requested = query.tags
     ? await lookupKnowledgeTags(tx, principal.userId, query.tags, followAlias)
     : [];
@@ -203,8 +205,6 @@ export async function selectKnowledgeCandidates(
   const rows = await currentKnowledgeForRetrieval(tx, principal, query, authorizedScopes);
   const candidates: Candidate[] = [];
   let unavailable = false;
-  // One pass shares disclosure work: a record many candidates cite is disclosed once.
-  const checked = createKnowledgeDisclosureCache();
   for (const row of rows) {
     const revision = projectKnowledgeRevision(row);
     const { snapshot, metadata } = revision;
@@ -272,8 +272,10 @@ export async function selectKnowledgeCandidates(
   const matches = ranks
     ? candidates.filter(
         ({ record, textTags }) =>
-          ranks.has(record.id) ||
-          (textTags > 0 && !record.tags.some((tag) => excludedTags.has(tag))),
+          // An excluded word excludes a record carrying it as a tag, alias targets included,
+          // whether the record matched by its text or by a tag.
+          !record.tags.some((tag) => excludedTags.has(tag)) &&
+          (ranks.has(record.id) || textTags > 0),
       )
     : candidates;
   matches.sort(

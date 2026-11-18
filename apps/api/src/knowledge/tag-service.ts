@@ -27,7 +27,9 @@ import type { Principal } from "../types.js";
 import {
   bumpKnowledgeEpoch,
   createKnowledgeAccess,
+  createKnowledgeDisclosureCache,
   currentKnowledgeForRetrieval,
+  type KnowledgeDisclosureCache,
   type KnowledgeTransaction,
   knowledgeNotTrashed,
   projectKnowledgeRevision,
@@ -157,13 +159,15 @@ export async function lookupKnowledgeTags(
 /**
  * The alias gate for one caller in one transaction: none for the owner; for an agent, a tag
  * counts as visible when one current record it can read carries it. Disclosure runs only when
- * an alias is actually hit, and stops at the first readable record.
+ * an alias is actually hit, and stops at the first readable record. Pass the caller's disclosure
+ * cache to share that work with the rest of the request.
  */
 export function knowledgeAliasGate(
   tx: KnowledgeTransaction,
   principal: Principal,
   access: ReturnType<typeof createKnowledgeAccess>,
   authorizedScopes: AccessScope[],
+  checked: KnowledgeDisclosureCache = createKnowledgeDisclosureCache(),
 ): KnowledgeAliasGate | undefined {
   if (principal.actorType === "user") return undefined;
   let rows: Promise<Awaited<ReturnType<typeof currentKnowledgeForRetrieval>>> | undefined;
@@ -175,7 +179,7 @@ export function knowledgeAliasGate(
       answer = rows.then(async (current) => {
         for (const row of current) {
           if (!row.tags.includes(target.name)) continue;
-          if (await access.visibleDisclosure(tx, principal, projectKnowledgeRevision(row)))
+          if (await access.visibleDisclosure(tx, principal, projectKnowledgeRevision(row), checked))
             return true;
         }
         return false;

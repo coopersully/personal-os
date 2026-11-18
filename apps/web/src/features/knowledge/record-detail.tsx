@@ -1,14 +1,20 @@
-import {
-  type KnowledgeLifecycleInput,
-  type KnowledgeMutationInput,
-  type KnowledgeRecord,
-  type KnowledgeSource,
-  knowledgeLifecycleInputSchema,
+import type {
+  KnowledgeLifecycleInput,
+  KnowledgeMutationInput,
+  KnowledgeRecord,
+  KnowledgeSource,
 } from "@personal-os/domain";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { type ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
+import { ArchiveIcon, HistoryIcon, TrashIcon } from "@/components/icons";
 import { RecoveryRequest } from "@/components/recovery-request";
 import {
   ResponsiveDialog,
@@ -21,27 +27,53 @@ import {
 } from "@/components/responsive-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import {
   type MemoryActions,
   memoryErrorStatus,
   readableMemory,
+  updateMemory,
   useMemoryWriteKey,
 } from "./actions";
 import {
-  memoryAcceptance,
+  isTrashRoot,
+  memoryAuthor,
   memoryContent,
+  memoryDate,
   memoryLabel,
-  memoryState,
+  memoryOrigin,
+  memoryStatus,
   memorySummary,
+  memoryUses,
+  memoryWorkspace,
 } from "./presentation";
-import { MemoryRestrictions, memoryClaimFields, RecordEditor } from "./record-editor";
+import { MemoryWorkspace, memoryClaimFields, RecordEditor } from "./record-editor";
+import {
+  DeleteNowConfirmation,
+  deleteNowDescription,
+  restoreMemory,
+  TrashConfirmation,
+  trashDescription,
+} from "./trash";
 
-type Purpose = KnowledgeRecord["purposes"][number];
-type DetailMode = "detail" | "edit" | "restrict" | "supersede";
-type Selection = { id: string; purpose: Purpose };
+/** Modes a record can be opened in directly, besides its details. */
+export type MemoryOpenMode = "edit" | "delete";
+type DetailMode = "detail" | "workspace" | "trash" | MemoryOpenMode;
+/** `content` starts the editor from other content, such as an agent's proposal. */
+type Selection = {
+  id: string;
+  mode?: MemoryOpenMode | undefined;
+  content?: KnowledgeRecord["content"] | undefined;
+};
+type OpenRecord = (id: string, mode?: MemoryOpenMode, content?: KnowledgeRecord["content"]) => void;
 
 export function MemoryDialog({
   title,
@@ -128,18 +160,33 @@ export function MemoryDialog({
   );
 }
 
+/** Origin, status and access labels. No confidence score: origin and freshness say enough. */
 export function MemoryBadges({ record }: { record: KnowledgeRecord }) {
+  const status = memoryStatus(record);
   return (
     <span className="flex min-w-0 flex-wrap gap-1">
-      <Badge variant="secondary">{memoryLabel(record.origin)}</Badge>
-      <Badge variant="secondary">{memoryState(record)}</Badge>
+      <Badge variant="secondary">{memoryOrigin(record)}</Badge>
+      {record.sensitivity === "sensitive" ? <Badge variant="secondary">Sensitive</Badge> : null}
+      {status ? <Badge variant="secondary">{status}</Badge> : null}
       {record.conflictRecordIds.length ? <Badge variant="secondary">Conflict</Badge> : null}
+      {record.core ? <Badge variant="secondary">Core</Badge> : null}
+      {record.agentAccess === "blocked" ? (
+        <Badge variant="secondary">Hidden from agents</Badge>
+      ) : null}
     </span>
   );
 }
 
-function dateLabel(value: string) {
-  return new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+export function MemoryTags({ tags }: { tags: readonly string[] }) {
+  return (
+    <span className="flex min-w-0 flex-wrap gap-1">
+      {tags.map((tag) => (
+        <Badge key={tag} variant="outline">
+          {tag}
+        </Badge>
+      ))}
+    </span>
+  );
 }
 
 function MemoryFields({ fields }: { fields: Array<[string, string]> }) {
@@ -159,18 +206,17 @@ function memoryUseFields(
   record: Pick<KnowledgeRecord, "scope" | "purposes" | "sensitivity">,
 ): Array<[string, string]> {
   return [
-    ["Workspace", record.scope.workspace ? memoryLabel(record.scope.workspace) : "All workspaces"],
-    ["Allowed uses", record.purposes.map(memoryLabel).join(", ")],
+    ["Workspace", memoryWorkspace(record)],
+    ["Uses", memoryUses(record)],
     ["Sensitivity", record.sensitivity === "sensitive" ? "Sensitive" : "Standard"],
   ];
 }
 
 function submittedFields(input: KnowledgeLifecycleInput): Array<[string, string]> {
   if (input.action === "revise") return memoryClaimFields(input.content);
-  if (input.action === "supersede") return [["Replacement memory ID", input.replacementId]];
-  if (input.action === "restrict" || input.action === "widen")
-    return [["Workspace", input.workspace ? memoryLabel(input.workspace) : "All workspaces"]];
-  return [["Action", input.action === "confirm" ? "Confirm memory" : "Dispute memory"]];
+  // Only the content and workspace editors offer a reviewed retry.
+  const workspace = "workspace" in input ? input.workspace : null;
+  return [["Workspace", workspace ? memoryLabel(workspace) : "All workspaces"]];
 }
 
 function SourceEvidence({
@@ -178,7 +224,7 @@ function SourceEvidence({
   openRecord,
 }: {
   source: KnowledgeSource;
-  openRecord?: (id: string) => void;
+  openRecord?: OpenRecord;
 }) {
   if (source.availability) return <span>Source unavailable</span>;
   const { evidence } = source;
@@ -230,7 +276,7 @@ function RecordSources({
   openRecord,
 }: {
   sources: KnowledgeRecord["sources"];
-  openRecord?: (id: string) => void;
+  openRecord?: OpenRecord;
 }) {
   if (!sources.length) return <p className="text-muted-foreground">No source details available.</p>;
   return (
@@ -253,20 +299,22 @@ function RecordInformation({
   openRecord,
 }: {
   record: KnowledgeRecord;
-  openRecord: (id: string) => void;
+  openRecord: OpenRecord;
 }) {
   const content = memoryContent(record);
   const summary = memorySummary(content);
   const data: Array<[string, string]> = [
-    ["Acceptance", memoryAcceptance(record)],
-    ["Contributor", record.author.actorType === "user" ? "You" : `Agent ${record.author.actorId}`],
-    ...memoryUseFields(record),
-    ["Added", dateLabel(record.createdAt)],
+    ["Saved by", memoryAuthor(record)],
+    ["Latest version", record.ownerHeld ? "Written or confirmed by you" : "Not confirmed by you"],
+    ["Workspace", memoryWorkspace(record)],
+    ["Uses", memoryUses(record)],
+    ["Updated", memoryDate(record.createdAt)],
   ];
-  if (record.acceptance) data.push(["Accepted", dateLabel(record.acceptance.acceptedAt)]);
-  if (record.validFrom) data.push(["Available from", dateLabel(record.validFrom)]);
-  if (record.validUntil) data.push(["Available until", dateLabel(record.validUntil)]);
-  if (record.reviewAt) data.push(["Review date", dateLabel(record.reviewAt)]);
+  if (record.lastConfirmedAt) data.push(["Last confirmed", memoryDate(record.lastConfirmedAt)]);
+  if (record.validFrom) data.push(["Available from", memoryDate(record.validFrom)]);
+  if (record.validUntil) data.push(["Available until", memoryDate(record.validUntil)]);
+  if (record.reviewAt) data.push(["Review date", memoryDate(record.reviewAt)]);
+  if (record.trashedAt) data.push(["Moved to Trash", memoryDate(record.trashedAt)]);
   if (content.kind === "inference")
     data.push(
       ["Uncertainty", content.value.uncertainty],
@@ -279,19 +327,15 @@ function RecordInformation({
         <MemoryBadges record={record} />
         {summary.title.length > 80 ? <h3 className="font-medium">{summary.title}</h3> : null}
         <p className="whitespace-pre-wrap">{summary.text}</p>
+        <MemoryTags tags={record.tags} />
       </div>
       <MemoryFields fields={data} />
       <section aria-label="Sources" className="flex flex-col gap-2">
         <h3 className="font-medium">Sources</h3>
         <RecordSources sources={record.sources} openRecord={openRecord} />
       </section>
-      {record.conflictRecordIds.length || record.supersededBy || record.relatedRecordIds.length ? (
+      {record.supersededBy || record.relatedRecordIds.length ? (
         <section aria-label="Related memory" className="flex flex-col items-start gap-2">
-          {record.conflictRecordIds.map((id, index) => (
-            <Button key={id} variant="secondary" size="sm" onClick={() => openRecord(id)}>
-              Open conflicting memory {index + 1}
-            </Button>
-          ))}
           {record.supersededBy ? (
             <Button
               variant="secondary"
@@ -318,17 +362,15 @@ function RecordInformation({
 
 function MemoryHistory({
   record,
-  purpose,
   queryKey,
   actions,
 }: {
   record: KnowledgeRecord;
-  purpose: Purpose;
   queryKey: readonly unknown[];
   actions: MemoryActions;
 }) {
   const history = useInfiniteQuery({
-    queryKey: [...queryKey, "history", record.id, record.revision, purpose],
+    queryKey: [...queryKey, "history", record.id, record.revision],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) => {
       signal.throwIfAborted();
@@ -336,7 +378,6 @@ function MemoryHistory({
         () =>
           api.getKnowledgeHistory({
             recordId: record.id,
-            purpose,
             ...(pageParam ? { cursor: pageParam } : {}),
           }),
         pageParam,
@@ -368,7 +409,11 @@ function MemoryHistory({
                   <RecordSources sources={revision.sources} />
                 </details>
               ) : null}
-              <p className="text-muted-foreground">{memoryAcceptance(revision)}</p>
+              <p className="text-muted-foreground">
+                {revision.author.actorType === "user"
+                  ? "Saved by you"
+                  : `Saved by agent ${revision.author.actorId}`}
+              </p>
             </li>
           ))}
       </ol>
@@ -391,57 +436,210 @@ function MemoryHistory({
   );
 }
 
-function SupersedeForm({
-  disabled,
-  onSubmit,
-  cancel,
+function ConflictValue({ label, record }: { label: string; record: KnowledgeRecord }) {
+  const { text } = memorySummary(memoryContent(record));
+  return (
+    <div className="flex min-w-0 flex-col gap-1 rounded-lg border border-border/60 p-3">
+      <span className="font-medium">{label}</span>
+      <span className="whitespace-pre-wrap">{text}</span>
+      <span className="text-sm text-muted-foreground">
+        {memoryOrigin(record)} · saved by {memoryAuthor(record).toLowerCase()}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A pending agent proposal is settled on the proposal itself: keep the person's memory, take the
+ * agent's, or keep the person's and edit it starting from the agent's content. Two plain claims
+ * are compared and opened.
+ */
+function ConflictPanel({
+  record,
+  queryKey,
+  actions,
+  openRecord,
+  resolve,
+  editMine,
 }: {
-  disabled: boolean;
-  onSubmit: (id: string) => void;
-  cancel: ReactNode;
+  record: KnowledgeRecord;
+  queryKey: readonly unknown[];
+  actions: MemoryActions;
+  openRecord: OpenRecord;
+  resolve: (proposal: KnowledgeRecord, keep: "current" | "proposed") => void;
+  editMine: (proposal: KnowledgeRecord, mine: KnowledgeRecord) => void;
+}) {
+  const others = useQueries({
+    queries: record.conflictRecordIds.map((id) => ({
+      queryKey: [...queryKey, "record", id],
+      queryFn: ({ signal }: { signal: AbortSignal }) => {
+        signal.throwIfAborted();
+        return actions.read(() => api.getKnowledge({ id }).then(readableMemory));
+      },
+      placeholderData: keepPreviousData,
+      retry: false,
+    })),
+  });
+  return (
+    <section aria-label="Conflict" className="flex flex-col gap-3">
+      <h3 className="font-medium">Conflict</h3>
+      {record.conflictRecordIds.map((id, index) => {
+        const query = others[index];
+        const other = query?.data;
+        const proposal =
+          record.status === "proposed" ? record : other?.status === "proposed" ? other : null;
+        const mine = proposal === record ? other : record;
+        return (
+          <div key={id} className="flex flex-col gap-2">
+            {query ? <QueryFeedback query={query} title="Couldn’t load the other memory." /> : null}
+            {query?.isPending ? <Spinner aria-label="Loading the other memory" /> : null}
+            {other && mine && proposal ? (
+              <>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <ConflictValue label="Your version" record={mine} />
+                  <ConflictValue label="Agent's proposal" record={proposal} />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    disabled={actions.busy}
+                    onClick={() => resolve(proposal, "current")}
+                  >
+                    Keep mine
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={actions.busy}
+                    onClick={() => resolve(proposal, "proposed")}
+                  >
+                    Take the agent's
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={actions.busy}
+                    onClick={() => editMine(proposal, mine)}
+                  >
+                    Edit and keep mine
+                  </Button>
+                </div>
+              </>
+            ) : other ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <ConflictValue label="This memory" record={record} />
+                <ConflictValue label="Conflicting memory" record={other} />
+              </div>
+            ) : null}
+            <Button variant="ghost" size="sm" className="w-fit" onClick={() => openRecord(id)}>
+              Open conflicting memory {index + 1}
+            </Button>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+/** Owner-only switches that apply immediately, each with its own Sonner outcome. */
+function MemorySwitches({
+  record,
+  busy,
+  act,
+}: {
+  record: KnowledgeRecord;
+  busy: boolean;
+  act: (input: KnowledgeLifecycleInput, success?: string) => void;
 }) {
   const id = useId();
-  const [replacement, setReplacement] = useState("");
+  const identity = () => ({
+    recordId: record.id,
+    expectedRevision: record.revision,
+    mutationKey: crypto.randomUUID(),
+  });
+  // Core is revised content metadata, which a pending proposal or archived memory cannot take.
+  const coreEditable = ["active", "disputed", "expired"].includes(record.status);
+  // The core never loads sensitive or blocked memory, and a revise clears a dispute (COO-268).
+  const coreBlocked =
+    record.sensitivity === "sensitive"
+      ? "Sensitive memories never load at session start."
+      : record.agentAccess === "blocked"
+        ? "Memories hidden from agents never load at session start."
+        : record.status === "disputed"
+          ? "Confirm or edit this disputed memory first. Changing this would clear the dispute."
+          : null;
   return (
-    <form
-      className="flex flex-col gap-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!disabled) onSubmit(replacement.trim());
-      }}
-    >
-      <Field>
-        <FieldLabel htmlFor={id}>Replacement memory ID</FieldLabel>
-        <Input
-          id={id}
-          value={replacement}
-          onChange={(event) => setReplacement(event.target.value)}
-          disabled={disabled}
+    <FieldGroup className="gap-3">
+      {coreEditable ? (
+        <Field orientation="horizontal" data-disabled={Boolean(coreBlocked)}>
+          <Switch
+            id={`${id}-core`}
+            checked={record.core}
+            disabled={busy || Boolean(coreBlocked)}
+            aria-describedby={coreBlocked ? `${id}-core-blocked` : undefined}
+            onCheckedChange={(core) =>
+              act(
+                { ...identity(), action: "revise", content: record.content, core },
+                core
+                  ? "Memory will load at session start."
+                  : "Memory no longer loads at session start.",
+              )
+            }
+          />
+          <FieldContent>
+            <FieldLabel htmlFor={`${id}-core`}>Load at session start</FieldLabel>
+            {coreBlocked ? (
+              <FieldDescription id={`${id}-core-blocked`}>{coreBlocked}</FieldDescription>
+            ) : null}
+          </FieldContent>
+        </Field>
+      ) : null}
+      <Field orientation="horizontal">
+        <Switch
+          id={`${id}-access`}
+          checked={record.agentAccess === "allowed"}
+          disabled={busy}
+          onCheckedChange={(allowed) =>
+            act({
+              ...identity(),
+              action: "set_access",
+              agentAccess: allowed ? "allowed" : "blocked",
+            })
+          }
         />
+        <FieldLabel htmlFor={`${id}-access`}>Agents can read this</FieldLabel>
       </Field>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {cancel}
-        <Button type="submit" disabled={disabled || !replacement.trim()}>
-          Supersede memory
-        </Button>
-      </div>
-    </form>
+      <Field orientation="horizontal">
+        <Switch
+          id={`${id}-sensitive`}
+          checked={record.sensitivity === "sensitive"}
+          disabled={busy}
+          onCheckedChange={(sensitive) =>
+            act({
+              ...identity(),
+              action: "set_sensitivity",
+              sensitivity: sensitive ? "sensitive" : "standard",
+            })
+          }
+        />
+        <FieldLabel htmlFor={`${id}-sensitive`}>Sensitive memory</FieldLabel>
+      </Field>
+    </FieldGroup>
   );
 }
 
 export function NewMemory({
-  purpose,
   actions,
   close,
   restoreFocus,
   onSaved,
 }: {
-  purpose: Purpose;
   actions: MemoryActions;
   close: () => void;
   restoreFocus: () => void;
   onSaved: () => void;
 }) {
+  // An exact retry of an uncertain save reuses its key, so it cannot create a duplicate.
   const retryableInput = useMemoryWriteKey();
   const save = (input: KnowledgeMutationInput | KnowledgeLifecycleInput) => {
     if ("action" in input) return;
@@ -453,7 +651,7 @@ export function NewMemory({
         close();
         onSaved();
         return {
-          message: result.outcome === "forgotten" ? "This memory is unavailable." : "Memory saved.",
+          message: result.outcome === "readable" ? "Memory saved." : "This memory is unavailable.",
         };
       },
     });
@@ -467,7 +665,6 @@ export function NewMemory({
       restoreFocus={restoreFocus}
     >
       <RecordEditor
-        purpose={purpose}
         disabled={actions.busy}
         onSave={save}
         onInvalid={() => actions.notifyError("Check the highlighted memory fields.")}
@@ -495,72 +692,69 @@ export function MemoryRecordDetail({
   actions: MemoryActions;
   close: () => void;
   restoreFocus: () => void;
-  openRecord: (id: string) => void;
+  openRecord: OpenRecord;
   onChanged: () => void;
 }) {
-  const { id, purpose } = selection;
-  const retryableInput = useMemoryWriteKey();
+  const { id } = selection;
   const cache = useQueryClient();
-  const detailKey = [...queryKey, "record", id, purpose];
-  const detail = useQuery({
+  const detailKey = [...queryKey, "record", id];
+  const detail = useQuery<KnowledgeRecord>({
     queryKey: detailKey,
     queryFn: ({ signal }) => {
       signal.throwIfAborted();
-      return actions.read(() => api.getKnowledge({ id, purpose }).then(readableMemory));
+      return actions.read(() => api.getKnowledge({ id }).then(readableMemory));
     },
+    // A refresh after an action keeps the record on screen until the new read arrives.
+    placeholderData: keepPreviousData,
     retry: false,
   });
-  const [mode, setMode] = useState<DetailMode>("detail");
+  const [mode, setMode] = useState<DetailMode>(selection.mode ?? "detail");
   const [localRecord, setLocalRecord] = useState<KnowledgeRecord | null>(null);
   const [draftRecord, setDraftRecord] = useState<KnowledgeRecord | null>(null);
   const [history, setHistory] = useState(false);
   const [conflict, setConflict] = useState<KnowledgeLifecycleInput | null>(null);
   const [reviewed, setReviewed] = useState<KnowledgeRecord | null>(null);
   const accessLost = [401, 403, 404].includes(memoryErrorStatus(detail.error) ?? 0);
-  const record = accessLost ? undefined : (detail.data ?? localRecord);
+  const fetched = detail.isPlaceholderData ? undefined : detail.data;
+  const record = accessLost ? undefined : (fetched ?? localRecord ?? detail.data);
+  // Editors work on the revision the person started from, never a later refresh.
+  if (mode === "edit" && !draftRecord && record) setDraftRecord(record);
 
   const summary = record && memorySummary(memoryContent(record));
-  const mutable = record && record.status !== "superseded";
+  const trashed = Boolean(record?.trashedAt);
+  const live = record && !trashed && record.status !== "superseded";
+  const editable = live && ["active", "disputed", "expired"].includes(record.status);
 
+  /** Simple actions refresh and show the latest memory on a conflict, never retrying. */
+  function act(input: KnowledgeLifecycleInput, success?: string) {
+    const leaves = ["archive", "unarchive", "trash", "restore", "delete_now", "resolve_conflict"];
+    void updateMemory(actions, input, {
+      ...(success ? { success } : {}),
+      done: (result) => {
+        onChanged();
+        if (leaves.includes(input.action) || result.outcome !== "readable") close();
+        else setLocalRecord(result.record);
+      },
+      conflict: () => {
+        setMode("detail");
+        onChanged();
+        return undefined;
+      },
+    });
+  }
+
+  /** Editors keep the draft on a conflict and offer the latest revision for review. */
   function save(input: KnowledgeMutationInput | KnowledgeLifecycleInput) {
     if (!("action" in input)) return;
-    void actions.run({
-      pending: input.action === "revise" ? "Saving memory…" : "Updating memory…",
-      failure: "Couldn’t confirm this update. Review the latest memory before trying again.",
-      request: () => api.updateKnowledge(retryableInput(input)),
-      complete: (result) => {
+    void updateMemory(actions, input, {
+      done: (result) => {
         setMode("detail");
         setDraftRecord(null);
         onChanged();
-        if (result.outcome === "readable") {
-          setLocalRecord(result.record);
-        } else {
-          close();
-        }
-        const messages: Record<KnowledgeLifecycleInput["action"], string> = {
-          revise: "Memory saved.",
-          confirm: "Memory confirmed.",
-          dispute: "Memory disputed.",
-          restrict: "Memory use restricted.",
-          widen: "Memory use widened.",
-          supersede: "Memory superseded.",
-          archive: "Memory archived.",
-          unarchive: "Memory unarchived.",
-          raise_sensitivity: "Memory marked sensitive.",
-          set_sensitivity: "Memory sensitivity updated.",
-          set_access: "Agent access updated.",
-          resolve_conflict: "Conflict resolved.",
-          trash: "Memory moved to Trash.",
-          restore: "Memory restored.",
-          delete_now: "Memory deleted.",
-        };
-        return {
-          message:
-            result.outcome === "readable" ? messages[input.action] : "This memory is unavailable.",
-        };
+        if (result.outcome === "readable") setLocalRecord(result.record);
+        else close();
       },
-      recover: (error) => {
-        if (memoryErrorStatus(error) !== 409) return undefined;
+      conflict: () => {
         setConflict(input);
         setReviewed(null);
         return "The memory changed before this update. Review the latest revision.";
@@ -572,7 +766,7 @@ export function MemoryRecordDetail({
     void actions.run({
       pending: "Loading the latest memory…",
       failure: "Couldn’t load the latest memory.",
-      request: () => api.getKnowledge({ id, purpose }).then(readableMemory),
+      request: () => api.getKnowledge({ id }).then(readableMemory),
       complete: (current) => {
         setReviewed(current);
         return undefined;
@@ -580,29 +774,51 @@ export function MemoryRecordDetail({
       recover: (error) => {
         if (![401, 403, 404].includes(memoryErrorStatus(error) ?? 0)) return undefined;
         close();
-        return "This memory is no longer available for the selected use.";
+        return "This memory is no longer available.";
       },
     });
   }
 
-  function action(action: "confirm" | "dispute" | "supersede", replacementId?: string) {
-    const target = action === "supersede" ? draftRecord : record;
-    if (!target) return;
-    const parsed = knowledgeLifecycleInputSchema.safeParse({
-      action,
-      recordId: id,
+  function identity(target: KnowledgeRecord) {
+    return {
+      recordId: target.id,
       expectedRevision: target.revision,
       mutationKey: crypto.randomUUID(),
-      ...(replacementId !== undefined ? { replacementId } : {}),
-    });
-    if (!parsed.success) {
-      actions.notifyError("Enter a valid replacement memory ID.");
-      return;
-    }
-    save(parsed.data);
+    };
   }
 
-  function startEditor(next: "edit" | "restrict" | "supersede") {
+  /**
+   * Keeps the person's memory, retiring the proposal, then edits it starting from the agent's
+   * content. Nothing opens unless the proposal was resolved, so it never stays pending.
+   */
+  function editKeepingMine(proposal: KnowledgeRecord, mine: KnowledgeRecord) {
+    void updateMemory(
+      actions,
+      { ...identity(proposal), action: "resolve_conflict", keep: "current" },
+      {
+        success: "Kept your version. Edit it with the agent's proposal.",
+        done: () => {
+          onChanged();
+          openRecord(mine.id, "edit", memoryContent(proposal));
+        },
+        conflict: () => {
+          onChanged();
+          return undefined;
+        },
+      },
+    );
+  }
+
+  function deleteNow() {
+    if (!record) return;
+    if (record.trashVersion === undefined) {
+      actions.notifyError("Reload Trash before deleting this memory.");
+      return;
+    }
+    act({ ...identity(record), action: "delete_now", expectedTrashVersion: record.trashVersion });
+  }
+
+  function startEditor(next: "edit" | "workspace") {
     if (!record) return;
     setDraftRecord(record);
     setMode(next);
@@ -617,26 +833,22 @@ export function MemoryRecordDetail({
     </Button>
   );
   const invalid = () => actions.notifyError("Check the highlighted memory fields.");
-  const title =
-    mode === "edit"
-      ? "Edit memory"
-      : mode === "restrict"
-        ? "Restrict memory use"
-        : mode === "supersede"
-          ? "Supersede memory"
-          : summary && summary.title.length <= 80
-            ? summary.title
-            : "Memory details";
-  const description =
-    mode === "edit"
-      ? "Save your correction as a new revision."
-      : mode === "restrict"
-        ? "Limit where and why this memory can be used."
-        : mode === "supersede"
-          ? "Choose the saved memory that should replace this one."
-          : record
+  const titles: Record<Exclude<DetailMode, "detail">, [string, string]> = {
+    edit: ["Edit memory", "Save your correction as a new revision."],
+    workspace: ["Change workspace", "Choose where this memory can be used."],
+    trash: ["Move to Trash?", trashDescription],
+    delete: ["Delete now?", deleteNowDescription],
+  };
+  const [title, description] =
+    mode === "detail"
+      ? [
+          summary && summary.title.length <= 80 ? summary.title : "Memory details",
+          record
             ? `${memoryLabel(memoryContent(record).kind)} · revision ${record.revision}`
-            : "View the saved record.";
+            : "View the saved record.",
+        ]
+      : titles[mode];
+  const detailShown = mode === "detail" || accessLost;
 
   return (
     <>
@@ -644,11 +856,11 @@ export function MemoryRecordDetail({
         title={title}
         description={description}
         busy={actions.busy}
-        close={mode === "detail" || accessLost ? close : goBack}
+        close={detailShown ? close : goBack}
         restoreFocus={restoreFocus}
-        showFooter={accessLost || mode === "detail"}
+        showFooter={detailShown}
         footer={
-          !accessLost && mode === "detail" && mutable ? (
+          !accessLost && mode === "detail" && editable ? (
             <Button
               disabled={actions.busy}
               variant="secondary"
@@ -660,7 +872,7 @@ export function MemoryRecordDetail({
           ) : undefined
         }
       >
-        {mode === "detail" || accessLost ? (
+        {detailShown ? (
           <div className="flex flex-col gap-4">
             <QueryFeedback query={detail} title="Couldn’t open this memory." />
             {detail.isPending && !record ? <Spinner aria-label="Loading memory details" /> : null}
@@ -672,46 +884,124 @@ export function MemoryRecordDetail({
             {record ? (
               <>
                 <RecordInformation record={record} openRecord={openRecord} />
+                {record.conflictRecordIds.length ? (
+                  <ConflictPanel
+                    record={record}
+                    queryKey={queryKey}
+                    actions={actions}
+                    openRecord={openRecord}
+                    resolve={(proposal, keep) =>
+                      act({ ...identity(proposal), action: "resolve_conflict", keep })
+                    }
+                    editMine={editKeepingMine}
+                  />
+                ) : null}
+                {live ? <MemorySwitches record={record} busy={actions.busy} act={act} /> : null}
+                {trashed && !isTrashRoot(record) && record.trashGroupId ? (
+                  <div className="flex flex-col items-start gap-2">
+                    <p className="text-muted-foreground">
+                      This memory moved to Trash with another memory. It restores or deletes with
+                      that one.
+                    </p>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => openRecord(record.trashGroupId as string)}
+                    >
+                      Open the memory it moved with
+                    </Button>
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap items-start gap-2">
-                  {mutable ? (
+                  {trashed && isTrashRoot(record) ? (
                     <>
-                      {record.status !== "active" ? (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={actions.busy}
-                          onClick={() => action("confirm")}
-                        >
-                          Confirm memory
-                        </Button>
-                      ) : null}
-                      {record.status !== "disputed" ? (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={actions.busy}
-                          onClick={() => action("dispute")}
-                        >
-                          {record.status === "proposed" ? "Reject proposal" : "Dispute memory"}
-                        </Button>
-                      ) : null}
                       <Button
                         variant="secondary"
                         size="sm"
                         disabled={actions.busy}
-                        onClick={() => startEditor("supersede")}
+                        onClick={() =>
+                          void restoreMemory(actions, record, {
+                            done: () => {
+                              onChanged();
+                              close();
+                            },
+                            refused: onChanged,
+                          })
+                        }
                       >
-                        Supersede
+                        Restore
                       </Button>
                       <Button
-                        variant="secondary"
+                        variant="destructive"
                         size="sm"
                         disabled={actions.busy}
-                        onClick={() => startEditor("restrict")}
+                        onClick={() => setMode("delete")}
                       >
-                        Restrict use
+                        Delete now
                       </Button>
                     </>
+                  ) : null}
+                  {editable && (!record.ownerHeld || record.status === "disputed") ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={actions.busy}
+                      onClick={() => act({ ...identity(record), action: "confirm" })}
+                    >
+                      Confirm memory
+                    </Button>
+                  ) : null}
+                  {editable && record.status !== "disputed" ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={actions.busy}
+                      onClick={() => act({ ...identity(record), action: "dispute" })}
+                    >
+                      Dispute memory
+                    </Button>
+                  ) : null}
+                  {editable ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={actions.busy}
+                        onClick={() => startEditor("workspace")}
+                      >
+                        Change workspace
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={actions.busy}
+                        onClick={() => act({ ...identity(record), action: "archive" })}
+                      >
+                        <ArchiveIcon data-icon="inline-start" aria-hidden="true" />
+                        Archive
+                      </Button>
+                    </>
+                  ) : null}
+                  {live && record.status === "archived" ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={actions.busy}
+                      onClick={() => act({ ...identity(record), action: "unarchive" })}
+                    >
+                      Unarchive
+                    </Button>
+                  ) : null}
+                  {!trashed ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={actions.busy}
+                      onClick={() => setMode("trash")}
+                    >
+                      <TrashIcon data-icon="inline-start" aria-hidden="true" />
+                      Move to Trash
+                    </Button>
                   ) : null}
                   <Button
                     variant="secondary"
@@ -720,16 +1010,12 @@ export function MemoryRecordDetail({
                     aria-expanded={history}
                     onClick={() => setHistory(!history)}
                   >
+                    <HistoryIcon data-icon="inline-start" aria-hidden="true" />
                     {history ? "Hide history" : "Show history"}
                   </Button>
                 </div>
                 {history ? (
-                  <MemoryHistory
-                    record={record}
-                    purpose={purpose}
-                    queryKey={queryKey}
-                    actions={actions}
-                  />
+                  <MemoryHistory record={record} queryKey={queryKey} actions={actions} />
                 ) : null}
               </>
             ) : null}
@@ -738,15 +1024,15 @@ export function MemoryRecordDetail({
         {mode === "edit" && draftRecord && !accessLost ? (
           <RecordEditor
             record={draftRecord}
-            purpose={purpose}
+            initialContent={selection.content}
             disabled={actions.busy || Boolean(conflict)}
             onSave={save}
             onInvalid={invalid}
             footer={back}
           />
         ) : null}
-        {mode === "restrict" && draftRecord && !accessLost ? (
-          <MemoryRestrictions
+        {mode === "workspace" && draftRecord && !accessLost ? (
+          <MemoryWorkspace
             record={draftRecord}
             disabled={actions.busy || Boolean(conflict)}
             onSave={save}
@@ -754,11 +1040,20 @@ export function MemoryRecordDetail({
             footer={back}
           />
         ) : null}
-        {mode === "supersede" && !accessLost ? (
-          <SupersedeForm
-            disabled={actions.busy || Boolean(conflict)}
-            cancel={back}
-            onSubmit={(replacementId) => action("supersede", replacementId)}
+        {mode === "trash" && record && !accessLost ? (
+          <TrashConfirmation
+            record={record}
+            queryKey={queryKey}
+            actions={actions}
+            cancel={goBack}
+            confirm={() => act({ ...identity(record), action: "trash" })}
+          />
+        ) : null}
+        {mode === "delete" && !accessLost ? (
+          <DeleteNowConfirmation
+            disabled={actions.busy || !record}
+            cancel={goBack}
+            confirm={deleteNow}
           />
         ) : null}
       </MemoryDialog>
@@ -775,7 +1070,7 @@ export function MemoryRecordDetail({
                 </Button>
               ) : null}
               {reviewed &&
-              (mode === "edit" || mode === "restrict" || mode === "supersede") &&
+              (mode === "edit" || mode === "workspace") &&
               reviewed.status !== "superseded" ? (
                 <Button
                   variant="secondary"
@@ -787,11 +1082,7 @@ export function MemoryRecordDetail({
                     setConflict(null);
                   }}
                 >
-                  {mode === "edit"
-                    ? "Keep editing"
-                    : mode === "restrict"
-                      ? "Keep editing restrictions"
-                      : "Keep replacement"}
+                  {mode === "edit" ? "Keep editing" : "Keep editing the workspace"}
                 </Button>
               ) : null}
               <Button
@@ -815,7 +1106,6 @@ export function MemoryRecordDetail({
             <div className="grid min-w-0 gap-4 [overflow-wrap:anywhere]">
               <section aria-label="Current claim" className="grid gap-2">
                 <h3 className="font-medium">Current revision {reviewed.revision}</h3>
-                <MemoryBadges record={reviewed} />
                 <MemoryFields
                   fields={[
                     ...memoryClaimFields(memoryContent(reviewed)),

@@ -1,8 +1,14 @@
 import { ApiClientError } from "@personal-os/api-client";
-import type { KnowledgeForgottenRecord, KnowledgeRecord } from "@personal-os/domain";
+import type {
+  KnowledgeForgottenRecord,
+  KnowledgeLifecycleInput,
+  KnowledgeMutationResult,
+  KnowledgeRecord,
+} from "@personal-os/domain";
 import { CancelledError, type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { api } from "@/api";
 import {
   type PreferenceSession,
   registerSessionCleanup,
@@ -180,4 +186,104 @@ export function useMemoryWriteKey() {
     if (previous.current?.payload !== payload) previous.current = { payload, mutationKey };
     return { ...input, mutationKey: previous.current.mutationKey };
   };
+}
+
+type LifecycleCopy = { pending: string; success: string; conflict: string };
+const changedCopy = "This memory changed. Review the latest version.";
+
+/** One loading toast per action, updated to the confirmed outcome. */
+export function lifecycleCopy(input: KnowledgeLifecycleInput): LifecycleCopy {
+  const copy = (pending: string, success: string, conflict = changedCopy) => ({
+    pending,
+    success,
+    conflict,
+  });
+  switch (input.action) {
+    case "revise":
+      return copy("Saving memory…", "Memory saved.");
+    case "confirm":
+      return copy("Confirming memory…", "Memory confirmed.");
+    case "dispute":
+      return copy("Disputing memory…", "Memory disputed.");
+    case "archive":
+      return copy("Archiving memory…", "Memory archived.");
+    case "unarchive":
+      return copy("Unarchiving memory…", "Memory unarchived.");
+    case "supersede":
+      return copy("Replacing memory…", "Memory superseded.");
+    case "restrict":
+    case "widen":
+      return copy("Updating workspace…", "Workspace updated.");
+    case "raise_sensitivity":
+      return copy("Updating sensitivity…", "Memory marked sensitive.");
+    case "set_sensitivity":
+      return copy(
+        "Updating sensitivity…",
+        input.sensitivity === "sensitive" ? "Memory marked sensitive." : "Memory marked standard.",
+      );
+    case "set_access":
+      return copy(
+        "Updating agent access…",
+        input.agentAccess === "blocked"
+          ? "Memory hidden from agents."
+          : "Agents can read this memory.",
+      );
+    case "resolve_conflict":
+      return copy(
+        "Resolving conflict…",
+        input.keep === "current" ? "Kept your version." : "Took the agent's version.",
+      );
+    case "trash":
+      return copy("Moving memory to Trash…", "Memory moved to Trash.");
+    case "restore":
+      return copy(
+        "Restoring memory…",
+        "Memory restored.",
+        "This memory couldn't be restored. Review Trash and try again.",
+      );
+    case "delete_now":
+      return copy(
+        "Deleting memory…",
+        "Memory deleted.",
+        "This memory's Trash state changed. Review it before deleting.",
+      );
+  }
+}
+
+/**
+ * Runs one lifecycle action. A conflict (409) is never retried here: the caller refreshes and
+ * the person decides again, so a stale Trash version or revision never applies on its own.
+ */
+export function updateMemory(
+  actions: MemoryActions,
+  input: KnowledgeLifecycleInput,
+  handlers: {
+    success?: string;
+    done: (result: KnowledgeMutationResult) => void;
+    /** Returns the toast to show instead of the action's conflict copy. */
+    conflict: () => string | undefined;
+  },
+) {
+  const copy = lifecycleCopy(input);
+  // Trash and delete now return content-free receipts; anything else means it is gone.
+  const expected =
+    input.action === "trash" ? "trashed" : input.action === "delete_now" ? "forgotten" : "readable";
+  return actions.run({
+    pending: copy.pending,
+    failure: "Couldn’t confirm this update. Review the latest memory before trying again.",
+    request: () => api.updateKnowledge(input),
+    complete: (result) => {
+      handlers.done(result);
+      return {
+        message:
+          result.outcome === expected
+            ? (handlers.success ?? copy.success)
+            : "This memory is unavailable.",
+      };
+    },
+    recover: (error) => {
+      if (memoryErrorStatus(error) !== 409) return undefined;
+      return handlers.conflict() ?? copy.conflict;
+    },
+  });
 }

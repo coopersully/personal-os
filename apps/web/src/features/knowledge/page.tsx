@@ -1,7 +1,7 @@
 import type { KnowledgePage, KnowledgeQuery, KnowledgeRecord } from "@personal-os/domain";
 import {
   knowledgeContentSchema,
-  knowledgePurposeSchema,
+  knowledgeOriginSchema,
   knowledgeQuerySchema,
   knowledgeWorkspaceSchema,
 } from "@personal-os/domain";
@@ -10,7 +10,7 @@ import { useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import { useConfirmAction } from "@/components/confirm-action";
-import { ChevronRightIcon, DownloadIcon, PlusIcon } from "@/components/icons";
+import { ChevronRightIcon, DownloadIcon, PlusIcon, TagsIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -24,34 +24,37 @@ import {
   usePreferenceSession,
 } from "../workspace-settings/account-save-session";
 import { memoryKey, registerMemoryCleanup, useMemoryActions } from "./actions";
-import { memoryContent, memoryLabel, memorySummary } from "./presentation";
-import { MemoryBadges, MemoryRecordDetail, NewMemory } from "./record-detail";
+import { memoryContent, memoryFreshness, memoryLabel, memorySummary } from "./presentation";
+import {
+  MemoryBadges,
+  type MemoryOpenMode,
+  MemoryRecordDetail,
+  MemoryTags,
+  NewMemory,
+} from "./record-detail";
+import { ManageTags, TagChips, useMemoryTags } from "./tags";
+import { restoreMemory, TrashRow } from "./trash";
 
-type View = "accepted" | "review" | "conflicts" | "all";
-type FilterStatus = NonNullable<KnowledgeQuery["status"]>;
-type Filters = Pick<KnowledgeQuery, "workspace" | "kind" | "text"> & {
-  purpose: NonNullable<KnowledgeQuery["purpose"]>;
+type View = "all" | "conflicts" | "archived" | "trash";
+type Filters = Pick<KnowledgeQuery, "workspace" | "kind" | "origin" | "text">;
+/** `opened` remounts the detail on every open, so a mode or draft always starts fresh. */
+type Selection = {
+  id: string;
+  mode?: MemoryOpenMode | undefined;
+  content?: KnowledgeRecord["content"] | undefined;
+  opened: number;
 };
-const statuses: FilterStatus[] = ["active", "proposed", "disputed", "expired", "superseded"];
-const reviewStatuses: FilterStatus[] = ["proposed", "disputed"];
-const conflictStatuses: FilterStatus[] = ["active", ...reviewStatuses];
 
-function statusLabel(status: FilterStatus) {
-  if (status === "active") return "Accepted";
-  return memoryLabel(status);
-}
-
-function listScope(view: View, status: FilterStatus | "", filters: Filters): KnowledgeQuery {
-  return {
-    ...filters,
-    ...(status ? { status } : {}),
-    ...(view === "conflicts" ? { hasConflict: true } : {}),
-    ...(view === "accepted"
-      ? { reviewView: "accepted" }
-      : view === "review"
-        ? { reviewView: "needs_review" }
-        : {}),
-  };
+/** The search for one list: tabs pick a view, the rest narrows it. Unset filters are left out. */
+function listScope(view: View, filters: Filters, tags: string[]): KnowledgeQuery {
+  const scope: KnowledgeQuery = Object.fromEntries(
+    Object.entries(filters).filter(([, value]) => value !== undefined),
+  );
+  if (tags.length) scope.tags = tags;
+  if (view === "conflicts") scope.hasConflict = true;
+  if (view === "archived") scope.status = "archived";
+  if (view === "trash") scope.status = "trashed";
+  return scope;
 }
 
 export function MemoryPage({ ownerId }: { ownerId: string }) {
@@ -65,14 +68,15 @@ export function MemoryPage({ ownerId }: { ownerId: string }) {
 function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId: string }) {
   const cache = useQueryClient();
   const viewId = useId();
-  const [view, setView] = useState<View>("accepted");
-  const [status, setStatus] = useState<FilterStatus | "">("");
+  const [view, setView] = useState<View>("all");
   const [searchText, setSearchText] = useState("");
-  const [filters, setFilters] = useState<Filters>({ purpose: "planning" });
+  const [filters, setFilters] = useState<Filters>({});
+  const [tags, setTags] = useState<string[]>([]);
   const [filterVersion, setFilterVersion] = useState(0);
   const [generation, setGeneration] = useState(0);
-  const [selection, setSelection] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [adding, setAdding] = useState(false);
+  const [managingTags, setManagingTags] = useState(false);
   const [exportPosition, setExportPosition] = useState<{ cursor?: string; page: number }>({
     page: 1,
   });
@@ -92,6 +96,7 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
     setGeneration((value) => value + 1);
     setSelection(null);
     setAdding(false);
+    setManagingTags(false);
     setSearchText("");
     setFilters((previous) => ({ ...previous, text: undefined }));
     setExportPosition({ page: 1 });
@@ -107,6 +112,7 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
     },
   });
 
+  /** Reloads memory after a change; silent, since the action already has its own toast. */
   function refresh() {
     cache.removeQueries({ queryKey });
     setGeneration((value) => value + 1);
@@ -114,7 +120,7 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
     setExportPosition({ page: 1 });
   }
 
-  const query = listScope(view, status, filters);
+  const query = listScope(view, filters, tags);
   const records = useInfiniteQuery({
     queryKey: [...queryKey, "list", filterVersion],
     queryFn: async ({ pageParam, signal }) => {
@@ -137,23 +143,44 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     retry: false,
   });
+  const tagIndex = useMemoryTags(queryKey, actions);
 
   const close = () => {
     setSelection(null);
     setAdding(false);
+    setManagingTags(false);
   };
   function focusInvoker() {
     if (!actions.isCurrent()) return;
     const target = origin.current?.isConnected ? origin.current : addButton.current;
     target?.focus();
   }
-  function openRecord(id: string, trigger?: HTMLElement) {
-    if (trigger) origin.current = trigger;
-    setSelection(id);
+  function openRecord(
+    id: string,
+    options: {
+      trigger?: HTMLElement;
+      mode?: MemoryOpenMode | undefined;
+      content?: KnowledgeRecord["content"] | undefined;
+    } = {},
+  ) {
+    if (options.trigger) origin.current = options.trigger;
+    setSelection((previous) => ({
+      id,
+      mode: options.mode,
+      content: options.content,
+      opened: (previous?.opened ?? 0) + 1,
+    }));
   }
   function changeFilters(patch: Partial<Filters>) {
     setFilters((previous) => ({ ...previous, ...patch }));
     setFilterVersion((version) => version + 1);
+  }
+  function changeTags(next: string[]) {
+    setTags(next);
+    setFilterVersion((version) => version + 1);
+  }
+  function restore(record: KnowledgeRecord) {
+    void restoreMemory(actions, record, { done: refresh, refused: refresh });
   }
 
   const { confirm, confirmation } = useConfirmAction();
@@ -189,8 +216,10 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
                 message: "Memory export is unavailable because its sources are unavailable.",
                 tone: "error",
               };
-            if (!page.items.length)
+            if (!page.items.length) {
+              setExportPosition({ page: 1 });
               return { message: "No available memory to download.", tone: "info" };
+            }
             const url = URL.createObjectURL(
               new Blob(
                 [
@@ -239,7 +268,7 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
 
   return (
     <div className="settings-stack">
-      <SettingsSection title="Saved Memory">
+      <SettingsSection title="Saved memory">
         <div className="flex min-w-0 flex-col gap-4">
           <div className="flex flex-wrap gap-2">
             <Button
@@ -253,6 +282,17 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
               <PlusIcon data-icon="inline-start" aria-hidden="true" />
               Add memory
             </Button>
+            <Button
+              variant="secondary"
+              disabled={actions.busy}
+              onClick={(event) => {
+                origin.current = event.currentTarget;
+                setManagingTags(true);
+              }}
+            >
+              <TagsIcon data-icon="inline-start" aria-hidden="true" />
+              Manage tags
+            </Button>
             <Button variant="secondary" disabled={actions.busy} onClick={download}>
               <DownloadIcon data-icon="inline-start" aria-hidden="true" />
               {exportPosition.cursor ? "Download next page" : "Download memory"}
@@ -261,9 +301,7 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
           <Tabs
             value={view}
             onValueChange={(value) => {
-              const next = value as View;
-              setView(next);
-              setStatus("");
+              setView(value as View);
               setFilterVersion((version) => version + 1);
             }}
           >
@@ -271,10 +309,10 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
               aria-label="Memory views"
               className="max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto [&>[role=tab]]:h-auto"
             >
-              <TabsTrigger value="accepted">Accepted</TabsTrigger>
-              <TabsTrigger value="review">Needs review</TabsTrigger>
+              <TabsTrigger value="all">All</TabsTrigger>
               <TabsTrigger value="conflicts">Conflicts</TabsTrigger>
-              <TabsTrigger value="all">All memory</TabsTrigger>
+              <TabsTrigger value="archived">Archived</TabsTrigger>
+              <TabsTrigger value="trash">Trash</TabsTrigger>
             </TabsList>
             <TabsContent value={view} className="flex min-w-0 flex-col gap-3">
               <form
@@ -282,10 +320,7 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
                 onSubmit={(event) => {
                   event.preventDefault();
                   const text = searchText.trim();
-                  const parsed = knowledgeQuerySchema.safeParse({
-                    ...filters,
-                    text: text || undefined,
-                  });
+                  const parsed = knowledgeQuerySchema.safeParse({ text: text || undefined });
                   if (!parsed.success) {
                     actions.notifyError("Enter a valid memory search.");
                     return;
@@ -319,13 +354,17 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
                   </Button>
                 ) : null}
               </form>
+              <TagChips index={tagIndex.data} selected={tags} change={changeTags} />
               <FieldGroup className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2">
                 <MemoryFilter
-                  id={`${viewId}-purpose`}
-                  label="Use"
-                  value={filters.purpose}
-                  options={knowledgePurposeSchema.options}
-                  onChange={(purpose) => changeFilters({ purpose: purpose as Filters["purpose"] })}
+                  id={`${viewId}-kind`}
+                  label="Type"
+                  value={filters.kind ?? ""}
+                  options={knowledgeContentSchema.options.map((option) => option.shape.kind.value)}
+                  all="All types"
+                  onChange={(kind) =>
+                    changeFilters({ kind: (kind || undefined) as Filters["kind"] })
+                  }
                 />
                 <MemoryFilter
                   id={`${viewId}-workspace`}
@@ -340,35 +379,15 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
                   }
                 />
                 <MemoryFilter
-                  id={`${viewId}-kind`}
-                  label="Type"
-                  value={filters.kind ?? ""}
-                  options={knowledgeContentSchema.options.map((option) => option.shape.kind.value)}
-                  all="All types"
-                  onChange={(kind) =>
-                    changeFilters({ kind: (kind || undefined) as Filters["kind"] })
+                  id={`${viewId}-origin`}
+                  label="Origin"
+                  value={filters.origin ?? ""}
+                  options={knowledgeOriginSchema.options}
+                  all="Stated and inferred"
+                  onChange={(value) =>
+                    changeFilters({ origin: (value || undefined) as Filters["origin"] })
                   }
                 />
-                {view !== "accepted" ? (
-                  <MemoryFilter
-                    id={`${viewId}-status`}
-                    label="Status"
-                    value={status}
-                    options={
-                      view === "review"
-                        ? reviewStatuses
-                        : view === "conflicts"
-                          ? conflictStatuses
-                          : statuses
-                    }
-                    all="All statuses"
-                    optionLabel={(value) => statusLabel(value as FilterStatus)}
-                    onChange={(value) => {
-                      setStatus(value as FilterStatus | "");
-                      setFilterVersion((version) => version + 1);
-                    }}
-                  />
-                ) : null}
               </FieldGroup>
               <QueryFeedback query={records} title="Couldn’t load memory." />
               {records.isPending ? <Spinner aria-label="Loading saved memory" /> : null}
@@ -386,15 +405,34 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
               ) : null}
               {items.length ? (
                 <ul className="flex min-w-0 flex-col divide-y divide-border/40">
-                  {items.map((record) => (
-                    <MemoryRow key={record.id} record={record} open={openRecord} />
-                  ))}
+                  {items.map((record) =>
+                    view === "trash" ? (
+                      <TrashRow
+                        key={record.id}
+                        record={record}
+                        busy={actions.busy}
+                        open={(trigger) => openRecord(record.id, { trigger })}
+                        restore={() => restore(record)}
+                        deleteNow={(trigger) => openRecord(record.id, { trigger, mode: "delete" })}
+                      />
+                    ) : (
+                      <MemoryRow
+                        key={record.id}
+                        record={record}
+                        open={(trigger) => openRecord(record.id, { trigger })}
+                      />
+                    ),
+                  )}
                 </ul>
               ) : records.isSuccess && pageAvailability === "available" ? (
                 <Empty>
                   <EmptyHeader>
                     <EmptyTitle>No matching memory</EmptyTitle>
-                    <EmptyDescription>Try another use, status, or search.</EmptyDescription>
+                    <EmptyDescription>
+                      {view === "trash"
+                        ? "Trashed memory appears here for 30 days."
+                        : "Try another tag, filter, or search."}
+                    </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
               ) : null}
@@ -413,23 +451,26 @@ function OwnerMemory({ session, ownerId }: { session: PreferenceSession; ownerId
         </div>
       </SettingsSection>
       {adding ? (
-        <NewMemory
-          purpose={filters.purpose}
+        <NewMemory actions={actions} close={close} restoreFocus={focusInvoker} onSaved={refresh} />
+      ) : null}
+      {managingTags ? (
+        <ManageTags
+          tags={tagIndex}
           actions={actions}
           close={close}
           restoreFocus={focusInvoker}
-          onSaved={refresh}
+          onChanged={refresh}
         />
       ) : null}
       {selection ? (
         <MemoryRecordDetail
-          key={selection}
-          selection={{ id: selection, purpose: filters.purpose }}
+          key={selection.opened}
+          selection={selection}
           queryKey={queryKey}
           actions={actions}
           close={close}
           restoreFocus={focusInvoker}
-          openRecord={openRecord}
+          openRecord={(id, mode, content) => openRecord(id, { mode, content })}
           onChanged={refresh}
         />
       ) : null}
@@ -444,15 +485,13 @@ function MemoryFilter({
   value,
   options,
   all,
-  optionLabel = memoryLabel,
   onChange,
 }: {
   id: string;
   label: string;
   value: string;
   options: readonly string[];
-  all?: string;
-  optionLabel?: (value: string) => string;
+  all: string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -464,10 +503,10 @@ function MemoryFilter({
         onChange={(event) => onChange(event.target.value)}
         className="w-full"
       >
-        {all ? <NativeSelectOption value="">{all}</NativeSelectOption> : null}
+        <NativeSelectOption value="">{all}</NativeSelectOption>
         {options.map((item) => (
           <NativeSelectOption key={item} value={item}>
-            {optionLabel(item)}
+            {memoryLabel(item)}
           </NativeSelectOption>
         ))}
       </NativeSelect>
@@ -480,20 +519,24 @@ function MemoryRow({
   open,
 }: {
   record: KnowledgeRecord;
-  open: (id: string, trigger: HTMLElement) => void;
+  open: (trigger: HTMLElement) => void;
 }) {
   const { title, text } = memorySummary(memoryContent(record));
   return (
     <li className="min-w-0">
       <Button
         variant="ghost"
-        onClick={(event) => open(record.id, event.currentTarget)}
+        onClick={(event) => open(event.currentTarget)}
         className="h-auto w-full min-w-0 justify-between gap-3 rounded-lg px-2 py-3 text-left whitespace-normal"
       >
         <span className="flex min-w-0 flex-col gap-1 [overflow-wrap:anywhere]">
           <span>{title}</span>
           <span className="line-clamp-2 font-normal text-muted-foreground">{text}</span>
           <MemoryBadges record={record} />
+          <MemoryTags tags={record.tags} />
+          <span className="text-sm font-normal text-muted-foreground">
+            {memoryFreshness(record)}
+          </span>
         </span>
         <ChevronRightIcon aria-hidden="true" />
       </Button>

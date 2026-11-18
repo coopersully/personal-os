@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -151,24 +152,21 @@ function contentDraft(kind: Kind, draft: Record<string, string>, original?: Memo
 }
 
 function PurposeFields({
-  available,
   selected,
   change,
   disabled,
-  invalid,
 }: {
-  available: readonly KnowledgeRecord["purposes"][number][];
   selected: KnowledgeRecord["purposes"];
   change: (next: KnowledgeRecord["purposes"]) => void;
   disabled: boolean;
-  invalid: boolean;
 }) {
   const id = useId();
   return (
-    <FieldSet data-invalid={invalid}>
-      <FieldLegend>Allowed uses</FieldLegend>
+    <FieldSet>
+      <FieldLegend>Uses</FieldLegend>
+      <FieldDescription>Leave these empty to use this memory everywhere.</FieldDescription>
       <FieldGroup className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2">
-        {available.map((purpose) => (
+        {knowledgePurposeSchema.options.map((purpose) => (
           <Field key={purpose} orientation="horizontal">
             <Checkbox
               id={`${id}-${purpose}`}
@@ -184,7 +182,6 @@ function PurposeFields({
           </Field>
         ))}
       </FieldGroup>
-      {invalid ? <FieldError>Choose at least one use.</FieldError> : null}
     </FieldSet>
   );
 }
@@ -221,7 +218,11 @@ function MemorySelect({
   );
 }
 
-export function MemoryRestrictions({
+/**
+ * The person may set any workspace. Narrowing from every workspace is a `restrict`, which agents
+ * may also do; anything else is the person-only `widen`.
+ */
+export function MemoryWorkspace({
   record,
   disabled,
   onSave,
@@ -235,20 +236,18 @@ export function MemoryRestrictions({
   footer: ReactNode;
 }) {
   const id = useId();
-  const [draftWorkspace, setWorkspace] = useState(record.scope.workspace ?? "");
-  // Restricting only narrows. A reviewed concurrent restriction fixes the workspace.
-  const workspace = record.scope.workspace ?? draftWorkspace;
+  const [workspace, setWorkspace] = useState<string>(record.scope.workspace ?? "");
   const unchanged = workspace === (record.scope.workspace ?? "");
 
   function submit(event: FormEvent) {
     event.preventDefault();
     if (disabled || unchanged) return;
     const parsed = knowledgeLifecycleInputSchema.safeParse({
-      action: "restrict",
+      action: record.scope.workspace === null ? "restrict" : "widen",
       recordId: record.id,
       expectedRevision: record.revision,
       mutationKey: crypto.randomUUID(),
-      workspace,
+      workspace: workspace || null,
     });
     if (!parsed.success) {
       onInvalid();
@@ -266,11 +265,7 @@ export function MemoryRestrictions({
             id={`${id}-workspace`}
             value={workspace}
             change={setWorkspace}
-            choices={
-              record.scope.workspace
-                ? [record.scope.workspace]
-                : ["", ...knowledgeWorkspaceSchema.options]
-            }
+            choices={["", ...knowledgeWorkspaceSchema.options]}
             label={(entry) => (entry ? memoryLabel(entry) : "All workspaces")}
             disabled={disabled}
           />
@@ -279,7 +274,7 @@ export function MemoryRestrictions({
       <div className="grid gap-2 sm:grid-cols-2">
         {footer}
         <Button type="submit" disabled={disabled || unchanged}>
-          Save restrictions
+          Save workspace
         </Button>
       </div>
     </form>
@@ -288,14 +283,15 @@ export function MemoryRestrictions({
 
 export function RecordEditor({
   record,
-  purpose,
+  initialContent,
   disabled,
   onSave,
   onInvalid,
   footer,
 }: {
   record?: KnowledgeRecord;
-  purpose: KnowledgeRecord["purposes"][number];
+  /** Content to start the draft from instead of the record's, such as an agent's proposal. */
+  initialContent?: MemoryContent | undefined;
   disabled: boolean;
   onSave: (input: KnowledgeMutationInput | KnowledgeLifecycleInput) => void;
   onInvalid: () => void;
@@ -303,14 +299,15 @@ export function RecordEditor({
 }) {
   const id = useId();
   const original = record ? memoryContent(record) : undefined;
-  const [kind, setKind] = useState<Kind>(original?.kind ?? "fact");
-  const [draft, setDraft] = useState(() => fieldDraft(original));
+  const start = initialContent ?? original;
+  const [kind, setKind] = useState<Kind>(start?.kind ?? "fact");
+  const [draft, setDraft] = useState(() => fieldDraft(start));
   const [workspace, setWorkspace] = useState(record?.scope.workspace ?? "");
-  const [purposes, setPurposes] = useState(record?.purposes ?? [purpose]);
-  const [sensitive, setSensitive] = useState(record?.sensitivity === "sensitive");
+  const [purposes, setPurposes] = useState<KnowledgeRecord["purposes"]>([]);
+  const [sensitive, setSensitive] = useState(false);
+  const [core, setCore] = useState(false);
   const [tagText, setTagText] = useState(record?.tags.join(", ") ?? "");
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [purposeInvalid, setPurposeInvalid] = useState(false);
 
   const change = (key: string, value: string) =>
     setDraft((previous) => ({ ...previous, [key]: value }));
@@ -370,16 +367,15 @@ export function RecordEditor({
           evidence,
           scope: { workspace: workspace || null },
           tags: tags.parsed.data,
-          purposes,
+          ...(purposes.length ? { purposes } : {}),
+          core,
           sensitivity: sensitive ? "sensitive" : "standard",
         });
     if (!input.success) {
-      setPurposeInvalid(!purposes.length);
       onInvalid();
       return;
     }
     setErrors({});
-    setPurposeInvalid(false);
     onSave(input.data);
   }
 
@@ -507,13 +503,16 @@ export function RecordEditor({
                 change={setWorkspace}
               />
             </Field>
-            <PurposeFields
-              available={knowledgePurposeSchema.options}
-              selected={purposes}
-              change={setPurposes}
-              disabled={disabled}
-              invalid={purposeInvalid && !purposes.length}
-            />
+            <PurposeFields selected={purposes} change={setPurposes} disabled={disabled} />
+            <Field orientation="horizontal">
+              <Checkbox
+                id={`${id}-core`}
+                checked={core}
+                disabled={disabled}
+                onCheckedChange={(value) => setCore(value === true)}
+              />
+              <FieldLabel htmlFor={`${id}-core`}>Load at session start</FieldLabel>
+            </Field>
             <Field orientation="horizontal">
               <Checkbox
                 id={`${id}-private`}

@@ -478,9 +478,11 @@ describe.sequential("persistent scoped knowledge", () => {
       .set({ scopes })
       .where(eq(accessTokens.id, f.agent.actorId));
     const authorized: Principal = { ...f.agent, scopes: new Set(scopes) };
-    expect(await service().get(authorized, { id: saved.record.id, purpose: "planning" })).toEqual(
-      saved.record,
-    );
+    // The same record, less the Trash version only the owner receives.
+    expect(await service().get(authorized, { id: saved.record.id, purpose: "planning" })).toEqual({
+      ...saved.record,
+      trashVersion: undefined,
+    });
     const before = await persistedKnowledge();
     await database.db
       .update(accessTokens)

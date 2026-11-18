@@ -1,5 +1,34 @@
 # nohmi — Implementation Log
 
+## 2026-11-18 — iPhone completion: remaining slices (local candidate)
+
+- COO-229 — Spending reads on the account's saved Spending defaults and a saved default period, and
+  the Assistant tab and its conversation show unread counts.
+- COO-241 — Mail conversations can be snoozed, and a long press starts a selection that marks
+  read or unread, archives or snoozes up to 50 conversations, one guarded write at a time.
+- COO-254 — A manual transaction's date can be corrected from the iPhone edit form and from the web
+  transaction dialog. A synced transaction's date still cannot be changed.
+- COO-228 — Finance setup (onboarding review, first budget draft and record maintenance, reached
+  from a Finish Finance setup row on Overview) and Finance automations (list, register, rename,
+  enter a host automation ID, cancel setup and remove). Fire tokens, host prompts and run recovery
+  remain on the web.
+- COO-238 — Mail shows what needs attention above the inbox, the steward's findings in a
+  conversation and an answer to its questions, and Mail rules can be inspected, created off,
+  previewed and turned on from the preview.
+- COO-265 — A tracked audit exception for the unpatched picomatch advisory; its terms are in
+  `docs/engineering/code-standards.md`.
+- The one API addition is an optional `date` on the transaction update. It is accepted only for a
+  manual account's transaction, requires the revision the caller read (409 when it no longer
+  matches), is refused for an agent that also sends a category, and is recorded in the audit event.
+  The MCP `update_finance_transaction` tool accepts it under the same rules.
+- Verified: unit and screen tests for each slice under jsdom, API integration tests for the date
+  change against PostgreSQL, domain and MCP tests for the new field, and `pnpm lint`.
+- Not verified: no simulator or device check of any of the new work on this branch, no CI run, and
+  nothing is merged, deployed or observed in production. Nothing here depends on a bank
+  connection. The `apps/mcp` and `apps/web` type checks reported errors in files this work did not
+  touch (a zod version mismatch and a library lag) that were not checked on a clean tree. This is
+  not a release.
+
 ## 2026-11-13 — Finished projects on the iPhone Projects tab (local implementation)
 
 - COO-217 — The native Projects tab has Active, Completed, Cancelled and All status chips with

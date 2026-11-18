@@ -9,6 +9,7 @@
       "@/*": ["./src/*"]
     },
     "rootDir": ".",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "types": ["vite/client", "vite-plugin-pwa/client", "vitest/globals"]
   },
   "include": ["src", "scripts", "vite.config.ts"]

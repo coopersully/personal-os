@@ -22,9 +22,9 @@ overrides:
   "postcss@8.5.17": "8.5.23"
   "proxy-addr@<2.0.8": "2.0.8"
   "qs": "6.16.1"
-  "@modelcontextprotocol/client>zod": "4.6.6"
-  "@modelcontextprotocol/core>zod": "4.6.6"
-  "@modelcontextprotocol/server>zod": "4.6.6"
+  "@modelcontextprotocol/client>zod": "4.6.7"
+  "@modelcontextprotocol/core>zod": "4.6.7"
+  "@modelcontextprotocol/server>zod": "4.6.7"
 
 # Tracked exception (COO-265): see docs/engineering/code-standards.md, Dependency audit exceptions.
 auditConfig:

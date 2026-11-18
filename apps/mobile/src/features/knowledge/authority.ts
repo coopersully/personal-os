@@ -15,6 +15,11 @@ export type MemoryAccess = {
 export function statusOf(error: unknown) {
   return error instanceof ApiClientError ? error.status : undefined;
 }
+/** The structured details of an API error, such as a 409's blocking merge IDs. */
+export function detailsOf(error: unknown): Record<string, unknown> {
+  const details = error instanceof ApiClientError ? error.details : undefined;
+  return details && typeof details === "object" ? (details as Record<string, unknown>) : {};
+}
 /** The Memory screen treats a purged record like any other record that is no longer available. */
 export function readableMemory(result: KnowledgeRecord | KnowledgeForgottenRecord) {
   if ("state" in result)
@@ -56,9 +61,13 @@ type Command<T> = {
   loading: string;
   failure: string;
   request: (current: Current) => Promise<T>;
-  complete: (result: T, toastId: string) => Feedback | undefined;
+  complete: (result: T) => Feedback | undefined;
   rejected?: (error: unknown) => string | undefined;
   cursor?: boolean;
+  /**
+   * Hands the outcome toast to an owner that outlives this hook, for commands whose outcome
+   * remounts the screen that ran them. Success and failure both go there.
+   */
   retain?: (id: string, feedback: Feedback) => void;
 };
 
@@ -115,7 +124,7 @@ export function useMemoryCommands(capture: () => Current, recover?: MemoryAccess
     try {
       const result = await request(current);
       if (!current()) return;
-      const feedback = complete(result, id);
+      const feedback = complete(result);
       if (feedback && retain) {
         ids.current.delete(id);
         retain(id, feedback);
@@ -126,7 +135,11 @@ export function useMemoryCommands(capture: () => Current, recover?: MemoryAccess
       }
     } catch (error) {
       if (!current() || recover?.(error, cursor)) return;
-      finish(id, { message: rejected?.(error) ?? failure, tone: "error" });
+      const feedback: Feedback = { message: rejected?.(error) ?? failure, tone: "error" };
+      if (retain) {
+        ids.current.delete(id);
+        retain(id, feedback);
+      } else finish(id, feedback);
     } finally {
       if (version.current === started) {
         active.current = false;
@@ -138,6 +151,7 @@ export function useMemoryCommands(capture: () => Current, recover?: MemoryAccess
   return { busy, run, finish };
 }
 
+/** A new memory keeps one key across exact retries, so an uncertain save never duplicates it. */
 export function useMutationKey() {
   const previous = useRef<{ serialized: string; key: string } | null>(null);
   return (body: unknown) => {
@@ -188,9 +202,18 @@ export function useMemoryResource<T>(load: (signal: AbortSignal) => Promise<T | 
       throw error;
     }
   }, [load]);
+  /** Pull-to-refresh: keeps what is shown and lets the caller report a failure once. */
+  const refresh = useCallback(async () => {
+    active.current?.abort();
+    const controller = new AbortController();
+    active.current = controller;
+    const value = await load(controller.signal);
+    if (!controller.signal.aborted && value !== undefined) setState({ value, loading: false });
+    return value;
+  }, [load]);
   useLayoutEffect(() => {
     void reload().catch(() => {});
     return () => active.current?.abort();
   }, [reload]);
-  return { ...state, reload };
+  return { ...state, reload, refresh };
 }

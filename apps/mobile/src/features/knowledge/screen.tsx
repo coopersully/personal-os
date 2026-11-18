@@ -1,22 +1,24 @@
 import {
   type KnowledgeQuery,
   type KnowledgeRecord,
-  knowledgePurposeSchema,
+  knowledgeOriginSchema,
   knowledgeWorkspaceSchema,
 } from "@personal-os/domain";
-import { router, Stack, useFocusEffect, usePreventRemove } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Keyboard, View } from "react-native";
+import { Stack, useFocusEffect, usePreventRemove } from "expo-router";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import { Keyboard, ScrollView, View } from "react-native";
 import { toast } from "sonner-native";
 import { editorDismissOptions } from "../../components/editor-header";
+import { FilterChip } from "../../components/filter-chip";
 import { FloatingAdd } from "../../components/forms/form-save";
 import { Icon } from "../../components/icons";
 import { RecordRow } from "../../components/record-row";
-import { SettingsAccentProvider } from "../../components/settings-accent";
+import { SettingsAccentProvider, useSettingsAccent } from "../../components/settings-accent";
 import { useTheme } from "../../theme";
 import { useAuth } from "../auth/context";
 import { confirmDiscard, Field, Section } from "../goals/controls";
 import { SettingsActionRow } from "../settings/settings-row";
+import { SettingsViewSwitcher } from "../settings/view-switcher";
 import {
   type Feedback,
   type MemoryAccess,
@@ -29,19 +31,64 @@ import {
   useVisitAuthority,
 } from "./authority";
 import { MemoryBody, MemoryChoice, MemoryReadState, MemoryText } from "./controls";
-import { MemoryDetail, type Selection } from "./detail";
+import { type BackHandler, MemoryDetail } from "./detail";
 import { MemoryEditor } from "./editor";
 import {
   memoryContent,
+  memoryFreshness,
   memoryKinds,
-  memoryLabel,
-  memoryState,
+  memoryLabels,
+  memoryStatus,
   memorySummary,
+  originLabels,
 } from "./presentation";
 import { memoryShareAvailable, shareMemoryPage } from "./share";
+import { MemoryTags } from "./tags";
 
-type Destination = { kind: "list" } | { kind: "detail"; selection: Selection };
+type Destination =
+  | { kind: "list" }
+  | { kind: "detail"; id: string }
+  | { kind: "add" }
+  | { kind: "tags" };
 const listDestination: Destination = { kind: "list" };
+
+const views = ["all", "conflicts", "archived", "trash"] as const;
+type ViewMode = (typeof views)[number];
+const viewOptions = [
+  { value: "all", label: "All" },
+  { value: "conflicts", label: "Conflicts" },
+  { value: "archived", label: "Archived", icon: "archive" },
+  { value: "trash", label: "Trash", icon: "trash" },
+] as const;
+/** What the list shows. It lives with the visit, so opening a memory and going back keeps it. */
+export type ListState = {
+  view: ViewMode;
+  draft: string;
+  text: string;
+  tags: string[];
+  kind?: KnowledgeQuery["kind"];
+  workspace?: KnowledgeQuery["workspace"];
+  origin?: KnowledgeQuery["origin"];
+  filters: boolean;
+};
+const initialList: ListState = { view: "all", draft: "", text: "", tags: [], filters: false };
+
+function listQuery({ view, text, tags, kind, workspace, origin }: ListState): KnowledgeQuery {
+  return {
+    ...(text ? { text } : {}),
+    ...(tags.length ? { tags } : {}),
+    ...(kind ? { kind } : {}),
+    ...(workspace ? { workspace } : {}),
+    ...(origin ? { origin } : {}),
+    ...(view === "conflicts"
+      ? { hasConflict: true }
+      : view === "archived"
+        ? { status: "archived" }
+        : view === "trash"
+          ? { status: "trashed" }
+          : {}),
+  };
+}
 
 export function MemoryScreen() {
   const { state, session } = useAuth();
@@ -62,6 +109,8 @@ export function MemoryScreen() {
     () => focusedRef.current && session.epoch() === epoch,
     [session, epoch],
   );
+  // Everything read here lives in this visit; signing out unmounts it, so nothing outlives the
+  // owner, and there is no offline copy or write queue to clear.
   if (!focused || state.status !== "signedIn") return null;
   return (
     <SettingsAccentProvider>
@@ -81,6 +130,7 @@ function MemoryVisit({
   const visit = useVisitAuthority(signedIn);
   const [generation, setGeneration] = useState(0);
   const [destination, setDestination] = useState<Destination>(listDestination);
+  const [list, setList] = useState(initialList);
   const seenEpoch = useRef<number>(undefined);
   const operations = useMemoryCommands(visit.capture);
   const invalidate = visit.invalidate;
@@ -120,9 +170,8 @@ function MemoryVisit({
   return (
     <PrivateMemory
       key={generation}
-      {...{ api, access }}
+      {...{ api, access, list, setList, revalidate }}
       initial={destination}
-      revalidate={revalidate}
       retain={finish}
     />
   );
@@ -132,47 +181,52 @@ type PrivateProps = {
   api: MemoryApi;
   access: MemoryAccess;
   initial: Destination;
+  list: ListState;
+  setList: (update: (list: ListState) => ListState) => void;
   revalidate: (next?: Destination) => void;
   retain: (id: string, feedback: Feedback) => void;
 };
-function PrivateMemory({ api, access, initial, revalidate, retain }: PrivateProps) {
-  const [destination, setDestination] = useState<Destination | { kind: "add" }>(initial);
-  const [purpose, setPurpose] = useState<NonNullable<KnowledgeQuery["purpose"]>>(
-    initial.kind === "detail" ? initial.selection.purpose : "planning",
-  );
+function PrivateMemory({ api, access, initial, list, setList, revalidate, retain }: PrivateProps) {
+  const [destination, setDestination] = useState<Destination>(initial);
   const [dirty, setDirty] = useState(false);
   const commands = useMemoryCommands(access.capture, access.recover);
   const mutationKey = useMutationKey();
+  const back: BackHandler = useRef(undefined);
   const close = () => {
     setDirty(false);
     setDestination(listDestination);
   };
-  usePreventRemove(destination.kind === "add" && dirty && !commands.busy, ({ repeat }) => {
-    confirmDiscard(() => {
-      setDirty(false);
-      repeat();
-    });
-  });
   function closeAdd() {
+    // Leaving during a save fences it: its result no longer reaches this screen.
     if (commands.busy) revalidate();
     else if (dirty) confirmDiscard(close);
     else close();
   }
-  const open = (id: string) => setDestination({ kind: "detail", selection: { id, purpose } });
+  // Native back leaves an open memory, the editor or tags for the list, not the Memory screen.
+  usePreventRemove(destination.kind !== "list", () => {
+    if (destination.kind === "add") closeAdd();
+    else if (destination.kind === "detail") (back.current ?? close)();
+    else close();
+  });
+  const open = (id: string) => setDestination({ kind: "detail", id });
 
   if (destination.kind === "detail") {
     return (
+      <MemoryDetail
+        key={destination.id}
+        {...{ api, access, open, retain, close, back }}
+        id={destination.id}
+        changed={(id) => revalidate(id ? { kind: "detail", id } : listDestination)}
+      />
+    );
+  }
+  if (destination.kind === "tags") {
+    return (
       <>
-        <Stack.Screen options={{ title: "Memory details" }} />
-        <MemoryDetail
-          key={destination.selection.id}
-          {...{ api, access, open, retain }}
-          selection={destination.selection}
-          close={close}
-          changed={(selection) =>
-            revalidate(selection ? { kind: "detail", selection } : listDestination)
-          }
+        <Stack.Screen
+          options={{ title: "Tags", headerLeft: undefined, unstable_headerLeftItems: undefined }}
         />
+        <MemoryTags {...{ api, access, retain }} changed={() => revalidate({ kind: "tags" })} />
       </>
     );
   }
@@ -181,13 +235,12 @@ function PrivateMemory({ api, access, initial, revalidate, retain }: PrivateProp
       <>
         <Stack.Screen
           options={{
-            title: "Add Memory",
+            title: "Add memory",
             ...editorDismissOptions({ label: dirty ? "Cancel" : "Close", onPress: closeAdd }),
           }}
         />
         <MemoryEditor
           mode="add"
-          purpose={purpose}
           disabled={commands.busy}
           onDirty={() => setDirty(true)}
           onInvalid={() => toast.error("Check the memory fields and try again.")}
@@ -201,7 +254,7 @@ function PrivateMemory({ api, access, initial, revalidate, retain }: PrivateProp
               complete: (value) => {
                 revalidate(
                   value.outcome === "readable"
-                    ? { kind: "detail", selection: { id: value.record.id, purpose } }
+                    ? { kind: "detail", id: value.record.id }
                     : listDestination,
                 );
                 return {
@@ -220,69 +273,34 @@ function PrivateMemory({ api, access, initial, revalidate, retain }: PrivateProp
 
   return (
     <>
-      <Stack.Screen options={{ title: "Memory", headerLeft: undefined }} />
+      <Stack.Screen
+        options={{ title: "Memory", headerLeft: undefined, unstable_headerLeftItems: undefined }}
+      />
       <MemoryList
-        {...{ api, access, open, purpose }}
-        setPurpose={setPurpose}
+        {...{ api, access, open, list, setList }}
         onAdd={() => setDestination({ kind: "add" })}
+        onTags={() => setDestination({ kind: "tags" })}
       />
     </>
   );
 }
 
-const views = ["accepted", "review", "conflicts", "all"] as const;
-type ViewMode = (typeof views)[number];
-type Status = NonNullable<KnowledgeQuery["status"]>;
-const reviewStatuses: Status[] = ["proposed", "disputed"];
-const allStatuses: Status[] = ["active", ...reviewStatuses, "expired", "superseded"];
-const statusLabels = { active: "Accepted", "": "Any status" };
-const viewLabels = {
-  accepted: "Accepted",
-  review: "Needs review",
-  conflicts: "Conflicts",
-  all: "All memory",
-};
 type ListProps = {
   api: MemoryApi;
   access: MemoryAccess;
-  purpose: NonNullable<KnowledgeQuery["purpose"]>;
-  setPurpose: (purpose: NonNullable<KnowledgeQuery["purpose"]>) => void;
+  list: ListState;
+  setList: PrivateProps["setList"];
   open: (id: string) => void;
   onAdd: () => void;
+  onTags: () => void;
 };
-function MemoryList({ api, access, purpose, setPurpose, open, onAdd }: ListProps) {
-  const [view, setView] = useState<ViewMode>("accepted");
-  const [status, setStatus] = useState<Status | "">("");
-  const [workspace, setWorkspace] = useState<KnowledgeQuery["workspace"]>();
-  const [kind, setKind] = useState<KnowledgeQuery["kind"]>();
-  const [draft, setDraft] = useState("");
-  const [text, setText] = useState("");
-  const [filters, setFilters] = useState(false);
-  const [exportPosition, setExportPosition] = useState<{ cursor?: string; page: number }>({
-    page: 1,
-  });
-  const statuses =
-    view === "review"
-      ? reviewStatuses
-      : view === "conflicts"
-        ? allStatuses.slice(0, 4)
-        : allStatuses;
-  const query = useMemo<KnowledgeQuery>(
-    () => ({
-      purpose,
-      workspace,
-      kind,
-      text: text || undefined,
-      ...(status ? { status } : {}),
-      ...(view === "conflicts" ? { hasConflict: true } : {}),
-      ...(view === "accepted"
-        ? { reviewView: "accepted" }
-        : view === "review"
-          ? { reviewView: "needs_review" }
-          : {}),
-    }),
-    [purpose, workspace, kind, text, status, view],
-  );
+type SearchPage = Awaited<ReturnType<MemoryApi["searchKnowledge"]>>;
+
+function MemoryList({ api, access, list, setList, open, onAdd, onTags }: ListProps) {
+  // Typing a search or opening filters changes the list state, not the query: no reload.
+  const queryKey = JSON.stringify(listQuery(list));
+  const query = useMemo<KnowledgeQuery>(() => JSON.parse(queryKey), [queryKey]);
+  const change = (update: Partial<ListState>) => setList((current) => ({ ...current, ...update }));
   const load = useCallback(
     (signal: AbortSignal) =>
       readMemory(access, signal, () => api.searchKnowledge(query), {
@@ -290,8 +308,16 @@ function MemoryList({ api, access, purpose, setPurpose, open, onAdd }: ListProps
       }),
     [access, api, query],
   );
+  const loadTags = useCallback(
+    (signal: AbortSignal) => readMemory(access, signal, () => api.listKnowledgeTags()),
+    [access, api],
+  );
+  const tagIndex = useMemoryResource(loadTags);
   const commands = useMemoryCommands(access.capture, access.recover);
-  const current = access.capture();
+  const [exportPosition, setExportPosition] = useState<{ cursor?: string; page: number }>({
+    page: 1,
+  });
+  const accent = useSettingsAccent();
 
   function share() {
     const { cursor, page } = exportPosition;
@@ -302,8 +328,7 @@ function MemoryList({ api, access, purpose, setPurpose, open, onAdd }: ListProps
       request: async (canPublish) => {
         if (!memoryShareAvailable()) throw new Error("unsupported");
         const result = await api.exportKnowledge({ cursor });
-        if (!canPublish()) return;
-        if (!access.observe(result)) return;
+        if (!canPublish() || !access.observe(result)) return;
         if (result.state === "unavailable") return { result, shared: false };
         const shared = await shareMemoryPage(result, page, canPublish);
         return { result, shared };
@@ -318,7 +343,9 @@ function MemoryList({ api, access, purpose, setPurpose, open, onAdd }: ListProps
           result.nextCursor ? { cursor: result.nextCursor, page: page + 1 } : { page: 1 },
         );
         return {
-          message: "Memory export shared.",
+          message: result.nextCursor
+            ? `Shared export page ${page}. Share the next page to continue.`
+            : "Memory export shared.",
           ...(result.state === "partial" && {
             description: "The file includes available revisions.",
           }),
@@ -326,129 +353,162 @@ function MemoryList({ api, access, purpose, setPurpose, open, onAdd }: ListProps
       },
       rejected: (error) =>
         error instanceof Error && error.message === "unsupported"
-          ? "Memory export is unavailable on this device."
+          ? "Sharing files isn’t available on this device."
           : undefined,
     });
   }
 
+  const tags = tagIndex.value?.tags ?? [];
+  // Selected tags stay visible even when the index no longer lists them.
+  const chips = [...new Set([...list.tags, ...tags.map((tag) => tag.name)])];
   return (
     <MemoryListResults
-      key={JSON.stringify(query)}
+      key={queryKey}
       {...{ api, access, query, load, open }}
+      view={list.view}
+      filtered={Object.keys(query).some((key) => key !== "status" && key !== "hasConflict")}
+      refreshTags={tagIndex.refresh}
       disabled={commands.busy}
-      add={<FloatingAdd label="Add memory" onPress={onAdd} disabled={commands.busy} />}
+      add={
+        list.view === "trash" ? null : (
+          <FloatingAdd label="Add memory" onPress={onAdd} disabled={commands.busy} />
+        )
+      }
       header={(pending) => (
         <>
-          <Section title="Saved Memory">
-            <MemoryChoice
-              label="View"
-              value={view}
-              choices={views}
-              labels={viewLabels}
-              disabled={pending}
-              onChange={(value) => {
-                setView(value);
-                setStatus("");
-              }}
-            />
+          <SettingsViewSwitcher
+            value={list.view}
+            options={viewOptions}
+            onChange={(value) => {
+              const view = views.find((entry) => entry === value);
+              if (view && !pending) change({ view });
+            }}
+          />
+          <Section>
             <Field
               label="Search memory"
-              value={draft}
-              onChange={(value) => setDraft(value.slice(0, 500))}
+              value={list.draft}
+              onChange={(value) => change({ draft: value.slice(0, 500) })}
               disabled={pending}
             />
             <SettingsActionRow
               label="Search"
-              disabled={pending || draft.trim() === text}
+              icon="search"
+              disabled={pending || list.draft.trim() === list.text}
               onPress={() => {
                 Keyboard.dismiss();
-                setText(draft.trim());
+                change({ text: list.draft.trim() });
               }}
             />
-            {text && (
+            {list.text && (
               <SettingsActionRow
                 label="Clear search"
                 disabled={pending}
-                onPress={() => {
-                  setText("");
-                  setDraft("");
-                }}
+                onPress={() => change({ text: "", draft: "" })}
               />
             )}
             <SettingsActionRow
-              label={filters ? "Hide filters" : "Filters"}
+              label={list.filters ? "Hide filters" : "Filters"}
               disabled={pending}
-              onPress={() => setFilters(!filters)}
+              onPress={() => change({ filters: !list.filters })}
             />
           </Section>
-          {filters && (
+          {chips.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {chips.map((tag) => {
+                  const selected = list.tags.includes(tag);
+                  return (
+                    <FilterChip
+                      key={tag}
+                      label={`#${tag}`}
+                      icon="categoryTags"
+                      selected={selected}
+                      color={accent}
+                      onPress={() => {
+                        if (pending) return;
+                        change({
+                          tags: selected
+                            ? list.tags.filter((entry) => entry !== tag)
+                            : [...list.tags, tag].slice(-8),
+                        });
+                      }}
+                    />
+                  );
+                })}
+              </View>
+            </ScrollView>
+          )}
+          {list.filters && (
             <Section title="Filters">
               <MemoryChoice
-                label="Use"
-                value={purpose}
-                choices={knowledgePurposeSchema.options}
-                onChange={setPurpose}
+                label="Type"
+                value={list.kind ?? ""}
+                choices={["", ...memoryKinds]}
+                labels={{ "": "All types" }}
+                onChange={(kind) => change({ kind: kind || undefined })}
                 disabled={pending}
               />
               <MemoryChoice
                 label="Workspace"
-                value={workspace ?? ""}
+                value={list.workspace ?? ""}
                 choices={["", ...knowledgeWorkspaceSchema.options]}
                 labels={{ "": "All workspaces" }}
-                onChange={(value) => setWorkspace(value || undefined)}
+                onChange={(workspace) => change({ workspace: workspace || undefined })}
                 disabled={pending}
               />
               <MemoryChoice
-                label="Type"
-                value={kind ?? ""}
-                choices={["", ...memoryKinds]}
-                labels={{ "": "All types" }}
-                onChange={(value) => setKind(value || undefined)}
+                label="Origin"
+                value={list.origin ?? ""}
+                choices={["", ...knowledgeOriginSchema.options]}
+                labels={{ "": "Stated and inferred", ...originLabels }}
+                onChange={(origin) => change({ origin: origin || undefined })}
                 disabled={pending}
               />
-              {view !== "accepted" && (
-                <MemoryChoice
-                  label="Status"
-                  value={status}
-                  choices={["", ...statuses]}
-                  labels={statusLabels}
-                  onChange={setStatus}
-                  disabled={pending}
-                />
-              )}
             </Section>
           )}
         </>
       )}
       footer={(pending) => (
-        <Section title="Memory settings">
+        <Section title="Manage memory">
+          <SettingsActionRow
+            label="Manage tags"
+            icon="categoryTags"
+            onPress={onTags}
+            disabled={pending}
+          />
           <SettingsActionRow
             label={exportPosition.cursor ? "Share next export page" : "Share memory export"}
+            icon="send"
             onPress={share}
             disabled={pending}
           />
           {!memoryShareAvailable() && (
             <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-              <MemoryText>File sharing is unavailable on this device.</MemoryText>
+              <MemoryText>Sharing files isn’t available on this device.</MemoryText>
             </View>
           )}
-          <SettingsActionRow
-            label="Close memory"
-            onPress={() => {
-              if (current()) router.back();
-            }}
-          />
         </Section>
       )}
     />
   );
 }
 
+const emptyText: Record<ViewMode, string> = {
+  all: "No memories yet. Agents save what you tell them, and you can add your own.",
+  conflicts: "No conflicts. When an agent proposes a change to a memory you hold, it shows here.",
+  archived: "No archived memories.",
+  trash: "Trash is empty. Memories you move here are deleted for good after 30 days.",
+};
+
 function MemoryListResults({
   api,
   access,
   query,
+  view,
+  filtered,
   load,
+  refreshTags,
   open,
   header,
   footer,
@@ -456,25 +516,31 @@ function MemoryListResults({
   disabled,
 }: Pick<ListProps, "api" | "access" | "open"> & {
   query: KnowledgeQuery;
-  load: (
-    signal: AbortSignal,
-  ) => ReturnType<typeof readMemory<Awaited<ReturnType<MemoryApi["searchKnowledge"]>>>>;
-  header: (disabled: boolean) => React.ReactNode;
-  footer: (disabled: boolean) => React.ReactNode;
-  add: React.ReactNode;
+  view: ViewMode;
+  filtered: boolean;
+  load: (signal: AbortSignal) => Promise<SearchPage | undefined>;
+  refreshTags: () => Promise<unknown>;
+  header: (disabled: boolean) => ReactNode;
+  footer: (disabled: boolean) => ReactNode;
+  add: ReactNode;
   disabled: boolean;
 }) {
   const list = useMemoryResource(load);
-  const [more, setMore] = useState<Awaited<ReturnType<MemoryApi["searchKnowledge"]>>[]>([]);
+  const [more, setMore] = useState<SearchPage[]>([]);
   const commands = useMemoryCommands(access.capture, access.recover);
   const initial = list.value;
   const cursor = (more.at(-1) ?? initial)?.nextCursor;
   const pending = commands.busy || disabled;
 
+  /** Pull-to-refresh: the native spinner, and one Sonner error if either read fails. */
   async function refresh() {
     if (pending) return;
-    setMore([]);
-    await list.reload();
+    const results = await Promise.allSettled([
+      list.refresh().then(() => setMore([])),
+      refreshTags(),
+    ]);
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
   }
 
   const records = initial ? [initial, ...more].flatMap((result) => result.items) : [];
@@ -503,8 +569,10 @@ function MemoryListResults({
         ) : (
           <MemoryText>
             {initial.state === "unavailable"
-              ? "Memory is unavailable for this use."
-              : "No matching memory"}
+              ? "Memory is unavailable right now."
+              : filtered
+                ? "No memories match."
+                : emptyText[view]}
           </MemoryText>
         ))}
       {cursor && (
@@ -518,7 +586,7 @@ function MemoryListResults({
               cursor: true,
               request: () => api.searchKnowledge({ ...query, cursor }),
               complete: (result) => {
-                access.observe(result);
+                if (!access.observe(result)) return;
                 setMore((previous) => [...previous, result]);
                 return { message: "More memory loaded.", tone: "info" };
               },
@@ -534,11 +602,21 @@ function MemoryListResults({
 function MemoryRow({ record, open }: { record: KnowledgeRecord; open: () => void }) {
   const summary = memorySummary(memoryContent(record));
   const t = useTheme();
+  const meta = [...memoryLabels(record), memoryStatus(record), memoryFreshness(record)].filter(
+    Boolean,
+  );
+  const tags = record.tags.map((tag) => `#${tag}`).join(" ");
   return (
     <RecordRow
       title={summary.title}
-      leading={<Icon name="history" size={20} color={t.secondary} />}
-      subtitle={`${summary.text}\n${memoryLabel(record.origin)} · ${memoryState(record)}`}
+      leading={
+        <Icon
+          name={record.origin === "inferred" ? "agent" : "profile"}
+          size={20}
+          color={t.secondary}
+        />
+      }
+      subtitle={[summary.text, tags, meta.join(" · ")].filter(Boolean).join("\n")}
       onPress={open}
     />
   );

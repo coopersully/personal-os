@@ -26,6 +26,15 @@ export function MemoryText({ children }: PropsWithChildren) {
   return <Text style={{ color: t.secondary, fontSize: 16, lineHeight: 23 }}>{children}</Text>;
 }
 
+/** Text inside a grouped section, inset like its rows. */
+export function MemoryNote({ children }: PropsWithChildren) {
+  return (
+    <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+      <MemoryText>{children}</MemoryText>
+    </View>
+  );
+}
+
 export function MemoryChoice<T extends string>({
   label,
   value,

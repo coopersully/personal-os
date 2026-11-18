@@ -28,7 +28,7 @@ import {
 type Purpose = KnowledgeRecord["purposes"][number];
 type Scope = KnowledgeRecord["scope"]["workspace"];
 type Sensitivity = KnowledgeRecord["sensitivity"];
-export type EditMode = "edit" | "restrict" | "supersede";
+export type EditMode = "edit" | "supersede";
 const visibilityLabels = { standard: "Standard", sensitive: "Sensitive" };
 
 /** Tags typed as a comma-separated list; the API normalizes and files them. */
@@ -50,31 +50,23 @@ type PermissionDraft = {
   workspace: Scope;
   purposes: Purpose[];
   sensitivity: Sensitivity;
+  core: boolean;
 };
-export function permissionDraft(
-  record?: KnowledgeRecord,
-  purpose: Purpose = "planning",
-): PermissionDraft {
-  return {
-    workspace: record?.scope.workspace ?? null,
-    purposes: record?.purposes ?? [purpose],
-    sensitivity: record?.sensitivity ?? "standard",
-  };
-}
+const emptyPermissions: PermissionDraft = {
+  workspace: null,
+  purposes: [],
+  sensitivity: "standard",
+  core: false,
+};
 
 function Permissions({
   value,
-  record,
   change,
   disabled,
-  workspaceOnly = false,
 }: {
   value: PermissionDraft;
-  record?: KnowledgeRecord;
   change: (value: PermissionDraft) => void;
   disabled: boolean;
-  /** Restricting only narrows the workspace, so it offers nothing else. */
-  workspaceOnly?: boolean;
 }) {
   return (
     <>
@@ -82,46 +74,45 @@ function Permissions({
         <MemoryChoice
           label="Workspace"
           value={value.workspace ?? ""}
-          choices={
-            record?.scope.workspace
-              ? [record.scope.workspace]
-              : ["", ...knowledgeWorkspaceSchema.options]
-          }
+          choices={["", ...knowledgeWorkspaceSchema.options]}
           labels={{ "": "All workspaces" }}
           onChange={(workspace) => change({ ...value, workspace: workspace || null })}
-          disabled={disabled || Boolean(record?.scope.workspace)}
+          disabled={disabled}
         />
-        {workspaceOnly ? null : (
-          <MemoryChoice
-            label="Sensitivity"
-            value={value.sensitivity}
-            choices={["standard", "sensitive"]}
-            labels={visibilityLabels}
-            onChange={(sensitivity) => change({ ...value, sensitivity })}
+        <MemoryChoice
+          label="Sensitivity"
+          value={value.sensitivity}
+          choices={["standard", "sensitive"]}
+          labels={visibilityLabels}
+          onChange={(sensitivity) => change({ ...value, sensitivity })}
+          disabled={disabled}
+        />
+        <ToggleRow
+          label="Core memory"
+          detail="Agents load it at the start of every session."
+          value={value.core}
+          onChange={(core) => change({ ...value, core })}
+          disabled={disabled}
+        />
+      </Section>
+      <Section title="Uses (leave all off for every use)">
+        {knowledgePurposeSchema.options.map((purpose) => (
+          <ToggleRow
+            key={purpose}
+            label={memoryLabel(purpose)}
+            value={value.purposes.includes(purpose)}
+            onChange={(allowed) =>
+              change({
+                ...value,
+                purposes: allowed
+                  ? [...value.purposes, purpose]
+                  : value.purposes.filter((item) => item !== purpose),
+              })
+            }
             disabled={disabled}
           />
-        )}
+        ))}
       </Section>
-      {workspaceOnly ? null : (
-        <Section title="Allowed uses">
-          {knowledgePurposeSchema.options.map((purpose) => (
-            <ToggleRow
-              key={purpose}
-              label={memoryLabel(purpose)}
-              value={value.purposes.includes(purpose)}
-              onChange={(allowed) =>
-                change({
-                  ...value,
-                  purposes: allowed
-                    ? [...value.purposes, purpose]
-                    : value.purposes.filter((item) => item !== purpose),
-                })
-              }
-              disabled={disabled}
-            />
-          ))}
-        </Section>
-      )}
     </>
   );
 }
@@ -129,7 +120,6 @@ function Permissions({
 export function MemoryEditor({
   mode,
   record,
-  purpose,
   disabled,
   onDirty,
   onSave,
@@ -138,7 +128,6 @@ export function MemoryEditor({
 }: {
   mode: "add" | EditMode;
   record?: KnowledgeRecord;
-  purpose: Purpose;
   disabled: boolean;
   onDirty: () => void;
   onSave: (input: KnowledgeLifecycleInput | KnowledgeMutationInput) => void;
@@ -148,24 +137,18 @@ export function MemoryEditor({
   const original = record && memoryContent(record);
   const [kind, setKind] = useState<Kind>(original?.kind ?? "fact");
   const [draft, setDraft] = useState(() => fieldDraft(original));
-  const [permissions, setPermissions] = useState(() => permissionDraft(record, purpose));
+  const [permissions, setPermissions] = useState(emptyPermissions);
   const [replacementId, setReplacementId] = useState("");
   const [tagText, setTagText] = useState(record?.tags.join(", ") ?? "");
   const [dirty, setDirty] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const parsed = contentDraft(kind, draft, original);
   const tags = tagsDraft(tagText, record);
-  // Restricting only narrows the workspace of the just-reviewed revision.
-  const restricted = {
-    ...permissions,
-    workspace: record?.scope.workspace ?? permissions.workspace,
-  };
   const unchanged =
-    mode === "edit"
-      ? parsed.success && JSON.stringify(parsed.data) === JSON.stringify(original) && !tags.changed
-      : mode === "restrict"
-        ? restricted.workspace === (record?.scope.workspace ?? null)
-        : false;
+    mode === "edit" &&
+    parsed.success &&
+    JSON.stringify(parsed.data) === JSON.stringify(original) &&
+    !tags.changed;
 
   function change(apply: () => void) {
     if (disabled) return;
@@ -187,15 +170,9 @@ export function MemoryEditor({
             action: "supersede",
             replacementId: replacementId.trim(),
           })
-        : mode === "restrict"
-          ? knowledgeLifecycleInputSchema.safeParse({
-              ...identity,
-              action: "restrict",
-              workspace: restricted.workspace,
-            })
-          : parsed.success && tags.tags
-            ? claimInput(parsed.data, permissions, tags, mutationKey, identity)
-            : undefined;
+        : parsed.success && tags.tags
+          ? claimInput(parsed.data, permissions, tags, mutationKey, identity)
+          : undefined;
     if (!input?.success) {
       setInvalid(true);
       onInvalid();
@@ -218,99 +195,92 @@ export function MemoryEditor({
           />
         </Section>
       ) : (
-        mode !== "restrict" && (
-          <Section title="Memory">
-            <MemoryChoice
-              label="Memory type"
-              value={kind}
-              choices={memoryKinds}
-              onChange={(value) =>
-                change(() => {
-                  setKind(value);
-                  setDraft(fieldDraft());
-                })
-              }
-              disabled={disabled}
-            />
-            {contentFields[kind].map(({ name, label, choices, multi }) =>
-              choices ? (
-                <MemoryChoice
-                  key={name}
-                  label={label}
-                  value={draft[name] ?? choices[0] ?? ""}
-                  choices={choices}
+        <Section title="Memory">
+          <MemoryChoice
+            label="Memory type"
+            value={kind}
+            choices={memoryKinds}
+            onChange={(value) =>
+              change(() => {
+                setKind(value);
+                setDraft(fieldDraft());
+              })
+            }
+            disabled={disabled}
+          />
+          {contentFields[kind].map(({ name, label, choices, multi }) =>
+            choices ? (
+              <MemoryChoice
+                key={name}
+                label={label}
+                value={draft[name] ?? choices[0] ?? ""}
+                choices={choices}
+                onChange={(value) =>
+                  change(() => setDraft((fields) => ({ ...fields, [name]: value })))
+                }
+                disabled={disabled}
+              />
+            ) : (
+              <Field
+                key={name}
+                label={label}
+                value={draft[name] ?? ""}
+                multiline={multi}
+                onChange={(value) =>
+                  change(() => setDraft((fields) => ({ ...fields, [name]: value })))
+                }
+                disabled={disabled}
+              />
+            ),
+          )}
+          {typed && (
+            <>
+              <MemoryChoice
+                label="Value type"
+                value={draft.valueType ?? "string"}
+                choices={valueTypes}
+                onChange={(value) =>
+                  change(() => setDraft((fields) => ({ ...fields, valueType: value, value: "" })))
+                }
+                disabled={disabled}
+              />
+              {draft.valueType === "boolean" ? (
+                <ToggleRow
+                  label="Value"
+                  value={draft.value !== "false"}
                   onChange={(value) =>
-                    change(() => setDraft((fields) => ({ ...fields, [name]: value })))
+                    change(() => setDraft((fields) => ({ ...fields, value: String(value) })))
                   }
                   disabled={disabled}
                 />
               ) : (
                 <Field
-                  key={name}
-                  label={label}
-                  value={draft[name] ?? ""}
-                  multiline={multi}
-                  onChange={(value) =>
-                    change(() => setDraft((fields) => ({ ...fields, [name]: value })))
-                  }
+                  label="Value"
+                  value={draft.value ?? ""}
+                  onChange={(value) => change(() => setDraft((fields) => ({ ...fields, value })))}
                   disabled={disabled}
+                  placeholder={draft.valueType === "date" ? "2026-01-31" : undefined}
                 />
-              ),
-            )}
-            {typed && (
-              <>
-                <MemoryChoice
-                  label="Value type"
-                  value={draft.valueType ?? "string"}
-                  choices={valueTypes}
-                  onChange={(value) =>
-                    change(() => setDraft((fields) => ({ ...fields, valueType: value, value: "" })))
-                  }
-                  disabled={disabled}
-                />
-                {draft.valueType === "boolean" ? (
-                  <ToggleRow
-                    label="Value"
-                    value={draft.value !== "false"}
-                    onChange={(value) =>
-                      change(() => setDraft((fields) => ({ ...fields, value: String(value) })))
-                    }
-                    disabled={disabled}
-                  />
-                ) : (
-                  <Field
-                    label="Value"
-                    value={draft.value ?? ""}
-                    onChange={(value) => change(() => setDraft((fields) => ({ ...fields, value })))}
-                    disabled={disabled}
-                    placeholder={draft.valueType === "date" ? "2026-01-31" : undefined}
-                  />
-                )}
-              </>
-            )}
-            <Field
-              label="Tags"
-              value={tagText}
-              onChange={(value) => change(() => setTagText(value))}
-              disabled={disabled}
-              placeholder="family, planning"
-            />
-          </Section>
-        )
+              )}
+            </>
+          )}
+          <Field
+            label="Tags"
+            value={tagText}
+            onChange={(value) => change(() => setTagText(value))}
+            disabled={disabled}
+            placeholder="family, planning"
+          />
+        </Section>
       )}
-      {(mode === "add" || mode === "restrict") && (
+      {mode === "add" && (
         <Permissions
-          record={mode === "restrict" ? record : undefined}
-          value={mode === "restrict" ? restricted : permissions}
+          value={permissions}
           change={(value) => change(() => setPermissions(value))}
           disabled={disabled}
-          workspaceOnly={mode === "restrict"}
         />
       )}
-      {invalid && mode === "add" && !permissions.purposes.length && (
-        <MemoryText>Select at least one allowed use.</MemoryText>
-      )}
-      {invalid && mode !== "supersede" && mode !== "restrict" && !tags.tags && (
+      {invalid && mode !== "supersede" && !tags.tags && (
         <MemoryText>Enter 1 to 8 tags, separated by commas.</MemoryText>
       )}
     </>,
@@ -345,7 +315,8 @@ function claimInput(
         scope: { workspace: permissions.workspace },
         tags,
         evidence,
-        purposes: permissions.purposes,
+        ...(permissions.purposes.length ? { purposes: permissions.purposes } : {}),
         sensitivity: permissions.sensitivity,
+        core: permissions.core,
       });
 }

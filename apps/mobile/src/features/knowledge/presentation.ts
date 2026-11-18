@@ -35,14 +35,59 @@ export function memoryContent(record: KnowledgeRecord): MemoryContent {
 /** The shared readable title and text of a memory. */
 export const memorySummary = knowledgeSummary;
 
-export function memoryAcceptance(record: KnowledgeRecord) {
-  if (record.acceptance?.kind === "owner") return "Accepted by you";
-  return record.status === "proposed" ? "Awaiting review" : "Acceptance unrecorded";
+export const originLabels = { stated: "Stated", inferred: "Inferred" } as const;
+
+/** Origin, and Sensitive when set: the labels a row and the detail carry. No scores. */
+export function memoryLabels(record: KnowledgeRecord) {
+  return [
+    originLabels[record.origin],
+    ...(record.sensitivity === "sensitive" ? ["Sensitive"] : []),
+  ];
 }
 
-export function memoryState(record: KnowledgeRecord) {
-  if (record.status === "active") return "Accepted";
-  return memoryLabel(record.status);
+const statusLabels: Partial<Record<KnowledgeRecord["status"], string>> = {
+  proposed: "Agent’s proposal",
+  disputed: "Disputed",
+  archived: "Archived",
+  superseded: "Replaced",
+  expired: "Expired",
+};
+/** A record state worth naming; active memory names none. */
+export function memoryStatus(record: KnowledgeRecord) {
+  return record.trashedAt ? "In Trash" : statusLabels[record.status];
+}
+
+/** The latest content change or confirmation. */
+export function memoryUpdatedAt(record: KnowledgeRecord) {
+  const created = Date.parse(record.createdAt);
+  const confirmed = record.lastConfirmedAt ? Date.parse(record.lastConfirmedAt) : 0;
+  return Math.max(created, confirmed);
+}
+
+const day = 24 * 60 * 60 * 1000;
+export function memoryFreshness(record: KnowledgeRecord, now = Date.now()) {
+  const days = Math.max(0, Math.floor((now - memoryUpdatedAt(record)) / day));
+  if (days === 0) return "Updated today";
+  if (days === 1) return "Updated yesterday";
+  if (days < 30) return `Updated ${days} days ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return months === 1 ? "Updated a month ago" : `Updated ${months} months ago`;
+  const years = Math.floor(days / 365);
+  return years <= 1 ? "Updated a year ago" : `Updated ${years} years ago`;
+}
+
+export function memoryDate(date: string) {
+  return new Date(date).toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
+/** Memories this one names, other than itself: its related records and relationship ends. */
+export function linkedMemoryIds(record: KnowledgeRecord) {
+  const ids = [...record.relatedRecordIds];
+  if (record.content.kind === "relationship")
+    ids.push(record.content.value.subjectId, record.content.value.objectId);
+  return [...new Set(ids.map((id) => id.toLowerCase()))].filter(
+    (id) => id !== record.id.toLowerCase(),
+  );
 }
 
 export type Kind = MemoryContent["kind"];

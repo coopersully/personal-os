@@ -365,6 +365,7 @@ import {
   financeSectionFromPath,
 } from "./features/finances/navigation.js";
 import { FinanceSettings } from "./features/finances/settings.js";
+import { MemoryPage } from "./features/knowledge/page.js";
 import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
@@ -386,6 +387,7 @@ import {
   WorkspaceSettings,
   type WorkspaceSettingsActions,
 } from "./features/settings/agent-access.js";
+import { memorySettingsSection } from "./features/settings/manifest.js";
 import { ProfileChoice } from "./features/settings/profile-choice.js";
 import { ProfileInlineField } from "./features/settings/profile-inline-field.js";
 import { ProfileRow, ProfileSection } from "./features/settings/profile-rows.js";
@@ -6012,6 +6014,7 @@ type SettingsSectionId =
   | "invitations"
   | "mail"
   | "motives"
+  | "memory"
   | "profile"
   | "reviews"
   | "sessions"
@@ -6056,6 +6059,7 @@ const settingsNavigation: Array<{
   {
     label: "Personal",
     items: [
+      memorySettingsSection,
       { icon: TargetIcon, id: "goals", label: "Goals & Motives" },
       { icon: SparklesIcon, id: "rituals", label: "Rituals" },
     ],
@@ -6307,6 +6311,7 @@ function SettingsPageContent({
       }
     >
       <FinanceRecoveryReturn />
+      {section === "memory" ? <MemoryPage ownerId={user.id} /> : null}
       {section === "mail" ? (
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="mail" />

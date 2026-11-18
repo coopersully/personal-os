@@ -424,18 +424,20 @@ export function ownedKnowledgeHistory(
     .limit(options.limit);
 }
 
-export async function hasMoreKnowledgeHistory(
+/** The newest revision a history scan has not reached yet, if any. */
+export async function nextKnowledgeHistoryRevision(
   tx: KnowledgeTransaction,
   userId: string,
   recordId: string,
   seek: KnowledgeHistorySeek | null,
 ) {
-  const [remaining] = await tx
+  const [next] = await tx
     .select({ revision: knowledgeRevisions.revision })
     .from(knowledgeRevisions)
     .where(knowledgeHistoryWhere(userId, recordId, seek))
+    .orderBy(desc(knowledgeRevisions.revision))
     .limit(1);
-  return remaining !== undefined;
+  return next?.revision;
 }
 
 export async function knowledgeClaimRevisions(

@@ -15,6 +15,7 @@ import {
 } from "@personal-os/database";
 import {
   type KnowledgeMutationInput,
+  type KnowledgePage,
   knowledgeContextPackSchema,
   knowledgePageSchema,
   knowledgeQuerySchema,
@@ -821,7 +822,7 @@ describe("purpose-bound memory retrieval", () => {
     expect(baseline.state).toBe("available");
   });
 
-  it("reports unavailable when a bounded history scan cannot verify completion", async () => {
+  it("continues past a bounded history scan instead of failing", async () => {
     const f = await fixture();
     const goalId = randomUUID();
     await database.db
@@ -836,18 +837,48 @@ describe("purpose-bound memory retrieval", () => {
       mutationKey: randomUUID(),
       content: fact("current independent detail").content,
     });
+    // Readable history after the long unreadable run must still be reached.
+    const readable = await f.save(fact("readable after the scan budget"));
     await database.db.delete(goals).where(eq(goals.id, goalId));
 
-    await expect(f.exporter.exportPage(f.owner, {})).rejects.toMatchObject({
-      code: "service_unavailable",
-      status: 503,
-    });
-    await expect(
-      f.search.history(f.owner, { ...planning, recordId: record.id }),
-    ).rejects.toMatchObject({
-      code: "service_unavailable",
-      status: 503,
-    });
+    async function collect(read: (cursor?: string) => Promise<KnowledgePage>) {
+      const pages: KnowledgePage[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await read(cursor);
+        pages.push(page);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor && pages.length < 10);
+      return pages;
+    }
+    const exported = await collect((cursor) =>
+      f.exporter.exportPage(f.owner, cursor ? { cursor } : {}),
+    );
+    expect(exported.at(-1)?.nextCursor).toBeNull();
+    expect(exported.some(({ state }) => state !== "available")).toBe(true);
+    expect(
+      exported
+        .flatMap(({ items }) => items)
+        .map(({ id, revision }) => ({ id, revision }))
+        .sort((a, b) => a.id.localeCompare(b.id)),
+    ).toEqual(
+      [
+        { id: record.id, revision: 103 },
+        { id: readable.id, revision: 1 },
+      ].sort((a, b) => a.id.localeCompare(b.id)),
+    );
+    const history = await collect((cursor) =>
+      f.search.history(f.owner, {
+        ...planning,
+        recordId: record.id,
+        ...(cursor ? { cursor } : {}),
+      }),
+    );
+    expect(history.map(({ items, state }) => ({ items: items.length, state }))).toEqual([
+      { items: 1, state: "partial" },
+      { items: 0, state: "unavailable" },
+    ]);
+    expect(history.at(-1)?.nextCursor).toBeNull();
   });
 
   it("exports owner-only pages including permitted history and invalidates them after an epoch change", async () => {

@@ -4,10 +4,9 @@ import {
   type KnowledgeRecordReference,
   knowledgeRetrievalMaxRecords,
 } from "@personal-os/domain";
-import { AppError } from "../errors.js";
 import {
-  hasMoreKnowledgeHistory,
   type KnowledgeHistorySeek,
+  nextKnowledgeHistoryRevision,
   ownedKnowledgeHistory,
   ownedKnowledgeHistoryRecordIds,
 } from "./access.js";
@@ -37,7 +36,11 @@ async function* exportRecordIds(
   }
 }
 
-/** A continuation starts at the next revision whose disclosure has been verified. */
+/**
+ * A continuation starts at the next revision to read: the first verified one past a full page,
+ * or the first unscanned one when the scan budget runs out. Every revision's disclosure is
+ * checked again on the page that returns it, and only admitted records are ever named.
+ */
 export async function pageKnowledgeHistory(
   session: KnowledgeRetrievalSession,
   userId: string,
@@ -85,8 +88,12 @@ export async function pageKnowledgeHistory(
       if (rows.length < limit || !last) break;
       seek = { revision: last.revision, inclusive: false };
     }
-    if (remaining === 0 && (await hasMoreKnowledgeHistory(session.tx, userId, id, seek)))
-      throw new AppError("service_unavailable", "This memory page is temporarily unavailable.");
+    if (remaining === 0) {
+      // Out of budget: hand back what was found and continue past the scanned revisions, so
+      // a long run of unreadable history never blocks the readable history after it.
+      const next = await nextKnowledgeHistoryRevision(session.tx, userId, id, seek);
+      if (next !== undefined) return page({ recordId: id, revision: next });
+    }
   }
   return page();
 }

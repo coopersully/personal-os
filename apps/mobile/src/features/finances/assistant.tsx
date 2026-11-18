@@ -149,6 +149,12 @@ export function FinanceAssistantScreen() {
               onPress={openConversation}
             />
             <FinanceRow
+              title="Automations"
+              subtitle="Hosts registered to run Finance maintenance"
+              icon="agent"
+              onPress={() => router.push("/finance-automations")}
+            />
+            <FinanceRow
               title="Recorded activity"
               subtitle="Actions, explanations, and outcomes"
               icon="history"

@@ -6,6 +6,7 @@ import {
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
+import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner-native";
 import { EnumChoice } from "../../components/forms/enum-choice";
@@ -14,7 +15,7 @@ import { SettingsAccentProvider } from "../../components/settings-accent";
 import { useCurrentSession } from "./budget-write";
 import { useFinance, useFinanceRead } from "./data";
 import { confirmedRejection, rejectionReason } from "./mutations";
-import { Copy, ReadState, Section } from "./ui";
+import { Card, Copy, FinanceRow, ReadState, Section } from "./ui";
 
 const blockerCopy: Record<FinanceOnboardingBlocker, string> = {
   source_required: "Add an account or import records to continue.",
@@ -102,7 +103,9 @@ function Review({
   untouched.current = !dirty && !pending && !mustReload;
   // biome-ignore lint/correctness/useExhaustiveDependencies: only a new snapshot is adopted.
   useEffect(() => {
-    if (untouched.current && initial !== snapshot) adopt(initial);
+    // Revisions only advance, so an older read that lands late is not a newer snapshot.
+    if (untouched.current && initial !== snapshot && initial.revision >= snapshot.revision)
+      adopt(initial);
   }, [initial]);
   /** Replaces the draft with what the server holds now. False when that could not be read. */
   async function readAgain() {
@@ -268,6 +271,16 @@ function Review({
           />
         </Group>
       </Section>
+      {choice === "now" && !complete && (
+        <Card rows>
+          <FinanceRow
+            title="Finance automations"
+            subtitle="Register a host and the schedule you expect it to keep"
+            icon="agent"
+            onPress={() => router.push("/finance-automations")}
+          />
+        </Card>
+      )}
       {complete ? (
         <Copy>Setup is complete. Your workspace remains available.</Copy>
       ) : (

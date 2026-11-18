@@ -1162,6 +1162,11 @@ it("keeps Assistant shortcuts on their matching canonical view", async () => {
   await screen.findByText("No recorded activity yet.");
   expect(h.setParams).toHaveBeenLastCalledWith({ view: "Activity" });
 });
+it("opens Finance automations from the Assistant", async () => {
+  mount(<FinanceAssistantScreen />);
+  fireEvent.click(await screen.findByRole("button", { name: /^Automations/ }));
+  expect(h.push).toHaveBeenLastCalledWith("/finance-automations");
+});
 it("resets the spending drill-down when changing period and opens full transaction details", async () => {
   mount(<FinanceSpendingScreen />);
   fireEvent.click(await screen.findByRole("button", { name: /Groceries/ }));

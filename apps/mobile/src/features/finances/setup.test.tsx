@@ -578,6 +578,16 @@ it("adopts a newer server snapshot only while there are no unsaved choices", asy
   expect(screen.getByRole("button", { name: /^Automation, Set up/ })).toBeTruthy();
 });
 
+it("links to Finance automations while the choice is to set up automation now", async () => {
+  await loaded();
+  expect(screen.queryByRole("button", { name: /Finance automations/ })).toBeNull();
+  pick(/^Automation,/, /^Set up/);
+  press(/Finance automations/);
+  expect(h.push).toHaveBeenCalledWith("/finance-automations");
+  pick(/^Automation,/, /^Later/);
+  expect(screen.queryByRole("button", { name: /Finance automations/ })).toBeNull();
+});
+
 it("reports a refused save with the server's reason and keeps the draft writable", async () => {
   await loaded();
   review();

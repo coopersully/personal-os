@@ -31,13 +31,16 @@ describe("memory presentation", () => {
     expect(memoryAgo(new Date(at + 1000).toISOString(), at)).toBe("just now");
   });
 
-  it("dates freshness from the later of the revision and the last confirmation", () => {
-    const createdAt = ago(10 * 24 * 60 * 60);
-    expect(memoryFreshness({ createdAt, lastConfirmedAt: null })).toMatch(/^Updated /);
+  it("says when a memory was added and later confirmed, never that it was updated", () => {
+    const createdAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
     const confirmed = new Date().toISOString();
-    expect(memoryFreshness({ createdAt, lastConfirmedAt: confirmed })).toBe("Updated just now");
+    expect(memoryFreshness({ createdAt, lastConfirmedAt: null })).toBe("Added 10 days ago");
+    expect(memoryFreshness({ createdAt, lastConfirmedAt: confirmed })).toBe(
+      "Added 10 days ago · Confirmed just now",
+    );
+    // A confirmation older than the record adds nothing.
     expect(memoryFreshness({ createdAt: confirmed, lastConfirmedAt: createdAt })).toBe(
-      "Updated just now",
+      "Added just now",
     );
   });
 

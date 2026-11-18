@@ -231,6 +231,7 @@ it("shows_stated_inferred_and_sensitive_labels", async () => {
     },
     claimKey: null,
     tags: ["home"],
+    core: true,
   };
   const inferred: KnowledgeRecord = {
     ...record,
@@ -250,9 +251,13 @@ it("shows_stated_inferred_and_sensitive_labels", async () => {
   const inferredRow = screen.getByRole("button", { name: rowName });
   expect(within(inferredRow).getByText("Inferred", { exact: true })).toBeVisible();
   expect(within(inferredRow).getByText("Sensitive", { exact: true })).toBeVisible();
-  expect(within(inferredRow).getByText("Core", { exact: true })).toBeVisible();
+  // Sensitive and hidden memory never loads at session start, so it never reads as Core.
+  expect(within(inferredRow).queryByText("Core")).not.toBeInTheDocument();
+  expect(within(statedRow).getByText("Core", { exact: true })).toBeVisible();
   expect(within(inferredRow).getByText("Hidden from agents", { exact: true })).toBeVisible();
-  expect(within(inferredRow).getByText("Updated 3 days ago")).toBeVisible();
+  // createdAt survives revisions (COO-267), so the row never claims an update.
+  expect(within(inferredRow).getByText("Added 3 days ago")).toBeVisible();
+  expect(document.body.textContent).not.toMatch(/Updated/);
 
   const detail = await openRecord();
   expect(await within(detail).findByText("Inferred", { exact: true })).toBeVisible();
@@ -292,7 +297,14 @@ it("resolve_conflict_keep_mine_and_take_agents", async () => {
   const panel = await within(detail).findByRole("region", { name: "Conflict" });
   expect(await within(panel).findByText("concise")).toBeVisible();
   expect(within(panel).getByText("detailed")).toBeVisible();
-  for (const name of ["Confirm memory", "Dispute memory", "Edit memory", "Archive"])
+  // A pending proposal is resolved, never confirmed, disputed, edited, archived or trashed.
+  for (const name of [
+    "Confirm memory",
+    "Dispute memory",
+    "Edit memory",
+    "Archive",
+    "Move to Trash",
+  ])
     expect(within(detail).queryByRole("button", { name })).not.toBeInTheDocument();
   fireEvent.click(within(panel).getByRole("button", { name: "Keep mine" }));
   await waitFor(() =>
@@ -506,8 +518,12 @@ it("restore_and_delete_now_from_trash", async () => {
     trashVersion: 2,
   };
   const refreshed = { ...root, trashVersion: 3 };
+  const refreshing = deferred<KnowledgeRecord>();
   vi.mocked(api.searchKnowledge).mockResolvedValue(page([root, child]));
-  vi.mocked(api.getKnowledge).mockResolvedValueOnce(root).mockResolvedValue(refreshed);
+  vi.mocked(api.getKnowledge)
+    .mockResolvedValueOnce(root)
+    .mockImplementationOnce(() => refreshing.promise)
+    .mockResolvedValue(refreshed);
   vi.mocked(api.updateKnowledge)
     .mockResolvedValueOnce(readable({ ...record, trashVersion: 3 }))
     .mockRejectedValueOnce(conflict({ trashVersion: 3, trashedAt: now }))
@@ -523,12 +539,14 @@ it("restore_and_delete_now_from_trash", async () => {
   };
   const rootRow = await trashRow("concise");
   const childRow = await trashRow("derived");
-  expect(within(childRow).queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
-  expect(within(childRow).queryByRole("button", { name: "Delete now" })).not.toBeInTheDocument();
+  expect(within(childRow).queryByRole("button", { name: /^Restore/ })).not.toBeInTheDocument();
+  expect(within(childRow).queryByRole("button", { name: /^Delete/ })).not.toBeInTheDocument();
+  expect(within(rootRow).getByText("Inferred", { exact: true })).toBeVisible();
+  expect(within(rootRow).getByText("communication", { exact: true })).toBeVisible();
   expect(within(childRow).getByText(/Restores with the memory it was trashed with/)).toBeVisible();
   expect(within(rootRow).getByText(/Deleted for good in \d+ days?/)).toBeVisible();
 
-  fireEvent.click(within(rootRow).getByRole("button", { name: "Restore" }));
+  fireEvent.click(within(rootRow).getByRole("button", { name: "Restore Communication style" }));
   await waitFor(() =>
     expect(api.updateKnowledge).toHaveBeenCalledWith({
       action: "restore",
@@ -539,7 +557,11 @@ it("restore_and_delete_now_from_trash", async () => {
   );
   await expectToastOnly("Memory restored.");
 
-  fireEvent.click(within(await trashRow("concise")).getByRole("button", { name: "Delete now" }));
+  fireEvent.click(
+    within(await trashRow("concise")).getByRole("button", {
+      name: "Delete Communication style now",
+    }),
+  );
   const confirmation = await screen.findByRole("dialog", { name: "Delete now?" });
   expect(within(confirmation).getByText(/can't be restored/)).toBeVisible();
   expect(
@@ -565,7 +587,12 @@ it("restore_and_delete_now_from_trash", async () => {
   const detail = await screen.findByRole("dialog", { name: "Communication style" });
   fireEvent.click(await within(detail).findByRole("button", { name: "Delete now" }));
   const again = await screen.findByRole("dialog", { name: "Delete now?" });
-  fireEvent.click(within(again).getByRole("button", { name: "Delete now" }));
+  // The stale record stays on screen while the refresh is pending, and can't be deleted.
+  const confirmAgain = within(again).getByRole("button", { name: "Delete now" });
+  expect(confirmAgain).toBeDisabled();
+  await act(async () => refreshing.resolve(refreshed));
+  await waitFor(() => expect(confirmAgain).toBeEnabled());
+  fireEvent.click(confirmAgain);
   await waitFor(() =>
     expect(api.updateKnowledge).toHaveBeenLastCalledWith(
       expect.objectContaining({ action: "delete_now", expectedTrashVersion: 3 }),
@@ -773,7 +800,7 @@ it("rejects a tag merge without a valid target and reports a failed merge", asyn
     target: { value: "relatives" },
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Merge tag" }));
-  await expectToastOnly("A tag cannot be merged into itself.");
+  await expectToastOnly("A tag can't be merged into itself. Choose a different name.");
   expect(api.mergeKnowledgeTags).toHaveBeenCalledWith({
     from: "family",
     into: "relatives",
@@ -854,8 +881,18 @@ it("adds a memory with tags, core and a purpose hint", async () => {
   expect(await within(editor).findByText("Enter 1 to 8 tags, separated by commas.")).toBeVisible();
   await expectToastOnly("Check the highlighted memory fields.");
   fireEvent.change(within(editor).getByLabelText("Tags"), { target: { value: "Home, travel" } });
-  fireEvent.click(within(editor).getByRole("checkbox", { name: "Load at session start" }));
-  fireEvent.click(within(editor).getByRole("checkbox", { name: "Sensitive" }));
+  const core = within(editor).getByRole("checkbox", { name: "Load at session start" });
+  const sensitive = within(editor).getByRole("checkbox", { name: "Sensitive" });
+  fireEvent.click(core);
+  expect(core).toBeChecked();
+  // The core never loads sensitive memory: marking it sensitive clears and locks Core.
+  fireEvent.click(sensitive);
+  expect(core).not.toBeChecked();
+  expect(core).toBeDisabled();
+  expect(core).toHaveAccessibleDescription("Sensitive memories never load at session start.");
+  fireEvent.click(sensitive);
+  expect(core).toBeEnabled();
+  fireEvent.click(core);
   fireEvent.click(within(editor).getByRole("checkbox", { name: "Planning" }));
   fireEvent.change(within(editor).getByLabelText("Workspace"), { target: { value: "tasks" } });
   fireEvent.click(within(editor).getByRole("button", { name: "Save memory" }));
@@ -876,7 +913,7 @@ it("adds a memory with tags, core and a purpose hint", async () => {
       purposes: ["planning"],
       relatedRecordIds: [],
       core: true,
-      sensitivity: "sensitive",
+      sensitivity: "standard",
     }),
   );
   await expectToastOnly("Memory saved.");
@@ -1384,7 +1421,7 @@ it("refreshes Trash when a restore conflicts and explains an empty Trash", async
   mount();
   await screen.findByRole("button", { name: rowName });
   selectTab("Trash");
-  fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Restore Communication style" }));
   await expectToastOnly("This memory couldn't be restored. Review Trash and try again.");
   expect(await screen.findByText("Trashed memory appears here for 30 days.")).toBeVisible();
 });
@@ -1445,9 +1482,9 @@ it("reports tag failures that are not the person's to fix", async () => {
   fireEvent.click(within(dialog).getByRole("button", { name: "Merge tag" }));
   await expectToastOnly("Couldn’t merge these tags. Try again.");
   fireEvent.click(within(dialog).getByRole("button", { name: "Undo merge of kin" }));
-  await expectToastOnly("The tag merge was not found.");
+  await expectToastOnly("This merge no longer exists.");
   fireEvent.click(within(dialog).getByRole("button", { name: "Undo merge of kin" }));
-  await expectToastOnly("Changed");
+  await expectToastOnly("Undo the later merge of this tag first.");
 });
 
 it("closes an edit whose memory was deleted meanwhile", async () => {
@@ -1459,7 +1496,8 @@ it("closes an edit whose memory was deleted meanwhile", async () => {
   mount();
   await openEditor();
   fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
-  await expectToastOnly("This memory is unavailable.");
+  const unavailable = await expectToastOnly("This memory is unavailable.");
+  expect(unavailable.closest("[data-sonner-toast]")).toHaveAttribute("data-type", "info");
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 });
 
@@ -1483,7 +1521,7 @@ it("refuses delete now without the Trash version the owner read", async () => {
   vi.mocked(api.getKnowledge).mockResolvedValue(unversioned);
   mount();
   selectTab("Trash");
-  fireEvent.click(await screen.findByRole("button", { name: "Delete now" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Delete Communication style now" }));
   const confirmation = await screen.findByRole("dialog", { name: "Delete now?" });
   const confirmDelete = within(confirmation).getByRole("button", { name: "Delete now" });
   await waitFor(() => expect(confirmDelete).toBeEnabled());
@@ -1603,15 +1641,21 @@ it("names the memories that block a restore and says when Trash retention ended"
     if (!found) throw new Error(`Expected a row for ${text}.`);
     return found;
   };
-  fireEvent.click(within(row("concise")).getByRole("button", { name: "Restore" }));
+  fireEvent.click(
+    within(row("concise")).getByRole("button", { name: "Restore Communication style" }),
+  );
   await expectToastOnly(
     "This memory came from memory that is in Trash or deleted: Communication style, A deleted memory, a memory you can't open. Restore that first, or leave this one in Trash.",
   );
   await screen.findByText("expired");
-  fireEvent.click(within(row("expired")).getByRole("button", { name: "Restore" }));
+  fireEvent.click(
+    within(row("expired")).getByRole("button", { name: "Restore Communication style" }),
+  );
   await expectToastOnly("This memory can no longer be restored. Its 30 days in Trash have ended.");
   await screen.findByText("expired");
-  fireEvent.click(within(row("concise")).getByRole("button", { name: "Restore" }));
+  fireEvent.click(
+    within(row("concise")).getByRole("button", { name: "Restore Communication style" }),
+  );
   await expectToastOnly("Couldn't confirm the restore. Check Trash before trying again.");
   expect(api.updateKnowledge).toHaveBeenCalledTimes(3);
   expect(
@@ -1659,4 +1703,120 @@ it("disables further tag chips once eight are chosen", async () => {
   );
   fireEvent.click(within(chips).getByRole("button", { name: "tag1" }));
   expect(within(chips).getByRole("button", { name: "tag9" })).toBeEnabled();
+});
+
+it("offers no resolution on a trashed proposal", async () => {
+  const mine: KnowledgeRecord = { ...record, conflictRecordIds: [proposalId] };
+  const proposal: KnowledgeRecord = {
+    ...record,
+    id: proposalId,
+    revision: 1,
+    status: "proposed",
+    content: preference("detailed"),
+    conflictRecordIds: [id],
+    trashedAt: now,
+    trashGroupId: proposalId,
+    trashVersion: 1,
+  };
+  vi.mocked(api.searchKnowledge).mockResolvedValue(page([proposal]));
+  vi.mocked(api.getKnowledge).mockImplementation(async ({ id: requested }) =>
+    requested === proposalId ? proposal : mine,
+  );
+  mount();
+  selectTab("Trash");
+  fireEvent.click(await screen.findByRole("button", { name: /Communication style.*detailed/ }));
+  const detail = await screen.findByRole("dialog", { name: "Communication style" });
+  const panel = await within(detail).findByRole("region", { name: "Conflict" });
+  expect(await within(panel).findByText("concise")).toBeVisible();
+  for (const name of ["Keep mine", "Take the agent's", "Edit and keep mine"])
+    expect(within(panel).queryByRole("button", { name })).not.toBeInTheDocument();
+  expect(within(panel).getByRole("button", { name: "Open conflicting memory 1" })).toBeVisible();
+});
+
+it("offers no resolution from a live memory whose proposal is in Trash", async () => {
+  const mine: KnowledgeRecord = { ...record, conflictRecordIds: [proposalId] };
+  const proposal: KnowledgeRecord = {
+    ...record,
+    id: proposalId,
+    status: "proposed",
+    content: preference("detailed"),
+    trashedAt: now,
+  };
+  vi.mocked(api.getKnowledge).mockImplementation(async ({ id: requested }) =>
+    requested === proposalId ? proposal : mine,
+  );
+  mount();
+  const detail = await openRecord();
+  const panel = await within(detail).findByRole("region", { name: "Conflict" });
+  expect(await within(panel).findByText("detailed")).toBeVisible();
+  expect(within(panel).queryByRole("button", { name: "Keep mine" })).not.toBeInTheDocument();
+});
+
+it("always lets the person turn Core off, except on a disputed memory", async () => {
+  const sensitiveCore = { ...record, core: true, sensitivity: "sensitive" as const };
+  vi.mocked(api.getKnowledge).mockResolvedValue(sensitiveCore);
+  vi.mocked(api.updateKnowledge).mockResolvedValue(
+    readable({ ...sensitiveCore, revision: 4, core: false }),
+  );
+  const { view } = mount();
+  const detail = await openRecord();
+  const core = await within(detail).findByRole("switch", { name: "Load at session start" });
+  expect(core).toBeEnabled();
+  fireEvent.click(core);
+  await expectToastOnly("Memory no longer loads at session start.");
+  expect(api.updateKnowledge).toHaveBeenCalledWith(
+    expect.objectContaining({ action: "revise", core: false }),
+  );
+  view.unmount();
+
+  vi.mocked(api.updateKnowledge).mockClear();
+  vi.mocked(api.getKnowledge).mockResolvedValue({ ...record, core: true, status: "disputed" });
+  mount();
+  const disputed = await openRecord();
+  const locked = await within(disputed).findByRole("switch", { name: "Load at session start" });
+  expect(locked).toBeDisabled();
+  expect(locked).toHaveAccessibleDescription(
+    "Confirm or edit this disputed memory first. Changing this would clear the dispute.",
+  );
+});
+
+it("explains each documented tag refusal in product copy", async () => {
+  const refusal = (status: number, message: string) =>
+    new ApiClientError({ status, code: "refused", message });
+  vi.mocked(api.listKnowledgeTags).mockResolvedValue({
+    tags: tagIndex.tags,
+    aliases: [{ alias: "kin", name: "family", mergeId }],
+  });
+  vi.mocked(api.mergeKnowledgeTags)
+    .mockRejectedValueOnce(refusal(422, "This tag is already merged into another tag."))
+    .mockRejectedValueOnce(refusal(422, "Merging these tags would form a cycle."))
+    .mockRejectedValueOnce(refusal(404, "The memory tag was not found."))
+    .mockRejectedValueOnce(refusal(422, "Something new."));
+  vi.mocked(api.unmergeKnowledgeTags)
+    .mockRejectedValueOnce(refusal(409, "This tag merge was already undone."))
+    .mockRejectedValueOnce(refusal(409, "This mutation key was used for another request."));
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Manage tags" }));
+  const dialog = await screen.findByRole("dialog", { name: "Manage tags" });
+  await within(dialog).findByRole("option", { name: "family (2)" });
+  fireEvent.change(within(dialog).getByLabelText("Rename or merge into"), {
+    target: { value: "relatives" },
+  });
+  const merge = () => fireEvent.click(within(dialog).getByRole("button", { name: "Merge tag" }));
+  for (const message of [
+    "This tag is already merged into another tag. Undo that merge first.",
+    "These tags are already merged the other way. Undo that merge first.",
+    "This tag no longer exists. Close Manage tags and try again.",
+    "Couldn’t merge these tags. Try again.",
+  ]) {
+    merge();
+    await expectToastOnly(message);
+  }
+  const undo = () =>
+    fireEvent.click(within(dialog).getByRole("button", { name: "Undo merge of kin" }));
+  undo();
+  await expectToastOnly("This merge was already undone.");
+  undo();
+  await expectToastOnly("Couldn’t undo this merge. Try again.");
+  expect(document.body.textContent).not.toMatch(/mutation key|was not found/);
 });

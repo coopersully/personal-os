@@ -6,6 +6,7 @@ import { ChevronRightIcon, RefreshIcon, TrashIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { type MemoryActions, memoryErrorStatus } from "./actions";
+import { MemoryBadges, MemoryTags } from "./badges";
 import {
   isTrashRoot,
   memoryAgo,
@@ -204,9 +205,9 @@ export function restoreMemory(
     },
     complete: (result) => {
       handlers.done();
-      return {
-        message: result.outcome === "readable" ? "Memory restored." : "This memory is unavailable.",
-      };
+      return result.outcome === "readable"
+        ? { message: "Memory restored." }
+        : { message: "This memory is unavailable.", tone: "info" };
     },
     recover: (error) => {
       if (error instanceof RestoreBlocked) {
@@ -277,6 +278,8 @@ export function TrashRow({
         <span className="flex min-w-0 flex-col gap-1 [overflow-wrap:anywhere]">
           <span>{title}</span>
           <span className="line-clamp-2 font-normal text-muted-foreground">{text}</span>
+          <MemoryBadges record={record} />
+          <MemoryTags tags={record.tags} />
         </span>
         <ChevronRightIcon aria-hidden="true" />
       </Button>
@@ -284,7 +287,13 @@ export function TrashRow({
         <TrashState record={record} />
         {isTrashRoot(record) ? (
           <span className="flex gap-2">
-            <Button variant="secondary" size="sm" disabled={busy} onClick={restore}>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              aria-label={`Restore ${title}`}
+              onClick={restore}
+            >
               <RefreshIcon data-icon="inline-start" aria-hidden="true" />
               Restore
             </Button>
@@ -292,6 +301,7 @@ export function TrashRow({
               variant="destructive"
               size="sm"
               disabled={busy}
+              aria-label={`Delete ${title} now`}
               onClick={(event) => deleteNow(event.currentTarget)}
             >
               Delete now

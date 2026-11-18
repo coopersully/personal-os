@@ -74,11 +74,34 @@ export function TagChips({
   );
 }
 
-function errorMessage(error: unknown) {
+/**
+ * Product copy for the refusals the tag routes document. Anything else falls back to the
+ * action's generic failure, so a raw API message never reaches the person.
+ */
+const mergeRefusals: Array<[RegExp, string]> = [
+  [/into itself/i, "A tag can't be merged into itself. Choose a different name."],
+  [
+    /already merged into another/i,
+    "This tag is already merged into another tag. Undo that merge first.",
+  ],
+  [/form a cycle/i, "These tags are already merged the other way. Undo that merge first."],
+];
+
+function mergeErrorCopy(error: unknown) {
   const status = memoryErrorStatus(error);
-  return status && [404, 409, 422].includes(status) && error instanceof Error
-    ? error.message
-    : undefined;
+  if (status === 404) return "This tag no longer exists. Close Manage tags and try again.";
+  if (status !== 422 || !(error instanceof Error)) return undefined;
+  return mergeRefusals.find(([pattern]) => pattern.test(error.message))?.[1];
+}
+
+function unmergeErrorCopy(error: unknown, blocked: boolean) {
+  const status = memoryErrorStatus(error);
+  if (status === 404) return "This merge no longer exists.";
+  if (status !== 409) return undefined;
+  if (blocked) return "Undo the later merge of this tag first.";
+  if (error instanceof Error && /already undone/i.test(error.message))
+    return "This merge was already undone.";
+  return undefined;
 }
 
 /** Rename a tag by merging it into a new name, file it under another, or undo a merge. */
@@ -118,7 +141,7 @@ export function ManageTags({
         onChanged();
         return { message: "Tag merged." };
       },
-      recover: errorMessage,
+      recover: mergeErrorCopy,
     });
   }
 
@@ -144,7 +167,7 @@ export function ManageTags({
           return `Undo the later merge first: ${later
             .map((alias) => `${alias.alias} → ${alias.name}`)
             .join(", ")}.`;
-        return errorMessage(error);
+        return unmergeErrorCopy(error, Array.isArray(blocking));
       },
     });
   }

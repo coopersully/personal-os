@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldError,
   FieldGroup,
@@ -504,21 +505,33 @@ export function RecordEditor({
               />
             </Field>
             <PurposeFields selected={purposes} change={setPurposes} disabled={disabled} />
-            <Field orientation="horizontal">
+            <Field orientation="horizontal" data-disabled={sensitive}>
               <Checkbox
                 id={`${id}-core`}
                 checked={core}
-                disabled={disabled}
+                disabled={disabled || sensitive}
+                aria-describedby={sensitive ? `${id}-core-sensitive` : undefined}
                 onCheckedChange={(value) => setCore(value === true)}
               />
-              <FieldLabel htmlFor={`${id}-core`}>Load at session start</FieldLabel>
+              <FieldContent>
+                <FieldLabel htmlFor={`${id}-core`}>Load at session start</FieldLabel>
+                {sensitive ? (
+                  <FieldDescription id={`${id}-core-sensitive`}>
+                    Sensitive memories never load at session start.
+                  </FieldDescription>
+                ) : null}
+              </FieldContent>
             </Field>
             <Field orientation="horizontal">
               <Checkbox
                 id={`${id}-private`}
                 checked={sensitive}
                 disabled={disabled}
-                onCheckedChange={(value) => setSensitive(value === true)}
+                onCheckedChange={(value) => {
+                  setSensitive(value === true);
+                  // The core never loads sensitive memory, so marking it sensitive clears Core.
+                  if (value === true) setCore(false);
+                }}
               />
               <FieldLabel htmlFor={`${id}-private`}>Sensitive</FieldLabel>
             </Field>

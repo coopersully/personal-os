@@ -24,14 +24,15 @@ import {
   usePreferenceSession,
 } from "../workspace-settings/account-save-session";
 import { memoryKey, registerMemoryCleanup, useMemoryActions } from "./actions";
-import { memoryContent, memoryFreshness, memoryLabel, memorySummary } from "./presentation";
+import { MemoryBadges, MemoryTags } from "./badges";
 import {
-  MemoryBadges,
   type MemoryOpenMode,
-  MemoryRecordDetail,
-  MemoryTags,
-  NewMemory,
-} from "./record-detail";
+  memoryContent,
+  memoryFreshness,
+  memoryLabel,
+  memorySummary,
+} from "./presentation";
+import { MemoryRecordDetail, NewMemory } from "./record-detail";
 import { ManageTags, TagChips, useMemoryTags } from "./tags";
 import { restoreMemory, TrashRow } from "./trash";
 

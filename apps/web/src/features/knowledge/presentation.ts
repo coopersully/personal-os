@@ -8,6 +8,10 @@ import {
 } from "@personal-os/domain";
 
 export type MemoryContent = KnowledgeRecord["content"];
+/** Modes a record can be opened in directly, besides its details. */
+export type MemoryOpenMode = "edit" | "delete";
+/** Opens a record; `content` starts the editor from other content, such as an agent's proposal. */
+export type OpenMemory = (id: string, mode?: MemoryOpenMode, content?: MemoryContent) => void;
 export const memoryKinds = knowledgeContentSchema.options.map((schema) => schema.shape.kind.value);
 
 export function memoryLabel(value: string) {
@@ -85,13 +89,15 @@ export function memoryAgo(value: string, at = Date.now()) {
   return "just now";
 }
 
-/** When the memory last changed or the person last confirmed it. */
+/**
+ * When the memory was added, and when the person last confirmed it if that came later. The API
+ * keeps `createdAt` across revisions and has no `updatedAt` yet (COO-267), so never "Updated".
+ */
 export function memoryFreshness(record: Pick<KnowledgeRecord, "createdAt" | "lastConfirmedAt">) {
-  const latest =
-    record.lastConfirmedAt && Date.parse(record.lastConfirmedAt) > Date.parse(record.createdAt)
-      ? record.lastConfirmedAt
-      : record.createdAt;
-  return `Updated ${memoryAgo(latest)}`;
+  const added = `Added ${memoryAgo(record.createdAt)}`;
+  return record.lastConfirmedAt && Date.parse(record.lastConfirmedAt) > Date.parse(record.createdAt)
+    ? `${added} · Confirmed ${memoryAgo(record.lastConfirmedAt)}`
+    : added;
 }
 
 /** Days left before the purge job erases a trashed memory. */

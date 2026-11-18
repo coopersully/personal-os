@@ -7,11 +7,10 @@ import type {
 import {
   keepPreviousData,
   useInfiniteQuery,
-  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import { ArchiveIcon, HistoryIcon, TrashIcon } from "@/components/icons";
@@ -25,17 +24,8 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
 import {
   type MemoryActions,
   memoryErrorStatus,
@@ -43,19 +33,22 @@ import {
   updateMemory,
   useMemoryWriteKey,
 } from "./actions";
+import { MemoryBadges, MemoryTags } from "./badges";
+import { ConflictPanel } from "./conflict";
 import {
   isTrashRoot,
+  type MemoryOpenMode,
   memoryAuthor,
   memoryContent,
   memoryDate,
   memoryLabel,
-  memoryOrigin,
-  memoryStatus,
   memorySummary,
   memoryUses,
   memoryWorkspace,
+  type OpenMemory,
 } from "./presentation";
 import { MemoryWorkspace, memoryClaimFields, RecordEditor } from "./record-editor";
+import { MemorySwitches } from "./switches";
 import {
   DeleteNowConfirmation,
   deleteNowDescription,
@@ -64,8 +57,6 @@ import {
   trashDescription,
 } from "./trash";
 
-/** Modes a record can be opened in directly, besides its details. */
-export type MemoryOpenMode = "edit" | "delete";
 type DetailMode = "detail" | "workspace" | "trash" | MemoryOpenMode;
 /** `content` starts the editor from other content, such as an agent's proposal. */
 type Selection = {
@@ -73,7 +64,7 @@ type Selection = {
   mode?: MemoryOpenMode | undefined;
   content?: KnowledgeRecord["content"] | undefined;
 };
-type OpenRecord = (id: string, mode?: MemoryOpenMode, content?: KnowledgeRecord["content"]) => void;
+type OpenRecord = OpenMemory;
 
 export function MemoryDialog({
   title,
@@ -157,35 +148,6 @@ export function MemoryDialog({
         ) : null}
       </ResponsiveDialogContent>
     </ResponsiveDialog>
-  );
-}
-
-/** Origin, status and access labels. No confidence score: origin and freshness say enough. */
-export function MemoryBadges({ record }: { record: KnowledgeRecord }) {
-  const status = memoryStatus(record);
-  return (
-    <span className="flex min-w-0 flex-wrap gap-1">
-      <Badge variant="secondary">{memoryOrigin(record)}</Badge>
-      {record.sensitivity === "sensitive" ? <Badge variant="secondary">Sensitive</Badge> : null}
-      {status ? <Badge variant="secondary">{status}</Badge> : null}
-      {record.conflictRecordIds.length ? <Badge variant="secondary">Conflict</Badge> : null}
-      {record.core ? <Badge variant="secondary">Core</Badge> : null}
-      {record.agentAccess === "blocked" ? (
-        <Badge variant="secondary">Hidden from agents</Badge>
-      ) : null}
-    </span>
-  );
-}
-
-export function MemoryTags({ tags }: { tags: readonly string[] }) {
-  return (
-    <span className="flex min-w-0 flex-wrap gap-1">
-      {tags.map((tag) => (
-        <Badge key={tag} variant="outline">
-          {tag}
-        </Badge>
-      ))}
-    </span>
   );
 }
 
@@ -308,7 +270,8 @@ function RecordInformation({
     ["Latest version", record.ownerHeld ? "Written or confirmed by you" : "Not confirmed by you"],
     ["Workspace", memoryWorkspace(record)],
     ["Uses", memoryUses(record)],
-    ["Updated", memoryDate(record.createdAt)],
+    // The API keeps createdAt across revisions; there is no updatedAt yet (COO-267).
+    ["Added", memoryDate(record.createdAt)],
   ];
   if (record.lastConfirmedAt) data.push(["Last confirmed", memoryDate(record.lastConfirmedAt)]);
   if (record.validFrom) data.push(["Available from", memoryDate(record.validFrom)]);
@@ -436,198 +399,6 @@ function MemoryHistory({
   );
 }
 
-function ConflictValue({ label, record }: { label: string; record: KnowledgeRecord }) {
-  const { text } = memorySummary(memoryContent(record));
-  return (
-    <div className="flex min-w-0 flex-col gap-1 rounded-lg border border-border/60 p-3">
-      <span className="font-medium">{label}</span>
-      <span className="whitespace-pre-wrap">{text}</span>
-      <span className="text-sm text-muted-foreground">
-        {memoryOrigin(record)} · saved by {memoryAuthor(record).toLowerCase()}
-      </span>
-    </div>
-  );
-}
-
-/**
- * A pending agent proposal is settled on the proposal itself: keep the person's memory, take the
- * agent's, or keep the person's and edit it starting from the agent's content. Two plain claims
- * are compared and opened.
- */
-function ConflictPanel({
-  record,
-  queryKey,
-  actions,
-  openRecord,
-  resolve,
-  editMine,
-}: {
-  record: KnowledgeRecord;
-  queryKey: readonly unknown[];
-  actions: MemoryActions;
-  openRecord: OpenRecord;
-  resolve: (proposal: KnowledgeRecord, keep: "current" | "proposed") => void;
-  editMine: (proposal: KnowledgeRecord, mine: KnowledgeRecord) => void;
-}) {
-  const others = useQueries({
-    queries: record.conflictRecordIds.map((id) => ({
-      queryKey: [...queryKey, "record", id],
-      queryFn: ({ signal }: { signal: AbortSignal }) => {
-        signal.throwIfAborted();
-        return actions.read(() => api.getKnowledge({ id }).then(readableMemory));
-      },
-      placeholderData: keepPreviousData,
-      retry: false,
-    })),
-  });
-  return (
-    <section aria-label="Conflict" className="flex flex-col gap-3">
-      <h3 className="font-medium">Conflict</h3>
-      {record.conflictRecordIds.map((id, index) => {
-        const query = others[index];
-        const other = query?.data;
-        const proposal =
-          record.status === "proposed" ? record : other?.status === "proposed" ? other : null;
-        const mine = proposal === record ? other : record;
-        return (
-          <div key={id} className="flex flex-col gap-2">
-            {query ? <QueryFeedback query={query} title="Couldn’t load the other memory." /> : null}
-            {query?.isPending ? <Spinner aria-label="Loading the other memory" /> : null}
-            {other && mine && proposal ? (
-              <>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <ConflictValue label="Your version" record={mine} />
-                  <ConflictValue label="Agent's proposal" record={proposal} />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    disabled={actions.busy}
-                    onClick={() => resolve(proposal, "current")}
-                  >
-                    Keep mine
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={actions.busy}
-                    onClick={() => resolve(proposal, "proposed")}
-                  >
-                    Take the agent's
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={actions.busy}
-                    onClick={() => editMine(proposal, mine)}
-                  >
-                    Edit and keep mine
-                  </Button>
-                </div>
-              </>
-            ) : other ? (
-              <div className="grid gap-2 sm:grid-cols-2">
-                <ConflictValue label="This memory" record={record} />
-                <ConflictValue label="Conflicting memory" record={other} />
-              </div>
-            ) : null}
-            <Button variant="ghost" size="sm" className="w-fit" onClick={() => openRecord(id)}>
-              Open conflicting memory {index + 1}
-            </Button>
-          </div>
-        );
-      })}
-    </section>
-  );
-}
-
-/** Owner-only switches that apply immediately, each with its own Sonner outcome. */
-function MemorySwitches({
-  record,
-  busy,
-  act,
-}: {
-  record: KnowledgeRecord;
-  busy: boolean;
-  act: (input: KnowledgeLifecycleInput, success?: string) => void;
-}) {
-  const id = useId();
-  const identity = () => ({
-    recordId: record.id,
-    expectedRevision: record.revision,
-    mutationKey: crypto.randomUUID(),
-  });
-  // Core is revised content metadata, which a pending proposal or archived memory cannot take.
-  const coreEditable = ["active", "disputed", "expired"].includes(record.status);
-  // The core never loads sensitive or blocked memory, and a revise clears a dispute (COO-268).
-  const coreBlocked =
-    record.sensitivity === "sensitive"
-      ? "Sensitive memories never load at session start."
-      : record.agentAccess === "blocked"
-        ? "Memories hidden from agents never load at session start."
-        : record.status === "disputed"
-          ? "Confirm or edit this disputed memory first. Changing this would clear the dispute."
-          : null;
-  return (
-    <FieldGroup className="gap-3">
-      {coreEditable ? (
-        <Field orientation="horizontal" data-disabled={Boolean(coreBlocked)}>
-          <Switch
-            id={`${id}-core`}
-            checked={record.core}
-            disabled={busy || Boolean(coreBlocked)}
-            aria-describedby={coreBlocked ? `${id}-core-blocked` : undefined}
-            onCheckedChange={(core) =>
-              act(
-                { ...identity(), action: "revise", content: record.content, core },
-                core
-                  ? "Memory will load at session start."
-                  : "Memory no longer loads at session start.",
-              )
-            }
-          />
-          <FieldContent>
-            <FieldLabel htmlFor={`${id}-core`}>Load at session start</FieldLabel>
-            {coreBlocked ? (
-              <FieldDescription id={`${id}-core-blocked`}>{coreBlocked}</FieldDescription>
-            ) : null}
-          </FieldContent>
-        </Field>
-      ) : null}
-      <Field orientation="horizontal">
-        <Switch
-          id={`${id}-access`}
-          checked={record.agentAccess === "allowed"}
-          disabled={busy}
-          onCheckedChange={(allowed) =>
-            act({
-              ...identity(),
-              action: "set_access",
-              agentAccess: allowed ? "allowed" : "blocked",
-            })
-          }
-        />
-        <FieldLabel htmlFor={`${id}-access`}>Agents can read this</FieldLabel>
-      </Field>
-      <Field orientation="horizontal">
-        <Switch
-          id={`${id}-sensitive`}
-          checked={record.sensitivity === "sensitive"}
-          disabled={busy}
-          onCheckedChange={(sensitive) =>
-            act({
-              ...identity(),
-              action: "set_sensitivity",
-              sensitivity: sensitive ? "sensitive" : "standard",
-            })
-          }
-        />
-        <FieldLabel htmlFor={`${id}-sensitive`}>Sensitive memory</FieldLabel>
-      </Field>
-    </FieldGroup>
-  );
-}
-
 export function NewMemory({
   actions,
   close,
@@ -650,9 +421,9 @@ export function NewMemory({
       complete: (result) => {
         close();
         onSaved();
-        return {
-          message: result.outcome === "readable" ? "Memory saved." : "This memory is unavailable.",
-        };
+        return result.outcome === "readable"
+          ? { message: "Memory saved." }
+          : { message: "This memory is unavailable.", tone: "info" };
       },
     });
   };
@@ -887,6 +658,7 @@ export function MemoryRecordDetail({
                 {record.conflictRecordIds.length ? (
                   <ConflictPanel
                     record={record}
+                    live={Boolean(live)}
                     queryKey={queryKey}
                     actions={actions}
                     openRecord={openRecord}
@@ -992,7 +764,8 @@ export function MemoryRecordDetail({
                       Unarchive
                     </Button>
                   ) : null}
-                  {!trashed ? (
+                  {/* A pending proposal is resolved, not trashed (R28). */}
+                  {!trashed && record.status !== "proposed" ? (
                     <Button
                       variant="secondary"
                       size="sm"
@@ -1051,7 +824,8 @@ export function MemoryRecordDetail({
         ) : null}
         {mode === "delete" && !accessLost ? (
           <DeleteNowConfirmation
-            disabled={actions.busy || !record}
+            // A placeholder from before a refresh may carry a stale Trash version.
+            disabled={actions.busy || !record || detail.isPlaceholderData}
             cancel={goBack}
             confirm={deleteNow}
           />

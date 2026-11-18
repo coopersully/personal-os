@@ -274,12 +274,9 @@ export function updateMemory(
     request: () => api.updateKnowledge(input),
     complete: (result) => {
       handlers.done(result);
-      return {
-        message:
-          result.outcome === expected
-            ? (handlers.success ?? copy.success)
-            : "This memory is unavailable.",
-      };
+      return result.outcome === expected
+        ? { message: handlers.success ?? copy.success }
+        : { message: "This memory is unavailable.", tone: "info" };
     },
     recover: (error) => {
       if (memoryErrorStatus(error) !== 409) return undefined;

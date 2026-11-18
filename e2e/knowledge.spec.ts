@@ -92,7 +92,7 @@ test("add, filter by tag, edit, trash and restore a memory", async ({ page }) =>
   await page.getByRole("tab", { name: "Trash" }).click();
   const trashed = page.getByRole("listitem").filter({ hasText: new RegExp(marker, "i") });
   await expect(trashed.getByText(/Deleted for good in 30 days/)).toBeVisible();
-  await trashed.getByRole("button", { name: "Restore" }).click();
+  await trashed.getByRole("button", { name: new RegExp(`^Restore ${marker}`, "i") }).click();
   await expect(toast(page, "Memory restored.")).toBeVisible();
   await expect(trashed).toHaveCount(0);
   await page.getByRole("tab", { name: "All" }).click();

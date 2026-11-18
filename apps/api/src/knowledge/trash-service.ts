@@ -6,9 +6,11 @@ import {
   knowledgeTombstones,
 } from "@personal-os/database";
 import {
+  type KnowledgeDeleteNowInput,
   type KnowledgeMutationResult,
   type KnowledgeTrashAction,
   type KnowledgeTrashInput,
+  knowledgeDeleteNowInputSchema,
   knowledgeTrashInputSchema,
   knowledgeTrashRetentionMs,
 } from "@personal-os/domain";
@@ -142,11 +144,10 @@ export function createKnowledgeTrashService({ db, now }: { db: Database; now: ()
   function run(
     action: KnowledgeTrashAction,
     principal: Principal,
-    raw: KnowledgeTrashInput,
+    input: KnowledgeTrashInput,
     apply: (tx: KnowledgeTransaction, current: KnowledgeRevision, at: Date) => Promise<void>,
   ): Promise<KnowledgeMutationResult> {
     requireKnowledgeOwner(principal);
-    const input = knowledgeTrashInputSchema.parse(raw);
     const requestHash = knowledgeRequestHash(principal, { ...input, action });
     return db.transaction(async (tx) => {
       const { at } = await admitHumanKnowledgeContent(tx, principal, now);
@@ -171,14 +172,16 @@ export function createKnowledgeTrashService({ db, now }: { db: Database; now: ()
   }
 
   return {
-    trash(principal: Principal, input: KnowledgeTrashInput) {
+    trash(principal: Principal, raw: KnowledgeTrashInput) {
+      const input = knowledgeTrashInputSchema.parse(raw);
       return run("trash", principal, input, async (tx, current, at) => {
         if (current.trashedAt !== null)
           throw new AppError("conflict", "This memory is already in Trash.");
         await trashDerivationClosure(tx, principal.userId, current.snapshot.id, at);
       });
     },
-    restore(principal: Principal, input: KnowledgeTrashInput) {
+    restore(principal: Principal, raw: KnowledgeTrashInput) {
+      const input = knowledgeTrashInputSchema.parse(raw);
       return run("restore", principal, input, async (tx, current, at) => {
         requireTrashGroupRoot(current);
         if (at.getTime() - (current.trashedAt?.getTime() ?? 0) > knowledgeTrashRetentionMs)
@@ -201,8 +204,17 @@ export function createKnowledgeTrashService({ db, now }: { db: Database; now: ()
           );
       });
     },
-    deleteNow(principal: Principal, input: KnowledgeTrashInput) {
+    deleteNow(principal: Principal, raw: KnowledgeDeleteNowInput) {
+      const input = knowledgeDeleteNowInputSchema.parse(raw);
       return run("delete_now", principal, input, async (tx, current, at) => {
+        // A confirmation prepared before a restore, a re-trash or a new derived record no longer
+        // describes what would be erased; only the state the person confirmed is deleted.
+        const expected =
+          input.expectedTrashedAt === null ? null : Date.parse(input.expectedTrashedAt);
+        if ((current.trashedAt?.getTime() ?? null) !== expected)
+          throw new AppError("conflict", "This memory's Trash state changed.", {
+            trashedAt: current.trashedAt?.toISOString() ?? null,
+          });
         const { userId } = principal;
         const groupId = current.snapshot.id;
         if (current.trashedAt === null) await trashDerivationClosure(tx, userId, groupId, at);

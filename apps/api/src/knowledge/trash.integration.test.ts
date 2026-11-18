@@ -132,17 +132,27 @@ describe("memory trash and purge", () => {
     };
     const records = createKnowledgeRecordService(config);
     const lifecycle = createKnowledgeLifecycleService(config);
-    function act(
+    /** The record's Trash state as the owner sees it now, which a fresh Delete now confirms. */
+    async function trashedAt(id: string) {
+      const current = await records.get(owner, { id });
+      return "trashedAt" in current ? current.trashedAt : null;
+    }
+    async function act(
       action: "trash" | "restore" | "delete_now",
       record: { id: string; revision: number },
       principal: Principal = owner,
     ) {
-      return lifecycle.mutate(principal, {
-        action,
+      const identity = {
         recordId: record.id,
         expectedRevision: record.revision,
         mutationKey: randomUUID(),
-      });
+      };
+      return lifecycle.mutate(
+        principal,
+        action === "delete_now"
+          ? { ...identity, action, expectedTrashedAt: await trashedAt(record.id) }
+          : { ...identity, action },
+      );
     }
     return {
       owner,
@@ -150,6 +160,7 @@ describe("memory trash and purge", () => {
       records,
       lifecycle,
       act,
+      trashedAt,
       search: createKnowledgeSearchService(config),
       context: createKnowledgeContextService(config),
       exporter: createKnowledgeExportService(config),
@@ -832,6 +843,38 @@ describe("memory trash and purge", () => {
     await f.act("trash", trashed);
     expect(await f.act("delete_now", trashed)).toMatchObject({ outcome: "forgotten" });
     expect(await f.purge.purgeExpired({ limit: 100 })).toMatchObject({ purged: 0 });
+  });
+
+  it("delete_now_refuses_a_stale_trash_state", async () => {
+    const f = await fixture();
+    const a = await f.save(fact("stale-delete-value"));
+    await f.act("trash", a);
+    const seen = await f.trashedAt(a.id);
+    expect(seen).not.toBeNull();
+    // Another session restores the record and derives a new memory from it.
+    await f.act("restore", a);
+    const derived = await f.save(derivedFrom(a, "stale-delete-derived"));
+    const stale = {
+      action: "delete_now" as const,
+      recordId: a.id,
+      expectedRevision: a.revision,
+      expectedTrashedAt: seen,
+      mutationKey: randomUUID(),
+    };
+    await expect(f.lifecycle.mutate(f.owner, stale)).rejects.toMatchObject({ status: 409 });
+    // Re-trashing it later is a new Trash state, so the old confirmation still does not apply.
+    f.advance(60_000);
+    await f.act("trash", a);
+    await expect(
+      f.lifecycle.mutate(f.owner, { ...stale, mutationKey: randomUUID() }),
+    ).rejects.toMatchObject({ status: 409 });
+    for (const id of [a.id, derived.id])
+      expect(await f.records.get(f.owner, { id })).toMatchObject({ id, revision: 1 });
+    // A confirmation of the current state deletes, and its exact retry replays.
+    const fresh = { ...stale, expectedTrashedAt: await f.trashedAt(a.id) };
+    const deleted = await f.lifecycle.mutate(f.owner, fresh);
+    expect(deleted).toMatchObject({ outcome: "forgotten" });
+    expect(await f.lifecycle.mutate(f.owner, fresh)).toEqual(deleted);
   });
 
   it("purge_is_idempotent", async () => {

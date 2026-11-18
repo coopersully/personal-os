@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { idSchema } from "./common.js";
+import { idSchema, isoDateTimeSchema } from "./common.js";
 import {
   type KnowledgeRecordSnapshot,
   knowledgeAgentAccessSchema,
@@ -67,6 +67,15 @@ export const knowledgeTrashRetentionMs = 30 * 24 * 60 * 60 * 1000;
 
 export const knowledgeTrashInputSchema = z.object(mutationIdentity).strict();
 export type KnowledgeTrashInput = z.infer<typeof knowledgeTrashInputSchema>;
+/**
+ * Delete now also confirms the Trash state the person saw: when the record entered Trash, or
+ * null for a live record. Restore and Trash leave the revision unchanged, so the revision alone
+ * cannot tell a stale confirmation from a fresh one.
+ */
+export const knowledgeDeleteNowInputSchema = knowledgeTrashInputSchema
+  .extend({ expectedTrashedAt: isoDateTimeSchema.nullable() })
+  .strict();
+export type KnowledgeDeleteNowInput = z.infer<typeof knowledgeDeleteNowInputSchema>;
 
 /** Every agent action plus the person-only actions. */
 export const knowledgeLifecycleInputSchema = z.discriminatedUnion("action", [
@@ -107,7 +116,7 @@ export const knowledgeLifecycleInputSchema = z.discriminatedUnion("action", [
     .strict(),
   knowledgeTrashInputSchema.extend({ action: z.literal("trash") }),
   knowledgeTrashInputSchema.extend({ action: z.literal("restore") }),
-  knowledgeTrashInputSchema.extend({ action: z.literal("delete_now") }),
+  knowledgeDeleteNowInputSchema.extend({ action: z.literal("delete_now") }),
 ]);
 export type KnowledgeLifecycleInput = z.infer<typeof knowledgeLifecycleInputSchema>;
 

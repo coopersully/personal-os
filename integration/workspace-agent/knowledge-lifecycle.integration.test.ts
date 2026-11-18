@@ -341,10 +341,14 @@ describe.sequential("registered memory lifecycle", () => {
         receiptId: expect.any(String),
         recordId: savedId,
       });
-      expect(
-        (await f.owner.searchKnowledge({ ...planning, status: "trashed" })).items,
-      ).toMatchObject([{ id: savedId, trashGroupId: savedId }]);
-      const deletion = { ...identity, action: "delete_now" as const, mutationKey: randomUUID() };
+      const [inTrash] = (await f.owner.searchKnowledge({ ...planning, status: "trashed" })).items;
+      expect(inTrash).toMatchObject({ id: savedId, trashGroupId: savedId });
+      const deletion = {
+        ...identity,
+        action: "delete_now" as const,
+        expectedTrashedAt: inTrash?.trashedAt ?? null,
+        mutationKey: randomUUID(),
+      };
       expect(await f.owner.updateKnowledge(deletion)).toMatchObject({
         outcome: "forgotten",
         recordId: savedId,

@@ -192,11 +192,15 @@ export function createKnowledgeLifecycleService({ db, now }: { db: Database; now
       raw: KnowledgeLifecycleInput,
     ): Promise<KnowledgeMutationResult> {
       const input = knowledgeLifecycleInputSchema.parse(raw);
-      if (input.action === "trash" || input.action === "restore" || input.action === "delete_now") {
+      if (input.action === "delete_now") {
         const { action, ...identity } = input;
-        if (action === "trash") return trash.trash(principal, identity);
-        if (action === "restore") return trash.restore(principal, identity);
         return trash.deleteNow(principal, identity);
+      }
+      if (input.action === "trash" || input.action === "restore") {
+        const { action, ...identity } = input;
+        return action === "trash"
+          ? trash.trash(principal, identity)
+          : trash.restore(principal, identity);
       }
       if (!agentActions.has(input.action)) requireKnowledgeOwner(principal);
       const requestHash = knowledgeRequestHash(principal, input);

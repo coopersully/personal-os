@@ -272,6 +272,7 @@ describe("purpose-bound memory retrieval", () => {
       action: "delete_now",
       recordId: forgotten.id,
       expectedRevision: 1,
+      expectedTrashedAt: null,
       mutationKey: randomUUID(),
     });
     expect(deleted.outcome).toBe("forgotten");
